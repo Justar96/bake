@@ -75,11 +75,12 @@ On Unix, SIGINT, SIGTERM, and SIGHUP are handled while the preview runs. Raw mod
 |---|---|
 | `crates/bake-tui` | `editor` (pure draft and wrapping), `app` (preview state and keys), `render` (Ratatui drawing), and the terminal owner |
 | `crates/bake-cli` | The `bake-rs` binary: argument parsing, terminal checks, exit statuses |
+| `crates/bake-session` | A development-only reader for one current-format Session header record, checked against the [shared header cases](../conformance/README.md#session-header-cases); it reads no event rows, writes nothing, and nothing depends on it |
 | `crates/bake-conformance` | A synthetic fixture runner for the [migration comparison harness](../conformance/README.md), plus `bake-eval-fake-arm` for the [native eval fixture adapter](../evals/README.md#native-fixture-adapter); no agent runtime |
 
 Dependencies are pinned exactly in `Cargo.toml` and locked in `Cargo.lock`: Ratatui 0.30.2 with only its `crossterm` feature, Crossterm 0.29.0, unicode-segmentation 1.13.3, unicode-width 0.2.2, and on Unix signal-hook 0.3.18, which Crossterm already uses. `ratatui-crossterm` enables Crossterm's default features; `cargo tree --locked -i crossterm` shows one Crossterm version.
 
-The conformance runner uses Serde 1.0.229 and serde_json 1.0.151 for its separate, versioned test input. These dependencies do not connect the preview to a model or session store.
+The conformance runner uses Serde 1.0.229 and serde_json 1.0.151 for its separate, versioned test input. `bake-session` uses serde_json alone, with its default features. These dependencies do not connect the preview to a model or session store.
 
 ## Checks
 
@@ -96,5 +97,7 @@ Unit tests cover grapheme editing (including deletions that join neighboring gra
 From the repository root, `bun run preflight --only native` runs those Cargo checks and `bun run test:rust:pty` against the built binary. The PTY driver checks composer input, caret and undo preservation through inspection, refused submission, multiline paste, resize, and terminal restoration after Ctrl+C, SIGINT, SIGTERM, and SIGHUP. A Linux process-stop barrier exercises a shrink and grow that reach the application as one resize. That barrier is skipped on macOS; all native PTY scenarios are skipped on Windows until ConPTY coverage is implemented. Cargo checks run on Linux, macOS, and Windows in CI.
 
 The native preflight group also runs `bun run test:rust:conformance` on all three operating systems. It compares the built Rust fixture runner with the TypeScript arm and independently observes final files. See the [harness guide](../conformance/README.md) for its synthetic scope, deliberate mismatches, and report format.
+
+`crates/bake-session` tests run every [shared header case](../conformance/README.md#session-header-cases) under both path platforms, check Node's POSIX and Win32 absolute-path rules on every host, and require a shared case witnessing each serde_json syntax-error code that maps to a JSON rejection.
 
 `bun run test:rust:eval` runs the compiled `bake-eval-fake-arm` through the evaluator's `ordinary_edit` fixture. The fake reads a prompt on stdin and either makes a fixed edit or exercises a rejection case; it does not run a model. The check accepts the correct edit and rejects test-file tampering, a success claim without an edit, and a failed process. This gate also runs after the Rust build on all three CI operating systems. Bun drives the adapter and Node runs the fixture's check; this is not a Node-free agent qualification. See the [eval guide](../evals/README.md#native-fixture-adapter) for the adapter's ownership and limits.

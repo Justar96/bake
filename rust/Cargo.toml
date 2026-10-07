@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/bake-cli", "crates/bake-conformance", "crates/bake-tui"]
+members = ["crates/bake-cli", "crates/bake-conformance", "crates/bake-session", "crates/bake-tui"]
 
 [workspace.package]
 version = "0.4.0-dev"

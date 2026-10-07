@@ -2,7 +2,7 @@
 
 ## Summary
 
-Run the same controlled fixtures through TypeScript and Rust, then compare prompt bytes, event order, permission records, and the files each runner changed. The fixtures qualify the comparison tooling for [migration scope 01](../docs/roadmap/rust-0.4/README.md#01--workspace-and-comparison-harness). They do not run Bake's agent, implement its permission policy, or establish runtime parity. The separate [native eval fixture adapter](../evals/README.md#native-fixture-adapter) checks a compiled fake arm with the evaluator's existing file predicates. The [qualification ledger](../docs/roadmap/rust-0.4/ledger/README.md) records partial evidence and failed attempts. A [runtime request-reconstruction fixture](#runtime-request-reconstruction) captures one real TypeScript tool-call turn. Rust replay and a live native eval arm remain open.
+Run the same controlled fixtures through TypeScript and Rust, then compare prompt bytes, event order, permission records, and the files each runner changed. The fixtures qualify the comparison tooling for [migration scope 01](../docs/roadmap/rust-0.4/README.md#01--workspace-and-comparison-harness). They do not run Bake's agent, implement its permission policy, or establish runtime parity. The separate [native eval fixture adapter](../evals/README.md#native-fixture-adapter) checks a compiled fake arm with the evaluator's existing file predicates. The [qualification ledger](../docs/roadmap/rust-0.4/ledger/README.md) records partial evidence and failed attempts. A [runtime request-reconstruction fixture](#runtime-request-reconstruction) captures one real TypeScript tool-call turn. [Session header cases](#session-header-cases) compare one physical header record between the real TypeScript scanner and a development Rust reader. Rust replay and a live native eval arm remain open.
 
 ## Table of Contents
 
@@ -10,6 +10,7 @@ Run the same controlled fixtures through TypeScript and Rust, then compare promp
 - [What is compared](#what-is-compared)
 - [Shared fixtures](#shared-fixtures)
 - [Runtime request reconstruction](#runtime-request-reconstruction)
+- [Session header cases](#session-header-cases)
 - [Runner contract](#runner-contract)
 - [Ownership and limits](#ownership-and-limits)
 
@@ -77,7 +78,33 @@ The capture uses production sources at `5cd716c70fdc443c9e997ee7b5e67ed2d4a1b06f
 
 Keep the committed generation and expectation unchanged. A correction or another scenario belongs in a new directory, with its own provenance and review. The [fixture-layout policy](../scripts/session-fixture-layout.ts) explicitly recognizes this physical log so the logical-fixture formatter cannot strip its envelopes. The original [request-reconstruction tests](../packages/core/agent-loop/tests/request-reconstruction.spec.ts) remain in place, including the broader header-change scenario.
 
-The runtime suite exercises this fixture, and the ordinary TypeScript check includes its helper and spec. There is no Rust reader or reducer for it yet. Provider wire encodings, historical formats, seeded/forked logs, compaction, retries, cancellation, changing request headers, profile composition, and cross-platform release qualification remain separate work.
+The runtime suite exercises this fixture, and the ordinary TypeScript check includes its helper and spec. Rust reads only its header record, through the [Session header cases](#session-header-cases); there is no Rust event reader or reducer for it yet. Provider wire encodings, historical formats, seeded/forked logs, compaction, retries, cancellation, changing request headers, profile composition, and cross-platform release qualification remain separate work.
+
+## Session header cases
+
+[`session/header-cases.json`](session/header-cases.json) holds current-format (format 3) Session header records and the outcome of each. The [TypeScript header spec](../packages/session/session-persistence-jsonl/tests/header-conformance.spec.ts) runs every record through the real `SessionLogScanner` constructor, which parses the header of every current log. The development [`bake-session`](../rust/crates/bake-session/src/lib.rs) crate runs the same records through `read_header_record` under both path platforms. Neither harness reads event rows: agreement covers these header records, not whole logs, replay, or writers.
+
+```sh
+bun run test:runtime packages/session/session-persistence-jsonl/tests/header-conformance.spec.ts
+(cd rust && cargo test --locked -p bake-session)
+```
+
+Each case supplies exactly one record source:
+
+- `record`: text; both harnesses append the LF.
+- `bytesHex`: the complete record bytes, used for framing and invalid UTF-8.
+- `fixtureFirstRecord`: only the request-reconstruction `session.jsonl`, whose first record both harnesses read without changing the file.
+
+`ts` is the scanner's outcome: `admitted`; `unsupported`, with whether the version is newer; `rejected`, with a reason that maps to exactly one error message; or `type-error`, the specific ID-conversion error that only a native-subset case may expect. It splits into `posix` and `win32` where Node's `path.isAbsolute` decides `cwd` differently. `meta` is the expected logical header of an admitted case. Rust checks it for every admitted case; TypeScript checks it for unseeded cases. Outcome precedence follows the scanner: framing, JSON, object, a numeric version other than 3, the retired `sandboxMode` and `approvalPolicy` fields, then the header shape. A failing shape check rejects even when a count is undecided, and collision rows pin these orders. A JSON `null` is a present value of the wrong type, never an omitted field, and a duplicate key keeps its last value. For a seeded header (`isSeeded: true`), TypeScript checks only the constructor outcome, because it exposes header metadata only after a complete log. The `absolutePaths` rows pin both Node path flavors on every host. Rust CI runs on Linux, macOS, and Windows, and the Windows release job runs the TypeScript spec so the Win32 `cwd` rows meet the real scanner.
+
+A `rust` override marks a case whose TypeScript outcome Rust does not reproduce. Rust then returns `NativeSubset` and claims no TypeScript class. Of the 86 cases, 19 are native subset:
+
+- `float-lexeme` (8): a number that serde_json stores as a non-negative `f64` decides the version or a count. These are fraction and exponent spellings, including `0.0`, and integers above `u64::MAX`; serde_json's default float parsing is not proven to round as JavaScript does. A negative number that serde_json parses is decided exactly.
+- `json-parser` (5): serde_json refuses input that `JSON.parse` accepts, such as lone surrogate escapes, nesting at serde_json's recursion limit, and out-of-range numbers. Rust reports a JSON rejection only for a fixed list of serde_json 1.0.151 syntax-error codes. A unit test requires a case in this table, which the TypeScript spec runs through `JSON.parse`, to witness each code. Any other parse error is a subset refusal.
+- `invalid-utf8` (2): Node decodes invalid UTF-8 with replacement characters.
+- `version-diagnostic` (4): a foreign version's `id` is an object or array. The scanner formats it with `String(id)`, which can throw a `TypeError`; Rust leaves that conversion outside this subset, including objects and arrays TypeScript can convert.
+
+Expected metadata never contains a lone surrogate; such input appears only as escaped text in `record`. Expectations come from the TypeScript scanner, not from the Rust reader. The table's rows were selected from a wider measured probe, with precedence-collision rows, refusal-message rows, and ten syntax-error witnesses added.
 
 ## Runner contract
 

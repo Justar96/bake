@@ -126,6 +126,7 @@ Read these pages when the package-level contract is not enough. They move from t
 - [Project-session directory decision](../../../.agents/notes/implemented/architecture/2026-07-24-project-session-directories.md) — the layout tradeoff behind project and session directories.
 - [Zstandard JSONL session logs](../../../.agents/notes/implemented/architecture/2026-07-19-zstandard-jsonl-session-logs.md) — the checksummed-frame encoding rationale.
 - [Released Session format migrations](../../../.agents/notes/implemented/architecture/2026-08-31-released-session-format-migrations.md) — immutable generations, adjacent migration edges, and publication rules.
+- [Session header cases](../../../conformance/README.md#session-header-cases) — the shared header-record table this package's scanner checks for the development Rust reader.
 
 -----
 

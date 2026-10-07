@@ -4,12 +4,16 @@
     "composite": false,
     "incremental": false,
     "noEmit": true,
+    // Nothing is emitted. With a root file inside session-persistence-jsonl,
+    // TS2877 would otherwise flag package-name `.ts` imports of its sources.
+    "rewriteRelativeImportExtensions": false,
     "types": ["node", "bun"]
   },
   "include": [
     "rust-conformance/**/*.ts",
     "../packages/core/agent-loop/tests/runtime-fixture.ts",
-    "../packages/core/agent-loop/tests/request-reconstruction.fixture.spec.ts"
+    "../packages/core/agent-loop/tests/request-reconstruction.fixture.spec.ts",
+    "../packages/session/session-persistence-jsonl/tests/header-conformance.spec.ts"
   ],
   "references": [
     { "path": "../vendor/cordis" },

@@ -28,7 +28,7 @@ Review the core deliverables in the roadmap's PR order: support decisions first,
 
 ## What is implemented and what is missing
 
-The inventory assigns owning scopes and dispositions to 167 packages, 816 TypeScript test files, 188 recorded scenarios, all 42 PTY scenarios, three shipped profiles, four presets, 18 tool packages, and six model surfaces. A listed test records an available oracle, not a passing result. The inventory's `gaps` list names missing coverage. Native crate tests belong to the [Cargo workspace](../../../../rust/README.md#checks).
+The inventory assigns owning scopes and dispositions to 167 packages, 817 TypeScript test files, 188 recorded scenarios, all 42 PTY scenarios, three shipped profiles, four presets, 18 tool packages, and six model surfaces. A listed test records an available oracle, not a passing result. The inventory's `gaps` list names missing coverage. Native crate tests belong to the [Cargo workspace](../../../../rust/README.md#checks).
 
 **Implemented:**
 
