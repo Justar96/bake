@@ -1,29 +1,37 @@
 /**
- * Real-runtime request-reconstruction fixture for the first turn of the
- * original THEOREM (`request-reconstruction.spec.ts`), which remains the oracle
- * for its full three-request scenario. The live composed loop must dispatch
- * exactly the hand-written `expected-requests.json`, and the committed
- * `session.jsonl`, a byte-exact capture of one such run, must replay to the
- * same requests. Only request message ids are normalized; the log keeps its
- * captured ids and timing, so a fresh run is not expected to reproduce its
- * bytes. Tests only read the committed files; a new or corrected scenario gets
- * a new directory instead of a rewrite.
+ * Real-runtime request-reconstruction fixtures. `tool-call-turn` is the first
+ * turn of the original THEOREM (`request-reconstruction.spec.ts`), which
+ * remains the oracle for its full three-request scenario; `dynamic-tools` adds,
+ * removes, and restores a tool across three turns, and `tool-updates.spec.ts`
+ * remains the oracle for tool-update routes. The live composed loop must
+ * dispatch exactly each hand-written `expected-requests.json`, and each
+ * committed `session.jsonl`, a byte-exact capture of one such run, must
+ * replay to the same requests. Only generated message ids, and in
+ * `dynamic-tools` the tool-history anchors that name them, are normalized; the
+ * logs keep their captured ids and timing, so a fresh run is not expected to
+ * reproduce their bytes. Tests only read the committed files; a new or
+ * corrected scenario gets a new directory instead of a rewrite.
  */
 
+import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { describe, expect, it } from 'vitest'
 import { Session, SessionId, SESSION_FORMAT_VERSION } from 'bake-session'
-import type { JsonValue } from 'bake-util-values'
+import type { SessionEvent } from 'bake-session'
+import { snapshotJsonValue, type JsonValue } from 'bake-util-values'
 import { scanLog } from 'bake-session-persistence-jsonl/src/format.ts'
 import {
+  FETCH_DESCRIPTION,
   MessageIdentities,
   compareBytes,
   compareJson,
   encodeLog,
+  normalizeAnchoredRequests,
   normalizeRequests,
   parseExpectedRequests,
   projectRequest,
   replayRequests,
+  runDynamicToolsScenario,
   runToolCallTurn,
   toolCallTurnScript,
 } from './runtime-fixture.ts'
@@ -170,5 +178,175 @@ describe('request normalization', () => {
     const withNull = projectRequest({ ...request!, stop: null } as never)
     expect(compareJson(projected, withNull)).toEqual({ outcome: 'fail', detail: '$.stop: unexpected member' })
     expect(projectRequest({ ...request!, stop: undefined } as never)).toEqual(projected)
+  })
+})
+
+const DYNAMIC_LOG_SHA256 = '43852e686ea6ef5f599065a7ead57f82d27f8b20e9e936e81b0b0596636e61e2'
+const DYNAMIC_ROWS = 38
+/** Each request's Assistant settlement seq, where its replay prefix ends. */
+const DYNAMIC_CUTS = [8, 15, 25, 35]
+
+function dynamicRequests(capture: ScenarioCapture): { [key: string]: JsonValue }[] {
+  return normalizeAnchoredRequests(capture.requests.map(projectRequest))
+}
+
+/** The log's request rows: header reasons, update rows, and settlement cuts. */
+function requestRows(events: readonly SessionEvent[]) {
+  return {
+    reasons: events.flatMap(event => event.type === 'request/header' ? [event.data] : [])
+      .map(data => [data.reason, Object.hasOwn(data, 'startsSeries')]),
+    updates: events.flatMap(event => event.type === 'request/tool-update'
+      ? [[event.seq, event.data.headerSeq, event.data.additions, event.data.removals]]
+      : []),
+    cuts: events.filter(event => event.type === 'assistant/message' || event.type === 'assistant/attempt').map(event => event.seq),
+  }
+}
+
+const DYNAMIC_ROWS_EXPECTED = {
+  reasons: [['initial', false], ['change', false], ['change', false], ['change', false]],
+  updates: [[14, 13, ['fetch'], []], [24, 23, [], ['fetch']], [34, 33, ['fetch'], []]],
+  cuts: DYNAMIC_CUTS,
+}
+
+/** Replace `from` with the same-length `to` in the one log row with seq `seq`. */
+function replaceInRow(log: Buffer, seq: number, from: string, to: string): Buffer {
+  const lines = log.toString('utf8').split('\n')
+  const row = lines[seq + 1]!
+  expect(row.startsWith('{"type":') && row.includes(`"seq":${seq},`)).toBe(true)
+  expect(row.split(from)).toHaveLength(2)
+  expect(Buffer.byteLength(to)).toBe(Buffer.byteLength(from))
+  lines[seq + 1] = row.replace(from, to)
+  return Buffer.from(lines.join('\n'))
+}
+
+describe('dynamic-tools request-reconstruction fixture', () => {
+  it('dispatches exactly the independently specified requests, which its own log replays', async ({ signal }) => {
+    const { expected } = await readFixture('dynamic-tools')
+    const capture = await runDynamicToolsScenario(signal)
+
+    expect(capture.requests).toHaveLength(4)
+    expect(capture.events).toHaveLength(DYNAMIC_ROWS)
+    expect(requestRows(capture.events)).toEqual(DYNAMIC_ROWS_EXPECTED)
+    expect(capture.events.filter(event => event.type === 'system/message')).toHaveLength(1)
+    expect(capture.events.filter(event => event.type === 'turn/end').map(event => event.data.reason))
+      .toEqual(Array.from({ length: 3 }, () => ({ kind: 'completed' })))
+    // A registration failure inside `install` would surface as an error result, not a thrown test.
+    expect(capture.events.filter(event => event.type === 'tool/result').map(event => event.data.message.content))
+      .toEqual([[{ type: 'tool-result', toolCallId: 'c1', content: [{ type: 'text', text: 'installed' }], isError: false }]])
+    for (const request of capture.requests) {
+      expect(request.toolUpdates).toBeUndefined()
+      expect(request.tools?.some(schema => Object.hasOwn(schema, 'deferLoading'))).toBe(false)
+    }
+    expect(compareJson(expected, dynamicRequests(capture), 'requests')).toEqual({ outcome: 'pass' })
+    const ownLog = Buffer.from(encodeLog(capture.header, capture.events))
+    expect(compareJson(expected, normalizeAnchoredRequests(replayRequests(ownLog)), 'requests')).toEqual({ outcome: 'pass' })
+  })
+
+  it('dispatches identical normalized requests from two private runs', async ({ signal }) => {
+    const first = dynamicRequests(await runDynamicToolsScenario(signal))
+    const second = dynamicRequests(await runDynamicToolsScenario(signal))
+    expect(JSON.stringify(second)).toBe(JSON.stringify(first))
+  })
+
+  it('stores a complete current-format Session that replays to the expected requests', async () => {
+    const fixture = await readFixture('dynamic-tools')
+    expect(createHash('sha256').update(fixture.log).digest('hex')).toBe(DYNAMIC_LOG_SHA256)
+    const { meta, events, committedBytes, inheritedEventCount } = scanLog(fixture.log)
+    expect(meta.version).toBe(SESSION_FORMAT_VERSION)
+    expect([meta.isSeeded, inheritedEventCount, committedBytes]).toEqual([false, 0, fixture.log.length])
+    expect(events).toHaveLength(DYNAMIC_ROWS)
+    expect(requestRows(events)).toEqual(DYNAMIC_ROWS_EXPECTED)
+    expect(() => Session.create(SessionId(meta.id), events, meta)).not.toThrow()
+    expect(compareBytes(fixture.log, Buffer.from(encodeLog(meta, events)))).toEqual({ outcome: 'pass' })
+    expect(compareJson(fixture.expected, normalizeAnchoredRequests(replayRequests(fixture.log)), 'requests')).toEqual({ outcome: 'pass' })
+  })
+
+  it('unwinds through disposal when the idle wait is aborted before or between turns', async () => {
+    const reason = new Error('test aborted')
+    await expect(runDynamicToolsScenario(AbortSignal.abort(reason))).rejects.toBe(reason)
+    // Aborting while idle after turn 1 starts turn 2 against a rejected wait; disposal must still quiesce it.
+    const controller = new AbortController()
+    const turns: number[] = []
+    const afterTurn = (turn: number): void => {
+      turns.push(turn)
+      if (turn === 1) controller.abort(reason)
+    }
+    await expect(runDynamicToolsScenario(controller.signal, { afterTurn })).rejects.toBe(reason)
+    expect(turns).toEqual([1])
+  })
+})
+
+describe('dynamic-tools negative controls', () => {
+  it('a one-byte change in the declared fetch description fails the expected requests', async ({ signal }) => {
+    const { expected } = await readFixture('dynamic-tools')
+    const live = dynamicRequests(await runDynamicToolsScenario(signal, { fetchDescription: 'fetch a urm' }))
+    expect(FETCH_DESCRIPTION).toBe('fetch a url')
+    expect(compareJson(expected, live, 'requests')).toEqual({
+      outcome: 'fail',
+      detail: 'requests[1].tools[0].description: expected "fetch a url", got "fetch a urm"',
+    })
+  })
+
+  it('a redeclared fetch in the last header resets the replayed tool history', async () => {
+    const fixture = await readFixture('dynamic-tools')
+    const mutated = replaceInRow(fixture.log, 33, '"description":"fetch a url"', '"description":"fetch a urx"')
+    const replayed = normalizeAnchoredRequests(replayRequests(mutated))
+    const changed = { ...(fixture.expected[3] as { tools: JsonValue[] }).tools[0] as object, description: 'fetch a urx' }
+    const install = (fixture.expected[0] as { tools: JsonValue[] }).tools[0]!
+    expect(replayed[3]!.toolHistory).toEqual({ tools: [changed, install], updates: [] })
+    expect(compareJson(fixture.expected.slice(0, 3), replayed.slice(0, 3), 'requests')).toEqual({ outcome: 'pass' })
+    expect(compareJson(fixture.expected, replayed, 'requests')).toEqual({
+      outcome: 'fail',
+      detail: 'requests[3].tools[0].description: expected "fetch a url", got "fetch a urx"',
+    })
+  })
+
+  it('an update anchored to an earlier message is refused by Session admission', async () => {
+    const fixture = await readFixture('dynamic-tools')
+    const { events } = scanLog(fixture.log)
+    const anchor = (seq: number): string => (events[seq] as Extract<SessionEvent, { type: 'request/tool-update' }>).data.afterMessageId
+    const mutated = replaceInRow(fixture.log, 24, anchor(24), anchor(14))
+    expect(() => replayRequests(mutated)).toThrow('request/tool-update must follow the current user or tool-result message')
+  })
+
+  it('a dropped expected request or a cut past the settlement fails', async () => {
+    const fixture = await readFixture('dynamic-tools')
+    const replayed = normalizeAnchoredRequests(replayRequests(fixture.log))
+    expect(compareJson(fixture.expected.slice(0, 3), replayed, 'requests')).toEqual({
+      outcome: 'fail',
+      detail: 'requests: expected 3 items, got 4',
+    })
+    // R2's prefix extended through its own settlement carries the response it asked for.
+    const { meta, events } = scanLog(fixture.log)
+    const late = Session.create(SessionId(meta.id), events.slice(0, DYNAMIC_CUTS[1]! + 1), meta).deriveMessages()
+    const messages = normalizeRequests([{ messages: snapshotJsonValue<unknown>(late) as JsonValue }])[0]!.messages
+    expect(compareJson((fixture.expected[1] as { messages: JsonValue }).messages, messages!, 'messages')).toEqual({
+      outcome: 'fail',
+      detail: 'messages: expected 4 items, got 5',
+    })
+  })
+
+  it('the message-id normalizer leaves anchors raw, and the anchored one refuses foreign anchors', async () => {
+    const fixture = await readFixture('dynamic-tools')
+    const raw = replayRequests(fixture.log)
+    const comparison = compareJson(fixture.expected, normalizeRequests(raw), 'requests')
+    expect(comparison).toMatchObject({ outcome: 'fail' })
+    expect(comparison.outcome === 'fail' && comparison.detail)
+      .toMatch(/^requests\[1\]\.toolHistory\.updates\[0\]\.afterMessageId: expected "message-4", got "[0-9a-f-]{36}"$/)
+
+    const where = 'requests[1].toolHistory.updates[0].afterMessageId'
+    const withAnchor = (anchor: JsonValue): { [key: string]: JsonValue }[] => {
+      const requests = structuredClone(raw)
+      const history = requests[1]!.toolHistory as { updates: { afterMessageId: JsonValue }[] }
+      history.updates[0]!.afterMessageId = anchor
+      return requests
+    }
+    const fresh = '0f8e2c1a-4b3d-4e5f-8a9b-1c2d3e4f5a6b'
+    expect(() => normalizeAnchoredRequests(withAnchor(fresh))).toThrow(`${where}: ${fresh} is not a message of this request`)
+    const later = ((raw[3]!.messages as { id: string }[])[7]!).id
+    expect(() => normalizeAnchoredRequests(withAnchor(later))).toThrow(`${where}: ${later} is not a message of this request`)
+    expect(() => normalizeAnchoredRequests(withAnchor('message-4'))).toThrow(`${where}: expected a generated message id, got "message-4"`)
+    expect(() => normalizeAnchoredRequests(withAnchor(null))).toThrow(`${where}: expected a generated message id, got null`)
+    expect(() => normalizeAnchoredRequests([{ ...raw[0]!, toolUpdates: [] }])).toThrow('requests[0].toolUpdates is not normalized')
   })
 })

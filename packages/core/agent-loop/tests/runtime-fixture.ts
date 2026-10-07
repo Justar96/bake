@@ -1,7 +1,7 @@
 /**
- * The tool-call-turn request-reconstruction fixture: composes the real loop
- * around the scripted model, replays requests from a Session log, maps
- * generated message ids to stable placeholders, and compares requests as
+ * The `tool-call-turn` and `dynamic-tools` request-reconstruction fixtures:
+ * composes the real loop around the scripted model, replays requests from a
+ * Session log, maps generated message ids to stable placeholders, and compares requests as
  * exact JSON values. Committed fixture files are read by the spec and never
  * written here.
  */
@@ -15,6 +15,7 @@ import { eventLines, scanLog, toHeaderLine } from 'bake-session-persistence-json
 import SessionProjectionRegistry from 'bake-session-projection'
 import SystemPrompt from 'bake-system-prompt'
 import ToolRuntime, { defineContentToolFixture } from 'bake-tools'
+import type { ToolDefinition } from 'bake-tools'
 import AgentRegistry, { type Agent } from 'bake-agent'
 import { snapshotJsonValue, type JsonValue } from 'bake-util-values'
 import AgentLoop from 'bake-agent-loop'
@@ -86,6 +87,102 @@ export async function runToolCallTurn(script: StreamChunk[][], signal: AbortSign
     await ctx.fiber.dispose()
   }
   if (adapter.requests.length !== capture.requests.length) throw new Error('a model request was dispatched during disposal')
+  return capture
+}
+
+/** Scripted responses for `dynamic-tools`: the `install` call and its follow-up, then one reply per later turn. */
+export function dynamicToolsScript(): StreamChunk[][] {
+  return [
+    toolCallResponse('c1', 'install', { name: 'fetch' }, 'installing'),
+    textResponse('ready'),
+    textResponse('dropped'),
+    textResponse('restored'),
+  ]
+}
+
+/** The `fetch` description the scenario declares; a control may vary it. */
+export const FETCH_DESCRIPTION = 'fetch a url'
+
+/** Optional variations of {@link runDynamicToolsScenario}. */
+export interface DynamicToolsOptions {
+  /** The declared `fetch` description, for both registrations. */
+  readonly fetchDescription?: string
+  /** Called once each turn is idle, before the runner changes the tools for the next turn. */
+  readonly afterTurn?: (turn: number) => void
+}
+
+/**
+ * Run the `dynamic-tools` scenario through a private composed runtime: three
+ * user turns, the same composition as {@link runToolCallTurn} with the tool
+ * `install`. Executing `install` registers `fetch`; the runner removes it
+ * while idle after turn 1 and registers an identical definition while idle
+ * after turn 2. Registrations belong to the runner's Context, whose disposal
+ * is awaited on every exit.
+ * @param signal - aborts the idle wait, typically the test's own signal.
+ * @param options - the `fetch` description and a between-turns callback.
+ * @returns the dispatched requests and a detached Session snapshot taken before disposal.
+ * @throws when the wait is aborted, or when a model request is dispatched once disposal begins.
+ */
+export async function runDynamicToolsScenario(signal: AbortSignal, options: DynamicToolsOptions = {}): Promise<ScenarioCapture> {
+  const ctx = new Context()
+  const adapter = new MockAdapter(dynamicToolsScript())
+  const fetch = (): ToolDefinition => defineContentToolFixture({
+    name: 'fetch',
+    description: options.fetchDescription ?? FETCH_DESCRIPTION,
+    parameters: { url: { type: 'string' } },
+    async execute() {
+      throw new Error('the scenario never calls fetch')
+    },
+  })
+  let releaseFetch: (() => void) | undefined
+  let stopWaiting: (() => void) | undefined
+  let capture: ScenarioCapture
+  try {
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(SessionProjectionRegistry)
+    await ctx.plugin(SystemPrompt, { personaPrefix: 'stable base', includeHarnessIdentity: false })
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(AgentLoop, { agents: [] })
+    ctx.llm.registerAdapter(['mock'], adapter)
+    ctx.tools.register(defineContentToolFixture({
+      name: 'install',
+      description: 'install fetch',
+      parameters: { name: { type: 'string' } },
+      async execute() {
+        // The runner's Context registers globally, so the runner, not the agent scope, owns this registration.
+        releaseFetch = ctx.tools.register(fetch())
+        return [{ type: 'text', text: 'installed' }]
+      },
+    }))
+    const agent = await ctx.agentLoop.create(SessionId('dynamic-tools'), { provider: 'mock', model: 'mock' })
+    const turns: [text: string, prepare?: () => void][] = [
+      ['install fetch'],
+      ['drop fetch', () => releaseFetch?.()],
+      ['restore fetch', () => { releaseFetch = ctx.tools.register(fetch()) }],
+    ]
+    for (const [index, [text, prepare]] of turns.entries()) {
+      prepare?.()
+      // Subscribe before the follow-up so a fast turn cannot finish unobserved.
+      const idle = waitForIdle(ctx, agent, signal)
+      stopWaiting = idle.stop
+      agent.followup(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } }))
+      await idle.done
+      options.afterTurn?.(index + 1)
+    }
+    capture = {
+      requests: [...adapter.requests],
+      header: structuredClone(agent.session.header),
+      events: structuredClone(agent.session.snapshotEvents()),
+    }
+  } finally {
+    stopWaiting?.()
+    const dispatched = adapter.requests.length
+    await ctx.fiber.dispose()
+    // An aborted wait must also quiesce without another model dispatch.
+    if (adapter.requests.length !== dispatched) throw new Error('a model request was dispatched during disposal')
+  }
   return capture
 }
 
@@ -192,6 +289,53 @@ export function normalizeRequests(requests: readonly { [key: string]: JsonValue 
         throw new Error(`requests[${index}].messages[${position}] is not an object`)
       }
       message.id = ids.placeholder(message.id, `requests[${index}].messages[${position}].id`)
+    })
+    return copy
+  })
+}
+
+function isRecord(value: JsonValue | undefined): value is { [key: string]: JsonValue } {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+/**
+ * Like {@link normalizeRequests}, and also map each
+ * `toolHistory.updates[j].afterMessageId` through the same bijection. Before
+ * mapping, an anchor must be a generated UUID carried by a message of the
+ * same request; anything else throws. Opt-in for `dynamic-tools`, whose
+ * requests carry tool-history anchors.
+ * @param requests - projected requests in dispatch order.
+ * @returns normalized copies.
+ * @throws when a message id or anchor is not a generated UUID, an anchor names
+ * no message of its request, the tool history has no updates array, or the
+ * request carries `toolUpdates`.
+ */
+export function normalizeAnchoredRequests(requests: readonly { [key: string]: JsonValue }[]): { [key: string]: JsonValue }[] {
+  const ids = new MessageIdentities()
+  return requests.map((request, index) => {
+    const copy = structuredClone(request)
+    const { messages, toolHistory } = copy
+    // The default route projection omits it; a capable route's anchors are out of scope.
+    if (Object.hasOwn(copy, 'toolUpdates')) throw new Error(`requests[${index}].toolUpdates is not normalized`)
+    if (!Array.isArray(messages)) throw new Error(`requests[${index}].messages is not an array`)
+    const carried = new Set<JsonValue>()
+    messages.forEach((message, position) => {
+      if (!isRecord(message)) throw new Error(`requests[${index}].messages[${position}] is not an object`)
+      carried.add(message.id ?? null)
+      message.id = ids.placeholder(message.id, `requests[${index}].messages[${position}].id`)
+    })
+    if (!isRecord(toolHistory) || !Array.isArray(toolHistory.updates)) {
+      throw new Error(`requests[${index}].toolHistory has no updates array`)
+    }
+    toolHistory.updates.forEach((update, position) => {
+      const where = `requests[${index}].toolHistory.updates[${position}].afterMessageId`
+      if (!isRecord(update)) throw new Error(`requests[${index}].toolHistory.updates[${position}] is not an object`)
+      const anchor = update.afterMessageId
+      if (typeof anchor !== 'string' || !GENERATED_MESSAGE_ID.test(anchor)) {
+        throw new Error(`${where}: expected a generated message id, got ${JSON.stringify(anchor)}`)
+      }
+      if (!carried.has(anchor)) throw new Error(`${where}: ${anchor} is not a message of this request`)
+      update.afterMessageId = ids.placeholder(anchor, where)
     })
     return copy
   })
