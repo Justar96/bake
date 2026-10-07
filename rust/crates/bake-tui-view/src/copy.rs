@@ -4,7 +4,7 @@ pub const TITLE: &str = "Bake · Rust preview";
 pub const INTRO: &[&str] = &[
     "Try the native composer and sample-agent views. Models and tools are not connected yet.",
     "",
-    "Press Tab to inspect a sample agent. Esc brings you back to your draft.",
+    "Press Ctrl+G to inspect a sample agent. Esc brings you back to your draft.",
 ];
 pub const HEADER_LIST_HINT: &str = "↑↓ select · Enter inspect · Esc back";
 /// The idle placeholder's parts. The preview has no commands or file

@@ -658,6 +658,9 @@ pub fn present(rows: &[Row], index: usize, width: usize, look: Look) -> Vec<Line
     } else {
         width
     };
+    // Prose keeps the rail's width clear on the right too, so it ends where
+    // a call's boxed text does instead of against the scrollbar.
+    let prose = width.saturating_sub(RAIL).max(RAIL + 1);
     match row {
         Row::Welcome => {
             let mut title = vec![
@@ -673,7 +676,7 @@ pub fn present(rows: &[Row], index: usize, width: usize, look: Look) -> Vec<Line
             }
             lines.push(Line::from(title));
             for paragraph in copy::INTRO.iter().filter(|p| !p.is_empty()) {
-                lines.extend(hang(paragraph, width, RAIL, rail(), rail(), dim()));
+                lines.extend(hang(paragraph, prose, RAIL, rail(), rail(), dim()));
             }
         }
         // A prompt mark opens the user's words, as they were typed; the
@@ -682,7 +685,7 @@ pub fn present(rows: &[Row], index: usize, width: usize, look: Look) -> Vec<Line
             let mark = vec![Span::styled(format!("{} ", marks.user), accent(look.tones))];
             lines.extend(hang(
                 text,
-                width,
+                prose,
                 RAIL,
                 mark,
                 rail(),
@@ -691,13 +694,13 @@ pub fn present(rows: &[Row], index: usize, width: usize, look: Look) -> Vec<Line
         }
         Row::Reasoning(text) => lines.extend(hang(
             text,
-            width,
+            prose,
             RAIL,
             rail(),
             rail(),
             dim().add_modifier(Modifier::ITALIC),
         )),
-        Row::Answer(text) => lines.extend(hang(text, width, RAIL, rail(), rail(), Style::new())),
+        Row::Answer(text) => lines.extend(hang(text, prose, RAIL, rail(), rail(), Style::new())),
         Row::Call {
             tool,
             argument,
@@ -2436,11 +2439,11 @@ mod tests {
 
     #[test]
     fn prose_and_arguments_wrap_under_their_own_columns() {
+        // Prose keeps the rail's two cells clear on the right as on the left.
         let rows = vec![Row::Answer("alpha beta gamma delta epsilon".into())];
-        assert_eq!(
-            text(&present(&rows, 0, 14, PLAIN)),
-            ["  alpha beta", "  gamma delta", "  epsilon"]
-        );
+        let drawn = text(&present(&rows, 0, 14, PLAIN));
+        assert_eq!(drawn, ["  alpha beta", "  gamma", "  delta", "  epsilon"]);
+        assert!(drawn.iter().all(|l| l.chars().count() <= 14 - RAIL));
         let user = vec![Row::User("alpha beta gamma".into())];
         assert_eq!(
             text(&present(&user, 0, 10, PLAIN)),

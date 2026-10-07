@@ -510,7 +510,15 @@ fn render_transcript(app: &mut State, area: Rect, gap: Rect, buf: &mut Buffer) {
         }
     }
     if let Some(row) = hint {
-        render_scroll_hint(app, Rect::new(row.x, row.y, width, 1), buf);
+        // The hint ends where the status line and the agents row under it
+        // do, inset from the edge when the composer is boxed.
+        let right = if composer::geometry(area.width).boxed {
+            INSET
+        } else {
+            0
+        };
+        let hint_width = width.min(area.width.saturating_sub(right));
+        render_scroll_hint(app, Rect::new(row.x, row.y, hint_width, 1), buf);
     }
 }
 
@@ -1751,21 +1759,20 @@ mod tests {
         let mut app = State::default();
         let (rows, _) = draw(&mut app, 80, 24);
         let bar = row_index(&rows, "no model");
-        // Following: the scroll keys sit right-aligned on the row above the bar.
-        assert!(
-            rows[bar - 1]
-                .trim_end()
-                .ends_with("Wheel/PgUp scroll · Ctrl+↑ prompts")
-        );
+        // Following: the scroll keys sit right-aligned on the row above the
+        // bar, ending in the status line's column.
+        let hint = rows[bar - 1].trim_end();
+        assert!(hint.ends_with("Wheel/PgUp scroll · Ctrl+↑ prompts"));
+        assert_eq!(hint.chars().count(), rows[bar].trim_end().chars().count());
         key(&mut app, Key::PageUp);
         let (rows, _) = draw(&mut app, 80, 24);
         let pill = &rows[bar - 1];
         let below = app.transcript.total() - app.transcript.offset() - app.transcript.height;
         let text = format!(" ↓ {below} lines below · Ctrl+End ");
         let start = pill.find(&text).expect(pill);
-        // Centred under the text, the scrollbar's column excluded.
+        // Centred on the row the status line spans.
         let left = pill[..start].chars().count();
-        let right = 79 - left - text.chars().count();
+        let right = 78 - left - text.chars().count();
         assert!(left.abs_diff(right) <= 1, "{left} {right}");
         // Its spot is recorded, and a press there follows output again.
         let spot = app.latest.unwrap();

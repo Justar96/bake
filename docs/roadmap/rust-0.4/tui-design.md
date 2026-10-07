@@ -47,7 +47,7 @@ Every row aligns to four edges:
 |---|---|---|
 | Rail | 0 | The prompt mark before the user's words (`>`) and the box's left side |
 | Prompt | 2 | The composer's `❯`, `^`, and `v`, and the first cell of every row drawn outside the box: the bar, panels, and standing rows |
-| Text | 4 in the box, 2 in the transcript | Draft and prose. A call's state mark sits at 2, its tool name at 4, and its argument in an aligned column after the name; its output, diff, and source start at 4, under the tool name ([D8](#intentional-differences)) |
+| Text | 4 in the box, 2 in the transcript | Draft and prose. Prose keeps the same 2 cells clear on the right, as a call's text keeps 2 clear of its box's edge. A call's state mark sits at 2, its tool name at 4, and its argument in an aligned column after the name; its output, diff, and source start at 4, under the tool name ([D8](#intentional-differences)) |
 | Right | last column less 2 | The end of right-aligned keys and hints outside the box, level with the box's inner padding |
 
 Idle, after a turn:
