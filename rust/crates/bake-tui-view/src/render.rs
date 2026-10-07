@@ -897,7 +897,7 @@ fn agent_list(selected: &str, width: usize, classic: bool, tones: Tones) -> Vec<
 /// Cells an inspection ledger's label column takes, its gap included.
 const LEDGER_LABEL: usize = 8;
 
-/// One agent, read only, as a ledger: its name, a dotted rule, then a label
+/// One agent, read only, as a ledger: its name, a dashed rule, then a label
 /// and a value per row, the value wrapped under itself.
 fn inspection(agent: &SampleAgent, width: usize, look: Look) -> Vec<Line<'static>> {
     let mut lines = vec![
@@ -905,7 +905,7 @@ fn inspection(agent: &SampleAgent, width: usize, look: Look) -> Vec<Line<'static
             Span::raw("  "),
             Span::styled(agent.name, accent().add_modifier(Modifier::BOLD)),
         ]),
-        transcript::rule(width, look),
+        transcript::rule(width, transcript::RAIL, look),
     ];
     let indent = usize::from(INSET) + LEDGER_LABEL;
     let labelled = |label: &str, cells: usize, value: Vec<Span<'static>>| {
@@ -1185,12 +1185,12 @@ mod tests {
             rows.iter()
                 .any(|r| r.starts_with("  Agents / Sample explorer  Tab agents · Esc draft"))
         );
-        // The body is a ledger under the agent's name and a dotted rule.
+        // The body is a ledger under the agent's name and a dashed rule.
         let name = rows
             .iter()
             .position(|r| r.trim_end() == "  Sample explorer")
             .unwrap();
-        assert!(rows[name + 1].starts_with("  ┄┄┄"));
+        assert!(rows[name + 1].starts_with("  ---"));
         let ledger: Vec<&str> = rows[name + 2..name + 7]
             .iter()
             .map(|r| r.trim_end())

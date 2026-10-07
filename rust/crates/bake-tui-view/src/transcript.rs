@@ -220,24 +220,37 @@ fn sample_script() -> Row {
 }
 
 /// Rows that open `row`, given the row before it: none for the first row, a
-/// dotted rule and a blank before a user's turn, and a blank before any
-/// other row, so each call's box stands apart from the next.
+/// blank after the last turn's end then a dashed rule right above a user's
+/// words, and a blank before any other row, so each call's box stands apart
+/// from the next.
 fn opening(previous: Option<&Row>, row: &Row, width: usize, look: Look) -> Vec<Line<'static>> {
     match (previous, row) {
         (None, _) => Vec::new(),
-        (Some(_), Row::User(_)) => vec![rule(width, look), Line::default()],
+        (Some(_), Row::User(_)) => vec![Line::default(), rule(width, 0, look)],
         (Some(_), _) => vec![Line::default()],
     }
 }
 
-/// A dim dotted rule across the transcript, inside its rail on both sides,
-/// as a printed catalogue rules off a section.
-pub fn rule(width: usize, look: Look) -> Line<'static> {
-    let cells = width.saturating_sub(2 * RAIL);
+/// A faint dashed rule across `width`, `margin` cells in from each edge, as
+/// a printed catalogue rules off a section. Each cell's ASCII hyphen is a
+/// short dash with a gap either side, so a run reads as a fine dashed line
+/// on every terminal and font.
+pub fn rule(width: usize, margin: usize, look: Look) -> Line<'static> {
+    let cells = width.saturating_sub(2 * margin);
     Line::from(vec![
-        pad(RAIL),
-        Span::styled(look.marks().rule.repeat(cells), dim()),
+        pad(margin),
+        Span::styled(look.marks().rule.repeat(cells), faint(look.tones)),
     ])
+}
+
+/// Fainter than [`dim`]: the darkest palette grey on a truecolor terminal,
+/// and dimmed dark grey, or dimmed text under `NO_COLOR`, elsewhere.
+fn faint(tones: Tones) -> Style {
+    match tones {
+        Tones::TrueColor => Style::new().fg(Color::Rgb(0x37, 0x41, 0x51)),
+        Tones::Ansi => dim().fg(Color::DarkGray),
+        Tones::None => dim(),
+    }
 }
 
 /// The tint of a [`tag`].
@@ -428,7 +441,8 @@ pub struct Marks {
     pub meter_running: &'static str,
     pub meter_failed: &'static str,
     pub meter_stopped: &'static str,
-    /// The dotted rule that opens a user's turn.
+    /// The dash of the rule that opens a user's turn: ASCII in both sets,
+    /// since box-drawing dashes are missing from many console fonts.
     pub rule: &'static str,
 }
 
@@ -445,7 +459,7 @@ pub const ROUND_MARKS: Marks = Marks {
     meter_running: "╌",
     meter_failed: "✗",
     meter_stopped: "╳",
-    rule: "┄",
+    rule: "-",
 };
 
 pub const CLASSIC_MARKS: Marks = Marks {
@@ -2353,7 +2367,8 @@ mod tests {
             all[user],
             "> Find where the session controller registers commands"
         );
-        assert_eq!(all[user - 1], "", "a blank opens the turn");
+        assert!(all[user - 1].starts_with("---"), "a rule opens the turn");
+        assert_eq!(all[user - 2], "", "a blank ends the last turn");
         assert_eq!(all[user + 1], "");
         assert_eq!(
             all[user + 2],
@@ -3033,7 +3048,7 @@ mod tests {
     }
 
     #[test]
-    fn a_dotted_rule_opens_each_turn_after_the_first_row() {
+    fn a_dashed_rule_opens_each_turn_after_the_first_row() {
         let rows = sample_session();
         let all: Vec<String> = (0..rows.len())
             .flat_map(|i| text(&present(&rows, i, 40, PLAIN)))
@@ -3042,10 +3057,10 @@ mod tests {
             .iter()
             .position(|l| l.starts_with("> Find where"))
             .unwrap();
-        assert_eq!(all[user - 2], format!("  {}", "┄".repeat(36)));
-        assert_eq!(all[user - 1], "");
+        assert_eq!(all[user - 2], "");
+        assert_eq!(all[user - 1], "-".repeat(40));
         assert_eq!(
-            all.iter().filter(|l| l.contains('┄')).count(),
+            all.iter().filter(|l| *l == &"-".repeat(40)).count(),
             3,
             "one per turn"
         );
@@ -3053,7 +3068,8 @@ mod tests {
             classic: true,
             ..PLAIN
         };
-        assert_eq!(rule(10, classic).to_string(), "  ------");
+        assert_eq!(rule(10, RAIL, classic).to_string(), "  ------");
+        assert_eq!(rule(6, 0, classic).to_string(), "------");
     }
 
     #[test]
