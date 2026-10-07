@@ -11,7 +11,7 @@ use crate::frame::FrameStyle;
 use crate::keys::{self, Action, KeyInput, Scope};
 use crate::mode::Mode;
 use crate::status::StatusInput;
-use crate::transcript::{self, Transcript};
+use crate::transcript::{self, CallState, Row, Transcript};
 
 /// Everything the frontend applies, in arrival order.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -155,6 +155,8 @@ pub struct State {
     pub(crate) window: ComposerWindow,
     /// Samples started so far; seeds each sample's word.
     samples: u32,
+    /// The transcript row of the sample turn's running call.
+    live_call: Option<usize>,
 }
 
 impl Default for State {
@@ -182,6 +184,7 @@ impl State {
             now: Duration::ZERO,
             window: ComposerWindow::default(),
             samples: 0,
+            live_call: None,
         }
     }
 
@@ -204,9 +207,14 @@ impl State {
     /// the sample's next shimmer beat, or its next second without motion.
     /// `None` while nothing moves.
     pub fn next_change(&self) -> Option<Duration> {
-        self.activity.map(|sample| {
+        let activity = self.activity.map(|sample| {
             activity::next_change(self.now.saturating_sub(sample.started), self.tones.moves())
-        })
+        });
+        let blink = self
+            .transcript
+            .running()
+            .then(|| transcript::next_pulse(self.now));
+        activity.into_iter().chain(blink).min()
     }
 }
 
@@ -346,6 +354,15 @@ fn toggle_activity(state: &mut State) {
         None => {
             state.samples = state.samples.wrapping_add(1);
             state.summary = None;
+            // The turn's work: a call that runs until the turn ends.
+            state.live_call = Some(state.transcript.rows.len());
+            state.transcript.rows.push(Row::Call {
+                tool: "Bash".into(),
+                argument: crate::copy::SAMPLE_COMMAND.into(),
+                state: CallState::Running,
+                summary: None,
+                output: Vec::new(),
+            });
             Some(SampleActivity {
                 kind: SampleKind::Turn,
                 word: activity::pick(activity::WORDS, &format!("sample-{}", state.samples)),
@@ -370,6 +387,24 @@ fn end_turn(state: &mut State, outcome: Outcome) {
             outcome,
             elapsed: state.now.saturating_sub(sample.started),
         });
+    }
+    // The turn's call settles with it: done when it completed, failed when
+    // Esc stopped it.
+    if let Some(Row::Call {
+        state: call,
+        summary,
+        ..
+    }) = state
+        .live_call
+        .take()
+        .and_then(|index| state.transcript.rows.get_mut(index))
+    {
+        let (settled, note) = match outcome {
+            Outcome::Completed => (CallState::Done, crate::copy::SAMPLE_DONE),
+            Outcome::Interrupted => (CallState::Failed, crate::copy::INTERRUPTED_NOTE),
+        };
+        *call = settled;
+        *summary = Some(note.into());
     }
 }
 
@@ -572,6 +607,51 @@ mod tests {
         );
         press(&mut state, Key::Esc);
         assert_eq!(state.summary.map(|s| s.outcome), Some(Outcome::Interrupted));
+    }
+
+    #[test]
+    fn a_sample_turn_runs_a_call_that_settles_when_the_turn_ends() {
+        let mut state = State::default();
+        let rows = state.transcript.rows.len();
+        let call = |state: &State| match &state.transcript.rows[rows] {
+            Row::Call {
+                state: call,
+                summary,
+                ..
+            } => (*call, summary.clone()),
+            other => panic!("{other:?}"),
+        };
+        update(&mut state, Msg::Tick(Duration::from_millis(250)));
+        chord(&mut state, Key::Char('t'), Mods::CTRL);
+        assert_eq!(call(&state), (CallState::Running, None));
+        assert!(state.transcript.running());
+        // The loop wakes for the blink as well as the shimmer.
+        assert_eq!(
+            state.next_change(),
+            Some(activity::BEAT.min(Duration::from_millis(350)))
+        );
+        chord(&mut state, Key::Char('t'), Mods::CTRL);
+        assert_eq!(call(&state), (CallState::Done, Some("exit 0".into())));
+        assert!(!state.transcript.running());
+        // Esc stops the next turn, and its call fails.
+        chord(&mut state, Key::Char('t'), Mods::CTRL);
+        chord(&mut state, Key::Char('t'), Mods::CTRL);
+        press(&mut state, Key::Esc);
+        assert_eq!(state.transcript.rows.len(), rows + 2);
+        match &state.transcript.rows[rows + 1] {
+            Row::Call {
+                state: call,
+                summary,
+                ..
+            } => {
+                assert_eq!(
+                    (*call, summary.as_deref()),
+                    (CallState::Failed, Some("interrupted"))
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(state.next_change(), None);
     }
 
     #[test]

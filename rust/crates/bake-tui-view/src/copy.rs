@@ -25,6 +25,11 @@ pub const DRAFT_KEPT: &str = "draft kept · Esc returns";
 pub const SAMPLE_PHASES: &[&str] = &["thinking", "writing", "running bash", "running subagent +2"];
 /// The header's word while history is compacted, and the phases it steps through.
 pub const COMPACTING: &str = "Compacting history";
+/// The call a sample turn runs, and its note once the turn completes or Esc
+/// stops it.
+pub const SAMPLE_COMMAND: &str = "bun run build";
+pub const SAMPLE_DONE: &str = "exit 0";
+pub const INTERRUPTED_NOTE: &str = "interrupted";
 pub const COMPACTING_PHASES: &[&str] = &["preparing", "summarizing", "saving"];
 pub const PHASE_SECONDS: u64 = 4;
 pub const ABOVE: &str = "above";

@@ -12,6 +12,8 @@
 //! measures from the newest row up; reading, from its anchor down. Neither
 //! measures the whole history.
 
+use std::time::Duration;
+
 use ratatui_core::style::{Color, Modifier, Style};
 use ratatui_core::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
@@ -252,11 +254,40 @@ pub const CLASSIC_MARKS: Marks = Marks {
     result: ">",
 };
 
-/// How the transcript is drawn: its colours and its marks.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// How the transcript is drawn: its colours, its marks, and whether a
+/// running call's blinking mark is shown at this moment.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Look {
     pub tones: Tones,
     pub classic: bool,
+    /// The blink's phase, from [`lit`]: shown, or a blank of the mark's width.
+    pub lit: bool,
+}
+
+impl Default for Look {
+    fn default() -> Self {
+        Self {
+            tones: Tones::default(),
+            classic: false,
+            lit: true,
+        }
+    }
+}
+
+/// How long a running call's mark is shown, and then as long hidden; the
+/// TypeScript `PULSE_MS`, four of its 150 ms beats.
+pub const PULSE: Duration = Duration::from_millis(600);
+
+/// Whether a running call's mark is shown at `now`. Every running mark blinks
+/// in phase, so several cost no more redraws than one.
+pub fn lit(now: Duration) -> bool {
+    (now.as_millis() / PULSE.as_millis()).is_multiple_of(2)
+}
+
+/// Time from `now` until the blink next changes phase.
+pub fn next_pulse(now: Duration) -> Duration {
+    let step = PULSE.as_millis();
+    Duration::from_millis(u64::try_from(step - now.as_millis() % step).unwrap_or(1))
 }
 
 impl Look {
@@ -393,13 +424,17 @@ pub fn present(rows: &[Row], index: usize, width: usize, look: Look) -> Vec<Line
     lines
 }
 
-/// A call state's mark and its colour.
+/// A call state's mark and its colour: a white dot that blinks while the
+/// call runs, a green check when it is done, and a red cross when it failed.
 fn mark_of(state: CallState, look: Look) -> (&'static str, Style) {
     let marks = look.marks();
     match state {
+        // A clean on and off, not a dim half-state, so it reads the same on
+        // every theme and under `NO_COLOR`; hidden, a blank keeps the row still.
+        CallState::Running if !look.lit => (" ", Style::new()),
         CallState::Running => (
             marks.running,
-            colour(look.tones, (0xf9, 0x73, 0x16), Color::LightRed),
+            colour(look.tones, (0xff, 0xff, 0xff), Color::White).add_modifier(Modifier::BOLD),
         ),
         CallState::Done => (
             marks.done,
@@ -870,6 +905,18 @@ impl Transcript {
         self.anchor.unwrap_or_else(|| self.bottom_anchor())
     }
 
+    /// Whether any call, or any call a script made, is still running, so its
+    /// mark blinks.
+    pub fn running(&self) -> bool {
+        self.rows.iter().any(|row| match row {
+            Row::Call { state, .. } => *state == CallState::Running,
+            Row::Script { state, calls, .. } => {
+                *state == CallState::Running || calls.iter().any(|c| c.state == CallState::Running)
+            }
+            _ => false,
+        })
+    }
+
     /// Whether the viewport is following new output.
     pub fn following(&self) -> bool {
         self.anchor.is_none()
@@ -1047,6 +1094,7 @@ mod tests {
     const PLAIN: Look = Look {
         tones: Tones::None,
         classic: false,
+        lit: true,
     };
 
     fn text(lines: &[Line]) -> Vec<String> {
@@ -1386,5 +1434,38 @@ mod tests {
             .map(str::to_owned)
         );
         assert!(tree(&[]).is_empty());
+    }
+
+    #[test]
+    fn a_running_mark_blinks_white_in_place() {
+        let rows = vec![Row::Call {
+            tool: "Bash".into(),
+            argument: "bun run build".into(),
+            state: CallState::Running,
+            summary: None,
+            output: Vec::new(),
+        }];
+        let look = Look {
+            tones: Tones::TrueColor,
+            ..PLAIN
+        };
+        let on = present(&rows, 0, 40, look);
+        let off = present(&rows, 0, 40, Look { lit: false, ..look });
+        assert_eq!(text(&on), ["  ● Bash  bun run build"]);
+        assert_eq!(text(&off), ["    Bash  bun run build"]);
+        assert_eq!(on[0].width(), off[0].width());
+        let mark = on[0].spans.iter().find(|s| s.content == "●").unwrap();
+        assert_eq!(mark.style.fg, Some(Color::Rgb(0xff, 0xff, 0xff)));
+        // Shown for one pulse, hidden for the next; the loop wakes at each change.
+        assert!(lit(Duration::ZERO) && lit(Duration::from_millis(599)));
+        assert!(!lit(PULSE) && lit(PULSE * 2));
+        assert_eq!(
+            next_pulse(Duration::from_millis(250)),
+            Duration::from_millis(350)
+        );
+        let mut t = Transcript::new(rows);
+        assert!(t.running());
+        t.rows = sample_session();
+        assert!(!t.running());
     }
 }

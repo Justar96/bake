@@ -370,6 +370,7 @@ fn render_transcript(app: &mut State, area: Rect, buf: &mut Buffer) {
         Look {
             tones: app.tones,
             classic: app.frame == FrameStyle::Classic,
+            lit: transcript::lit(app.now),
         },
     );
     for (i, content) in view.visible().into_iter().enumerate() {

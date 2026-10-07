@@ -211,10 +211,15 @@ await scenario('sample activity is text that advances on its own, then compacts,
   preview.send('\x14')
   await preview.wait('sample turn', () => /^ {2}\S+… {2}thinking · 0s +no model/mu.test(preview.screen) && preview.screen.includes('Esc interrupts')
     && preview.screen.includes('Enter steers the next step'))
+  // The turn's call is running: its dot blinks on its own, shown and then a blank in place.
+  await preview.wait('running call shown', () => /^ {2}● Bash {2}bun run build/mu.test(preview.screen))
+  await preview.wait('running call blinks', () => /^ {4}Bash {2}bun run build/mu.test(preview.screen))
+  await preview.wait('running call shown again', () => /^ {2}● Bash {2}bun run build/mu.test(preview.screen))
   // No key is pressed: the loop's own timer must redraw the elapsed time.
   await preview.wait('elapsed time advances', () => preview.screen.includes('thinking · 1s'))
   assert(!/[\u2800-\u28ff]/u.test(preview.screen), 'the activity drew a spinner glyph')
   preview.send('\x14')
+  await preview.wait('call settles with the turn', () => /^ {2}✓ Bash {2}bun run build +exit 0$/mu.test(preview.screen))
   await preview.wait('sample compaction', () => preview.screen.includes('Compacting history…  preparing · 0s')
     && preview.screen.includes('Compacting… Enter queues · Esc cancels') && !preview.screen.includes('Esc interrupts'))
   preview.send('\x1b')
