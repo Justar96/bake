@@ -206,6 +206,11 @@ await scenario('composer, agent inspection, paste, and resize', async (preview) 
   await preview.wait('prompt recalled', () => preview.screen.includes('❯ Run the parser tests') && !preview.screen.includes('XdraftAB'))
   preview.send('\x1b[B')
   await preview.wait('draft restored', () => preview.screen.includes('❯ XdraftAB tail'))
+  // A paste of three lines or more collapses into one placeholder, which Backspace removes whole.
+  preview.send('\x1b[200~one\ntwo\nthree\nfour\x1b[201~')
+  await preview.wait('collapsed paste', () => preview.screen.includes('❯ XdraftAB tail[Pasted text #1 +3 lines]'))
+  preview.send('\x7f')
+  await preview.wait('placeholder erased', () => !preview.screen.includes('Pasted text') && preview.screen.includes('❯ XdraftAB tail'))
   await preview.quit()
 })
 

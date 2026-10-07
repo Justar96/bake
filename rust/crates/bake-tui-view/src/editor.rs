@@ -35,6 +35,42 @@ enum EditKind {
 /// and slashes of a path: the TypeScript `PUNCTUATION` class.
 const PUNCTUATION: &str = "(){}[]<>.,;:'\"!?+-=*/\\|&%^$#@~`";
 
+/// Pasted text longer than this many bytes collapses into a placeholder; the
+/// TypeScript `PASTE_COLLAPSE_CHARS`, which counts UTF-16 units.
+pub const PASTE_COLLAPSE_BYTES: usize = 800;
+/// Pasted text with at least this many lines collapses into a placeholder.
+pub const PASTE_COLLAPSE_LINES: usize = 3;
+
+/// What a registered placeholder stands for: pasted text, which a submission
+/// expands back, or a staged image, by its attachment number.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Atom {
+    Text(String),
+    Image(u32),
+}
+
+/// Whether a paste is long enough to collapse into a placeholder.
+pub fn collapses(text: &str) -> bool {
+    text.len() > PASTE_COLLAPSE_BYTES || text.split('\n').count() >= PASTE_COLLAPSE_LINES
+}
+
+/// The placeholder a collapsed paste shows in the draft: `[Pasted text #1
+/// +42 lines]`, or `[Pasted text #1 900 chars]` for one long line. The
+/// format is fixed English, as the oracle's is.
+pub fn pasted_text_token(id: u32, text: &str) -> String {
+    let breaks = text.matches('\n').count();
+    if breaks > 0 {
+        format!("[Pasted text #{id} +{breaks} lines]")
+    } else {
+        format!("[Pasted text #{id} {} chars]", text.chars().count())
+    }
+}
+
+/// The placeholder a staged image shows in the draft: `[Image #2]`.
+pub fn image_token(id: u32) -> String {
+    format!("[Image #{id}]")
+}
+
 /// Draft text with a caret that always sits on a grapheme boundary.
 #[derive(Clone, Debug, Default)]
 pub struct Draft {
@@ -52,6 +88,11 @@ pub struct Draft {
     /// A browse through input history, from Up on the first row until it
     /// returns to the draft it started from.
     visit: Option<Visit>,
+    /// Placeholders this draft inserted. One stays registered after it is
+    /// erased, so undo and yank can bring it back as itself.
+    atoms: Vec<(String, Atom)>,
+    /// Placeholders numbered so far; the next takes the next number.
+    pastes: u32,
 }
 
 /// An open history browse: the draft it started from, each entry shown so
@@ -102,6 +143,9 @@ impl Draft {
     // toward, so repeating the key deletes the joined grapheme next.
 
     pub fn backspace(&mut self) {
+        if let Some((start, end)) = self.atom_at(self.caret, true) {
+            return self.erase(start, end);
+        }
         let start = self.prev_boundary(self.caret);
         if start < self.caret {
             self.checkpoint(EditKind::Delete);
@@ -115,6 +159,9 @@ impl Draft {
     }
 
     pub fn delete(&mut self) {
+        if let Some((start, end)) = self.atom_at(self.caret, false) {
+            return self.erase(start, end);
+        }
         let end = self.next_boundary(self.caret);
         if end > self.caret {
             self.checkpoint(EditKind::Delete);
@@ -126,11 +173,68 @@ impl Draft {
     }
 
     pub fn left(&mut self) {
-        self.move_to(self.prev_boundary(self.caret));
+        match self.atom_at(self.caret, true) {
+            Some((start, _)) => self.move_to(start),
+            None => self.move_to(self.prev_boundary(self.caret)),
+        }
     }
 
     pub fn right(&mut self) {
-        self.move_to(self.next_boundary(self.caret));
+        match self.atom_at(self.caret, false) {
+            Some((_, end)) => self.move_to(end),
+            None => self.move_to(self.next_boundary(self.caret)),
+        }
+    }
+
+    /// Inserts a terminal paste: as text, or, when it [`collapses`], as one
+    /// placeholder that stands for it. Returns `false` when the draft limit
+    /// cut the pasted text.
+    pub fn paste_block(&mut self, input: &str) -> bool {
+        let clean = sanitize(input);
+        if !collapses(&clean) {
+            return self.paste(&clean);
+        }
+        let complete = clean.len() <= MAX_DRAFT_BYTES;
+        let kept = cut_at_boundary(&clean, MAX_DRAFT_BYTES).to_owned();
+        self.pastes += 1;
+        let token = pasted_text_token(self.pastes, &kept);
+        self.atoms.push((token.clone(), Atom::Text(kept)));
+        self.paste(&token) && complete
+    }
+
+    /// The text a submission sends: every pasted-text placeholder replaced by
+    /// the text it stands for. Image placeholders stay, beside their
+    /// attachments.
+    pub fn expanded(&self) -> String {
+        let mut text = self.text.clone();
+        for (token, atom) in &self.atoms {
+            if let Atom::Text(pasted) = atom {
+                text = text.replace(token.as_str(), pasted);
+            }
+        }
+        text
+    }
+
+    /// The placeholder the caret would cross going back (`backward`) or
+    /// forward from byte `at`: one that ends at or contains it going back,
+    /// and one that starts at or contains it going forward.
+    fn atom_at(&self, at: usize, backward: bool) -> Option<(usize, usize)> {
+        atom_at(&self.text, at, &self.atoms, backward)
+    }
+
+    /// `at`, moved to the start of any placeholder it falls strictly inside.
+    fn outside_atoms(&self, at: usize) -> usize {
+        match self.atom_at(at, false) {
+            Some((start, _)) if start < at => start,
+            _ => at,
+        }
+    }
+
+    /// Removes `start..end` as a deletion step.
+    fn erase(&mut self, start: usize, end: usize) {
+        self.checkpoint(EditKind::Delete);
+        self.text.replace_range(start..end, "");
+        self.caret = start;
     }
 
     /// Moves to the start of the caret's logical line.
@@ -182,6 +286,7 @@ impl Draft {
         } else {
             self.prev_boundary(row.end).max(row.start)
         };
+        let target = self.outside_atoms(target);
         (target != self.caret).then_some(target)
     }
 
@@ -220,7 +325,7 @@ impl Draft {
             .take_while(|&&(_, at)| at <= column)
             .last()
             .unwrap_or(&rows[to][0]);
-        self.caret = landing.0;
+        self.caret = self.outside_atoms(landing.0);
         self.last_edit = None;
         self.goal = Some(column);
         true
@@ -240,7 +345,7 @@ impl Draft {
             .take_while(|&&(_, at)| at <= column)
             .last()
             .unwrap_or(&stops[0]);
-        self.move_to(landing.0);
+        self.move_to(self.outside_atoms(landing.0));
         true
     }
 
@@ -319,23 +424,23 @@ impl Draft {
 
     /// Moves one word toward the start: see [`word_stop`].
     pub fn word_left(&mut self) {
-        self.move_to(word_stop(&self.text, self.caret, false));
+        self.move_to(word_stop(&self.text, self.caret, false, &self.atoms));
     }
 
     /// Moves one word toward the end: see [`word_stop`].
     pub fn word_right(&mut self) {
-        self.move_to(word_stop(&self.text, self.caret, true));
+        self.move_to(word_stop(&self.text, self.caret, true, &self.atoms));
     }
 
     /// Ctrl+W and Alt+Backspace: kills back to the previous word stop.
     pub fn kill_word_left(&mut self) {
-        let stop = word_stop(&self.text, self.caret, false);
+        let stop = word_stop(&self.text, self.caret, false, &self.atoms);
         self.kill(stop, self.caret, true);
     }
 
     /// Alt+D, Alt+Delete, and Ctrl+Delete: kills on to the next word stop.
     pub fn kill_word_right(&mut self) {
-        let stop = word_stop(&self.text, self.caret, true);
+        let stop = word_stop(&self.text, self.caret, true, &self.atoms);
         self.kill(self.caret, stop, false);
     }
 
@@ -368,6 +473,15 @@ impl Draft {
     /// Cuts `from..to` into the yank ring as its own undo step. Consecutive
     /// kills join one entry, in the order the text stood.
     fn kill(&mut self, from: usize, to: usize, backward: bool) {
+        // A kill takes any placeholder it touches whole.
+        let from = match self.atom_at(from, false) {
+            Some((start, _)) if start < from => start,
+            _ => from,
+        };
+        let to = match self.atom_at(to, true) {
+            Some((_, end)) if end > to => end,
+            _ => to,
+        };
         if from >= to {
             return;
         }
@@ -517,7 +631,7 @@ impl Draft {
 /// the line break alone. Words are Unicode word segments without a
 /// dictionary, so CJK text steps one ideograph at a time where the oracle's
 /// ICU segmenter steps by dictionary word.
-pub fn word_stop(text: &str, caret: usize, forward: bool) -> usize {
+pub fn word_stop(text: &str, caret: usize, forward: bool, atoms: &[(String, Atom)]) -> usize {
     let line_start = text[..caret].rfind('\n').map_or(0, |i| i + 1);
     let line_end = text[caret..].find('\n').map_or(text.len(), |i| caret + i);
     let wordlike = |segment: &str| segment.chars().any(char::is_alphanumeric);
@@ -529,6 +643,10 @@ pub fn word_stop(text: &str, caret: usize, forward: bool) -> usize {
         let at = text[line_start..caret].trim_end().len() + line_start;
         if at == line_start {
             return at;
+        }
+        // A placeholder is crossed whole.
+        if let Some((start, _)) = atom_at(text, at, atoms, true) {
+            return start;
         }
         let segments: Vec<(usize, &str)> =
             text[line_start..at].split_word_bound_indices().collect();
@@ -557,6 +675,9 @@ pub fn word_stop(text: &str, caret: usize, forward: bool) -> usize {
     if at == line_end {
         return at;
     }
+    if let Some((_, end)) = atom_at(text, at, atoms, false) {
+        return end;
+    }
     let mut offset = at;
     for (_, segment) in text[at..line_end].split_word_bound_indices() {
         if offset == at && wordlike(segment) {
@@ -575,6 +696,43 @@ pub fn word_stop(text: &str, caret: usize, forward: bool) -> usize {
         offset += segment.len();
     }
     offset
+}
+
+/// The range of a placeholder in `text` that the caret at `at` would cross
+/// going back or forward: the TypeScript `atomAt`.
+fn atom_at(
+    text: &str,
+    at: usize,
+    atoms: &[(String, Atom)],
+    backward: bool,
+) -> Option<(usize, usize)> {
+    atoms.iter().find_map(|(token, _)| {
+        text.match_indices(token.as_str())
+            .map(|(start, _)| (start, start + token.len()))
+            .find(|&(start, end)| {
+                if backward {
+                    start < at && at <= end
+                } else {
+                    start <= at && at < end
+                }
+            })
+    })
+}
+
+/// The longest prefix of `text` within `limit` bytes that ends on a grapheme
+/// boundary.
+fn cut_at_boundary(text: &str, limit: usize) -> &str {
+    if text.len() <= limit {
+        return text;
+    }
+    let mut end = 0;
+    for (at, grapheme) in text.grapheme_indices(true) {
+        if at + grapheme.len() > limit {
+            break;
+        }
+        end = at + grapheme.len();
+    }
+    &text[..end]
 }
 
 /// Normalizes CRLF and CR to LF and drops control characters other than LF and
@@ -800,7 +958,7 @@ mod tests {
         let mut caret = if forward { 0 } else { text.len() };
         let mut stops = Vec::new();
         loop {
-            let next = word_stop(text, caret, forward);
+            let next = word_stop(text, caret, forward, &[]);
             if next == caret {
                 return stops;
             }
@@ -1112,6 +1270,89 @@ mod tests {
         // Before the first frame, there is no drawn row.
         draft.row_home(0);
         assert_eq!(draft.caret(), 0);
+    }
+
+    #[test]
+    fn a_long_paste_collapses_into_a_placeholder_that_edits_as_one() {
+        assert!(collapses("a\nb\nc") && !collapses("a\nb"));
+        assert!(collapses(&"x".repeat(801)) && !collapses(&"x".repeat(800)));
+        assert_eq!(pasted_text_token(1, "a\nb\nc"), "[Pasted text #1 +2 lines]");
+        assert_eq!(
+            pasted_text_token(2, &"x".repeat(900)),
+            "[Pasted text #2 900 chars]"
+        );
+        let pasted = "line 0\nline 1\nline 2\nline 3";
+        let mut draft = typed("see ");
+        assert!(draft.paste_block(pasted));
+        assert_eq!(draft.text(), "see [Pasted text #1 +3 lines]");
+        assert_eq!(draft.expanded(), format!("see {pasted}"));
+        // A short paste stays text.
+        draft.paste_block(" ok");
+        assert_eq!(draft.text(), "see [Pasted text #1 +3 lines] ok");
+        // The caret, word steps, and Backspace cross the placeholder whole.
+        draft.word_left();
+        draft.left();
+        draft.left();
+        assert_eq!(draft.caret(), 4);
+        draft.right();
+        assert_eq!(&draft.text()[draft.caret()..], " ok");
+        draft.word_left();
+        assert_eq!(draft.caret(), 4);
+        draft.word_right();
+        assert_eq!(&draft.text()[draft.caret()..], " ok");
+        draft.backspace();
+        assert_eq!(draft.text(), "see  ok");
+        // Undo brings it back, still standing for its text.
+        draft.undo();
+        assert_eq!(draft.expanded(), format!("see {pasted} ok"));
+    }
+
+    #[test]
+    fn a_placeholder_is_killed_and_yanked_whole_and_never_split() {
+        let pasted = "a\nb\nc";
+        let mut draft = Draft::default();
+        draft.paste_block(pasted);
+        // Ctrl+U takes it; Ctrl+Y puts it back as the paste.
+        draft.kill_line_left();
+        assert_eq!(draft.text(), "");
+        draft.type_text("first ");
+        draft.yank();
+        assert_eq!(draft.expanded(), format!("first {pasted}"));
+        // A kill that starts inside it widens to take it all.
+        let start = "first [Pasted".len();
+        draft.caret = start;
+        draft.kill(start, draft.text().len(), false);
+        assert_eq!(draft.text(), "first ");
+        // A click or a row edge inside it lands before it.
+        draft.yank();
+        assert!(draft.place(0, 10, 80));
+        assert_eq!(draft.caret(), "first ".len());
+    }
+
+    #[test]
+    fn a_word_step_crosses_a_placeholder_whole() {
+        let atoms = [("[Image #1]".to_owned(), Atom::Image(1))];
+        let walk = |forward: bool| {
+            let text = "a [Image #1] b";
+            let mut caret = if forward { 0 } else { text.len() };
+            let mut stops = Vec::new();
+            loop {
+                let next = word_stop(text, caret, forward, &atoms);
+                if next == caret {
+                    return stops;
+                }
+                caret = next;
+                stops.push(format!("{}|{}", &text[..caret], &text[caret..]));
+            }
+        };
+        assert_eq!(
+            walk(false),
+            ["a [Image #1] |b", "a |[Image #1] b", "|a [Image #1] b"]
+        );
+        assert_eq!(
+            walk(true),
+            ["a| [Image #1] b", "a [Image #1]| b", "a [Image #1] b|"]
+        );
     }
 
     #[test]

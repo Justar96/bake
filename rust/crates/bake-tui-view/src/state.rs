@@ -436,8 +436,9 @@ pub fn update(state: &mut State, msg: Msg) -> Vec<Effect> {
     match msg {
         Msg::Key(input) => return key(state, input),
         Msg::Paste(text) => match state.focus {
+            // A long paste collapses into a placeholder, as the oracle's does.
             Focus::Composer => {
-                let complete = state.draft.paste(&text);
+                let complete = state.draft.paste_block(&text);
                 state.notice = (!complete).then_some(Notice::DraftLimit);
             }
             Focus::AgentList => state.notice = Some(Notice::ListKeys),
