@@ -2,6 +2,10 @@
   "schema": "bake/session-conformance/zstd-cases",
   "version": 1,
   "provenance": "Source-authored before either new harness; frame construction and edge selection informed by the prior 24 codec and 21 reader oracle probes. Outcomes were not obtained from the implementation.",
+  "amendments": [
+    "image-offload-projection and known-ignorable-routing-decision were added with Session projection restoration, written from the TypeScript sources before either harness ran; their raw-block frames and XXH64 checksums encode hand-written plaintext.",
+    "image-offload-torn-frame was added after the independent review: an image/offload in a row recovered from a frame without its checksum. Written from the TypeScript sources before either harness ran on it."
+  ],
   "cases": [
     {
       "id": "header-only",
@@ -1755,6 +1759,355 @@
               {
                 "type": "text",
                 "text": "Hello 🦀 世界"
+              }
+            ],
+            "source": {
+              "kind": "user"
+            },
+            "role": "user",
+            "id": "m0"
+          }
+        ],
+        "requestHeader": null,
+        "toolHistory": {
+          "tools": [],
+          "updates": []
+        },
+        "requestContext": null
+      }
+    },
+    {
+      "id": "image-offload-projection",
+      "hex": "28b52ffd04383103007b2274797065223a2273657373696f6e222c2276657273696f6e223a332c226964223a227a7374642d66697874757265222c22637265617465644174223a312c226973536565646564223a66616c73652c2264656c65676174696f6e4465707468223a307d0a4e808b7428b52ffd0438d914007b2274797065223a22757365722f6d657373616765222c22736571223a302c2274696d65223a312c2264617461223a7b22636f6e74656e74223a5b7b2274797065223a2274657874222c2274657874223a226c6f6f6b227d2c7b2274797065223a22696d616765222c226174746163686d656e74223a7b226174746163686d656e744964223a227368613235363a61616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161222c226d6564696154797065223a22696d6167652f706e67222c226279746573223a313032342c227769647468223a322c22686569676874223a327d7d2c7b2274797065223a22696d616765222c226174746163686d656e74223a7b226174746163686d656e744964223a227368613235363a62626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262222c226d6564696154797065223a22696d6167652f706e67222c226279746573223a313032342c227769647468223a322c22686569676874223a327d7d5d2c22736f75726365223a7b226b696e64223a2275736572227d2c22726f6c65223a2275736572222c226964223a226d30227d2c22737572666163654f70223a22617070656e64227d0a7b2274797065223a22696d6167652f6f66666c6f6164222c22736571223a312c2274696d65223a322c2264617461223a7b2274617267657473223a5b7b22736571223a302c22696d616765496e6465786573223a5b315d7d5d7d7d0a7b2274797065223a2273657373696f6e2f656e642d73656564222c22736571223a322c2274696d65223a332c2264617461223a7b7d7d0a9931f695",
+      "maxPlaintextBytes": 2097152,
+      "expected": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "zstd-fixture",
+          "createdAt": 1,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "rows": [
+          {
+            "type": "user/message",
+            "seq": 0,
+            "time": 1,
+            "data": {
+              "content": [
+                {
+                  "type": "text",
+                  "text": "look"
+                },
+                {
+                  "type": "image",
+                  "attachment": {
+                    "attachmentId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "mediaType": "image/png",
+                    "bytes": 1024,
+                    "width": 2,
+                    "height": 2
+                  }
+                },
+                {
+                  "type": "image",
+                  "attachment": {
+                    "attachmentId": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                    "mediaType": "image/png",
+                    "bytes": 1024,
+                    "width": 2,
+                    "height": 2
+                  }
+                }
+              ],
+              "source": {
+                "kind": "user"
+              },
+              "role": "user",
+              "id": "m0"
+            },
+            "surfaceOp": "append"
+          },
+          {
+            "type": "image/offload",
+            "seq": 1,
+            "time": 2,
+            "data": {
+              "targets": [
+                {
+                  "seq": 0,
+                  "imageIndexes": [
+                    1
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "type": "session/end-seed",
+            "seq": 2,
+            "time": 3,
+            "data": {}
+          }
+        ],
+        "inheritedEventCount": 0,
+        "committedBytes": 769,
+        "torn": null,
+        "closers": [],
+        "endSeedAppended": false,
+        "messages": [
+          {
+            "content": [
+              {
+                "type": "text",
+                "text": "look"
+              },
+              {
+                "type": "image",
+                "attachment": {
+                  "attachmentId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "mediaType": "image/png",
+                  "bytes": 1024,
+                  "width": 2,
+                  "height": 2
+                }
+              },
+              {
+                "type": "image",
+                "attachment": {
+                  "attachmentId": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "mediaType": "image/png",
+                  "bytes": 1024,
+                  "width": 2,
+                  "height": 2
+                },
+                "offloaded": true
+              }
+            ],
+            "source": {
+              "kind": "user"
+            },
+            "role": "user",
+            "id": "m0"
+          }
+        ],
+        "requestHeader": null,
+        "toolHistory": {
+          "tools": [],
+          "updates": []
+        },
+        "requestContext": null
+      }
+    },
+    {
+      "id": "known-ignorable-routing-decision",
+      "hex": "28b52ffd04383103007b2274797065223a2273657373696f6e222c2276657273696f6e223a332c226964223a227a7374642d66697874757265222c22637265617465644174223a312c226973536565646564223a66616c73652c2264656c65676174696f6e4465707468223a307d0a4e808b7428b52ffd0438c112007b2274797065223a22757365722f6d657373616765222c22736571223a302c2274696d65223a312c2264617461223a7b22636f6e74656e74223a5b7b2274797065223a2274657874222c2274657874223a22726f757465227d5d2c22736f75726365223a7b226b696e64223a2275736572227d2c22726f6c65223a2275736572222c226964223a226d30227d2c22737572666163654f70223a22617070656e64227d0a7b2274797065223a227375626167656e742f726f7574696e672d6465636973696f6e222c22736571223a312c2274696d65223a322c2264617461223a7b226368696c644964223a226368696c642d31222c2263616c6c4964223a226331222c22736f75726365223a226175746f222c22726f757465223a7b2270726f7669646572223a226d6f636b222c226d6f64656c223a226d6f636b2d736d616c6c222c22726561736f6e696e674566666f7274223a226c6f77227d2c22726f75746572223a7b22726561736f6e223a2273686f7274206c6f6f6b7570222c2266616c6c6261636b223a66616c73652c226173736573736d656e74223a7b22706f6c696379223a2264656661756c74222c22737461747573223a226e6f726d616c222c22646966666963756c7479223a302e33352c22726561736f6e73223a5b2273696e676c652066696c65225d7d7d7d2c2269676e6f7261626c65223a747275657d0a7b2274797065223a22726571756573742f636f6e74657874222c22736571223a322c2274696d65223a332c2264617461223a7b2270726f7669646572223a226d6f636b222c226d6f64656c223a226d6f636b227d7d0aed6f833c",
+      "maxPlaintextBytes": 2097152,
+      "expected": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "zstd-fixture",
+          "createdAt": 1,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "rows": [
+          {
+            "type": "user/message",
+            "seq": 0,
+            "time": 1,
+            "data": {
+              "content": [
+                {
+                  "type": "text",
+                  "text": "route"
+                }
+              ],
+              "source": {
+                "kind": "user"
+              },
+              "role": "user",
+              "id": "m0"
+            },
+            "surfaceOp": "append"
+          },
+          {
+            "type": "subagent/routing-decision",
+            "seq": 1,
+            "time": 2,
+            "data": {
+              "childId": "child-1",
+              "callId": "c1",
+              "source": "auto",
+              "route": {
+                "provider": "mock",
+                "model": "mock-small",
+                "reasoningEffort": "low"
+              },
+              "router": {
+                "reason": "short lookup",
+                "fallback": false,
+                "assessment": {
+                  "policy": "default",
+                  "status": "normal",
+                  "difficulty": 0.35,
+                  "reasons": [
+                    "single file"
+                  ]
+                }
+              }
+            },
+            "ignorable": true
+          },
+          {
+            "type": "request/context",
+            "seq": 2,
+            "time": 3,
+            "data": {
+              "provider": "mock",
+              "model": "mock"
+            }
+          }
+        ],
+        "inheritedEventCount": 0,
+        "committedBytes": 702,
+        "torn": null,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "content": [
+              {
+                "type": "text",
+                "text": "route"
+              }
+            ],
+            "source": {
+              "kind": "user"
+            },
+            "role": "user",
+            "id": "m0"
+          }
+        ],
+        "requestHeader": null,
+        "toolHistory": {
+          "tools": [],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      }
+    },
+    {
+      "id": "image-offload-torn-frame",
+      "hex": "28b52ffd04383103007b2274797065223a2273657373696f6e222c2276657273696f6e223a332c226964223a227a7374642d66697874757265222c22637265617465644174223a312c226973536565646564223a66616c73652c2264656c65676174696f6e4465707468223a307d0a4e808b7428b52ffd04384110007b2274797065223a22757365722f6d657373616765222c22736571223a302c2274696d65223a312c2264617461223a7b22636f6e74656e74223a5b7b2274797065223a2274657874222c2274657874223a226c6f6f6b227d2c7b2274797065223a22696d616765222c226174746163686d656e74223a7b226174746163686d656e744964223a227368613235363a61616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161222c226d6564696154797065223a22696d6167652f706e67222c226279746573223a313032342c227769647468223a322c22686569676874223a327d7d2c7b2274797065223a22696d616765222c226174746163686d656e74223a7b226174746163686d656e744964223a227368613235363a62626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262222c226d6564696154797065223a22696d6167652f706e67222c226279746573223a313032342c227769647468223a322c22686569676874223a327d7d5d2c22736f75726365223a7b226b696e64223a2275736572227d2c22726f6c65223a2275736572222c226964223a226d30227d2c22737572666163654f70223a22617070656e64227d0a6865ea6b28b52ffd0438f102007b2274797065223a22696d6167652f6f66666c6f6164222c22736571223a312c2274696d65223a322c2264617461223a7b2274617267657473223a5b7b22736571223a302c22696d616765496e6465786573223a5b302c315d7d5d7d7d0a",
+      "maxPlaintextBytes": 2097152,
+      "expected": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "zstd-fixture",
+          "createdAt": 1,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "rows": [
+          {
+            "type": "user/message",
+            "seq": 0,
+            "time": 1,
+            "data": {
+              "content": [
+                {
+                  "type": "text",
+                  "text": "look"
+                },
+                {
+                  "type": "image",
+                  "attachment": {
+                    "attachmentId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "mediaType": "image/png",
+                    "bytes": 1024,
+                    "width": 2,
+                    "height": 2
+                  }
+                },
+                {
+                  "type": "image",
+                  "attachment": {
+                    "attachmentId": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                    "mediaType": "image/png",
+                    "bytes": 1024,
+                    "width": 2,
+                    "height": 2
+                  }
+                }
+              ],
+              "source": {
+                "kind": "user"
+              },
+              "role": "user",
+              "id": "m0"
+            },
+            "surfaceOp": "append"
+          },
+          {
+            "type": "image/offload",
+            "seq": 1,
+            "time": 2,
+            "data": {
+              "targets": [
+                {
+                  "seq": 0,
+                  "imageIndexes": [
+                    0,
+                    1
+                  ]
+                }
+              ]
+            }
+          }
+        ],
+        "inheritedEventCount": 0,
+        "committedBytes": 716,
+        "torn": {
+          "truncateTo": 648,
+          "recoveredFrom": 1
+        },
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "content": [
+              {
+                "type": "text",
+                "text": "look"
+              },
+              {
+                "type": "image",
+                "attachment": {
+                  "attachmentId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "mediaType": "image/png",
+                  "bytes": 1024,
+                  "width": 2,
+                  "height": 2
+                },
+                "offloaded": true
+              },
+              {
+                "type": "image",
+                "attachment": {
+                  "attachmentId": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "mediaType": "image/png",
+                  "bytes": 1024,
+                  "width": 2,
+                  "height": 2
+                },
+                "offloaded": true
               }
             ],
             "source": {
