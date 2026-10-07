@@ -18,12 +18,13 @@ use crate::copy;
 use crate::editor::{self, display};
 use crate::frame::FrameStyle;
 use crate::layout::{self, Needs};
+use crate::mention::PathKind;
 use crate::mode::{self, HINT_MIN_COLUMNS};
 use crate::runtime::Target;
 use crate::selection::line_columns;
 use crate::state::{
-    ActivityKind, Area, DraftSpot, Focus, Notice, Outcome, SAMPLE_AGENTS, SampleAgent, ScrollTrack,
-    Spot, State, agent,
+    ActivityKind, Area, DraftSpot, FileMenu, Focus, Notice, Outcome, SAMPLE_AGENTS, SampleAgent,
+    ScrollTrack, Spot, State, agent,
 };
 use crate::status::{self, Tone};
 use crate::transcript::{self, Look, TagTone};
@@ -152,7 +153,8 @@ pub fn render(app: &mut State, frame: &mut Frame) {
         Some(format!("+{below} {}", copy::BELOW))
     } else {
         // While the menu offers commands, its key takes the hint's place.
-        let completing = app.menu().is_some_and(|menu| !menu.entries.is_empty());
+        let completing = app.menu().is_some_and(|menu| !menu.entries.is_empty())
+            || app.file_menu().is_some_and(|menu| !menu.entries.is_empty());
         mode.hint
             .filter(|_| !listing)
             .map(|hint| {
@@ -374,21 +376,164 @@ fn bar_left(app: &State) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
     }
 }
 
-/// Rows the slash menu wants: up to [`completion::MENU_ROWS`] commands and
-/// a count of the rest, one row saying nothing matches, or, once the menu
-/// has closed on a typed command, its usage line.
+/// Rows a menu of `count` entries lists: up to [`completion::MENU_ROWS`]
+/// and a count of the rest.
+fn listed_rows(count: usize) -> usize {
+    count.min(completion::MENU_ROWS) + usize::from(count > completion::MENU_ROWS)
+}
+
+/// The file menu's status rows, as the oracle stacks them under its list:
+/// nothing found, still looking, and why discovery failed.
+fn file_status(menu: &FileMenu) -> Vec<(String, bool)> {
+    let mut rows = Vec::new();
+    if menu.entries.is_empty() && !menu.loading {
+        rows.push((copy::NO_FILES.to_owned(), false));
+    }
+    if menu.loading {
+        rows.push((copy::FILES_LOADING.to_owned(), false));
+    }
+    if let Some(error) = &menu.error {
+        rows.push((format!("{}: {error}", copy::FILES_ERROR), true));
+    }
+    rows
+}
+
+/// Rows the menus want: the slash menu's commands, or one row saying none
+/// match; the file menu's mentions and its status rows; or, once the slash
+/// menu has closed on a typed command, its usage line.
 fn menu_rows(app: &State) -> u16 {
-    match app.menu() {
-        Some(menu) => {
-            let count = menu.entries.len();
-            let rows =
-                count.min(completion::MENU_ROWS) + usize::from(count > completion::MENU_ROWS);
-            u16::try_from(rows.max(1)).unwrap_or(u16::MAX)
+    let rows = if let Some(menu) = app.menu() {
+        listed_rows(menu.entries.len()).max(1)
+    } else if let Some(menu) = app.file_menu() {
+        (listed_rows(menu.entries.len()) + file_status(&menu).len()).max(1)
+    } else if app.focus == Focus::Composer {
+        usize::from(completion::usage(app.draft.text()).is_some())
+    } else {
+        0
+    };
+    u16::try_from(rows).unwrap_or(u16::MAX)
+}
+
+/// One status row under a menu, past the rail: dim, or in the failed red.
+fn status_row(app: &State, text: &str, error: bool, area: Rect, buf: &mut Buffer) {
+    let style = if error {
+        match app.tones {
+            Tones::TrueColor => Style::new().fg(Color::Rgb(0xef, 0x44, 0x44)),
+            Tones::Ansi => Style::new().fg(Color::Red),
+            Tones::None => Style::new(),
         }
-        None if app.focus == Focus::Composer => {
-            u16::from(completion::usage(app.draft.text()).is_some())
+    } else {
+        dim()
+    };
+    line(
+        buf,
+        area,
+        Line::styled(fit(&format!("  {text}"), usize::from(area.width)), style),
+    );
+}
+
+/// `text` cut from its start to `width` cells, with `…` standing for what
+/// was cut, as Ink's `truncate-start` cuts a long path to keep its name.
+fn fit_start(text: &str, width: usize) -> String {
+    if text.width() <= width {
+        return text.to_owned();
+    }
+    let mut kept = Vec::new();
+    let mut used = 0;
+    for grapheme in text.graphemes(true).rev() {
+        let cells = grapheme.width();
+        if used + cells + 1 > width {
+            break;
         }
-        None => 0,
+        kept.push(grapheme);
+        used += cells;
+    }
+    if width == 0 {
+        return String::new();
+    }
+    kept.reverse();
+    format!("…{}", kept.concat())
+}
+
+/// The file menu, drawn as the slash menu is: a `▸` on the selected row, the
+/// mentions in a column sized to the longest, up to 40 cells, a long one cut
+/// from its start; each row's kind after it only when the rows shown mix
+/// files and directories. Its status rows follow.
+fn render_file_menu(app: &State, menu: &FileMenu, area: Rect, buf: &mut Buffer) {
+    let asking = tone_style(Tone::Asking, app.tones);
+    let status = file_status(menu);
+    let rows = usize::from(area.height).saturating_sub(status.len());
+    let count = menu.entries.len();
+    let mut y = area.y;
+    if count > 0 && rows > 0 {
+        let shown = if count > rows {
+            rows.saturating_sub(1).max(1)
+        } else {
+            count
+        };
+        let first = (menu.selected + 1).saturating_sub(shown).min(count - shown);
+        let visible = &menu.entries[first..first + shown];
+        let mixed = visible.iter().any(|c| c.kind != visible[0].kind);
+        let column = visible
+            .iter()
+            .map(|c| c.name.width() + 2)
+            .max()
+            .unwrap_or(0)
+            .clamp(8, 40);
+        let marker = if app.frame == FrameStyle::Classic {
+            ">"
+        } else {
+            "▸"
+        };
+        for (i, choice) in visible.iter().enumerate() {
+            let active = first + i == menu.selected;
+            let name = fit_start(&choice.name, column);
+            let pad = column.saturating_sub(name.width());
+            let kind = match (mixed, choice.kind) {
+                (false, _) => "",
+                (true, PathKind::File) => copy::FILE,
+                (true, PathKind::Directory) => copy::DIRECTORY,
+            };
+            let content = Line::from(vec![
+                Span::styled(
+                    if active {
+                        format!("{marker} ")
+                    } else {
+                        "  ".into()
+                    },
+                    asking.add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("{name}{}", " ".repeat(pad)),
+                    if active {
+                        asking.add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::new()
+                    },
+                ),
+                Span::styled(kind, if active { Style::new() } else { dim() }),
+            ]);
+            line(buf, Rect::new(area.x, y, area.width, 1), content);
+            y += 1;
+        }
+        if shown < count && rows > 1 {
+            line(
+                buf,
+                Rect::new(area.x, y, area.width, 1),
+                Line::styled(
+                    format!("  +{} {}", count - shown, copy::MORE_MATCHES),
+                    dim(),
+                ),
+            );
+            y += 1;
+        }
+    }
+    for (text, error) in status {
+        if y >= area.bottom() {
+            break;
+        }
+        status_row(app, &text, error, Rect::new(area.x, y, area.width, 1), buf);
+        y += 1;
     }
 }
 
@@ -401,6 +546,10 @@ fn render_menu(app: &State, area: Rect, buf: &mut Buffer) {
         return;
     }
     let asking = tone_style(Tone::Asking, app.tones);
+    if let Some(menu) = app.file_menu() {
+        render_file_menu(app, &menu, area, buf);
+        return;
+    }
     let Some(menu) = app.menu() else {
         if let Some(command) = completion::usage(app.draft.text()) {
             let text = format!(
@@ -418,11 +567,8 @@ fn render_menu(app: &State, area: Rect, buf: &mut Buffer) {
         return;
     };
     if menu.entries.is_empty() {
-        line(
-            buf,
-            Rect::new(area.x, area.y, area.width, 1),
-            Line::styled(copy::NO_COMPLETIONS, dim()),
-        );
+        let row = Rect::new(area.x, area.y, area.width, 1);
+        status_row(app, copy::NO_COMPLETIONS, false, row, buf);
         return;
     }
     let rows = usize::from(area.height);
@@ -1043,6 +1189,7 @@ mod tests {
     use crate::activity::Tones;
     use crate::frame::FrameStyle;
     use crate::keys::{Key, KeyInput, Mods};
+    use crate::mention::Candidate;
     use std::time::Duration;
 
     use crate::state::{
@@ -2098,6 +2245,70 @@ mod tests {
         assert!(!rows.iter().any(|r| r.contains("Staged attachments")));
     }
 
+    fn found(app: &mut State, query: &str, found: Result<Vec<Candidate>, String>) {
+        update(
+            app,
+            Msg::FilesFound {
+                query: query.into(),
+                found,
+            },
+        );
+    }
+
+    fn candidate(path: &str, kind: PathKind) -> Candidate {
+        Candidate {
+            path: path.into(),
+            kind,
+        }
+    }
+
+    #[test]
+    fn the_file_menu_lists_mentions_and_says_when_it_looks_or_fails() {
+        let mut app = State::default();
+        key(&mut app, Key::Char('@'));
+        let (rows, _) = draw(&mut app, 80, 30);
+        let bar = row_index(&rows, "no model");
+        assert_eq!(rows[bar - 1].trim_end(), "    Finding paths…");
+        // One kind: no kind column. The box's edge names Tab.
+        let files = (0..10)
+            .map(|i| candidate(&format!("f{i}.md"), PathKind::File))
+            .collect();
+        found(&mut app, "", Ok(files));
+        let (rows, _) = draw(&mut app, 80, 30);
+        let first = row_index(&rows, "@f0.md");
+        assert_eq!(rows[first].trim_end(), "  ▸ @f0.md");
+        assert_eq!(
+            rows[first + 8].trim_end(),
+            "    +2 more, keep typing to narrow"
+        );
+        assert_eq!(first + 9, bar);
+        assert!(rows.iter().any(|r| r.contains("Tab completes")));
+        // Mixed kinds name each; a long path keeps its end.
+        let long = format!("{}/name.rs", "deep".repeat(12));
+        found(
+            &mut app,
+            "",
+            Ok(vec![
+                candidate("src", PathKind::Directory),
+                candidate(&long, PathKind::File),
+            ]),
+        );
+        let (rows, _) = draw(&mut app, 80, 30);
+        assert!(rows[bar - 2].starts_with("  ▸ @src/"), "{rows:#?}");
+        assert!(rows[bar - 2].trim_end().ends_with("Directory"));
+        assert!(rows[bar - 1].starts_with("    …"));
+        assert!(rows[bar - 1].contains("deep/name.rsFile"));
+        // Nothing found, and a failure, each take a row.
+        found(&mut app, "", Err("denied".into()));
+        let (rows, _) = draw(&mut app, 80, 30);
+        assert_eq!(rows[bar - 2].trim_end(), "    No matching paths");
+        assert_eq!(
+            rows[bar - 1].trim_end(),
+            "    File discovery failed: denied"
+        );
+        assert!(!rows.iter().any(|r| r.contains("Tab completes")));
+    }
+
     #[test]
     fn the_slash_menu_sits_above_the_bar_and_keeps_its_selection_in_view() {
         let mut app = State::default();
@@ -2120,10 +2331,10 @@ mod tests {
         let (rows, _) = draw(&mut app, 80, 30);
         assert!(rows[bar - 2].starts_with("  ▸ /thinking"));
         assert!(!rows.iter().any(|r| r.contains("/model")));
-        // Nothing matching says so in one row.
+        // Nothing matching says so in one row, past the rail.
         key(&mut app, Key::Char('z'));
         let (rows, _) = draw(&mut app, 80, 30);
-        assert_eq!(rows[bar - 1].trim_end(), "  No matching commands");
+        assert_eq!(rows[bar - 1].trim_end(), "    No matching commands");
         assert!(!rows.iter().any(|r| r.contains("Tab completes")));
         // A typed command with a hint shows its usage once the menu closes.
         update(

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { basename, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { parseArgs } from 'node:util'
 import xterm from '@xterm/headless'
@@ -147,14 +147,20 @@ class Preview {
   async saveFailure(path: string): Promise<void> { await writeFile(path, this.raw) }
 }
 
-async function scenario(name: string, run: (preview: Preview) => Promise<void>): Promise<void> {
+/** Run one scenario in a fresh working directory holding only `files`, which must be all it holds at the end. */
+async function scenario(name: string, run: (preview: Preview) => Promise<void>, files: readonly string[] = []): Promise<void> {
   const cwd = await mkdtemp(join(tmpdir(), 'bake-rust-pty-'))
   let preview: Preview | undefined
   try {
+    for (const file of files) {
+      await mkdir(dirname(join(cwd, file)), { recursive: true })
+      await writeFile(join(cwd, file), '')
+    }
     preview = new Preview(cwd)
     await preview.ready()
     await run(preview)
-    assert.deepEqual(await readdir(cwd), [], 'preview wrote files into the working directory')
+    const seeded = [...new Set(files.map(file => file.split('/')[0]))].sort()
+    assert.deepEqual((await readdir(cwd)).sort(), seeded, 'preview wrote files into the working directory')
     console.log(`PASS Rust PTY: ${name}`)
   } catch (error) {
     if (preview !== undefined) {
@@ -231,6 +237,20 @@ await scenario('composer, agent inspection, paste, and resize', async (preview) 
   await preview.wait('command refused', () => preview.screen.includes('Commands are not available in this preview'))
   await preview.quit()
 })
+
+await scenario('an @ mention lists workspace paths, completes one, and closes on Esc', async (preview) => {
+  preview.send('read @src/')
+  await preview.wait('file menu', () => /▸ @src\/lib\.rs/u.test(preview.screen) && preview.screen.includes('@src/main.rs')
+    && preview.screen.includes('Tab completes'))
+  preview.send('\x1b[B\t')
+  await preview.wait('mention completed', () => preview.screen.includes('❯ read @src/main.rs') && !preview.screen.includes('@src/lib.rs'))
+  // A bare name is ranked against the whole tree.
+  preview.send('@READ')
+  await preview.wait('ranked match', () => /▸ @README\.md/u.test(preview.screen))
+  preview.send('\x1b')
+  await preview.wait('menu closed', () => !preview.screen.includes('@README.md') && preview.screen.includes('❯ read @src/main.rs @READ'))
+  await preview.quit()
+}, ['src/main.rs', 'src/lib.rs', 'README.md'])
 
 await scenario('transcript pages, jumps between prompts, and follows output again', async (preview) => {
   preview.send('keep')

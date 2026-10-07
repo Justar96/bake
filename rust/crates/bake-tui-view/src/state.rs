@@ -11,6 +11,7 @@ use crate::editor::Draft;
 use crate::frame::FrameStyle;
 use crate::keys::{self, Action, KeyInput, Scope};
 use crate::live;
+use crate::mention::{self, Candidate, Choice};
 use crate::mode::Mode;
 use crate::paste::{self, Image};
 use crate::runtime::{Pending, RuntimeUpdate, Submission};
@@ -45,6 +46,12 @@ pub enum Msg {
     },
     /// A change the agent runtime reports, in the order it sent them.
     Runtime(RuntimeUpdate),
+    /// The paths an [`Effect::FindFiles`] found for `query`, or why it could
+    /// not look. A result for a query no longer wanted is dropped.
+    FilesFound {
+        query: String,
+        found: Result<Vec<Candidate>, String>,
+    },
 }
 
 /// A mouse report, at a cell of the screen.
@@ -197,13 +204,32 @@ pub struct Menu {
     pub selected: usize,
 }
 
-/// What the slash menu remembers about the draft and caret it was last
-/// changed at.
+/// The file menu as drawn: the mentions found for the `@` token at the
+/// caret, the selected one, and whether discovery is still looking or
+/// failed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileMenu {
+    pub entries: Vec<Choice>,
+    pub selected: usize,
+    pub loading: bool,
+    pub error: Option<String>,
+}
+
+/// What a menu remembers about the draft and caret it was last changed at:
+/// the selected row's name and whether Esc closed it there.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct MenuMemory {
     at: Option<(String, usize)>,
-    selected: Option<&'static str>,
+    selected: Option<String>,
     dismissed: bool,
+}
+
+/// The query the view last asked discovery for, and what came back for it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Files {
+    pub query: Option<String>,
+    /// `None` while discovery is looking.
+    pub found: Option<Result<Vec<Candidate>, String>>,
 }
 
 /// How long the scroll indicator says whether a selection was copied.
@@ -224,6 +250,9 @@ pub enum Effect {
     Cancel,
     /// Send every waiting prompt now; the runtime reports the turn it starts.
     SendPending,
+    /// List the paths that match this `@` query, then report with
+    /// [`Msg::FilesFound`]. A newer request supersedes it.
+    FindFiles(String),
 }
 
 /// A fixed example row for the agent list; it describes no running work.
@@ -397,9 +426,11 @@ pub struct State {
     pub attachments: Vec<(u32, Image)>,
     /// Images staged so far; the next takes the next id.
     images: u32,
-    /// The slash menu's selection and whether Esc closed it, for the draft
-    /// and caret they were made at. Any edit or move starts the menu over.
+    /// The menu's selection and whether Esc closed it, for the draft and
+    /// caret they were made at. Any edit or move starts the menu over.
     menu: MenuMemory,
+    /// Path discovery for the file menu.
+    pub files: Files,
     /// Whether a press on the scrollbar is being dragged.
     pub(crate) dragging: bool,
     /// While a first Ctrl+C is armed, when it lapses; a second before then
@@ -446,29 +477,86 @@ impl State {
             attachments: Vec::new(),
             images: 0,
             menu: MenuMemory::default(),
+            files: Files::default(),
             dragging: false,
             quit_until: None,
         }
     }
 
-    /// The slash menu, while the draft up to the caret is a leading slash
-    /// token and Esc has not closed it there.
-    pub fn menu(&self) -> Option<Menu> {
+    /// The draft and caret while a menu may open there: in the composer,
+    /// unless Esc closed one at this very draft and caret.
+    fn menu_here(&self) -> Option<(&str, usize)> {
         if self.focus != Focus::Composer {
             return None;
         }
         let (draft, caret) = (self.draft.text(), self.draft.caret());
-        let here = self.menu.at == Some((draft.to_owned(), caret));
-        if here && self.menu.dismissed {
+        let here = self
+            .menu
+            .at
+            .as_ref()
+            .is_some_and(|(text, at)| text == draft && *at == caret);
+        (!(here && self.menu.dismissed)).then_some((draft, caret))
+    }
+
+    /// The row a menu keeps selected at this draft and caret, by name.
+    fn remembered(&self, names: impl Iterator<Item = impl AsRef<str>>) -> usize {
+        let here = self
+            .menu
+            .at
+            .as_ref()
+            .is_some_and(|(text, at)| text == self.draft.text() && *at == self.draft.caret());
+        let Some(name) = self.menu.selected.as_deref().filter(|_| here) else {
+            return 0;
+        };
+        names
+            .into_iter()
+            .position(|n| n.as_ref() == name)
+            .unwrap_or(0)
+    }
+
+    /// The slash menu, while the draft up to the caret is a leading slash
+    /// token and Esc has not closed it there.
+    pub fn menu(&self) -> Option<Menu> {
+        let (draft, caret) = self.menu_here()?;
+        let entries = completion::matches(draft, caret)?;
+        let selected = self.remembered(entries.iter().map(|c| c.name));
+        Some(Menu { entries, selected })
+    }
+
+    /// The `@` token the file menu completes, with where it ends, while the
+    /// caret is inside one, no slash menu is open, and Esc has not closed
+    /// the menu there.
+    fn file_token(&self) -> Option<(mention::AtToken, usize)> {
+        let (draft, caret) = self.menu_here()?;
+        if completion::matches(draft, caret).is_some() {
             return None;
         }
-        let entries = completion::matches(draft, caret)?;
-        let selected = here
-            .then_some(self.menu.selected)
-            .flatten()
-            .and_then(|name| entries.iter().position(|c| c.name == name))
-            .unwrap_or(0);
-        Some(Menu { entries, selected })
+        let token = mention::active_at_token(draft, caret)?;
+        let end = mention::token_end(draft, caret, &token)?;
+        Some((token, end))
+    }
+
+    /// The file menu for the `@` token at the caret. Until discovery answers
+    /// that token's query, it is loading and lists nothing.
+    pub fn file_menu(&self) -> Option<FileMenu> {
+        let (token, end) = self.file_token()?;
+        let answered = self.files.query.as_deref() == Some(token.query.as_str());
+        let (entries, loading, error) = match self.files.found.as_ref().filter(|_| answered) {
+            Some(Ok(found)) => (
+                mention::choices(self.draft.text(), &token, end, found),
+                false,
+                None,
+            ),
+            Some(Err(error)) => (Vec::new(), false, Some(error.clone())),
+            None => (Vec::new(), true, None),
+        };
+        let selected = self.remembered(entries.iter().map(|c| c.name.as_str()));
+        Some(FileMenu {
+            entries,
+            selected,
+            loading,
+            error,
+        })
     }
 
     /// Whether a second Ctrl+C would quit now.
@@ -530,6 +618,30 @@ impl State {
 
 /// Applies one message and returns the effects it requests.
 pub fn update(state: &mut State, msg: Msg) -> Vec<Effect> {
+    let tick = matches!(msg, Msg::Tick(_));
+    let mut effects = apply(state, msg);
+    // Only a message can move the caret into or out of an `@` token.
+    if !tick && let Some(find) = discover(state) {
+        effects.push(find);
+    }
+    effects
+}
+
+/// Asks for the paths of the `@` token at the caret once its query differs
+/// from the last asked; leaving the token forgets what was found.
+fn discover(state: &mut State) -> Option<Effect> {
+    let wanted = state.file_token().map(|(token, _)| token.query);
+    if wanted == state.files.query {
+        return None;
+    }
+    state.files = Files {
+        query: wanted.clone(),
+        found: None,
+    };
+    wanted.map(Effect::FindFiles)
+}
+
+fn apply(state: &mut State, msg: Msg) -> Vec<Effect> {
     match msg {
         Msg::Key(input) => return key(state, input),
         Msg::Paste(text) => match state.focus {
@@ -573,6 +685,11 @@ pub fn update(state: &mut State, msg: Msg) -> Vec<Effect> {
         Msg::Copied(ok) => state.copied = Some((ok, state.now + COPIED)),
         Msg::ImageRead { source, image } => staged(state, source, image),
         Msg::Runtime(update) => runtime(state, update),
+        Msg::FilesFound { query, found } => {
+            if state.files.query.as_deref() == Some(query.as_str()) {
+                state.files.found = Some(found);
+            }
+        }
     }
     Vec::new()
 }
@@ -993,7 +1110,7 @@ fn menu_key(state: &mut State, bound: Option<Action>) -> bool {
                 let next = menu.entries[(menu.selected + step) % count].name;
                 state.menu = MenuMemory {
                     at: Some((state.draft.text().to_owned(), state.draft.caret())),
-                    selected: Some(next),
+                    selected: Some(next.to_owned()),
                     dismissed: false,
                 };
             }
@@ -1026,6 +1143,36 @@ fn menu_key(state: &mut State, bound: Option<Action>) -> bool {
         }
         _ => false,
     }
+}
+
+/// Up, Down, and Tab while the file menu is open, as the oracle's composer
+/// takes them: the arrows cycle the selection and Tab puts in the selected
+/// mention; with nothing listed yet they do nothing. Enter is not the
+/// menu's, so it sends the draft as typed. Returns `false` without a menu.
+fn file_key(state: &mut State, bound: Option<Action>) -> bool {
+    let Some(menu) = state.file_menu() else {
+        return false;
+    };
+    let count = menu.entries.len();
+    if count == 0 {
+        return true;
+    }
+    if bound == Some(Action::Complete) {
+        let choice = &menu.entries[menu.selected];
+        state.draft.replace(&choice.draft, choice.caret);
+        return true;
+    }
+    let step = if bound == Some(Action::CaretUp) {
+        count - 1
+    } else {
+        1
+    };
+    state.menu = MenuMemory {
+        at: Some((state.draft.text().to_owned(), state.draft.caret())),
+        selected: Some(menu.entries[(menu.selected + step) % count].name.clone()),
+        dismissed: false,
+    };
+    true
 }
 
 /// Inserts pasted text at the caret, a long paste as a placeholder.
@@ -1066,7 +1213,7 @@ fn composer_key(state: &mut State, bound: Option<Action>, input: KeyInput) -> Ve
         if state.selecting.clear() {
             return Vec::new();
         }
-        if state.menu().is_some() {
+        if state.menu().is_some() || state.file_menu().is_some() {
             state.menu = MenuMemory {
                 at: Some((state.draft.text().to_owned(), state.draft.caret())),
                 selected: None,
@@ -1079,6 +1226,13 @@ fn composer_key(state: &mut State, bound: Option<Action>, input: KeyInput) -> Ve
         bound,
         Some(Action::CaretUp | Action::CaretDown | Action::Complete | Action::Submit)
     ) && menu_key(state, bound)
+    {
+        return Vec::new();
+    }
+    if matches!(
+        bound,
+        Some(Action::CaretUp | Action::CaretDown | Action::Complete)
+    ) && file_key(state, bound)
     {
         return Vec::new();
     }
@@ -1877,6 +2031,121 @@ mod tests {
         assert_eq!(
             press(&mut state, Key::Enter),
             [Effect::Submit(Submission::FollowUp("a\t".into()))]
+        );
+    }
+
+    fn found(state: &mut State, query: &str, paths: &[&str]) -> Vec<Effect> {
+        let found = paths
+            .iter()
+            .map(|path| match path.strip_suffix('/') {
+                Some(dir) => Candidate {
+                    path: dir.into(),
+                    kind: mention::PathKind::Directory,
+                },
+                None => Candidate {
+                    path: (*path).into(),
+                    kind: mention::PathKind::File,
+                },
+            })
+            .collect();
+        update(
+            state,
+            Msg::FilesFound {
+                query: query.into(),
+                found: Ok(found),
+            },
+        )
+    }
+
+    fn file_names(state: &State) -> Option<(Vec<String>, usize, bool)> {
+        state.file_menu().map(|menu| {
+            let names = menu.entries.iter().map(|c| c.name.clone()).collect();
+            (names, menu.selected, menu.loading)
+        })
+    }
+
+    #[test]
+    fn an_at_token_asks_for_its_query_once_and_lists_only_its_answer() {
+        let mut state = State::default();
+        type_str(&mut state, "read ");
+        assert!(state.file_menu().is_none());
+        assert_eq!(
+            press(&mut state, Key::Char('@')),
+            [Effect::FindFiles(String::new())]
+        );
+        assert_eq!(file_names(&state), Some((vec![], 0, true)));
+        assert_eq!(
+            press(&mut state, Key::Char('s')),
+            [Effect::FindFiles("s".into())]
+        );
+        // An answer for an older query is dropped; the current one lists.
+        found(&mut state, "", &["README.md"]);
+        assert_eq!(file_names(&state), Some((vec![], 0, true)));
+        assert_eq!(found(&mut state, "s", &["src/", "src/main.rs"]), []);
+        assert_eq!(
+            file_names(&state),
+            Some((vec!["@src/".into(), "@src/main.rs".into()], 0, false))
+        );
+        // A key that leaves the query alone asks again for nothing.
+        assert_eq!(press(&mut state, Key::Down), []);
+        // Leaving the token forgets the query; a failure says why.
+        press(&mut state, Key::Char(' '));
+        assert_eq!(state.files, Files::default());
+        press(&mut state, Key::Char('@'));
+        update(
+            &mut state,
+            Msg::FilesFound {
+                query: String::new(),
+                found: Err("denied".into()),
+            },
+        );
+        let menu = state.file_menu().unwrap();
+        assert_eq!(
+            (menu.loading, menu.error.as_deref()),
+            (false, Some("denied"))
+        );
+        // A slash menu takes precedence and asks for no paths.
+        chord(&mut state, Key::Char('u'), Mods::CTRL);
+        type_str(&mut state, "/@");
+        assert!(state.file_menu().is_none() && state.files.query.is_none());
+    }
+
+    #[test]
+    fn the_file_menu_cycles_completes_closes_and_leaves_enter_to_send() {
+        let mut state = State::default();
+        type_str(&mut state, "see @s");
+        found(&mut state, "s", &["src/", "setup.md"]);
+        press(&mut state, Key::Down);
+        assert_eq!(file_names(&state).unwrap().1, 1);
+        press(&mut state, Key::Up);
+        press(&mut state, Key::Up);
+        assert_eq!(file_names(&state).unwrap().1, 1);
+        // Tab puts in the file and a space, which ends the token.
+        press(&mut state, Key::Tab);
+        assert_eq!(state.draft.text(), "see @setup.md ");
+        assert!(state.file_menu().is_none());
+        // A directory keeps the token open and asks for its contents.
+        chord(&mut state, Key::Char('u'), Mods::CTRL);
+        type_str(&mut state, "@s");
+        found(&mut state, "s", &["src/", "setup.md"]);
+        let effects = press(&mut state, Key::Tab);
+        assert_eq!(state.draft.text(), "@src/");
+        assert_eq!(effects, [Effect::FindFiles("src/".into())]);
+        // While nothing is listed the menu's keys do nothing.
+        press(&mut state, Key::Tab);
+        press(&mut state, Key::Down);
+        assert_eq!(state.draft.text(), "@src/");
+        // Esc closes the menu until the draft or caret changes.
+        press(&mut state, Key::Esc);
+        assert!(state.file_menu().is_none() && state.files.query.is_none());
+        assert_eq!(
+            press(&mut state, Key::Char('m')),
+            [Effect::FindFiles("src/m".into())]
+        );
+        // Enter sends the draft as typed, menu or not.
+        assert_eq!(
+            press(&mut state, Key::Enter),
+            [Effect::Submit(Submission::FollowUp("@src/m".into()))]
         );
     }
 
