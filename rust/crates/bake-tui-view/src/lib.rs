@@ -19,6 +19,7 @@ pub mod live;
 pub mod mode;
 pub mod paste;
 pub mod render;
+pub mod runtime;
 pub mod selection;
 pub mod shell_output;
 pub mod state;

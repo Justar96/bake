@@ -5,10 +5,10 @@
 //! a panic, or a handled SIGINT/SIGTERM/SIGHUP restores exactly what was
 //! changed.
 //!
-//! The loop owns the view's state and the terminal. An input thread and, on
-//! Unix, a signal thread only send it messages over one channel; the loop
-//! waits for the next message or the view's next timed change, applies every
-//! waiting message, and draws once.
+//! The loop owns the view's state and the terminal. An input thread, the
+//! runtime port's thread, and, on Unix, a signal thread only send it
+//! messages over one channel; the loop waits for the next message or the
+//! view's next timed change, applies every waiting message, and draws once.
 
 use std::io::{self, Stdout};
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
@@ -40,6 +40,7 @@ use ratatui::layout::Rect;
 use crate::clipboard::{self, Clipboard, Platform};
 use crate::git;
 use crate::input;
+use crate::port::{FixturePort, Request};
 
 /// How often the loop looks for a finished copy while one is pending.
 const COPY_POLL: Duration = Duration::from_millis(20);
@@ -179,6 +180,9 @@ static MODES: AtomicU8 = AtomicU8::new(0);
 const READER_WAKE: Duration = Duration::from_millis(50);
 /// Messages applied before a frame is drawn, so a long burst still draws.
 const MAX_BATCH: usize = 256;
+/// The shortest gap between frames that only runtime updates prompted. A
+/// batch with input is drawn at once.
+const RUNTIME_FRAME: Duration = Duration::from_millis(16);
 
 /// How the preview ended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -364,14 +368,29 @@ pub fn run_preview() -> io::Result<PreviewExit> {
     // One clock for the loop's ticks and the reader's timestamps.
     let clock = Instant::now();
     // Started only once raw mode is on, so it never reads cooked input.
+    let updates = sender.clone();
     let outcome = Reader::start(sender, clock).and_then(|reader| {
         let clipboard = Clipboard::new(Platform::current(), env);
         let home = env(if cfg!(windows) { "USERPROFILE" } else { "HOME" });
-        let outcome = run_loop(&mut session, &mut state, &inputs, clock, clipboard, home);
+        let port = FixturePort::start(clock, move |update| {
+            updates.send(Source::Msg(Msg::Runtime(update))).is_ok()
+        })?;
+        let outcome = run_loop(
+            &mut session,
+            &mut state,
+            &inputs,
+            clock,
+            Owners {
+                clipboard,
+                home,
+                runtime: &|request| port.request(request),
+            },
+        );
         // Joined before the terminal leaves raw mode, so it reads nothing
-        // meant for the shell.
+        // meant for the shell, and no runtime update outlives the loop.
+        let ported = port.stop();
         let stopped = reader.stop();
-        outcome.and_then(|exit| stopped.map(|()| exit))
+        outcome.and_then(|exit| ported.and(stopped).map(|()| exit))
     });
     let closed = session.close();
     drop(signals);
@@ -380,34 +399,59 @@ pub fn run_preview() -> io::Result<PreviewExit> {
     Ok(exit)
 }
 
+/// What the loop hands effects to: the clipboard and image jobs, and the
+/// runtime port.
+struct Owners<'a> {
+    clipboard: Clipboard,
+    home: Option<String>,
+    runtime: &'a dyn Fn(Request),
+}
+
 /// Draws, waits for the next message or the view's next timed change, applies
 /// the current time and then every waiting message, and draws again. A burst
-/// of keys or resizes therefore draws once. Returns when the view asks to
-/// quit, a signal arrives, or input fails.
+/// of keys or resizes therefore draws once, and a batch of runtime updates
+/// alone waits until [`RUNTIME_FRAME`] after the last frame. Returns when
+/// the view asks to quit, a signal arrives, or input fails.
 fn run_loop(
     screen: &mut impl Screen,
     state: &mut State,
     inputs: &Receiver<Source>,
     clock: Instant,
-    clipboard: Clipboard,
-    home: Option<String>,
+    owners: Owners,
 ) -> io::Result<PreviewExit> {
-    let mut jobs = Jobs::new(clipboard, home);
+    let mut jobs = Jobs::new(owners.clipboard, owners.home);
     let mut stale = false;
+    // When the last frame was drawn, and whether a runtime-only batch is
+    // waiting for its turn to be drawn.
+    let mut drawn = clock.elapsed();
+    let mut deferred = false;
+    let mut first_frame = true;
     loop {
-        update(state, Msg::Tick(clock.elapsed()));
+        let now = clock.elapsed();
+        update(state, Msg::Tick(now));
         jobs.settle(screen, state)?;
-        screen.draw(state, stale)?;
-        stale = false;
-        // While a copy is pending, the loop also wakes to report it.
-        let wait = match (state.next_change(), jobs.pending > 0) {
-            (wait, false) => wait,
-            (wait, true) => Some(wait.map_or(COPY_POLL, |wait| wait.min(COPY_POLL))),
-        };
+        if first_frame || !deferred || now >= drawn + RUNTIME_FRAME {
+            screen.draw(state, stale)?;
+            (stale, deferred, first_frame, drawn) = (false, false, false, now);
+        }
+        // While a copy is pending, the loop also wakes to report it, and
+        // while a frame is deferred, to draw it.
+        let mut wait = state.next_change();
+        if jobs.pending > 0 {
+            wait = Some(wait.map_or(COPY_POLL, |wait| wait.min(COPY_POLL)));
+        }
+        if deferred {
+            let due = (drawn + RUNTIME_FRAME).saturating_sub(clock.elapsed());
+            wait = Some(wait.map_or(due, |wait| wait.min(due)));
+        }
         let first = match wait {
             Some(wait) => match inputs.recv_timeout(wait) {
                 Ok(source) => source,
-                Err(RecvTimeoutError::Timeout) => continue,
+                // Something timed is due: draw it whatever is deferred.
+                Err(RecvTimeoutError::Timeout) => {
+                    deferred = false;
+                    continue;
+                }
                 Err(RecvTimeoutError::Disconnected) => return Err(input_stopped()),
             },
             None => inputs.recv().map_err(|_| input_stopped())?,
@@ -415,17 +459,23 @@ fn run_loop(
         update(state, Msg::Tick(clock.elapsed()));
         let mut source = first;
         let mut applied = 0;
+        let mut input = false;
         loop {
             match source {
                 Source::Signal(signal) => return Ok(PreviewExit::Signal(signal)),
                 Source::Failed(err) => return Err(err),
                 Source::Msg(msg) => {
+                    input |= !matches!(msg, Msg::Runtime(_));
                     stale |= matches!(msg, Msg::Resize { .. });
                     for effect in update(state, msg) {
                         match effect {
                             Effect::Quit => return Ok(PreviewExit::Quit),
                             Effect::Copy(text) => jobs.copy(screen, state, text)?,
                             Effect::ReadImage(source) => jobs.read_image(source),
+                            Effect::Submit(submission) => {
+                                (owners.runtime)(Request::Submit(submission));
+                            }
+                            Effect::Cancel => (owners.runtime)(Request::Cancel),
                         }
                     }
                 }
@@ -440,6 +490,9 @@ fn run_loop(
                 Err(_) => break,
             }
         }
+        // A batch with input is drawn at once; runtime updates alone wait
+        // for their frame, unless one is already waiting.
+        deferred = !input;
     }
 }
 
@@ -605,6 +658,8 @@ mod signals {
 mod tests {
     use super::*;
     use bake_tui_view::keys::{Key, KeyInput, Mods};
+    use bake_tui_view::runtime::RuntimeUpdate;
+    use bake_tui_view::transcript::Row;
 
     fn key(c: char) -> Source {
         Source::Msg(Msg::Key(KeyInput::plain(Key::Char(c))))
@@ -727,15 +782,70 @@ mod tests {
         })
     }
 
+    fn owners(runtime: &dyn Fn(Request)) -> Owners<'_> {
+        Owners {
+            clipboard: no_clipboard(),
+            home: None,
+            runtime,
+        }
+    }
+
     fn run(screen: &mut Scripted, inputs: &Receiver<Source>) -> io::Result<PreviewExit> {
         run_loop(
             screen,
             &mut State::default(),
             inputs,
             Instant::now(),
-            no_clipboard(),
-            None,
+            owners(&|_| {}),
         )
+    }
+
+    fn runtime(update: RuntimeUpdate) -> Source {
+        Source::Msg(Msg::Runtime(update))
+    }
+
+    #[test]
+    fn submit_and_cancel_reach_the_runtime() {
+        let (mut screen, inputs) = Scripted::new(vec![
+            vec![
+                key('h'),
+                Source::Msg(Msg::Key(KeyInput::plain(Key::Enter))),
+                runtime(RuntimeUpdate::TurnStarted { seed: "t".into() }),
+            ],
+            vec![Source::Msg(Msg::Key(KeyInput::plain(Key::Esc)))],
+            vec![ctrl('c'), ctrl('c')],
+        ]);
+        let requests = std::cell::RefCell::new(Vec::new());
+        let exit = run_loop(
+            &mut screen,
+            &mut State::default(),
+            &inputs,
+            Instant::now(),
+            owners(&|request| requests.borrow_mut().push(format!("{request:?}"))),
+        );
+        assert_eq!(exit.unwrap(), PreviewExit::Quit);
+        assert_eq!(requests.into_inner(), ["Submit(FollowUp(\"h\"))", "Cancel"]);
+    }
+
+    #[test]
+    fn runtime_updates_alone_wait_for_their_frame_and_input_does_not() {
+        let live = |text: &str| runtime(RuntimeUpdate::Live(vec![Row::Answer(text.into())]));
+        let (mut screen, inputs) = Scripted::new(vec![
+            // Arrives as soon as the first frame is shown: deferred.
+            vec![live("a")],
+            // Arrives once that frame is drawn: deferred again.
+            vec![live("ab")],
+            // Input with an update draws at once.
+            vec![live("abc"), key('x')],
+            vec![ctrl('c'), ctrl('c')],
+        ]);
+        assert_eq!(run(&mut screen, &inputs).unwrap(), PreviewExit::Quit);
+        let times: Vec<Duration> = screen.frames.iter().map(|(.., now)| *now).collect();
+        assert_eq!(times.len(), 4, "{times:?}");
+        assert!(times[1] - times[0] >= RUNTIME_FRAME, "{times:?}");
+        assert!(times[2] - times[1] >= RUNTIME_FRAME, "{times:?}");
+        assert!(times[3] - times[2] < RUNTIME_FRAME, "{times:?}");
+        assert_eq!(screen.frames[3].0, "x");
     }
 
     #[test]
@@ -826,8 +936,7 @@ mod tests {
             &mut State::default(),
             &inputs,
             Instant::now(),
-            no_clipboard(),
-            None,
+            owners(&|_| {}),
         );
         assert_eq!(exit.unwrap(), PreviewExit::Quit);
         // Frame 1 shows the started sample; frame 2 came from its timer alone,

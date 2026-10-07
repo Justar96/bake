@@ -1944,9 +1944,12 @@ pub struct Anchor {
 
 /// The transcript's rows and the viewport over them. `anchor` is `None`
 /// while following new output, which holds the newest line at the bottom.
+/// The first `committed` rows are settled; any after them are live rows a
+/// runtime is still writing, which its next update replaces.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Transcript {
     pub rows: Vec<Row>,
+    committed: usize,
     pub anchor: Option<Anchor>,
     /// The viewport's size on the last frame; paging needs both.
     pub width: usize,
@@ -1972,8 +1975,51 @@ pub struct Thumb {
 impl Transcript {
     pub fn new(rows: Vec<Row>) -> Self {
         Self {
+            committed: rows.len(),
             rows,
             ..Self::default()
+        }
+    }
+
+    /// Rows settled for good; the rest are live.
+    pub fn committed(&self) -> usize {
+        self.committed
+    }
+
+    /// Replaces the live rows with `rows`.
+    pub fn set_live(&mut self, rows: Vec<Row>) {
+        self.replace_live(rows);
+    }
+
+    /// Replaces the live rows with `rows` and settles them, so what was
+    /// streamed is drawn once, in its settled form.
+    pub fn commit(&mut self, rows: Vec<Row>) {
+        self.replace_live(rows);
+        self.committed = self.rows.len();
+    }
+
+    fn replace_live(&mut self, rows: Vec<Row>) {
+        let from = self.committed;
+        // An unchanged row keeps its measured height; only what changed,
+        // and what follows it, is measured again.
+        let same = self.rows[from..]
+            .iter()
+            .zip(&rows)
+            .take_while(|(old, new)| old == new)
+            .count();
+        self.rows.truncate(from + same);
+        self.rows.extend(rows.into_iter().skip(same));
+        self.touched(from + same);
+        // A reading position on a live row that went away falls back to the
+        // newest row's start.
+        if let Some(anchor) = self.anchor
+            && anchor.row >= self.rows.len()
+        {
+            self.anchor = Some(Anchor {
+                row: self.rows.len().saturating_sub(1),
+                line: 0,
+            });
+            self.settle();
         }
     }
 
@@ -2353,6 +2399,33 @@ mod tests {
         let mut t = Transcript::new(sample_session());
         t.resize(width, height, PLAIN);
         t
+    }
+
+    #[test]
+    fn live_rows_are_replaced_until_a_commit_settles_them() {
+        let mut t = session(40, 6);
+        let base = t.committed();
+        assert_eq!(base, t.rows.len());
+        t.set_live(vec![Row::Answer("a".into())]);
+        t.set_live(vec![Row::Answer("a b".into()), Row::Reasoning("c".into())]);
+        assert_eq!(t.rows.len(), base + 2);
+        assert_eq!(t.committed(), base);
+        t.commit(vec![Row::Answer("done".into())]);
+        assert_eq!(t.rows[base..], [Row::Answer("done".into())]);
+        assert_eq!(t.committed(), base + 1);
+        // The height measured for the scrollbar follows the replacement.
+        t.resize(40, 6, PLAIN);
+        let lines: usize = (0..t.rows.len()).map(|i| t.count(i)).sum();
+        assert_eq!(t.total(), lines);
+        // A reading position on a live row that goes away holds on the
+        // newest row rather than past the end.
+        t.set_live(vec![Row::Answer("x".into()), Row::Answer("y".into())]);
+        t.anchor = Some(Anchor {
+            row: base + 2,
+            line: 0,
+        });
+        t.set_live(Vec::new());
+        assert!(t.anchor.is_none_or(|a| a.row < t.rows.len()));
     }
 
     #[test]

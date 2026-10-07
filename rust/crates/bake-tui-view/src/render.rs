@@ -20,7 +20,7 @@ use crate::layout::{self, Needs};
 use crate::mode::{self, HINT_MIN_COLUMNS};
 use crate::selection::line_columns;
 use crate::state::{
-    Area, DraftSpot, Focus, Notice, Outcome, SAMPLE_AGENTS, SampleAgent, SampleKind, ScrollTrack,
+    ActivityKind, Area, DraftSpot, Focus, Notice, Outcome, SAMPLE_AGENTS, SampleAgent, ScrollTrack,
     Spot, State, agent,
 };
 use crate::status::{self, Tone};
@@ -97,7 +97,8 @@ pub fn render(app: &mut State, frame: &mut Frame) {
         );
     } else if let Some(kind) = app.notice {
         let text = match kind {
-            Notice::NoModel => copy::NO_MODEL,
+            Notice::SampleOnly => copy::SAMPLE_ONLY,
+            Notice::NoImages => copy::NO_IMAGES,
             Notice::ReadOnly => copy::READ_ONLY,
             Notice::DraftLimit => copy::DRAFT_LIMIT,
             Notice::NoClipboardImage => copy::NO_CLIPBOARD_IMAGE,
@@ -314,11 +315,17 @@ fn bar_left(app: &State) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
             (Some(sample), _) => {
                 let elapsed = app.now.saturating_sub(sample.started);
                 let (hue, phases) = match sample.kind {
-                    SampleKind::Turn => (Hue::Running, copy::SAMPLE_PHASES),
-                    SampleKind::Compaction => (Hue::Compacting, copy::COMPACTING_PHASES),
+                    ActivityKind::Turn => (Hue::Running, copy::SAMPLE_PHASES),
+                    ActivityKind::Compaction => (Hue::Compacting, copy::COMPACTING_PHASES),
                 };
+                // A runtime turn shows the phase its runtime reported; a
+                // sample steps through its own.
                 let step = elapsed.as_secs() / copy::PHASE_SECONDS;
-                let phase = phases[step as usize % phases.len()];
+                let phase = match (&app.phase, sample.runtime) {
+                    (Some(phase), true) => phase.as_str(),
+                    (None, true) => copy::FIRST_PHASE,
+                    (_, false) => phases[step as usize % phases.len()],
+                };
                 let word = format!("{}…", sample.word);
                 let head =
                     activity::shimmer_spans(&word, elapsed, app.tones, hue, app.tones.moves());
@@ -968,7 +975,7 @@ mod tests {
     use std::time::Duration;
 
     use crate::state::{
-        COPIED, EDGE_SCROLL, Effect, Mouse, MouseKind, Msg, QUIT_WINDOW, SampleActivity, update,
+        Activity, COPIED, EDGE_SCROLL, Effect, Mouse, MouseKind, Msg, QUIT_WINDOW, update,
     };
 
     /// Columns where boxed draft text starts.
@@ -1070,14 +1077,14 @@ mod tests {
     #[test]
     fn refused_submission_shows_the_notice_above_the_bar() {
         let mut app = State::default();
-        app.draft.type_text("keep me");
+        app.draft.type_text("/keep me");
         key(&mut app, Key::Enter);
         let (rows, cursor) = draw(&mut app, 80, 24);
-        let notice = row_index(&rows, "Model connection is not available");
+        let notice = row_index(&rows, "Commands are not available");
         let bar = row_index(&rows, "no model");
-        let prompt = row_index(&rows, "❯ keep me");
+        let prompt = row_index(&rows, "❯ /keep me");
         assert!(notice < bar && bar + 2 == prompt);
-        assert_eq!(cursor, Position::new(TEXT_X + 7, prompt as u16));
+        assert_eq!(cursor, Position::new(TEXT_X + 8, prompt as u16));
     }
 
     #[test]
@@ -1214,10 +1221,11 @@ mod tests {
 
     fn sampling(word: &'static str) -> State {
         let mut app = State::default();
-        app.activity = Some(SampleActivity {
-            kind: SampleKind::Turn,
+        app.activity = Some(Activity {
+            kind: ActivityKind::Turn,
             word,
             started: Duration::from_secs(1),
+            runtime: false,
         });
         app
     }
@@ -1415,7 +1423,7 @@ mod tests {
         let mut app = State::default();
         app.draft
             .paste("emoji \u{1F468}\u{200D}\u{1F469} 你好 กำลัง\nsecond line");
-        key(&mut app, Key::Enter);
+        app.notice = Some(Notice::NoCommands);
         for width in 0..=12 {
             for height in 0..=8 {
                 let (rows, cursor) = draw(&mut app, width, height);
@@ -2064,7 +2072,7 @@ mod tests {
     #[test]
     fn an_armed_quit_asks_for_a_second_press_above_the_bar() {
         let mut app = State::default();
-        update(&mut app, Msg::Key(KeyInput::plain(Key::Enter)));
+        app.notice = Some(Notice::NoCommands);
         let ctrl_c = Msg::Key(KeyInput::new(Key::Char('c'), Mods::CTRL));
         update(&mut app, ctrl_c.clone());
         let (rows, _) = draw(&mut app, 80, 24);
@@ -2081,13 +2089,12 @@ mod tests {
     #[test]
     fn a_notice_sits_between_the_pill_and_the_bar() {
         let mut app = State::default();
-        app.draft.type_text("x");
         draw(&mut app, 80, 24);
         key(&mut app, Key::PageUp);
-        key(&mut app, Key::Enter);
+        app.notice = Some(Notice::NoCommands);
         let (rows, _) = draw(&mut app, 80, 24);
         let bar = row_index(&rows, "no model");
-        assert!(rows[bar - 1].contains("Model connection is not available"));
+        assert!(rows[bar - 1].contains("Commands are not available"));
         assert!(rows[bar - 2].contains("lines below · Ctrl+End"));
     }
 }

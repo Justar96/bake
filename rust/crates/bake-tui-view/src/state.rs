@@ -13,6 +13,7 @@ use crate::keys::{self, Action, KeyInput, Scope};
 use crate::live;
 use crate::mode::Mode;
 use crate::paste::{self, Image};
+use crate::runtime::{RuntimeUpdate, Submission};
 use crate::selection::{self, Granularity, Point, Range};
 use crate::status::StatusInput;
 use crate::transcript::{self, Transcript};
@@ -42,6 +43,8 @@ pub enum Msg {
         source: ImageSource,
         image: Option<Image>,
     },
+    /// A change the agent runtime reports, in the order it sent them.
+    Runtime(RuntimeUpdate),
 }
 
 /// A mouse report, at a cell of the screen.
@@ -214,6 +217,11 @@ pub enum Effect {
     Copy(String),
     /// Read an image, then report with [`Msg::ImageRead`].
     ReadImage(ImageSource),
+    /// Send a prompt to the runtime. The draft is cleared; the prompt
+    /// appears once the runtime commits it.
+    Submit(Submission),
+    /// Stop the running turn; the runtime reports when it has ended.
+    Cancel,
 }
 
 /// A fixed example row for the agent list; it describes no running work.
@@ -264,7 +272,10 @@ impl Focus {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Notice {
-    NoModel,
+    /// Enter during the Ctrl+T sample activity, which takes no prompt.
+    SampleOnly,
+    /// Enter with staged images, which the preview cannot send.
+    NoImages,
     ReadOnly,
     DraftLimit,
     /// Ctrl+V, or an empty paste, found no image on the clipboard.
@@ -284,22 +295,26 @@ pub enum ImageSource {
 
 /// What a sample activity stands for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SampleKind {
+pub enum ActivityKind {
     /// A running turn.
     Turn,
     /// History being compacted.
     Compaction,
 }
 
-/// A sample of the header's activity line and the composer mode it puts the
-/// session in. Nothing runs; it shows how a session at work reads.
+/// What the header's activity line shows and the composer mode it puts the
+/// session in: a turn the runtime is running, or a Ctrl+T sample, which
+/// nothing runs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SampleActivity {
-    pub kind: SampleKind,
-    /// The turn's word, kept until the sample stops; compaction names itself.
+pub struct Activity {
+    pub kind: ActivityKind,
+    /// The turn's word, kept until it ends; compaction names itself.
     pub word: &'static str,
-    /// When the sample started, on the clock [`Msg::Tick`] carries.
+    /// When it started, on the clock [`Msg::Tick`] carries.
     pub started: Duration,
+    /// Whether the runtime owns it. Only the runtime ends its turns; a
+    /// sample is stepped and stopped by keys.
+    pub runtime: bool,
 }
 
 /// How a sample turn ended.
@@ -327,8 +342,10 @@ pub struct State {
     pub focus: Focus,
     pub selected: &'static str,
     pub notice: Option<Notice>,
-    pub activity: Option<SampleActivity>,
-    /// How the last sample turn ended.
+    pub activity: Option<Activity>,
+    /// What the runtime's turn is doing, as it last reported.
+    pub phase: Option<String>,
+    /// How the last turn ended.
     pub summary: Option<TurnSummary>,
     /// What the status line reports. The terminal owner fills in the working
     /// directory and branch; the preview has no model, level, or context.
@@ -396,6 +413,7 @@ impl State {
             selected: SAMPLE_AGENTS[0].id,
             notice: None,
             activity: None,
+            phase: None,
             summary: None,
             status: StatusInput {
                 ascii: frame == FrameStyle::Classic,
@@ -454,7 +472,7 @@ impl State {
     pub fn mode(&self) -> Mode {
         match (self.focus, self.activity) {
             (Focus::Inspect(_), _) => Mode::Inspecting,
-            (_, Some(sample)) if sample.kind == SampleKind::Compaction => Mode::Compacting,
+            (_, Some(sample)) if sample.kind == ActivityKind::Compaction => Mode::Compacting,
             (_, Some(_)) => Mode::Running,
             (_, None) => Mode::Idle,
         }
@@ -495,7 +513,7 @@ impl State {
 
     /// Time since the sample turn started, while its script runs.
     fn live_elapsed(&self) -> Option<Duration> {
-        let sample = self.activity.filter(|s| s.kind == SampleKind::Turn)?;
+        let sample = self.activity.filter(|s| s.kind == ActivityKind::Turn)?;
         self.live_call?;
         Some(self.now.saturating_sub(sample.started))
     }
@@ -545,8 +563,78 @@ pub fn update(state: &mut State, msg: Msg) -> Vec<Effect> {
         Msg::Mouse(mouse) => return pointer(state, mouse),
         Msg::Copied(ok) => state.copied = Some((ok, state.now + COPIED)),
         Msg::ImageRead { source, image } => staged(state, source, image),
+        Msg::Runtime(update) => runtime(state, update),
     }
     Vec::new()
+}
+
+/// Applies what the runtime reports. The transcript and the turn change only
+/// here, so the screen shows what the runtime holds.
+fn runtime(state: &mut State, update: RuntimeUpdate) {
+    match update {
+        RuntimeUpdate::TurnStarted { seed } => {
+            // A sample still running gives way; the runtime's turn is real.
+            end_turn(state, Outcome::Completed);
+            state.activity = Some(Activity {
+                kind: ActivityKind::Turn,
+                word: activity::pick(activity::WORDS, &seed),
+                started: state.now,
+                runtime: true,
+            });
+            state.phase = None;
+            state.summary = None;
+        }
+        RuntimeUpdate::Phase(phase) => state.phase = Some(phase),
+        RuntimeUpdate::Live(rows) => state.transcript.set_live(rows),
+        RuntimeUpdate::Commit(rows) => state.transcript.commit(rows),
+        RuntimeUpdate::TurnEnded(outcome) => {
+            if let Some(turn) = state.activity.filter(|a| a.runtime) {
+                state.summary = Some(TurnSummary {
+                    outcome,
+                    elapsed: state.now.saturating_sub(turn.started),
+                });
+                state.activity = None;
+            }
+            state.phase = None;
+        }
+    }
+}
+
+/// Whether the runtime is running a turn.
+fn turn_running(state: &State) -> bool {
+    state.activity.is_some_and(|a| a.runtime)
+}
+
+/// What Enter does with the draft: sends it to the runtime, as a follow-up
+/// while idle and a steer while a turn runs, and clears it. A blank draft is
+/// left alone, and a slash command, the Ctrl+T sample, or staged images keep
+/// the draft and say why.
+fn submit(state: &mut State) -> Vec<Effect> {
+    let text = state.draft.expanded();
+    if text.trim().is_empty() {
+        return Vec::new();
+    }
+    let refused = if text.starts_with('/') {
+        Some(Notice::NoCommands)
+    } else if state.activity.is_some_and(|a| !a.runtime) {
+        Some(Notice::SampleOnly)
+    } else if !state.attachments.is_empty() {
+        Some(Notice::NoImages)
+    } else {
+        None
+    };
+    if let Some(notice) = refused {
+        state.notice = Some(notice);
+        return Vec::new();
+    }
+    state.notice = None;
+    state.draft.replace("", 0);
+    let submission = if turn_running(state) {
+        Submission::Steer(text)
+    } else {
+        Submission::FollowUp(text)
+    };
+    vec![Effect::Submit(submission)]
 }
 
 /// Applies a mouse report. The wheel scrolls what the arrows would: the
@@ -865,8 +953,9 @@ fn key(state: &mut State, input: KeyInput) -> Vec<Effect> {
             return vec![Effect::ReadImage(ImageSource::Clipboard)];
         }
         Focus::Composer => {
-            composer_key(state, bound, input);
+            let effects = composer_key(state, bound, input);
             unstage(state);
+            return effects;
         }
         Focus::AgentList => list_key(state, bound),
         Focus::Inspect(_) => inspect_key(state, bound),
@@ -960,12 +1049,12 @@ fn unstage(state: &mut State) {
     state.attachments.retain(|(id, _)| !gone.contains(id));
 }
 
-fn composer_key(state: &mut State, bound: Option<Action>, input: KeyInput) {
+fn composer_key(state: &mut State, bound: Option<Action>, input: KeyInput) -> Vec<Effect> {
     // Esc drops a selection, then closes the menu until the draft or the
     // caret changes, before it stops anything.
     if bound == Some(Action::Interrupt) {
         if state.selecting.clear() {
-            return;
+            return Vec::new();
         }
         if state.menu().is_some() {
             state.menu = MenuMemory {
@@ -973,7 +1062,7 @@ fn composer_key(state: &mut State, bound: Option<Action>, input: KeyInput) {
                 selected: None,
                 dismissed: true,
             };
-            return;
+            return Vec::new();
         }
     }
     if matches!(
@@ -981,42 +1070,62 @@ fn composer_key(state: &mut State, bound: Option<Action>, input: KeyInput) {
         Some(Action::CaretUp | Action::CaretDown | Action::Complete | Action::Submit)
     ) && menu_key(state, bound)
     {
-        return;
+        return Vec::new();
     }
+    let running = turn_running(state);
     let draft = &mut state.draft;
     let complete = match bound {
         Some(Action::ToggleAgentList) => {
             state.focus = Focus::AgentList;
             state.notice = None;
-            return;
+            return Vec::new();
         }
-        // Esc stops a sample the way it interrupts a turn or cancels compaction.
         // Without a menu, Tab types a tab, as the oracle's composer does.
         Some(Action::Complete) => draft.type_text("\t"),
+        // Esc asks the runtime to stop its turn, which ends when it says so.
+        Some(Action::Interrupt) if running => {
+            state.notice = None;
+            return vec![Effect::Cancel];
+        }
+        // Esc stops a sample the way it interrupts a turn or cancels compaction.
         Some(Action::Interrupt) => {
             end_turn(state, Outcome::Interrupted);
             state.activity = None;
             state.notice = None;
-            return;
+            return Vec::new();
         }
+        // The sample stands in for a turn, so it waits while a real one runs.
         Some(Action::ToggleSampleActivity) => {
-            toggle_activity(state);
-            return;
+            if !running {
+                toggle_activity(state);
+            }
+            return Vec::new();
         }
-        Some(Action::Submit) => {
-            state.notice = Some(if draft.text().starts_with('/') {
-                Notice::NoCommands
-            } else {
-                Notice::NoModel
-            });
-            return;
+        Some(Action::Submit) => return submit(state),
+        Some(Action::PageUp) => {
+            state.transcript.scroll_up(state.transcript.page());
+            return Vec::new();
         }
-        Some(Action::PageUp) => return state.transcript.scroll_up(state.transcript.page()),
-        Some(Action::PageDown) => return state.transcript.scroll_down(state.transcript.page()),
-        Some(Action::PreviousPrompt) => return state.transcript.previous_prompt(),
-        Some(Action::NextPrompt) => return state.transcript.next_prompt(),
-        Some(Action::ToStart) => return state.transcript.to_start(),
-        Some(Action::ToLatest) => return state.transcript.follow(),
+        Some(Action::PageDown) => {
+            state.transcript.scroll_down(state.transcript.page());
+            return Vec::new();
+        }
+        Some(Action::PreviousPrompt) => {
+            state.transcript.previous_prompt();
+            return Vec::new();
+        }
+        Some(Action::NextPrompt) => {
+            state.transcript.next_prompt();
+            return Vec::new();
+        }
+        Some(Action::ToStart) => {
+            state.transcript.to_start();
+            return Vec::new();
+        }
+        Some(Action::ToLatest) => {
+            state.transcript.follow();
+            return Vec::new();
+        }
         Some(Action::Newline) => draft.newline(),
         Some(Action::Undo) => {
             draft.undo();
@@ -1106,10 +1215,11 @@ fn composer_key(state: &mut State, bound: Option<Action>, input: KeyInput) {
         }
         _ => match input.types() {
             Some(c) => draft.type_text(c.encode_utf8(&mut [0; 4])),
-            None => return,
+            None => return Vec::new(),
         },
     };
     state.notice = (!complete).then_some(Notice::DraftLimit);
+    Vec::new()
 }
 
 /// The prompts the session holds, newest first, as Up recalls them: the
@@ -1170,26 +1280,28 @@ fn toggle_activity(state: &mut State) {
             // The turn's work: a code-mode script, whose last call runs
             // until the turn ends.
             state.live_call = Some(state.transcript.rows.len());
-            state.transcript.rows.push(live::at(Duration::ZERO));
-            Some(SampleActivity {
-                kind: SampleKind::Turn,
+            state.transcript.commit(vec![live::at(Duration::ZERO)]);
+            Some(Activity {
+                kind: ActivityKind::Turn,
                 word: activity::pick(activity::WORDS, &format!("sample-{}", state.samples)),
                 started: state.now,
+                runtime: false,
             })
         }
-        Some(SampleKind::Turn) => Some(SampleActivity {
-            kind: SampleKind::Compaction,
+        Some(ActivityKind::Turn) => Some(Activity {
+            kind: ActivityKind::Compaction,
             word: crate::copy::COMPACTING,
             started: state.now,
+            runtime: false,
         }),
-        Some(SampleKind::Compaction) => None,
+        Some(ActivityKind::Compaction) => None,
     };
 }
 
 /// Records how a running sample turn ended; anything else is left alone.
 fn end_turn(state: &mut State, outcome: Outcome) {
     if let Some(sample) = state.activity
-        && sample.kind == SampleKind::Turn
+        && sample.kind == ActivityKind::Turn
     {
         state.summary = Some(TurnSummary {
             outcome,
@@ -1247,6 +1359,7 @@ mod tests {
     use super::*;
     use crate::keys::{Key, Mods};
     use crate::paste::Image;
+    use crate::runtime::{RuntimeUpdate, Submission};
     use crate::transcript::{CallState, Row};
 
     fn press(state: &mut State, key: Key) -> Vec<Effect> {
@@ -1263,14 +1376,129 @@ mod tests {
         }
     }
 
+    fn runtime(state: &mut State, update_: RuntimeUpdate) {
+        assert_eq!(update(state, Msg::Runtime(update_)), []);
+    }
+
     #[test]
-    fn enter_is_refused_and_keeps_the_draft() {
+    fn enter_sends_the_draft_as_a_follow_up_and_clears_it() {
         let mut state = State::default();
+        let rows = state.transcript.rows.len();
         type_str(&mut state, "hello");
         press(&mut state, Key::Left);
+        assert_eq!(
+            press(&mut state, Key::Enter),
+            [Effect::Submit(Submission::FollowUp("hello".into()))]
+        );
+        assert_eq!((state.draft.text(), state.notice), ("", None));
+        // The prompt shows only once the runtime commits it.
+        assert_eq!(state.transcript.rows.len(), rows);
+        // Undo brings a sent draft back, as the oracle's does.
+        chord(&mut state, Key::Char('-'), Mods::CTRL);
+        assert_eq!(state.draft.text(), "hello");
+    }
+
+    #[test]
+    fn a_blank_draft_sends_nothing() {
+        let mut state = State::default();
+        type_str(&mut state, "  ");
         assert_eq!(press(&mut state, Key::Enter), []);
-        assert_eq!(state.notice, Some(Notice::NoModel));
-        assert_eq!((state.draft.text(), state.draft.caret()), ("hello", 4));
+        assert_eq!((state.draft.text(), state.notice), ("  ", None));
+    }
+
+    #[test]
+    fn enter_during_the_sample_or_with_images_keeps_the_draft() {
+        let mut state = State::default();
+        chord(&mut state, Key::Char('t'), Mods::CTRL);
+        type_str(&mut state, "hi");
+        assert_eq!(press(&mut state, Key::Enter), []);
+        assert_eq!(
+            (state.draft.text(), state.notice),
+            ("hi", Some(Notice::SampleOnly))
+        );
+        press(&mut state, Key::Esc);
+        assert_eq!(state.activity, None);
+
+        let image = Image {
+            name: "a.png".into(),
+            media_type: "image/png",
+            bytes: 1,
+            size: None,
+        };
+        update(
+            &mut state,
+            Msg::ImageRead {
+                source: ImageSource::Clipboard,
+                image: Some(image),
+            },
+        );
+        assert_eq!(press(&mut state, Key::Enter), []);
+        assert_eq!(state.notice, Some(Notice::NoImages));
+        assert_eq!(state.draft.text(), "hi[Image #1]");
+    }
+
+    #[test]
+    fn a_runtime_turn_streams_live_rows_then_commits_them_once() {
+        let mut state = State::default();
+        let before = state.transcript.rows.len();
+        update(&mut state, Msg::Tick(Duration::from_secs(3)));
+        runtime(
+            &mut state,
+            RuntimeUpdate::Commit(vec![Row::User("hi".into())]),
+        );
+        runtime(
+            &mut state,
+            RuntimeUpdate::TurnStarted {
+                seed: "turn-1".into(),
+            },
+        );
+        assert_eq!(state.mode(), Mode::Running);
+        let turn = state.activity.unwrap();
+        assert!(turn.runtime);
+        assert_eq!(turn.started, Duration::from_secs(3));
+        runtime(&mut state, RuntimeUpdate::Phase("writing".into()));
+        assert_eq!(state.phase.as_deref(), Some("writing"));
+        runtime(
+            &mut state,
+            RuntimeUpdate::Live(vec![Row::Answer("Hel".into())]),
+        );
+        runtime(
+            &mut state,
+            RuntimeUpdate::Live(vec![Row::Answer("Hello".into())]),
+        );
+        assert_eq!(state.transcript.rows.len(), before + 2);
+        runtime(
+            &mut state,
+            RuntimeUpdate::Commit(vec![Row::Answer("Hello.".into())]),
+        );
+        assert_eq!(
+            state.transcript.rows[before..],
+            [Row::User("hi".into()), Row::Answer("Hello.".into())]
+        );
+        assert_eq!(state.transcript.committed(), before + 2);
+        // While it runs, Enter steers, Esc asks to stop, and Ctrl+T waits.
+        type_str(&mut state, "also");
+        assert_eq!(
+            press(&mut state, Key::Enter),
+            [Effect::Submit(Submission::Steer("also".into()))]
+        );
+        chord(&mut state, Key::Char('t'), Mods::CTRL);
+        assert!(state.activity.unwrap().runtime);
+        assert_eq!(press(&mut state, Key::Esc), [Effect::Cancel]);
+        assert_eq!(state.mode(), Mode::Running, "the runtime ends the turn");
+        update(&mut state, Msg::Tick(Duration::from_secs(5)));
+        runtime(&mut state, RuntimeUpdate::TurnEnded(Outcome::Interrupted));
+        assert_eq!((state.activity, state.phase.as_deref()), (None, None));
+        assert_eq!(
+            state.summary,
+            Some(TurnSummary {
+                outcome: Outcome::Interrupted,
+                elapsed: Duration::from_secs(2),
+            })
+        );
+        // The committed prompt is recalled like any other.
+        press(&mut state, Key::Up);
+        assert_eq!(state.draft.text(), "hi");
     }
 
     #[test]
@@ -1602,13 +1830,15 @@ mod tests {
             (state.draft.text(), state.notice),
             ("/model", Some(Notice::NoCommands))
         );
-        // Without a menu Tab types a tab, and plain text still has no model.
+        // Without a menu Tab types a tab, and plain text is sent.
         chord(&mut state, Key::Char('u'), Mods::CTRL);
         type_str(&mut state, "a");
         press(&mut state, Key::Tab);
         assert_eq!(state.draft.text(), "a\t");
-        press(&mut state, Key::Enter);
-        assert_eq!(state.notice, Some(Notice::NoModel));
+        assert_eq!(
+            press(&mut state, Key::Enter),
+            [Effect::Submit(Submission::FollowUp("a\t".into()))]
+        );
     }
 
     #[test]
@@ -1648,7 +1878,7 @@ mod tests {
         let sample = state.activity.expect("sample started");
         assert_eq!(
             (sample.kind, sample.started),
-            (SampleKind::Turn, Duration::from_secs(3))
+            (ActivityKind::Turn, Duration::from_secs(3))
         );
         assert!(activity::WORDS.contains(&sample.word));
         assert_eq!(state.mode(), Mode::Running);
@@ -1660,7 +1890,7 @@ mod tests {
         assert_eq!(
             (sample.kind, sample.word, sample.started),
             (
-                SampleKind::Compaction,
+                ActivityKind::Compaction,
                 "Compacting history",
                 Duration::from_secs(5)
             )
@@ -1790,12 +2020,12 @@ mod tests {
     #[test]
     fn resize_and_tick_leave_the_draft_and_notice_alone() {
         let mut state = State::default();
-        type_str(&mut state, "ab");
+        type_str(&mut state, "/x");
         press(&mut state, Key::Enter);
         update(&mut state, Msg::Resize { cols: 20, rows: 5 });
         update(&mut state, Msg::Tick(Duration::from_secs(9)));
-        assert_eq!(state.draft.text(), "ab");
-        assert_eq!(state.notice, Some(Notice::NoModel));
+        assert_eq!(state.draft.text(), "/x");
+        assert_eq!(state.notice, Some(Notice::NoCommands));
         assert_eq!(state.now, Duration::from_secs(9));
     }
 }

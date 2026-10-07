@@ -83,7 +83,13 @@ pub const COPY_FAILED: &str = "Copy failed";
 pub const NEW_OUTPUT: &str = "New output";
 pub const LATEST_KEY: &str = "Ctrl+End";
 pub const BELOW: &str = "below";
-pub const NO_MODEL: &str = "Model connection is not available in this preview. Your draft is kept.";
+/// Enter while the Ctrl+T sample runs: it stands in for a turn and takes no prompt.
+pub const SAMPLE_ONLY: &str =
+    "The sample activity takes no prompt. Esc stops it; your draft is kept.";
+/// Enter with staged images: the fixture runtime takes text alone.
+pub const NO_IMAGES: &str = "Images are not sent in this preview. Your draft is kept.";
+/// The phase a runtime turn shows until the runtime names one.
+pub const FIRST_PHASE: &str = "thinking";
 pub const READ_ONLY: &str =
     "Read-only inspection: input does not reach any agent or your draft. Esc returns.";
 pub const DRAFT_LIMIT: &str = "Draft limit reached; the rest of the input was not added.";

@@ -183,9 +183,6 @@ await scenario('composer, agent inspection, paste, and resize', async (preview) 
   assert(!preview.screen.includes('forbidden'), 'inspection accepted draft input')
   preview.send('\x1f')
   await preview.wait('undo after inspection', () => preview.screen.includes('draftAB') && !preview.screen.includes('draftAXB'))
-  preview.send('\r')
-  await preview.wait('refused submission', () => /not available/iu.test(preview.screen))
-  assert(preview.screen.includes('draftAB'), 'refused submission cleared the draft')
   preview.send('\x1b[200~line one\r\nline two\x1b[201~')
   await preview.wait('multiline paste', () => preview.screen.includes('line one') && preview.screen.includes('line two'))
   await preview.resize(40, 12)
@@ -331,6 +328,22 @@ await scenario('sample activity is text that advances on its own, then compacts,
   // status, no model and then the directory, right-aligned on the same row.
   await preview.wait('sample stopped', () => /^ {2}✓ Completed {2}\d+s +no model {2}\S+$/mu.test(preview.screen)
     && !preview.screen.includes('Compacting'))
+  await preview.quit()
+})
+
+await scenario('a prompt runs a fixture turn that streams, completes, and stops on Esc', async (preview) => {
+  preview.send('hello fixture\r')
+  // The prompt shows once the runtime commits it, and the draft is empty again.
+  await preview.wait('turn started', () => /^> hello fixture +[│┃]$/mu.test(preview.screen)
+    && preview.screen.includes('Esc interrupts') && preview.screen.includes('Enter steers the next step'))
+  await preview.wait('turn completed', () => preview.screen.includes('no model or tool ran.')
+    && /^ {2}✓ Completed {2}\d+s/mu.test(preview.screen) && preview.screen.includes('❯ Type a draft'))
+  assert.equal(preview.screen.split('no model or tool ran.').length - 1, 1, 'the streamed answer was drawn twice')
+  preview.send('again\r')
+  await preview.wait('call running', () => preview.screen.includes('running bash'))
+  preview.send('\x1b')
+  await preview.wait('turn interrupted', () => /^ {2}■ Interrupted/mu.test(preview.screen)
+    && /Bash: true +interrupted/u.test(preview.screen))
   await preview.quit()
 })
 
