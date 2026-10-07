@@ -122,6 +122,13 @@ pub enum Action {
     /// Ctrl+Y puts back the last kill; Alt+Y right after cycles older ones.
     Yank,
     YankPop,
+    /// Up and Down: the drawn row above or below, then input history from
+    /// the first or the last row.
+    CaretUp,
+    CaretDown,
+    /// Ctrl+P and Ctrl+N: input history at once, from any row.
+    RecallOlder,
+    RecallNewer,
     /// Ctrl+A and Ctrl+E: the logical line's start and end, past any row.
     LogicalStart,
     LogicalEnd,
@@ -277,6 +284,24 @@ pub const BINDINGS: &[Binding] = &[
     bind(S::Composer, K::Down, Mods::CTRL, ANY, A::NextPrompt),
     bind(S::Composer, K::Home, Mods::CTRL, ANY, A::ToStart),
     bind(S::Composer, K::End, Mods::CTRL, ANY, A::ToLatest),
+    // After Ctrl+↑ and Ctrl+↓, which move the transcript. Alt+↑ is the
+    // oracle's steering key, so neither arrow moves with Alt.
+    bind(S::Composer, K::Up, ANY, Mods::ALT, A::CaretUp),
+    bind(S::Composer, K::Down, ANY, Mods::ALT, A::CaretDown),
+    bind(
+        S::Composer,
+        K::Char('p'),
+        Mods::CTRL,
+        Mods::ALT,
+        A::RecallOlder,
+    ),
+    bind(
+        S::Composer,
+        K::Char('n'),
+        Mods::CTRL,
+        Mods::ALT,
+        A::RecallNewer,
+    ),
     bind(S::Composer, K::Home, ANY, ANY, A::LineStart),
     bind(S::Composer, K::End, ANY, ANY, A::LineEnd),
     bind(S::AgentList, K::Up, ANY, ANY, A::SelectPrevious),
@@ -369,7 +394,14 @@ mod tests {
             action(Scope::Composer, KeyInput::new(Key::Char('z'), Mods::CTRL)),
             None
         );
-        assert_eq!(action(Scope::Composer, KeyInput::plain(Key::Up)), None);
+        assert_eq!(
+            action(Scope::Composer, KeyInput::plain(Key::Up)),
+            Some(Action::CaretUp)
+        );
+        assert_eq!(
+            action(Scope::Composer, KeyInput::new(Key::Up, Mods::ALT)),
+            None
+        );
         // Ctrl+Home reaches the transcript's start; Home alone, the line's.
         let home = |mods| action(Scope::Composer, KeyInput::new(Key::Home, mods));
         assert_eq!(home(Mods::CTRL), Some(Action::ToStart));

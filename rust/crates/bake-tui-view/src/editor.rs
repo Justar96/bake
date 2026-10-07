@@ -46,6 +46,21 @@ pub struct Draft {
     ring: VecDeque<String>,
     /// Where the last yank put the ring's newest entry.
     yanked: Option<(usize, usize)>,
+    /// The cell column a run of Up and Down presses keeps to; any other
+    /// change ends the run.
+    goal: Option<usize>,
+    /// A browse through input history, from Up on the first row until it
+    /// returns to the draft it started from.
+    visit: Option<Visit>,
+}
+
+/// An open history browse: the draft it started from, each entry shown so
+/// far as the user left it, and the one shown now.
+#[derive(Clone, Debug)]
+struct Visit {
+    scratch: (String, usize),
+    entries: Vec<(String, usize)>,
+    index: Option<usize>,
 }
 
 impl Draft {
@@ -170,6 +185,120 @@ impl Draft {
         (target != self.caret).then_some(target)
     }
 
+    /// Up or Down: moves the caret to the drawn row above or below at
+    /// `width`, to the place nearest the column a run of presses keeps.
+    /// Returns `false` on the first row going up or the last going down,
+    /// where history takes over, and before the first frame.
+    pub fn vertical(&mut self, width: usize, up: bool) -> bool {
+        if width == 0 {
+            return false;
+        }
+        let rows = row_stops(&self.text, width);
+        let Some(from) = rows
+            .iter()
+            .position(|row| row.iter().any(|&(at, _)| at == self.caret))
+        else {
+            return false;
+        };
+        let Some(to) = (if up {
+            from.checked_sub(1)
+        } else {
+            Some(from + 1)
+        })
+        .filter(|&to| to < rows.len()) else {
+            return false;
+        };
+        let column = self.goal.unwrap_or_else(|| {
+            rows[from]
+                .iter()
+                .find(|&&(at, _)| at == self.caret)
+                .map_or(0, |&(_, column)| column)
+        });
+        // The last place at or before the column, else the row's first.
+        let landing = rows[to]
+            .iter()
+            .take_while(|&&(_, at)| at <= column)
+            .last()
+            .unwrap_or(&rows[to][0]);
+        self.caret = landing.0;
+        self.last_edit = None;
+        self.goal = Some(column);
+        true
+    }
+
+    /// Steps through `history`, newest first: older for Up, newer for Down.
+    /// The first step keeps the draft as one undo step and as the place a
+    /// browse returns to; stepping newer than the newest entry restores it,
+    /// caret and all. An entry left with edits shows them again within the
+    /// same browse. An entry of several rows at `width` opens with the caret
+    /// at its start going older and its end going newer, so the next press
+    /// keeps walking; a one-row entry keeps the caret where it was. Returns
+    /// `false` when there was nothing further to show.
+    pub fn recall(&mut self, history: &[String], older: bool, width: usize) -> bool {
+        if self.visit.is_none() {
+            if !older {
+                return false;
+            }
+            self.checkpoint(EditKind::Block);
+            self.visit = Some(Visit {
+                scratch: (self.text.clone(), self.caret),
+                entries: Vec::new(),
+                index: None,
+            });
+        }
+        let current = (self.text.clone(), self.caret);
+        let Some(visit) = self.visit.as_mut() else {
+            return false;
+        };
+        if let Some(index) = visit.index {
+            visit.entries[index] = current;
+        }
+        let next = match (visit.index, older) {
+            (None, true) => 0,
+            (Some(index), true) => index + 1,
+            (Some(index), false) if index > 0 => index - 1,
+            _ => {
+                let (text, caret) = visit.scratch.clone();
+                self.visit = None;
+                self.show(text, caret);
+                return true;
+            }
+        };
+        if next == visit.entries.len() {
+            let Some(entry) = history.get(next) else {
+                if visit.entries.is_empty() {
+                    self.visit = None;
+                }
+                return false;
+            };
+            let entry = sanitize(entry);
+            let end = entry.len();
+            visit.entries.push((entry, end));
+        }
+        visit.index = Some(next);
+        let (text, caret) = visit.entries[next].clone();
+        let rows = if width == 0 {
+            1
+        } else {
+            layout(&text, 0, width).rows.len()
+        };
+        let caret = match rows {
+            0 | 1 => caret,
+            _ if older => 0,
+            _ => text.len(),
+        };
+        self.show(text, caret);
+        true
+    }
+
+    /// Replaces the text and caret without an undo step, as recall does.
+    fn show(&mut self, text: String, caret: usize) {
+        self.text = text;
+        self.caret = caret.min(self.text.len());
+        self.last_edit = None;
+        self.goal = None;
+    }
+
     /// Moves one word toward the start: see [`word_stop`].
     pub fn word_left(&mut self) {
         self.move_to(word_stop(&self.text, self.caret, false));
@@ -281,6 +410,9 @@ impl Draft {
     /// there is nothing to undo.
     pub fn undo(&mut self) -> bool {
         self.last_edit = None;
+        self.goal = None;
+        // Undo returns from a whole browse to the draft it started from.
+        self.visit = None;
         match self.undo.pop_back() {
             Some((text, caret)) => {
                 self.text = text;
@@ -318,6 +450,7 @@ impl Draft {
 
     fn checkpoint(&mut self, kind: EditKind) {
         // A kill or a yank is always a step of its own.
+        self.goal = None;
         let own = matches!(kind, EditKind::Block | EditKind::Kill | EditKind::Yank);
         if own || self.last_edit != Some(kind) {
             if self.undo.len() == UNDO_DEPTH {
@@ -331,6 +464,7 @@ impl Draft {
     fn move_to(&mut self, caret: usize) {
         self.caret = caret;
         self.last_edit = None;
+        self.goal = None;
     }
 
     fn is_boundary(&self, at: usize) -> bool {
@@ -582,6 +716,34 @@ fn open_row(rows: &mut Vec<VisualRow>, start: &mut usize, col: &mut usize, at: u
     *col = 0;
 }
 
+/// The caret's places on each row [`layout`] draws at `width`, with their
+/// cell columns: before each grapheme, and after the text of the row a
+/// logical line ends on. A wrapped row's end is the next row's start, so it
+/// is not a place on the row.
+fn row_stops(text: &str, width: usize) -> Vec<Vec<(usize, usize)>> {
+    let limit = width.saturating_sub(1).max(1);
+    let line_ends_at = |at: usize| text.as_bytes().get(at).is_none_or(|&byte| byte == b'\n');
+    layout(text, 0, width)
+        .rows
+        .iter()
+        .map(|row| {
+            let mut column = 0;
+            let mut stops: Vec<(usize, usize)> = text[row.start..row.end]
+                .grapheme_indices(true)
+                .map(|(at, grapheme)| {
+                    let stop = (row.start + at, column);
+                    column += advance(grapheme, column, limit);
+                    stop
+                })
+                .collect();
+            if line_ends_at(row.end) {
+                stops.push((row.end, column));
+            }
+            stops
+        })
+        .collect()
+}
+
 /// The row holding the grapheme at `caret`, or the row a logical line ends on
 /// for a caret after its last grapheme, and the caret's column in it.
 fn place_caret(text: &str, rows: &[VisualRow], caret: usize, limit: usize) -> (usize, usize) {
@@ -756,6 +918,123 @@ mod tests {
         }
         assert_eq!(draft.ring.len(), RING_LIMIT);
         assert_eq!(draft.ring.front().map(String::as_str), Some("w5"));
+    }
+
+    /// The caret's row at `width`, and that row with the caret drawn as `|`.
+    fn shown(draft: &Draft, width: usize) -> String {
+        let drawn = layout(draft.text(), draft.caret(), width);
+        let row = drawn.rows[drawn.caret.0];
+        let text = draft.text();
+        let caret = draft.caret().clamp(row.start, row.end);
+        format!(
+            "{}:{}|{}",
+            drawn.caret.0,
+            &text[row.start..caret],
+            &text[caret..row.end]
+        )
+    }
+
+    fn at(text: &str, caret: usize) -> Draft {
+        let mut draft = typed(text);
+        draft.caret = caret;
+        draft
+    }
+
+    #[test]
+    fn up_and_down_move_between_lines_and_keep_the_column() {
+        let mut draft = at("first line\nsecond line", 3);
+        assert!(draft.vertical(40, false));
+        assert_eq!(shown(&draft, 40), "1:sec|ond line");
+        assert!(draft.vertical(40, true));
+        assert_eq!(shown(&draft, 40), "0:fir|st line");
+    }
+
+    #[test]
+    fn up_and_down_move_between_the_rows_of_a_wrapped_line() {
+        // "alpha beta " then "gamma" at 11 columns, as the oracle draws it.
+        let text = "alpha beta gamma";
+        let mut draft = at(text, 2);
+        assert!(draft.vertical(11, false));
+        assert_eq!(shown(&draft, 11), "1:ga|mma");
+        // Past the end of the last row, the caret goes after its text.
+        let mut draft = at(text, 9);
+        assert!(draft.vertical(11, false));
+        assert_eq!(shown(&draft, 11), "1:gamma|");
+        let mut draft = at(text, text.len());
+        assert!(draft.vertical(11, true));
+        assert_eq!(shown(&draft, 11), "0:alpha| beta ");
+        // A wrapped row's last place is before the space hanging past it,
+        // and a run of presses keeps the column it started from.
+        let mut draft = at(text, text.len());
+        draft.goal = Some(30);
+        assert!(draft.vertical(11, true));
+        assert_eq!(shown(&draft, 11), "0:alpha beta| ");
+        assert!(draft.vertical(11, false));
+        assert_eq!(shown(&draft, 11), "1:gamma|");
+    }
+
+    #[test]
+    fn the_first_and_last_rows_leave_up_and_down_to_history() {
+        assert!(!at("one\ntwo", 2).vertical(40, true));
+        assert!(!at("one\ntwo", 6).vertical(40, false));
+        assert!(!at("", 0).vertical(40, true));
+        // Before the first frame there are no drawn rows.
+        assert!(!at("one\ntwo", 6).vertical(0, true));
+    }
+
+    #[test]
+    fn recall_browses_history_and_returns_to_the_unsent_draft() {
+        let history = [
+            "Latest".to_owned(),
+            "First line\nsecond line".into(),
+            "Oldest".into(),
+        ];
+        let mut draft = typed("unsent");
+        draft.left();
+        // Newer than the draft there is nothing.
+        assert!(!draft.recall(&history, false, 40));
+        assert!(draft.recall(&history, true, 40));
+        assert_eq!((draft.text(), draft.caret()), ("Latest", 6));
+        // An entry of several rows opens at its start going older ...
+        assert!(draft.recall(&history, true, 40));
+        assert_eq!(
+            (draft.text(), draft.caret()),
+            ("First line\nsecond line", 0)
+        );
+        assert!(draft.recall(&history, true, 40));
+        assert_eq!(draft.text(), "Oldest");
+        assert!(!draft.recall(&history, true, 40));
+        // ... and at its end going newer.
+        assert!(draft.recall(&history, false, 40));
+        assert_eq!(draft.caret(), draft.text().len());
+        // An entry edited in the browse shows its edit again.
+        draft.type_text("!");
+        assert!(draft.recall(&history, false, 40));
+        assert!(draft.recall(&history, true, 40));
+        assert_eq!(draft.text(), "First line\nsecond line!");
+        // Back past the newest, the unsent draft returns with its caret.
+        assert!(draft.recall(&history, false, 40));
+        assert!(draft.recall(&history, false, 40));
+        assert_eq!((draft.text(), draft.caret()), ("unsent", 5));
+        assert!(!draft.recall(&history, false, 40));
+    }
+
+    #[test]
+    fn one_undo_returns_from_a_whole_browse() {
+        let history = ["one".to_owned(), "two".into()];
+        let mut draft = typed("mine");
+        draft.recall(&history, true, 40);
+        draft.recall(&history, true, 40);
+        assert_eq!(draft.text(), "two");
+        draft.undo();
+        assert_eq!(draft.text(), "mine");
+        // The browse ended with it; Up starts a new one from the newest.
+        draft.recall(&history, true, 40);
+        assert_eq!(draft.text(), "one");
+        // Without history, nothing changes and no browse stays open.
+        let mut draft = typed("mine");
+        assert!(!draft.recall(&[], true, 40));
+        assert!(draft.visit.is_none());
     }
 
     #[test]

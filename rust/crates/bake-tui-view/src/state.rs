@@ -464,6 +464,26 @@ fn composer_key(state: &mut State, bound: Option<Action>, input: KeyInput) {
             draft.row_end(state.window.width());
             true
         }
+        // Up and Down move between drawn rows, and from the first or the
+        // last row browse the prompts the session holds; Ctrl+P and Ctrl+N
+        // browse at once.
+        Some(Action::CaretUp | Action::CaretDown) => {
+            let up = bound == Some(Action::CaretUp);
+            let width = state.window.width();
+            if !draft.vertical(width, up) {
+                draft.recall(&input_history(&state.transcript), up, width);
+            }
+            true
+        }
+        Some(Action::RecallOlder | Action::RecallNewer) => {
+            let older = bound == Some(Action::RecallOlder);
+            draft.recall(
+                &input_history(&state.transcript),
+                older,
+                state.window.width(),
+            );
+            true
+        }
         Some(Action::LogicalStart) => {
             draft.home();
             true
@@ -507,6 +527,21 @@ fn composer_key(state: &mut State, bound: Option<Action>, input: KeyInput) {
         },
     };
     state.notice = (!complete).then_some(Notice::DraftLimit);
+}
+
+/// The prompts the session holds, newest first, as Up recalls them: the
+/// TypeScript `inputHistory` over the transcript's user rows. The preview
+/// has no pending input or commands to recall.
+fn input_history(transcript: &Transcript) -> Vec<String> {
+    transcript
+        .rows
+        .iter()
+        .rev()
+        .filter_map(|row| match row {
+            transcript::Row::User(text) if !text.trim().is_empty() => Some(text.clone()),
+            _ => None,
+        })
+        .collect()
 }
 
 fn list_key(state: &mut State, bound: Option<Action>) {
@@ -782,6 +817,48 @@ mod tests {
         // Every kill is its own undo step.
         chord(&mut state, Key::Char('-'), Mods::CTRL);
         assert_eq!(state.draft.text(), " now");
+    }
+
+    #[test]
+    fn up_and_down_move_between_rows_before_they_recall_prompts() {
+        let mut state = State::default();
+        // As a frame of 40 columns would have wrapped the draft.
+        state.window.follow(0, 5, 1, 40);
+        let caret_at = |state: &State| {
+            let (text, caret) = (state.draft.text(), state.draft.caret());
+            format!("{}|{}", &text[..caret], &text[caret..])
+        };
+        type_str(&mut state, "one");
+        chord(&mut state, Key::Enter, Mods::ALT);
+        type_str(&mut state, "second");
+        for _ in 0..3 {
+            press(&mut state, Key::Left);
+        }
+        // The column is kept by cells, past the end of `one`.
+        press(&mut state, Key::Up);
+        assert_eq!(caret_at(&state), "one|\nsecond");
+        // From the first row, Up recalls the newest prompt.
+        press(&mut state, Key::Up);
+        assert_eq!(caret_at(&state), "Run the parser tests|");
+        press(&mut state, Key::Up);
+        assert_eq!(state.draft.text(), "Find TODO comments in the source files");
+        // Down returns, and back past the newest restores the draft and caret.
+        press(&mut state, Key::Down);
+        press(&mut state, Key::Down);
+        assert_eq!(caret_at(&state), "one|\nsecond");
+        press(&mut state, Key::Down);
+        assert_eq!(caret_at(&state), "one\nsec|ond");
+        // The last row has nothing newer.
+        press(&mut state, Key::Down);
+        assert_eq!(caret_at(&state), "one\nsec|ond");
+        // Ctrl+P recalls from any row, and Ctrl+N comes back.
+        chord(&mut state, Key::Char('p'), Mods::CTRL);
+        assert_eq!(state.draft.text(), "Run the parser tests");
+        chord(&mut state, Key::Char('n'), Mods::CTRL);
+        assert_eq!(caret_at(&state), "one\nsec|ond");
+        // Alt+↑ is not a caret key.
+        chord(&mut state, Key::Up, Mods::ALT);
+        assert_eq!(caret_at(&state), "one\nsec|ond");
     }
 
     #[test]

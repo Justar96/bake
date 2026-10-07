@@ -198,6 +198,11 @@ await scenario('composer, agent inspection, paste, and resize', async (preview) 
   await preview.wait('word killed', () => preview.screen.includes('❯ XdraftAB ') && !preview.screen.includes('tail'))
   preview.send('\x19')
   await preview.wait('kill yanked', () => preview.screen.includes('❯ XdraftAB tail'))
+  // Up on a one-row draft recalls the newest prompt; Down restores the draft.
+  preview.send('\x1b[A')
+  await preview.wait('prompt recalled', () => preview.screen.includes('❯ Run the parser tests') && !preview.screen.includes('XdraftAB'))
+  preview.send('\x1b[B')
+  await preview.wait('draft restored', () => preview.screen.includes('❯ XdraftAB tail'))
   await preview.quit()
 })
 
