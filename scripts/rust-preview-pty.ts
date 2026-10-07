@@ -199,7 +199,7 @@ await scenario('transcript pages, jumps between prompts, and follows output agai
   await preview.wait('parser turn at the top', () => /^> Run the parser tests/u.test(preview.screen))
   preview.send('\x1b[1;5A')
   await preview.wait('code-mode block', () => /^> Find TODO comments/u.test(preview.screen)
-    && /✓ Codemode: Find TODOs +13 calls · 1 failed/u.test(preview.screen)
+    && /(?:✓|\{\}) Codemode: Find TODOs +13 calls · 1 failed/u.test(preview.screen)
     && /╰ ✓ tools\.read ×12 .+11 done · 1 failed/u.test(preview.screen)
     && /✗ src\/m5\.ts +Permission denied/u.test(preview.screen))
   preview.send('\x1b[1;5H')
@@ -250,9 +250,9 @@ await scenario('sample activity is text that advances on its own, then compacts,
   await preview.wait('sample turn', () => /^ {2}\S+… {2}thinking · 0s +no model/mu.test(preview.screen) && preview.screen.includes('Esc interrupts')
     && preview.screen.includes('Enter steers the next step'))
   // The turn runs a code-mode script: its dot blinks on its own, shown and then a blank in place.
-  await preview.wait('running script shown', () => /^ {2}● Codemode: Read every manifest, then build/mu.test(preview.screen))
-  await preview.wait('running script blinks', () => /^ {4}Codemode: Read every manifest, then build/mu.test(preview.screen))
-  await preview.wait('running script shown again', () => /^ {2}● Codemode: Read every manifest, then build/mu.test(preview.screen))
+  await preview.wait('running script shown', () => /^ {2}(?:●|\{\}) Codemode: Read every manifest, then build/mu.test(preview.screen))
+  await preview.wait('running script blinks', () => /^ {4,5}Codemode: Read every manifest, then build/mu.test(preview.screen))
+  await preview.wait('running script shown again', () => /^ {2}(?:●|\{\}) Codemode: Read every manifest, then build/mu.test(preview.screen))
   // Its calls arrive on the clock, and the build runs last until the turn ends.
   await preview.wait('script calls arrive', () => /✗ packages\/goal\/package\.json +Permission denied/u.test(preview.screen)
     && /╰ [● ] tools\.bash +bun run build/u.test(preview.screen))

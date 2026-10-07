@@ -779,7 +779,7 @@ pub fn kind(tool: &str) -> Kind {
         "grep" | "glob" | "find" | "search" | "ls" => Kind::Search,
         "fetch" | "web_fetch" | "websearch" | "web_search" => Kind::Web,
         "agent" | "task" | "spawn" => Kind::Agent,
-        "script" | "run_code" => Kind::Script,
+        "codemode" | "script" | "run_code" => Kind::Script,
         _ => Kind::Other,
     }
 }
@@ -810,6 +810,24 @@ fn mark_of(state: CallState, look: Look) -> (&'static str, Style) {
         CallState::Failed => (marks.failed, red(look)),
     }
 }
+
+/// A code-mode script's mark: braces, `{}`, for the program it is, in
+/// its state's colour and blinking while it runs like any call's mark.
+/// Under `NO_COLOR` or with the classic frame colour cannot tell the
+/// states apart, so it takes a call's mark instead.
+fn script_mark(state: CallState, look: Look) -> (&'static str, Style) {
+    let (mark, style) = mark_of(state, look);
+    if look.tones == Tones::None || look.classic {
+        return (mark, style);
+    }
+    match state {
+        CallState::Running if !look.lit => ("  ", style),
+        _ => (SCRIPT_MARK, style),
+    }
+}
+
+/// The code-mode script's mark, two cells wide.
+const SCRIPT_MARK: &str = "{}";
 
 fn red(look: Look) -> Style {
     colour(look.tones, (0xef, 0x44, 0x44), Color::Red)
@@ -861,11 +879,15 @@ fn labelled(
     width: usize,
     look: Look,
 ) -> (Vec<Line<'static>>, Vec<Span<'static>>) {
-    let (mark, mark_style) = mark_of(state, look);
+    let (mark, mark_style) = if kind == Kind::Script {
+        script_mark(state, look)
+    } else {
+        mark_of(state, look)
+    };
     let lead_cells: usize = lead.iter().map(Span::width).sum();
     let name_cells: usize = name.iter().map(Span::width).sum();
     let column = column.max(name_cells + 1);
-    let indent = lead_cells + 2 + column;
+    let indent = lead_cells + mark.width() + 1 + column;
     let mut first = lead;
     first.extend([Span::styled(mark, mark_style), pad(1)]);
     first.extend(name);
@@ -2497,6 +2519,52 @@ mod tests {
             .position(|r| matches!(r, Row::Script { .. }))
             .unwrap();
         text(&present(&rows, index, width, look))
+    }
+
+    #[test]
+    fn only_a_script_head_is_marked_with_braces() {
+        let look = Look {
+            tones: Tones::TrueColor,
+            ..PLAIN
+        };
+        let lines = script_lines(80, look);
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.starts_with("  {} Codemode: Find TODOs"))
+        );
+        // Its call sites and every other call keep their state marks.
+        assert!(lines.iter().any(|l| l.contains("╰ ✓ tools.glob")));
+        let rows = sample_session();
+        let all: Vec<String> = (0..rows.len())
+            .flat_map(|i| text(&present(&rows, i, 80, look)))
+            .collect();
+        assert!(all.iter().any(|l| l.starts_with("  ✓ Bash: rg")));
+        assert!(all.iter().all(|l| !l.contains("{} Bash")));
+        let script = |state, lit| {
+            let rows = vec![Row::Script {
+                description: "Build".into(),
+                state,
+                summary: None,
+                source: vec!["return 1;".into()],
+                calls: Vec::new(),
+                logs: Vec::new(),
+                result: None,
+            }];
+            present(&rows, 0, 40, Look { lit, ..look })
+        };
+        let done = script(CallState::Done, true);
+        assert_eq!(fg_of(&done, "{}"), Some(Color::Rgb(0x22, 0xc5, 0x5e)));
+        let failed = script(CallState::Failed, true);
+        assert_eq!(fg_of(&failed, "{}"), Some(Color::Rgb(0xef, 0x44, 0x44)));
+        // Hidden while it blinks, a blank as wide keeps the row still.
+        let on = script(CallState::Running, true);
+        let off = script(CallState::Running, false);
+        assert_eq!(fg_of(&on, "{}"), Some(Color::Rgb(0xff, 0xff, 0xff)));
+        assert!(text(&off).iter().any(|l| l == "     Codemode: Build"));
+        assert_eq!(text(&on).len(), text(&off).len());
+        // Without colour the braces cannot tell the states apart.
+        assert!(script_lines(80, PLAIN)[1].starts_with("  ✓ Codemode"));
     }
 
     #[test]
