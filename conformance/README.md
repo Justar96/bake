@@ -2,7 +2,7 @@
 
 ## Summary
 
-Compare TypeScript and Rust using controlled fixtures and independently checked outcomes. The synthetic harness and [native eval fixture adapter](../evals/README.md#native-fixture-adapter) qualify comparison tooling for [migration scope 01](../docs/roadmap/rust-0.4/README.md#01--workspace-and-comparison-harness). Separate shared cases exercise Session headers, source references, row envelopes, strict V3 codec rows, and scans of plain logs against released codecs; three runtime fixtures capture a real TypeScript tool-call turn, a tool added, removed, and restored across turns, and a model request retried under a changed model, and request derivation cases replay the first and its variants through the TypeScript replay helper. The [qualification ledger](../docs/roadmap/rust-0.4/ledger/README.md) records partial evidence. Rust Session restoration, replay of seeded, resumed, or compressed logs, and live native evals remain open.
+Compare TypeScript and Rust using controlled fixtures and independently checked outcomes. The synthetic harness and [native eval fixture adapter](../evals/README.md#native-fixture-adapter) qualify comparison tooling for [migration scope 01](../docs/roadmap/rust-0.4/README.md#01--workspace-and-comparison-harness). Separate shared cases exercise Session headers, source references, row envelopes, strict V3 codec rows, and scans of plain logs against released codecs, and restoration of plain logs as the production read path restores them; three runtime fixtures capture a real TypeScript tool-call turn, a tool added, removed, and restored across turns, and a model request retried under a changed model, and request derivation cases replay the first and its variants through the TypeScript replay helper. The [qualification ledger](../docs/roadmap/rust-0.4/ledger/README.md) records partial evidence. Agent resume, restoration of compressed or migrated logs, replay of seeded, resumed, or compressed logs, and live native evals remain open.
 
 ## Table of Contents
 
@@ -16,6 +16,7 @@ Compare TypeScript and Rust using controlled fixtures and independently checked 
 - [V3 row cases](#v3-row-cases)
 - [Log scan cases](#log-scan-cases)
 - [Request derivation cases](#request-derivation-cases)
+- [Plain log restoration cases](#plain-log-restoration-cases)
 - [Runner contract](#runner-contract)
 - [Ownership and limits](#ownership-and-limits)
 
@@ -318,6 +319,29 @@ A `rust` override replaces the TypeScript outcome for Rust:
 Both harnesses pin the case count, reject unknown keys, and require every limit and cause to be witnessed, with limits covering both accepted and rejected input. The TypeScript spec checks both fixture files' SHA-256; Rust, which has no hash dependency, checks their sizes. Of the 184 cases, 82 agree on requests, including a three-turn log written for the table, a message with an own `__proto__` member, two-step logs written for replacement sequences, compaction records, header changes, tool updates, released knob, title, and hook records with fractional, rounded, or deeply nested payloads, attempt settlements, and numbers after the last cut that the prefix qualification never reads; 86 are rejections with a Rust cause, including torn tails, recovered invalid rows, -0 in log-only rows and markers, markers on codec-known types (a scan refusal) and on codec-opaque ones (a Session refusal), and malformed attempts; and 16 are native limits, 10 of them on logs the helper accepts. One limit, `tools: null`, witnesses the helper's `TypeError` during request derivation. Requests compare as JSON values: equal values do not prove equal provider wire bytes or member order.
 
 The helper emits a request for a settlement after a step's `assistant/message`, which the loop never writes, and leaves the last settlement row unchecked because no prefix contains it; Rust does the same. A settlement whose coordinate has no `step/start` cuts nothing. The rule is the helper's: it does not validate step and turn lifecycles or a global dispatch order for interleaved coordinates. In `assistant-attempt`, an attempt and a message both settle step 1.1, so the case yields three requests, the second repeating the first.
+
+## Plain log restoration cases
+
+[`session/restore-cases.json`](session/restore-cases.json) holds plain current-format logs and the state the production read path restores from each. The [TypeScript spec](../packages/session/session-persistence-jsonl/tests/restore-conformance.spec.ts) composes that path in its `restorePlainLog` helper: `scanLog`, `validateStoredEvents`, `interruptedTurnClosers`, then `Session.fromRestore` with the current message projections, as `readColdSessionLog` and `SessionStore.prepare` do. The development [`bake-session`](../rust/crates/bake-session/src/restore.rs) crate passes the same bytes to `restore_plain_log`.
+
+```sh
+bun run test:runtime packages/session/session-persistence-jsonl/tests/restore-conformance.spec.ts
+(cd rust && cargo test --locked -p bake-session)
+```
+
+A current-format read runs no `restoreReleasedV3Artifact`, so neither harness checks turn, step, or tool lifecycles, and neither claims Agent resume: nothing truncates a torn tail, writes a closer or end seed, or checks a file's path or stored identity. The stages run in this order, and an earlier stage's refusal wins:
+
+1. The scan, which accepts a torn or recovered tail and leaves it out.
+2. A pass over every event refusing an unknown type without `ignorable` or a `request/header` whose reason is `fallback` (`SessionFormatUnsupportedError`).
+3. A pass adopting every event (`SessionPersistenceCorruptionError`). Adoption checks message shapes, model and tool sources, tool-update data, and markers on non-surface types, but not settlements, header config, reason or series fields, or surface transitions, so a later adoption failure beats an earlier event that only Session construction refuses. Two cases witness that inversion.
+4. The closers for a turn the writer left open: an error `tool/result` per pending call in insertion order, then `step/end` when a step is open, then `turn/end {interrupted}`, with continuing seqs and the last row's time. A repeated call id keeps its position and forgets its `tool/call`.
+5. Session construction over the stored events and then the closers, without a lossless snapshot, so -0 restores; Rust limits it in projected payloads. It appends an ordinary `session/end-seed` unless the last event is one; its timestamp is the current time, so both harnesses report only whether it is appended.
+
+`ts` is the restored state, written from the TypeScript sources and the committed captures before either harness ran: the header, inherited count, committed bytes, stored event count, full closers, whether an end seed is appended, `deriveMessages`, the canonical request header, the tool-history snapshot, and the latest `request/context` as spread. `{"$log": pointer}` and `{"$closer": pointer}` name a value in the edited rows or the closers, so IDs and times stay raw; there is no normalizer. `events` checks decoded `sourceEventSeqs`, which expand packed ranges, while the stored row keeps its packed field. A rejection carries the helper’s class and exact message, or only its `TypeError` class. The file backend adds path context to unsupported-format refusals and wraps other scan failures as `SessionPersistenceCorruptionError`; this table does not claim those wrapper messages. Each case edits one of the three [runtime captures](#runtime-request-reconstruction) in memory: it truncates rows, replaces the header, a row, or one exact substring of a row, appends a row, or adds an unterminated tail.
+
+A `rust` override names a `native-subset` limit, which claims nothing, or a `rejected` cause: `scan`, which claims the exact message, or an `unsupported/`, `stored/`, or `restore/` check, which claims the layer and refused seq. Rust limits `image/offload`, every known type carrying `ignorable` (TypeScript accepts a hook result and a user message, and refuses a tool update, all witnessed), `request/context` data that is not an object, closers whose computation would depend on JavaScript coercion (`null` data, a `null` content block, a non-string pending call id, or an open turn or step that is not a safe count), and the request derivation subset's number, depth, coordinate, config-member, and tool-schema rules on projected payloads, including fields no output carries, such as usage. Unknown types carrying `ignorable` restore as opaque rows, markers included.
+
+Both harnesses pin the case count, reject unknown keys, and require every limit and refusal layer to be witnessed. Of the 57 cases, 29 restore identically, 13 are rejections with a Rust cause, and 15 are native limits, 11 of them on logs TypeScript restores. Nine restored cases, the three captures, a cut needing a closer, a torn and a recovered tail, a balanced end seed, and two seeded cuts, also run through the real JSONL backend and `readColdSessionLog` in a temporary store, and must match the table. Rust also checks that request derivation differs on the same bytes where its prefix rules do.
 
 ## Runner contract
 
