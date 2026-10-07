@@ -11,4 +11,10 @@ name = "bake-rs"
 path = "src/main.rs"
 
 [dependencies]
+bake-session.workspace = true
 bake-tui.workspace = true
+serde_json.workspace = true
+
+# Opens the inspected file without blocking on a FIFO.
+[target.'cfg(unix)'.dependencies]
+libc = { version = "=0.2.190", default-features = false }

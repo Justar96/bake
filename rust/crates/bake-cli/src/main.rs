@@ -1,10 +1,13 @@
 //! `bake-rs`: entry point for Bake's native terminal preview.
 
-use std::ffi::OsString;
+mod inspect;
+
+use std::ffi::{OsStr, OsString};
 use std::io::{self, IsTerminal, Write};
 use std::process::ExitCode;
 
 use bake_tui::PreviewExit;
+use inspect::{InspectArgs, MAX_BUDGET, Outcome, parse_count};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -13,11 +16,40 @@ bake-rs: Bake's native terminal preview (Rust preview)
 
 Usage:
   bake-rs preview      Open the fullscreen preview in an interactive terminal
+  bake-rs session inspect --max-bytes <N> --max-source-seqs <N> [--] <file>
+                       Describe one Session log as JSON, read-only
   bake-rs --help       Show this help
   bake-rs --version    Show the version
 
 The preview shows sample content only. It does not connect to a model,
 read credentials, write sessions, or start agents. Ctrl+C quits.
+";
+
+const INSPECT_HELP: &str = "\
+bake-rs session inspect: describe one Session log (Rust preview)
+
+Usage:
+  bake-rs session inspect --max-bytes <N> --max-source-seqs <N> [--] <file>
+
+Options:
+  --max-bytes <N>        Largest file size, and largest decoded Zstd size
+  --max-source-seqs <N>  Largest expanded sourceEventSeqs list of one event
+  --                     End the options, as before a path starting with '-'
+  -h, --help             Show this help
+
+Both budgets are required positive integers no greater than 9007199254740991.
+<file> must be named session.v3.jsonl or session.v3.jsonl.zstd; the name
+selects plain or Zstd decoding. Other format versions are refused without
+opening the file.
+
+The command opens only the named file, read-only, restores it as the Session
+read path does, and prints one JSON record: counts, the header, recovery and
+closer metadata, but no message or tool content. It does not truncate, repair,
+migrate, or resume the Session, check its stored identity, or read the Bake
+home, configuration, or credentials.
+
+Exit status: 0 restored, 3 refused log (a JSON record on standard output),
+1 unreadable file or unsupported name, 2 usage error.
 ";
 
 const KNOWN: &[&str] = &["-h", "--help", "help", "-V", "--version", "preview"];
@@ -27,9 +59,32 @@ enum Command {
     Help,
     Version,
     Preview,
+    InspectHelp,
+    Inspect(InspectArgs),
 }
 
-fn parse(args: &[OsString]) -> Result<Command, String> {
+/// A usage error, and the help command it points to.
+#[derive(Debug, PartialEq, Eq)]
+struct Usage {
+    message: String,
+    help: &'static str,
+}
+
+fn parse(args: &[OsString]) -> Result<Command, Usage> {
+    // `session` operands are parsed as OS strings: a path need not be UTF-8.
+    if args.first().is_some_and(|first| first == "session") {
+        return parse_session(&args[1..]).map_err(|message| Usage {
+            message,
+            help: "bake-rs session inspect --help",
+        });
+    }
+    parse_top(args).map_err(|message| Usage {
+        message,
+        help: "bake-rs --help",
+    })
+}
+
+fn parse_top(args: &[OsString]) -> Result<Command, String> {
     let args = args
         .iter()
         .map(|a| {
@@ -52,14 +107,129 @@ fn parse(args: &[OsString]) -> Result<Command, String> {
     }
 }
 
+fn parse_session(args: &[OsString]) -> Result<Command, String> {
+    let Some((command, rest)) = args.split_first() else {
+        return Err("missing a command after 'session'".into());
+    };
+    let help = |flag: &OsStr, rest: &[OsString]| match rest.first() {
+        None => Ok(Command::InspectHelp),
+        Some(extra) => Err(format!(
+            "unexpected argument {} after '{}'",
+            quoted(extra),
+            flag.display()
+        )),
+    };
+    if is_help(command) {
+        return help(command, rest);
+    }
+    if command != "inspect" {
+        return Err(format!("unknown command {} for 'session'", quoted(command)));
+    }
+    if let Some((flag, extra)) = rest.split_first().filter(|(flag, _)| is_help(flag)) {
+        return help(flag, extra);
+    }
+    let mut max_bytes = None;
+    let mut max_source_seqs = None;
+    let mut path = None;
+    let mut options = true;
+    let mut rest = rest.iter();
+    while let Some(arg) = rest.next() {
+        let slot = match arg.to_str() {
+            _ if !options => None,
+            Some("--") => {
+                options = false;
+                continue;
+            }
+            Some("--max-bytes") => Some(("--max-bytes", &mut max_bytes)),
+            Some("--max-source-seqs") => Some(("--max-source-seqs", &mut max_source_seqs)),
+            Some(flag @ ("-h" | "--help")) => {
+                return Err(format!(
+                    "option '{flag}' must be the only operand of 'session inspect'"
+                ));
+            }
+            _ if arg.as_encoded_bytes().starts_with(b"-") => {
+                return Err(format!(
+                    "unknown option {} for 'session inspect'",
+                    quoted(arg)
+                ));
+            }
+            _ => None,
+        };
+        if let Some((option, slot)) = slot {
+            let value = rest
+                .next()
+                .ok_or_else(|| format!("option '{option}' needs a value"))?;
+            if slot.is_some() {
+                return Err(format!("option '{option}' was given more than once"));
+            }
+            *slot = Some(value.to_str().and_then(parse_count).ok_or_else(|| {
+                format!(
+                    "option '{option}' needs a positive decimal integer no greater than \
+                     {MAX_BUDGET}, not {}",
+                    quoted(value)
+                )
+            })?);
+        } else if path.is_some() {
+            return Err(format!(
+                "unexpected argument {} for 'session inspect'",
+                quoted(arg)
+            ));
+        } else {
+            path = Some(arg.clone());
+        }
+    }
+    Ok(Command::Inspect(InspectArgs {
+        max_bytes: max_bytes.ok_or("missing required option '--max-bytes'")?,
+        max_source_seqs: max_source_seqs.ok_or("missing required option '--max-source-seqs'")?,
+        path: path.ok_or("missing the Session log path")?,
+    }))
+}
+
+fn is_help(arg: &OsStr) -> bool {
+    arg == "-h" || arg == "--help"
+}
+
+/// An argument for a one-line diagnostic: single-quoted when it is UTF-8,
+/// with control characters, apostrophes, and backslashes escaped as in Rust
+/// source, otherwise in Rust's escaped debug form.
+fn quoted(arg: &OsStr) -> String {
+    let Some(text) = arg.to_str() else {
+        return format!("{arg:?}");
+    };
+    let mut quoted = String::from("'");
+    for char in text.chars() {
+        if char.is_control() || char == '\'' || char == '\\' {
+            quoted.extend(char.escape_debug());
+        } else {
+            quoted.push(char);
+        }
+    }
+    quoted.push('\'');
+    quoted
+}
+
 fn main() -> ExitCode {
     let args: Vec<OsString> = std::env::args_os().skip(1).collect();
     match parse(&args) {
         Ok(Command::Help) => print(HELP),
         Ok(Command::Version) => print(&format!("bake-rs {VERSION}\n")),
         Ok(Command::Preview) => preview(),
-        Err(message) => {
-            eprintln!("bake-rs: {message}\n\nRun 'bake-rs --help' for usage.");
+        Ok(Command::InspectHelp) => print(INSPECT_HELP),
+        Ok(Command::Inspect(args)) => match inspect::inspect(&args) {
+            Outcome::Record { json, status } => {
+                if write_stdout(&format!("{json}\n")) {
+                    ExitCode::from(status)
+                } else {
+                    ExitCode::FAILURE
+                }
+            }
+            Outcome::Failure(message) => {
+                eprintln!("bake-rs: {message}");
+                ExitCode::FAILURE
+            }
+        },
+        Err(Usage { message, help }) => {
+            eprintln!("bake-rs: {message}\n\nRun '{help}' for usage.");
             ExitCode::from(2)
         }
     }
@@ -67,10 +237,17 @@ fn main() -> ExitCode {
 
 /// Writes to stdout without panicking when the reader has gone away.
 fn print(text: &str) -> ExitCode {
-    match io::stdout().write_all(text.as_bytes()) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(_) => ExitCode::FAILURE,
+    if write_stdout(text) {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
     }
+}
+
+/// Whether the whole text reached stdout; a closed reader is not a panic.
+fn write_stdout(text: &str) -> bool {
+    let mut stdout = io::stdout().lock();
+    stdout.write_all(text.as_bytes()).is_ok() && stdout.flush().is_ok()
 }
 
 /// Names the first standard stream that is not a terminal, input before output.
@@ -109,7 +286,15 @@ mod tests {
     use super::*;
 
     fn parse_strs(args: &[&str]) -> Result<Command, String> {
-        parse(&args.iter().map(OsString::from).collect::<Vec<_>>())
+        parse(&args.iter().map(OsString::from).collect::<Vec<_>>()).map_err(|usage| usage.message)
+    }
+
+    fn inspect_args(max_bytes: u64, max_source_seqs: u64, path: &str) -> Command {
+        Command::Inspect(InspectArgs {
+            max_bytes,
+            max_source_seqs,
+            path: path.into(),
+        })
     }
 
     #[test]
@@ -141,6 +326,161 @@ mod tests {
         assert_eq!(
             parse_strs(&["--version", "x"]),
             Err("unexpected argument 'x' after '--version'".into())
+        );
+    }
+
+    #[test]
+    fn inspect_takes_both_budgets_in_either_order_and_one_path() {
+        let path = "d/session.v3.jsonl";
+        let want = Ok(inspect_args(7, 9, path));
+        assert_eq!(
+            parse_strs(&[
+                "session",
+                "inspect",
+                "--max-bytes",
+                "7",
+                "--max-source-seqs",
+                "9",
+                path
+            ]),
+            want
+        );
+        assert_eq!(
+            parse_strs(&[
+                "session",
+                "inspect",
+                path,
+                "--max-source-seqs",
+                "9",
+                "--max-bytes",
+                "7"
+            ]),
+            want
+        );
+        assert_eq!(
+            parse_strs(&[
+                "session",
+                "inspect",
+                "--max-bytes",
+                "7",
+                "--max-source-seqs",
+                "9",
+                "--",
+                "-p"
+            ]),
+            Ok(inspect_args(7, 9, "-p"))
+        );
+        assert_eq!(
+            parse_strs(&[
+                "session",
+                "inspect",
+                "--",
+                "--max-bytes",
+                "--max-bytes",
+                "7",
+                "--max-source-seqs",
+                "9"
+            ]),
+            Err("unexpected argument '--max-bytes' for 'session inspect'".into())
+        );
+        for help in [
+            &["session", "--help"][..],
+            &["session", "inspect", "-h"],
+            &["session", "inspect", "--help"],
+        ] {
+            assert_eq!(parse_strs(help), Ok(Command::InspectHelp));
+        }
+    }
+
+    #[test]
+    fn budgets_are_positive_safe_decimal_integers() {
+        assert_eq!(parse_count("1"), Some(1));
+        assert_eq!(parse_count("9007199254740991"), Some(MAX_BUDGET));
+        for bad in [
+            "",
+            "0",
+            "00",
+            "01",
+            "+1",
+            "-1",
+            " 1",
+            "1 ",
+            "1e3",
+            "1.0",
+            "0x1",
+            "1_0",
+            "9007199254740992",
+            "99999999999999999999",
+        ] {
+            assert_eq!(parse_count(bad), None, "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn log_names_follow_the_typescript_generation_rule() {
+        use inspect::{Encoding, LogName, parse_log_name};
+        let canonical = |version, encoding| LogName::Canonical { version, encoding };
+        assert_eq!(
+            parse_log_name("session.jsonl"),
+            canonical(0, Encoding::None)
+        );
+        assert_eq!(
+            parse_log_name("session.v3.jsonl"),
+            canonical(3, Encoding::None)
+        );
+        assert_eq!(
+            parse_log_name("session.v3.jsonl.zstd"),
+            canonical(3, Encoding::Zstd)
+        );
+        assert_eq!(
+            parse_log_name("session.v12.jsonl.zstd"),
+            canonical(12, Encoding::Zstd)
+        );
+        for name in [
+            "session.v0.jsonl",
+            "session.v03.jsonl",
+            "Session.v3.jsonl",
+            "session.v3.jsonl.zst",
+            "session.v3.jsonl.tmp",
+            "session.jsonl.zstd.zstd",
+            "session.v.jsonl",
+            "session.v9007199254740992.jsonl",
+            "sessions.v3.jsonl",
+            "",
+        ] {
+            assert_eq!(parse_log_name(name), LogName::NotCanonical, "{name:?}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn inspect_paths_and_values_stay_os_strings() {
+        use std::os::unix::ffi::OsStringExt;
+        let path = OsString::from_vec(b"\xff/session.v3.jsonl".to_vec());
+        let args = |value: OsString, path: OsString| {
+            [
+                "session",
+                "inspect",
+                "--max-source-seqs",
+                "1",
+                "--max-bytes",
+            ]
+            .into_iter()
+            .map(OsString::from)
+            .chain([value, path])
+            .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            parse(&args("2".into(), path.clone())),
+            Ok(Command::Inspect(InspectArgs {
+                max_bytes: 2,
+                max_source_seqs: 1,
+                path: path.clone()
+            }))
+        );
+        assert_eq!(
+            parse(&args(OsString::from_vec(vec![0xff]), path)).map_err(|usage| usage.message),
+            Err("option '--max-bytes' needs a positive decimal integer no greater than 9007199254740991, not \"\\xFF\"".into())
         );
     }
 }
