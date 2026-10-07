@@ -71,7 +71,7 @@ Candidate foundations are Cargo, Serde, Tokio, and a Ratatui/Crossterm terminal 
 
 The [terminal direction](terminal.md) keeps the current transcript and composer layout recognizable, with cleaner presentation and clearer agent selection, status, and input focus. Ratatui with Crossterm is the starting stack. The composer uses a pure Bake-owned model following the [editor widget qualification](scope-00/editor-2026-10-07/README.md); the native frontend must pass the inline, Unicode, draft-preservation, and terminal-restoration cases before adoption.
 
-Keep `run_code`'s JavaScript semantics through an explicitly confined embedded engine; moving the host to Rust does not authorize changing the model's programming language. Treat arbitrary Cordis JavaScript, executable YAML, npm plugins, and Electron message ports as separate compatibility decisions. An optional legacy whole-profile process may bridge development, but it cannot count as native parity or silently become the implementation behind a supposedly native profile. Scope 00 resolves the shipped support matrix; scopes 05, 12, and 13 prove it.
+Keep `run_code`'s JavaScript semantics through an explicitly confined embedded engine; moving the host to Rust does not authorize changing the model's programming language. 0.4 ships Rust only, with no bundled or selectable Node/TypeScript compatibility runtime ([D5](scope-00/support.md#decision-register), approved 2026-10-07). The TypeScript runtime stays runnable during development as the comparison oracle; it cannot count as native parity or serve behind a supposedly native profile. Custom profiles that use arbitrary Cordis JavaScript, executable YAML, or npm plugins need migration and are never silently rewritten or executed. Electron message ports remain a separate Desktop decision. Scope 00 resolves the shipped support matrix; scopes 05, 12, and 13 prove it.
 
 ## Linear development sequence
 
@@ -156,11 +156,11 @@ Each scope below specifies implementation, review order, and observable proof. T
 
 ### 05 — Composition, settings, credentials, and lifecycle
 
-**Implement:** typed service registration, agent-scoped resolution, reversible registration handles, ordered middleware, asynchronous close, settings watching, credential precedence, managed secret writes, profile layers, preset configuration, and known legacy names. Define validated native configuration and the scope-00 policy for dynamic JavaScript and npm profiles. Preserve whole-row patch replacement versus field-wise settings merging.
+**Implement:** typed service registration, agent-scoped resolution, reversible registration handles, ordered middleware, asynchronous close, settings watching, credential precedence, managed secret writes, profile layers, preset configuration, and known legacy names. Define validated native configuration and the detection and migration reporting for dynamic JavaScript and npm profiles, which 0.4 does not run. Preserve whole-row patch replacement versus field-wise settings merging.
 
-**PR order:** lifecycle/services → static configuration and profiles → settings/credentials → supported dynamic compatibility. Keep unsupported constructs detectable before an agent starts or a profile is rewritten.
+**PR order:** lifecycle/services → static configuration and profiles → settings/credentials → migration reporting for unsupported dynamic constructs. Detect unsupported constructs before an agent starts, without executing them or rewriting the profile.
 
-**Proof:** layer precedence and reload tests, dependency loss during a call, re-registration without duplicate listeners, partial-startup failure, scoped visibility, canceled secret prompts, secret redaction, file permissions, and old config surviving rollback. Test approved legacy profiles with their real entry path. Anchors: [boot](../../../packages/boot/app-boot/tests/), [credentials](../../../packages/credentials/credentials-local/tests/), [settings](../../../packages/settings/settings-file/tests/), and [presets](../../../packages/preset/agent-presets/tests/).
+**Proof:** layer precedence and reload tests, dependency loss during a call, re-registration without duplicate listeners, partial-startup failure, scoped visibility, canceled secret prompts, secret redaction, file permissions, and old config surviving rollback. Test that unsupported custom profiles are refused through their real entry path, with no file changed. Anchors: [boot](../../../packages/boot/app-boot/tests/), [credentials](../../../packages/credentials/credentials-local/tests/), [settings](../../../packages/settings/settings-file/tests/), and [presets](../../../packages/preset/agent-presets/tests/).
 
 **Rollback:** preserve original configuration and credential documents; conversions are explicit and independently reversible.
 
@@ -228,11 +228,11 @@ Each scope below specifies implementation, review order, and observable proof. T
 
 **Implement:** MCP client/resources and reconnection, web search/fetch, hook protocols and external hook processes, code mode, and the approved external-extension strategy. Account for existing Cordis inspection/mutation and plugin-manager tools; their generated JavaScript API catalog cannot be presented as a Rust API unchanged.
 
-**PR order:** MCP → web/hooks → embedded code mode → extension compatibility and catalog generation. Regenerate model-facing catalogs from their owner and evaluate intentional prompt/schema changes.
+**PR order:** MCP → web/hooks → embedded code mode → extension migration and catalog generation. Regenerate model-facing catalogs from their owner and evaluate intentional prompt/schema changes.
 
-**Proof:** local protocol servers check negotiation, tools/resources, invalid schemas, reconnect, cancellation, and shutdown. HTTP tests cover redirects, DNS rebinding/private destinations, pinned connections, payload limits, and proxy behavior. Code-mode tests cover nested approvals, memory/time exhaustion, infinite loops, denied ambient filesystem/network/process access, output limits, and VM termination. Run real fixture plugins through the chosen compatibility path, including load/unload/reload/failure. Anchors: [MCP](../../../packages/mcp/), [web](../../../packages/web/), [hooks](../../../packages/hooks/), [code mode](../../../packages/ptc-runtime/), and [extensions](../../../packages/extensions/).
+**Proof:** local protocol servers check negotiation, tools/resources, invalid schemas, reconnect, cancellation, and shutdown. HTTP tests cover redirects, DNS rebinding/private destinations, pinned connections, payload limits, and proxy behavior. Code-mode tests cover nested approvals, memory/time exhaustion, infinite loops, denied ambient filesystem/network/process access, output limits, and VM termination. Run real fixture plugins through the chosen migration or replacement path, including load/unload/reload/failure. Anchors: [MCP](../../../packages/mcp/), [web](../../../packages/web/), [hooks](../../../packages/hooks/), [code mode](../../../packages/ptc-runtime/), and [extensions](../../../packages/extensions/).
 
-**Rollback:** retain the legacy profile path only as explicitly documented compatibility; do not claim this closes a native scope when the work still executes in the TypeScript runtime.
+**Rollback:** native execution stays opt-in until the default switch. The TypeScript runtime remains a development oracle that 0.4 does not ship; work that still executes there does not close a native scope.
 
 ### 13 — CLI profiles and Desktop
 
@@ -266,9 +266,9 @@ Each scope below specifies implementation, review order, and observable proof. T
 
 ### 16 — Distribution and updates
 
-**Implement:** native archives for `darwin-arm64`, `darwin-x64`, `linux-arm64`, `linux-x64`, and `win32-x64`; signed manifests; installer/launcher changes; self-check; atomic update/rollback; release retention; and version/channel handling agreed in scope 00. Test old updaters' assumptions about Node entry points and archive layout before changing the layout. A transition shim or preparatory 0.3 patch may be necessary.
+**Implement:** native archives for `darwin-arm64`, `darwin-x64`, `linux-arm64`, `linux-x64`, and `win32-x64`; signed manifests; installer/launcher changes; self-check; atomic update/rollback; release retention; and version/channel handling agreed in scope 00. Test old updaters' assumptions about Node entry points and archive layout before changing the layout. The transition route is open ([D14](scope-00/support.md#decision-register)), and it must end in Rust-only shipped artifacts.
 
-**PR order:** package layout and self-check → updater/installers → old-to-new transition/rollback → five-target release rehearsal. Remove the normal native runtime's Node prerequisite only after a no-Node host test succeeds; list any optional compatibility runtime separately.
+**PR order:** package layout and self-check → updater/installers → old-to-new transition/rollback → five-target release rehearsal. Remove the Node prerequisite only after a no-Node host test succeeds; 0.4 archives ship no Node runtime.
 
 **Proof:** install from an empty home, update from the oldest supported updater and latest 0.3, restart/resume, then roll back. Corrupt signatures/hashes, truncated archives, disk-full, concurrent update, held Windows executables, interrupted pointer switching, and failed candidate self-check must preserve the working install. Preserve `dsh --profile desktop` and user-owned aliases. Use ephemeral signing keys in tests. Anchors: [distribution](../../../distribution/README.md), [release tooling](../../../scripts/release/), and [updater](../../../packages/boot/updater/tests/).
 
@@ -296,7 +296,7 @@ During coexistence, run the current Bake gates for affected TypeScript paths and
 
 0.4.0 is ready for a release request only when all of the following have evidence:
 
-- Every supported 0.3 behavior has native parity or an explicitly approved, documented compatibility disposition; unresolved provider, plugin, or Desktop gaps block release.
+- Every supported 0.3 behavior has native parity or an approved support change with a documented migration path; unresolved provider, plugin, or Desktop gaps block release.
 - Historical sessions open, current-format sessions resume across both runtimes, concurrent writers remain excluded, and rollback preserves user data.
 - All five release targets pass native artifact tests; each OS's sandbox and terminal behavior is tested on that OS.
 - Every model-visible change has its required paired record. Regressions are fixed or their measured causes and acceptance are recorded in both the eval note and PR.
