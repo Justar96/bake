@@ -63,6 +63,10 @@ pub const ERROR: &str = "error";
 pub const HINT_FOLLOWING: &[(&str, &str)] = &[("Wheel/PgUp", "scroll"), ("Ctrl+↑", "prompts")];
 /// While reading history, how much lies below: `12 lines below`.
 pub const LINES_BELOW: &str = "lines below";
+/// Said in the scroll indicator's row once a selection reaches the clipboard,
+/// or does not.
+pub const COPIED: &str = "Copied";
+pub const COPY_FAILED: &str = "Copy failed";
 /// The reading indicator's words: what arrived below, and the key back.
 pub const NEW_OUTPUT: &str = "New output";
 pub const LATEST_KEY: &str = "Ctrl+End";

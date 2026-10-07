@@ -11,6 +11,7 @@ use crate::frame::FrameStyle;
 use crate::keys::{self, Action, KeyInput, Scope};
 use crate::live;
 use crate::mode::Mode;
+use crate::selection::{self, Granularity, Point, Range};
 use crate::status::StatusInput;
 use crate::transcript::{self, Transcript};
 use crate::wheel::{self, WheelSteps};
@@ -31,6 +32,8 @@ pub enum Msg {
     /// from when it started.
     Tick(Duration),
     Mouse(Mouse),
+    /// Whether the text of the last [`Effect::Copy`] reached a clipboard.
+    Copied(bool),
 }
 
 /// A mouse report, at a cell of the screen.
@@ -79,6 +82,85 @@ pub struct DraftSpot {
     pub width: usize,
 }
 
+/// Where the transcript's lines were last drawn: the cell of the first
+/// line's first column, and the columns and lines the text takes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Area {
+    pub x: u16,
+    pub y: u16,
+    pub width: u16,
+    pub rows: u16,
+}
+
+impl Area {
+    fn holds(self, column: u16, row: u16) -> bool {
+        (self.x..self.x + self.width).contains(&column)
+            && (self.y..self.y + self.rows).contains(&row)
+    }
+}
+
+/// How often a drag held at the transcript's edge scrolls a line on.
+pub const EDGE_SCROLL: Duration = Duration::from_millis(50);
+
+/// A press in progress: what it extends by, and the range a double or triple
+/// click started with.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Gesture {
+    granularity: Granularity,
+    initial: Option<Range>,
+    dragged: bool,
+}
+
+/// The last press, for counting a double or triple click on the same word.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Click {
+    at: Duration,
+    point: Point,
+    word: (usize, usize),
+    count: u8,
+}
+
+/// A drag held at the transcript's top or bottom: where the pointer is, the
+/// way it scrolls, and when it next does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct EdgeHold {
+    column: usize,
+    row: isize,
+    direction: i8,
+    next: Duration,
+}
+
+/// The transcript selection and the press that is making it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Selecting {
+    /// Where the selection began and where its free end is now.
+    pub ends: Option<(Point, Point)>,
+    gesture: Option<Gesture>,
+    last_click: Option<Click>,
+    edge: Option<EdgeHold>,
+    /// Set when a press that selected is released, until it is copied.
+    finished: bool,
+}
+
+impl Selecting {
+    /// The selection, or `None` while nothing, or one cell, is selected.
+    pub fn range(&self) -> Option<Range> {
+        self.ends
+            .and_then(|(anchor, focus)| selection::ordered(anchor, focus))
+    }
+
+    /// Drops the selection and the press making it. Returns whether there
+    /// was one, so Esc does nothing else.
+    fn clear(&mut self) -> bool {
+        let had = self.ends.is_some() || self.gesture.is_some();
+        *self = Self {
+            last_click: self.last_click,
+            ..Self::default()
+        };
+        had
+    }
+}
+
 /// A run of cells on one row that a press acts on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Spot {
@@ -97,10 +179,15 @@ impl Spot {
 /// the TypeScript `doubleInterruptMs` default.
 pub const QUIT_WINDOW: Duration = Duration::from_millis(2000);
 
+/// How long the scroll indicator says whether a selection was copied.
+pub const COPIED: Duration = Duration::from_millis(1500);
+
 /// Requests the terminal owner performs on the view's behalf.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Effect {
     Quit,
+    /// Put this text on the clipboard, then report with [`Msg::Copied`].
+    Copy(String),
 }
 
 /// A fixed example row for the agent list; it describes no running work.
@@ -232,6 +319,15 @@ pub struct State {
     pub latest: Option<Spot>,
     /// The draft's rows as last drawn; a press on them places the caret.
     pub draft_spot: Option<DraftSpot>,
+    /// The transcript's lines as last drawn; a press there selects.
+    pub transcript_area: Option<Area>,
+    /// The transcript selection.
+    pub selecting: Selecting,
+    /// The terminal's columns at the last resize; a change drops the
+    /// selection, whose lines wrap anew.
+    columns: u16,
+    /// Whether the last selection was copied, said until the time given.
+    pub copied: Option<(bool, Duration)>,
     /// Whether a press on the scrollbar is being dragged.
     pub(crate) dragging: bool,
     /// While a first Ctrl+C is armed, when it lapses; a second before then
@@ -269,6 +365,10 @@ impl State {
             track: None,
             latest: None,
             draft_spot: None,
+            transcript_area: None,
+            selecting: Selecting::default(),
+            columns: 0,
+            copied: None,
             dragging: false,
             quit_until: None,
         }
@@ -308,11 +408,18 @@ impl State {
         // The turn's script changes when its next call starts or settles.
         let script = self.live_elapsed().and_then(live::next);
         let quit = self.quit_until.map(|until| until.saturating_sub(self.now));
+        let edge = self
+            .selecting
+            .edge
+            .map(|edge| edge.next.saturating_sub(self.now));
+        let copied = self.copied.map(|(_, until)| until.saturating_sub(self.now));
         activity
             .into_iter()
             .chain(blink)
             .chain(script)
             .chain(quit)
+            .chain(edge)
+            .chain(copied)
             .min()
     }
 
@@ -336,15 +443,26 @@ pub fn update(state: &mut State, msg: Msg) -> Vec<Effect> {
             Focus::AgentList => state.notice = Some(Notice::ListKeys),
             Focus::Inspect(_) => state.notice = Some(Notice::ReadOnly),
         },
-        Msg::Resize { .. } => {}
+        Msg::Resize { cols, .. } => {
+            // The first resize only learns the width.
+            if state.columns != 0 && cols != state.columns {
+                state.selecting.clear();
+            }
+            state.columns = cols;
+        }
         Msg::Tick(now) => {
             state.now = now;
             if !state.quitting() {
                 state.quit_until = None;
             }
             advance_script(state);
+            edge_scroll(state);
+            if state.copied.is_some_and(|(_, until)| now >= until) {
+                state.copied = None;
+            }
         }
-        Msg::Mouse(mouse) => pointer(state, mouse),
+        Msg::Mouse(mouse) => return pointer(state, mouse),
+        Msg::Copied(ok) => state.copied = Some((ok, state.now + COPIED)),
     }
     Vec::new()
 }
@@ -353,7 +471,42 @@ pub fn update(state: &mut State, msg: Msg) -> Vec<Effect> {
 /// transcript from the composer, the selection in the agent list. A press on
 /// the scrollbar's track moves the transcript there, and dragging follows
 /// the pointer until release, wherever it goes.
-fn pointer(state: &mut State, mouse: Mouse) {
+fn pointer(state: &mut State, mouse: Mouse) -> Vec<Effect> {
+    pointer_at(state, mouse);
+    match mouse.kind {
+        MouseKind::Up => copy_selection(state)
+            .map(Effect::Copy)
+            .into_iter()
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// The text a finished selection copies: each line as drawn, cut to the
+/// cells it covers and trimmed at its end; `None` when nothing but spaces is
+/// selected, or the press is still going.
+fn copy_selection(state: &mut State) -> Option<String> {
+    if !std::mem::take(&mut state.selecting.finished) {
+        return None;
+    }
+    let range = state.selecting.range()?;
+    let text = state
+        .transcript
+        .between(range.start.at, range.end.at)
+        .into_iter()
+        .map(|(at, line)| {
+            selection::line_columns(range, at, &line).map_or(String::new(), |(from, to)| {
+                selection::slice_cells(&line, from, to)
+                    .trim_end()
+                    .to_owned()
+            })
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    (!text.trim().is_empty()).then_some(text)
+}
+
+fn pointer_at(state: &mut State, mouse: Mouse) {
     let wheel = match mouse.kind {
         MouseKind::WheelUp => Some(-1),
         MouseKind::WheelDown => Some(1),
@@ -393,24 +546,223 @@ fn pointer(state: &mut State, mouse: Mouse) {
             return;
         }
     }
-    let Some(track) = state.track.filter(|_| state.focus == Focus::Composer) else {
+    if state.focus != Focus::Composer {
         state.dragging = false;
         return;
-    };
-    let on_track =
-        mouse.column == track.column && (track.top..track.top + track.rows).contains(&mouse.row);
+    }
+    let on_track = state.track.is_some_and(|track| {
+        mouse.column == track.column && (track.top..track.top + track.rows).contains(&mouse.row)
+    });
     match mouse.kind {
         MouseKind::Down if on_track => state.dragging = true,
+        MouseKind::Down => return press(state, mouse),
         MouseKind::Drag if state.dragging => {}
-        MouseKind::Up => {
+        MouseKind::Drag => return drag(state, mouse),
+        MouseKind::Up if state.dragging => {
             state.dragging = false;
             return;
         }
+        MouseKind::Up => return release(state),
         _ => return,
     }
+    let Some(track) = state.track else {
+        return;
+    };
     let row = usize::from(mouse.row.clamp(track.top, track.top + track.rows - 1) - track.top);
     let offset = state.transcript.offset_at(row, usize::from(track.rows));
     state.transcript.jump(offset);
+}
+
+/// The lines on screen, each with the row and line that draw it.
+fn on_screen(transcript: &Transcript) -> Vec<(transcript::Anchor, String)> {
+    transcript
+        .screen()
+        .into_iter()
+        .map(|(at, line)| (at, line.to_string()))
+        .collect()
+}
+
+/// A press in the transcript starts a selection: a cell, then a word on a
+/// double click and a line on a triple, counted on the same word within
+/// [`selection::CLICK`]. A press anywhere else drops the selection.
+fn press(state: &mut State, mouse: Mouse) {
+    let select = &mut state.selecting;
+    select.edge = None;
+    let inside = state
+        .transcript_area
+        .filter(|area| area.holds(mouse.column, mouse.row));
+    let Some(area) = inside else {
+        select.gesture = None;
+        select.ends = None;
+        return;
+    };
+    let lines = on_screen(&state.transcript);
+    let anchors: Vec<_> = lines.iter().map(|(at, _)| *at).collect();
+    let row = usize::from(mouse.row - area.y);
+    let column = usize::from(mouse.column - area.x);
+    let width = usize::from(area.width);
+    let Some(point) = selection::point_at(column, row as isize, &anchors, width) else {
+        select.gesture = None;
+        select.ends = None;
+        return;
+    };
+    let text = lines.get(row).map_or("", |(_, text)| text.as_str());
+    let word = lines
+        .get(row)
+        .and_then(|_| selection::word_at(text, point.column));
+    let count = match (select.last_click, word) {
+        (Some(previous), Some(word))
+            if mouse.at.saturating_sub(previous.at) <= selection::CLICK
+                && previous.point.at == point.at
+                && previous.word == word =>
+        {
+            previous.count % 3 + 1
+        }
+        _ => 1,
+    };
+    select.last_click = word.map(|word| Click {
+        at: mouse.at,
+        point,
+        word,
+        count,
+    });
+    let granularity = match count {
+        2 => Granularity::Word,
+        3 => Granularity::Line,
+        _ => Granularity::Character,
+    };
+    let initial = selection::range_at(point, granularity, text, width);
+    select.gesture = Some(Gesture {
+        granularity: if initial.is_some() {
+            granularity
+        } else {
+            Granularity::Character
+        },
+        initial,
+        dragged: false,
+    });
+    select.ends = Some(initial.map_or((point, point), |range| (range.start, range.end)));
+}
+
+/// A drag moves the selection's free end. Held on the transcript's top or
+/// bottom line, or past it, the view scrolls the selection on a line every
+/// [`EDGE_SCROLL`].
+fn drag(state: &mut State, mouse: Mouse) {
+    let Some(area) = state.transcript_area else {
+        return;
+    };
+    let Some(gesture) = state.selecting.gesture.as_mut() else {
+        return;
+    };
+    gesture.dragged = true;
+    state.selecting.last_click = None;
+    let room = area.rows as isize;
+    let row = mouse.row as isize - area.y as isize;
+    let pinned = row.clamp(0, (room - 1).max(0));
+    let column = usize::from(mouse.column.saturating_sub(area.x));
+    extend_to(state, column, if row >= room { room } else { pinned });
+    let direction = if row <= 0 {
+        -1
+    } else if row >= room - 1 {
+        1
+    } else {
+        0
+    };
+    if direction == 0 {
+        state.selecting.edge = None;
+        return;
+    }
+    let next = state
+        .selecting
+        .edge
+        .map_or(mouse.at + EDGE_SCROLL, |edge| edge.next);
+    state.selecting.edge = Some(EdgeHold {
+        column,
+        row: pinned,
+        direction,
+        next,
+    });
+}
+
+/// Moves the selection's free end to the point under screen line `row`, a
+/// word or a line at a time after a double or triple click.
+fn extend_to(state: &mut State, column: usize, row: isize) {
+    let Some(area) = state.transcript_area else {
+        return;
+    };
+    let width = usize::from(area.width);
+    let anchors: Vec<_> = state
+        .transcript
+        .screen()
+        .into_iter()
+        .map(|(at, _)| at)
+        .collect();
+    let Some(point) = selection::point_at(column, row, &anchors, width) else {
+        return;
+    };
+    let select = &mut state.selecting;
+    let (Some(gesture), Some((anchor, _))) = (select.gesture, select.ends) else {
+        return;
+    };
+    let range = gesture.initial.and_then(|_| {
+        let text = state.transcript.line_text(point.at);
+        selection::range_at(point, gesture.granularity, &text, width)
+    });
+    select.ends = Some(match (gesture.initial, range) {
+        (Some(initial), Some(range)) => {
+            let before = selection::compare_lines(range.start.at, initial.start.at)
+                .then(range.start.column.cmp(&initial.start.column))
+                .is_lt();
+            if before {
+                (initial.end, range.start)
+            } else {
+                (initial.start, range.end)
+            }
+        }
+        (initial, _) => (initial.map_or(anchor, |initial| initial.start), point),
+    });
+}
+
+/// The end of a press: a click selects nothing and only clears what was
+/// selected; a drag, a word, or a line stays selected.
+fn release(state: &mut State) {
+    let select = &mut state.selecting;
+    select.edge = None;
+    let Some(gesture) = select.gesture.take() else {
+        return;
+    };
+    if gesture.granularity == Granularity::Character && !gesture.dragged {
+        select.ends = None;
+    } else {
+        select.finished = true;
+    }
+}
+
+/// Scrolls a drag held at an edge on by a line for each [`EDGE_SCROLL`]
+/// that has passed, until either end of the transcript.
+fn edge_scroll(state: &mut State) {
+    while let Some(mut edge) = state.selecting.edge {
+        if state.now < edge.next {
+            return;
+        }
+        let at_end = if edge.direction < 0 {
+            !state.transcript.more_above()
+        } else {
+            state.transcript.following()
+        };
+        if at_end {
+            state.selecting.edge = None;
+            return;
+        }
+        if edge.direction < 0 {
+            state.transcript.scroll_up(1);
+        } else {
+            state.transcript.scroll_down(1);
+        }
+        extend_to(state, edge.column, edge.row);
+        edge.next += EDGE_SCROLL;
+        state.selecting.edge = Some(edge);
+    }
 }
 
 fn key(state: &mut State, input: KeyInput) -> Vec<Effect> {
@@ -443,6 +795,8 @@ fn composer_key(state: &mut State, bound: Option<Action>, input: KeyInput) {
             return;
         }
         // Esc stops a sample the way it interrupts a turn or cancels compaction.
+        // Esc drops a selection before it stops anything.
+        Some(Action::Interrupt) if state.selecting.clear() => return,
         Some(Action::Interrupt) => {
             end_turn(state, Outcome::Interrupted);
             state.activity = None;

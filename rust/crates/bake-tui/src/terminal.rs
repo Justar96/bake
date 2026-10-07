@@ -36,8 +36,85 @@ use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Rect;
 
+use crate::clipboard::{self, Clipboard, Platform};
 use crate::git;
 use crate::input;
+
+/// How often the loop looks for a finished copy while one is pending.
+const COPY_POLL: Duration = Duration::from_millis(20);
+
+/// Clipboard workers, joined when the loop ends so none outlives it. A tool
+/// that hangs is killed after its own timeout, so the join is bounded.
+#[derive(Default)]
+struct Workers(Vec<JoinHandle<()>>);
+
+impl Drop for Workers {
+    fn drop(&mut self) {
+        for worker in self.0.drain(..) {
+            let _ = worker.join();
+        }
+    }
+}
+
+/// Copies run here: the terminal's own clipboard at once over SSH or where
+/// no tool applies, and otherwise the tools on a worker thread, which
+/// reports on `done` whether one took the text.
+struct Copier {
+    clipboard: Clipboard,
+    done: Sender<(String, bool)>,
+    results: Receiver<(String, bool)>,
+    pending: usize,
+    workers: Workers,
+}
+
+impl Copier {
+    fn new(clipboard: Clipboard) -> Self {
+        let (done, results) = mpsc::channel();
+        Self {
+            clipboard,
+            done,
+            results,
+            pending: 0,
+            workers: Workers::default(),
+        }
+    }
+
+    fn copy(
+        &mut self,
+        screen: &mut impl Screen,
+        state: &mut State,
+        text: String,
+    ) -> io::Result<()> {
+        let tools = self.clipboard.tools();
+        if self.clipboard.terminal_first() || tools.is_empty() {
+            screen.write(&clipboard::osc52(&text))?;
+            update(state, Msg::Copied(true));
+            return Ok(());
+        }
+        let done = self.done.clone();
+        self.workers.0.retain(|worker| !worker.is_finished());
+        self.workers.0.push(thread::spawn(move || {
+            let ok = tools.into_iter().any(|tool| clipboard::feed(tool, &text));
+            let _ = done.send((text, ok));
+        }));
+        self.pending += 1;
+        Ok(())
+    }
+
+    /// Applies every finished copy. When no tool took the text, the
+    /// terminal's own clipboard is the last resort; a terminal that ignores
+    /// OSC 52 gives no sign, so it counts as copied.
+    fn settle(&mut self, screen: &mut impl Screen, state: &mut State) -> io::Result<()> {
+        while let Ok((text, ok)) = self.results.try_recv() {
+            self.pending -= 1;
+            if !ok {
+                screen.write(&clipboard::osc52(&text))?;
+            }
+            update(state, Msg::Copied(true));
+        }
+        Ok(())
+    }
+}
 
 const OWNED: u8 = 1;
 const RAW: u8 = 1 << 1;
@@ -87,6 +164,8 @@ enum Source {
 trait Screen {
     /// Draws one frame. When `stale`, every cell is repainted.
     fn draw(&mut self, state: &mut State, stale: bool) -> io::Result<()>;
+    /// Writes an escape sequence that is not part of a frame, such as OSC 52.
+    fn write(&mut self, sequence: &str) -> io::Result<()>;
 }
 
 /// Owns raw mode, the alternate screen, bracketed paste, autowrap, cursor
@@ -168,6 +247,10 @@ impl Screen for TerminalSession {
         }
         drawn.and(ended)
     }
+
+    fn write(&mut self, sequence: &str) -> io::Result<()> {
+        execute!(self.terminal.backend_mut(), Print(sequence))
+    }
 }
 
 impl Drop for TerminalSession {
@@ -246,7 +329,8 @@ pub fn run_preview() -> io::Result<PreviewExit> {
     let clock = Instant::now();
     // Started only once raw mode is on, so it never reads cooked input.
     let outcome = Reader::start(sender, clock).and_then(|reader| {
-        let outcome = run_loop(&mut session, &mut state, &inputs, clock);
+        let clipboard = Clipboard::new(Platform::current(), env);
+        let outcome = run_loop(&mut session, &mut state, &inputs, clock, clipboard);
         // Joined before the terminal leaves raw mode, so it reads nothing
         // meant for the shell.
         let stopped = reader.stop();
@@ -268,13 +352,21 @@ fn run_loop(
     state: &mut State,
     inputs: &Receiver<Source>,
     clock: Instant,
+    clipboard: Clipboard,
 ) -> io::Result<PreviewExit> {
+    let mut copier = Copier::new(clipboard);
     let mut stale = false;
     loop {
         update(state, Msg::Tick(clock.elapsed()));
+        copier.settle(screen, state)?;
         screen.draw(state, stale)?;
         stale = false;
-        let first = match state.next_change() {
+        // While a copy is pending, the loop also wakes to report it.
+        let wait = match (state.next_change(), copier.pending > 0) {
+            (wait, false) => wait,
+            (wait, true) => Some(wait.map_or(COPY_POLL, |wait| wait.min(COPY_POLL))),
+        };
+        let first = match wait {
             Some(wait) => match inputs.recv_timeout(wait) {
                 Ok(source) => source,
                 Err(RecvTimeoutError::Timeout) => continue,
@@ -291,8 +383,11 @@ fn run_loop(
                 Source::Failed(err) => return Err(err),
                 Source::Msg(msg) => {
                     stale |= matches!(msg, Msg::Resize { .. });
-                    if update(state, msg).contains(&Effect::Quit) {
-                        return Ok(PreviewExit::Quit);
+                    for effect in update(state, msg) {
+                        match effect {
+                            Effect::Quit => return Ok(PreviewExit::Quit),
+                            Effect::Copy(text) => copier.copy(screen, state, text)?,
+                        }
                     }
                 }
             }
@@ -503,6 +598,10 @@ mod tests {
     }
 
     impl Screen for Scripted {
+        fn write(&mut self, _sequence: &str) -> io::Result<()> {
+            Ok(())
+        }
+
         fn draw(&mut self, state: &mut State, stale: bool) -> io::Result<()> {
             self.frames
                 .push((state.draft.text().to_owned(), stale, state.now));
@@ -518,8 +617,60 @@ mod tests {
         }
     }
 
+    /// Records the sequences written outside frames.
+    #[derive(Default)]
+    struct Recorder(Vec<String>);
+
+    impl Screen for Recorder {
+        fn draw(&mut self, _state: &mut State, _stale: bool) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn write(&mut self, sequence: &str) -> io::Result<()> {
+            self.0.push(sequence.to_owned());
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn over_ssh_a_copy_goes_to_the_terminal_at_once() {
+        let mut copier = Copier::new(no_clipboard());
+        let (mut screen, mut state) = (Recorder::default(), State::default());
+        copier.copy(&mut screen, &mut state, "hi".into()).unwrap();
+        assert_eq!(screen.0, ["\x1b]52;c;aGk=\x07"]);
+        assert_eq!(state.copied.map(|(ok, _)| ok), Some(true));
+        assert_eq!(copier.pending, 0);
+    }
+
+    #[test]
+    fn a_copy_no_tool_took_falls_back_to_the_terminal() {
+        let mut copier = Copier::new(no_clipboard());
+        let (mut screen, mut state) = (Recorder::default(), State::default());
+        // As a worker reports: one copy a tool took, one none did.
+        copier.pending = 2;
+        copier.done.send(("taken".into(), true)).unwrap();
+        copier.done.send(("hi".into(), false)).unwrap();
+        copier.settle(&mut screen, &mut state).unwrap();
+        assert_eq!(screen.0, ["\x1b]52;c;aGk=\x07"]);
+        assert_eq!(copier.pending, 0);
+        assert_eq!(state.copied.map(|(ok, _)| ok), Some(true));
+    }
+
+    /// A clipboard with no tools: copies go to the terminal itself.
+    fn no_clipboard() -> Clipboard {
+        Clipboard::new(Platform::Other, |name| {
+            (name == "SSH_TTY").then(|| "/dev/pts/0".to_owned())
+        })
+    }
+
     fn run(screen: &mut Scripted, inputs: &Receiver<Source>) -> io::Result<PreviewExit> {
-        run_loop(screen, &mut State::default(), inputs, Instant::now())
+        run_loop(
+            screen,
+            &mut State::default(),
+            inputs,
+            Instant::now(),
+            no_clipboard(),
+        )
     }
 
     #[test]
@@ -581,6 +732,10 @@ mod tests {
     }
 
     impl Screen for UntilTick {
+        fn write(&mut self, _sequence: &str) -> io::Result<()> {
+            Ok(())
+        }
+
         fn draw(&mut self, state: &mut State, _stale: bool) -> io::Result<()> {
             self.frames
                 .push((state.now, state.activity.map(|sample| sample.started)));
@@ -601,7 +756,13 @@ mod tests {
             sender,
             frames: Vec::new(),
         };
-        let exit = run_loop(&mut screen, &mut State::default(), &inputs, Instant::now());
+        let exit = run_loop(
+            &mut screen,
+            &mut State::default(),
+            &inputs,
+            Instant::now(),
+            no_clipboard(),
+        );
         assert_eq!(exit.unwrap(), PreviewExit::Quit);
         // Frame 1 shows the started sample; frame 2 came from its timer alone,
         // no sooner than its first beat.

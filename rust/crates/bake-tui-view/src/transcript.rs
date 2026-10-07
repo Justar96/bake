@@ -2099,25 +2099,65 @@ impl Transcript {
         self.anchor.is_none()
     }
 
-    /// Lines from `anchor` down, at most `limit`.
-    fn lines_from(&self, anchor: Anchor, limit: usize) -> Vec<Line<'static>> {
+    /// Lines from `anchor` down, at most `limit`, each with the row and
+    /// line that draw it.
+    fn walk(&self, anchor: Anchor, limit: usize) -> Vec<(Anchor, Line<'static>)> {
         let mut out = Vec::new();
         let mut skip = anchor.line;
-        for index in anchor.row..self.rows.len() {
-            for line in self.lines(index).into_iter().skip(skip) {
+        for row in anchor.row..self.rows.len() {
+            for (line, content) in self.lines(row).into_iter().enumerate().skip(skip) {
                 if out.len() == limit {
                     return out;
                 }
-                out.push(line);
+                out.push((Anchor { row, line }, content));
             }
             skip = 0;
         }
         out
     }
 
+    fn lines_from(&self, anchor: Anchor, limit: usize) -> Vec<Line<'static>> {
+        self.walk(anchor, limit)
+            .into_iter()
+            .map(|(_, line)| line)
+            .collect()
+    }
+
     /// The lines the viewport shows, `height` of them at most.
     pub fn visible(&self) -> Vec<Line<'static>> {
         self.lines_from(self.top(), self.height)
+    }
+
+    /// The lines the viewport shows with the row and line that draw each,
+    /// for a selection to find its text on screen.
+    pub fn screen(&self) -> Vec<(Anchor, Line<'static>)> {
+        self.walk(self.top(), self.height)
+    }
+
+    /// The text of the line at `at`, as drawn; empty past the transcript.
+    pub fn line_text(&self, at: Anchor) -> String {
+        self.lines(at.row)
+            .get(at.line)
+            .map(ToString::to_string)
+            .unwrap_or_default()
+    }
+
+    /// Every line from `start` to `end`, both included, as drawn: the text a
+    /// selection copies.
+    pub fn between(&self, start: Anchor, end: Anchor) -> Vec<(Anchor, String)> {
+        let mut out = Vec::new();
+        let mut skip = start.line;
+        for row in start.row..=end.row.min(self.rows.len().saturating_sub(1)) {
+            for (line, content) in self.lines(row).into_iter().enumerate().skip(skip) {
+                let at = Anchor { row, line };
+                if (row, line) > (end.row, end.line) {
+                    return out;
+                }
+                out.push((at, content.to_string()));
+            }
+            skip = 0;
+        }
+        out
     }
 
     /// Whether lines lie below the viewport.

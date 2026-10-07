@@ -21,7 +21,8 @@ class Preview {
   private parsed = Promise.resolve()
   private code: number | undefined
   private streamStatus: number | undefined
-  private raw = ''
+  /** Everything the preview wrote, its last MiB, for sequences the screen does not show. */
+  raw = ''
 
   constructor(cwd: string) {
     const decoder = new TextDecoder()
@@ -29,7 +30,9 @@ class Preview {
     // lets us read cooked modes before the native process can enable raw mode.
     this.process = Bun.spawn(['sh', '-c', 'read -r ready; exec "$1" preview', 'rust-preview-pty', binary], {
       cwd,
-      env: { PATH: process.env.PATH, TERM: 'xterm-256color', LANG: 'C.UTF-8' },
+      // SSH_TTY sends a copy to the terminal as OSC 52, which the driver
+      // reads, instead of to this machine's clipboard.
+      env: { PATH: process.env.PATH, TERM: 'xterm-256color', LANG: 'C.UTF-8', SSH_TTY: '/dev/pts/bake-pty' },
       terminal: {
         cols: 80, rows: 24,
         data: (_terminal, bytes) => {
@@ -268,6 +271,16 @@ await scenario('the wheel scrolls the transcript and the scrollbar takes clicks 
   const worldColumn = [...draftLine.slice(0, draftLine.indexOf('world'))].length
   preview.send(sgr(0, worldColumn + 1, draftRow + 1) + sgr(0, worldColumn + 1, draftRow + 1, false) + 'big ')
   await preview.wait('caret placed by a press', () => preview.screen.includes('❯ hello big world'))
+  // A double click in the transcript selects a word and copies it on release, through OSC 52 here.
+  const textLines = preview.screen.split('\n')
+  const wordRow = textLines.findIndex(line => line.includes('before splitting.'))
+  const wordLine = textLines[wordRow] ?? ''
+  const wordColumn = [...wordLine.slice(0, wordLine.indexOf('splitting'))].length + 3
+  const click = sgr(0, wordColumn, wordRow + 1) + sgr(0, wordColumn, wordRow + 1, false)
+  preview.send(click + click)
+  const copied = `\x1b]52;c;${Buffer.from('splitting').toString('base64')}\x07`
+  await preview.wait('word copied', () => preview.raw.includes(copied) && preview.screen.includes('Copied'))
+  await preview.wait('copy notice gone', () => !preview.screen.includes('Copied'))
   await preview.quit()
 })
 

@@ -17,9 +17,10 @@ use crate::editor::{self, display};
 use crate::frame::FrameStyle;
 use crate::layout::{self, Needs};
 use crate::mode::{self, HINT_MIN_COLUMNS};
+use crate::selection::line_columns;
 use crate::state::{
-    DraftSpot, Focus, Notice, Outcome, SAMPLE_AGENTS, SampleAgent, SampleKind, ScrollTrack, Spot,
-    State, agent,
+    Area, DraftSpot, Focus, Notice, Outcome, SAMPLE_AGENTS, SampleAgent, SampleKind, ScrollTrack,
+    Spot, State, agent,
 };
 use crate::status::{self, Tone};
 use crate::transcript::{self, Look, TagTone};
@@ -79,6 +80,7 @@ pub fn render(app: &mut State, frame: &mut Frame) {
 
     let buf = frame.buffer_mut();
     app.latest = None;
+    app.transcript_area = None;
     render_body(app, body, gap, buf);
     // The prompt to press Ctrl+C again takes the notice's row while it is
     // armed; the notice returns when it lapses.
@@ -403,9 +405,27 @@ fn render_transcript(app: &mut State, area: Rect, gap: Rect, buf: &mut Buffer) {
             lit: transcript::lit(app.now),
         },
     );
-    for (i, content) in view.visible().into_iter().enumerate() {
-        line(buf, Rect::new(area.x, area.y + i as u16, width, 1), content);
+    let range = app.selecting.range();
+    for (i, (at, content)) in view.screen().into_iter().enumerate() {
+        let y = area.y + i as u16;
+        // The cells a selection covers are drawn reversed, keeping their
+        // own colours, as a terminal draws its own selection.
+        let selected = range.and_then(|range| line_columns(range, at, &content.to_string()));
+        line(buf, Rect::new(area.x, y, width, 1), content);
+        if let Some((from, to)) = selected {
+            for column in from..to.min(usize::from(width)) {
+                buf[(area.x + column as u16, y)]
+                    .modifier
+                    .insert(Modifier::REVERSED);
+            }
+        }
     }
+    app.transcript_area = Some(Area {
+        x: area.x,
+        y: area.y,
+        width,
+        rows,
+    });
     let thumb = bar.then(|| view.thumb(usize::from(rows))).flatten();
     app.track = thumb.map(|_| ScrollTrack {
         column: area.x + width,
@@ -437,6 +457,29 @@ fn render_transcript(app: &mut State, area: Rect, gap: Rect, buf: &mut Buffer) {
 /// output arrives below. The pill gives up its key, then its count, before
 /// it would be cut. Pressing it follows output again.
 fn render_scroll_hint(app: &mut State, row: Rect, buf: &mut Buffer) {
+    // Whether a selection was copied takes the row for a moment, at the
+    // right, apart from the transcript's text.
+    if let Some((ok, _)) = app.copied {
+        // The green and red of a call's done and failed marks.
+        let (text, rgb, ansi) = if ok {
+            (copy::COPIED, (0x22, 0xc5, 0x5e), Color::Green)
+        } else {
+            (copy::COPY_FAILED, (0xef, 0x44, 0x44), Color::Red)
+        };
+        let cells = (text.len() as u16).min(row.width);
+        let style = match app.tones {
+            Tones::TrueColor => Style::new().fg(Color::Rgb(rgb.0, rgb.1, rgb.2)),
+            Tones::Ansi => Style::new().fg(ansi),
+            Tones::None => Style::new(),
+        }
+        .add_modifier(Modifier::BOLD);
+        line(
+            buf,
+            Rect::new(row.x + row.width - cells, row.y, cells, 1),
+            Line::styled(text, style),
+        );
+        return;
+    }
     let view = &app.transcript;
     if view.following() {
         if !view.more_above() {
@@ -722,7 +765,9 @@ mod tests {
     use crate::keys::{Key, KeyInput, Mods};
     use std::time::Duration;
 
-    use crate::state::{Mouse, MouseKind, Msg, QUIT_WINDOW, SampleActivity, update};
+    use crate::state::{
+        COPIED, EDGE_SCROLL, Effect, Mouse, MouseKind, Msg, QUIT_WINDOW, SampleActivity, update,
+    };
 
     /// Columns where boxed draft text starts.
     const TEXT_X: u16 = 4;
@@ -1343,6 +1388,170 @@ mod tests {
         draw(&mut app, 40, 12);
         update(&mut app, mouse(MouseKind::Down, world, y, 0));
         assert_eq!(app.draft.caret(), 0);
+    }
+
+    /// Each screen row's reversed cells, as text; empty where none are.
+    fn reversed(app: &mut State, width: u16, height: u16) -> Vec<String> {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal.draw(|f| render(app, f)).unwrap();
+        let buffer = terminal.backend().buffer();
+        (0..height)
+            .map(|y| {
+                (0..width)
+                    .filter(|&x| buffer[(x, y)].modifier.contains(Modifier::REVERSED))
+                    .map(|x| buffer[(x, y)].symbol().to_owned())
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// The screen row holding `needle`, and the column it starts at.
+    fn find(rows: &[String], needle: &str) -> (u16, u16) {
+        let row = row_index(rows, needle);
+        let line = &rows[row];
+        let column = line[..line.find(needle).unwrap()].chars().count();
+        (row as u16, column as u16)
+    }
+
+    #[test]
+    fn a_drag_in_the_transcript_selects_and_reverses_its_cells() {
+        let mut app = State::default();
+        let (rows, _) = draw(&mut app, 80, 24);
+        let (y, x) = find(&rows, "before splitting.");
+        update(&mut app, mouse(MouseKind::Down, x, y, 0));
+        update(&mut app, mouse(MouseKind::Drag, x + 5, y, 10));
+        update(&mut app, mouse(MouseKind::Up, x + 5, y, 20));
+        let marked = reversed(&mut app, 80, 24);
+        // A dragged end covers its own cell.
+        assert_eq!(marked[usize::from(y)], "before");
+        assert!(
+            marked
+                .iter()
+                .enumerate()
+                .all(|(i, m)| i == usize::from(y) || m.is_empty())
+        );
+        // A click selects nothing and clears what was selected.
+        update(&mut app, mouse(MouseKind::Down, x, y, 1000));
+        update(&mut app, mouse(MouseKind::Up, x, y, 1010));
+        assert!(app.selecting.range().is_none());
+    }
+
+    #[test]
+    fn a_release_copies_the_selection_and_the_indicator_says_so() {
+        let mut app = State::default();
+        let (rows, _) = draw(&mut app, 80, 24);
+        let (y, x) = find(&rows, "before splitting.");
+        // Dragged from the line above to the middle of this one: each line
+        // as drawn, cut to its cells and trimmed at its end.
+        // The scrollbar's column is not the transcript's, so it is not copied.
+        let above: String = rows[usize::from(y) - 1].chars().take(79).collect();
+        let above = above.trim_end();
+        update(&mut app, mouse(MouseKind::Down, 0, y - 1, 0));
+        update(&mut app, mouse(MouseKind::Drag, x + 5, y, 10));
+        let copied = update(&mut app, mouse(MouseKind::Up, x + 5, y, 20));
+        let text = format!("{above}\n  rejects it before");
+        assert_eq!(copied, [Effect::Copy(text)]);
+        // A click copies nothing.
+        update(&mut app, mouse(MouseKind::Down, x, y, 1000));
+        assert!(update(&mut app, mouse(MouseKind::Up, x, y, 1010)).is_empty());
+        // The indicator says it was copied, at the right, then goes back.
+        update(&mut app, Msg::Copied(true));
+        let (rows, _) = draw(&mut app, 80, 24);
+        let bar = row_index(&rows, "no model");
+        assert!(
+            rows[bar - 1].trim_end().ends_with("Copied"),
+            "{:?}",
+            rows[bar - 1]
+        );
+        assert_eq!(app.next_change(), Some(COPIED));
+        update(&mut app, Msg::Tick(COPIED));
+        update(&mut app, Msg::Copied(false));
+        let (rows, _) = draw(&mut app, 80, 24);
+        assert!(rows[bar - 1].contains("Copy failed"));
+        update(&mut app, Msg::Tick(COPIED * 2));
+        let (rows, _) = draw(&mut app, 80, 24);
+        assert!(rows[bar - 1].contains("PgUp scroll"));
+    }
+
+    #[test]
+    fn a_double_click_takes_a_word_and_a_triple_its_line() {
+        let mut app = State::default();
+        let (rows, _) = draw(&mut app, 80, 24);
+        let (y, x) = find(&rows, "splitting.");
+        let click = |app: &mut State, at: u64| {
+            update(app, mouse(MouseKind::Down, x + 2, y, at));
+            update(app, mouse(MouseKind::Up, x + 2, y, at + 5));
+        };
+        click(&mut app, 0);
+        click(&mut app, 100);
+        assert_eq!(reversed(&mut app, 80, 24)[usize::from(y)], "splitting");
+        click(&mut app, 200);
+        // A line runs from its first cell to the end of its text.
+        let line = reversed(&mut app, 80, 24)[usize::from(y)].clone();
+        assert_eq!(line, "  rejects it before splitting.");
+        // Too slow, it starts over as a click.
+        click(&mut app, 2000);
+        click(&mut app, 2600);
+        assert!(app.selecting.range().is_none());
+    }
+
+    #[test]
+    fn esc_and_a_new_width_drop_the_selection_before_anything_else() {
+        let mut app = State::default();
+        update(
+            &mut app,
+            Msg::Key(KeyInput::new(Key::Char('t'), Mods::CTRL)),
+        );
+        let (rows, _) = draw(&mut app, 80, 24);
+        let (y, x) = find(&rows, "before splitting.");
+        let select = |app: &mut State| {
+            update(app, mouse(MouseKind::Down, x, y, 0));
+            update(app, mouse(MouseKind::Drag, x + 3, y, 10));
+            update(app, mouse(MouseKind::Up, x + 3, y, 20));
+        };
+        select(&mut app);
+        assert!(app.selecting.range().is_some());
+        key(&mut app, Key::Esc);
+        assert!(app.selecting.range().is_none());
+        // The sample turn still runs: Esc only dropped the selection.
+        assert!(app.activity.is_some());
+        select(&mut app);
+        update(&mut app, Msg::Resize { cols: 80, rows: 24 });
+        update(&mut app, Msg::Resize { cols: 80, rows: 30 });
+        assert!(app.selecting.range().is_some(), "a new height keeps it");
+        update(
+            &mut app,
+            Msg::Resize {
+                cols: 100,
+                rows: 30,
+            },
+        );
+        assert!(app.selecting.range().is_none());
+    }
+
+    #[test]
+    fn a_drag_held_at_the_top_scrolls_the_selection_on() {
+        let mut app = State::default();
+        let (rows, _) = draw(&mut app, 80, 24);
+        let (y, x) = find(&rows, "before splitting.");
+        update(&mut app, mouse(MouseKind::Down, x, y, 0));
+        update(&mut app, mouse(MouseKind::Drag, 4, 0, 10));
+        assert!(app.transcript.following());
+        // The loop wakes for the edge, and each step scrolls a line.
+        assert_eq!(
+            app.next_change(),
+            Some(EDGE_SCROLL + Duration::from_millis(10))
+        );
+        update(
+            &mut app,
+            Msg::Tick(Duration::from_millis(10) + EDGE_SCROLL * 3),
+        );
+        assert!(!app.transcript.following());
+        let top = app.transcript.top();
+        assert_eq!(app.selecting.range().map(|r| r.start.at), Some(top));
+        // Released, the edge stops.
+        update(&mut app, mouse(MouseKind::Up, 4, 0, 200));
+        assert_eq!(app.next_change(), None);
     }
 
     /// The scrollbar column of a drawn screen, top to bottom.

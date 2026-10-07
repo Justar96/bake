@@ -17,6 +17,7 @@ pub mod layout;
 pub mod live;
 pub mod mode;
 pub mod render;
+pub mod selection;
 pub mod shell_output;
 pub mod state;
 pub mod status;
