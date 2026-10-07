@@ -260,29 +260,36 @@ The mouse is on in fullscreen, with the TypeScript modes: presses, releases, and
 
 ## Code mode
 
-A `run_code` call, a program the model writes in TypeScript and runs in the confined QuickJS VM, is one transcript block like any call ([D8](#intentional-differences)). Its head reads `Script` and the program's description, and its source, its calls, and its result hang under it:
+A `run_code` call, a program the model writes in TypeScript and runs in the confined QuickJS VM, is one transcript block like any call ([D8](#intentional-differences)). The block follows the program's life in three groups, parted by blank rows: the program the model wrote, the calls the program made through its `tools` bindings, and what went back to the model. Only that last group re-enters the model's context; the calls between stay on the harness side, which is the point of code mode.
 
 ```
   ✓ Script: Find TODOs  13 calls · 1 failed
-    1  const found = [];
-    2  for (const path of await tools.glob({ pattern: "src/**/*.ts" })) {
-    ⋯ 2 more lines
-    5  }
-    6  return found;
-    ├ ✓ Glob: src/**/*.ts  12 files
-    ├ ✓ Read: src/m0.ts  2 lines
-    ├ ⋯ 4 more calls
-    ├ ✗ Read: src/m5.ts  Permission denied
-    ├ ⋯ 4 more calls
-    ├ ✓ Read: src/m10.ts  2 lines
-    └ ✓ Read: src/m11.ts  2 lines
-    → ["src/m3.ts", "src/m9.ts"]
+  │ 1  const found = [];
+  │ 2  for (const path of await tools.glob({ pattern: "src/**/*.ts" })) {
+  │ 3    try {
+  │ 4      if ((await tools.read({ path })).includes("TODO")) found.push(path);
+  │ 5    } catch (error) {
+  │ 6      console.log(`skipped ${path}: ${error.message}`);
+  │ 7    }
+  │ 8  }
+  │ 9  return found;
+  │
+  ├ ✓ tools.glob  src/**/*.ts  12 files
+  ├ ✓ tools.read  src/m0.ts  2 lines
+  ├ ⋯ 4 more calls
+  ├ ✗ tools.read  src/m5.ts  Permission denied
+  ├ ⋯ 4 more calls
+  ├ ✓ tools.read  src/m10.ts  2 lines
+  └ ✓ tools.read  src/m11.ts  2 lines
+
+  │ skipped src/m5.ts: Permission denied
+  → ["src/m3.ts", "src/m9.ts"]
 ```
 
 - **Head.** The script's own state mark, `Script`, and its description, then how many calls it made, and once it has ended, how many failed, in red: `13 calls · 1 failed`. While it runs, each failed call is red on its own row instead, as the TypeScript `callTally` does.
-- **Source.** Numbered from 1, the numbers dim, the code at full brightness with its indentation kept. A source longer than five lines shows its first two and last two lines around `⋯ N more lines`, and the numbers after the count keep their place, so a reader can still say which line is which.
-- **Calls.** One row each on a tree one level in, `├` and `└` at column 4, each with its own state mark, tool name, argument, and its note two cells after the argument: a size such as `2 lines` when it succeeded, its error in red when it failed. A call that succeeded never shows its output; the script's result is what it worked toward. The first two and last two calls stay, up to three that failed or never finished stay where they were, and every other run folds into `⋯ N more calls`; a count that would stand for one call is that call. These are the TypeScript `NESTED_ENDS` and `NESTED_FAILURES` rules. When a note does not fit beside its call, it moves to a row of its own under the argument, wrapping there rather than being cut, and the tree's stem runs beside it.
-- **Result.** What the program returned, after `→`, previewed like any output, and red when the script failed.
+- **Source.** Numbered from 1, the numbers dim, the code syntax-coloured with its indentation kept. The program is what the model chose to do, so up to eleven lines read whole; a longer source shows its first five and last five lines around `⋯ N more lines`, and the numbers after the count keep their place.
+- **Calls.** One row each on a tree that branches from the source's spine, each with its own state mark, the binding the program called, `tools.read`, and its argument, then its note two cells after the argument: a size such as `2 lines` when it succeeded, its error in red when it failed. A tool whose name is not an identifier reads as the generated SDK keys it, `tools["my-tool"]`. `tools.` is dim and the tool's name bold, and every binding shares one column, so the arguments align down the tree; a binding longer than 16 cells takes its own width instead. A call that succeeded never shows its output, because the program consumed it and the model never saw it. The first two and last two calls stay, up to three that failed or never finished stay where they were, and every other run folds into `⋯ N more calls`; a count that would stand for one call is that call. These are the TypeScript `NESTED_ENDS` and `NESTED_FAILURES` rules. When a note does not fit beside its call, it moves to a row of its own under the argument, wrapping there rather than being cut, and the tree's stem runs beside it.
+- **Back to the model.** What the program logged with `console.log`, hung from the output gutter and previewed like any output, then what it returned after `→`, coloured as TypeScript. A failed script keeps the lines it logged before it failed, and its error follows `→` in red, as the outer result carries the error and the captured output together.
 - **Classic frame.** `|` and `` ` `` draw the tree and `>` the result.
 
 The preview draws one finished sample script. These remain: a running script's live window, which keeps the head and the newest calls when the live region is short (the TypeScript `fittedAction`), approvals raised by a script's calls, and the session log as the source of the calls.

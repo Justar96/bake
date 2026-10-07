@@ -200,7 +200,7 @@ await scenario('transcript pages, jumps between prompts, and follows output agai
   preview.send('\x1b[1;5A')
   await preview.wait('code-mode block', () => /^> Find TODO comments/u.test(preview.screen)
     && /✓ Script: Find TODOs +13 calls · 1 failed/u.test(preview.screen)
-    && /✗ Read: src\/m5\.ts +Permission denied/u.test(preview.screen))
+    && /✗ tools\.read +src\/m5\.ts +Permission denied/u.test(preview.screen))
   preview.send('\x1b[1;5H')
   await preview.wait('transcript start', () => /^ {2}Bake · Rust preview/mu.test(preview.screen))
   preview.send('\x1b[1;5B')
