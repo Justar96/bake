@@ -118,6 +118,9 @@ class Preview {
       this.send('\x03')
     } else this.process.kill(signal)
     await this.wait('preview process and PTY exit', () => this.code !== undefined && this.streamStatus !== undefined)
+    // The wait read the parse queue before its last output arrived; the
+    // stream has ended now, so this queue holds every byte the preview wrote.
+    await this.parsed
     assert.equal(await this.exited, signal === 'SIGTERM' ? 143 : signal === 'SIGHUP' ? 129 : signal === 'SIGINT' ? 130 : 0)
     assert.equal(this.process.signalCode, null)
     // Linux reports EIO when the last slave closes, including a clean exit.
