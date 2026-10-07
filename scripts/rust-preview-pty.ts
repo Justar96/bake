@@ -206,12 +206,12 @@ await scenario('transcript pages, jumps between prompts, and follows output agai
   preview.send('\x1b[1;5F')
   await preview.wait('following again', () => preview.screen.includes('PgUp scroll') && preview.screen.includes('before splitting.'))
   assert(preview.screen.includes('❯ keep'), 'transcript navigation changed the draft')
-  // Wide enough, an edit's diff goes side by side; narrow again, it is unified. Without truecolor
+  // Wide enough, an edit's numbered diff goes side by side; narrow again, it is unified. Without truecolor
   // there is no box, so the gutter takes the cell before the diff.
   await preview.resize(120, 30)
-  await preview.wait('side-by-side diff', () => /^ {2}[│ ] - {2}if \(quote\) fields\.push\(rest\); +│ \+ {2}if \(quote\) throw/mu.test(preview.screen))
+  await preview.wait('side-by-side diff', () => /^ {2}[│ ] 42 [-▎] {3}if \(quote\) fields\.push\(rest\); +│ 42 [+▎] {3}if \(quote\) throw/mu.test(preview.screen))
   await preview.resize(80, 30)
-  await preview.wait('unified diff', () => /^ {2}[│ ] \+ {2}if \(quote\) throw/mu.test(preview.screen))
+  await preview.wait('unified diff', () => /^ {2}[│ ] 42 [+▎] {3}if \(quote\) throw/mu.test(preview.screen))
   await preview.quit()
 })
 

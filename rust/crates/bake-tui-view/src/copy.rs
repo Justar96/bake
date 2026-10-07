@@ -35,6 +35,8 @@ pub const PHASE_SECONDS: u64 = 4;
 pub const ABOVE: &str = "above";
 /// A result preview's count of the lines it leaves out: `⋯ 4 more lines`.
 pub const MORE_LINES: &str = "more lines";
+/// A diff's count of the lines between its hunks: `⋯ 40 unmodified lines`.
+pub const UNMODIFIED: &str = "unmodified lines";
 /// A call's line count when it has no summary of its own: `1 line`, `2 lines`.
 pub const LINE: &str = "line";
 pub const LINES: &str = "lines";

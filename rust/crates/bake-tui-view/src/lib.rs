@@ -9,6 +9,7 @@
 pub mod activity;
 pub mod composer;
 mod copy;
+pub mod diff;
 pub mod editor;
 pub mod frame;
 pub mod keys;

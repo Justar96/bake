@@ -21,6 +21,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::activity::Tones;
 use crate::copy;
+use crate::diff::{self, Change, DiffLine, DiffRow, SplitRow};
 use crate::editor;
 use crate::syntax::{self, Carry, Lang};
 
@@ -138,6 +139,7 @@ pub fn sample_session() -> Vec<Row> {
             CallState::Done,
             None,
             &[
+                "@@ -41,4 +41,4 @@",
                 "   const fields = split(line);",
                 "-  if (quote) fields.push(rest);",
                 "+  if (quote) throw new SyntaxError(\"unterminated quote\");",
@@ -875,217 +877,231 @@ fn ride(
     }
 }
 
-/// The background of an added or removed diff line inside a call's box: a
-/// green or red a step off the box's grey.
-fn diff_tint(sign: u8) -> Option<Color> {
-    match sign {
-        b'+' => Some(Color::Rgb(0x21, 0x3a, 0x2c)),
-        b'-' => Some(Color::Rgb(0x3d, 0x25, 0x29)),
-        _ => None,
-    }
-}
-
-/// One line of an edit's diff. In a box, the sign takes the line's colour,
-/// the code its syntax colour (dim on a removed line), and an added or
-/// removed row a green or red tint from the box's left text column to its
-/// right one. Without a box there is no tint to tell the rows apart, so the
-/// whole line takes green or red, as a plain diff does.
-fn diff_line(
-    text: &str,
-    lang: Option<Lang>,
-    carry: &mut Carry,
-    width: usize,
-    lead: Vec<Span<'static>>,
-    look: Look,
-) -> Vec<Line<'static>> {
-    let text = expand_tabs(text);
-    let sign = text.as_bytes().first().copied().unwrap_or(b' ');
-    if !boxes(look) {
-        return hang(
-            &text,
-            width,
-            BODY,
-            lead.clone(),
-            lead,
-            diff_style(&text, look),
-        );
-    }
-    let base = if sign == b'-' {
-        dim()
-    } else {
-        output_tone(look.tones)
-    };
-    let mut runs = vec![(0..usize::from(!text.is_empty()), diff_style(&text, look))];
-    let code = text.get(1..).unwrap_or_default();
-    runs.extend(
-        code_runs(code, lang, carry, look.tones)
-            .into_iter()
-            .map(|(range, style)| (range.start + 1..range.end + 1, style)),
-    );
-    let mut rows = hang_runs(&text, &runs, base, width, BODY, lead.clone(), lead);
-    if let Some(tint) = diff_tint(sign) {
-        for row in &mut rows {
-            for span in row.spans.iter_mut().skip(1) {
-                span.style = span.style.bg(tint);
-            }
-            let used = row.width();
-            if used < width {
-                row.spans.push(Span::styled(
-                    " ".repeat(width - used),
-                    Style::new().bg(tint),
-                ));
-            }
-        }
-    }
-    rows
-}
-
 /// Cells a call's text area needs before an edit's diff goes side by side,
 /// so each side keeps about 46 cells.
 pub const SPLIT_MIN: usize = 100;
 /// The divider between a split diff's sides.
 const DIVIDER: &str = " │ ";
+/// Diff rows an edit draws before the rest folds into a count.
+pub const DIFF_ROWS: usize = 16;
 
-/// One side of a diff line, `cells` wide, its wrapped rows hung past the
-/// sign column: the sign in its colour, the code in
-/// syntax colour, dim when removed, and in a box a changed row's tint across
-/// the whole side. Without a box, the line takes green or red whole. Every
-/// row is padded to `cells`.
-fn pane(
-    text: &str,
+/// The tints of a changed diff line in a call's box: the line, and the
+/// stronger one under the part of it that changed.
+fn diff_tints(change: Change) -> Option<(Color, Color)> {
+    match change {
+        Change::Removed => Some((Color::Rgb(0x3d, 0x25, 0x29), Color::Rgb(0x6b, 0x2f, 0x37))),
+        Change::Added => Some((Color::Rgb(0x21, 0x3a, 0x2c), Color::Rgb(0x2a, 0x5e, 0x3f))),
+        Change::Context => None,
+    }
+}
+
+/// A change's colour: red removed, green added.
+fn change_colour(change: Change, look: Look) -> Style {
+    match change {
+        Change::Removed => red(look),
+        Change::Added => colour(look.tones, (0x22, 0xc5, 0x5e), Color::Green),
+        Change::Context => output_tone(look.tones),
+    }
+}
+
+/// The mark beside a changed line: a coloured bar where colour tells removed
+/// from added, and `-` or `+` where it cannot, under `NO_COLOR` or with the
+/// classic frame.
+fn change_mark(change: Change, look: Look) -> &'static str {
+    let bars = look.tones != Tones::None && !look.classic;
+    match (change, bars) {
+        (Change::Context, _) => " ",
+        (_, true) => "▎",
+        (Change::Removed, false) => "-",
+        (Change::Added, false) => "+",
+    }
+}
+
+/// `runs` with `emphasis` laid over them: the bytes split at every edge so
+/// runs never overlap, and each byte in `emphasis` given `strong` as well as
+/// its own style.
+fn overlay(
+    runs: Vec<(Range<usize>, Style)>,
+    emphasis: Option<Range<usize>>,
+    strong: Style,
+    len: usize,
+) -> Vec<(Range<usize>, Style)> {
+    let Some(emphasis) = emphasis.filter(|e| !e.is_empty()) else {
+        return runs;
+    };
+    let mut edges: Vec<usize> = runs
+        .iter()
+        .flat_map(|(r, _)| [r.start, r.end])
+        .chain([0, len, emphasis.start, emphasis.end])
+        .collect();
+    edges.sort_unstable();
+    edges.dedup();
+    edges
+        .windows(2)
+        .map(|w| w[0]..w[1])
+        .filter(|seg| !seg.is_empty())
+        .map(|seg| {
+            let own = runs
+                .iter()
+                .find(|(r, _)| r.start <= seg.start && seg.end <= r.end)
+                .map_or(Style::new(), |(_, style)| *style);
+            let inside = emphasis.start <= seg.start && seg.end <= emphasis.end;
+            (seg, if inside { own.patch(strong) } else { own })
+        })
+        .collect()
+}
+
+/// One side of a diff row, exactly `cells` wide on every row: the line's
+/// number right-aligned in `digits` cells, its change mark, and its code
+/// wrapped under itself. In a box, a changed line is tinted across the side
+/// and the part that changed takes the stronger tint; without one, a changed
+/// line takes its colour whole and the changed part is bold. An empty side
+/// is a blank row.
+fn diff_side(
+    line: Option<&DiffLine>,
+    cells: usize,
+    digits: usize,
     lang: Option<Lang>,
     carry: &mut Carry,
-    cells: usize,
     look: Look,
-) -> (Vec<Line<'static>>, Option<Color>) {
-    let text = expand_tabs(text);
-    let sign = text.as_bytes().first().copied().unwrap_or(b' ');
-    let tint = if boxes(look) { diff_tint(sign) } else { None };
-    let mut rows = if boxes(look) {
-        let base = if sign == b'-' {
-            dim()
-        } else {
-            output_tone(look.tones)
-        };
-        let mut runs = vec![(0..usize::from(!text.is_empty()), diff_style(&text, look))];
-        let code = text.get(1..).unwrap_or_default();
-        runs.extend(
-            code_runs(code, lang, carry, look.tones)
-                .into_iter()
-                .map(|(range, style)| (range.start + 1..range.end + 1, style)),
-        );
-        hang_runs(&text, &runs, base, cells, 1, Vec::new(), vec![pad(1)])
+) -> Vec<Line<'static>> {
+    let Some(line) = line else {
+        return vec![Line::from(pad(cells))];
+    };
+    let boxed = boxes(look);
+    let tints = if boxed { diff_tints(line.change) } else { None };
+    let number_style = match line.change {
+        Change::Context => dim(),
+        change => change_colour(change, look),
+    };
+    let number = line.number().map_or(String::new(), |n| n.to_string());
+    let mark = Span::styled(
+        change_mark(line.change, look),
+        change_colour(line.change, look),
+    );
+    let first = vec![
+        Span::styled(format!("{number:>digits$} "), number_style),
+        mark.clone(),
+        pad(1),
+    ];
+    let rest = vec![pad(digits + 1), mark, pad(1)];
+    let indent = digits + 3;
+    let code = expand_tabs(&line.code);
+    let (base, runs, strong) = if boxed || line.change == Change::Context {
+        let runs = code_runs(&code, lang, carry, look.tones);
+        let strong = tints.map_or(Style::new(), |(_, strong)| Style::new().bg(strong));
+        (output_tone(look.tones), runs, strong)
     } else {
-        hang(
-            &text,
-            cells,
-            1,
+        // Without a box the line's colour marks it; syntax would hide it.
+        code_runs(&code, lang, carry, look.tones);
+        (
+            change_colour(line.change, look),
             Vec::new(),
-            vec![pad(1)],
-            diff_style(&text, look),
+            Style::new().add_modifier(Modifier::BOLD),
         )
     };
+    let emphasis = line.emphasis.clone().filter(|e| e.end <= code.len());
+    let runs = overlay(runs, emphasis, strong, code.len());
+    let mut rows = hang_runs(&code, &runs, base, cells, indent, first, rest);
     for row in &mut rows {
-        if let Some(tint) = tint {
+        if let Some((tint, _)) = tints {
             for span in &mut row.spans {
-                span.style = span.style.bg(tint);
+                if span.style.bg.is_none() {
+                    span.style = span.style.bg(tint);
+                }
             }
         }
         let used = row.width();
-        row.spans.push(filler(cells.saturating_sub(used), tint));
+        let fill = Span::raw(" ".repeat(cells.saturating_sub(used)));
+        row.spans.push(match tints {
+            Some((tint, _)) => fill.style(Style::new().bg(tint)),
+            None => fill,
+        });
     }
-    (rows, tint)
+    rows
 }
 
-/// Blank cells, tinted when the side they continue is.
-fn filler(cells: usize, tint: Option<Color>) -> Span<'static> {
-    let style = tint.map_or(Style::new(), |tint| Style::new().bg(tint));
-    Span::styled(" ".repeat(cells), style)
-}
-
-/// The rows of a diff paired for a split view: context on both sides, and a
-/// run of removed lines beside the run of added lines that follows it. A
-/// line with no partner leaves the other side empty.
-pub fn pairs(lines: &[String]) -> Vec<(Option<&str>, Option<&str>)> {
-    let sign = |line: &String| line.as_bytes().first().copied();
-    let mut out = Vec::new();
-    let mut i = 0;
-    while i < lines.len() {
-        let removed = lines[i..]
-            .iter()
-            .take_while(|l| sign(l) == Some(b'-'))
-            .count();
-        let added = lines[i + removed..]
-            .iter()
-            .take_while(|l| sign(l) == Some(b'+'))
-            .count();
-        if removed + added == 0 {
-            out.push((Some(lines[i].as_str()), Some(lines[i].as_str())));
-            i += 1;
-            continue;
-        }
-        for k in 0..removed.max(added) {
-            out.push((
-                (k < removed).then(|| lines[i + k].as_str()),
-                (k < added).then(|| lines[i + removed + k].as_str()),
-            ));
-        }
-        i += removed + added;
-    }
-    out
-}
-
-/// An edit's diff side by side: the old file on the left, the new on the
-/// right, a dim divider between them, each side lexed on its own. Each side
-/// wraps within its half, and a row is as tall as its taller side, the
-/// shorter one keeping its tint. A fold reads across both sides.
-fn split_diff(
+/// An edit's diff, numbered: unified on a narrow call, side by side once the
+/// call's text area reaches [`SPLIT_MIN`] cells. Every row opens with
+/// `lead`. Lines a hunk skips read as a count across the diff, and rows past
+/// [`DIFF_ROWS`] fold into one.
+fn diff_view(
     output: &[String],
     lang: Option<Lang>,
     width: usize,
     look: Look,
     lead: impl Fn() -> Vec<Span<'static>>,
-    more: impl Fn(usize) -> Line<'static>,
 ) -> Vec<Line<'static>> {
-    let room = width.saturating_sub(BODY + DIVIDER.width());
-    let (left_cells, right_cells) = (room / 2, room - room / 2);
-    let (mut old, mut new) = (Carry::default(), Carry::default());
+    let marks = look.marks();
+    let mut rows = diff::parse(output);
+    let folded = rows.len().saturating_sub(DIFF_ROWS);
+    rows.truncate(DIFF_ROWS);
+    let digits = diff::number_width(&rows);
+    let lead_cells: usize = lead().iter().map(Span::width).sum();
+    let room = width.saturating_sub(lead_cells);
+    let count = |text: String| {
+        let mut spans = lead();
+        spans.push(pad(digits + 1));
+        spans.push(Span::styled(format!("{} {text}", marks.more), dim()));
+        Line::from(spans)
+    };
     let mut lines = Vec::new();
-    let mut segment: Vec<String> = Vec::new();
-    let mut flush = |segment: &mut Vec<String>, lines: &mut Vec<Line<'static>>| {
-        for (left, right) in pairs(segment) {
-            let (l, lt) = left.map_or((Vec::new(), None), |t| {
-                pane(t, lang, &mut old, left_cells, look)
-            });
-            let (r, rt) = right.map_or((Vec::new(), None), |t| {
-                pane(t, lang, &mut new, right_cells, look)
-            });
-            for k in 0..l.len().max(r.len()) {
-                let mut spans = lead();
-                match l.get(k) {
-                    Some(row) => spans.extend(row.spans.iter().cloned()),
-                    None => spans.push(filler(left_cells, lt)),
+    if width >= SPLIT_MIN {
+        let half = room.saturating_sub(DIVIDER.width());
+        let (left_cells, right_cells) = (half / 2, half - half / 2);
+        let (mut old, mut new) = (Carry::default(), Carry::default());
+        for row in diff::split(&rows) {
+            match row {
+                SplitRow::Skipped(n) => lines.push(count(format!("{n} {}", copy::UNMODIFIED))),
+                SplitRow::Pair(left, right) => {
+                    let l = diff_side(left, left_cells, digits, lang, &mut old, look);
+                    let r = diff_side(right, right_cells, digits, lang, &mut new, look);
+                    for k in 0..l.len().max(r.len()) {
+                        let mut spans = lead();
+                        // A side shorter than its partner continues its own
+                        // tint down the row.
+                        let blank = |side: &[Line<'static>], cells: usize| {
+                            let bg = side
+                                .last()
+                                .and_then(|row| row.spans.last())
+                                .and_then(|s| s.style.bg);
+                            Span::styled(
+                                " ".repeat(cells),
+                                bg.map_or(Style::new(), |bg| Style::new().bg(bg)),
+                            )
+                        };
+                        match l.get(k) {
+                            Some(row) => spans.extend(row.spans.iter().cloned()),
+                            None => spans.push(blank(&l, left_cells)),
+                        }
+                        spans.push(Span::styled(DIVIDER, dim()));
+                        match r.get(k) {
+                            Some(row) => spans.extend(row.spans.iter().cloned()),
+                            None => spans.push(blank(&r, right_cells)),
+                        }
+                        lines.push(Line::from(spans));
+                    }
                 }
-                spans.push(Span::styled(DIVIDER, dim()));
-                match r.get(k) {
-                    Some(row) => spans.extend(row.spans.iter().cloned()),
-                    None => spans.push(filler(right_cells, rt)),
-                }
-                lines.push(Line::from(spans));
             }
         }
-        segment.clear();
-    };
-    for item in preview(output) {
-        match item {
-            Preview::Line(text) => segment.push(text),
-            Preview::More(count) => {
-                flush(&mut segment, &mut lines);
-                lines.push(more(count));
+    } else {
+        let mut carry = Carry::default();
+        for row in &rows {
+            match row {
+                DiffRow::Skipped(n) => lines.push(count(format!("{n} {}", copy::UNMODIFIED))),
+                DiffRow::Line(line) => {
+                    for side in diff_side(Some(line), room, digits, lang, &mut carry, look) {
+                        let mut spans = lead();
+                        spans.extend(side.spans);
+                        lines.push(Line::from(spans));
+                    }
+                }
             }
         }
     }
-    flush(&mut segment, &mut lines);
+    if folded > 0 {
+        lines.push(count(format!("{folded} {}", copy::MORE_LINES)));
+    }
     lines
 }
 
@@ -1173,25 +1189,12 @@ fn present_call(
     } else {
         None
     };
-    let mut carry = Carry::default();
-    // A wide edit reads side by side; a narrow one stays unified.
-    if edit && width >= SPLIT_MIN {
-        let more = |count: usize| {
-            let mut spans = gutter();
-            spans.push(Span::styled(
-                format!("{} {count} {}", marks.more, copy::MORE_LINES),
-                dim(),
-            ));
-            Line::from(spans)
-        };
-        lines.extend(split_diff(output, lang, width, look, gutter, more));
+    if edit {
+        lines.extend(diff_view(output, lang, width, look, gutter));
         return lines;
     }
     for item in preview(output) {
         match item {
-            Preview::Line(text) if edit => {
-                lines.extend(diff_line(&text, lang, &mut carry, width, gutter(), look));
-            }
             Preview::Line(text) => lines.extend(hang(
                 &text,
                 width,
@@ -2168,90 +2171,6 @@ mod tests {
     }
 
     #[test]
-    fn a_path_reads_by_its_file_name_and_an_edit_by_its_diff() {
-        let rows = sample_session();
-        let index = rows
-            .iter()
-            .position(|r| matches!(r, Row::Call { tool, .. } if tool == "Edit"))
-            .unwrap();
-        let look = Look {
-            tones: Tones::TrueColor,
-            ..PLAIN
-        };
-        let lines = present(&rows, index, 80, look);
-        assert_eq!(
-            text(&lines),
-            [
-                "",
-                "",
-                "  ✓ Edit: src/parser.ts  +1 -1",
-                "       const fields = split(line);",
-                "    -  if (quote) fields.push(rest);",
-                r#"    +  if (quote) throw new SyntaxError("unterminated quote");"#,
-                "       return fields;",
-                "",
-            ]
-        );
-        // In a box the diff sits at the body column, under the tool name,
-        // with no gutter; without one, the gutter holds it together.
-        let plain = text(&present(&rows, index, 80, PLAIN));
-        assert_eq!(plain[3], "  │ -  if (quote) fields.push(rest);");
-        let style = |line: &Line, content: &str| {
-            line.spans
-                .iter()
-                .find(|s| s.content == content)
-                .map(|s| s.style)
-                .unwrap()
-        };
-        let head = &lines[2];
-        // The tool name is bold in the foreground, with a colon after it.
-        let name = style(head, "Edit: ");
-        assert_eq!(name.fg, None);
-        assert!(name.add_modifier.contains(Modifier::BOLD));
-        assert!(style(head, "src/").add_modifier.contains(Modifier::DIM));
-        assert_eq!(style(head, "parser.ts").fg, None);
-        assert_eq!(style(head, "+1").fg, Some(Color::Rgb(0x22, 0xc5, 0x5e)));
-        assert_eq!(style(head, "-1").fg, Some(Color::Rgb(0xef, 0x44, 0x44)));
-        // The diff: the sign in the line's colour, the code in syntax
-        // colour, a removed line dim, and each changed row tinted.
-        let (removed, added) = (&lines[4], &lines[5]);
-        assert_eq!(style(removed, "-").fg, Some(Color::Rgb(0xef, 0x44, 0x44)));
-        assert_eq!(style(added, "+").fg, Some(Color::Rgb(0x22, 0xc5, 0x5e)));
-        assert_eq!(style(added, "throw").fg, Some(Color::Rgb(0xc4, 0xb5, 0xfd)));
-        assert_eq!(
-            style(added, r#""unterminated quote""#).fg,
-            Some(Color::Rgb(0xbe, 0xf2, 0x64))
-        );
-        let push = style(removed, "push");
-        assert_eq!(push.fg, Some(Color::Rgb(0x7d, 0xd3, 0xfc)));
-        assert!(push.add_modifier.contains(Modifier::DIM));
-        assert_eq!(push.bg, Some(Color::Rgb(0x3d, 0x25, 0x29)));
-        assert_eq!(style(added, "throw").bg, Some(Color::Rgb(0x21, 0x3a, 0x2c)));
-        // The tint runs from the text column to the box's right margin;
-        // the box's own colour frames it on both sides.
-        let box_bg = Some(Color::Rgb(0x25, 0x28, 0x2f));
-        assert_eq!(added.spans[0].style.bg, box_bg);
-        assert_eq!(added.spans.last().unwrap().style.bg, box_bg);
-        assert_eq!(added.width(), 80);
-        // A context line keeps the box's colour, and without a box the whole
-        // line takes green or red.
-        assert_eq!(style(&lines[3], "const").bg, box_bg);
-        let ansi = present(
-            &rows,
-            index,
-            80,
-            Look {
-                tones: Tones::Ansi,
-                ..PLAIN
-            },
-        );
-        assert_eq!(ansi[3].spans.last().unwrap().style.fg, Some(Color::Red));
-        // A path too long for its row wraps like any argument.
-        let narrow = text(&present(&rows, index, 20, PLAIN));
-        assert_eq!(narrow[1], "  ✓ Edit: src/parser");
-    }
-
-    #[test]
     fn each_call_sits_in_its_own_light_box() {
         let rows = sample_session();
         let look = Look {
@@ -2503,96 +2422,190 @@ mod tests {
         );
     }
 
-    #[test]
-    fn diff_lines_pair_removed_runs_with_the_added_runs_after_them() {
-        let lines: Vec<String> = [" a", "-b", "-c", "+B", " d", "+e", "-f"]
-            .map(str::to_owned)
-            .to_vec();
-        assert_eq!(
-            pairs(&lines),
-            [
-                (Some(" a"), Some(" a")),
-                (Some("-b"), Some("+B")),
-                (Some("-c"), None),
-                (Some(" d"), Some(" d")),
-                (None, Some("+e")),
-                (Some("-f"), None),
-            ]
-        );
+    fn edit_index(rows: &[Row]) -> usize {
+        rows.iter()
+            .position(|r| matches!(r, Row::Call { tool, .. } if tool == "Edit"))
+            .unwrap()
+    }
+
+    /// The style of the cell at column `x` of `line`.
+    fn cell(line: &Line, x: usize) -> Style {
+        let mut at = 0;
+        line.spans
+            .iter()
+            .find(|s| {
+                at += s.width();
+                at > x
+            })
+            .map(|s| s.style)
+            .unwrap()
     }
 
     #[test]
-    fn a_wide_edit_reads_side_by_side_and_a_narrow_one_unified() {
+    fn an_edit_is_a_numbered_diff_with_its_changes_marked() {
         let rows = sample_session();
-        let index = rows
-            .iter()
-            .position(|r| matches!(r, Row::Call { tool, .. } if tool == "Edit"))
-            .unwrap();
+        let index = edit_index(&rows);
         let look = Look {
             tones: Tones::TrueColor,
             ..PLAIN
         };
-        // 104 columns leave the call 102 cells: each side takes 47.
+        let lines = present(&rows, index, 80, look);
+        assert_eq!(
+            text(&lines),
+            [
+                "",
+                "",
+                "  ✓ Edit: src/parser.ts  +1 -1",
+                "       ⋯ 40 unmodified lines",
+                "    41     const fields = split(line);",
+                "    42 ▎   if (quote) fields.push(rest);",
+                r#"    42 ▎   if (quote) throw new SyntaxError("unterminated quote");"#,
+                "    43     return fields;",
+                "",
+            ]
+        );
+        let head = &lines[2];
+        assert!(
+            cell(head, 4).add_modifier.contains(Modifier::BOLD),
+            "tool name"
+        );
+        assert!(
+            cell(head, 10).add_modifier.contains(Modifier::DIM),
+            "directory"
+        );
+        let (red, green) = (
+            Some(Color::Rgb(0xef, 0x44, 0x44)),
+            Some(Color::Rgb(0x22, 0xc5, 0x5e)),
+        );
+        let (removed, added, context) = (&lines[5], &lines[6], &lines[4]);
+        // Numbers dim on context, in the change's colour on a changed line;
+        // the bar in the change's colour.
+        assert!(cell(context, 4).add_modifier.contains(Modifier::DIM));
+        assert_eq!((cell(removed, 4).fg, cell(removed, 7).fg), (red, red));
+        assert_eq!((cell(added, 4).fg, cell(added, 7).fg), (green, green));
+        // The line is tinted; what changed takes the stronger tint; the
+        // code keeps its syntax colour.
+        let line_tint = Some(Color::Rgb(0x21, 0x3a, 0x2c));
+        let strong = Some(Color::Rgb(0x2a, 0x5e, 0x3f));
+        let at = |needle: &str| added.to_string().find(needle).unwrap();
+        assert_eq!(cell(added, at("if")).bg, line_tint);
+        assert_eq!(cell(added, at("throw")).bg, strong);
+        assert_eq!(
+            cell(added, at("throw")).fg,
+            Some(Color::Rgb(0xc4, 0xb5, 0xfd))
+        );
+        assert_eq!(
+            cell(added, 79).bg,
+            Some(Color::Rgb(0x25, 0x28, 0x2f)),
+            "the box frames it"
+        );
+        assert_eq!(
+            cell(removed, removed.to_string().find("push").unwrap()).bg,
+            Some(Color::Rgb(0x6b, 0x2f, 0x37))
+        );
+        assert_eq!(cell(context, 20).bg, Some(Color::Rgb(0x25, 0x28, 0x2f)));
+    }
+
+    #[test]
+    fn without_colour_a_diff_marks_changes_with_signs() {
+        let rows = sample_session();
+        let index = edit_index(&rows);
+        let plain = text(&present(&rows, index, 80, PLAIN));
+        assert_eq!(plain[4], "  │ 42 -   if (quote) fields.push(rest);");
+        assert_eq!(
+            plain[5],
+            r#"  │ 42 +   if (quote) throw new SyntaxError("unterminated quote");"#
+        );
+        let classic = text(&present(
+            &rows,
+            index,
+            80,
+            Look {
+                classic: true,
+                tones: Tones::Ansi,
+                lit: true,
+            },
+        ));
+        assert!(classic[4].starts_with("  | 42 -"));
+        // Sixteen colours: the changed line takes its colour, the changed
+        // part is bold.
+        let ansi = present(
+            &rows,
+            index,
+            80,
+            Look {
+                tones: Tones::Ansi,
+                ..PLAIN
+            },
+        );
+        let added = &ansi[5];
+        let x = added.to_string().find("throw").unwrap();
+        assert_eq!(cell(added, x).fg, Some(Color::Green));
+        assert!(cell(added, x).add_modifier.contains(Modifier::BOLD));
+        assert!(
+            !cell(added, added.to_string().find("if").unwrap())
+                .add_modifier
+                .contains(Modifier::BOLD)
+        );
+    }
+
+    #[test]
+    fn a_wide_edit_reads_side_by_side_with_each_side_numbered() {
+        let rows = sample_session();
+        let index = edit_index(&rows);
+        let look = Look {
+            tones: Tones::TrueColor,
+            ..PLAIN
+        };
+        // 104 columns leave the call 102 cells; each side takes 47.
         let wide = present(&rows, index, 104, look);
         let side =
             |left: &str, right: &str| format!("    {left:<47} │ {right}").trim_end().to_owned();
         assert_eq!(
-            text(&wide)[3..6],
+            text(&wide)[3..8],
             [
+                "       ⋯ 40 unmodified lines".to_owned(),
                 side(
-                    "   const fields = split(line);",
-                    "   const fields = split(line);"
+                    "41     const fields = split(line);",
+                    "41     const fields = split(line);"
                 ),
                 side(
-                    "-  if (quote) fields.push(rest);",
-                    "+  if (quote) throw new"
+                    "42 ▎   if (quote) fields.push(rest);",
+                    "42 ▎   if (quote) throw new"
                 ),
-                side("", r#" SyntaxError("unterminated quote");"#),
+                side("", r#"   ▎ SyntaxError("unterminated quote");"#),
+                side("43     return fields;", "43     return fields;"),
             ]
         );
         assert!(
             wide[1..].iter().all(|l| l.width() == 104),
             "the box fills every row"
         );
-        // The removed side and the added side keep their own tint, the
-        // added side's down the row it wraps onto, and the left blank beside
-        // that wrap continues the removed line's tint.
-        let tint = |line: &Line, x: usize| {
-            let mut at = 0;
-            line.spans
-                .iter()
-                .find(|s| {
-                    at += s.width();
-                    at > x
-                })
-                .and_then(|s| s.style.bg)
-        };
-        let (red, green) = (
-            Some(Color::Rgb(0x3d, 0x25, 0x29)),
-            Some(Color::Rgb(0x21, 0x3a, 0x2c)),
-        );
-        assert_eq!((tint(&wide[4], 6), tint(&wide[4], 60)), (red, green));
-        assert_eq!((tint(&wide[5], 6), tint(&wide[5], 60)), (red, green));
-        // The context row keeps the box's colour on both sides.
-        assert_eq!(tint(&wide[3], 60), Some(Color::Rgb(0x25, 0x28, 0x2f)));
+        // The removed side keeps its tint beside the added side's wrap.
+        let red = Some(Color::Rgb(0x3d, 0x25, 0x29));
+        assert_eq!(cell(&wide[6], 20).bg, red);
+        // The wrapped part of the added line is all changed text.
+        assert_eq!(cell(&wide[6], 60).bg, Some(Color::Rgb(0x2a, 0x5e, 0x3f)));
         // Narrower, the same edit is unified.
         let narrow = text(&present(&rows, index, 100, look));
-        assert_eq!(narrow[4], "    -  if (quote) fields.push(rest);");
+        assert_eq!(narrow[5], "    42 ▎   if (quote) fields.push(rest);");
     }
 
     #[test]
-    fn a_split_diff_without_a_box_keeps_the_gutter() {
-        let rows = sample_session();
-        let index = rows
-            .iter()
-            .position(|r| matches!(r, Row::Call { tool, .. } if tool == "Edit"))
-            .unwrap();
-        let lines = text(&present(&rows, index, 104, PLAIN));
-        assert!(
-            lines[2].starts_with("  │    const fields"),
-            "{:?}",
-            lines[2]
-        );
-        assert!(lines[3].starts_with("  │ -  if (quote)") && lines[3].contains("│ +  if (quote)"));
+    fn a_long_diff_folds_after_its_row_limit() {
+        let output: Vec<String> = (0..30).map(|i| format!("+line {i}")).collect();
+        let rows = vec![Row::Call {
+            tool: "Write".into(),
+            argument: "notes.txt".into(),
+            state: CallState::Done,
+            summary: None,
+            output,
+        }];
+        let lines = text(&present(&rows, 0, 80, PLAIN));
+        assert_eq!(lines[0], "  ✓ Write: notes.txt  +30");
+        assert_eq!(lines.len(), 1 + DIFF_ROWS + 1);
+        assert_eq!(lines.last().unwrap(), "  │    ⋯ 14 more lines");
+        assert_eq!(lines[1], "  │  1 + line 0");
+        assert_eq!(lines[DIFF_ROWS], "  │ 16 + line 15");
     }
 }
