@@ -8,6 +8,7 @@ use ratatui_core::layout::{Position, Rect};
 use ratatui_core::style::{Color, Modifier, Style};
 use ratatui_core::terminal::Frame;
 use ratatui_core::text::{Line, Span};
+use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 use crate::activity::{self, Hue, Tones};
@@ -18,6 +19,7 @@ use crate::editor::{self, display};
 use crate::frame::FrameStyle;
 use crate::layout::{self, Needs};
 use crate::mode::{self, HINT_MIN_COLUMNS};
+use crate::runtime::Target;
 use crate::selection::line_columns;
 use crate::state::{
     ActivityKind, Area, DraftSpot, Focus, Notice, Outcome, SAMPLE_AGENTS, SampleAgent, ScrollTrack,
@@ -53,6 +55,7 @@ pub fn render(app: &mut State, frame: &mut Frame) {
             draft_rows: u16::try_from(draft.rows.len()).unwrap_or(u16::MAX),
             standing: true,
             notice: u16::from(app.notice.is_some() || app.quitting()),
+            pending: panel_rows(app.pending.len()),
             panel: panel_rows(app.attachments.len()),
             menu: menu_rows(app),
         },
@@ -66,6 +69,7 @@ pub fn render(app: &mut State, frame: &mut Frame) {
     };
     let body = next(rows.body);
     let gap = next(rows.gap);
+    let pending = next(rows.pending);
     let panel = next(rows.panel);
     let notice = next(rows.notice);
     let menu_area = next(rows.menu);
@@ -103,6 +107,8 @@ pub fn render(app: &mut State, frame: &mut Frame) {
             Notice::DraftLimit => copy::DRAFT_LIMIT,
             Notice::NoClipboardImage => copy::NO_CLIPBOARD_IMAGE,
             Notice::NoCommands => copy::NO_COMMANDS,
+            Notice::PendingSent => copy::PENDING_SENT,
+            Notice::NoPending => copy::NO_PENDING,
         };
         line(
             buf,
@@ -110,6 +116,7 @@ pub fn render(app: &mut State, frame: &mut Frame) {
             Line::styled(text, Style::new().fg(Color::Yellow)),
         );
     }
+    render_pending(app, inset(pending), buf);
     render_attachments(app, inset(panel), buf);
     render_menu(app, inset(menu_area), buf);
     let columns = area.width;
@@ -483,12 +490,12 @@ fn render_menu(app: &State, area: Rect, buf: &mut Buffer) {
     }
 }
 
-/// Items the attachments panel lists before it counts the rest.
+/// Items a panel above the bar lists before it counts the rest.
 const PANEL_ITEMS: usize = 3;
 
-/// Rows the attachments panel wants for `count` staged images: its title,
-/// up to [`PANEL_ITEMS`] items and one more row, which holds the next item
-/// or a count of the rest, and its footer.
+/// Rows a panel above the bar wants for `count` items: its title, up to
+/// [`PANEL_ITEMS`] items and one more row, which holds the next item or a
+/// count of the rest, and its footer.
 fn panel_rows(count: usize) -> u16 {
     if count == 0 {
         return 0;
@@ -498,31 +505,95 @@ fn panel_rows(count: usize) -> u16 {
 }
 
 /// The staged images above the bar, as the oracle's attachments panel:
-/// `Staged attachments: 2` in blue, a dim line for each image, and a dim
-/// footer. Short of rows, the footer and then the items give way, and the
-/// title stays to say why.
+/// `Staged attachments: 2` in blue, a numbered line for each image, and a
+/// footer.
 fn render_attachments(app: &State, area: Rect, buf: &mut Buffer) {
-    if area.is_empty() {
+    let items: Vec<String> = app
+        .attachments
+        .iter()
+        .enumerate()
+        .map(|(index, (_, image))| format!("{}. {}", index + 1, image.summary()))
+        .collect();
+    let title = format!("{}: {}", copy::ATTACHMENTS_TITLE, items.len());
+    let style = tone_style(Tone::Asking, app.tones);
+    render_panel(&title, style, &items, copy::ATTACHMENTS_HELP, area, buf);
+}
+
+/// The prompts the runtime holds above the bar, as the oracle's pending
+/// panel: `Pending input` in amber, a line for each prompt with where it
+/// will be admitted, `Next step: …`, and the key that sends them now. A
+/// prompt of several lines reads as one, its breaks shown as spaces, and is
+/// cut to the row; the oracle wraps it instead.
+fn render_pending(app: &State, area: Rect, buf: &mut Buffer) {
+    let width = usize::from(area.width);
+    let items: Vec<String> = app
+        .pending
+        .iter()
+        .map(|waiting| {
+            let target = match waiting.target {
+                Target::NextStep => copy::NEXT_STEP,
+                Target::NextTurn => copy::NEXT_TURN,
+            };
+            let text = waiting
+                .text
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ");
+            fit(&format!("{target}: {text}"), width)
+        })
+        .collect();
+    let style = tone_style(Tone::Waiting, app.tones);
+    render_panel(copy::PENDING, style, &items, copy::PENDING_HELP, area, buf);
+}
+
+/// `text` cut to `width` cells, between graphemes, with `…` standing for
+/// what was cut.
+fn fit(text: &str, width: usize) -> String {
+    if text.width() <= width {
+        return text.to_owned();
+    }
+    let mut out = String::new();
+    let mut used = 0;
+    for grapheme in text.graphemes(true) {
+        let cells = grapheme.width();
+        if used + cells + 1 > width {
+            break;
+        }
+        out.push_str(grapheme);
+        used += cells;
+    }
+    if width > 0 {
+        out.push('…');
+    }
+    out
+}
+
+/// One panel above the bar: a title in its tone, a dim line per item, and a
+/// dim footer. Short of rows, the footer and then the items give way, a
+/// count standing for those left out, and the title stays to say why.
+fn render_panel(
+    title: &str,
+    style: Style,
+    items: &[String],
+    footer: &str,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    if area.is_empty() || items.is_empty() {
         return;
     }
-    let count = app.attachments.len();
-    let mut lines = vec![Line::styled(
-        format!("{}: {count}", copy::ATTACHMENTS_TITLE),
-        tone_style(Tone::Asking, app.tones),
-    )];
+    let count = items.len();
+    let mut lines = vec![Line::styled(title.to_owned(), style)];
     let room = usize::from(area.height) - 1;
-    let footer = room >= 2;
-    let slots = room - usize::from(footer);
+    let with_footer = room >= 2;
+    let slots = room - usize::from(with_footer);
     let shown = if count > slots {
         slots.saturating_sub(1)
     } else {
         count
     };
-    for (index, (_, image)) in app.attachments.iter().take(shown).enumerate() {
-        lines.push(Line::styled(
-            format!("{}. {}", index + 1, image.summary()),
-            dim(),
-        ));
+    for item in &items[..shown] {
+        lines.push(Line::styled(item.clone(), dim()));
     }
     if shown < count && slots > 0 {
         lines.push(Line::styled(
@@ -530,8 +601,8 @@ fn render_attachments(app: &State, area: Rect, buf: &mut Buffer) {
             dim(),
         ));
     }
-    if footer {
-        lines.push(Line::styled(copy::ATTACHMENTS_HELP, dim()));
+    if with_footer {
+        lines.push(Line::styled(footer.to_owned(), dim()));
     }
     for (i, content) in lines.into_iter().enumerate() {
         line(
@@ -2084,6 +2155,55 @@ mod tests {
         let (rows, _) = draw(&mut app, 80, 24);
         assert!(!rows.iter().any(|r| r.contains("again to quit")));
         assert!(rows.iter().any(|r| r.contains("not available")));
+    }
+
+    #[test]
+    fn pending_input_sits_above_the_attachments_and_cuts_long_prompts() {
+        use crate::runtime::{Pending, RuntimeUpdate, Target};
+        let mut app = State::default();
+        let waiting = |text: &str, target| Pending {
+            text: text.into(),
+            target,
+        };
+        update(
+            &mut app,
+            Msg::Runtime(RuntimeUpdate::Pending(vec![
+                waiting("first\nsecond", Target::NextStep),
+                waiting(&"long ".repeat(30), Target::NextTurn),
+            ])),
+        );
+        app.attachments.push((
+            1,
+            crate::paste::Image {
+                name: "a.png".into(),
+                media_type: "image/png",
+                bytes: 1,
+                size: None,
+            },
+        ));
+        let (rows, _) = draw(&mut app, 60, 24);
+        let title = row_index(&rows, "Pending input");
+        assert!(rows[title].starts_with("  Pending input"));
+        assert_eq!(rows[title + 1].trim_end(), "  Next step: first second");
+        assert!(rows[title + 2].starts_with("  Next turn: long long"));
+        assert!(rows[title + 2].trim_end().ends_with('…'));
+        assert!(rows[title + 2].width() <= 60);
+        assert_eq!(rows[title + 3].trim_end(), "  Alt+↑ sends it now");
+        assert_eq!(title + 4, row_index(&rows, "Staged attachments: 1"));
+        // With nothing waiting, the panel gives its rows back.
+        update(&mut app, Msg::Runtime(RuntimeUpdate::Pending(Vec::new())));
+        let (rows, _) = draw(&mut app, 60, 24);
+        assert!(!rows.iter().any(|r| r.contains("Pending input")));
+    }
+
+    #[test]
+    fn fit_cuts_between_graphemes_and_marks_the_cut() {
+        assert_eq!(fit("abc", 3), "abc");
+        assert_eq!(fit("abcd", 3), "ab…");
+        assert_eq!(fit("界界界", 4), "界…");
+        assert_eq!(fit("e\u{301}e\u{301}e", 3), "e\u{301}e\u{301}e");
+        assert_eq!(fit("e\u{301}e\u{301}e", 2), "e\u{301}…");
+        assert_eq!(fit("ab", 0), "");
     }
 
     #[test]

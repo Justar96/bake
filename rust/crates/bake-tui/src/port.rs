@@ -16,6 +16,8 @@ use crate::fixture::Fixture;
 pub enum Request {
     Submit(Submission),
     Cancel,
+    /// Send every waiting prompt now.
+    SendPending,
 }
 
 /// Runs the fixture on a thread. Requests go in over a channel; updates
@@ -64,6 +66,7 @@ impl FixturePort {
                             updates.extend(fixture.submit(submission, now));
                         }
                         Some(Request::Cancel) => updates.extend(fixture.cancel(now)),
+                        Some(Request::SendPending) => updates.extend(fixture.send_pending(now)),
                         None => {}
                     }
                     updates.extend(fixture.advance(now));

@@ -21,6 +21,22 @@ pub enum Submission {
     Steer(String),
 }
 
+/// When a waiting prompt is admitted, as the TypeScript inbox targets it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Target {
+    /// At the running turn's next step.
+    NextStep,
+    /// When the next turn starts.
+    NextTurn,
+}
+
+/// A prompt the runtime holds but has not admitted yet.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Pending {
+    pub text: String,
+    pub target: Target,
+}
+
 /// One change the runtime reports.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RuntimeUpdate {
@@ -37,4 +53,7 @@ pub enum RuntimeUpdate {
     Commit(Vec<Row>),
     /// The running turn ended; anything still live was committed first.
     TurnEnded(Outcome),
+    /// Every prompt still waiting, in the order it will be admitted. Sent
+    /// whenever the list changes; an empty list clears the panel.
+    Pending(Vec<Pending>),
 }

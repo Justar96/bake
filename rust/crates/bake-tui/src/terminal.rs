@@ -476,6 +476,7 @@ fn run_loop(
                                 (owners.runtime)(Request::Submit(submission));
                             }
                             Effect::Cancel => (owners.runtime)(Request::Cancel),
+                            Effect::SendPending => (owners.runtime)(Request::SendPending),
                         }
                     }
                 }

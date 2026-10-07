@@ -10,7 +10,7 @@
 use std::collections::VecDeque;
 use std::time::Duration;
 
-use bake_tui_view::runtime::{RuntimeUpdate, Submission};
+use bake_tui_view::runtime::{Pending, RuntimeUpdate, Submission, Target};
 use bake_tui_view::state::Outcome;
 use bake_tui_view::transcript::{CallState, Row};
 
@@ -49,15 +49,54 @@ impl Fixture {
         let (Submission::FollowUp(text) | Submission::Steer(text)) = submission;
         if self.step.is_some() {
             self.steers.push_back(text);
+            return vec![self.pending()];
+        }
+        self.start_turn(vec![text], now)
+    }
+
+    /// Sends every waiting steer now, as the oracle's Alt+↑ does: the
+    /// running turn is interrupted, keeping them, and a new turn starts with
+    /// all of them, in the order they were sent.
+    pub fn send_pending(&mut self, now: Duration) -> Vec<RuntimeUpdate> {
+        if self.steers.is_empty() {
             return Vec::new();
         }
-        self.start_turn(text, now)
+        let batch: Vec<String> = self.steers.drain(..).collect();
+        let mut updates = self.stop();
+        updates.push(self.pending());
+        updates.extend(self.start_turn(batch, now));
+        updates
+    }
+
+    /// The waiting steers as the runtime reports them.
+    fn pending(&self) -> RuntimeUpdate {
+        RuntimeUpdate::Pending(
+            self.steers
+                .iter()
+                .map(|text| Pending {
+                    text: text.clone(),
+                    target: Target::NextStep,
+                })
+                .collect(),
+        )
     }
 
     /// Stops the running turn where it is: what was live is committed as it
     /// stood, a running call marked interrupted. Waiting steers are kept and
     /// start the next turn, as the oracle keeps its inbox on a cancel.
     pub fn cancel(&mut self, now: Duration) -> Vec<RuntimeUpdate> {
+        let mut updates = self.stop();
+        if !updates.is_empty()
+            && let Some(text) = self.steers.pop_front()
+        {
+            updates.push(self.pending());
+            updates.extend(self.start_turn(vec![text], now));
+        }
+        updates
+    }
+
+    /// Ends the running turn where it is, if one runs.
+    fn stop(&mut self) -> Vec<RuntimeUpdate> {
         let Some(step) = self.step.take() else {
             return Vec::new();
         };
@@ -68,9 +107,6 @@ impl Fixture {
             ));
         }
         updates.push(RuntimeUpdate::TurnEnded(Outcome::Interrupted));
-        if let Some(text) = self.steers.pop_front() {
-            updates.extend(self.start_turn(text, now));
-        }
         updates
     }
 
@@ -95,7 +131,10 @@ impl Fixture {
             let end = step.start + step.updates.last().map_or(Duration::ZERO, |(at, _)| *at);
             self.step = None;
             match self.steers.pop_front() {
-                Some(text) => self.step = Some(step_for(text, end)),
+                Some(text) => {
+                    self.step = Some(step_for(vec![text], end));
+                    out.push(self.pending());
+                }
                 None => out.push(RuntimeUpdate::TurnEnded(Outcome::Completed)),
             }
         }
@@ -108,11 +147,11 @@ impl Fixture {
         step.updates.get(step.next).map(|(at, _)| step.start + *at)
     }
 
-    fn start_turn(&mut self, text: String, now: Duration) -> Vec<RuntimeUpdate> {
+    fn start_turn(&mut self, prompts: Vec<String>, now: Duration) -> Vec<RuntimeUpdate> {
         self.turns += 1;
-        // The step's first update commits the prompt; it is sent at once,
+        // The step's first update commits the prompts; it is sent at once,
         // before the turn starts, rather than on the step's timeline.
-        let mut step = step_for(text, now);
+        let mut step = step_for(prompts, now);
         let commit = step.updates.remove(0).1;
         self.step = Some(step);
         vec![
@@ -124,13 +163,15 @@ impl Fixture {
     }
 }
 
-/// The script for one prompt, from `start`: the prompt committed, then
-/// reasoning streamed a word at a time, one call that runs for [`CALL`],
-/// and the answer streamed the same way.
-fn step_for(prompt: String, start: Duration) -> Step {
+/// The script for one step, from `start`: its prompts committed in order,
+/// then reasoning streamed a word at a time, one call that runs for
+/// [`CALL`], and the answer streamed the same way. The reasoning quotes the
+/// last prompt.
+fn step_for(prompts: Vec<String>, start: Duration) -> Step {
+    let prompt = prompts.last().cloned().unwrap_or_default();
     let mut updates = vec![(
         Duration::ZERO,
-        RuntimeUpdate::Commit(vec![Row::User(prompt.clone())]),
+        RuntimeUpdate::Commit(prompts.into_iter().map(Row::User).collect()),
     )];
     let mut at = Duration::ZERO;
     updates.push((at, RuntimeUpdate::Phase("thinking".into())));
@@ -295,13 +336,21 @@ mod tests {
     fn a_steer_joins_the_turn_after_its_current_step() {
         let mut f = Fixture::default();
         f.submit(follow_up("one"), Duration::ZERO);
-        assert_eq!(f.submit(Submission::Steer("two".into()), WORD), []);
+        assert_eq!(
+            f.submit(Submission::Steer("two".into()), WORD),
+            [RuntimeUpdate::Pending(vec![Pending {
+                text: "two".into(),
+                target: Target::NextStep,
+            }])]
+        );
         let updates = f.advance(LONG);
         let ended = updates
             .iter()
             .filter(|u| matches!(u, RuntimeUpdate::TurnEnded(_)))
             .count();
         assert_eq!(ended, 1, "one turn holds both steps");
+        // The steer leaves the pending list when its step starts.
+        assert!(updates.contains(&RuntimeUpdate::Pending(Vec::new())));
         let users: Vec<_> = rows(&updates)
             .into_iter()
             .filter(|r| matches!(r, Row::User(_)))
@@ -314,7 +363,9 @@ mod tests {
         let mut f = Fixture::default();
         let updates = f.submit(Submission::Steer("late".into()), Duration::ZERO);
         assert!(matches!(updates[1], RuntimeUpdate::TurnStarted { .. }));
-        assert_eq!(f.submit(follow_up("early"), WORD), []);
+        assert!(
+            matches!(&f.submit(follow_up("early"), WORD)[..], [RuntimeUpdate::Pending(p)] if p.len() == 1)
+        );
     }
 
     #[test]
@@ -334,18 +385,46 @@ mod tests {
             RuntimeUpdate::Commit(r) if matches!(&r[0], Row::Call { state: CallState::Failed, summary, .. } if summary.as_deref() == Some("interrupted"))
         ));
         assert_eq!(stopped[1], RuntimeUpdate::TurnEnded(Outcome::Interrupted));
+        assert_eq!(stopped[2], RuntimeUpdate::Pending(Vec::new()));
         // The kept steer starts the next turn.
         assert_eq!(
-            stopped[2],
+            stopped[3],
             RuntimeUpdate::Commit(vec![Row::User("next".into())])
         );
-        assert!(matches!(stopped[3], RuntimeUpdate::TurnStarted { .. }));
+        assert!(matches!(stopped[4], RuntimeUpdate::TurnStarted { .. }));
         all.extend(stopped);
         let shown = rows(&all);
         assert_eq!(shown.len(), 4, "the interrupted call is drawn once");
         // A cancel with nothing running does nothing.
         f.cancel(in_call);
         assert_eq!(f.cancel(in_call), []);
+    }
+
+    #[test]
+    fn sending_pending_input_interrupts_and_starts_a_turn_with_all_of_it() {
+        let mut f = Fixture::default();
+        assert_eq!(f.send_pending(Duration::ZERO), [], "nothing waits");
+        let mut all = f.submit(follow_up("one"), Duration::ZERO);
+        all.extend(f.advance(WORD));
+        f.submit(Submission::Steer("two".into()), WORD);
+        f.submit(Submission::Steer("three".into()), WORD);
+        let sent = f.send_pending(WORD);
+        assert!(matches!(&sent[0], RuntimeUpdate::Commit(_)), "{sent:#?}");
+        assert_eq!(sent[1], RuntimeUpdate::TurnEnded(Outcome::Interrupted));
+        assert_eq!(sent[2], RuntimeUpdate::Pending(Vec::new()));
+        assert_eq!(
+            sent[3],
+            RuntimeUpdate::Commit(vec![Row::User("two".into()), Row::User("three".into())])
+        );
+        assert!(matches!(sent[4], RuntimeUpdate::TurnStarted { .. }));
+        all.extend(sent);
+        all.extend(f.advance(LONG));
+        let users = rows(&all)
+            .into_iter()
+            .filter(|r| matches!(r, Row::User(_)))
+            .count();
+        assert_eq!(users, 3);
+        assert_eq!(f.next_due(), None);
     }
 
     #[test]

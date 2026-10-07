@@ -126,6 +126,8 @@ pub enum Action {
     /// the first or the last row.
     CaretUp,
     CaretDown,
+    /// Alt+↑: send the waiting prompts now, interrupting the running turn.
+    SendPending,
     /// Ctrl+P and Ctrl+N: input history at once, from any row.
     RecallOlder,
     RecallNewer,
@@ -295,8 +297,9 @@ pub const BINDINGS: &[Binding] = &[
     bind(S::Composer, K::Down, Mods::CTRL, ANY, A::NextPrompt),
     bind(S::Composer, K::Home, Mods::CTRL, ANY, A::ToStart),
     bind(S::Composer, K::End, Mods::CTRL, ANY, A::ToLatest),
-    // After Ctrl+↑ and Ctrl+↓, which move the transcript. Alt+↑ is the
-    // oracle's steering key, so neither arrow moves with Alt.
+    // After Ctrl+↑ and Ctrl+↓, which move the transcript. Alt+↑ sends the
+    // waiting prompts, as the oracle's does, so neither arrow moves with Alt.
+    bind(S::Composer, K::Up, Mods::ALT, ANY, A::SendPending),
     bind(S::Composer, K::Up, ANY, Mods::ALT, A::CaretUp),
     bind(S::Composer, K::Down, ANY, Mods::ALT, A::CaretDown),
     bind(
@@ -410,8 +413,13 @@ mod tests {
             action(Scope::Composer, KeyInput::plain(Key::Up)),
             Some(Action::CaretUp)
         );
+        // Alt+↑ sends waiting prompts; Alt+↓ moves nothing.
         assert_eq!(
             action(Scope::Composer, KeyInput::new(Key::Up, Mods::ALT)),
+            Some(Action::SendPending)
+        );
+        assert_eq!(
+            action(Scope::Composer, KeyInput::new(Key::Down, Mods::ALT)),
             None
         );
         // Ctrl+Home reaches the transcript's start; Home alone, the line's.

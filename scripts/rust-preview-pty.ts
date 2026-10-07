@@ -331,7 +331,7 @@ await scenario('sample activity is text that advances on its own, then compacts,
   await preview.quit()
 })
 
-await scenario('a prompt runs a fixture turn that streams, completes, and stops on Esc', async (preview) => {
+await scenario('a prompt runs a fixture turn that streams, completes, takes a steer, and stops on Esc', async (preview) => {
   preview.send('hello fixture\r')
   // The prompt shows once the runtime commits it, and the draft is empty again.
   await preview.wait('turn started', () => /^> hello fixture +[│┃]$/mu.test(preview.screen)
@@ -341,6 +341,14 @@ await scenario('a prompt runs a fixture turn that streams, completes, and stops 
   assert.equal(preview.screen.split('no model or tool ran.').length - 1, 1, 'the streamed answer was drawn twice')
   preview.send('again\r')
   await preview.wait('call running', () => preview.screen.includes('running bash'))
+  // A prompt sent while the turn runs waits above the bar until Alt+↑ sends it.
+  preview.send('later\r')
+  await preview.wait('pending input', () => preview.screen.includes('Pending input')
+    && preview.screen.includes('Next step: later') && preview.screen.includes('Alt+↑ sends it now'))
+  preview.send('\x1b[1;3A')
+  await preview.wait('pending sent', () => preview.screen.includes('Sent queued input now')
+    && /^> later +[│┃]$/mu.test(preview.screen) && !preview.screen.includes('Pending input'))
+  await preview.wait('steered turn running', () => preview.screen.includes('running bash'))
   preview.send('\x1b')
   await preview.wait('turn interrupted', () => /^ {2}■ Interrupted/mu.test(preview.screen)
     && /Bash: true +interrupted/u.test(preview.screen))

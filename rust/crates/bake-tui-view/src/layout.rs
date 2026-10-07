@@ -20,20 +20,23 @@ pub struct Needs {
     pub standing: bool,
     /// Rows a notice wants; zero without one.
     pub notice: u16,
+    /// Rows the pending-input panel wants; zero while nothing waits.
+    pub pending: u16,
     /// Rows the attachments panel wants; zero without staged images.
     pub panel: u16,
     /// Rows the slash menu or a command's usage line wants; zero without.
     pub menu: u16,
 }
 
-/// Rows granted to each region, top to bottom as drawn: body, gap, panel,
-/// notice, the slash menu,
+/// Rows granted to each region, top to bottom as drawn: body, gap, the
+/// pending-input panel, the attachments panel, notice, the slash menu,
 /// the bar, which holds the activity and the status line, the box's top
 /// edge, the draft, its bottom edge, and the standing row.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Rows {
     pub body: u16,
     pub gap: u16,
+    pub pending: u16,
     pub panel: u16,
     pub notice: u16,
     pub menu: u16,
@@ -48,6 +51,7 @@ impl Rows {
     pub fn total(&self) -> u16 {
         self.body
             + self.gap
+            + self.pending
             + self.panel
             + self.notice
             + self.menu
@@ -89,11 +93,14 @@ pub fn plan(height: u16, needs: Needs) -> Rows {
     )));
     let notice = take(needs.notice);
     let menu = take(needs.menu);
+    // Pending input claims before attachments, as the TypeScript panels do.
+    let pending = take(needs.pending);
     let panel = take(needs.panel);
     let body = take(u16::MAX);
     Rows {
         body,
         gap,
+        pending,
         panel,
         notice,
         menu,
@@ -119,6 +126,7 @@ mod tests {
             draft_rows,
             standing: true,
             notice: 1,
+            pending: 0,
             panel: 0,
             menu: 0,
         }
@@ -180,6 +188,7 @@ mod tests {
                 draft_rows: 1,
                 standing: false,
                 notice: 0,
+                pending: 0,
                 panel: 0,
                 menu: 0,
             },

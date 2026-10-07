@@ -73,6 +73,15 @@ pub const NO_COMMANDS: &str = "Commands are not available in this preview";
 /// The attachments panel's title, before the count, and its footer.
 pub const ATTACHMENTS_TITLE: &str = "Staged attachments";
 pub const ATTACHMENTS_HELP: &str = "Erase a placeholder to unstage its image";
+/// The pending-input panel: its title, each item's target, and its footer,
+/// as the TypeScript copy names them.
+pub const PENDING: &str = "Pending input";
+pub const NEXT_STEP: &str = "Next step";
+pub const NEXT_TURN: &str = "Next turn";
+pub const PENDING_HELP: &str = "Alt+↑ sends it now";
+/// Alt+↑ sent the waiting prompts, or found none.
+pub const PENDING_SENT: &str = "Sent queued input now";
+pub const NO_PENDING: &str = "No queued input";
 /// Ctrl+V, or an empty paste, found no image on the clipboard.
 pub const NO_CLIPBOARD_IMAGE: &str = "No image on the clipboard";
 /// Said in the scroll indicator's row once a selection reaches the clipboard,

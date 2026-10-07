@@ -13,7 +13,7 @@ use crate::keys::{self, Action, KeyInput, Scope};
 use crate::live;
 use crate::mode::Mode;
 use crate::paste::{self, Image};
-use crate::runtime::{RuntimeUpdate, Submission};
+use crate::runtime::{Pending, RuntimeUpdate, Submission};
 use crate::selection::{self, Granularity, Point, Range};
 use crate::status::StatusInput;
 use crate::transcript::{self, Transcript};
@@ -222,6 +222,8 @@ pub enum Effect {
     Submit(Submission),
     /// Stop the running turn; the runtime reports when it has ended.
     Cancel,
+    /// Send every waiting prompt now; the runtime reports the turn it starts.
+    SendPending,
 }
 
 /// A fixed example row for the agent list; it describes no running work.
@@ -282,6 +284,10 @@ pub enum Notice {
     NoClipboardImage,
     /// A slash command was submitted; the preview runs none.
     NoCommands,
+    /// Alt+↑ sent the waiting prompts.
+    PendingSent,
+    /// Alt+↑ with nothing waiting.
+    NoPending,
 }
 
 /// Where a pasted image is read from: the clipboard, or a file whose path
@@ -345,6 +351,8 @@ pub struct State {
     pub activity: Option<Activity>,
     /// What the runtime's turn is doing, as it last reported.
     pub phase: Option<String>,
+    /// Prompts the runtime holds but has not admitted, as it last reported.
+    pub pending: Vec<Pending>,
     /// How the last turn ended.
     pub summary: Option<TurnSummary>,
     /// What the status line reports. The terminal owner fills in the working
@@ -414,6 +422,7 @@ impl State {
             notice: None,
             activity: None,
             phase: None,
+            pending: Vec::new(),
             summary: None,
             status: StatusInput {
                 ascii: frame == FrameStyle::Classic,
@@ -585,6 +594,7 @@ fn runtime(state: &mut State, update: RuntimeUpdate) {
             state.summary = None;
         }
         RuntimeUpdate::Phase(phase) => state.phase = Some(phase),
+        RuntimeUpdate::Pending(pending) => state.pending = pending,
         RuntimeUpdate::Live(rows) => state.transcript.set_live(rows),
         RuntimeUpdate::Commit(rows) => state.transcript.commit(rows),
         RuntimeUpdate::TurnEnded(outcome) => {
@@ -1102,6 +1112,16 @@ fn composer_key(state: &mut State, bound: Option<Action>, input: KeyInput) -> Ve
             return Vec::new();
         }
         Some(Action::Submit) => return submit(state),
+        // Alt+↑ hands every waiting prompt to the runtime at once; the
+        // panel empties when the runtime reports it.
+        Some(Action::SendPending) => {
+            if state.pending.is_empty() {
+                state.notice = Some(Notice::NoPending);
+                return Vec::new();
+            }
+            state.notice = Some(Notice::PendingSent);
+            return vec![Effect::SendPending];
+        }
         Some(Action::PageUp) => {
             state.transcript.scroll_up(state.transcript.page());
             return Vec::new();
@@ -1396,6 +1416,25 @@ mod tests {
         // Undo brings a sent draft back, as the oracle's does.
         chord(&mut state, Key::Char('-'), Mods::CTRL);
         assert_eq!(state.draft.text(), "hello");
+    }
+
+    #[test]
+    fn alt_up_sends_what_the_runtime_holds_or_says_nothing_waits() {
+        let mut state = State::default();
+        assert_eq!(chord(&mut state, Key::Up, Mods::ALT), []);
+        assert_eq!(state.notice, Some(Notice::NoPending));
+        let waiting = vec![Pending {
+            text: "also".into(),
+            target: crate::runtime::Target::NextStep,
+        }];
+        runtime(&mut state, RuntimeUpdate::Pending(waiting.clone()));
+        assert_eq!(state.pending, waiting);
+        assert_eq!(chord(&mut state, Key::Up, Mods::ALT), [Effect::SendPending]);
+        assert_eq!(state.notice, Some(Notice::PendingSent));
+        // The panel empties only when the runtime says so.
+        assert_eq!(state.pending, waiting);
+        runtime(&mut state, RuntimeUpdate::Pending(Vec::new()));
+        assert!(state.pending.is_empty());
     }
 
     #[test]
