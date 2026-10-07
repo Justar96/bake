@@ -21,6 +21,7 @@ use bake_tui_view::activity::Tones;
 use bake_tui_view::frame;
 use bake_tui_view::paste::Image;
 use bake_tui_view::render::render;
+use bake_tui_view::runtime::RuntimeUpdate;
 use bake_tui_view::state::{Effect, ImageSource, Msg, State, update};
 use bake_tui_view::status;
 use bake_tui_view::wheel::{self, WheelSteps};
@@ -38,6 +39,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Rect;
 
 use crate::clipboard::{self, Clipboard, Platform};
+use crate::files::{Ask, Finder};
 use crate::git;
 use crate::input;
 use crate::port::{FixturePort, Request};
@@ -374,8 +376,17 @@ pub fn run_preview() -> io::Result<PreviewExit> {
     let outcome = Reader::start(sender, clock).and_then(|reader| {
         let clipboard = Clipboard::new(Platform::current(), env);
         let home = env(if cfg!(windows) { "USERPROFILE" } else { "HOME" });
+        let found = updates.clone();
         let port = FixturePort::start(clock, move |update| {
             updates.send(Source::Msg(Msg::Runtime(update))).is_ok()
+        })?;
+        let root = std::env::current_dir().unwrap_or_else(|_| ".".into());
+        let finder = Finder::start(root, move |query, found_paths| {
+            let msg = Msg::FilesFound {
+                query,
+                found: found_paths,
+            };
+            found.send(Source::Msg(msg)).is_ok()
         })?;
         let outcome = run_loop(
             &mut session,
@@ -386,13 +397,16 @@ pub fn run_preview() -> io::Result<PreviewExit> {
                 clipboard,
                 home,
                 runtime: &|request| port.request(request),
+                files: &|ask| finder.ask(ask),
             },
         );
         // Joined before the terminal leaves raw mode, so it reads nothing
-        // meant for the shell, and no runtime update outlives the loop.
+        // meant for the shell, and no runtime update or found path outlives
+        // the loop.
         let ported = port.stop();
+        let searched = finder.stop();
         let stopped = reader.stop();
-        outcome.and_then(|exit| ported.and(stopped).map(|()| exit))
+        outcome.and_then(|exit| ported.and(searched).and(stopped).map(|()| exit))
     });
     let closed = session.close();
     drop(signals);
@@ -401,12 +415,13 @@ pub fn run_preview() -> io::Result<PreviewExit> {
     Ok(exit)
 }
 
-/// What the loop hands effects to: the clipboard and image jobs, and the
-/// runtime port.
+/// What the loop hands effects to: the clipboard and image jobs, the
+/// runtime port, and path discovery.
 struct Owners<'a> {
     clipboard: Clipboard,
     home: Option<String>,
     runtime: &'a dyn Fn(Request),
+    files: &'a dyn Fn(Ask),
 }
 
 /// Draws, waits for the next message or the view's next timed change, applies
@@ -468,6 +483,11 @@ fn run_loop(
                 Source::Failed(err) => return Err(err),
                 Source::Msg(msg) => {
                     input |= !matches!(msg, Msg::Runtime(_));
+                    // A finished turn may have changed the tree, so later
+                    // bare queries see it once the traversal is rebuilt.
+                    if matches!(msg, Msg::Runtime(RuntimeUpdate::TurnEnded(_))) {
+                        (owners.files)(Ask::Invalidate);
+                    }
                     stale |= matches!(msg, Msg::Resize { .. });
                     for effect in update(state, msg) {
                         match effect {
@@ -479,6 +499,7 @@ fn run_loop(
                             }
                             Effect::Cancel => (owners.runtime)(Request::Cancel),
                             Effect::SendPending => (owners.runtime)(Request::SendPending),
+                            Effect::FindFiles(query) => (owners.files)(Ask::Find(query)),
                         }
                     }
                 }
@@ -666,7 +687,6 @@ mod signals {
 mod tests {
     use super::*;
     use bake_tui_view::keys::{Key, KeyInput, Mods};
-    use bake_tui_view::runtime::RuntimeUpdate;
     use bake_tui_view::transcript::Row;
 
     fn key(c: char) -> Source {
@@ -795,6 +815,7 @@ mod tests {
             clipboard: no_clipboard(),
             home: None,
             runtime,
+            files: &|_| {},
         }
     }
 

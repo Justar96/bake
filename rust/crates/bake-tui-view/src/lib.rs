@@ -16,6 +16,7 @@ pub mod frame;
 pub mod keys;
 pub mod layout;
 pub mod live;
+pub mod mention;
 pub mod mode;
 pub mod paste;
 pub mod render;

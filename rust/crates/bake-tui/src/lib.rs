@@ -3,6 +3,7 @@
 //! port with its scripted fixture.
 
 mod clipboard;
+mod files;
 mod fixture;
 mod git;
 mod input;
