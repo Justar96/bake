@@ -3,10 +3,10 @@
 //!
 //! A user's words run beside an accent bar, reasoning (dim, italic) and
 //! answers are prose at column 2, and a call is one block: its state mark,
-//! the tool name in an aligned column, the argument, a summary right-aligned,
-//! and its output hung from a dim gutter. A blank row opens each section: a
-//! user turn, a reasoning block, a group of calls, and an answer. Lines wrap,
-//! never truncate, and a result's output is previewed, not replayed.
+//! the tool name in an aligned column, the argument, its status after it,
+//! and its output hung from a dim gutter, in a light box on a truecolor
+//! terminal. A blank row opens every row but the first. Lines wrap, never
+//! truncate, and a result's output is previewed, not replayed.
 //!
 //! The viewport presents only the rows it visits: following output, it
 //! measures from the newest row up; reading, from its anchor down. Neither
@@ -198,13 +198,37 @@ fn sample_script() -> Row {
     }
 }
 
-/// Whether a blank row opens `row`, given the row before it: each section
-/// opens with one, and a call directly after a call joins its group.
-fn opens_section(previous: Option<&Row>, row: &Row) -> bool {
-    let call = |row: &Row| matches!(row, Row::Call { .. } | Row::Script { .. });
-    match previous {
-        None => false,
-        Some(previous) => !(call(previous) && call(row)),
+/// Whether a blank row opens `row`, given the row before it: every row but
+/// the first opens with one, so each call's box stands apart from the next.
+fn opens_section(previous: Option<&Row>, _row: &Row) -> bool {
+    previous.is_some()
+}
+
+/// The background of a call's box: a soft grey a few steps above a dark
+/// terminal's own, and a faint red for a call that failed. Only a truecolor
+/// terminal draws it; sixteen colours have no step that subtle, and
+/// `NO_COLOR` draws none.
+pub fn box_colour(state: CallState, tones: Tones) -> Option<Color> {
+    (tones == Tones::TrueColor).then_some(match state {
+        CallState::Failed => Color::Rgb(0x2e, 0x22, 0x25),
+        CallState::Running | CallState::Done => Color::Rgb(0x25, 0x28, 0x2f),
+    })
+}
+
+/// Fills `lines` with `bg` across the full `width`, under every span that
+/// sets no background of its own, so the call reads as one box.
+fn boxed(lines: &mut [Line<'static>], width: usize, bg: Color) {
+    for line in lines {
+        for span in &mut line.spans {
+            if span.style.bg.is_none() {
+                span.style = span.style.bg(bg);
+            }
+        }
+        let used = line.width();
+        if used < width {
+            line.spans
+                .push(Span::styled(" ".repeat(width - used), Style::new().bg(bg)));
+        }
     }
 }
 
@@ -416,30 +440,42 @@ pub fn present(rows: &[Row], index: usize, width: usize, look: Look) -> Vec<Line
             state,
             summary,
             output,
-        } => lines.extend(present_call(
-            tool,
-            argument,
-            *state,
-            summary.as_deref(),
-            output,
-            width,
-            look,
-        )),
+        } => {
+            let mut block = present_call(
+                tool,
+                argument,
+                *state,
+                summary.as_deref(),
+                output,
+                width,
+                look,
+            );
+            if let Some(bg) = box_colour(*state, look.tones) {
+                boxed(&mut block, width, bg);
+            }
+            lines.extend(block);
+        }
         Row::Script {
             description,
             source,
             state,
             calls,
             result,
-        } => lines.extend(present_script(
-            description,
-            source,
-            *state,
-            calls,
-            result.as_deref(),
-            width,
-            look,
-        )),
+        } => {
+            let mut block = present_script(
+                description,
+                source,
+                *state,
+                calls,
+                result.as_deref(),
+                width,
+                look,
+            );
+            if let Some(bg) = box_colour(*state, look.tones) {
+                boxed(&mut block, width, bg);
+            }
+            lines.extend(block);
+        }
     }
     lines
 }
@@ -1271,13 +1307,14 @@ mod tests {
         );
         assert_eq!(all[user + 5], "    │ packages/app/src/controller.ts:45");
         assert_eq!(all[user + 6], "    │ packages/app/src/controller.ts:52");
-        // A call after a call joins its group without a blank.
+        // Each call stands apart from the next, so its box does too.
+        assert_eq!(all[user + 7], "");
         assert_eq!(
-            all[user + 7],
+            all[user + 8],
             "  ✓ Read  packages/app/src/controller.ts  412 lines"
         );
-        assert_eq!(all[user + 8], "");
-        assert!(all[user + 9].starts_with("  Two registrations"));
+        assert_eq!(all[user + 9], "");
+        assert!(all[user + 10].starts_with("  Two registrations"));
     }
 
     #[test]
@@ -1684,15 +1721,71 @@ mod tests {
         assert_eq!(style(head, "+1").fg, Some(Color::Rgb(0x22, 0xc5, 0x5e)));
         assert_eq!(style(head, "-1").fg, Some(Color::Rgb(0xef, 0x44, 0x44)));
         assert_eq!(
-            lines[3].spans.last().unwrap().style.fg,
+            style(&lines[3], "-  if (quote) fields.push(rest);").fg,
             Some(Color::Rgb(0xef, 0x44, 0x44))
         );
         assert_eq!(
-            lines[4].spans.last().unwrap().style.fg,
+            style(
+                &lines[4],
+                r#"+  if (quote) throw new SyntaxError("unterminated quote");"#
+            )
+            .fg,
             Some(Color::Rgb(0x22, 0xc5, 0x5e))
         );
         // A path too long for its row wraps like any argument.
         let narrow = text(&present(&rows, index, 20, PLAIN));
         assert_eq!(narrow[1], "  ✓ Edit  src/parser");
+    }
+
+    #[test]
+    fn each_call_sits_in_its_own_light_box() {
+        let rows = sample_session();
+        let look = Look {
+            tones: Tones::TrueColor,
+            ..PLAIN
+        };
+        let index = rows
+            .iter()
+            .position(|r| {
+                matches!(
+                    r,
+                    Row::Call {
+                        state: CallState::Failed,
+                        ..
+                    }
+                )
+            })
+            .unwrap();
+        let failed = present(&rows, index, 60, look);
+        let done = present(&rows, index + 2, 60, look);
+        // The opening blank stays outside the box; every other row is filled
+        // to the full width, under every span.
+        assert!(failed[0].spans.iter().all(|s| s.style.bg.is_none()));
+        for (lines, bg) in [
+            (&failed, Color::Rgb(0x2e, 0x22, 0x25)),
+            (&done, Color::Rgb(0x25, 0x28, 0x2f)),
+        ] {
+            for line in &lines[1..] {
+                assert_eq!(line.width(), 60, "{line}");
+                assert!(line.spans.iter().all(|s| s.style.bg == Some(bg)), "{line}");
+            }
+        }
+        // Prose is not boxed, and no box is drawn without truecolor.
+        let answer = rows.len() - 1;
+        assert!(
+            present(&rows, answer, 60, look)
+                .iter()
+                .flat_map(|l| &l.spans)
+                .all(|s| s.style.bg.is_none())
+        );
+        for tones in [Tones::Ansi, Tones::None] {
+            let plain = present(&rows, index, 60, Look { tones, ..PLAIN });
+            assert!(
+                plain
+                    .iter()
+                    .flat_map(|l| &l.spans)
+                    .all(|s| s.style.bg.is_none())
+            );
+        }
     }
 }
