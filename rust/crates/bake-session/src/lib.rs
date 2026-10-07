@@ -1,13 +1,23 @@
-//! Development-only Session format reader: one current-format header record.
+//! Development-only Session format primitives: one current-format header
+//! record and one event's `sourceEventSeqs` field.
 //!
 //! [`read_header_record`] decodes the first physical record of a current
 //! (format 3) Session log into its logical header metadata, or refuses it with
 //! the class TypeScript's `parseHeaderRecord` in
 //! `packages/session/session-persistence-jsonl/src/format.ts` would report.
 //! Where this crate cannot reproduce the TypeScript outcome, it returns
-//! [`HeaderRefusal::NativeSubset`] and claims no TypeScript class. It reads no
-//! event rows, retains no input bytes, and encodes nothing. The crate is
-//! unstable and unshipped; nothing in the workspace depends on it.
+//! [`HeaderRefusal::NativeSubset`] and claims no TypeScript class.
+//! [`decode_source_event_seqs`] expands one already parsed field value; it does
+//! not admit the row that carries it. Neither reads a whole log, retains input
+//! bytes, or encodes anything. The crate is unstable and unshipped; nothing in
+//! the workspace depends on it.
+
+mod source_event_seqs;
+
+pub use source_event_seqs::{
+    SourceEventSeqsLimit, SourceEventSeqsRefusal, SourceEventSeqsRejection,
+    decode_source_event_seqs,
+};
 
 use serde_json::{Map, Value};
 
