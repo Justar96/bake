@@ -16,12 +16,15 @@
 //!
 //! 1. [`scan_log`], with its documented refusal and native-limit contracts.
 //! 2. The unsupported pass over every event.
-//! 3. This port's whole-log qualification, which only reports limits.
+//! 3. This port's whole-log qualification of `request/context`, which only
+//!    reports limits.
 //! 4. The adoption pass over every event.
 //! 5. The closers, built directly from the decoded events: they never pass
 //!    the codec, in TypeScript or here.
 //! 6. Session construction over the stored events, then the closers, which
-//!    folds the surface, request header, and tool history.
+//!    folds the surface, the catalog's `image/offload` message projection,
+//!    the request header, and tool history. Known types are interpreted
+//!    whether or not they carry `ignorable`; only a tool update refuses it.
 //!
 //! Neither path runs `restoreReleasedV3Artifact`: a current-format read
 //! applies no turn, step, or tool lifecycle validation, and neither does this
@@ -36,7 +39,7 @@ use serde_json::{Map, Value};
 
 use crate::repair::interrupted_turn_closers;
 use crate::replay::{KNOWN_EVENT_TYPES, ReplayRefusal, admit, adopt, folded, qualify_payload};
-use crate::request::RequestFold;
+use crate::request::{FoldRefusal, RequestFold};
 use crate::{
     PathPlatform, ReplayLimit, ScanRefusal, ScannedLog, SeedRejection, UnadmittedEnvelope, scan_log,
 };
@@ -95,7 +98,10 @@ impl RestoredLog {
         self.end_seed_appended
     }
 
-    /// `deriveMessages`: each current surface node's message, as logged.
+    /// `deriveMessages`: each current surface node's message, as logged or as
+    /// the `image/offload` projection last changed it. A projected message
+    /// keeps its identity and member order; only selected image blocks gain
+    /// `offloaded: true`.
     pub fn messages(&self) -> Vec<Value> {
         self.fold.messages().cloned().map(Value::Object).collect()
     }
@@ -122,7 +128,8 @@ impl RestoredLog {
 ///
 /// `Scan` and `Zstd` have their respective reader contracts. `Unsupported`,
 /// `Stored`, and `Restore` claim the TypeScript refusal layer and seq, not
-/// its message. Both native-only variants make no TypeScript outcome claim.
+/// its message, except that [`SeedRejection::ImageOffload`] also claims the
+/// message. Both native-only variants make no TypeScript outcome claim.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RestoreRefusal {
     /// `scanLog` throws; see [`ScanRefusal`].
@@ -160,11 +167,6 @@ pub enum Unsupported {
 /// Input this port does not restore, whatever TypeScript does with it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RestoreLimit {
-    /// `image/offload`, which needs its message projection.
-    EventType,
-    /// A known type carrying `ignorable`. TypeScript admits most of them, but
-    /// refuses a tool update after its other checks.
-    Ignorable,
     /// A surface message, request header, tool update, or `request/context`
     /// payload holds a number other than a safe integer and not -0, even
     /// where no output carries it, such as usage.
@@ -187,6 +189,10 @@ pub enum RestoreLimit {
     /// data in a `turn/start`, `step/start`, or `tool/call`, a `null` content
     /// block, or a pending tool call whose id is not a string.
     Repair,
+    /// An `image/offload` walk reaches a `null` block or a `tool-result`
+    /// block whose `content` is not an array, where JavaScript throws a
+    /// `TypeError` that Session construction wraps with engine text.
+    Projection,
 }
 
 /// Restore a stored plain current-format log, as the production read path
@@ -238,12 +244,14 @@ pub(crate) fn restore_scanned(
         interrupted_turn_closers(&envelopes).map_err(|(seq, limit)| native(seq, limit))?;
     let closer_envelopes: Vec<UnadmittedEnvelope<'_>> =
         closers.iter().map(closer_envelope).collect();
-    let mut fold = RequestFold::new(stored.header().id.clone());
+    let mut fold = RequestFold::with_image_offload(stored.header().id.clone());
     for envelope in envelopes.iter().chain(&closer_envelopes) {
         let seq = envelope.seq;
-        admit(envelope)
-            .and_then(|fact| fold.append(fact).map_err(|refusal| folded(seq, refusal)))
-            .map_err(restore_refusal)?;
+        let fact = admit(envelope).map_err(restore_refusal)?;
+        fold.append(fact).map_err(|refusal| match refusal {
+            FoldRefusal::ProjectionCoercion => native(seq, RestoreLimit::Projection),
+            refusal => restore_refusal(folded(seq, refusal)),
+        })?;
     }
     let end_seed_appended = closer_envelopes
         .last()
@@ -272,18 +280,10 @@ pub(crate) fn restore_scanned(
     })
 }
 
-/// This port's whole-log qualification: `image/offload`, `ignorable` on a
-/// known type, and `request/context` data, which restoration projects but
-/// Session construction never checks.
+/// This port's whole-log qualification of `request/context` data, which
+/// restoration projects but Session construction never checks.
 fn qualify(envelope: &UnadmittedEnvelope<'_>) -> Result<(), RestoreLimit> {
-    let event_type = envelope.event_type;
-    if event_type == "image/offload" {
-        return Err(RestoreLimit::EventType);
-    }
-    if envelope.ignorable && KNOWN_EVENT_TYPES.contains(&event_type) {
-        return Err(RestoreLimit::Ignorable);
-    }
-    if event_type == "request/context" {
+    if envelope.event_type == "request/context" {
         if !envelope.data.is_object() {
             return Err(RestoreLimit::Context);
         }
@@ -325,11 +325,11 @@ fn restore_refusal(refusal: ReplayRefusal) -> RestoreRefusal {
     }
 }
 
-/// The restoration limit for one of the shared admission's.
-const fn limit(limit: ReplayLimit) -> RestoreLimit {
+/// The restoration limit for one of the shared admission's. Event types are
+/// qualified only by derivation's whole-log pass.
+fn limit(limit: ReplayLimit) -> RestoreLimit {
     match limit {
-        ReplayLimit::EventType => RestoreLimit::EventType,
-        ReplayLimit::Ignorable => RestoreLimit::Ignorable,
+        ReplayLimit::EventType => unreachable!("admission qualifies no event type"),
         ReplayLimit::Number => RestoreLimit::Number,
         ReplayLimit::Depth => RestoreLimit::Depth,
         ReplayLimit::Coordinate | ReplayLimit::RepeatedCoordinate => RestoreLimit::Coordinate,

@@ -25,12 +25,11 @@ const FIXTURE_EXPECTED: &str =
 const LOG_BYTES: usize = 4533;
 const EXPECTED_BYTES: usize = 2775;
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 184;
+const CASE_COUNT: usize = 200;
 const MAX_EDITS: usize = 8;
 const SOURCE_BUDGET: usize = 64;
-const LIMITS: [&str; 10] = [
+const LIMITS: [&str; 9] = [
     "event-type",
-    "ignorable",
     "number",
     "depth",
     "coordinate",
@@ -44,7 +43,7 @@ const LIMITS: [&str; 10] = [
 /// cases that check it.
 const EXACT_CAUSES: [&str; 4] = ["codec", "finish", "uncommitted", "seeded"];
 const EXACT_CASES: usize = 15;
-const SEED_CHECKS: [(&str, SeedRejection); 30] = [
+const SEED_CHECKS: [(&str, SeedRejection); 32] = [
     ("lossless-json", SeedRejection::LosslessJson),
     ("message-identity", SeedRejection::MessageIdentity),
     ("message-role", SeedRejection::MessageRole),
@@ -81,6 +80,8 @@ const SEED_CHECKS: [(&str, SeedRejection); 30] = [
     ("tool-update-baseline", SeedRejection::ToolUpdateBaseline),
     ("tool-update-change", SeedRejection::ToolUpdateChange),
     ("tool-update-anchor", SeedRejection::ToolUpdateAnchor),
+    ("tool-update-required", SeedRejection::ToolUpdateRequired),
+    ("projection-required", SeedRejection::ProjectionRequired),
 ];
 
 fn repo_path(relative: &str) -> PathBuf {
@@ -131,10 +132,17 @@ fn table() -> Map<String, Value> {
     let fields = object(&table, "table").clone();
     assert_eq!(
         keys(&fields),
-        BTreeSet::from(["schema", "version", "oracle", "fixture", "cases"])
+        BTreeSet::from(["schema", "version", "history", "oracle", "fixture", "cases"])
     );
     assert_eq!(fields["schema"], SCHEMA);
-    assert_eq!(fields["version"], 1);
+    assert_eq!(fields["version"], 2);
+    assert!(
+        fields["history"]
+            .as_array()
+            .expect("history")
+            .iter()
+            .all(Value::is_string)
+    );
     assert_eq!(fields["oracle"], ORACLE);
     assert_eq!(
         fields["fixture"],
@@ -400,20 +408,19 @@ fn classify(refusal: &ReplayRefusal) -> String {
         ReplayRefusal::Scan(_) => "cause:codec".to_owned(),
         ReplayRefusal::Uncommitted { .. } => "cause:uncommitted".to_owned(),
         ReplayRefusal::Seeded => "cause:seeded".to_owned(),
-        ReplayRefusal::Seed { rejection, .. } => {
-            let (name, _) = SEED_CHECKS
-                .iter()
-                .find(|(_, check)| check == rejection)
-                .expect("named seed check");
-            format!("cause:seed/{name}")
-        }
+        ReplayRefusal::Seed { rejection, .. } => SEED_CHECKS
+            .iter()
+            .find(|(_, check)| check == rejection)
+            .map_or_else(
+                || format!("cause:seed/unclassified:{rejection:?}"),
+                |(name, _)| format!("cause:seed/{name}"),
+            ),
         ReplayRefusal::NoLaterSettlement { .. } => "cause:no-later-settlement".to_owned(),
         ReplayRefusal::NoRequestHeader { .. } => "cause:no-request-header".to_owned(),
         ReplayRefusal::NativeSubset { limit, .. } => format!(
             "limit:{}",
             match limit {
                 ReplayLimit::EventType => "event-type",
-                ReplayLimit::Ignorable => "ignorable",
                 ReplayLimit::Number => "number",
                 ReplayLimit::Depth => "depth",
                 ReplayLimit::Coordinate => "coordinate",

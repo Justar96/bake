@@ -33,6 +33,8 @@ There are **157 direct shared package manifests**, **771 application/runtime sou
 
 Large owners deserve decomposition by behavior. Examples include [tool dispatch](../../../packages/core/tools/src/index.ts), [JSONL persistence](../../../packages/session/session-persistence-jsonl/src/index.ts), [Session](../../../packages/core/session/src/index.ts), [TUI controller](../../../apps/tui/packages/app/src/controller.ts), and [provider catalog](../../../packages/llm/llm-pi-ai/src/catalog.ts). The 5,605-line Cordis API catalog is generated source, so treating all source lines as handwritten implementation would overstate that work.
 
+The [Pi source reference](pi-reference.md) supplements this Bake baseline with the latest inspected official Pi release and main revision. It informs Rust ownership and lifecycle design; it does not replace the TypeScript comparison oracle.
+
 ## Execution and ownership
 
 The [base bundle](../../../packages/bundle/base/cordis.patch.yml) composes persistence, LLM services, settings, credentials, tool/policy infrastructure, subagents, goals, code mode, and web capabilities. The [headless overlay](../../../packages/bundle/headless/cordis.patch.yml), [terminal overlay](../../../apps/tui/packages/app/cordis.built.patch.yml), and [Desktop overlay](../../../packages/bundle/desktop/cordis.patch.yml) specialize that composition. Agent presets add scoped services and tools. Package presence alone does not prove that a feature is active in every profile.
@@ -89,7 +91,7 @@ MCP similarly delegates to an SDK and registers server-qualified tools with scop
 
 The [plugin manager](../../../packages/boot/plugin-manager/README.md), [Cordis host runner](../../../packages/extensions/cordis-host-runner/README.md), and [Cordis tool](../../../packages/extensions/tool-cordis/README.md) expose JavaScript package and runtime operations. Arbitrary plugins can depend on Cordis services and lifecycle behavior that cannot be transparently represented by a small JSON-RPC adapter.
 
-The product owner decided on 2026-10-07 that 0.4 ships Rust only ([D5](scope-00/support.md#decision-register)): no Node/TypeScript compatibility runtime ships, so custom Cordis/JavaScript profiles need migration. The old whole-profile runtime stays runnable in development as the comparison oracle. The owner also decided that 0.4.0 requires a native plugin API ([D6](scope-00/support.md#decision-register)); MCP servers and hook processes alone do not satisfy it. Its form is not chosen; design it around a named consumer. Before release, the Cordis preset, tools, and plugin manager each need a migration or native replacement, or an explicit support-change decision. Never feed an obsolete Cordis API catalog to the model while executing an unrelated native interface.
+The product owner decided on 2026-10-07 that 0.4 ships Rust only ([D5](scope-00/support.md#decision-register)): no Node/TypeScript compatibility runtime ships. The owner has also excluded custom JavaScript/Cordis profiles and their migration from 0.4.0. The old whole-profile runtime stays runnable in development as the comparison oracle. The owner also decided that 0.4.0 requires a native plugin API ([D6](scope-00/support.md#decision-register)); MCP servers and hook processes alone do not satisfy it. Its form is not chosen; design it around a named consumer. Before release, the shipped Cordis preset, tools, and plugin manager each need a designed migration of the shipped capability, a native replacement, or an explicit retirement decision under D7; custom-profile conversion is excluded by D5. Never feed an obsolete Cordis API catalog to the model while executing an unrelated native interface.
 
 ### Bake Desktop is a retained consumer
 
@@ -127,7 +129,7 @@ This map assigns every direct shared package group to a migration owner. It iden
 | `fs`, `shell`, `interaction`, `spill`, `guard` | Port tools, permissions, questions, errors, progress and bounds | 04, 08, 15 |
 | `preset`, `context`, `skill`, `attachment`, `compaction` | Preserve composition and model-facing context | 05, 10 |
 | `subagent`, `goal`, `jobs`, `schedule` | Port durable orchestration and restart behavior | 11 |
-| `mcp`, `web`, `hooks`, `ptc-runtime`, `extensions` | Native integrations; Cordis extensions need migration or an approved support change | 12 |
+| `mcp`, `web`, `hooks`, `ptc-runtime`, `extensions` | Native integrations and plugin API; custom Cordis profiles excluded by D5; shipped Cordis tooling awaits D7 | 12 |
 | `api`, `client`, `host`, `typert` | Trace retained consumers; preserve required wire/API behavior; replace TS-specific generation where justified | 13 |
 | `bundle`, CLI | Native profiles and supported launch contracts, including Desktop | 09, 13 |
 | `runtime-diagnostics`, `feedback`, Session telemetry | Preserve opt-outs, local feedback, bounded shutdown, identity/redaction; replace V8-specific measurements with native measurements | 13, 17 |
@@ -153,9 +155,9 @@ Scope 00 must settle these points in a concrete support matrix. Recommended defa
 
 | Decision | Recommended default | Evidence needed before acceptance |
 |---|---|---|
-| Native completion | Native standard, minimal, and code-mode agent paths plus terminal/headless/Desktop; explicit disposition for the Cordis preset and custom plugins | Per-profile command/tool/config/provider inventory |
+| Native completion | Native standard, minimal, and code-mode agent paths plus terminal/headless/Desktop; explicit disposition for the shipped Cordis preset; custom JavaScript/Cordis profiles excluded | Per-profile command/tool/config/provider inventory |
 | Session version | Preserve current format 3 unless a separately justified structural change is required | Cross-runtime write/read/reconstruction and historical migration tests |
-| Extension strategy | Built-ins in Rust; ship Rust only, with migration for custom Cordis/JavaScript profiles (decided); keep TypeScript as the development oracle; require a native plugin API in 0.4.0 (decided), designed around a named consumer | Real plugin lifecycle and migration fixtures; support-change decision if parity is narrowed |
+| Extension strategy | Built-ins in Rust; ship Rust only; custom JavaScript/Cordis profiles and their migration excluded (D5); keep TypeScript as the development oracle; require a native plugin API in 0.4.0 (D6), designed around a named consumer | Real native plugin lifecycle and unsupported-profile refusal fixtures; separate D7 disposition for shipped Cordis tooling |
 | Desktop integration | Coordinate native child spawning or test an Electron port-to-stdio adapter | Separate Desktop consumer test on supported hosts |
 | Provider breadth | Inventory catalog routes as well as three generic wire overrides; preserve claimed login flows | Fixture and live-smoke matrix with no implicit unsupported routes |
 | 0.3 maintenance | Bug fixes only; define post-0.4 maintenance PRs and separate update channel before cutover | Branch-policy and signed-channel release rehearsal |

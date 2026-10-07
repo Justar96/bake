@@ -392,7 +392,7 @@ fn with_path(template: &str, path: &Path) -> String {
 fn restored_logs_print_the_tables_expected_state() {
     let expectations = expectations();
     let cases = expectations["restored"].as_array().unwrap();
-    assert_eq!(cases.len(), 9);
+    assert_eq!(cases.len(), 13);
     for expectation in cases {
         let id = expectation["id"].as_str().unwrap();
         let scratch = Scratch::new(id);
@@ -425,7 +425,7 @@ fn restored_logs_print_the_tables_expected_state() {
 fn refused_logs_print_one_refusal_record_with_status_3() {
     let expectations = expectations();
     let cases = expectations["refused"].as_array().unwrap();
-    assert_eq!(cases.len(), 12);
+    assert_eq!(cases.len(), 14);
     for expectation in cases {
         let id = expectation["id"].as_str().unwrap();
         let scratch = Scratch::new(id);
