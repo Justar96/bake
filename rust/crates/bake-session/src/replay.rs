@@ -5,7 +5,8 @@
 //! The helper does not restore its log. For a log already in format 3,
 //! `scanLog` runs only the strict V3 codec on each row and `finish`: the
 //! catalog's transformed validation is the identity for current input. The
-//! helper then constructs a Session from each request's prefix. Session
+//! helper then refuses a log with bytes after the decoded prefix or a seeded
+//! one, and constructs a Session from each request's prefix. Session
 //! construction validates each prefix event's envelope, message, settlement,
 //! and request-header fields, and its surface transition, including the rule
 //! that a replacement starting at a `system/message` in node 0 must be one
@@ -19,8 +20,9 @@
 //!
 //! [`replay_requests`] runs the same stages in the same order:
 //!
-//! 1. The header record through [`read_header_record`].
-//! 2. Every row through [`decode_v3_row`]; the first refusal wins.
+//! 1. [`scan_log`], with its documented refusal and native-limit contracts.
+//! 2. Uncommitted trailing bytes, including any record after the first issue
+//!    and a torn tail, then a seeded header or a nonzero inherited cut.
 //! 3. Subset qualification of every row, and the step and settlement
 //!    coordinates.
 //! 4. Each prefix that ends before a step's settlement: number qualification,
@@ -31,7 +33,9 @@
 //! Rows at or after the last cut are never checked by Session construction,
 //! as in the helper, so a codec-admitted row there that Session construction
 //! would refuse, such as an invalid replacement, does not refuse the log. A
-//! codec-invalid row anywhere still does. For rows of the 16 subset types
+//! codec-invalid row anywhere still does: it ends the scan's prefix, so its
+//! bytes are uncommitted, unless it is a `turn/end` and the scan throws. For
+//! rows of the 16 subset types
 //! other than `request/tool-update`, the codec already proves the envelope
 //! fields, sequence contiguity, the `surfaceOp` marker and
 //! its eligibility, an exact replacement shape with earlier endpoints, the
@@ -66,21 +70,16 @@
 //!
 //! Whether a later header redeclares a tool compares `JSON.stringify` text,
 //! which depends on member order. Each object's member order is read from the
-//! caller's parsed rows, which the workspace's `preserve_order` feature keeps
+//! scan's parsed rows, which the workspace's `preserve_order` feature keeps
 //! in insertion order; JavaScript's array-index-first enumeration is applied
-//! when comparing. Callers must therefore parse each row with its members in
-//! log order, as `JSON.parse` would see them. Nothing here reads or claims the
-//! original bytes.
+//! when comparing, as `JSON.parse` would see the log's members.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Map, Value};
 
 use crate::request::{Fact, FoldRefusal, Request, RequestFold, SurfaceKind, SurfaceOp};
-use crate::{
-    HeaderRefusal, MAX_SAFE_INTEGER, PathPlatform, V3CodecEvent, V3RowRefusal, decode_v3_row,
-    read_header_record,
-};
+use crate::{MAX_SAFE_INTEGER, PathPlatform, ScanRefusal, V3CodecEvent, scan_log};
 
 /// The event types this subset admits: those of the committed
 /// request-reconstruction fixture, the compaction records written beside
@@ -123,17 +122,23 @@ const MAX_PAYLOAD_DEPTH: usize = 64;
 
 /// Why [`replay_requests`] returned no requests.
 ///
-/// Every variant except [`ReplayRefusal::NativeSubset`] and the native-subset
-/// outcomes it wraps claims only that `replayRequests` throws for the same
-/// log. None claims the TypeScript error's class or message.
+/// [`ReplayRefusal::Scan`], [`ReplayRefusal::Uncommitted`], and
+/// [`ReplayRefusal::Seeded`] claim the TypeScript error as their own
+/// documentation states it, except where a scan native limit claims nothing.
+/// Every other variant except [`ReplayRefusal::NativeSubset`] claims only that
+/// `replayRequests` throws for the same log, not the error's class or message.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReplayRefusal {
-    /// The header reader refused the record. Its own
-    /// [`HeaderRefusal::NativeSubset`] claims nothing.
-    Header(HeaderRefusal),
-    /// The V3 codec refused row `seq`. Its own [`V3RowRefusal::NativeSubset`]
-    /// claims nothing.
-    Row { seq: u64, refusal: V3RowRefusal },
+    /// `scanLog` throws; see [`ScanRefusal`].
+    Scan(ScanRefusal),
+    /// The log holds `bytes` bytes after the scan's committed prefix.
+    /// TypeScript throws a plain `Error`, "log has `bytes` uncommitted
+    /// trailing bytes".
+    Uncommitted { bytes: usize },
+    /// The header is seeded. TypeScript throws a plain `Error`, "replay
+    /// expects an unseeded log". A scanned unseeded log always has a zero
+    /// inherited cut.
+    Seeded,
     /// Session construction rejects the first prefix that contains row `seq`.
     Seed { seq: u64, rejection: SeedRejection },
     /// The step has no Assistant settlement after its `step/start`.
@@ -141,11 +146,23 @@ pub enum ReplayRefusal {
     /// No `request/header` precedes the step's settlement.
     NoRequestHeader { turn: u64, step: u64 },
     /// This subset cannot reproduce the outcome; nothing is claimed.
-    /// `seq` names the row, or `None` for the header.
-    NativeSubset {
-        seq: Option<u64>,
-        limit: ReplayLimit,
-    },
+    /// `seq` names the row.
+    NativeSubset { seq: u64, limit: ReplayLimit },
+}
+
+impl ReplayRefusal {
+    /// TypeScript's exact message for a scan, uncommitted, or seeded refusal,
+    /// where [`ScanRefusal::message`] renders one; otherwise `None`.
+    pub fn message(&self) -> Option<String> {
+        match self {
+            Self::Scan(refusal) => refusal.message(),
+            Self::Uncommitted { bytes } => {
+                Some(format!("log has {bytes} uncommitted trailing bytes"))
+            }
+            Self::Seeded => Some("replay expects an unseeded log".to_owned()),
+            _ => None,
+        }
+    }
 }
 
 /// A Session construction check that rejected a prefix event, in the order
@@ -229,9 +246,6 @@ pub enum SeedRejection {
 /// Input this subset does not derive, whatever TypeScript does with it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReplayLimit {
-    /// The header is seeded. Seeded logs need an inherited cut and the codec's
-    /// `finish` checks, which this subset does not implement.
-    SeededHeader,
     /// A row type outside this subset's 17 types, including ignorable
     /// unknown types, `assistant/attempt`, message projections, and
     /// `session/end-seed`.
@@ -261,29 +275,26 @@ type Coordinate = (u64, u64);
 
 /// Rebuild the request each step dispatched, as `replayRequests` does.
 ///
-/// `header_record` is the log's first record, LF included. `rows` are the
-/// parsed event rows in log order, numbered from 0, and `source_budget`
-/// bounds each row's expanded `sourceEventSeqs` as in [`decode_v3_row`]. Each
-/// `step/start` yields one request, in log order: the messages and header of
-/// the prefix that ends before the first Assistant message with the same
-/// coordinate. Framing, torn tails, and JSON parsing belong to the caller.
+/// `log` is a plain, uncompressed log, and `source_budget` bounds each row's
+/// expanded `sourceEventSeqs` as in [`scan_log`]. Each `step/start` yields one
+/// request, in log order: the messages and header of the prefix that ends
+/// before the first Assistant message with the same coordinate.
 pub fn replay_requests(
-    header_record: &[u8],
+    log: &[u8],
     platform: PathPlatform,
-    rows: &[Value],
     source_budget: usize,
 ) -> Result<Vec<Request>, ReplayRefusal> {
-    let header = read_header_record(header_record, platform).map_err(ReplayRefusal::Header)?;
-    if header.is_seeded {
-        return Err(limit(None, ReplayLimit::SeededHeader));
+    let scan = scan_log(log, platform, source_budget).map_err(ReplayRefusal::Scan)?;
+    if scan.committed_bytes() != log.len() {
+        return Err(ReplayRefusal::Uncommitted {
+            bytes: log.len() - scan.committed_bytes(),
+        });
     }
-    let mut events = Vec::with_capacity(rows.len());
-    for (seq, row) in (0u64..).zip(rows) {
-        events.push(
-            decode_v3_row(row, seq, source_budget)
-                .map_err(|refusal| ReplayRefusal::Row { seq, refusal })?,
-        );
+    if scan.header().is_seeded || scan.inherited_event_count() != 0 {
+        return Err(ReplayRefusal::Seeded);
     }
+    let header = scan.header();
+    let events: Vec<V3CodecEvent<'_>> = scan.events().collect();
     let mut starts: Vec<(Coordinate, u64)> = Vec::new();
     let mut started = BTreeSet::new();
     let mut settlements: BTreeMap<Coordinate, u64> = BTreeMap::new();
@@ -291,15 +302,15 @@ pub fn replay_requests(
         let envelope = event.envelope();
         let seq = envelope.seq;
         if !SUBSET_TYPES.contains(&envelope.event_type) {
-            return Err(limit(Some(seq), ReplayLimit::EventType));
+            return Err(limit(seq, ReplayLimit::EventType));
         }
         if envelope.ignorable {
-            return Err(limit(Some(seq), ReplayLimit::Ignorable));
+            return Err(limit(seq, ReplayLimit::Ignorable));
         }
         if !matches!(envelope.event_type, "step/start" | "assistant/message") {
             continue;
         }
-        let at = coordinate(envelope.data).ok_or(limit(Some(seq), ReplayLimit::Coordinate))?;
+        let at = coordinate(envelope.data).ok_or(limit(seq, ReplayLimit::Coordinate))?;
         let repeated = if envelope.event_type == "step/start" {
             starts.push((at, seq));
             !started.insert(at)
@@ -307,7 +318,7 @@ pub fn replay_requests(
             settlements.insert(at, seq).is_some()
         };
         if repeated {
-            return Err(limit(Some(seq), ReplayLimit::RepeatedCoordinate));
+            return Err(limit(seq, ReplayLimit::RepeatedCoordinate));
         }
     }
     // With unique coordinates, the first settlement `find` returns is the
@@ -319,7 +330,7 @@ pub fn replay_requests(
         .collect();
     let end = cuts.iter().map_while(|cut| *cut).max().unwrap_or(0);
     let cut_set: BTreeSet<u64> = cuts.iter().flatten().copied().collect();
-    let mut fold = RequestFold::new(header.id);
+    let mut fold = RequestFold::new(header.id.clone());
     let mut snapshots: BTreeMap<u64, Option<Request>> = BTreeMap::new();
     let mut failure = None;
     for event in &events[..usize::try_from(end).unwrap_or(events.len())] {
@@ -353,7 +364,7 @@ pub fn replay_requests(
     Ok(requests)
 }
 
-const fn limit(seq: Option<u64>, limit: ReplayLimit) -> ReplayRefusal {
+const fn limit(seq: u64, limit: ReplayLimit) -> ReplayRefusal {
     ReplayRefusal::NativeSubset { seq, limit }
 }
 
@@ -402,7 +413,7 @@ fn admit(event: &V3CodecEvent<'_>) -> Result<Fact, ReplayRefusal> {
     let envelope = event.envelope();
     let seq = envelope.seq;
     let data = envelope.data;
-    qualify_payload(data).map_err(|refusal| limit(Some(seq), refusal))?;
+    qualify_payload(data).map_err(|refusal| limit(seq, refusal))?;
     // Only for the surface types the closure serves did the codec prove the
     // marker: `"append"`, or an exact replacement whose endpoints are safe
     // integers. Other types never read it; an opaque type may carry anything.
@@ -625,12 +636,12 @@ fn request_header(seq: u64, data: &Value) -> Result<Fact, ReplayRefusal> {
         .keys()
         .any(|key| !CONFIG_KEYS.contains(&key.as_str()))
     {
-        return Err(limit(Some(seq), ReplayLimit::ConfigMember));
+        return Err(limit(seq, ReplayLimit::ConfigMember));
     }
     let tools = match header.get("tools") {
         None => None,
         Some(Value::Array(tools)) if tools.iter().all(Value::is_object) => Some(tools.clone()),
-        Some(_) => return Err(limit(Some(seq), ReplayLimit::ToolSchema)),
+        Some(_) => return Err(limit(seq, ReplayLimit::ToolSchema)),
     };
     Ok(Fact::Header {
         seq,

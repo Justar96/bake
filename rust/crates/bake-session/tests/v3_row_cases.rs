@@ -412,11 +412,15 @@ fn shared_v3_row_cases_match() {
         BTreeSet::from(REFUSALS),
         "every refusal witnessed"
     );
-    // serde_json reads this seq as -0, but JavaScript reads -5e-324.
+    // With `float_roundtrip`, serde_json reads this seq as -5e-324, as
+    // JavaScript does; Rust still renders no `f64` seq.
     let underflow = cases
         .iter()
         .find(|case| case["id"] == "obsolete-underflow-seq")
         .expect("underflow witness");
+    let row: Value = serde_json::from_str(underflow["row"].as_str().expect("row text"))
+        .expect("parse underflow row");
+    assert_eq!(row["seq"].as_f64(), Some(-5e-324));
     assert!(
         underflow["ts"]["message"]
             .as_str()

@@ -1,14 +1,15 @@
 //! Runs every shared case in `conformance/runtime/request-derivation-cases.json`
-//! through `replay_requests`. A case's expected outcome is its `rust` override
-//! when present, otherwise the requests the TypeScript `replayRequests` helper
-//! returns for the same log. Only this test normalizes message IDs; the
-//! derivation never reads an expected file.
+//! through `replay_requests`, over the same bytes the TypeScript spec builds.
+//! A case's expected outcome is its `rust` override when present, otherwise
+//! the requests the TypeScript `replayRequests` helper returns for the same
+//! log. Only this test normalizes message IDs; the derivation never reads an
+//! expected file.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use bake_session::{
-    HeaderRefusal, PathPlatform, ReplayLimit, ReplayRefusal, SeedRejection, V3RowRefusal,
+    HeaderRefusal, PathPlatform, ReplayLimit, ReplayRefusal, ScanLimit, ScanRefusal, SeedRejection,
     replay_requests,
 };
 use serde_json::{Map, Value};
@@ -24,11 +25,10 @@ const FIXTURE_EXPECTED: &str =
 const LOG_BYTES: usize = 4533;
 const EXPECTED_BYTES: usize = 2775;
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 149;
+const CASE_COUNT: usize = 158;
 const MAX_EDITS: usize = 8;
 const SOURCE_BUDGET: usize = 64;
-const LIMITS: [&str; 11] = [
-    "seeded-header",
+const LIMITS: [&str; 10] = [
     "event-type",
     "ignorable",
     "number",
@@ -40,6 +40,10 @@ const LIMITS: [&str; 11] = [
     "header",
     "codec",
 ];
+/// Causes whose refusal renders TypeScript's exact message, and the number of
+/// cases that check it.
+const EXACT_CAUSES: [&str; 4] = ["codec", "finish", "uncommitted", "seeded"];
+const EXACT_CASES: usize = 13;
 const SEED_CHECKS: [(&str, SeedRejection); 29] = [
     ("message-identity", SeedRejection::MessageIdentity),
     ("message-role", SeedRejection::MessageRole),
@@ -200,7 +204,8 @@ fn apply_edit(root: &mut Value, pointer: &str, operation: Operation) {
     }
 }
 
-/// Row edits re-serialize the row in TypeScript, so their values may hold only safe integers.
+/// Row edits re-serialize the row with `JSON.stringify` in TypeScript, so
+/// their values, and here their whole rows, may hold only safe integers.
 fn assert_integer_numbers(value: &Value, context: &str) {
     let mut pending = vec![value];
     while let Some(item) = pending.pop() {
@@ -217,11 +222,34 @@ fn assert_integer_numbers(value: &Value, context: &str) {
     }
 }
 
-/// The case's header record and parsed rows. Rows edited by value are parsed
-/// and edited; every other row is parsed from its exact text.
-fn case_log(case: &Map<String, Value>, fixture: &Fixture, id: &str) -> (String, Vec<Value>) {
+/// `JSON.stringify` text of a row whose numbers are safe integers and whose
+/// objects have no array-index keys, which JavaScript would enumerate first.
+fn stringify(row: &Value, id: &str) -> String {
+    assert_integer_numbers(row, id);
+    let mut pending = vec![row];
+    while let Some(item) = pending.pop() {
+        match item {
+            Value::Array(items) => pending.extend(items),
+            Value::Object(fields) => {
+                assert!(
+                    fields.keys().all(|key| key.parse::<u32>().is_err()),
+                    "{id}: a re-serialized row has an array-index key"
+                );
+                pending.extend(fields.values());
+            }
+            _ => {}
+        }
+    }
+    serde_json::to_string(row).expect("serialize row")
+}
+
+/// The case's log bytes, as the TypeScript spec builds them: the lines joined
+/// by LF with a final LF, then any unterminated `tail`. A row edited by value
+/// is parsed, edited, and re-serialized; every other row keeps its exact text.
+fn case_log(case: &Map<String, Value>, fixture: &Fixture, id: &str) -> Vec<u8> {
     let mut lines: Vec<String>;
     let mut values: Vec<Option<Value>>;
+    let mut tail = String::new();
     if case["log"] == "fixture" {
         lines = fixture.lines.clone();
         values = vec![None; lines.len()];
@@ -237,6 +265,7 @@ fn case_log(case: &Map<String, Value>, fixture: &Fixture, id: &str) -> (String, 
             };
             match keys(fields).into_iter().collect::<Vec<_>>().as_slice() {
                 ["header"] => lines[0] = edit["header"].as_str().expect("header").to_owned(),
+                ["tail"] => edit["tail"].as_str().expect("tail").clone_into(&mut tail),
                 ["truncate"] => {
                     let keep = edit["truncate"].as_u64().expect("truncate") as usize;
                     assert!(keep < rows, "{id}: truncate keeps fewer rows");
@@ -280,18 +309,16 @@ fn case_log(case: &Map<String, Value>, fixture: &Fixture, id: &str) -> (String, 
         assert!(!lines.is_empty(), "{id}: log has a header");
         values = vec![None; lines.len()];
     }
-    let header = format!("{}\n", lines[0]);
-    let rows = lines
-        .iter()
-        .zip(values)
-        .skip(1)
-        .map(|(line, value)| {
-            value.unwrap_or_else(|| {
-                serde_json::from_str(line).unwrap_or_else(|_| panic!("{id}: row is JSON"))
-            })
-        })
-        .collect();
-    (header, rows)
+    let mut log = String::new();
+    for (line, value) in lines.iter().zip(values) {
+        let line = value.map_or_else(|| line.clone(), |row| stringify(&row, id));
+        assert!(!line.contains('\n'), "{id}: a line holds a newline");
+        log.push_str(&line);
+        log.push('\n');
+    }
+    assert!(!tail.contains('\n'), "{id}: the tail holds a newline");
+    log.push_str(&tail);
+    log.into_bytes()
 }
 
 fn expected_requests(ts: &Value, fixture: &Fixture, id: &str) -> Vec<Value> {
@@ -357,13 +384,21 @@ fn normalize(requests: &[Value], id: &str) -> Vec<Value> {
 /// The case-table name of a refusal: `limit:<name>` or `cause:<name>`.
 fn classify(refusal: &ReplayRefusal) -> String {
     match refusal {
-        ReplayRefusal::Header(HeaderRefusal::NativeSubset(_)) => "limit:header".to_owned(),
-        ReplayRefusal::Header(_) => "cause:header".to_owned(),
-        ReplayRefusal::Row {
-            refusal: V3RowRefusal::NativeSubset(_),
+        ReplayRefusal::Scan(ScanRefusal::Header(HeaderRefusal::NativeSubset(_))) => {
+            "limit:header".to_owned()
+        }
+        ReplayRefusal::Scan(ScanRefusal::Header(_)) => "cause:header".to_owned(),
+        ReplayRefusal::Scan(ScanRefusal::NativeSubset {
+            limit: ScanLimit::Codec(_),
             ..
-        } => "limit:codec".to_owned(),
-        ReplayRefusal::Row { .. } => "cause:codec".to_owned(),
+        }) => "limit:codec".to_owned(),
+        ReplayRefusal::Scan(ScanRefusal::NativeSubset { limit, .. }) => {
+            format!("limit:scan/{limit:?}")
+        }
+        ReplayRefusal::Scan(ScanRefusal::Finish(_)) => "cause:finish".to_owned(),
+        ReplayRefusal::Scan(_) => "cause:codec".to_owned(),
+        ReplayRefusal::Uncommitted { .. } => "cause:uncommitted".to_owned(),
+        ReplayRefusal::Seeded => "cause:seeded".to_owned(),
         ReplayRefusal::Seed { rejection, .. } => {
             let (name, _) = SEED_CHECKS
                 .iter()
@@ -376,7 +411,6 @@ fn classify(refusal: &ReplayRefusal) -> String {
         ReplayRefusal::NativeSubset { limit, .. } => format!(
             "limit:{}",
             match limit {
-                ReplayLimit::SeededHeader => "seeded-header",
                 ReplayLimit::EventType => "event-type",
                 ReplayLimit::Ignorable => "ignorable",
                 ReplayLimit::Number => "number",
@@ -390,8 +424,8 @@ fn classify(refusal: &ReplayRefusal) -> String {
     }
 }
 
-fn replay(header: &str, rows: &[Value]) -> Result<Vec<Value>, ReplayRefusal> {
-    replay_requests(header.as_bytes(), PathPlatform::host(), rows, SOURCE_BUDGET).map(|requests| {
+fn replay(log: &[u8]) -> Result<Vec<Value>, ReplayRefusal> {
+    replay_requests(log, PathPlatform::host(), SOURCE_BUDGET).map(|requests| {
         requests
             .iter()
             .map(bake_session::Request::to_json)
@@ -409,14 +443,14 @@ fn shared_cases_derive_like_replay_requests() {
     let mut limits = BTreeSet::new();
     let mut causes = BTreeSet::new();
     let mut limited_outcomes = BTreeSet::new();
+    let mut exact = 0;
     for case in cases {
         let fields = object(case, "case");
         let id = case["id"].as_str().expect("case id");
         assert!(ids.insert(id), "{id}: duplicate id");
         let allowed = BTreeSet::from(["id", "log", "edits", "ts", "rust"]);
         assert!(keys(fields).is_subset(&allowed), "{id}: unknown keys");
-        let (header, rows) = case_log(fields, &fixture, id);
-        let actual = replay(&header, &rows);
+        let actual = replay(&case_log(fields, &fixture, id));
         let ts_outcome = case["ts"]["outcome"].as_str().expect("ts outcome");
         match case.get("rust") {
             None => {
@@ -447,6 +481,15 @@ fn shared_cases_derive_like_replay_requests() {
                         assert!(case["ts"]["message"].is_string(), "{id}: rejection message");
                         let cause = rust["cause"].as_str().expect("cause");
                         causes.insert(cause.to_owned());
+                        // Scan-level causes claim TypeScript's exact message.
+                        if EXACT_CAUSES.contains(&cause) {
+                            assert_eq!(
+                                refusal.message().as_deref(),
+                                case["ts"]["message"].as_str(),
+                                "{id}: exact message"
+                            );
+                            exact += 1;
+                        }
                         format!("cause:{cause}")
                     }
                     _ => panic!("{id}: invalid override {rust}"),
@@ -455,16 +498,13 @@ fn shared_cases_derive_like_replay_requests() {
             }
         }
     }
-    let all_causes: BTreeSet<String> = [
-        "header",
-        "codec",
-        "no-later-settlement",
-        "no-request-header",
-    ]
-    .into_iter()
-    .map(str::to_owned)
-    .chain(SEED_CHECKS.iter().map(|(name, _)| format!("seed/{name}")))
-    .collect();
+    assert_eq!(exact, EXACT_CASES, "exact scan-level messages");
+    let all_causes: BTreeSet<String> = ["header", "no-later-settlement", "no-request-header"]
+        .into_iter()
+        .chain(EXACT_CAUSES)
+        .map(str::to_owned)
+        .chain(SEED_CHECKS.iter().map(|(name, _)| format!("seed/{name}")))
+        .collect();
     assert_eq!(causes, all_causes, "every cause is witnessed");
     assert_eq!(
         limits,
@@ -479,9 +519,17 @@ fn shared_cases_derive_like_replay_requests() {
 }
 
 #[test]
+fn fixture_rows_reserialize_to_their_text() {
+    for line in fixture().lines {
+        let row: Value = serde_json::from_str(&line).expect("fixture line");
+        assert_eq!(stringify(&row, "fixture"), line);
+    }
+}
+
+#[test]
 fn requests_keep_the_logged_message_ids() {
     let fixture = fixture();
-    let header = format!("{}\n", fixture.lines[0]);
+    let log = format!("{}\n", fixture.lines.join("\n"));
     let rows: Vec<Value> = fixture.lines[1..]
         .iter()
         .map(|line| serde_json::from_str(line).expect("row"))
@@ -490,7 +538,7 @@ fn requests_keep_the_logged_message_ids() {
         let data = &rows[seq]["data"];
         data.get("message").unwrap_or(data)["id"].clone()
     };
-    let requests = replay(&header, &rows).expect("fixture requests");
+    let requests = replay(log.as_bytes()).expect("fixture requests");
     let ids: Vec<Vec<Value>> = requests
         .iter()
         .map(|request| {
