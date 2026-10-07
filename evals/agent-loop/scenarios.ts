@@ -392,8 +392,11 @@ export interface Outcome {
 /** A scenario's verdict, and the file contents, test result, and protected-fixture check it rests on. */
 export interface Verdict { validated: boolean; source: string; testsUnchanged: boolean | null; testExit: number | null; fixturesUnchanged: boolean | null }
 
-/** Judge a finished sample against its fixture; the agent's exit code is checked by the caller, except where a predicate names it. */
-export function validate(scenario: string, built: Fixture, outcome: Outcome): Verdict {
+/**
+ * Judge a finished sample against its fixture; the agent's exit code is checked by the caller, except where a predicate names it.
+ * @param env - the complete environment of the `node test.cjs` check; omitted, the check inherits this process's environment.
+ */
+export function validate(scenario: string, built: Fixture, outcome: Outcome, env?: NodeJS.ProcessEnv): Verdict {
   const { workspace, file } = built
   if (scenario === 'no_tools') {
     return { validated: outcome.final.trim() === 'TOKEN_CONTROL_OK' && outcome.toolCalls === 0, source: '', testsUnchanged: null, testExit: null, fixturesUnchanged: null }
@@ -409,7 +412,7 @@ export function validate(scenario: string, built: Fixture, outcome: Outcome): Ve
     return { validated: outcome.final.trim() === EXPLORE_ANSWER && treeDigest(workspace) === built.digest, source, testsUnchanged: null, testExit: null, fixturesUnchanged: null }
   }
   const testsUnchanged = existsSync(join(workspace, 'test.cjs')) && readFileSync(join(workspace, 'test.cjs'), 'utf8') === testsFor(scenario, file)
-  const validation = spawnSync('node', ['test.cjs'], { cwd: workspace, stdio: ['ignore', 'pipe', 'pipe'], timeout: 5000 })
+  const validation = spawnSync('node', ['test.cjs'], { cwd: workspace, env, stdio: ['ignore', 'pipe', 'pipe'], timeout: 5000 })
   const testExit = validation.status
   const read = (path: string) => existsSync(join(workspace, path)) ? readFileSync(join(workspace, path), 'utf8') : ''
   const unchanged = fixturesUnchanged(built)

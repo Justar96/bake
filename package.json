@@ -69,6 +69,7 @@
     "check:rust": "cd rust && cargo fmt --all -- --check && cargo clippy --workspace --all-targets --locked -- -D warnings && cargo test --workspace --locked && cargo build --workspace --locked",
     "test:rust:pty": "bun scripts/rust-preview-pty.ts",
     "test:rust:conformance": "bun scripts/rust-conformance/driver.ts",
+    "test:rust:eval": "bun evals/agent-loop/native-smoke.ts",
     "build": "bun run verify-workspace && bun run verify-tsconfig-paths && bun run build:runtime && bun run build:tui",
     "build:tui": "bun apps/tui/scripts/tui.ts build",
     "build:runtime": "bun run build:native-system && bun run build:lib:host",

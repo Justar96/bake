@@ -220,7 +220,7 @@ async function loadFixture(path: string): Promise<{ fixture: Fixture; sha256: st
 const isFile = async (path: string): Promise<boolean> => (await stat(path).catch(() => undefined))?.isFile() === true
 
 /** The minimal child environment: a search path and private homes, nothing inherited beyond them. */
-function childEnvironment(home: string, temporary: string): Record<string, string> {
+export function childEnvironment(home: string, temporary: string): Record<string, string> {
   const env: Record<string, string> = {
     PATH: process.env.PATH ?? '',
     HOME: home, BAKE_HOME: join(home, '.bake'), DSH_HOME: join(home, '.bake'),

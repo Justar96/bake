@@ -288,6 +288,11 @@ export const STEPS: readonly Step[] = [
     summary: 'synthetic TypeScript/Rust comparison fixtures and observed file effects',
     command: () => bun('run', 'test:rust:conformance'),
   },
+  {
+    name: 'rust-eval', phase: 'e2e', group: 'native', needsBuild: true, buildStep: 'rust',
+    summary: 'compiled Rust eval fixture arm and independent tamper rejection',
+    command: () => bun('run', 'test:rust:eval'),
+  },
 ]
 
 /** A failed artifact producer prevents a dependent check from testing an older build. */

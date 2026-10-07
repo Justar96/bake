@@ -32,7 +32,7 @@ For real model requests, sign in with `/login` or set `DEEPSEEK_API_KEY` in the 
 
 Run `bun run dev:rust` from the repository root to build and launch the native TUI preview. It supports editing and sample-agent inspection without a model connection, credentials, or session writes. See [its controls and limits](../rust/README.md) before treating it as an agent. `bun run check:rust` checks its locked workspace; `bun run test:rust:pty` exercises the built binary on Linux or macOS.
 
-After the Rust build, `bun run test:rust:conformance` runs the [shared synthetic comparison fixtures](../conformance/README.md). It checks prompt bytes, event order, permission records, and actual files against independent expected values and both runners. These fixtures qualify the comparison tooling, not Bake runtime parity.
+After the Rust build, `bun run test:rust:conformance` runs the [shared synthetic comparison fixtures](../conformance/README.md). It checks prompt bytes, event order, permission records, and actual files against independent expected values and both runners. These fixtures qualify the comparison tooling, not Bake runtime parity. `bun run test:rust:eval` exercises a compiled fake arm through the [existing evaluator fixture and independent check](../evals/README.md#native-fixture-adapter), including test-file tampering. Both checks run after Cargo builds in the native preflight group on Linux, macOS, and Windows.
 
 | Work | Command | Behavior |
 |---|---|---|
