@@ -367,7 +367,8 @@ impl Look {
     }
 }
 
-/// Cells the tool name's column takes, its gap included, so arguments align.
+/// Cells the tool name's column takes, its colon and gap included, so the
+/// arguments of the common four-letter tools align: `Bash: `, `Read: `.
 pub const TOOL_WIDTH: usize = 6;
 /// Column everything inside a call starts at: its output, a diff, a
 /// script's source, and the counts of what is folded away. Column [`RAIL`]
@@ -514,8 +515,8 @@ pub fn present(rows: &[Row], index: usize, width: usize, look: Look) -> Vec<Line
     lines
 }
 
-/// What kind of work a tool does. It picks the colour of the tool's name,
-/// whether its argument reads as a path, and how its output is drawn.
+/// What kind of work a tool does. It picks whether its argument reads as a
+/// path and how its output is drawn.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     /// A shell command.
@@ -551,22 +552,6 @@ pub fn kind(tool: &str) -> Kind {
 }
 
 impl Kind {
-    /// The tool name's style: bold, in the kind's colour. Each colour is a
-    /// TypeScript palette tone that means nothing else in a call's row.
-    pub fn style(self, tones: Tones) -> Style {
-        let (rgb, ansi) = match self {
-            Self::Shell => ((0xfb, 0xbf, 0x24), Color::Yellow),
-            Self::Read => ((0x60, 0xa5, 0xfa), Color::LightBlue),
-            Self::Edit => ((0xa7, 0x8b, 0xfa), Color::LightMagenta),
-            Self::Search => ((0x7d, 0xd3, 0xfc), Color::LightCyan),
-            Self::Web => ((0x2d, 0xd4, 0xbf), Color::Cyan),
-            Self::Agent => ((0xf4, 0x72, 0xb6), Color::Magenta),
-            Self::Script => ((0xc4, 0xb5, 0xfd), Color::LightMagenta),
-            Self::Other => return Style::new().add_modifier(Modifier::BOLD),
-        };
-        colour(tones, rgb, ansi).add_modifier(Modifier::BOLD)
-    }
-
     /// Whether the argument is a file path, drawn with its directory dim.
     fn takes_path(self) -> bool {
         matches!(self, Self::Read | Self::Edit)
@@ -613,13 +598,14 @@ fn head(
     let (mark, mark_style) = mark_of(state, look);
     let kind = kind(tool);
     let lead_cells: usize = lead.iter().map(Span::width).sum();
-    let name = format!("{tool:<width$}", width = TOOL_WIDTH.max(tool.width() + 2));
+    let label = format!("{tool}:");
+    let name = format!("{label:<width$}", width = TOOL_WIDTH.max(label.width() + 1));
     let indent = lead_cells + 2 + name.width();
     let mut first = lead;
     first.extend([
         Span::styled(mark, mark_style),
         pad(1),
-        Span::styled(name, kind.style(look.tones)),
+        Span::styled(name, Style::new().add_modifier(Modifier::BOLD)),
     ]);
     let mut rest = rest;
     rest.push(pad(indent - lead_cells));
@@ -716,7 +702,7 @@ fn line_count(count: usize) -> Option<String> {
     }
 }
 
-/// A call as one block: `✓ Bash  argument` with its status after it, then
+/// A call as one block: `✓ Bash: argument` with its status after it, then
 /// its output hung from a gutter; an edit's output is its diff.
 fn present_call(
     tool: &str,
@@ -823,7 +809,7 @@ pub fn tree(calls: &[Nested]) -> Vec<Branch<'_>> {
     out
 }
 
-/// A code-mode program as one block: `✓ Script  description` with its call
+/// A code-mode program as one block: `✓ Script: description` with its call
 /// count, its source numbered and previewed, the calls it made on a tree,
 /// and what it returned after `→`.
 fn present_script(
@@ -1327,7 +1313,7 @@ mod tests {
         // The tool name has its own column; the status follows the argument.
         assert_eq!(
             all[user + 4],
-            r#"  ✓ Bash  rg -n "commands.register" -g '*.ts'  2 lines"#
+            r#"  ✓ Bash: rg -n "commands.register" -g '*.ts'  2 lines"#
         );
         assert_eq!(all[user + 5], "  │ packages/app/src/controller.ts:45");
         assert_eq!(all[user + 6], "  │ packages/app/src/controller.ts:52");
@@ -1335,7 +1321,7 @@ mod tests {
         assert_eq!(all[user + 7], "");
         assert_eq!(
             all[user + 8],
-            "  ✓ Read  packages/app/src/controller.ts  412 lines"
+            "  ✓ Read: packages/app/src/controller.ts  412 lines"
         );
         assert_eq!(all[user + 9], "");
         assert!(all[user + 10].starts_with("  Two registrations"));
@@ -1358,7 +1344,7 @@ mod tests {
             .unwrap();
         let lines = text(&present(&rows, index, 60, PLAIN));
         assert_eq!(lines[0], "");
-        assert_eq!(lines[1], "  ✗ Bash  bun test tests/parser.test.ts  exit 1");
+        assert_eq!(lines[1], "  ✗ Bash: bun test tests/parser.test.ts  exit 1");
         assert_eq!(
             lines[2..],
             [
@@ -1397,7 +1383,7 @@ mod tests {
             "{all:#?}"
         );
         assert!(all.iter().any(|l| l.starts_with("| Run the parser tests")));
-        assert!(all.iter().any(|l| l.starts_with("  x Bash  bun test")));
+        assert!(all.iter().any(|l| l.starts_with("  x Bash: bun test")));
         assert!(all.iter().any(|l| l == "  | ... 4 more lines"));
     }
 
@@ -1423,7 +1409,7 @@ mod tests {
         assert_eq!(
             text(&present(&call, 0, 18, PLAIN)),
             [
-                "  ● Bash  one two",
+                "  ● Bash: one two",
                 "          three",
                 "          four",
                 "          1 line",
@@ -1537,20 +1523,20 @@ mod tests {
             lines,
             [
                 String::new(),
-                then("  ✓ Script  Find TODOs", "13 calls · 1 failed"),
+                then("  ✓ Script: Find TODOs", "13 calls · 1 failed"),
                 "  │ 1  const found = [];".into(),
                 r#"  │ 2  for (const path of await tools.glob({ pattern: "src/**/*.ts" })) {"#
                     .into(),
                 "  │ ⋯ 2 more lines".into(),
                 "  │ 5  }".into(),
                 "  │ 6  return found;".into(),
-                then("  ├ ✓ Glob  src/**/*.ts", "12 files"),
-                then("  ├ ✓ Read  src/m0.ts", "2 lines"),
+                then("  ├ ✓ Glob: src/**/*.ts", "12 files"),
+                then("  ├ ✓ Read: src/m0.ts", "2 lines"),
                 "  ├ ⋯ 4 more calls".into(),
-                then("  ├ ✗ Read  src/m5.ts", "Permission denied"),
+                then("  ├ ✗ Read: src/m5.ts", "Permission denied"),
                 "  ├ ⋯ 4 more calls".into(),
-                then("  ├ ✓ Read  src/m10.ts", "2 lines"),
-                then("  └ ✓ Read  src/m11.ts", "2 lines"),
+                then("  ├ ✓ Read: src/m10.ts", "2 lines"),
+                then("  └ ✓ Read: src/m11.ts", "2 lines"),
                 r#"  → ["src/m3.ts", "src/m9.ts"]"#.into(),
             ]
         );
@@ -1578,7 +1564,7 @@ mod tests {
         assert!(
             ascii
                 .iter()
-                .any(|l| l.starts_with("  ` + Read  src/m11.ts"))
+                .any(|l| l.starts_with("  ` + Read: src/m11.ts"))
         );
         assert!(ascii.iter().any(|l| l.starts_with(r#"  > ["src/m3.ts""#)));
     }
@@ -1638,8 +1624,8 @@ mod tests {
         let on = present(&rows, 0, 40, look);
         let off = present(&rows, 0, 40, Look { lit: false, ..look });
         // In its box: a padding row, the call, and a padding row.
-        assert_eq!(text(&on), ["", "  ● Bash  bun run build", ""]);
-        assert_eq!(text(&off), ["", "    Bash  bun run build", ""]);
+        assert_eq!(text(&on), ["", "  ● Bash: bun run build", ""]);
+        assert_eq!(text(&off), ["", "    Bash: bun run build", ""]);
         assert_eq!(on[1].width(), off[1].width());
         let mark = on[1].spans.iter().find(|s| s.content == "●").unwrap();
         assert_eq!(mark.style.fg, Some(Color::Rgb(0xff, 0xff, 0xff)));
@@ -1668,7 +1654,7 @@ mod tests {
         assert_eq!(
             text(&present(&rows, 0, 30, PLAIN)),
             [
-                "  ✗ Bash  make",
+                "  ✗ Bash: make",
                 "          error: no rule to",
                 "          make target build"
             ]
@@ -1676,7 +1662,7 @@ mod tests {
     }
 
     #[test]
-    fn each_kind_of_tool_has_its_own_colour() {
+    fn tools_are_sorted_into_kinds_by_name() {
         let kinds = [
             "Bash",
             "Read",
@@ -1701,11 +1687,6 @@ mod tests {
                 Kind::Other
             ]
         );
-        let colours: std::collections::HashSet<_> =
-            kinds.iter().map(|k| k.style(Tones::TrueColor).fg).collect();
-        assert_eq!(colours.len(), kinds.len(), "every kind reads apart");
-        assert_eq!(Kind::Other.style(Tones::TrueColor).fg, None);
-        assert!(kinds.iter().all(|k| k.style(Tones::None).fg.is_none()));
         assert_eq!(kind("run_code"), Kind::Script);
     }
 
@@ -1726,7 +1707,7 @@ mod tests {
             [
                 "",
                 "",
-                "  ✓ Edit  src/parser.ts  +1 -1",
+                "  ✓ Edit: src/parser.ts  +1 -1",
                 "       const fields = split(line);",
                 "    -  if (quote) fields.push(rest);",
                 r#"    +  if (quote) throw new SyntaxError("unterminated quote");"#,
@@ -1746,7 +1727,10 @@ mod tests {
                 .unwrap()
         };
         let head = &lines[2];
-        assert_eq!(style(head, "Edit  ").fg, Some(Color::Rgb(0xa7, 0x8b, 0xfa)));
+        // The tool name is bold in the foreground, with a colon after it.
+        let name = style(head, "Edit: ");
+        assert_eq!(name.fg, None);
+        assert!(name.add_modifier.contains(Modifier::BOLD));
         assert!(style(head, "src/").add_modifier.contains(Modifier::DIM));
         assert_eq!(style(head, "parser.ts").fg, None);
         assert_eq!(style(head, "+1").fg, Some(Color::Rgb(0x22, 0xc5, 0x5e)));
@@ -1765,7 +1749,7 @@ mod tests {
         );
         // A path too long for its row wraps like any argument.
         let narrow = text(&present(&rows, index, 20, PLAIN));
-        assert_eq!(narrow[1], "  ✓ Edit  src/parser");
+        assert_eq!(narrow[1], "  ✓ Edit: src/parser");
     }
 
     #[test]
@@ -1840,7 +1824,7 @@ mod tests {
             text(&lines),
             [
                 "",
-                "  ✓ Bash  x",
+                "  ✓ Bash: x",
                 "          1 line",
                 "    0123456789abcd",
                 "    efghij",
