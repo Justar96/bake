@@ -226,6 +226,24 @@ impl Draft {
         true
     }
 
+    /// Puts the caret where a click landed: on drawn row `row` at `width`, the
+    /// place at or before cell `column` of its text, the oracle's `offsetAt`.
+    /// A column past the text reaches the row's last place. Returns `false`
+    /// past the last row.
+    pub fn place(&mut self, row: usize, column: usize, width: usize) -> bool {
+        let rows = row_stops(&self.text, width.max(1));
+        let Some(stops) = rows.get(row) else {
+            return false;
+        };
+        let landing = stops
+            .iter()
+            .take_while(|&&(_, at)| at <= column)
+            .last()
+            .unwrap_or(&stops[0]);
+        self.move_to(landing.0);
+        true
+    }
+
     /// Steps through `history`, newest first: older for Up, newer for Down.
     /// The first step keeps the draft as one undo step and as the place a
     /// browse returns to; stepping newer than the newest entry restores it,
@@ -1035,6 +1053,46 @@ mod tests {
         let mut draft = typed("mine");
         assert!(!draft.recall(&[], true, 40));
         assert!(draft.visit.is_none());
+    }
+
+    #[test]
+    fn a_click_lands_before_the_grapheme_at_its_cell() {
+        // "alpha beta " / "gamma " / "delta" at 11 columns, as the oracle's
+        // `offsetAt` cases draw it.
+        let text = "alpha beta gamma delta";
+        let place = |text: &str, row, column, width| {
+            let mut draft = typed(text);
+            draft.place(row, column, width).then(|| draft.caret())
+        };
+        assert_eq!(place(text, 1, 2, 11), Some(13));
+        assert_eq!(place(text, 0, 50, 11), Some(10));
+        assert_eq!(place(text, 2, 50, 11), Some(text.len()));
+        assert_eq!(place(text, 3, 0, 11), None);
+        // Column 1 is the second cell of 你, which a click lands before.
+        assert_eq!(place("你好", 0, 1, 40), Some(0));
+        assert_eq!(place("你好", 0, 2, 40), Some("你".len()));
+    }
+
+    #[test]
+    fn row_edges_follow_the_oracle_cases() {
+        let text = "alpha beta gamma delta";
+        let mut draft = at(text, 13);
+        draft.row_home(11);
+        assert_eq!(draft.caret(), 11);
+        let mut draft = at(text, 13);
+        draft.row_end(11);
+        assert_eq!(draft.caret(), 16);
+        let mut draft = at(text, 11);
+        draft.row_home(11);
+        assert_eq!(draft.caret(), 0);
+        let mut draft = at(text, 16);
+        draft.row_end(11);
+        assert_eq!(draft.caret(), text.len());
+        let mut draft = at("one\ntwo", 5);
+        draft.row_home(40);
+        assert_eq!(draft.caret(), 4);
+        draft.row_home(40);
+        assert_eq!(draft.caret(), 4);
     }
 
     #[test]

@@ -259,6 +259,15 @@ await scenario('the wheel scrolls the transcript and the scrollbar takes clicks 
   // Dragged from the head past the foot, the transcript follows output again.
   preview.send(sgr(0, 80, 1) + sgr(32, 40, 30) + sgr(0, 40, 30, false))
   await preview.wait('scrollbar dragged to the foot', () => preview.screen.includes('Wheel/PgUp scroll'))
+  // A press on the draft puts the caret on the cell it hit: typing lands before `world`.
+  preview.send('hello world')
+  await preview.wait('typed draft', () => preview.screen.includes('❯ hello world'))
+  const draftLines = preview.screen.split('\n')
+  const draftRow = draftLines.findIndex(line => line.includes('❯ hello world'))
+  const draftLine = draftLines[draftRow] ?? ''
+  const worldColumn = [...draftLine.slice(0, draftLine.indexOf('world'))].length
+  preview.send(sgr(0, worldColumn + 1, draftRow + 1) + sgr(0, worldColumn + 1, draftRow + 1, false) + 'big ')
+  await preview.wait('caret placed by a press', () => preview.screen.includes('❯ hello big world'))
   await preview.quit()
 })
 

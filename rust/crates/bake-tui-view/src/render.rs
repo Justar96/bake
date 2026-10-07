@@ -18,7 +18,8 @@ use crate::frame::FrameStyle;
 use crate::layout::{self, Needs};
 use crate::mode::{self, HINT_MIN_COLUMNS};
 use crate::state::{
-    Focus, Notice, Outcome, SAMPLE_AGENTS, SampleAgent, SampleKind, ScrollTrack, Spot, State, agent,
+    DraftSpot, Focus, Notice, Outcome, SAMPLE_AGENTS, SampleAgent, SampleKind, ScrollTrack, Spot,
+    State, agent,
 };
 use crate::status::{self, Tone};
 use crate::transcript::{self, Look, TagTone};
@@ -111,6 +112,13 @@ pub fn render(app: &mut State, frame: &mut Frame) {
         .follow(draft.caret.0, visible, total, geometry.wrap_width);
     let above = top;
     let below = total.saturating_sub(top + visible);
+    app.draft_spot = (band.height > 0).then_some(DraftSpot {
+        top_row: band.y,
+        rows: band.height,
+        text_x: band.x + geometry.text_x,
+        first: top,
+        width: geometry.wrap_width,
+    });
 
     // The box closes only when both edges have rows; otherwise the edges that
     // fit are plain rules. Hidden-row counts ride the edges, so they never
@@ -1303,6 +1311,38 @@ mod tests {
             alt: false,
             at: Duration::from_millis(at_ms),
         })
+    }
+
+    #[test]
+    fn a_press_on_the_draft_places_the_caret_at_its_cell() {
+        let mut app = State::default();
+        for c in "hello world".chars() {
+            key(&mut app, Key::Char(c));
+        }
+        let (rows, _) = draw(&mut app, 40, 12);
+        let row = row_index(&rows, "❯ hello world");
+        let at = |rows: &[String], needle: &str| {
+            let line = &rows[row];
+            let byte = line.find(needle).unwrap();
+            u16::try_from(line[..byte].chars().count()).unwrap()
+        };
+        let world = at(&rows, "world");
+        let y = u16::try_from(row).unwrap();
+        update(&mut app, mouse(MouseKind::Down, world, y, 0));
+        assert_eq!(&app.draft.text()[app.draft.caret()..], "world");
+        // Past the text, the row's last place; on the prompt, its start.
+        update(&mut app, mouse(MouseKind::Down, 38, y, 0));
+        assert_eq!(app.draft.caret(), app.draft.text().len());
+        update(&mut app, mouse(MouseKind::Down, at(&rows, "❯"), y, 0));
+        assert_eq!(app.draft.caret(), 0);
+        // With the agent list open the draft is not editable.
+        update(
+            &mut app,
+            Msg::Key(KeyInput::new(Key::Char('g'), Mods::CTRL)),
+        );
+        draw(&mut app, 40, 12);
+        update(&mut app, mouse(MouseKind::Down, world, y, 0));
+        assert_eq!(app.draft.caret(), 0);
     }
 
     /// The scrollbar column of a drawn screen, top to bottom.

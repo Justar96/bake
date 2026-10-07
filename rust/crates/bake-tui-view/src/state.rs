@@ -67,6 +67,18 @@ pub struct ScrollTrack {
     pub rows: u16,
 }
 
+/// Where the draft's rows were last drawn, so a press there places the
+/// caret: the screen rows, the column its text starts at, and the window's
+/// first draft row and wrap width.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DraftSpot {
+    pub top_row: u16,
+    pub rows: u16,
+    pub text_x: u16,
+    pub first: usize,
+    pub width: usize,
+}
+
 /// A run of cells on one row that a press acts on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Spot {
@@ -218,6 +230,8 @@ pub struct State {
     pub track: Option<ScrollTrack>,
     /// The scroll indicator's pill as last drawn; a press on it follows output.
     pub latest: Option<Spot>,
+    /// The draft's rows as last drawn; a press on them places the caret.
+    pub draft_spot: Option<DraftSpot>,
     /// Whether a press on the scrollbar is being dragged.
     pub(crate) dragging: bool,
     /// While a first Ctrl+C is armed, when it lapses; a second before then
@@ -254,6 +268,7 @@ impl State {
             wheel: WheelSteps::default(),
             track: None,
             latest: None,
+            draft_spot: None,
             dragging: false,
             quit_until: None,
         }
@@ -363,6 +378,20 @@ fn pointer(state: &mut State, mouse: Mouse) {
     {
         state.transcript.follow();
         return;
+    }
+    // A press on the draft's rows puts the caret at the cell it hit; one in
+    // the rail before the text reaches the row's start.
+    if mouse.kind == MouseKind::Down
+        && state.focus == Focus::Composer
+        && let Some(spot) = state
+            .draft_spot
+            .filter(|spot| (spot.top_row..spot.top_row + spot.rows).contains(&mouse.row))
+    {
+        let row = spot.first + usize::from(mouse.row - spot.top_row);
+        let column = usize::from(mouse.column.saturating_sub(spot.text_x));
+        if state.draft.place(row, column, spot.width) {
+            return;
+        }
     }
     let Some(track) = state.track.filter(|_| state.focus == Focus::Composer) else {
         state.dragging = false;
