@@ -199,7 +199,7 @@ pub fn decode_row_envelope(
     {
         return rejected(EnvelopeRejection::MissingField(field));
     }
-    let keys: Vec<String> = fields
+    let mut keys: Vec<String> = fields
         .keys()
         .filter(|key| {
             !RequiredField::ALL.iter().any(|field| field.key() == *key)
@@ -207,6 +207,8 @@ pub fn decode_row_envelope(
         })
         .cloned()
         .collect();
+    // The diagnostic lists keys in byte order, not the row's member order.
+    keys.sort();
     if !keys.is_empty() {
         return rejected(EnvelopeRejection::UnexpectedFields { keys });
     }

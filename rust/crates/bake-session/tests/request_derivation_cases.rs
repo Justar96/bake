@@ -24,10 +24,10 @@ const FIXTURE_EXPECTED: &str =
 const LOG_BYTES: usize = 4533;
 const EXPECTED_BYTES: usize = 2775;
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 94;
+const CASE_COUNT: usize = 149;
 const MAX_EDITS: usize = 8;
 const SOURCE_BUDGET: usize = 64;
-const LIMITS: [&str; 12] = [
+const LIMITS: [&str; 11] = [
     "seeded-header",
     "event-type",
     "ignorable",
@@ -35,13 +35,12 @@ const LIMITS: [&str; 12] = [
     "depth",
     "coordinate",
     "repeated-coordinate",
-    "header-change",
     "config-member",
     "tool-schema",
     "header",
     "codec",
 ];
-const SEED_CHECKS: [(&str, SeedRejection); 22] = [
+const SEED_CHECKS: [(&str, SeedRejection); 29] = [
     ("message-identity", SeedRejection::MessageIdentity),
     ("message-role", SeedRejection::MessageRole),
     ("message-source", SeedRejection::MessageSource),
@@ -62,6 +61,8 @@ const SEED_CHECKS: [(&str, SeedRejection); 22] = [
     ),
     ("header-reason", SeedRejection::HeaderReason),
     ("header-starts-series", SeedRejection::HeaderStartsSeries),
+    ("tool-update-data", SeedRejection::ToolUpdateData),
+    ("non-surface-marker", SeedRejection::NonSurfaceMarker),
     ("replace-start", SeedRejection::ReplaceStart),
     ("replace-end", SeedRejection::ReplaceEnd),
     ("replace-order", SeedRejection::ReplaceOrder),
@@ -70,6 +71,11 @@ const SEED_CHECKS: [(&str, SeedRejection); 22] = [
     ("tool-result-target", SeedRejection::ToolResultTarget),
     ("tool-result-rest", SeedRejection::ToolResultRest),
     ("system-head", SeedRejection::SystemHead),
+    ("tool-update-header", SeedRejection::ToolUpdateHeader),
+    ("tool-update-stale", SeedRejection::ToolUpdateStale),
+    ("tool-update-baseline", SeedRejection::ToolUpdateBaseline),
+    ("tool-update-change", SeedRejection::ToolUpdateChange),
+    ("tool-update-anchor", SeedRejection::ToolUpdateAnchor),
 ];
 
 fn repo_path(relative: &str) -> PathBuf {
@@ -185,7 +191,10 @@ fn apply_edit(root: &mut Value, pointer: &str, operation: Operation) {
             fields.insert(key, value);
         }
         (Value::Object(fields), Operation::Remove) => {
-            assert!(fields.remove(&key).is_some(), "{pointer} does not exist");
+            assert!(
+                fields.shift_remove(&key).is_some(),
+                "{pointer} does not exist"
+            );
         }
         _ => panic!("{pointer}: edit does not apply to its parent"),
     }
@@ -374,7 +383,6 @@ fn classify(refusal: &ReplayRefusal) -> String {
                 ReplayLimit::Depth => "depth",
                 ReplayLimit::Coordinate => "coordinate",
                 ReplayLimit::RepeatedCoordinate => "repeated-coordinate",
-                ReplayLimit::HeaderChange => "header-change",
                 ReplayLimit::ConfigMember => "config-member",
                 ReplayLimit::ToolSchema => "tool-schema",
             }

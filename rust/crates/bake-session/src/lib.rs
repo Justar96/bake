@@ -16,8 +16,8 @@
 //! strict V3 codec's checks; its output is codec output, not a restored
 //! event. [`replay_requests`] rebuilds each step's model request from a header
 //! record and parsed rows, as the TypeScript test helper `replayRequests`
-//! does, and refuses input outside its subset; its requests are not restored
-//! Session state. None reads a file, frames records, or encodes a log.
+//! does, including tool history across request headers, and refuses input
+//! outside its subset; its requests are not restored Session state. None reads a file, frames records, or encodes a log.
 //! The crate is unstable and unshipped; nothing in the workspace depends on it.
 
 mod envelope;

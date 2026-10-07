@@ -542,11 +542,13 @@ fn exact_keys(
     if let Some(key) = required.iter().find(|key| !record.contains_key(**key)) {
         return structural(StructuralRejection::MissingField { record: which, key });
     }
-    let keys: Vec<String> = record
+    let mut keys: Vec<String> = record
         .keys()
         .filter(|key| !required.contains(&key.as_str()))
         .cloned()
         .collect();
+    // The diagnostic lists keys in byte order, not the row's member order.
+    keys.sort();
     if !keys.is_empty() {
         return structural(StructuralRejection::UnexpectedFields {
             record: which,

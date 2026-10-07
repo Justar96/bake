@@ -80,7 +80,7 @@ On Unix, SIGINT, SIGTERM, and SIGHUP are handled while the preview runs. Raw mod
 
 Dependencies are pinned exactly in `Cargo.toml` and locked in `Cargo.lock`: Ratatui 0.30.2 with only its `crossterm` feature, Crossterm 0.29.0, unicode-segmentation 1.13.3, unicode-width 0.2.2, and on Unix signal-hook 0.3.18, which Crossterm already uses. `ratatui-crossterm` enables Crossterm's default features; `cargo tree --locked -i crossterm` shows one Crossterm version.
 
-The conformance runner uses Serde 1.0.229 and serde_json 1.0.151 for its separate, versioned test input. `bake-session` uses serde_json alone, with its default features. These dependencies do not connect the preview to a model or session store.
+The conformance runner uses Serde 1.0.229 and serde_json 1.0.151 for its separate, versioned test input. `bake-session` uses serde_json alone, with its `preserve_order` feature enabled for the whole workspace. That feature adds indexmap 2.14.2 and keeps parsed object members in input order, which request derivation reads when it compares tool schemas as JavaScript text. These dependencies do not connect the preview to a model or session store.
 
 ## Checks
 

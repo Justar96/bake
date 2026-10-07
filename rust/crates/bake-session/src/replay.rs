@@ -15,7 +15,7 @@
 //! records, and restoration's stricter protected-first-head rules, so it
 //! accepts an unknown required event type and some logs restoration refuses.
 //! Requests derived here therefore carry no restoration claim. This subset
-//! instead admits only its own 16 event types.
+//! instead admits only its own 17 event types.
 //!
 //! [`replay_requests`] runs the same stages in the same order:
 //!
@@ -25,14 +25,15 @@
 //!    coordinates.
 //! 4. Each prefix that ends before a step's settlement: number qualification,
 //!    the Session construction checks the codec does not already cover, and
-//!    the [`RequestFold`], which plans each surface replacement against the
-//!    current nodes before it changes them.
+//!    the [`RequestFold`], which plans each surface replacement and checks
+//!    each tool update against the current state before it changes them.
 //!
 //! Rows at or after the last cut are never checked by Session construction,
 //! as in the helper, so a codec-admitted row there that Session construction
 //! would refuse, such as an invalid replacement, does not refuse the log. A
-//! codec-invalid row anywhere still does. For rows of the 16 subset types, the codec already
-//! proves the envelope fields, sequence contiguity, the `surfaceOp` marker and
+//! codec-invalid row anywhere still does. For rows of the 16 subset types
+//! other than `request/tool-update`, the codec already proves the envelope
+//! fields, sequence contiguity, the `surfaceOp` marker and
 //! its eligibility, an exact replacement shape with earlier endpoints, the
 //! event-local source rules (non-empty, unique, earlier, none on an Assistant
 //! message), and the `request/header` and `tool/result` rules of
@@ -46,6 +47,30 @@
 //! are delegated, not repeated. Locating endpoints and checking source
 //! coverage and the tool-result and system-head rules need the current nodes,
 //! so the fold runs them.
+//!
+//! The codec treats `request/tool-update` as opaque: it checks the envelope
+//! fields and decodes any `sourceEventSeqs` like every row's, but proves
+//! nothing about its payload or marker eligibility, so a `surfaceOp` of any
+//! value reaches Session construction. Derivation therefore runs every Session
+//! check for the type, in Session construction's order:
+//! `validateToolUpdateData`, the refusal of `surfaceOp` and `sourceEventSeqs`
+//! on a type that is not surface-eligible, whose values are never read, and
+//! `validateToolUpdate`, whose header, change, and anchor checks the fold
+//! runs. Its `ignorable` check stays behind the whole-log
+//! [`ReplayLimit::Ignorable`]. Session construction's lossless snapshot covers
+//! the whole event, but only `data` is qualified here, so a marker such as
+//! `surfaceOp: -0` is reported as the marker refusal where TypeScript fails
+//! the snapshot; both reject. Each request's tool history is the
+//! `ToolHistoryProjection` snapshot of its prefix, and its config and tools
+//! come from the latest header, as `foldRequestHeader` reads them.
+//!
+//! Whether a later header redeclares a tool compares `JSON.stringify` text,
+//! which depends on member order. Each object's member order is read from the
+//! caller's parsed rows, which the workspace's `preserve_order` feature keeps
+//! in insertion order; JavaScript's array-index-first enumeration is applied
+//! when comparing. Callers must therefore parse each row with its members in
+//! log order, as `JSON.parse` would see them. Nothing here reads or claims the
+//! original bytes.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -58,9 +83,9 @@ use crate::{
 };
 
 /// The event types this subset admits: those of the committed
-/// request-reconstruction fixture, and the compaction records written beside
-/// surface replacements.
-const SUBSET_TYPES: [&str; 16] = [
+/// request-reconstruction fixture, the compaction records written beside
+/// surface replacements, and tool updates.
+const SUBSET_TYPES: [&str; 17] = [
     "agent/inbox/spliced",
     "assistant/message",
     "compaction/end",
@@ -69,6 +94,7 @@ const SUBSET_TYPES: [&str; 16] = [
     "compaction/summary",
     "request/context",
     "request/header",
+    "request/tool-update",
     "step/end",
     "step/start",
     "system/message",
@@ -123,9 +149,11 @@ pub enum ReplayRefusal {
 }
 
 /// A Session construction check that rejected a prefix event, in the order
-/// Session construction runs them: `assertCurrentLlmShape` in
-/// `packages/core/session/src/index.ts`, then the surface replacement checks
-/// of `planSurfaceEvent` in `packages/core/session/src/surface.ts`.
+/// Session construction runs them: `validateToolUpdateData`, then
+/// `assertCurrentLlmShape` in `packages/core/session/src/index.ts`, then the
+/// surface metadata and replacement checks of `planSurfaceEvent` in
+/// `packages/core/session/src/surface.ts`, then `validateToolUpdate` in
+/// `packages/core/session/src/tool-history.ts`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SeedRejection {
     /// The message is not an object with a non-empty string `id`.
@@ -160,6 +188,11 @@ pub enum SeedRejection {
     HeaderReason,
     /// A present `startsSeries` is not `true`.
     HeaderStartsSeries,
+    /// A `request/tool-update`'s data fails `validateToolUpdateData`.
+    ToolUpdateData,
+    /// A `request/tool-update` carries `surfaceOp` or `sourceEventSeqs`. The
+    /// codec treats the type as opaque; Session construction does not.
+    NonSurfaceMarker,
     /// A replacement's `startSeq` is not a current surface node.
     ReplaceStart,
     /// A replacement's `endSeq` is not a current surface node.
@@ -178,6 +211,19 @@ pub enum SeedRejection {
     /// A replacement covering a `system/message` at node 0 is not one
     /// `system/message` over exactly that node.
     SystemHead,
+    /// A tool update's `headerSeq` is not an earlier `request/header`.
+    ToolUpdateHeader,
+    /// A header or tool update sits between a tool update and the header it
+    /// references.
+    ToolUpdateStale,
+    /// No `request/header` precedes the one a tool update references.
+    ToolUpdateBaseline,
+    /// A tool update's additions or removals, in order, differ from the names
+    /// the referenced header adds to and removes from the one before it.
+    ToolUpdateChange,
+    /// The last current non-system message is not the user or tool-result
+    /// message a tool update names.
+    ToolUpdateAnchor,
 }
 
 /// Input this subset does not derive, whatever TypeScript does with it.
@@ -186,11 +232,12 @@ pub enum ReplayLimit {
     /// The header is seeded. Seeded logs need an inherited cut and the codec's
     /// `finish` checks, which this subset does not implement.
     SeededHeader,
-    /// A row type outside this subset's 16 types, including ignorable
-    /// unknown types, `assistant/attempt`, tool updates, message projections,
-    /// and `session/end-seed`.
+    /// A row type outside this subset's 17 types, including ignorable
+    /// unknown types, `assistant/attempt`, message projections, and
+    /// `session/end-seed`.
     EventType,
-    /// A row carries `ignorable`.
+    /// A row carries `ignorable`, including a tool update, which Session
+    /// construction refuses only after its data and surface checks.
     Ignorable,
     /// A prefix payload holds a number other than a safe integer. JavaScript's
     /// rounding, -0, and underflow cannot be decided from a parsed `f64`.
@@ -203,8 +250,6 @@ pub enum ReplayLimit {
     /// Two `step/start` rows, or two Assistant settlements, share a
     /// coordinate. Retries are outside this subset.
     RepeatedCoordinate,
-    /// A second `request/header` in a prefix.
-    HeaderChange,
     /// `config` holds a member outside `LlmCallConfig`.
     ConfigMember,
     /// `tools` is present but not an array of objects.
@@ -318,7 +363,6 @@ const fn seed(seq: u64, rejection: SeedRejection) -> ReplayRefusal {
 
 const fn folded(seq: u64, refusal: FoldRefusal) -> ReplayRefusal {
     let rejection = match refusal {
-        FoldRefusal::HeaderChange => return limit(Some(seq), ReplayLimit::HeaderChange),
         FoldRefusal::ReplaceStart => SeedRejection::ReplaceStart,
         FoldRefusal::ReplaceEnd => SeedRejection::ReplaceEnd,
         FoldRefusal::ReplaceOrder => SeedRejection::ReplaceOrder,
@@ -327,6 +371,11 @@ const fn folded(seq: u64, refusal: FoldRefusal) -> ReplayRefusal {
         FoldRefusal::ToolResultTarget => SeedRejection::ToolResultTarget,
         FoldRefusal::ToolResultRest => SeedRejection::ToolResultRest,
         FoldRefusal::SystemHead => SeedRejection::SystemHead,
+        FoldRefusal::ToolUpdateHeader => SeedRejection::ToolUpdateHeader,
+        FoldRefusal::ToolUpdateStale => SeedRejection::ToolUpdateStale,
+        FoldRefusal::ToolUpdateBaseline => SeedRejection::ToolUpdateBaseline,
+        FoldRefusal::ToolUpdateChange => SeedRejection::ToolUpdateChange,
+        FoldRefusal::ToolUpdateAnchor => SeedRejection::ToolUpdateAnchor,
     };
     seed(seq, rejection)
 }
@@ -354,22 +403,23 @@ fn admit(event: &V3CodecEvent<'_>) -> Result<Fact, ReplayRefusal> {
     let seq = envelope.seq;
     let data = envelope.data;
     qualify_payload(data).map_err(|refusal| limit(Some(seq), refusal))?;
-    // The codec proved the marker: `"append"`, or an exact replacement whose
-    // endpoints are safe integers.
-    let op = match envelope.surface_op {
-        Some(Value::Object(replace)) => SurfaceOp::Replace {
-            start: replace["startSeq"].as_u64().expect("codec-proved endpoint"),
-            end: replace["endSeq"].as_u64().expect("codec-proved endpoint"),
-            sources: envelope.source_event_seqs.clone().unwrap_or_default(),
-        },
-        _ => SurfaceOp::Append,
-    };
+    // Only for the surface types the closure serves did the codec prove the
+    // marker: `"append"`, or an exact replacement whose endpoints are safe
+    // integers. Other types never read it; an opaque type may carry anything.
     let surface = |kind, message: &Value, role, payload: &Value| {
         message_shape(message, role).map_err(|rejection| seed(seq, rejection))?;
+        let op = match envelope.surface_op {
+            Some(Value::Object(replace)) => SurfaceOp::Replace {
+                start: replace["startSeq"].as_u64().expect("codec-proved endpoint"),
+                end: replace["endSeq"].as_u64().expect("codec-proved endpoint"),
+                sources: envelope.source_event_seqs.clone().unwrap_or_default(),
+            },
+            _ => SurfaceOp::Append,
+        };
         Ok(Fact::Surface {
             seq,
             kind,
-            op: op.clone(),
+            op,
             // `message_shape` proved the message an object, and the codec
             // proved a tool result's data one.
             payload: payload.as_object().expect("object payload").clone(),
@@ -402,14 +452,58 @@ fn admit(event: &V3CodecEvent<'_>) -> Result<Fact, ReplayRefusal> {
             Ok(fact)
         }
         "request/header" => request_header(seq, data),
+        "request/tool-update" => {
+            let fact = tool_update(seq, data).ok_or(seed(seq, SeedRejection::ToolUpdateData))?;
+            if envelope.surface_op.is_some() || envelope.source_event_seqs.is_some() {
+                return Err(seed(seq, SeedRejection::NonSurfaceMarker));
+            }
+            Ok(fact)
+        }
         _ => Ok(Fact::LogOnly),
     }
+}
+
+/// `validateToolUpdateData` over a qualified payload, as a fact.
+fn tool_update(seq: u64, data: &Value) -> Option<Fact> {
+    let names = |key| {
+        let names: Vec<String> = data
+            .get(key)?
+            .as_array()?
+            .iter()
+            .map(|name| {
+                name.as_str()
+                    .filter(|name| !name.is_empty())
+                    .map(str::to_owned)
+            })
+            .collect::<Option<_>>()?;
+        let unique: BTreeSet<&String> = names.iter().collect();
+        (unique.len() == names.len()).then_some(names)
+    };
+    let header_seq = data.get("headerSeq")?.as_u64()?;
+    let after_message_id = data.get("afterMessageId")?.as_str()?;
+    let additions = names("additions")?;
+    let removals = names("removals")?;
+    if after_message_id.is_empty()
+        || additions.len() + removals.len() == 0
+        || additions.iter().any(|name| removals.contains(name))
+    {
+        return None;
+    }
+    Some(Fact::ToolUpdate {
+        seq,
+        header_seq,
+        after_message_id: after_message_id.to_owned(),
+        additions,
+        removals,
+    })
 }
 
 /// `snapshotJsonValue` refuses -0 and non-finite numbers in every prefix
 /// event, and JavaScript rounds integers beyond 2^53. Admitting only safe
 /// integers covers both conservatively. The walk is iterative, so it is safe
-/// at any depth the caller's parser produced.
+/// at any depth the caller's parser produced. When one payload holds both an
+/// unqualified number and excess depth, which limit is reported depends on
+/// member order and is not specified; neither claims anything.
 fn qualify_payload(data: &Value) -> Result<(), ReplayLimit> {
     let mut pending = vec![(data, 1usize)];
     while let Some((value, depth)) = pending.pop() {
@@ -539,7 +633,9 @@ fn request_header(seq: u64, data: &Value) -> Result<Fact, ReplayRefusal> {
         Some(_) => return Err(limit(Some(seq), ReplayLimit::ToolSchema)),
     };
     Ok(Fact::Header {
+        seq,
         config: config.clone(),
         tools,
+        resets: data["reason"] == "series" || data.get("startsSeries").is_some(),
     })
 }
