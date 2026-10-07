@@ -72,7 +72,8 @@ pub struct Input {
     writes: Vec<WriteRequest>,
 }
 
-/// One relayed event object. Every field is retained; key order is not.
+/// One relayed event object. Every field is retained, in input order; the
+/// comparison does not depend on that order.
 #[derive(Debug, Serialize)]
 #[serde(transparent)]
 pub struct Event(Map<String, Value>);

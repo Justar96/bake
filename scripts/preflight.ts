@@ -206,6 +206,7 @@ export const STEPS: readonly Step[] = [
     ['cordis-config', 'Loader rows keep static metadata and resolve from their owner'],
     ['package-invariants', 'invariant companions are wired, or their omission is explained'],
     ['rust-migration-inventory', 'Rust migration ownership covers the current packages, profiles, tools, and tests'],
+    ['rust-migration-ledger', 'Rust qualification records are structurally valid and internally consistent'],
   ] as const).map(([name, summary]): Step => ({
     name: `verify-${name}`, phase: 'static', group: 'generated', summary,
     command: () => bun('run', `verify-${name}`),
@@ -287,6 +288,11 @@ export const STEPS: readonly Step[] = [
     name: 'rust-conformance', phase: 'e2e', group: 'native', needsBuild: true, buildStep: 'rust',
     summary: 'synthetic TypeScript/Rust comparison fixtures and observed file effects',
     command: () => bun('run', 'test:rust:conformance'),
+  },
+  {
+    name: 'rust-eval', phase: 'e2e', group: 'native', needsBuild: true, buildStep: 'rust',
+    summary: 'compiled Rust eval fixture arm and independent tamper rejection',
+    command: () => bun('run', 'test:rust:eval'),
   },
 ]
 

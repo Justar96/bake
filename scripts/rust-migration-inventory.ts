@@ -64,7 +64,7 @@ export interface Rule {
   readonly pending?: string
 }
 
-const PENDING_EXTENSIONS = 'Extension strategy: native protocol, legacy whole-profile compatibility, or approved support change.'
+const PENDING_EXTENSIONS = 'Rust-only shipping is decided; design custom-profile migration and native extension replacements, or obtain an approved support change.'
 const PENDING_TRANSPORT = 'Trace retained api/client/host/typert consumers before porting or removing them.'
 
 const transportConsumers: Rule = { scopes: ['13'], disposition: 'port-contract', reason: 'Gateway, connection, host, and type-runtime transports; preserve required wire behavior for retained consumers only.', pending: PENDING_TRANSPORT }
@@ -143,6 +143,7 @@ const PACKAGE_OVERRIDES: Readonly<Record<string, Partial<Rule>>> = {
 /** Tests outside any workspace package, by area; the first matching prefix wins. */
 const TEST_AREAS: readonly (Rule & { readonly id: string; readonly prefixes: readonly string[] })[] = [
   { id: 'scripts:conformance', prefixes: ['scripts/rust-conformance/'], scopes: ['01'], disposition: 'reuse-oracle', reason: 'Synthetic comparison fixtures and observation checks qualify the migration harness, not runtime parity.' },
+  { id: 'scripts:qualification-ledger', prefixes: ['scripts/rust-migration-ledger.'], scopes: ['01', '17'], disposition: 'reuse-oracle', reason: 'Evidence record integrity is separate from accepting a migration scope or release.' },
   { id: 'scripts:migration', prefixes: ['scripts/rust-migration-'], scopes: ['00'], disposition: 'replace-tooling', reason: 'Scope-00 migration bookkeeping; retired with the TypeScript oracle in scope 17.' },
   { id: 'scripts:release', prefixes: ['scripts/release/'], scopes: ['16'], disposition: 'replace-tooling', reason: 'Release packing, installers, and manifest tooling; scope 16 changes the archive layout for native artifacts.' },
   { id: 'scripts:persistence', prefixes: ['scripts/persistence-', 'scripts/render-persistence-schema', 'scripts/gen-session-format-catalog', 'scripts/session-', 'scripts/snapshot-'], scopes: ['02', '03'], disposition: 'reuse-oracle', reason: 'Pins released Session formats, persistence digests, and frozen fixture layout that native readers must honor.' },

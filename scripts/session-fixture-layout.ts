@@ -37,13 +37,22 @@ export interface SessionFixtureLayout {
   canonical: string
 }
 
+/** Request-reconstruction captures, each kept as the raw log one run wrote. */
+const REQUEST_RECONSTRUCTION_LOGS: ReadonlySet<string> = new Set([
+  'conformance/runtime/request-reconstruction/tool-call-turn/session.jsonl',
+  'conformance/runtime/request-reconstruction/dynamic-tools/session.jsonl',
+  'conformance/runtime/request-reconstruction/retry-attempt/session.jsonl',
+])
+
 /**
  * Whether a repository JSONL preserves physical persistence encoding rather
  * than the logical event projection owned by this script.
  * @param path - Repository-relative path with `/` separators.
- * @returns True for physical WebWorker and installed-runtime session logs.
+ * @returns True for an explicitly registered physical Session fixture.
  */
 export function isPhysicalSessionFixture(path: string): boolean {
+  // The request-reconstruction oracles preserve the captured envelopes and stream timing.
+  if (REQUEST_RECONSTRUCTION_LOGS.has(path)) return true
   if (path.startsWith(WEBWORKER_PHYSICAL_SESSION_FIXTURE_ROOT)) {
     return /\/session(?:\.v[1-9]\d*)?\.jsonl$/.test(path)
   }

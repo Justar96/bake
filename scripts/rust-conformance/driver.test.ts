@@ -299,7 +299,8 @@ describe('launch', () => {
   }, BUDGET)
 
   test('input the child never reads is recorded as a stdin failure beside a clean exit', async () => {
-    // Far more than a pipe buffer holds, so the write fails once the child exits.
+    // Far more than a pipe buffer holds, so the write is still queued when the child exits;
+    // depending on the platform it then fails or is cancelled, before or after `close`.
     const input = Buffer.alloc(16 * 1024 * 1024)
     const result = await launch([process.execPath, '-e', ''], root, { PATH: process.env.PATH ?? '' }, input, 20_000, undefined)
     expect({ exitCode: result.exitCode, signal: result.signal, timedOut: result.timedOut })

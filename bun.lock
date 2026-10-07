@@ -2513,6 +2513,7 @@
         "bake-session": "workspace:^",
         "bake-session-format-v0-to-v1": "workspace:^",
         "bake-session-persistence": "workspace:^",
+        "bake-session-query": "workspace:^",
       },
       "peerDependencies": {
         "@deepseek-ai/cordis": "workspace:^",

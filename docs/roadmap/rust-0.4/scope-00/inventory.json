@@ -114,7 +114,7 @@
     },
     "packages/boot/plugin-manager": {
       "reason": "npm/Cordis plugin installation for profiles.",
-      "pending": "Extension strategy: native protocol, legacy whole-profile compatibility, or approved support change."
+      "pending": "Rust-only shipping is decided; design custom-profile migration and native extension replacements, or obtain an approved support change."
     },
     "packages/boot/updater": {
       "reason": "Signed manifest and update/rollback; old updaters expect a Node entry point."
@@ -144,7 +144,7 @@
     },
     "packages/extensions": {
       "reason": "Cordis host runner and inspection tools that execute JavaScript plugin operations.",
-      "pending": "Extension strategy: native protocol, legacy whole-profile compatibility, or approved support change."
+      "pending": "Rust-only shipping is decided; design custom-profile migration and native extension replacements, or obtain an approved support change."
     },
     "packages/feedback": {
       "reason": "Local feedback and explicit-feedback export rules."
@@ -240,7 +240,7 @@
     },
     "preset:cordis": {
       "reason": "Creation preset with Cordis inspection and persistent plugin management.",
-      "pending": "Extension strategy: native protocol, legacy whole-profile compatibility, or approved support change."
+      "pending": "Rust-only shipping is decided; design custom-profile migration and native extension replacements, or obtain an approved support change."
     },
     "preset:minimal": {
       "reason": "Single persistent-shell preset."
@@ -291,6 +291,9 @@
     "scripts:persistence": {
       "reason": "Pins released Session formats, persistence digests, and frozen fixture layout that native readers must honor."
     },
+    "scripts:qualification-ledger": {
+      "reason": "Evidence record integrity is separate from accepting a migration scope or release."
+    },
     "scripts:release": {
       "reason": "Release packing, installers, and manifest tooling; scope 16 changes the archive layout for native artifacts."
     },
@@ -314,7 +317,7 @@
     },
     "tool:bake-plugin-manager": {
       "reason": "plugin_manager installs and toggles JavaScript profile plugins.",
-      "pending": "Extension strategy: native protocol, legacy whole-profile compatibility, or approved support change."
+      "pending": "Rust-only shipping is decided; design custom-profile migration and native extension replacements, or obtain an approved support change."
     },
     "tool:bake-schedule": {
       "reason": "Schedule create/list/delete tools and recurrence."
@@ -330,7 +333,7 @@
     },
     "tool:bake-tool-cordis": {
       "reason": "Cordis inspection over a generated JavaScript API catalog that cannot be presented as a Rust API unchanged.",
-      "pending": "Extension strategy: native protocol, legacy whole-profile compatibility, or approved support change."
+      "pending": "Rust-only shipping is decided; design custom-profile migration and native extension replacements, or obtain an approved support change."
     },
     "tool:bake-tool-fs": {
       "reason": "read/write/edit/read_image schemas, results, and stale-edit guards."
@@ -671,6 +674,7 @@
     {"path":"apps/tui/tests/no-bun-runtime.test.ts","lane":"bun-tui","owner":"apps/tui","scopes":["14"],"disposition":"replace-tooling","basis":"apps/tui"},
     {"path":"evals/agent-loop/composition.test.ts","lane":"bun-evals","owner":"evals","scopes":["01","09"],"disposition":"replace-tooling","basis":"evals"},
     {"path":"evals/agent-loop/metrics.test.ts","lane":"bun-evals","owner":"evals","scopes":["01","09"],"disposition":"replace-tooling","basis":"evals"},
+    {"path":"evals/agent-loop/native-fixture.test.ts","lane":"bun-evals","owner":"evals","scopes":["01","09"],"disposition":"replace-tooling","basis":"evals"},
     {"path":"evals/agent-loop/rules.test.ts","lane":"bun-evals","owner":"evals","scopes":["01","09"],"disposition":"replace-tooling","basis":"evals"},
     {"path":"evals/agent-loop/run.test.ts","lane":"bun-evals","owner":"evals","scopes":["01","09"],"disposition":"replace-tooling","basis":"evals"},
     {"path":"evals/agent-loop/scenarios.test.ts","lane":"bun-evals","owner":"evals","scopes":["01","09"],"disposition":"replace-tooling","basis":"evals"},
@@ -790,8 +794,10 @@
     {"path":"packages/core/agent-loop/tests/loop.spec.ts","lane":"vitest-runtime","owner":"packages/core/agent-loop","scopes":["09"],"disposition":"reuse-oracle","basis":"packages/core"},
     {"path":"packages/core/agent-loop/tests/properties.spec.ts","lane":"vitest-runtime","owner":"packages/core/agent-loop","scopes":["09"],"disposition":"reuse-oracle","basis":"packages/core"},
     {"path":"packages/core/agent-loop/tests/request-cache.e2e.ts","lane":"vitest-integration","owner":"packages/core/agent-loop","scopes":["09"],"disposition":"reuse-oracle","basis":"packages/core"},
+    {"path":"packages/core/agent-loop/tests/request-derivation-conformance.spec.ts","lane":"vitest-runtime","owner":"packages/core/agent-loop","scopes":["09"],"disposition":"reuse-oracle","basis":"packages/core"},
     {"path":"packages/core/agent-loop/tests/request-error.spec.ts","lane":"vitest-runtime","owner":"packages/core/agent-loop","scopes":["09"],"disposition":"reuse-oracle","basis":"packages/core"},
     {"path":"packages/core/agent-loop/tests/request-freeze.spec.ts","lane":"vitest-runtime","owner":"packages/core/agent-loop","scopes":["09"],"disposition":"reuse-oracle","basis":"packages/core"},
+    {"path":"packages/core/agent-loop/tests/request-reconstruction.fixture.spec.ts","lane":"vitest-runtime","owner":"packages/core/agent-loop","scopes":["09"],"disposition":"reuse-oracle","basis":"packages/core"},
     {"path":"packages/core/agent-loop/tests/request-reconstruction.spec.ts","lane":"vitest-runtime","owner":"packages/core/agent-loop","scopes":["09"],"disposition":"reuse-oracle","basis":"packages/core"},
     {"path":"packages/core/agent-loop/tests/resume.spec.ts","lane":"vitest-runtime","owner":"packages/core/agent-loop","scopes":["09"],"disposition":"reuse-oracle","basis":"packages/core"},
     {"path":"packages/core/agent-loop/tests/runtime-context.spec.ts","lane":"vitest-runtime","owner":"packages/core/agent-loop","scopes":["09"],"disposition":"reuse-oracle","basis":"packages/core"},
@@ -1068,9 +1074,12 @@
     {"path":"packages/session/session-format-v2-to-v3/tests/canonical-regressions.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-format-v2-to-v3","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
     {"path":"packages/session/session-format-v2-to-v3/tests/combined-migration.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-format-v2-to-v3","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
     {"path":"packages/session/session-format-v2-to-v3/tests/content-admission.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-format-v2-to-v3","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
+    {"path":"packages/session/session-format-v2-to-v3/tests/event-envelope-conformance.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-format-v2-to-v3","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
     {"path":"packages/session/session-format-v2-to-v3/tests/migration.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-format-v2-to-v3","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
     {"path":"packages/session/session-format-v2-to-v3/tests/preset-migration.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-format-v2-to-v3","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
+    {"path":"packages/session/session-format-v2-to-v3/tests/source-event-seqs-conformance.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-format-v2-to-v3","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
     {"path":"packages/session/session-format-v2-to-v3/tests/structural-regressions.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-format-v2-to-v3","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
+    {"path":"packages/session/session-format-v2-to-v3/tests/v3-row-conformance.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-format-v2-to-v3","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
     {"path":"packages/session/session-format/tests/catalog.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-format","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
     {"path":"packages/session/session-format/tests/chain.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-format","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
     {"path":"packages/session/session-format/tests/filename.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-format","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
@@ -1078,16 +1087,20 @@
     {"path":"packages/session/session-persistence-jsonl/tests/built-migration-worker.e2e.ts","lane":"vitest-integration","owner":"packages/session/session-persistence-jsonl","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
     {"path":"packages/session/session-persistence-jsonl/tests/content-admission.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-persistence-jsonl","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
     {"path":"packages/session/session-persistence-jsonl/tests/generation.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-persistence-jsonl","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
+    {"path":"packages/session/session-persistence-jsonl/tests/header-conformance.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-persistence-jsonl","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
     {"path":"packages/session/session-persistence-jsonl/tests/jsonl.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-persistence-jsonl","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
     {"path":"packages/session/session-persistence-jsonl/tests/lease.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-persistence-jsonl","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
     {"path":"packages/session/session-persistence-jsonl/tests/lease.two-process.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-persistence-jsonl","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
+    {"path":"packages/session/session-persistence-jsonl/tests/log-scan-conformance.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-persistence-jsonl","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
     {"path":"packages/session/session-persistence-jsonl/tests/migration-refusal.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-persistence-jsonl","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
     {"path":"packages/session/session-persistence-jsonl/tests/migration-verifier.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-persistence-jsonl","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
     {"path":"packages/session/session-persistence-jsonl/tests/multi-edge-publication.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-persistence-jsonl","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
+    {"path":"packages/session/session-persistence-jsonl/tests/restore-conformance.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-persistence-jsonl","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
     {"path":"packages/session/session-persistence-jsonl/tests/v2-ptc-migration.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-persistence-jsonl","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
     {"path":"packages/session/session-persistence-jsonl/tests/v2-system-migration.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-persistence-jsonl","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
     {"path":"packages/session/session-persistence-jsonl/tests/v3-event-admission.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-persistence-jsonl","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
     {"path":"packages/session/session-persistence-jsonl/tests/win32.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-persistence-jsonl","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
+    {"path":"packages/session/session-persistence-jsonl/tests/zstd-conformance.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-persistence-jsonl","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
     {"path":"packages/session/session-persistence-jsonl/tests/zstd.compat.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-persistence-jsonl","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
     {"path":"packages/session/session-persistence-jsonl/tests/zstd.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-persistence-jsonl","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
     {"path":"packages/session/session-persistence/tests/storage-contract.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-persistence","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
@@ -1325,6 +1338,7 @@
     {"path":"scripts/rust-conformance/runner.test.ts","lane":"bun-scripts","owner":"scripts:conformance","scopes":["01"],"disposition":"reuse-oracle","basis":"scripts:conformance"},
     {"path":"scripts/rust-migration-baseline.test.ts","lane":"bun-scripts","owner":"scripts:migration","scopes":["00"],"disposition":"replace-tooling","basis":"scripts:migration"},
     {"path":"scripts/rust-migration-inventory.test.ts","lane":"bun-scripts","owner":"scripts:migration","scopes":["00"],"disposition":"replace-tooling","basis":"scripts:migration"},
+    {"path":"scripts/rust-migration-ledger.test.ts","lane":"bun-scripts","owner":"scripts:qualification-ledger","scopes":["01","17"],"disposition":"reuse-oracle","basis":"scripts:qualification-ledger"},
     {"path":"scripts/session-fixture-layout.spec.ts","lane":"vitest-runtime","owner":"scripts:persistence","scopes":["02","03"],"disposition":"reuse-oracle","basis":"scripts:persistence"},
     {"path":"scripts/session-query-spill-command.spec.ts","lane":"vitest-runtime","owner":"scripts:persistence","scopes":["02","03"],"disposition":"reuse-oracle","basis":"scripts:persistence"},
     {"path":"scripts/session-snapshot-corpus-policy.spec.ts","lane":"vitest-runtime","owner":"scripts:persistence","scopes":["02","03"],"disposition":"reuse-oracle","basis":"scripts:persistence"},
