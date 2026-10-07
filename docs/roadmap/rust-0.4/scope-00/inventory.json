@@ -672,6 +672,7 @@
     {"path":"evals/agent-loop/composition.test.ts","lane":"bun-evals","owner":"evals","scopes":["01","09"],"disposition":"replace-tooling","basis":"evals"},
     {"path":"evals/agent-loop/metrics.test.ts","lane":"bun-evals","owner":"evals","scopes":["01","09"],"disposition":"replace-tooling","basis":"evals"},
     {"path":"evals/agent-loop/rules.test.ts","lane":"bun-evals","owner":"evals","scopes":["01","09"],"disposition":"replace-tooling","basis":"evals"},
+    {"path":"evals/agent-loop/run.test.ts","lane":"bun-evals","owner":"evals","scopes":["01","09"],"disposition":"replace-tooling","basis":"evals"},
     {"path":"evals/agent-loop/scenarios.test.ts","lane":"bun-evals","owner":"evals","scopes":["01","09"],"disposition":"replace-tooling","basis":"evals"},
     {"path":"native/system/test/entry.test.js","lane":"native-package-script","owner":"native/system","scopes":["04","16"],"disposition":"reuse-oracle","basis":"native/system"},
     {"path":"native/system/test/flock.test.js","lane":"native-package-script","owner":"native/system","scopes":["04","16"],"disposition":"reuse-oracle","basis":"native/system"},
