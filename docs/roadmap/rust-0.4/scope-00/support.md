@@ -4,7 +4,7 @@
 
 This page lists what Bake ships today, what the Rust 0.4 line must preserve, and which questions only the product owner can answer. The inventory comes from source at `origin/develop` `ae5eb51ab6` and the `v0.3.8` tag `dcb26d756e`, read on 2026-10-07. It belongs to [scope 00](README.md) of the [Rust migration roadmap](../README.md).
 
-The default is conservative: every behavior the final 0.3 release ships is the 0.4.0 parity target, and nothing is dropped without an approved, documented support change. The approved exception is the whole-profile Node/TypeScript runtime: 0.4 ships Rust only, so custom Cordis/JavaScript profiles need migration ([D5](#decision-register)). This page tests nothing; isolated qualification probes do not constitute a native implementation. Provider, platform, and Desktop rows say what evidence is missing; none claims native parity.
+The default is conservative: every behavior the final 0.3 release ships is the 0.4.0 parity target, and nothing is dropped without an approved, documented support change. The approved exception is the whole-profile Node/TypeScript runtime: 0.4 ships Rust only, so custom Cordis/JavaScript profiles need migration ([D5](#decision-register)). 0.4.0 must also ship a native plugin API ([D6](#decision-register)). This page tests nothing; isolated qualification probes do not constitute a native implementation. Provider, platform, and Desktop rows say what evidence is missing; none claims native parity.
 
 ## Table of Contents
 
@@ -40,7 +40,7 @@ Scope 01 may start on the settled rows. Scope 00 stays open until every **Owner 
 | D3 | Removed products | Decided by request | The web client, upstream desktop app, ACP, Python SDK, docs site, and upstream automation stay removed ([AGENTS](../../../../AGENTS.md#porting-from-upstream)). The `desktop` bundle is Bake's own and is kept. |
 | D4 | Session data | Scope-00 default | Keep Session format 3, its adjacent migrations, and the retired vocabulary. A Rust port is not a reason for a format change. |
 | D5 | TypeScript runtime and custom profiles | Decided by request, 2026-10-07 | The product owner approved: "Ship Rust only; custom JavaScript profiles would need migration." 0.4 ships no bundled or explicitly selectable Node/TypeScript compatibility runtime. During development the TypeScript runtime stays runnable as the comparison oracle. A custom Cordis/JavaScript profile needs migration; Bake never silently rewrites or executes a construct the native runtime does not support ([strategy](#profile-migration-and-native-extension-strategy)). This decision alone drops no provider, Desktop support, `run_code` language, legacy name, persisted data, or update and rollback obligation. |
-| D6 | Native extension protocol | **Owner decision** | Recommendation: 0.4.0 offers MCP servers and hook processes as its native extension surfaces and adds no new plugin API. A versioned out-of-process protocol is designed in a later 0.4.x release, around named consumers. |
+| D6 | Native plugin API | Decided by request, 2026-10-07 | The product owner answered: "Require a native plugin API in 0.4.0." MCP servers and hook processes stay supported; 0.4.0 also requires a native plugin API. Scope 12 designs its execution model, protocol or ABI, contributions, permissions, lifetimes, and versioning, and proves it with a named consumer ([strategy](#profile-migration-and-native-extension-strategy)). These design choices remain open. |
 | D7 | Cordis preset and Cordis tooling | **Owner decision** | The `cordis` preset, `cordis_inspect_*`, `plugin_manager`, the Cordis host runner, and `bake plugin` operate on JavaScript plugins that 0.4 cannot run ([D5](#decision-register)). Each needs a designed migration or native replacement, or a separately approved support change under [D2](#decision-register). None is approved for removal yet. |
 | D8 | Provider breadth | Scope-00 default for the target; **Owner decision** for tiers | Every route reachable today is the target. The [provider section](#provider-routes-and-authentication) recommends qualification tiers. Each family needs native qualification or a separately approved support change; no Node fallback discharges it. |
 | D9 | Bake Desktop launch | **Owner decision**, with the Desktop maintainers | Keep `dsh --profile desktop` and protocol version 1. How Desktop launches the native executable is open; candidates include spawning it over stdio or bridging Electron `parentPort` to that stdio, and none is chosen. Bake's TypeScript runtime cannot serve as the bridge ([D5](#decision-register)). The chosen path needs a test with the real Desktop consumer. |
@@ -212,7 +212,7 @@ Obligations for 0.4:
 
 ## Profile migration and native extension strategy
 
-[D5](#decision-register) is decided: 0.4 ships Rust only, and a profile the native runtime cannot run needs migration. [D6](#decision-register) and [D7](#decision-register) remain recommendations. The TypeScript runtime stays runnable in development as the comparison oracle; no shipped command selects it.
+[D5](#decision-register) is decided: 0.4 ships Rust only, and a profile the native runtime cannot run needs migration. [D6](#decision-register) is decided: 0.4.0 requires a native plugin API. [D7](#decision-register) remains open. The TypeScript runtime stays runnable in development as the comparison oracle; no shipped command selects it.
 
 **Profile classification.** Before any agent starts, the native launcher composes the profile's layers and checks every row and expression against a closed table of native-recognized rows. Each row in that table is pinned by package name, row id, and the exact source text of any shipped `!!js`. If every row matches, the profile runs natively. Otherwise the launcher reports the first unrecognized construct and its file and does not start the profile. It never executes the construct and never rewrites the profile to remove it. The migration path for such profiles is still to be designed. `--dump-config` and `--self-check` report whether a profile is native-recognized.
 
@@ -223,7 +223,16 @@ Obligations for 0.4:
 - **Code mode stays JavaScript.** `run_code` executes model-written TypeScript in a confined QuickJS VM ([codemode](../../../../packages/ptc-runtime/ptc-runtime-codemode/README.md)). A native host embeds an equivalent confined engine. It does not change the language the model writes.
 - **Development comparison.** Work that runs in the TypeScript runtime never closes a native scope. A native profile never delegates to it.
 
-**Recommended native extension surfaces in 0.4.0 ([D6](#decision-register)):** MCP servers (stdio and Streamable HTTP) and hook processes. Both are already out-of-process and language-neutral. A versioned native plugin protocol, covering tool, command, and prompt contributions with explicit lifetimes, is recommended for a later 0.4.x release. It must be designed around named consumers, and its catalog must be generated from its real interface, never from the Cordis API catalog.
+**Native extension surfaces in 0.4.0 ([D6](#decision-register)):** MCP servers (stdio and Streamable HTTP) and hook processes stay supported. They do not satisfy the plugin API requirement on their own. 0.4.0 must also ship a native plugin API. No API exists yet, and its form is not chosen. Scope 12 designs it and settles:
+
+- the protocol or ABI, including whether plugins run in process or out of process;
+- which contributions a plugin can make;
+- permissions, and how plugin effects pass the same approval and sandbox rules as built-ins;
+- lifetimes, including failure and a shutdown that awaits owned work;
+- versioning and compatibility rules;
+- proof through at least one named consumer exercised against the real native runtime.
+
+Any model-visible catalog for the API must be generated from its real interface, never from the Cordis API catalog. The API does not by itself migrate Cordis/JavaScript plugins or replace Cordis tooling; [D7](#decision-register) covers those.
 
 ## Unreleased develop work
 
@@ -290,6 +299,7 @@ Each row is one support entry. Rows link to their current oracle tests, and scop
 | A16 | Install, update, rollback, aliases | [updater tests](../../../../packages/boot/updater/tests/), [release script tests](../../../../scripts/release/) | Native plus transition | 16 | Old updater to 0.4 and back; held Windows files; `dsh` link kept | Oldest supported updater not chosen |
 | A17 | Performance | [terminal performance driver](../../../../apps/tui/packages/app/performance/README.md) | Baseline first | 00, 17 | Frozen budgets from repeated baseline runs | [Initial measurements](baseline-2026-10-07/README.md) and [shutdown observations](terminal-2026-10-07/README.md) captured; full qualification and budgets remain open |
 | A18 | Removed products | — | Excluded | — | No restored web, ACP, SDK, upstream desktop, or docs site | — |
+| A19 | Native plugin API | None; no native API exists | Required new surface ([D6](#decision-register)) | 12 | A versioned API with documented permissions and lifetimes; a named consumer exercises every lifetime transition the design defines, including failure and shutdown, through the real native runtime; any model-visible catalog is generated from the real interface | API design and named consumer are missing |
 
 ## Native consumer coverage gaps
 
@@ -302,6 +312,7 @@ These consumers or behaviors have no test that a native implementation could be 
 - **Old updaters:** no test runs a released 0.3 updater against a changed archive layout.
 - **Retained `api`, `client`, `host`, and `typert` packages:** `bake-typert-registry`, `bake-typert-loader`, and `bake-api-gateway` are composed in the base bundle. Their consumers, including the `sessionFeedback` Host Remote, have not been traced.
 - **Terminal setup:** edits to external terminal configuration files have no cross-runtime test.
+- **Native plugin API:** no consumer is named and no API exists to test ([D6](#decision-register)).
 - **`bake plugin`:** depends on pnpm being installed on the host and installs JavaScript plugins that 0.4 cannot run. Its migration or replacement is undecided ([D7](#decision-register)).
 - **Platform minimums:** no recorded minimum OS, kernel, glibc, or macOS deployment target.
 - **Performance:** the instrumentation is Node-specific, and several interactive workloads are excluded.

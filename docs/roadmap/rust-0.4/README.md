@@ -47,7 +47,7 @@ Use a small number of crates organized by ownership, with modules inside them. T
 | `bake-host` | Processes, filesystem, sandbox, settings, credentials, attachments, spill, terminal leases | Own every acquired resource and its asynchronous shutdown |
 | `bake-llm` | Provider routes, authentication, request encoding, streams, retry classification | Depend on host interfaces; never own conversation state |
 | `bake-runtime` | Agent state machine, inbox, policies, tools, prompts, compaction, goals, children | One authoritative session and serialized state owner per agent |
-| `bake-integrations` | MCP, hooks, web tools, code mode, scheduling, optional extension protocols | Use the same tools, permissions, and lifecycle as built-ins |
+| `bake-integrations` | MCP, hooks, web tools, code mode, scheduling, the native plugin API | Use the same tools, permissions, and lifecycle as built-ins |
 | `bake-tui` | Editor, layout, transcript presentation, terminal interaction | Read runtime projections; own presentation state only |
 | `bake-cli` | Profile selection, headless and Desktop entry points, updater, lifecycle | Compose services and select the frontend |
 | `bake-conformance` | Test drivers and comparison reports | Test-only; excluded from shipped archives |
@@ -71,7 +71,7 @@ Candidate foundations are Cargo, Serde, Tokio, and a Ratatui/Crossterm terminal 
 
 The [terminal direction](terminal.md) keeps the current transcript and composer layout recognizable, with cleaner presentation and clearer agent selection, status, and input focus. Ratatui with Crossterm is the starting stack. The composer uses a pure Bake-owned model following the [editor widget qualification](scope-00/editor-2026-10-07/README.md); the native frontend must pass the inline, Unicode, draft-preservation, and terminal-restoration cases before adoption.
 
-Keep `run_code`'s JavaScript semantics through an explicitly confined embedded engine; moving the host to Rust does not authorize changing the model's programming language. 0.4 ships Rust only, with no bundled or selectable Node/TypeScript compatibility runtime ([D5](scope-00/support.md#decision-register), approved 2026-10-07). The TypeScript runtime stays runnable during development as the comparison oracle; it cannot count as native parity or serve behind a supposedly native profile. Custom profiles that use arbitrary Cordis JavaScript, executable YAML, or npm plugins need migration and are never silently rewritten or executed. Electron message ports remain a separate Desktop decision. Scope 00 resolves the shipped support matrix; scopes 05, 12, and 13 prove it.
+Keep `run_code`'s JavaScript semantics through an explicitly confined embedded engine; moving the host to Rust does not authorize changing the model's programming language. 0.4 ships Rust only, with no bundled or selectable Node/TypeScript compatibility runtime ([D5](scope-00/support.md#decision-register), approved 2026-10-07). The TypeScript runtime stays runnable during development as the comparison oracle; it cannot count as native parity or serve behind a supposedly native profile. Custom profiles that use arbitrary Cordis JavaScript, executable YAML, or npm plugins need migration and are never silently rewritten or executed. 0.4.0 must ship a native plugin API; MCP servers and hook processes alone do not satisfy that requirement ([D6](scope-00/support.md#decision-register), decided 2026-10-07). Electron message ports remain a separate Desktop decision. Scope 00 resolves the shipped support matrix; scopes 05, 12, and 13 prove it.
 
 ## Linear development sequence
 
@@ -93,7 +93,7 @@ The effort bands are relative: **M** is a bounded subsystem; **L** spans multipl
 | 09 | Agent loop and headless vertical slice | XL | End-to-end edit/resume/cancel and paired agent-loop record | Planned |
 | 10 | Context, skills, attachments, and compaction | L | Prompt parity, reconstruction after replacement, long-session eval | Planned |
 | 11 | Subagents, goals, background jobs, and schedules | XL | Durable orchestration and race/restart proofs | Planned |
-| 12 | MCP, web, hooks, code mode, and extensions | XL | Protocol, permission, VM containment, and extension compatibility | Planned |
+| 12 | MCP, web, hooks, code mode, native plugin API, and extensions | XL | Protocol, permission, VM containment, plugin API design, and extension compatibility | Planned |
 | 13 | CLI profiles, public transports, and Bake Desktop | L | Built entry-point and Desktop consumer compatibility | Planned |
 | 14 | Terminal engine, layout, and transcript | XL | Inline/fullscreen PTY, Unicode, scrollback, and restoration | Planned |
 | 15 | Interactive terminal workflows | XL | Complete shipped PTY scenario mapping and model-surface parity | Planned |
@@ -226,11 +226,11 @@ Each scope below specifies implementation, review order, and observable proof. T
 
 ### 12 — Integrations and extension compatibility
 
-**Implement:** MCP client/resources and reconnection, web search/fetch, hook protocols and external hook processes, code mode, and the approved external-extension strategy. Account for existing Cordis inspection/mutation and plugin-manager tools; their generated JavaScript API catalog cannot be presented as a Rust API unchanged.
+**Implement:** MCP client/resources and reconnection, web search/fetch, hook protocols and external hook processes, code mode, the native plugin API that 0.4.0 requires ([D6](scope-00/support.md#decision-register)), and the approved migration for Cordis/JavaScript extensions. The plugin API's protocol or ABI, contribution set, permissions, lifetimes, and versioning are not chosen; this scope designs them around a named consumer. Account for existing Cordis inspection/mutation and plugin-manager tools ([D7](scope-00/support.md#decision-register)); their generated JavaScript API catalog cannot be presented as a Rust API unchanged.
 
-**PR order:** MCP → web/hooks → embedded code mode → extension migration and catalog generation. Regenerate model-facing catalogs from their owner and evaluate intentional prompt/schema changes.
+**PR order:** MCP → web/hooks → embedded code mode → native plugin API → extension migration and catalog generation. Generate any plugin API catalog from the API's real interface. Regenerate model-facing catalogs from their owner and evaluate intentional prompt/schema changes.
 
-**Proof:** local protocol servers check negotiation, tools/resources, invalid schemas, reconnect, cancellation, and shutdown. HTTP tests cover redirects, DNS rebinding/private destinations, pinned connections, payload limits, and proxy behavior. Code-mode tests cover nested approvals, memory/time exhaustion, infinite loops, denied ambient filesystem/network/process access, output limits, and VM termination. Run real fixture plugins through the chosen migration or replacement path, including load/unload/reload/failure. Anchors: [MCP](../../../packages/mcp/), [web](../../../packages/web/), [hooks](../../../packages/hooks/), [code mode](../../../packages/ptc-runtime/), and [extensions](../../../packages/extensions/).
+**Proof:** local protocol servers check negotiation, tools/resources, invalid schemas, reconnect, cancellation, and shutdown. HTTP tests cover redirects, DNS rebinding/private destinations, pinned connections, payload limits, and proxy behavior. Code-mode tests cover nested approvals, memory/time exhaustion, infinite loops, denied ambient filesystem/network/process access, output limits, and VM termination. A named consumer exercises the native plugin API through the real native runtime, including version mismatch, denied permission, failure, shutdown, and every other lifetime transition the design defines. Run real fixture plugins through the chosen migration or replacement path, including load/unload/reload/failure. Anchors: [MCP](../../../packages/mcp/), [web](../../../packages/web/), [hooks](../../../packages/hooks/), [code mode](../../../packages/ptc-runtime/), and [extensions](../../../packages/extensions/).
 
 **Rollback:** native execution stays opt-in until the default switch. The TypeScript runtime remains a development oracle that 0.4 does not ship; work that still executes there does not close a native scope.
 
@@ -297,6 +297,7 @@ During coexistence, run the current Bake gates for affected TypeScript paths and
 0.4.0 is ready for a release request only when all of the following have evidence:
 
 - Every supported 0.3 behavior has native parity or an approved support change with a documented migration path; unresolved provider, plugin, or Desktop gaps block release.
+- The native plugin API ships with documented versioning, permissions, and lifetimes, and a named consumer passes against final artifacts ([D6](scope-00/support.md#decision-register)). MCP servers and hook processes alone do not meet this requirement.
 - Historical sessions open, current-format sessions resume across both runtimes, concurrent writers remain excluded, and rollback preserves user data.
 - All five release targets pass native artifact tests; each OS's sandbox and terminal behavior is tested on that OS.
 - Every model-visible change has its required paired record. Regressions are fixed or their measured causes and acceptance are recorded in both the eval note and PR.

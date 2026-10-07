@@ -74,7 +74,7 @@ Each row supplements the detailed scope specification. The final column is a req
 | 09 | Native edit/check/resume, event trace parity and paired eval | Cancel before admission and during tools; crash after effect but before result commit |
 | 10 | Exact composed context, image admission, reconstructable compaction and long-session task | Missing attachment, failed summary, orphaned tool pair, canceled checkpoint, byte-limit edge |
 | 11 | Durable child/job/goal/schedule results and shutdown | Parent/child race, duplicate wakeup, clock jump, router failure, restart at settlement |
-| 12 | MCP/hooks/web/VM and approved extension path through real runtime | Disconnect, invalid schema, private-address redirect, infinite loop, memory limit, denied nested tool |
+| 12 | MCP/hooks/web/VM, the native plugin API with a named consumer, and approved extension path through real runtime | Disconnect, invalid schema, private-address redirect, infinite loop, memory limit, denied nested tool, plugin API version mismatch |
 | 13 | Built CLI flags/exits, public transport behavior and actual Desktop launch | Invalid envelope, dropped client, withdrawn approval, busy session, incompatible Electron entry |
 | 14 | Inline/fullscreen terminal cells, Unicode input, modes and restoration | Resize mid-stream, panic, hangup, malformed escape/input, constrained dimensions |
 | 15 | Complete PTY workflow map and all preset model surfaces | Cancel navigation/login/question; retain draft; deny approval; external-editor failure |
