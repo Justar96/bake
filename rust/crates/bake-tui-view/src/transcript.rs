@@ -413,7 +413,7 @@ pub struct Marks {
 }
 
 pub const ROUND_MARKS: Marks = Marks {
-    user: "▎",
+    user: ">",
     done: "✓",
     failed: "✗",
     running: "●",
@@ -427,7 +427,7 @@ pub const ROUND_MARKS: Marks = Marks {
 };
 
 pub const CLASSIC_MARKS: Marks = Marks {
-    user: "|",
+    user: ">",
     done: "+",
     failed: "x",
     running: "*",
@@ -656,16 +656,16 @@ pub fn present(rows: &[Row], index: usize, width: usize, look: Look) -> Vec<Line
                 lines.extend(hang(paragraph, width, RAIL, rail(), rail(), dim()));
             }
         }
-        // A bar runs beside every row of the user's words, so a long prompt
-        // reads as one block.
+        // A prompt mark opens the user's words, as they were typed; the
+        // rows a long prompt wraps to hang under the text, not the mark.
         Row::User(text) => {
-            let bar = vec![Span::styled(format!("{} ", marks.user), accent(look.tones))];
+            let mark = vec![Span::styled(format!("{} ", marks.user), accent(look.tones))];
             lines.extend(hang(
                 text,
                 width,
                 RAIL,
-                bar.clone(),
-                bar,
+                mark,
+                rail(),
                 Style::new().add_modifier(Modifier::BOLD),
             ));
         }
@@ -1927,7 +1927,7 @@ mod tests {
         let user = at("Find where");
         assert_eq!(
             all[user],
-            "▎ Find where the session controller registers commands"
+            "> Find where the session controller registers commands"
         );
         assert_eq!(all[user - 1], "", "a blank opens the turn");
         assert_eq!(all[user + 1], "");
@@ -2012,7 +2012,7 @@ mod tests {
             all.iter().all(|l| l.is_ascii() || l.contains('·')),
             "{all:#?}"
         );
-        assert!(all.iter().any(|l| l.starts_with("| Run the parser tests")));
+        assert!(all.iter().any(|l| l.starts_with("> Run the parser tests")));
         assert!(all.iter().any(|l| l.starts_with("  x Bash: bun test")));
         assert!(all.iter().any(|l| l == "  | ... 4 more lines"));
     }
@@ -2027,7 +2027,7 @@ mod tests {
         let user = vec![Row::User("alpha beta gamma".into())];
         assert_eq!(
             text(&present(&user, 0, 10, PLAIN)),
-            ["▎ alpha", "▎ beta", "▎ gamma"]
+            ["> alpha", "  beta", "  gamma"]
         );
         let call = vec![Row::Call {
             tool: "Bash".into(),
@@ -2086,22 +2086,22 @@ mod tests {
     fn prompts_jump_to_the_top_and_the_ends_reach_start_and_output() {
         let mut t = session(80, 6);
         t.previous_prompt();
-        assert_eq!(text(&t.visible())[0], "▎ Run the parser tests");
+        assert_eq!(text(&t.visible())[0], "> Run the parser tests");
         t.previous_prompt();
         assert_eq!(
             text(&t.visible())[0],
-            "▎ Find TODO comments in the source files"
+            "> Find TODO comments in the source files"
         );
         t.previous_prompt();
         assert_eq!(
             text(&t.visible())[0],
-            "▎ Find where the session controller registers commands"
+            "> Find where the session controller registers commands"
         );
         t.previous_prompt();
         assert_eq!(t.top(), Anchor::default());
         assert_eq!(text(&t.visible())[0], "  Bake · Rust preview");
         t.next_prompt();
-        assert!(text(&t.visible())[0].starts_with("▎ Find where"));
+        assert!(text(&t.visible())[0].starts_with("> Find where"));
         t.next_prompt();
         t.next_prompt();
         t.next_prompt();
@@ -2499,7 +2499,7 @@ mod tests {
             .collect();
         let user = all
             .iter()
-            .position(|l| l.starts_with("▎ Find where"))
+            .position(|l| l.starts_with("> Find where"))
             .unwrap();
         assert_eq!(all[user - 2], format!("  {}", "┄".repeat(36)));
         assert_eq!(all[user - 1], "");
