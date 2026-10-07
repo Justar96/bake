@@ -41,9 +41,11 @@ export interface SessionFixtureLayout {
  * Whether a repository JSONL preserves physical persistence encoding rather
  * than the logical event projection owned by this script.
  * @param path - Repository-relative path with `/` separators.
- * @returns True for physical WebWorker and installed-runtime session logs.
+ * @returns True for an explicitly registered physical Session fixture.
  */
 export function isPhysicalSessionFixture(path: string): boolean {
+  // The request-reconstruction oracle preserves the captured envelopes and stream timing.
+  if (path === 'conformance/runtime/request-reconstruction/tool-call-turn/session.jsonl') return true
   if (path.startsWith(WEBWORKER_PHYSICAL_SESSION_FIXTURE_ROOT)) {
     return /\/session(?:\.v[1-9]\d*)?\.jsonl$/.test(path)
   }
