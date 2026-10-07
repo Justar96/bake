@@ -74,6 +74,12 @@ pub struct ComposerWindow {
 }
 
 impl ComposerWindow {
+    /// The width the draft was wrapped at on the last frame; zero before the
+    /// first. Home and End find the drawn row's edges at it.
+    pub fn width(&self) -> usize {
+        self.width
+    }
+
     /// Returns the first visible row for a caret on `caret_row` of `total`
     /// rows, `visible` at a time. The first frame puts the caret on the
     /// window's bottom row; after that the window moves only when the caret

@@ -16,13 +16,24 @@ pub const MAX_DRAFT_BYTES: usize = 256 * 1024;
 pub const UNDO_DEPTH: usize = 64;
 /// Tab stops fall every `TAB_WIDTH` cells from the start of a row.
 pub const TAB_WIDTH: usize = 4;
+/// Killed texts the yank ring keeps; the oldest is dropped first.
+pub const RING_LIMIT: usize = 30;
 
+/// The last edit, which decides what the next one joins: typing is one undo
+/// step, consecutive deletions are one, consecutive kills are one ring
+/// entry, and only a yank can be replaced by an older kill.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum EditKind {
     Type,
     Delete,
     Block,
+    Kill,
+    Yank,
 }
+
+/// ASCII punctuation a word step stops at inside a word, such as the dots
+/// and slashes of a path: the TypeScript `PUNCTUATION` class.
+const PUNCTUATION: &str = "(){}[]<>.,;:'\"!?+-=*/\\|&%^$#@~`";
 
 /// Draft text with a caret that always sits on a grapheme boundary.
 #[derive(Clone, Debug, Default)]
@@ -31,6 +42,10 @@ pub struct Draft {
     caret: usize,
     undo: VecDeque<(String, usize)>,
     last_edit: Option<EditKind>,
+    /// Killed text, newest last.
+    ring: VecDeque<String>,
+    /// Where the last yank put the ring's newest entry.
+    yanked: Option<(usize, usize)>,
 }
 
 impl Draft {
@@ -116,6 +131,152 @@ impl Draft {
         self.move_to(end);
     }
 
+    /// Moves to the start of the drawn row at `width`, or from there to the
+    /// start of the logical line. A width of zero, before the first frame,
+    /// reaches the logical line's start at once.
+    pub fn row_home(&mut self, width: usize) {
+        match self.row_edge(width, false) {
+            Some(at) => self.move_to(at),
+            None => self.home(),
+        }
+    }
+
+    /// Moves to the end of the drawn row at `width`, or from there to the end
+    /// of the logical line.
+    pub fn row_end(&mut self, width: usize) {
+        match self.row_edge(width, true) {
+            Some(at) => self.move_to(at),
+            None => self.end(),
+        }
+    }
+
+    /// The caret's place at an edge of the row it is drawn on, when that is
+    /// not where it already is. A wrapped row's last place is before its last
+    /// grapheme, because a caret after it is drawn on the next row.
+    fn row_edge(&self, width: usize, end: bool) -> Option<usize> {
+        if width == 0 {
+            return None;
+        }
+        let drawn = layout(&self.text, self.caret, width);
+        let index = drawn.caret.0;
+        let row = drawn.rows[index];
+        let target = if !end {
+            row.start
+        } else if layout(&self.text, row.end, width).caret.0 == index {
+            row.end
+        } else {
+            self.prev_boundary(row.end).max(row.start)
+        };
+        (target != self.caret).then_some(target)
+    }
+
+    /// Moves one word toward the start: see [`word_stop`].
+    pub fn word_left(&mut self) {
+        self.move_to(word_stop(&self.text, self.caret, false));
+    }
+
+    /// Moves one word toward the end: see [`word_stop`].
+    pub fn word_right(&mut self) {
+        self.move_to(word_stop(&self.text, self.caret, true));
+    }
+
+    /// Ctrl+W and Alt+Backspace: kills back to the previous word stop.
+    pub fn kill_word_left(&mut self) {
+        let stop = word_stop(&self.text, self.caret, false);
+        self.kill(stop, self.caret, true);
+    }
+
+    /// Alt+D, Alt+Delete, and Ctrl+Delete: kills on to the next word stop.
+    pub fn kill_word_right(&mut self) {
+        let stop = word_stop(&self.text, self.caret, true);
+        self.kill(self.caret, stop, false);
+    }
+
+    /// Ctrl+U: kills to the logical line's start, or, at its start, the line
+    /// break before it.
+    pub fn kill_line_left(&mut self) {
+        let start = self.text[..self.caret].rfind('\n').map_or(0, |i| i + 1);
+        let from = if start == self.caret {
+            self.caret.saturating_sub(1)
+        } else {
+            start
+        };
+        self.kill(from, self.caret, true);
+    }
+
+    /// Ctrl+K: kills to the logical line's end, or, at its end, the line
+    /// break after it.
+    pub fn kill_line_right(&mut self) {
+        let end = self.text[self.caret..]
+            .find('\n')
+            .map_or(self.text.len(), |i| self.caret + i);
+        let to = if end == self.caret {
+            (self.caret + 1).min(self.text.len())
+        } else {
+            end
+        };
+        self.kill(self.caret, to, false);
+    }
+
+    /// Cuts `from..to` into the yank ring as its own undo step. Consecutive
+    /// kills join one entry, in the order the text stood.
+    fn kill(&mut self, from: usize, to: usize, backward: bool) {
+        if from >= to {
+            return;
+        }
+        let joining = self.last_edit == Some(EditKind::Kill);
+        self.checkpoint(EditKind::Kill);
+        let removed: String = self.text.drain(from..to).collect();
+        let joined = if joining { self.ring.pop_back() } else { None };
+        let entry = match joined {
+            Some(joined) if backward => removed + &joined,
+            Some(joined) => joined + &removed,
+            None => removed,
+        };
+        self.ring.push_back(entry);
+        if self.ring.len() > RING_LIMIT {
+            self.ring.pop_front();
+        }
+        self.caret = from;
+    }
+
+    /// Ctrl+Y: inserts the newest kill at the caret.
+    pub fn yank(&mut self) -> bool {
+        let Some(entry) = self.ring.back().filter(|e| !e.is_empty()).cloned() else {
+            return true;
+        };
+        let start = self.caret;
+        let complete = self.insert(&entry, EditKind::Yank);
+        self.yanked = Some((start, self.caret));
+        complete
+    }
+
+    /// Alt+Y right after a yank: replaces what it put in with the next older
+    /// kill, cycling through the ring.
+    pub fn yank_pop(&mut self) {
+        let Some((start, end)) = self.yanked else {
+            return;
+        };
+        if self.last_edit != Some(EditKind::Yank) || self.ring.len() < 2 {
+            return;
+        }
+        let mut ring = self.ring.clone();
+        if let Some(newest) = ring.pop_back() {
+            ring.push_front(newest);
+        }
+        let Some(older) = ring.back().cloned() else {
+            return;
+        };
+        if self.text.len() - (end - start) + older.len() > MAX_DRAFT_BYTES {
+            return;
+        }
+        self.ring = ring;
+        self.checkpoint(EditKind::Yank);
+        self.text.replace_range(start..end, &older);
+        self.caret = start + older.len();
+        self.yanked = Some((start, self.caret));
+    }
+
     /// Restores the text and caret before the latest step. Returns `false` when
     /// there is nothing to undo.
     pub fn undo(&mut self) -> bool {
@@ -156,7 +317,9 @@ impl Draft {
     }
 
     fn checkpoint(&mut self, kind: EditKind) {
-        if kind == EditKind::Block || self.last_edit != Some(kind) {
+        // A kill or a yank is always a step of its own.
+        let own = matches!(kind, EditKind::Block | EditKind::Kill | EditKind::Yank);
+        if own || self.last_edit != Some(kind) {
             if self.undo.len() == UNDO_DEPTH {
                 self.undo.pop_front();
             }
@@ -191,6 +354,75 @@ impl Draft {
             .flatten()
             .unwrap_or(self.text.len())
     }
+}
+
+/// Where a word step from byte `caret` lands, toward the end when `forward`:
+/// a port of the TypeScript `wordStop`.
+///
+/// A step skips whitespace, then one word or one run of punctuation. Inside
+/// a word, ASCII punctuation such as the dots of a path is a stop of its
+/// own. The step stays inside its logical line: at a line's edge it crosses
+/// the line break alone. Words are Unicode word segments without a
+/// dictionary, so CJK text steps one ideograph at a time where the oracle's
+/// ICU segmenter steps by dictionary word.
+pub fn word_stop(text: &str, caret: usize, forward: bool) -> usize {
+    let line_start = text[..caret].rfind('\n').map_or(0, |i| i + 1);
+    let line_end = text[caret..].find('\n').map_or(text.len(), |i| caret + i);
+    let wordlike = |segment: &str| segment.chars().any(char::is_alphanumeric);
+    let blank = |segment: &str| segment.chars().any(char::is_whitespace);
+    if !forward {
+        if caret == line_start {
+            return caret.saturating_sub(1);
+        }
+        let at = text[line_start..caret].trim_end().len() + line_start;
+        if at == line_start {
+            return at;
+        }
+        let segments: Vec<(usize, &str)> =
+            text[line_start..at].split_word_bound_indices().collect();
+        let Some(&(index, last)) = segments.last() else {
+            return line_start;
+        };
+        if wordlike(last) {
+            // After the last punctuation that leaves part of the word to cross.
+            let inner = last
+                .char_indices()
+                .filter(|&(_, c)| PUNCTUATION.contains(c))
+                .map(|(i, c)| i + c.len_utf8())
+                .rfind(|&end| end < last.len())
+                .unwrap_or(0);
+            return line_start + index + inner;
+        }
+        let kept = segments
+            .iter()
+            .rposition(|&(_, segment)| wordlike(segment) || blank(segment));
+        return line_start + kept.map_or(0, |i| segments[i].0 + segments[i].1.len());
+    }
+    if caret == line_end {
+        return (caret + 1).min(text.len());
+    }
+    let at = line_end - text[caret..line_end].trim_start().len();
+    if at == line_end {
+        return at;
+    }
+    let mut offset = at;
+    for (_, segment) in text[at..line_end].split_word_bound_indices() {
+        if offset == at && wordlike(segment) {
+            let stop = segment
+                .char_indices()
+                .find(|&(_, c)| PUNCTUATION.contains(c))
+                .map_or(
+                    segment.len(),
+                    |(i, _)| if i == 0 { segment.len() } else { i },
+                );
+            return at + stop;
+        }
+        if wordlike(segment) || blank(segment) {
+            break;
+        }
+        offset += segment.len();
+    }
+    offset
 }
 
 /// Normalizes CRLF and CR to LF and drops control characters other than LF and
@@ -380,6 +612,169 @@ mod tests {
         let mut draft = Draft::default();
         draft.type_text(text);
         draft
+    }
+
+    /// Every stop a run of word steps makes from one end of `text`, the
+    /// caret drawn as `|`: the TypeScript `wordStop` walk.
+    fn walk(text: &str, forward: bool) -> Vec<String> {
+        let mut caret = if forward { 0 } else { text.len() };
+        let mut stops = Vec::new();
+        loop {
+            let next = word_stop(text, caret, forward);
+            if next == caret {
+                return stops;
+            }
+            caret = next;
+            stops.push(format!("{}|{}", &text[..caret], &text[caret..]));
+        }
+    }
+
+    #[test]
+    fn a_word_step_skips_whitespace_then_one_word() {
+        assert_eq!(
+            walk("hello  world", false),
+            ["hello  |world", "|hello  world"]
+        );
+        assert_eq!(
+            walk("hello  world", true),
+            ["hello|  world", "hello  world|"]
+        );
+    }
+
+    #[test]
+    fn a_word_step_stops_inside_a_path_and_crosses_punctuation_whole() {
+        assert_eq!(
+            walk("src/main.ts --fix", false),
+            [
+                "src/main.ts --|fix",
+                "src/main.ts |--fix",
+                "src/main.|ts --fix",
+                "src/main|.ts --fix",
+                "src/|main.ts --fix",
+                "src|/main.ts --fix",
+                "|src/main.ts --fix",
+            ]
+        );
+        assert_eq!(
+            walk("x  ...  y", true),
+            ["x|  ...  y", "x  ...|  y", "x  ...  y|"]
+        );
+    }
+
+    #[test]
+    fn a_word_step_crosses_a_line_break_alone() {
+        assert_eq!(
+            walk("one\ntwo", false),
+            ["one\n|two", "one|\ntwo", "|one\ntwo"]
+        );
+        assert_eq!(
+            walk("one\ntwo", true),
+            ["one|\ntwo", "one\n|two", "one\ntwo|"]
+        );
+    }
+
+    #[test]
+    fn text_without_spaces_steps_by_unicode_word_segment() {
+        // Without the oracle's dictionary, each ideograph is a segment.
+        assert_eq!(walk("你好 hi", false), ["你好 |hi", "你|好 hi", "|你好 hi"]);
+    }
+
+    #[test]
+    fn word_moves_follow_the_oracle_around_a_path() {
+        let mut draft = typed("run src/app.ts now");
+        draft.word_left();
+        assert_eq!(&draft.text()[draft.caret()..], "now");
+        draft.word_left();
+        assert_eq!(&draft.text()[draft.caret()..], "ts now");
+        draft.word_left();
+        assert_eq!(&draft.text()[draft.caret()..], ".ts now");
+        draft.word_right();
+        assert_eq!(&draft.text()[draft.caret()..], "ts now");
+    }
+
+    #[test]
+    fn kills_join_one_ring_entry_that_yanks_back_and_undoes_by_step() {
+        // The TypeScript shell test: Ctrl+W then Alt+Backspace join one entry.
+        let mut draft = typed("alpha beta gamma");
+        draft.kill_word_left();
+        assert_eq!(draft.text(), "alpha beta ");
+        draft.kill_word_left();
+        assert_eq!(draft.text(), "alpha ");
+        draft.yank();
+        assert_eq!(draft.text(), "alpha beta gamma");
+        assert_eq!(draft.caret(), draft.text().len());
+        // Alt+D, then Ctrl+K, from the start: a second entry.
+        draft.home();
+        draft.kill_word_right();
+        assert_eq!(draft.text(), " beta gamma");
+        draft.kill_line_right();
+        assert_eq!(draft.text(), "");
+        draft.yank();
+        assert_eq!(draft.text(), "alpha beta gamma");
+        // Alt+Y right after a yank swaps in the older kill.
+        draft.yank_pop();
+        assert_eq!(draft.text(), "beta gamma");
+        // Undo takes back the swap, then the yank.
+        draft.undo();
+        assert_eq!(draft.text(), "alpha beta gamma");
+        draft.undo();
+        assert_eq!(draft.text(), "");
+        // Alt+Y without a yank before it does nothing.
+        draft.type_text("x");
+        draft.yank_pop();
+        assert_eq!(draft.text(), "x");
+    }
+
+    #[test]
+    fn line_kills_take_the_line_break_at_an_edge() {
+        let mut draft = typed("one");
+        draft.newline();
+        draft.type_text("two");
+        draft.kill_line_left();
+        assert_eq!(draft.text(), "one\n");
+        draft.kill_line_left();
+        assert_eq!((draft.text(), draft.caret()), ("one", 3));
+        draft.home();
+        draft.kill_line_right();
+        assert_eq!(draft.text(), "");
+        // "two" and the break before it joined; Home ended the run, so
+        // "one" is an entry of its own.
+        draft.yank();
+        assert_eq!(draft.text(), "one");
+        draft.yank_pop();
+        assert_eq!(draft.text(), "\ntwo");
+    }
+
+    #[test]
+    fn the_ring_keeps_its_newest_kills() {
+        let mut draft = Draft::default();
+        for i in 0..RING_LIMIT + 5 {
+            draft.type_text(&format!("w{i}"));
+            draft.kill_line_left();
+            // A move between kills keeps them apart.
+            draft.left();
+        }
+        assert_eq!(draft.ring.len(), RING_LIMIT);
+        assert_eq!(draft.ring.front().map(String::as_str), Some("w5"));
+    }
+
+    #[test]
+    fn home_and_end_reach_the_drawn_row_then_the_logical_line() {
+        // At width 8 the text takes seven cells a row: "alpha " / "beta " / "gamma".
+        let mut draft = typed("alpha beta gamma");
+        assert_eq!(layout(draft.text(), draft.caret(), 8).rows.len(), 3);
+        draft.row_home(8);
+        assert_eq!(&draft.text()[draft.caret()..], "gamma");
+        draft.row_home(8);
+        assert_eq!(draft.caret(), 0);
+        draft.row_end(8);
+        // A wrapped row's last place is before its last grapheme.
+        assert_eq!(&draft.text()[draft.caret()..], " beta gamma");
+        draft.row_end(8);
+        assert_eq!(draft.caret(), draft.text().len());
+        // Before the first frame, there is no drawn row.
+        draft.row_home(0);
+        assert_eq!(draft.caret(), 0);
     }
 
     #[test]

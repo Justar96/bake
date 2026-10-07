@@ -191,6 +191,13 @@ await scenario('composer, agent inspection, paste, and resize', async (preview) 
   await preview.wait('resized draft', () => preview.screen.includes('line one') && preview.screen.includes('line two'))
   preview.send('\x1f')
   await preview.wait('atomic paste undo', () => preview.screen.includes('draftAB') && !preview.screen.includes('line one'))
+  // Readline keys: Ctrl+A, then Ctrl+E and Ctrl+W kill the word, and Ctrl+Y puts it back.
+  preview.send('\x01X')
+  await preview.wait('line start', () => preview.screen.includes('❯ XdraftAB'))
+  preview.send('\x05 tail\x17')
+  await preview.wait('word killed', () => preview.screen.includes('❯ XdraftAB ') && !preview.screen.includes('tail'))
+  preview.send('\x19')
+  await preview.wait('kill yanked', () => preview.screen.includes('❯ XdraftAB tail'))
   await preview.quit()
 })
 

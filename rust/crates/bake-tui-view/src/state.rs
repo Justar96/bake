@@ -455,12 +455,50 @@ fn composer_key(state: &mut State, bound: Option<Action>, input: KeyInput) {
             draft.right();
             true
         }
+        // Home and End reach the drawn row's edge, then the logical line's.
         Some(Action::LineStart) => {
-            draft.home();
+            draft.row_home(state.window.width());
             true
         }
         Some(Action::LineEnd) => {
+            draft.row_end(state.window.width());
+            true
+        }
+        Some(Action::LogicalStart) => {
+            draft.home();
+            true
+        }
+        Some(Action::LogicalEnd) => {
             draft.end();
+            true
+        }
+        Some(Action::WordLeft) => {
+            draft.word_left();
+            true
+        }
+        Some(Action::WordRight) => {
+            draft.word_right();
+            true
+        }
+        Some(Action::KillWordLeft) => {
+            draft.kill_word_left();
+            true
+        }
+        Some(Action::KillWordRight) => {
+            draft.kill_word_right();
+            true
+        }
+        Some(Action::KillLineLeft) => {
+            draft.kill_line_left();
+            true
+        }
+        Some(Action::KillLineRight) => {
+            draft.kill_line_right();
+            true
+        }
+        Some(Action::Yank) => draft.yank(),
+        Some(Action::YankPop) => {
+            draft.yank_pop();
             true
         }
         _ => match input.types() {
@@ -695,6 +733,55 @@ mod tests {
                 before
             );
         }
+    }
+
+    #[test]
+    fn readline_keys_move_kill_and_yank_as_the_oracle_does() {
+        let mut state = State::default();
+        let caret_at = |state: &State| {
+            let (text, caret) = (state.draft.text(), state.draft.caret());
+            format!("{}|{}", &text[..caret], &text[caret..])
+        };
+        type_str(&mut state, "run src/app.ts now");
+        chord(&mut state, Key::Left, Mods::CTRL);
+        assert_eq!(caret_at(&state), "run src/app.ts |now");
+        chord(&mut state, Key::Left, Mods::ALT);
+        assert_eq!(caret_at(&state), "run src/app.|ts now");
+        chord(&mut state, Key::Char('b'), Mods::ALT);
+        assert_eq!(caret_at(&state), "run src/app|.ts now");
+        chord(&mut state, Key::Char('f'), Mods::ALT);
+        assert_eq!(caret_at(&state), "run src/app.|ts now");
+        chord(&mut state, Key::Right, Mods::CTRL);
+        assert_eq!(caret_at(&state), "run src/app.ts| now");
+        chord(&mut state, Key::Char('a'), Mods::CTRL);
+        assert_eq!(caret_at(&state), "|run src/app.ts now");
+        chord(&mut state, Key::Char('e'), Mods::CTRL);
+        assert_eq!(caret_at(&state), "run src/app.ts now|");
+        // Ctrl+W, then Alt+Backspace, join one kill that Ctrl+Y puts back.
+        chord(&mut state, Key::Char('w'), Mods::CTRL);
+        chord(&mut state, Key::Backspace, Mods::ALT);
+        assert_eq!(caret_at(&state), "run src/app.|");
+        chord(&mut state, Key::Char('y'), Mods::CTRL);
+        assert_eq!(caret_at(&state), "run src/app.ts now|");
+        // Ctrl+U and Ctrl+K; Alt+Y swaps the yank for the older kill.
+        chord(&mut state, Key::Char('u'), Mods::CTRL);
+        assert_eq!(state.draft.text(), "");
+        chord(&mut state, Key::Char('y'), Mods::CTRL);
+        chord(&mut state, Key::Char('y'), Mods::ALT);
+        assert_eq!(state.draft.text(), "ts now");
+        // Ctrl+B, Ctrl+F, Ctrl+D, Alt+D, and Ctrl+Delete.
+        chord(&mut state, Key::Char('a'), Mods::CTRL);
+        chord(&mut state, Key::Char('f'), Mods::CTRL);
+        chord(&mut state, Key::Char('b'), Mods::CTRL);
+        chord(&mut state, Key::Char('d'), Mods::CTRL);
+        assert_eq!(caret_at(&state), "|s now");
+        chord(&mut state, Key::Char('d'), Mods::ALT);
+        assert_eq!(caret_at(&state), "| now");
+        chord(&mut state, Key::Delete, Mods::CTRL);
+        assert_eq!(caret_at(&state), "|");
+        // Every kill is its own undo step.
+        chord(&mut state, Key::Char('-'), Mods::CTRL);
+        assert_eq!(state.draft.text(), " now");
     }
 
     #[test]

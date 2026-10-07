@@ -1518,6 +1518,20 @@ mod tests {
     }
 
     #[test]
+    fn home_reaches_the_drawn_row_before_the_line() {
+        let mut app = State::default();
+        for c in "alpha beta gamma delta".chars() {
+            key(&mut app, Key::Char(c));
+        }
+        // At 20 columns the draft wraps at 15: "alpha beta " / "gamma delta".
+        draw(&mut app, 20, 12);
+        key(&mut app, Key::Home);
+        assert_eq!(&app.draft.text()[app.draft.caret()..], "gamma delta");
+        key(&mut app, Key::Home);
+        assert_eq!(app.draft.caret(), 0);
+    }
+
+    #[test]
     fn an_armed_quit_asks_for_a_second_press_above_the_bar() {
         let mut app = State::default();
         update(&mut app, Msg::Key(KeyInput::plain(Key::Enter)));
