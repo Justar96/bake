@@ -211,6 +211,17 @@ await scenario('composer, agent inspection, paste, and resize', async (preview) 
   await preview.wait('collapsed paste', () => preview.screen.includes('❯ XdraftAB tail[Pasted text #1 +3 lines]'))
   preview.send('\x7f')
   await preview.wait('placeholder erased', () => !preview.screen.includes('Pasted text') && preview.screen.includes('❯ XdraftAB tail'))
+  // A pasted image path stages the image behind a placeholder, listed above the bar; Backspace unstages it.
+  const imageDir = await mkdtemp(join(tmpdir(), 'bake-rust-image-'))
+  try {
+    const png = Buffer.concat([Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex'), Buffer.from([0, 0, 0, 3, 0, 0, 0, 2]), Buffer.alloc(16)])
+    await writeFile(join(imageDir, 'shot.png'), png)
+    preview.send(`\x1b[200~${join(imageDir, 'shot.png')}\x1b[201~`)
+    await preview.wait('image staged', () => preview.screen.includes('❯ XdraftAB tail[Image #2]')
+      && preview.screen.includes('Staged attachments: 1') && preview.screen.includes('1. shot.png · image/png · 40 B · 3×2'))
+    preview.send('\x7f')
+    await preview.wait('image unstaged', () => !preview.screen.includes('Staged attachments') && !preview.screen.includes('[Image'))
+  } finally { await rm(imageDir, { recursive: true }) }
   await preview.quit()
 })
 

@@ -7,10 +7,14 @@
 //! it, and `clip.exe` elsewhere. When no tool succeeds, OSC 52 is the last
 //! resort; a terminal that ignores it gives no sign, so it counts as copied.
 
-use std::io::Write;
+use std::io::{Read, Write};
+use std::path::Path;
 use std::process::{Command, Stdio};
+use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
+
+use bake_tui_view::paste::{self, Image};
 
 /// Longest a clipboard tool may take; one that hangs is killed and reads as
 /// failed.
@@ -104,6 +108,171 @@ impl Clipboard {
             }
         }
     }
+}
+
+/// Image types the clipboard is asked for, in the oracle's preference order.
+const IMAGE_TYPES: &[&str] = &["image/png", "image/jpeg", "image/webp", "image/gif"];
+
+/// Largest clipboard image read; the oracle's attachment admission refuses
+/// larger ones anyway.
+const MAX_IMAGE: usize = 64 * 1024 * 1024;
+
+impl Clipboard {
+    /// Reads the clipboard's image, if it holds one, as the TypeScript
+    /// `readClipboardImage` does: `wl-paste` on Wayland, then `xclip`;
+    /// AppleScript writing PNG data to a private file on macOS; and
+    /// PowerShell's clipboard bitmap as PNG on Windows. A missing tool reads
+    /// as no image.
+    pub fn read_image(self) -> Option<Image> {
+        let (data, media_type) = match self.platform {
+            Platform::MacOs => (read_mac_image()?, "image/png"),
+            Platform::Windows => (
+                run(
+                    "powershell",
+                    &["-NoProfile", "-NonInteractive", "-Command", WINDOWS_IMAGE],
+                )?,
+                "image/png",
+            ),
+            Platform::Other => {
+                let wayland = self
+                    .wayland
+                    .then(|| {
+                        let listing = run("wl-paste", &["--list-types"])?;
+                        let kind = image_type(&String::from_utf8_lossy(&listing))?;
+                        Some((run("wl-paste", &["--no-newline", "--type", kind])?, kind))
+                    })
+                    .flatten();
+                match wayland {
+                    Some(image) => image,
+                    None => {
+                        let listing =
+                            run("xclip", &["-selection", "clipboard", "-t", "TARGETS", "-o"])?;
+                        let kind = image_type(&String::from_utf8_lossy(&listing))?;
+                        (
+                            run("xclip", &["-selection", "clipboard", "-t", kind, "-o"])?,
+                            kind,
+                        )
+                    }
+                }
+            }
+        };
+        if data.is_empty() {
+            return None;
+        }
+        let media_type = paste::sniff(&data).unwrap_or(media_type);
+        Some(Image {
+            name: format!("clipboard.{}", &media_type["image/".len()..]),
+            media_type,
+            bytes: data.len() as u64,
+            size: paste::pixel_size(&data),
+        })
+    }
+}
+
+const WINDOWS_IMAGE: &str = "Add-Type -AssemblyName System.Windows.Forms,System.Drawing; \
+    $i = [Windows.Forms.Clipboard]::GetImage(); \
+    if ($i) { $m = New-Object IO.MemoryStream; $i.Save($m, [Drawing.Imaging.ImageFormat]::Png); \
+    $o = [Console]::OpenStandardOutput(); $o.Write($m.ToArray(), 0, $m.Length); $o.Flush() }";
+
+/// The first image type a clipboard lists, in [`IMAGE_TYPES`] order.
+pub fn image_type(listing: &str) -> Option<&'static str> {
+    let offered: Vec<String> = listing
+        .lines()
+        .map(|line| line.trim().to_ascii_lowercase())
+        .collect();
+    IMAGE_TYPES
+        .iter()
+        .copied()
+        .find(|kind| offered.iter().any(|line| line == kind))
+}
+
+/// Asks AppleScript for the clipboard as PNG, written to a private file that
+/// is removed after it is read.
+fn read_mac_image() -> Option<Vec<u8>> {
+    let directory = std::env::temp_dir().join(format!("bake-clipboard-{}", std::process::id()));
+    std::fs::create_dir(&directory).ok()?;
+    let file = directory.join("clipboard.png");
+    let script = format!(
+        "set f to open for access POSIX file \"{}\" with write permission",
+        file.display()
+    );
+    let ran = run(
+        "osascript",
+        &[
+            "-e",
+            "set png to (the clipboard as «class PNGf»)",
+            "-e",
+            &script,
+            "-e",
+            "write png to f",
+            "-e",
+            "close access f",
+        ],
+    );
+    let data = ran.and_then(|_| std::fs::read(&file).ok());
+    let _ = std::fs::remove_dir_all(&directory);
+    data
+}
+
+/// Runs `program` and returns its standard output, at most [`MAX_IMAGE`]
+/// bytes, when it exits successfully within [`FEED`]; a hung program is
+/// killed.
+fn run(program: &str, args: &[&str]) -> Option<Vec<u8>> {
+    let mut child = Command::new(program)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let stdout = child.stdout.take()?;
+    let (sent, output) = mpsc::channel();
+    // Read on its own thread so a full pipe never stalls the wait below.
+    let reader = thread::spawn(move || {
+        let mut data = Vec::new();
+        let ok = stdout
+            .take(MAX_IMAGE as u64 + 1)
+            .read_to_end(&mut data)
+            .is_ok();
+        let _ = sent.send(ok.then_some(data));
+    });
+    let deadline = Instant::now() + FEED;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break Some(status),
+            Ok(None) if Instant::now() < deadline => thread::sleep(POLL),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break None;
+            }
+        }
+    };
+    let _ = reader.join();
+    let data = output.recv().ok().flatten()?;
+    (status?.success() && data.len() <= MAX_IMAGE).then_some(data)
+}
+
+/// Reads the image a pasted path names: its header for the type and size,
+/// and its length. `~/` is the home directory. `None` when the file cannot
+/// be read or is not an image the preview stages.
+pub fn read_image_file(path: &str, home: Option<&str>) -> Option<Image> {
+    let path = match (path.strip_prefix("~/"), home) {
+        (Some(rest), Some(home)) => Path::new(home).join(rest),
+        _ => Path::new(path).to_path_buf(),
+    };
+    let mut file = std::fs::File::open(&path).ok()?;
+    let bytes = file.metadata().ok().filter(|m| m.is_file())?.len();
+    let mut header = [0; 32];
+    let read = file.read(&mut header).ok()?;
+    let header = &header[..read];
+    let media_type = paste::sniff(header)?;
+    Some(Image {
+        name: path.file_name()?.to_string_lossy().into_owned(),
+        media_type,
+        bytes,
+        size: paste::pixel_size(header),
+    })
 }
 
 /// Runs `tool` with `text` on its standard input. Returns whether it exited
@@ -232,6 +401,50 @@ mod tests {
         assert_eq!(base64(b"fo"), "Zm8=");
         assert_eq!(base64(b"foo"), "Zm9v");
         assert_eq!(base64("é漢".as_bytes()), "w6nmvKI=");
+    }
+
+    #[test]
+    fn the_first_image_type_listed_in_preference_order_is_asked_for() {
+        assert_eq!(
+            image_type("TARGETS\nimage/gif\nimage/png\n"),
+            Some("image/png")
+        );
+        assert_eq!(image_type(" IMAGE/JPEG \r\ntext/plain"), Some("image/jpeg"));
+        assert_eq!(image_type("text/plain\nUTF8_STRING"), None);
+    }
+
+    #[test]
+    fn a_pasted_path_reads_as_an_image_by_its_header() {
+        let dir = std::env::temp_dir().join(format!("bake-image-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+        png.extend(3u32.to_be_bytes());
+        png.extend(2u32.to_be_bytes());
+        png.extend([0; 40]);
+        std::fs::write(dir.join("shot.png"), &png).unwrap();
+        std::fs::write(dir.join("notes.png"), b"not an image").unwrap();
+        let image = read_image_file(&dir.join("shot.png").to_string_lossy(), None).unwrap();
+        assert_eq!(
+            image.summary(),
+            format!("shot.png · image/png · {} B · 3×2", png.len())
+        );
+        // A home-relative path, a non-image, and a missing file.
+        let home = dir.to_string_lossy().into_owned();
+        assert!(read_image_file("~/shot.png", Some(&home)).is_some());
+        assert!(read_image_file(&dir.join("notes.png").to_string_lossy(), None).is_none());
+        assert!(read_image_file(&dir.join("gone.png").to_string_lossy(), None).is_none());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_program_output_is_read_only_when_it_exits_cleanly() {
+        assert_eq!(
+            run("sh", &["-c", "printf abc"]).as_deref(),
+            Some(&b"abc"[..])
+        );
+        assert_eq!(run("sh", &["-c", "printf abc; exit 1"]), None);
+        assert_eq!(run("bake-no-such-clipboard-tool", &[]), None);
     }
 
     #[cfg(unix)]

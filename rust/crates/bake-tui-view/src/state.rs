@@ -11,6 +11,7 @@ use crate::frame::FrameStyle;
 use crate::keys::{self, Action, KeyInput, Scope};
 use crate::live;
 use crate::mode::Mode;
+use crate::paste::{self, Image};
 use crate::selection::{self, Granularity, Point, Range};
 use crate::status::StatusInput;
 use crate::transcript::{self, Transcript};
@@ -34,6 +35,12 @@ pub enum Msg {
     Mouse(Mouse),
     /// Whether the text of the last [`Effect::Copy`] reached a clipboard.
     Copied(bool),
+    /// The image an [`Effect::ReadImage`] read, or `None` when there was none
+    /// or it could not be read.
+    ImageRead {
+        source: ImageSource,
+        image: Option<Image>,
+    },
 }
 
 /// A mouse report, at a cell of the screen.
@@ -188,6 +195,8 @@ pub enum Effect {
     Quit,
     /// Put this text on the clipboard, then report with [`Msg::Copied`].
     Copy(String),
+    /// Read an image, then report with [`Msg::ImageRead`].
+    ReadImage(ImageSource),
 }
 
 /// A fixed example row for the agent list; it describes no running work.
@@ -242,6 +251,17 @@ pub enum Notice {
     ReadOnly,
     ListKeys,
     DraftLimit,
+    /// Ctrl+V, or an empty paste, found no image on the clipboard.
+    NoClipboardImage,
+}
+
+/// Where a pasted image is read from: the clipboard, or a file whose path
+/// was pasted, kept with the paste to insert as text should the file not
+/// read as an image.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ImageSource {
+    Clipboard,
+    File { path: String, pasted: String },
 }
 
 /// What a sample activity stands for.
@@ -328,6 +348,12 @@ pub struct State {
     columns: u16,
     /// Whether the last selection was copied, said until the time given.
     pub copied: Option<(bool, Duration)>,
+    /// Images staged with the draft, by id, in the order they were pasted.
+    /// The preview has no model to send them to; erasing a placeholder
+    /// unstages its image.
+    pub attachments: Vec<(u32, Image)>,
+    /// Images staged so far; the next takes the next id.
+    images: u32,
     /// Whether a press on the scrollbar is being dragged.
     pub(crate) dragging: bool,
     /// While a first Ctrl+C is armed, when it lapses; a second before then
@@ -369,6 +395,8 @@ impl State {
             selecting: Selecting::default(),
             columns: 0,
             copied: None,
+            attachments: Vec::new(),
+            images: 0,
             dragging: false,
             quit_until: None,
         }
@@ -436,10 +464,18 @@ pub fn update(state: &mut State, msg: Msg) -> Vec<Effect> {
     match msg {
         Msg::Key(input) => return key(state, input),
         Msg::Paste(text) => match state.focus {
-            // A long paste collapses into a placeholder, as the oracle's does.
+            // A terminal pastes nothing for a clipboard that holds only an
+            // image, and a dropped file arrives as its path; either is read
+            // as an image. Other text goes in, a long paste collapsed into a
+            // placeholder, as the oracle's does.
+            Focus::Composer if text.is_empty() => {
+                return vec![Effect::ReadImage(ImageSource::Clipboard)];
+            }
             Focus::Composer => {
-                let complete = state.draft.paste_block(&text);
-                state.notice = (!complete).then_some(Notice::DraftLimit);
+                if let Some(path) = paste::image_path(&text) {
+                    return vec![Effect::ReadImage(ImageSource::File { path, pasted: text })];
+                }
+                paste_text(state, &text);
             }
             Focus::AgentList => state.notice = Some(Notice::ListKeys),
             Focus::Inspect(_) => state.notice = Some(Notice::ReadOnly),
@@ -464,6 +500,7 @@ pub fn update(state: &mut State, msg: Msg) -> Vec<Effect> {
         }
         Msg::Mouse(mouse) => return pointer(state, mouse),
         Msg::Copied(ok) => state.copied = Some((ok, state.now + COPIED)),
+        Msg::ImageRead { source, image } => staged(state, source, image),
     }
     Vec::new()
 }
@@ -780,11 +817,48 @@ fn key(state: &mut State, input: KeyInput) -> Vec<Effect> {
     }
     state.quit_until = None;
     match state.focus {
-        Focus::Composer => composer_key(state, bound, input),
+        Focus::Composer if bound == Some(Action::PasteImage) => {
+            return vec![Effect::ReadImage(ImageSource::Clipboard)];
+        }
+        Focus::Composer => {
+            composer_key(state, bound, input);
+            unstage(state);
+        }
         Focus::AgentList => list_key(state, bound),
         Focus::Inspect(_) => inspect_key(state, bound),
     }
     Vec::new()
+}
+
+/// Inserts pasted text at the caret, a long paste as a placeholder.
+fn paste_text(state: &mut State, text: &str) {
+    let complete = state.draft.paste_block(text);
+    state.notice = (!complete).then_some(Notice::DraftLimit);
+}
+
+/// Stages an image read for the draft, its placeholder at the caret. A file
+/// that did not read as an image goes in as the text that named it; an
+/// empty clipboard says so.
+fn staged(state: &mut State, source: ImageSource, image: Option<Image>) {
+    if state.focus != Focus::Composer {
+        return;
+    }
+    match (image, source) {
+        (Some(image), _) => {
+            state.images += 1;
+            state.draft.attach(state.images);
+            state.attachments.push((state.images, image));
+            state.notice = None;
+        }
+        (None, ImageSource::File { pasted, .. }) => paste_text(state, &pasted),
+        (None, ImageSource::Clipboard) => state.notice = Some(Notice::NoClipboardImage),
+    }
+}
+
+/// Unstages the images whose placeholders an edit removed.
+fn unstage(state: &mut State) {
+    let gone = state.draft.sweep();
+    state.attachments.retain(|(id, _)| !gone.contains(id));
 }
 
 fn composer_key(state: &mut State, bound: Option<Action>, input: KeyInput) {
@@ -1046,6 +1120,7 @@ pub fn agent(id: &str) -> Option<&'static SampleAgent> {
 mod tests {
     use super::*;
     use crate::keys::{Key, Mods};
+    use crate::paste::Image;
     use crate::transcript::{CallState, Row};
 
     fn press(state: &mut State, key: Key) -> Vec<Effect> {
@@ -1243,6 +1318,94 @@ mod tests {
         // Alt+↑ is not a caret key.
         chord(&mut state, Key::Up, Mods::ALT);
         assert_eq!(caret_at(&state), "one\nsec|ond");
+    }
+
+    fn shot(name: &str) -> Image {
+        Image {
+            name: name.into(),
+            media_type: "image/png",
+            bytes: 10,
+            size: Some((2, 1)),
+        }
+    }
+
+    #[test]
+    fn images_stage_with_a_placeholder_and_unstage_when_it_is_erased() {
+        let mut state = State::default();
+        // Ctrl+V and an empty paste read the clipboard; a lone image path its file.
+        assert_eq!(
+            chord(&mut state, Key::Char('v'), Mods::CTRL),
+            [Effect::ReadImage(ImageSource::Clipboard)]
+        );
+        assert_eq!(
+            update(&mut state, Msg::Paste(String::new())),
+            [Effect::ReadImage(ImageSource::Clipboard)]
+        );
+        let path = "'/tmp/my shot.png'";
+        let source = ImageSource::File {
+            path: "/tmp/my shot.png".into(),
+            pasted: path.into(),
+        };
+        assert_eq!(
+            update(&mut state, Msg::Paste(path.into())),
+            [Effect::ReadImage(source.clone())]
+        );
+        // A path that did not read as an image goes in as text.
+        update(
+            &mut state,
+            Msg::ImageRead {
+                source,
+                image: None,
+            },
+        );
+        assert_eq!(state.draft.text(), path);
+        // No image on the clipboard says so.
+        update(
+            &mut state,
+            Msg::ImageRead {
+                source: ImageSource::Clipboard,
+                image: None,
+            },
+        );
+        assert_eq!(state.notice, Some(Notice::NoClipboardImage));
+        chord(&mut state, Key::Char('u'), Mods::CTRL);
+        update(
+            &mut state,
+            Msg::ImageRead {
+                source: ImageSource::Clipboard,
+                image: Some(shot("a.png")),
+            },
+        );
+        type_str(&mut state, " and ");
+        update(
+            &mut state,
+            Msg::ImageRead {
+                source: ImageSource::Clipboard,
+                image: Some(shot("b.png")),
+            },
+        );
+        assert_eq!(state.draft.text(), "[Image #1] and [Image #2]");
+        assert_eq!(state.notice, None);
+        assert_eq!(state.attachments.len(), 2);
+        // Backspace removes the placeholder whole and unstages its image;
+        // undo does not bring it back without its image.
+        press(&mut state, Key::Backspace);
+        assert_eq!(state.draft.text(), "[Image #1] and ");
+        assert_eq!(
+            state
+                .attachments
+                .iter()
+                .map(|(_, i)| i.name.as_str())
+                .collect::<Vec<_>>(),
+            ["a.png"]
+        );
+        chord(&mut state, Key::Char('-'), Mods::CTRL);
+        assert!(!state.draft.text().contains("[Image #2]"));
+        // A kill unstages too, and a yank brings back only the text.
+        chord(&mut state, Key::Char('u'), Mods::CTRL);
+        assert!(state.attachments.is_empty());
+        chord(&mut state, Key::Char('y'), Mods::CTRL);
+        assert!(!state.draft.text().contains("[Image"));
     }
 
     #[test]

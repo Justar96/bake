@@ -93,6 +93,10 @@ pub struct Draft {
     atoms: Vec<(String, Atom)>,
     /// Placeholders numbered so far; the next takes the next number.
     pastes: u32,
+    /// Image placeholders whose image was unstaged when they left the draft;
+    /// undo strips them from what it restores, so none comes back without
+    /// its image.
+    unstaged: Vec<String>,
 }
 
 /// An open history browse: the draft it started from, each entry shown so
@@ -200,6 +204,41 @@ impl Draft {
         let token = pasted_text_token(self.pastes, &kept);
         self.atoms.push((token.clone(), Atom::Text(kept)));
         self.paste(&token) && complete
+    }
+
+    /// Inserts the placeholder of staged image `id` at the caret, as one
+    /// undo step, and returns it.
+    pub fn attach(&mut self, id: u32) -> String {
+        self.pastes += 1;
+        let token = image_token(self.pastes);
+        self.atoms.push((token.clone(), Atom::Image(id)));
+        self.paste(&token);
+        token
+    }
+
+    /// Unstages every image whose placeholder has left the draft, and
+    /// returns their ids. Nothing is unstaged while a history browse shows
+    /// another entry, since returning restores the draft and its
+    /// placeholders.
+    pub fn sweep(&mut self) -> Vec<u32> {
+        if self.visit.is_some() {
+            return Vec::new();
+        }
+        let mut gone = Vec::new();
+        let text = &self.text;
+        self.atoms.retain(|(token, atom)| match atom {
+            Atom::Image(id) if !text.contains(token.as_str()) => {
+                gone.push((token.clone(), *id));
+                false
+            }
+            _ => true,
+        });
+        gone.into_iter()
+            .map(|(token, id)| {
+                self.unstaged.push(token);
+                id
+            })
+            .collect()
     }
 
     /// The text a submission sends: every pasted-text placeholder replaced by
@@ -487,7 +526,14 @@ impl Draft {
         }
         let joining = self.last_edit == Some(EditKind::Kill);
         self.checkpoint(EditKind::Kill);
-        let removed: String = self.text.drain(from..to).collect();
+        let mut removed: String = self.text.drain(from..to).collect();
+        // An image's placeholder goes with its image; a yank brings back
+        // only text.
+        for (token, atom) in &self.atoms {
+            if matches!(atom, Atom::Image(_)) {
+                removed = removed.replace(token.as_str(), "");
+            }
+        }
         let joined = if joining { self.ring.pop_back() } else { None };
         let entry = match joined {
             Some(joined) if backward => removed + &joined,
@@ -546,7 +592,15 @@ impl Draft {
         // Undo returns from a whole browse to the draft it started from.
         self.visit = None;
         match self.undo.pop_back() {
-            Some((text, caret)) => {
+            Some((mut text, mut caret)) => {
+                for token in &self.unstaged {
+                    while let Some(at) = text.rfind(token.as_str()) {
+                        text.replace_range(at..at + token.len(), "");
+                        if caret > at {
+                            caret = caret.saturating_sub(token.len()).max(at);
+                        }
+                    }
+                }
                 self.text = text;
                 self.caret = caret;
                 true

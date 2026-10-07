@@ -63,6 +63,11 @@ pub const ERROR: &str = "error";
 pub const HINT_FOLLOWING: &[(&str, &str)] = &[("Wheel/PgUp", "scroll"), ("Ctrl+↑", "prompts")];
 /// While reading history, how much lies below: `12 lines below`.
 pub const LINES_BELOW: &str = "lines below";
+/// The attachments panel's title, before the count, and its footer.
+pub const ATTACHMENTS_TITLE: &str = "Staged attachments";
+pub const ATTACHMENTS_HELP: &str = "Erase a placeholder to unstage its image";
+/// Ctrl+V, or an empty paste, found no image on the clipboard.
+pub const NO_CLIPBOARD_IMAGE: &str = "No image on the clipboard";
 /// Said in the scroll indicator's row once a selection reaches the clipboard,
 /// or does not.
 pub const COPIED: &str = "Copied";

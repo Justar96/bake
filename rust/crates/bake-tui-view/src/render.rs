@@ -52,6 +52,7 @@ pub fn render(app: &mut State, frame: &mut Frame) {
             draft_rows: u16::try_from(draft.rows.len()).unwrap_or(u16::MAX),
             standing: true,
             notice: u16::from(app.notice.is_some() || app.quitting()),
+            panel: panel_rows(app.attachments.len()),
         },
     );
 
@@ -63,6 +64,7 @@ pub fn render(app: &mut State, frame: &mut Frame) {
     };
     let body = next(rows.body);
     let gap = next(rows.gap);
+    let panel = next(rows.panel);
     let notice = next(rows.notice);
     let bar = next(rows.bar);
     let rule = next(rows.top_edge);
@@ -96,6 +98,7 @@ pub fn render(app: &mut State, frame: &mut Frame) {
             Notice::ReadOnly => copy::READ_ONLY,
             Notice::ListKeys => copy::LIST_KEYS,
             Notice::DraftLimit => copy::DRAFT_LIMIT,
+            Notice::NoClipboardImage => copy::NO_CLIPBOARD_IMAGE,
         };
         line(
             buf,
@@ -103,6 +106,7 @@ pub fn render(app: &mut State, frame: &mut Frame) {
             Line::styled(text, Style::new().fg(Color::Yellow)),
         );
     }
+    render_attachments(app, inset(panel), buf);
     let columns = area.width;
     render_bar(app, inset(bar), buf);
     render_agents_row(columns, inset(agents), buf);
@@ -338,6 +342,65 @@ fn bar_left(app: &State) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
             ],
             vec![Span::styled(format!("  {}", copy::INSPECT_KEYS), dim())],
         ),
+    }
+}
+
+/// Items the attachments panel lists before it counts the rest.
+const PANEL_ITEMS: usize = 3;
+
+/// Rows the attachments panel wants for `count` staged images: its title,
+/// up to [`PANEL_ITEMS`] items and one more row, which holds the next item
+/// or a count of the rest, and its footer.
+fn panel_rows(count: usize) -> u16 {
+    if count == 0 {
+        return 0;
+    }
+    let items = count.min(PANEL_ITEMS + 1);
+    u16::try_from(items + 2).unwrap_or(u16::MAX)
+}
+
+/// The staged images above the bar, as the oracle's attachments panel:
+/// `Staged attachments: 2` in blue, a dim line for each image, and a dim
+/// footer. Short of rows, the footer and then the items give way, and the
+/// title stays to say why.
+fn render_attachments(app: &State, area: Rect, buf: &mut Buffer) {
+    if area.is_empty() {
+        return;
+    }
+    let count = app.attachments.len();
+    let mut lines = vec![Line::styled(
+        format!("{}: {count}", copy::ATTACHMENTS_TITLE),
+        tone_style(Tone::Asking, app.tones),
+    )];
+    let room = usize::from(area.height) - 1;
+    let footer = room >= 2;
+    let slots = room - usize::from(footer);
+    let shown = if count > slots {
+        slots.saturating_sub(1)
+    } else {
+        count
+    };
+    for (index, (_, image)) in app.attachments.iter().take(shown).enumerate() {
+        lines.push(Line::styled(
+            format!("{}. {}", index + 1, image.summary()),
+            dim(),
+        ));
+    }
+    if shown < count && slots > 0 {
+        lines.push(Line::styled(
+            format!("+{} {}", count - shown, copy::MORE_LINES),
+            dim(),
+        ));
+    }
+    if footer {
+        lines.push(Line::styled(copy::ATTACHMENTS_HELP, dim()));
+    }
+    for (i, content) in lines.into_iter().enumerate() {
+        line(
+            buf,
+            Rect::new(area.x, area.y + i as u16, area.width, 1),
+            content,
+        );
     }
 }
 
@@ -1778,6 +1841,44 @@ mod tests {
         assert_eq!(&app.draft.text()[app.draft.caret()..], "gamma delta");
         key(&mut app, Key::Home);
         assert_eq!(app.draft.caret(), 0);
+    }
+
+    #[test]
+    fn staged_images_are_listed_in_a_panel_above_the_bar() {
+        use crate::paste::Image;
+        use crate::state::ImageSource;
+        let mut app = State::default();
+        for name in ["a.png", "b.png", "c.png", "d.png", "e.png"] {
+            let image = Image {
+                name: name.into(),
+                media_type: "image/png",
+                bytes: 10,
+                size: Some((2, 1)),
+            };
+            update(
+                &mut app,
+                Msg::ImageRead {
+                    source: ImageSource::Clipboard,
+                    image: Some(image),
+                },
+            );
+        }
+        let (rows, _) = draw(&mut app, 80, 24);
+        let title = row_index(&rows, "Staged attachments: 5");
+        assert_eq!(
+            rows[title + 1].trim_end(),
+            "  1. a.png · image/png · 10 B · 2×1"
+        );
+        assert_eq!(rows[title + 4].trim_end(), "  +2 more lines");
+        assert!(rows[title + 5].contains("Erase a placeholder"));
+        assert_eq!(title + 6, row_index(&rows, "no model"));
+        // Erasing every placeholder takes the panel away.
+        update(
+            &mut app,
+            Msg::Key(KeyInput::new(Key::Char('u'), Mods::CTRL)),
+        );
+        let (rows, _) = draw(&mut app, 80, 24);
+        assert!(!rows.iter().any(|r| r.contains("Staged attachments")));
     }
 
     #[test]

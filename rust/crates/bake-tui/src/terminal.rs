@@ -19,8 +19,9 @@ use std::time::{Duration, Instant};
 
 use bake_tui_view::activity::Tones;
 use bake_tui_view::frame;
+use bake_tui_view::paste::Image;
 use bake_tui_view::render::render;
-use bake_tui_view::state::{Effect, Msg, State, update};
+use bake_tui_view::state::{Effect, ImageSource, Msg, State, update};
 use bake_tui_view::status;
 use bake_tui_view::wheel::{self, WheelSteps};
 use crossterm::cursor::Show;
@@ -56,27 +57,46 @@ impl Drop for Workers {
     }
 }
 
-/// Copies run here: the terminal's own clipboard at once over SSH or where
-/// no tool applies, and otherwise the tools on a worker thread, which
-/// reports on `done` whether one took the text.
-struct Copier {
+/// What a worker finished: a copy, with whether a tool took the text, or
+/// an image read for the draft.
+enum Done {
+    Copy(String, bool),
+    Image(ImageSource, Option<Image>),
+}
+
+/// Clipboard work runs here, off the loop: copies go to the terminal's own
+/// clipboard at once over SSH or where no tool applies, and otherwise to
+/// the tools on a worker thread; images are read on one too. Each worker
+/// reports on `done`.
+struct Jobs {
     clipboard: Clipboard,
-    done: Sender<(String, bool)>,
-    results: Receiver<(String, bool)>,
+    home: Option<String>,
+    done: Sender<Done>,
+    results: Receiver<Done>,
     pending: usize,
     workers: Workers,
 }
 
-impl Copier {
-    fn new(clipboard: Clipboard) -> Self {
+impl Jobs {
+    fn new(clipboard: Clipboard, home: Option<String>) -> Self {
         let (done, results) = mpsc::channel();
         Self {
             clipboard,
+            home,
             done,
             results,
             pending: 0,
             workers: Workers::default(),
         }
+    }
+
+    fn spawn(&mut self, work: impl FnOnce() -> Done + Send + 'static) {
+        let done = self.done.clone();
+        self.workers.0.retain(|worker| !worker.is_finished());
+        self.workers.0.push(thread::spawn(move || {
+            let _ = done.send(work());
+        }));
+        self.pending += 1;
     }
 
     fn copy(
@@ -91,26 +111,42 @@ impl Copier {
             update(state, Msg::Copied(true));
             return Ok(());
         }
-        let done = self.done.clone();
-        self.workers.0.retain(|worker| !worker.is_finished());
-        self.workers.0.push(thread::spawn(move || {
+        self.spawn(move || {
             let ok = tools.into_iter().any(|tool| clipboard::feed(tool, &text));
-            let _ = done.send((text, ok));
-        }));
-        self.pending += 1;
+            Done::Copy(text, ok)
+        });
         Ok(())
     }
 
-    /// Applies every finished copy. When no tool took the text, the
+    fn read_image(&mut self, source: ImageSource) {
+        let clipboard = self.clipboard;
+        let home = self.home.clone();
+        self.spawn(move || {
+            let image = match &source {
+                ImageSource::Clipboard => clipboard.read_image(),
+                ImageSource::File { path, .. } => clipboard::read_image_file(path, home.as_deref()),
+            };
+            Done::Image(source, image)
+        });
+    }
+
+    /// Applies every finished job. When no tool took a copy, the
     /// terminal's own clipboard is the last resort; a terminal that ignores
     /// OSC 52 gives no sign, so it counts as copied.
     fn settle(&mut self, screen: &mut impl Screen, state: &mut State) -> io::Result<()> {
-        while let Ok((text, ok)) = self.results.try_recv() {
+        while let Ok(done) = self.results.try_recv() {
             self.pending -= 1;
-            if !ok {
-                screen.write(&clipboard::osc52(&text))?;
+            match done {
+                Done::Copy(text, ok) => {
+                    if !ok {
+                        screen.write(&clipboard::osc52(&text))?;
+                    }
+                    update(state, Msg::Copied(true));
+                }
+                Done::Image(source, image) => {
+                    update(state, Msg::ImageRead { source, image });
+                }
             }
-            update(state, Msg::Copied(true));
         }
         Ok(())
     }
@@ -330,7 +366,8 @@ pub fn run_preview() -> io::Result<PreviewExit> {
     // Started only once raw mode is on, so it never reads cooked input.
     let outcome = Reader::start(sender, clock).and_then(|reader| {
         let clipboard = Clipboard::new(Platform::current(), env);
-        let outcome = run_loop(&mut session, &mut state, &inputs, clock, clipboard);
+        let home = env(if cfg!(windows) { "USERPROFILE" } else { "HOME" });
+        let outcome = run_loop(&mut session, &mut state, &inputs, clock, clipboard, home);
         // Joined before the terminal leaves raw mode, so it reads nothing
         // meant for the shell.
         let stopped = reader.stop();
@@ -353,16 +390,17 @@ fn run_loop(
     inputs: &Receiver<Source>,
     clock: Instant,
     clipboard: Clipboard,
+    home: Option<String>,
 ) -> io::Result<PreviewExit> {
-    let mut copier = Copier::new(clipboard);
+    let mut jobs = Jobs::new(clipboard, home);
     let mut stale = false;
     loop {
         update(state, Msg::Tick(clock.elapsed()));
-        copier.settle(screen, state)?;
+        jobs.settle(screen, state)?;
         screen.draw(state, stale)?;
         stale = false;
         // While a copy is pending, the loop also wakes to report it.
-        let wait = match (state.next_change(), copier.pending > 0) {
+        let wait = match (state.next_change(), jobs.pending > 0) {
             (wait, false) => wait,
             (wait, true) => Some(wait.map_or(COPY_POLL, |wait| wait.min(COPY_POLL))),
         };
@@ -386,7 +424,8 @@ fn run_loop(
                     for effect in update(state, msg) {
                         match effect {
                             Effect::Quit => return Ok(PreviewExit::Quit),
-                            Effect::Copy(text) => copier.copy(screen, state, text)?,
+                            Effect::Copy(text) => jobs.copy(screen, state, text)?,
+                            Effect::ReadImage(source) => jobs.read_image(source),
                         }
                     }
                 }
@@ -634,26 +673,51 @@ mod tests {
 
     #[test]
     fn over_ssh_a_copy_goes_to_the_terminal_at_once() {
-        let mut copier = Copier::new(no_clipboard());
+        let mut jobs = Jobs::new(no_clipboard(), None);
         let (mut screen, mut state) = (Recorder::default(), State::default());
-        copier.copy(&mut screen, &mut state, "hi".into()).unwrap();
+        jobs.copy(&mut screen, &mut state, "hi".into()).unwrap();
         assert_eq!(screen.0, ["\x1b]52;c;aGk=\x07"]);
         assert_eq!(state.copied.map(|(ok, _)| ok), Some(true));
-        assert_eq!(copier.pending, 0);
+        assert_eq!(jobs.pending, 0);
     }
 
     #[test]
     fn a_copy_no_tool_took_falls_back_to_the_terminal() {
-        let mut copier = Copier::new(no_clipboard());
+        let mut jobs = Jobs::new(no_clipboard(), None);
         let (mut screen, mut state) = (Recorder::default(), State::default());
         // As a worker reports: one copy a tool took, one none did.
-        copier.pending = 2;
-        copier.done.send(("taken".into(), true)).unwrap();
-        copier.done.send(("hi".into(), false)).unwrap();
-        copier.settle(&mut screen, &mut state).unwrap();
+        jobs.pending = 2;
+        jobs.done.send(Done::Copy("taken".into(), true)).unwrap();
+        jobs.done.send(Done::Copy("hi".into(), false)).unwrap();
+        jobs.settle(&mut screen, &mut state).unwrap();
         assert_eq!(screen.0, ["\x1b]52;c;aGk=\x07"]);
-        assert_eq!(copier.pending, 0);
+        assert_eq!(jobs.pending, 0);
         assert_eq!(state.copied.map(|(ok, _)| ok), Some(true));
+    }
+
+    #[test]
+    fn a_pasted_path_is_read_off_the_loop_and_staged_when_it_settles() {
+        let dir = std::env::temp_dir().join(format!("bake-jobs-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("shot.gif"), b"GIF89a\x04\x00\x03\x00rest").unwrap();
+        let mut jobs = Jobs::new(no_clipboard(), None);
+        let (mut screen, mut state) = (Recorder::default(), State::default());
+        let path = dir.join("shot.gif").to_string_lossy().into_owned();
+        jobs.read_image(ImageSource::File {
+            path: path.clone(),
+            pasted: path,
+        });
+        assert_eq!(jobs.pending, 1);
+        while jobs.pending > 0 {
+            jobs.settle(&mut screen, &mut state).unwrap();
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(state.draft.text(), "[Image #1]");
+        assert_eq!(
+            state.attachments[0].1.summary(),
+            "shot.gif · image/gif · 14 B · 4×3"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     /// A clipboard with no tools: copies go to the terminal itself.
@@ -670,6 +734,7 @@ mod tests {
             inputs,
             Instant::now(),
             no_clipboard(),
+            None,
         )
     }
 
@@ -762,6 +827,7 @@ mod tests {
             &inputs,
             Instant::now(),
             no_clipboard(),
+            None,
         );
         assert_eq!(exit.unwrap(), PreviewExit::Quit);
         // Frame 1 shows the started sample; frame 2 came from its timer alone,

@@ -16,6 +16,7 @@ pub mod keys;
 pub mod layout;
 pub mod live;
 pub mod mode;
+pub mod paste;
 pub mod render;
 pub mod selection;
 pub mod shell_output;

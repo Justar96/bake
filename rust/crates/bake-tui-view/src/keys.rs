@@ -129,6 +129,8 @@ pub enum Action {
     /// Ctrl+P and Ctrl+N: input history at once, from any row.
     RecallOlder,
     RecallNewer,
+    /// Ctrl+V: stage the clipboard's image.
+    PasteImage,
     /// Ctrl+A and Ctrl+E: the logical line's start and end, past any row.
     LogicalStart,
     LogicalEnd,
@@ -260,6 +262,13 @@ pub const BINDINGS: &[Binding] = &[
     bind(S::Composer, K::Char('b'), Mods::CTRL, Mods::ALT, A::Left),
     bind(S::Composer, K::Char('f'), Mods::CTRL, Mods::ALT, A::Right),
     bind(S::Composer, K::Char('d'), Mods::CTRL, Mods::ALT, A::Delete),
+    bind(
+        S::Composer,
+        K::Char('v'),
+        Mods::CTRL,
+        Mods::ALT,
+        A::PasteImage,
+    ),
     bind(
         S::Composer,
         K::Char('a'),
