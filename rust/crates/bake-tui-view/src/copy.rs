@@ -33,6 +33,13 @@ pub const MORE_LINES: &str = "more lines";
 /// A call's line count when it has no summary of its own: `1 line`, `2 lines`.
 pub const LINE: &str = "line";
 pub const LINES: &str = "lines";
+/// Code mode: the label `run_code` calls draw under, and the words of its
+/// call count, `13 calls · 1 failed`, and of its folded calls.
+pub const SCRIPT: &str = "Script";
+pub const CALL: &str = "call";
+pub const CALLS: &str = "calls";
+pub const FAILED: &str = "failed";
+pub const MORE_CALLS: &str = "more calls";
 /// The transcript's hint row: its keys while following output, and the way
 /// back while reading history.
 pub const HINT_FOLLOWING: &[(&str, &str)] = &[("PgUp", "scroll"), ("Ctrl+↑", "prompts")];

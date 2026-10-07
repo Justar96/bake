@@ -56,6 +56,26 @@ pub enum Row {
         summary: Option<String>,
         output: Vec<String>,
     },
+    /// A code-mode program (`run_code`): what it is for, its source, the
+    /// calls it made, and what it returned.
+    Script {
+        description: String,
+        source: Vec<String>,
+        state: CallState,
+        calls: Vec<Nested>,
+        /// What the program returned, or its error; absent while it runs.
+        result: Option<String>,
+    },
+}
+
+/// One call a script made, drawn on the script's tree.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Nested {
+    pub tool: String,
+    pub argument: String,
+    pub state: CallState,
+    /// What it returned in brief, such as `2 lines`, or its error when it failed.
+    pub note: Option<String>,
 }
 
 /// The fixed sample session the preview opens with; nothing in it ran.
@@ -84,6 +104,12 @@ pub fn sample_session() -> Vec<Row> {
             "Two registrations, both through ctx.effect, so each one is disposed with the plugin that made it."
                 .into(),
         ),
+        Row::User("Find TODO comments in the source files".into()),
+        sample_script(),
+        Row::Answer(
+            "Two files have TODOs: src/m3.ts and src/m9.ts. src/m5.ts could not be read: permission denied."
+                .into(),
+        ),
         Row::User("Run the parser tests".into()),
         call(
             "Bash",
@@ -108,13 +134,56 @@ pub fn sample_session() -> Vec<Row> {
     ]
 }
 
+/// A sample code-mode program that reads every source file, one of which
+/// it may not read.
+fn sample_script() -> Row {
+    let read = |index: usize| Nested {
+        tool: "Read".into(),
+        argument: format!("src/m{index}.ts"),
+        state: if index == 5 {
+            CallState::Failed
+        } else {
+            CallState::Done
+        },
+        note: Some(if index == 5 {
+            "Permission denied".into()
+        } else {
+            "2 lines".into()
+        }),
+    };
+    let mut calls = vec![Nested {
+        tool: "Glob".into(),
+        argument: "src/**/*.ts".into(),
+        state: CallState::Done,
+        note: Some("12 files".into()),
+    }];
+    calls.extend((0..12).map(read));
+    Row::Script {
+        description: "Find TODOs".into(),
+        source: [
+            "const found = [];",
+            "for (const path of await tools.glob({ pattern: \"src/**/*.ts\" })) {",
+            "  const text = await tools.read({ path });",
+            "  if (text.includes(\"TODO\")) found.push(path);",
+            "}",
+            "return found;",
+        ]
+        .map(str::to_owned)
+        .to_vec(),
+        state: CallState::Done,
+        calls,
+        result: Some(r#"["src/m3.ts", "src/m9.ts"]"#.into()),
+    }
+}
+
 /// Whether a blank row opens `row`, given the row before it: each section
 /// opens with one, and a call directly after a call joins its group.
 fn opens_section(previous: Option<&Row>, row: &Row) -> bool {
-    !matches!(
-        (previous, row),
-        (None, _) | (Some(Row::Call { .. }), Row::Call { .. })
-    )
+    let call = |row: &Row| matches!(row, Row::Call { .. } | Row::Script { .. });
+    match previous {
+        None => false,
+        Some(previous) => !(call(previous) && call(row)),
+    }
 }
 
 /// `text` wrapped into rows of at most `width` cells, as the composer wraps:
@@ -148,6 +217,13 @@ pub struct Marks {
     pub gutter: &'static str,
     /// Before the count of output lines left out.
     pub more: &'static str,
+    /// A script's tree: a call that has one after it, the last call, and the
+    /// stem that continues past a call's own lines.
+    pub branch: &'static str,
+    pub corner: &'static str,
+    pub stem: &'static str,
+    /// Before what a script returned.
+    pub result: &'static str,
 }
 
 pub const ROUND_MARKS: Marks = Marks {
@@ -157,6 +233,10 @@ pub const ROUND_MARKS: Marks = Marks {
     running: "●",
     gutter: "│",
     more: "⋯",
+    branch: "├",
+    corner: "└",
+    stem: "│",
+    result: "→",
 };
 
 pub const CLASSIC_MARKS: Marks = Marks {
@@ -166,6 +246,10 @@ pub const CLASSIC_MARKS: Marks = Marks {
     running: "*",
     gutter: "|",
     more: "...",
+    branch: "|",
+    corner: "`",
+    stem: "|",
+    result: ">",
 };
 
 /// How the transcript is drawn: its colours and its marks.
@@ -185,8 +269,6 @@ impl Look {
     }
 }
 
-/// Column a call's tool name starts at, after its state mark.
-pub const TOOL: usize = 4;
 /// Cells the tool name's column takes, its gap included, so arguments align.
 pub const TOOL_WIDTH: usize = 6;
 /// Column a call's output starts at, after the gutter at [`RAIL`] + 2.
@@ -292,8 +374,108 @@ pub fn present(rows: &[Row], index: usize, width: usize, look: Look) -> Vec<Line
             width,
             look,
         )),
+        Row::Script {
+            description,
+            source,
+            state,
+            calls,
+            result,
+        } => lines.extend(present_script(
+            description,
+            source,
+            *state,
+            calls,
+            result.as_deref(),
+            width,
+            look,
+        )),
     }
     lines
+}
+
+/// A call state's mark and its colour.
+fn mark_of(state: CallState, look: Look) -> (&'static str, Style) {
+    let marks = look.marks();
+    match state {
+        CallState::Running => (
+            marks.running,
+            colour(look.tones, (0xf9, 0x73, 0x16), Color::LightRed),
+        ),
+        CallState::Done => (
+            marks.done,
+            colour(look.tones, (0x22, 0xc5, 0x5e), Color::Green),
+        ),
+        CallState::Failed => (marks.failed, red(look)),
+    }
+}
+
+fn red(look: Look) -> Style {
+    colour(look.tones, (0xef, 0x44, 0x44), Color::Red)
+}
+
+/// A call's head: `lead`, its state mark, the tool name in its column, and
+/// the argument wrapped under itself. Wrapped rows open with `rest`, which
+/// takes as many cells as `lead`.
+fn head(
+    lead: Vec<Span<'static>>,
+    rest: Vec<Span<'static>>,
+    state: CallState,
+    tool: &str,
+    argument: &str,
+    width: usize,
+    look: Look,
+) -> Vec<Line<'static>> {
+    let (mark, mark_style) = mark_of(state, look);
+    let lead_cells: usize = lead.iter().map(Span::width).sum();
+    let name = format!("{tool:<width$}", width = TOOL_WIDTH.max(tool.width() + 2));
+    let indent = lead_cells + 2 + name.width();
+    let mut first = lead;
+    first.extend([
+        Span::styled(mark, mark_style),
+        pad(1),
+        Span::styled(name, Style::new().add_modifier(Modifier::BOLD)),
+    ]);
+    let mut rest = rest;
+    rest.push(pad(indent - lead_cells));
+    hang(argument, width, indent, first, rest, Style::new())
+}
+
+/// Puts `summary` at the right edge of the last line, or right-aligned on a
+/// line of its own, opening with `lead`, when it does not fit beside it.
+fn ride(
+    lines: &mut Vec<Line<'static>>,
+    summary: Vec<Span<'static>>,
+    lead: Vec<Span<'static>>,
+    width: usize,
+) {
+    let cells: usize = summary.iter().map(Span::width).sum();
+    if cells == 0 {
+        return;
+    }
+    let last = lines.last_mut().expect("a head has a row");
+    let used = last.width();
+    if used + 2 + cells <= width {
+        last.spans.push(pad(width - used - cells));
+        last.spans.extend(summary);
+    } else {
+        let lead_cells: usize = lead.iter().map(Span::width).sum();
+        if lead_cells + 2 + cells > width {
+            return;
+        }
+        let mut spans = lead;
+        spans.push(pad(width - lead_cells - cells));
+        spans.extend(summary);
+        lines.push(Line::from(spans));
+    }
+}
+
+/// A count of lines: `1 line`, `2 lines`; nothing for none.
+fn line_count(count: usize) -> Option<String> {
+    match count {
+        0 => None,
+        1 => Some(format!("1 {}", copy::LINE)),
+        n => Some(format!("{n} {}", copy::LINES)),
+    }
 }
 
 /// A call as one block: `✓ Bash  argument` with its summary right-aligned,
@@ -308,64 +490,34 @@ fn present_call(
     look: Look,
 ) -> Vec<Line<'static>> {
     let marks = look.marks();
-    let red = colour(look.tones, (0xef, 0x44, 0x44), Color::Red);
-    let (mark, mark_style) = match state {
-        CallState::Running => (
-            marks.running,
-            colour(look.tones, (0xf9, 0x73, 0x16), Color::LightRed),
-        ),
-        CallState::Done => (
-            marks.done,
-            colour(look.tones, (0x22, 0xc5, 0x5e), Color::Green),
-        ),
-        CallState::Failed => (marks.failed, red),
-    };
     let failed = state == CallState::Failed;
-    let previewed = preview(output);
-    // Without a summary of its own, a call with output says how much.
-    let counted = output.iter().filter(|line| !line.trim().is_empty()).count();
-    let summary = summary.map(str::to_owned).or_else(|| match counted {
-        0 => None,
-        1 => Some(format!("1 {}", copy::LINE)),
-        n => Some(format!("{n} {}", copy::LINES)),
-    });
-    let name = format!("{tool:<width$}", width = TOOL_WIDTH.max(tool.width() + 1));
-    let indent = TOOL + name.width();
-    let mut lines = hang(
+    let quiet = if failed { red(look) } else { dim() };
+    let mut lines = head(
+        vec![pad(RAIL)],
+        vec![pad(RAIL)],
+        state,
+        tool,
         argument,
         width,
-        indent,
-        vec![
-            pad(RAIL),
-            Span::styled(mark, mark_style),
-            pad(TOOL - RAIL - 1),
-            Span::styled(name, Style::new().add_modifier(Modifier::BOLD)),
-        ],
-        vec![pad(indent)],
-        Style::new(),
+        look,
     );
-    if let Some(summary) = summary {
-        let style = if failed { red } else { dim() };
-        let last = lines.last_mut().expect("a head has a row");
-        let used = last.width();
-        if used + 2 + summary.width() <= width {
-            last.spans.push(pad(width - used - summary.width()));
-            last.spans.push(Span::styled(summary, style));
-        } else if summary.width() + RAIL <= width {
-            lines.push(Line::from(vec![
-                pad(width - summary.width()),
-                Span::styled(summary, style),
-            ]));
-        }
+    // Without a summary of its own, a call with output says how much.
+    let counted = output.iter().filter(|line| !line.trim().is_empty()).count();
+    if let Some(summary) = summary.map(str::to_owned).or_else(|| line_count(counted)) {
+        ride(
+            &mut lines,
+            vec![Span::styled(summary, quiet)],
+            Vec::new(),
+            width,
+        );
     }
-    let gutter_style = if failed { red } else { dim() };
     let gutter = || {
         vec![
             pad(RAIL + 2),
-            Span::styled(format!("{} ", marks.gutter), gutter_style),
+            Span::styled(format!("{} ", marks.gutter), quiet),
         ]
     };
-    for item in previewed {
+    for item in preview(output) {
         match item {
             Preview::Line(text) => lines.extend(hang(
                 &text,
@@ -375,18 +527,246 @@ fn present_call(
                 gutter(),
                 output_tone(look.tones),
             )),
-            Preview::More(count) => lines.push(Line::from(
-                gutter()
-                    .into_iter()
-                    .chain([Span::styled(
-                        format!("{} {count} {}", marks.more, copy::MORE_LINES),
-                        dim(),
-                    )])
-                    .collect::<Vec<_>>(),
-            )),
+            Preview::More(count) => {
+                let mut spans = gutter();
+                spans.push(Span::styled(
+                    format!("{} {count} {}", marks.more, copy::MORE_LINES),
+                    dim(),
+                ));
+                lines.push(Line::from(spans));
+            }
         }
     }
     lines
+}
+
+/// Calls a script's tree keeps at each end, around the counts its middle
+/// folds into; the TypeScript `NESTED_ENDS`.
+pub const NESTED_ENDS: usize = 2;
+/// Failed or unfinished calls the tree keeps from its folded middle, where
+/// they are the news; the TypeScript `NESTED_FAILURES`.
+pub const NESTED_FAILURES: usize = 3;
+
+/// One entry of a script's tree: a call, or a count of calls folded away.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Branch<'a> {
+    Call(&'a Nested),
+    Folded(usize),
+}
+
+/// The tree a script's calls print as: the first and last [`NESTED_ENDS`],
+/// up to [`NESTED_FAILURES`] calls from the middle that did not succeed, and
+/// a count for each run of the rest. A count that would stand for one call
+/// is that call instead.
+pub fn tree(calls: &[Nested]) -> Vec<Branch<'_>> {
+    let ends = calls.len().saturating_sub(NESTED_ENDS);
+    let mut news = 0;
+    let kept: Vec<bool> = calls
+        .iter()
+        .enumerate()
+        .map(|(i, call)| {
+            i < NESTED_ENDS
+                || i >= ends
+                || (call.state != CallState::Done && {
+                    news += 1;
+                    news <= NESTED_FAILURES
+                })
+        })
+        .collect();
+    let mut out = Vec::new();
+    for (i, call) in calls.iter().enumerate() {
+        let lone = (i == 0 || kept[i - 1]) && kept.get(i + 1).is_none_or(|k| *k);
+        if kept[i] || lone {
+            out.push(Branch::Call(call));
+        } else if let Some(Branch::Folded(count)) = out.last_mut() {
+            *count += 1;
+        } else {
+            out.push(Branch::Folded(1));
+        }
+    }
+    out
+}
+
+/// A code-mode program as one block: `✓ Script  description` with its call
+/// count, its source numbered and previewed, the calls it made on a tree,
+/// and what it returned after `→`.
+fn present_script(
+    description: &str,
+    source: &[String],
+    state: CallState,
+    calls: &[Nested],
+    result: Option<&str>,
+    width: usize,
+    look: Look,
+) -> Vec<Line<'static>> {
+    let marks = look.marks();
+    let mut lines = head(
+        vec![pad(RAIL)],
+        vec![pad(RAIL)],
+        state,
+        copy::SCRIPT,
+        description,
+        width,
+        look,
+    );
+    // Failures are counted once the script ends; a running one shows each
+    // failed call red on its own row.
+    if !calls.is_empty() {
+        let noun = if calls.len() == 1 {
+            copy::CALL
+        } else {
+            copy::CALLS
+        };
+        let mut tally = vec![Span::styled(format!("{} {noun}", calls.len()), dim())];
+        let failed = calls
+            .iter()
+            .filter(|c| c.state == CallState::Failed)
+            .count();
+        if state != CallState::Running && failed > 0 {
+            tally.push(Span::styled(
+                format!(" · {failed} {}", copy::FAILED),
+                red(look),
+            ));
+        }
+        ride(&mut lines, tally, Vec::new(), width);
+    }
+    lines.extend(numbered(source, width, marks));
+    let entries = tree(calls);
+    for (i, entry) in entries.iter().enumerate() {
+        let last = i + 1 == entries.len();
+        let glyph = if last { marks.corner } else { marks.branch };
+        let lead = vec![pad(RAIL + 2), Span::styled(format!("{glyph} "), dim())];
+        let rest = vec![
+            pad(RAIL + 2),
+            Span::styled(format!("{} ", if last { " " } else { marks.stem }), dim()),
+        ];
+        match entry {
+            Branch::Folded(count) => {
+                let mut spans = lead;
+                spans.push(Span::styled(
+                    format!("{} {count} {}", marks.more, copy::MORE_CALLS),
+                    dim(),
+                ));
+                lines.push(Line::from(spans));
+            }
+            Branch::Call(call) => {
+                let mut rows = head(
+                    lead,
+                    rest.clone(),
+                    call.state,
+                    &call.tool,
+                    &call.argument,
+                    width,
+                    look,
+                );
+                if let Some(note) = &call.note {
+                    let style = if call.state == CallState::Failed {
+                        red(look)
+                    } else {
+                        dim()
+                    };
+                    ride(
+                        &mut rows,
+                        vec![Span::styled(note.clone(), style)],
+                        rest,
+                        width,
+                    );
+                }
+                lines.extend(rows);
+            }
+        }
+    }
+    if let Some(result) = result {
+        let style = if state == CallState::Failed {
+            red(look)
+        } else {
+            Style::new()
+        };
+        let returned: Vec<String> = result.lines().map(str::to_owned).collect();
+        let mark = || {
+            vec![
+                pad(RAIL + 2),
+                Span::styled(format!("{} ", marks.result), dim()),
+            ]
+        };
+        let mut first = true;
+        for item in preview(&returned) {
+            let lead = if first { mark() } else { vec![pad(OUTPUT)] };
+            first = false;
+            match item {
+                Preview::Line(text) => {
+                    lines.extend(hang(&text, width, OUTPUT, lead, vec![pad(OUTPUT)], style))
+                }
+                Preview::More(count) => {
+                    let mut spans = lead;
+                    spans.push(Span::styled(
+                        format!("{} {count} {}", marks.more, copy::MORE_LINES),
+                        dim(),
+                    ));
+                    lines.push(Line::from(spans));
+                }
+            }
+        }
+    }
+    lines
+}
+
+/// A script's source as the block previews it: each line after its number,
+/// dim, and long sources as their first and last lines around a count.
+fn numbered(source: &[String], width: usize, marks: &Marks) -> Vec<Line<'static>> {
+    let digits = source.len().to_string().len();
+    let indent = RAIL + 2 + digits + 2;
+    let mut lines = Vec::new();
+    let mut number = 0;
+    for item in preview_all(source) {
+        match item {
+            Preview::Line(text) => {
+                number += 1;
+                let lead = vec![
+                    pad(RAIL + 2),
+                    Span::styled(format!("{number:>digits$}  "), dim()),
+                ];
+                lines.extend(hang(
+                    &text,
+                    width,
+                    indent,
+                    lead,
+                    vec![pad(indent)],
+                    Style::new(),
+                ));
+            }
+            Preview::More(count) => {
+                number += count;
+                lines.push(Line::from(vec![
+                    pad(RAIL + 2),
+                    Span::styled(
+                        format!("{} {count} {}", marks.more, copy::MORE_LINES),
+                        dim(),
+                    ),
+                ]));
+            }
+        }
+    }
+    lines
+}
+
+/// [`preview`] without dropping blank lines at the ends, so source keeps
+/// its line numbers.
+fn preview_all(lines: &[String]) -> Vec<Preview> {
+    if lines.len() <= RESULT_LINES + 1 {
+        return lines.iter().cloned().map(Preview::Line).collect();
+    }
+    let head = RESULT_LINES / 2;
+    let tail = RESULT_LINES - head;
+    let mut out: Vec<Preview> = lines[..head].iter().cloned().map(Preview::Line).collect();
+    out.push(Preview::More(lines.len() - RESULT_LINES));
+    out.extend(
+        lines[lines.len() - tail..]
+            .iter()
+            .cloned()
+            .map(Preview::Line),
+    );
+    out
 }
 
 fn output_tone(tones: Tones) -> Style {
@@ -856,6 +1236,11 @@ mod tests {
         t.previous_prompt();
         assert_eq!(
             text(&t.visible())[0],
+            "▎ Find TODO comments in the source files"
+        );
+        t.previous_prompt();
+        assert_eq!(
+            text(&t.visible())[0],
             "▎ Find where the session controller registers commands"
         );
         t.previous_prompt();
@@ -863,6 +1248,7 @@ mod tests {
         assert_eq!(text(&t.visible())[0], "  Bake · Rust preview");
         t.next_prompt();
         assert!(text(&t.visible())[0].starts_with("▎ Find where"));
+        t.next_prompt();
         t.next_prompt();
         t.next_prompt();
         assert!(t.following());
@@ -893,5 +1279,112 @@ mod tests {
         let after = t.top();
         assert_eq!(after.row, before.row);
         assert!(after.line < t.count(after.row));
+    }
+
+    fn script_lines(width: usize, look: Look) -> Vec<String> {
+        let rows = sample_session();
+        let index = rows
+            .iter()
+            .position(|r| matches!(r, Row::Script { .. }))
+            .unwrap();
+        text(&present(&rows, index, width, look))
+    }
+
+    #[test]
+    fn a_script_shows_its_source_calls_and_result_as_one_block() {
+        let lines = script_lines(80, PLAIN);
+        let right = |left: &str, right: &str| {
+            format!(
+                "{left}{}{right}",
+                " ".repeat(80 - left.width() - right.width())
+            )
+        };
+        assert_eq!(
+            lines,
+            [
+                String::new(),
+                right("  ✓ Script  Find TODOs", "13 calls · 1 failed"),
+                "    1  const found = [];".into(),
+                r#"    2  for (const path of await tools.glob({ pattern: "src/**/*.ts" })) {"#
+                    .into(),
+                "    ⋯ 2 more lines".into(),
+                "    5  }".into(),
+                "    6  return found;".into(),
+                right("    ├ ✓ Glob  src/**/*.ts", "12 files"),
+                right("    ├ ✓ Read  src/m0.ts", "2 lines"),
+                "    ├ ⋯ 4 more calls".into(),
+                right("    ├ ✗ Read  src/m5.ts", "Permission denied"),
+                "    ├ ⋯ 4 more calls".into(),
+                right("    ├ ✓ Read  src/m10.ts", "2 lines"),
+                right("    └ ✓ Read  src/m11.ts", "2 lines"),
+                r#"    → ["src/m3.ts", "src/m9.ts"]"#.into(),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_narrow_script_keeps_its_tree_unbroken() {
+        let lines = script_lines(40, PLAIN);
+        let failed = lines.iter().position(|l| l.contains("src/m5.ts")).unwrap();
+        // The error moves under its call, and the stem runs beside it.
+        assert_eq!(
+            lines[failed + 1],
+            format!("    │{}Permission denied", " ".repeat(18))
+        );
+        assert!(lines.iter().all(|l| l.width() <= 40));
+        let classic = Look {
+            classic: true,
+            ..PLAIN
+        };
+        let ascii = script_lines(80, classic);
+        assert!(
+            ascii.iter().all(|l| l.is_ascii() || l.contains('·')),
+            "{ascii:#?}"
+        );
+        assert!(
+            ascii
+                .iter()
+                .any(|l| l.starts_with("    ` + Read  src/m11.ts"))
+        );
+        assert!(ascii.iter().any(|l| l.starts_with(r#"    > ["src/m3.ts""#)));
+    }
+
+    #[test]
+    fn the_tree_keeps_its_ends_and_failures_and_folds_the_rest() {
+        let call = |state| Nested {
+            tool: "Read".into(),
+            argument: String::new(),
+            state,
+            note: None,
+        };
+        let shape = |states: &[CallState]| -> Vec<String> {
+            let calls: Vec<Nested> = states.iter().map(|s| call(*s)).collect();
+            tree(&calls)
+                .iter()
+                .map(|b| match b {
+                    Branch::Call(c) => format!("{:?}", c.state),
+                    Branch::Folded(n) => format!("+{n}"),
+                })
+                .collect()
+        };
+        use CallState::{Done as D, Failed as F, Running as R};
+        assert_eq!(shape(&[D, D, D, D]), ["Done"; 4]);
+        // A count standing for one call is that call.
+        assert_eq!(shape(&[D, D, D, D, D]), ["Done"; 5]);
+        assert_eq!(
+            shape(&[D, D, D, D, D, D]),
+            ["Done", "Done", "+2", "Done", "Done"]
+        );
+        // Up to three failed or unfinished calls stay where they were; the
+        // fourth folds with its neighbours.
+        assert_eq!(
+            shape(&[D, D, D, F, D, F, D, F, D, F, D, D, R]),
+            [
+                "Done", "Done", "Done", "Failed", "Done", "Failed", "Done", "Failed", "+3", "Done",
+                "Running"
+            ]
+            .map(str::to_owned)
+        );
+        assert!(tree(&[]).is_empty());
     }
 }
