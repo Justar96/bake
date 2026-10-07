@@ -1,7 +1,12 @@
 {
   "schema": "bake/session-conformance/restore-cases",
-  "version": 1,
+  "version": 2,
   "oracle": "restorePlainLog(log) in packages/session/session-persistence-jsonl/tests/restore-conformance.spec.ts: scanLog, validateStoredEvents, interruptedTurnClosers, then Session.fromRestore(..., \"detached\", currentSessionMessageProjections)",
+  "history": [
+    "Version 1: 57 cases. Rust refused known ignorable rows and image/offload as the native limits ignorable and event-type.",
+    "Version 2: Rust restores image/offload with the catalog projection and known ignorable rows. The ignorable and event-type limits are removed and projection added. known-ignorable-hook-result and known-ignorable-user-message lose their rust overrides, and known-ignorable-tool-update and image-offload name restore causes; their version-1 TypeScript outcomes are unchanged. The 42 cases after unknown-type-before-fallback-header were written from the TypeScript sources before either harness ran.",
+    "Round 2 of version 2 added 19 cases for the independent review's obligations, written from the TypeScript sources before either harness ran on them."
+  ],
   "logs": {
     "tool-call-turn": "conformance/runtime/request-reconstruction/tool-call-turn/session.jsonl",
     "dynamic-tools": "conformance/runtime/request-reconstruction/dynamic-tools/session.jsonl",
@@ -3030,10 +3035,6 @@
           "updates": []
         },
         "requestContext": null
-      },
-      "rust": {
-        "outcome": "native-subset",
-        "limit": "ignorable"
       }
     },
     {
@@ -3100,10 +3101,6 @@
           "provider": "mock",
           "model": "mock"
         }
-      },
-      "rust": {
-        "outcome": "native-subset",
-        "limit": "ignorable"
       }
     },
     {
@@ -3122,8 +3119,8 @@
         "message": "invalid seed event at index 14: request/tool-update must be required on read"
       },
       "rust": {
-        "outcome": "native-subset",
-        "limit": "ignorable"
+        "outcome": "rejected",
+        "cause": "restore/tool-update-required"
       }
     },
     {
@@ -3435,8 +3432,8 @@
         "message": "invalid seed event at index 7: image/offload: data must contain a nonempty targets array"
       },
       "rust": {
-        "outcome": "native-subset",
-        "limit": "event-type"
+        "outcome": "rejected",
+        "cause": "restore/image-offload-data"
       }
     },
     {
@@ -3539,6 +3536,3321 @@
         "cause": "unsupported/unknown-type"
       },
       "note": "The first unsupported record wins: unknown seq 0 precedes fallback seq 6."
+    },
+    {
+      "id": "image-offload-user-message",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":5,\"imageIndexes\":[1]}]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 4996,
+        "storedEventCount": 17,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "text": "go"
+              },
+              {
+                "type": "image",
+                "attachment": {
+                  "attachmentId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "mediaType": "image/png",
+                  "bytes": 1024,
+                  "width": 2,
+                  "height": 2
+                }
+              },
+              {
+                "type": "image",
+                "attachment": {
+                  "attachmentId": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "mediaType": "image/png",
+                  "bytes": 1024,
+                  "width": 2,
+                  "height": 2
+                },
+                "offloaded": true
+              }
+            ],
+            "source": {
+              "kind": "user"
+            },
+            "role": "user",
+            "id": "f7802400-aed0-4b44-bbfd-9efc7f04e4c5"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      },
+      "production": true,
+      "note": "the selected image gains offloaded: true; the logged message and its id are unchanged"
+    },
+    {
+      "id": "image-offload-two-indexes",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":5,\"imageIndexes\":[0,1]}]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 4998,
+        "storedEventCount": 17,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "text": "go"
+              },
+              {
+                "type": "image",
+                "attachment": {
+                  "attachmentId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "mediaType": "image/png",
+                  "bytes": 1024,
+                  "width": 2,
+                  "height": 2
+                },
+                "offloaded": true
+              },
+              {
+                "type": "image",
+                "attachment": {
+                  "attachmentId": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "mediaType": "image/png",
+                  "bytes": 1024,
+                  "width": 2,
+                  "height": 2
+                },
+                "offloaded": true
+              }
+            ],
+            "source": {
+              "kind": "user"
+            },
+            "role": "user",
+            "id": "f7802400-aed0-4b44-bbfd-9efc7f04e4c5"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      }
+    },
+    {
+      "id": "image-offload-successive",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":5,\"imageIndexes\":[0]}]}}"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":17,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":5,\"imageIndexes\":[1]}]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 5101,
+        "storedEventCount": 18,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "text": "go"
+              },
+              {
+                "type": "image",
+                "attachment": {
+                  "attachmentId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "mediaType": "image/png",
+                  "bytes": 1024,
+                  "width": 2,
+                  "height": 2
+                },
+                "offloaded": true
+              },
+              {
+                "type": "image",
+                "attachment": {
+                  "attachmentId": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "mediaType": "image/png",
+                  "bytes": 1024,
+                  "width": 2,
+                  "height": 2
+                },
+                "offloaded": true
+              }
+            ],
+            "source": {
+              "kind": "user"
+            },
+            "role": "user",
+            "id": "f7802400-aed0-4b44-bbfd-9efc7f04e4c5"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      },
+      "production": true,
+      "note": "the second decision projects the first one's message"
+    },
+    {
+      "id": "image-offload-successive-already-offloaded",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":5,\"imageIndexes\":[1]}]}}"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":17,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":5,\"imageIndexes\":[0,1]}]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "invalid seed event at index 17: image/offload: image index 1 is already offloaded"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "restore/image-offload-already-offloaded"
+      }
+    },
+    {
+      "id": "image-offload-nested-depth-first",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"tool-result\",\"toolCallId\":\"n1\",\"content\":[{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"tool-result\",\"toolCallId\":\"n2\",\"content\":[{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]}]},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":5,\"imageIndexes\":[2,3]}]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 5434,
+        "storedEventCount": 17,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "content": [
+              {
+                "type": "image",
+                "attachment": {
+                  "attachmentId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "mediaType": "image/png",
+                  "bytes": 1024,
+                  "width": 2,
+                  "height": 2
+                }
+              },
+              {
+                "type": "tool-result",
+                "toolCallId": "n1",
+                "content": [
+                  {
+                    "type": "image",
+                    "attachment": {
+                      "attachmentId": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                      "mediaType": "image/png",
+                      "bytes": 1024,
+                      "width": 2,
+                      "height": 2
+                    }
+                  },
+                  {
+                    "type": "tool-result",
+                    "toolCallId": "n2",
+                    "content": [
+                      {
+                        "type": "image",
+                        "attachment": {
+                          "attachmentId": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                          "mediaType": "image/png",
+                          "bytes": 1024,
+                          "width": 2,
+                          "height": 2
+                        },
+                        "offloaded": true
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "image",
+                "attachment": {
+                  "attachmentId": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+                  "mediaType": "image/png",
+                  "bytes": 1024,
+                  "width": 2,
+                  "height": 2
+                },
+                "offloaded": true
+              }
+            ],
+            "source": {
+              "kind": "user"
+            },
+            "role": "user",
+            "id": "f7802400-aed0-4b44-bbfd-9efc7f04e4c5"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      },
+      "note": "indexes count every image depth-first, through nested tool-result blocks"
+    },
+    {
+      "id": "image-offload-tool-result",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 10,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"echo: one\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"echo: one\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"tool-result\",\"toolCallId\":\"n1\",\"content\":[{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":10,\"imageIndexes\":[1,2]}]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 5231,
+        "storedEventCount": 17,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "source": {
+              "kind": "tool",
+              "callId": "c1"
+            },
+            "content": [
+              {
+                "type": "tool-result",
+                "toolCallId": "c1",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "echo: one"
+                  },
+                  {
+                    "type": "image",
+                    "attachment": {
+                      "attachmentId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                      "mediaType": "image/png",
+                      "bytes": 1024,
+                      "width": 2,
+                      "height": 2
+                    }
+                  },
+                  {
+                    "type": "tool-result",
+                    "toolCallId": "n1",
+                    "content": [
+                      {
+                        "type": "image",
+                        "attachment": {
+                          "attachmentId": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                          "mediaType": "image/png",
+                          "bytes": 1024,
+                          "width": 2,
+                          "height": 2
+                        },
+                        "offloaded": true
+                      }
+                    ]
+                  },
+                  {
+                    "type": "image",
+                    "attachment": {
+                      "attachmentId": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                      "mediaType": "image/png",
+                      "bytes": 1024,
+                      "width": 2,
+                      "height": 2
+                    },
+                    "offloaded": true
+                  }
+                ],
+                "isError": false
+              }
+            ],
+            "role": "user",
+            "id": "df2fbed1-1421-4a96-8237-079e67740391"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      }
+    },
+    {
+      "id": "image-offload-two-targets",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "row": 10,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"echo: one\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"echo: one\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"tool-result\",\"toolCallId\":\"n1\",\"content\":[{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":10,\"imageIndexes\":[0]},{\"seq\":5,\"imageIndexes\":[0]}]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 5616,
+        "storedEventCount": 17,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "text": "go"
+              },
+              {
+                "type": "image",
+                "attachment": {
+                  "attachmentId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "mediaType": "image/png",
+                  "bytes": 1024,
+                  "width": 2,
+                  "height": 2
+                },
+                "offloaded": true
+              },
+              {
+                "type": "image",
+                "attachment": {
+                  "attachmentId": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "mediaType": "image/png",
+                  "bytes": 1024,
+                  "width": 2,
+                  "height": 2
+                }
+              }
+            ],
+            "source": {
+              "kind": "user"
+            },
+            "role": "user",
+            "id": "f7802400-aed0-4b44-bbfd-9efc7f04e4c5"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "source": {
+              "kind": "tool",
+              "callId": "c1"
+            },
+            "content": [
+              {
+                "type": "tool-result",
+                "toolCallId": "c1",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "echo: one"
+                  },
+                  {
+                    "type": "image",
+                    "attachment": {
+                      "attachmentId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                      "mediaType": "image/png",
+                      "bytes": 1024,
+                      "width": 2,
+                      "height": 2
+                    },
+                    "offloaded": true
+                  },
+                  {
+                    "type": "tool-result",
+                    "toolCallId": "n1",
+                    "content": [
+                      {
+                        "type": "image",
+                        "attachment": {
+                          "attachmentId": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                          "mediaType": "image/png",
+                          "bytes": 1024,
+                          "width": 2,
+                          "height": 2
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "type": "image",
+                    "attachment": {
+                      "attachmentId": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                      "mediaType": "image/png",
+                      "bytes": 1024,
+                      "width": 2,
+                      "height": 2
+                    }
+                  }
+                ],
+                "isError": false
+              }
+            ],
+            "role": "user",
+            "id": "df2fbed1-1421-4a96-8237-079e67740391"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      }
+    },
+    {
+      "id": "image-offload-keeps-member-position",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"image\",\"offloaded\":false,\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":5,\"imageIndexes\":[1]}]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 5014,
+        "storedEventCount": 17,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "text": "go"
+              },
+              {
+                "type": "image",
+                "attachment": {
+                  "attachmentId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "mediaType": "image/png",
+                  "bytes": 1024,
+                  "width": 2,
+                  "height": 2
+                }
+              },
+              {
+                "type": "image",
+                "offloaded": true,
+                "attachment": {
+                  "attachmentId": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "mediaType": "image/png",
+                  "bytes": 1024,
+                  "width": 2,
+                  "height": 2
+                }
+              }
+            ],
+            "source": {
+              "kind": "user"
+            },
+            "role": "user",
+            "id": "f7802400-aed0-4b44-bbfd-9efc7f04e4c5"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      },
+      "note": "the spread keeps an existing offloaded member in place; both harnesses compare serialized messages"
+    },
+    {
+      "id": "image-offload-numeric-spellings",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":5.0,\"imageIndexes\":[0e0,1E0]}]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 5004,
+        "storedEventCount": 17,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "text": "go"
+              },
+              {
+                "type": "image",
+                "attachment": {
+                  "attachmentId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "mediaType": "image/png",
+                  "bytes": 1024,
+                  "width": 2,
+                  "height": 2
+                },
+                "offloaded": true
+              },
+              {
+                "type": "image",
+                "attachment": {
+                  "attachmentId": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "mediaType": "image/png",
+                  "bytes": 1024,
+                  "width": 2,
+                  "height": 2
+                },
+                "offloaded": true
+              }
+            ],
+            "source": {
+              "kind": "user"
+            },
+            "role": "user",
+            "id": "f7802400-aed0-4b44-bbfd-9efc7f04e4c5"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      },
+      "note": "JSON.parse reads 5.0, 0e0, and 1E0 as the integers 5, 0, and 1"
+    },
+    {
+      "id": "image-offload-underflowing-index",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":5,\"imageIndexes\":[1e-400]}]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 5001,
+        "storedEventCount": 17,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "text": "go"
+              },
+              {
+                "type": "image",
+                "attachment": {
+                  "attachmentId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "mediaType": "image/png",
+                  "bytes": 1024,
+                  "width": 2,
+                  "height": 2
+                },
+                "offloaded": true
+              },
+              {
+                "type": "image",
+                "attachment": {
+                  "attachmentId": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "mediaType": "image/png",
+                  "bytes": 1024,
+                  "width": 2,
+                  "height": 2
+                }
+              }
+            ],
+            "source": {
+              "kind": "user"
+            },
+            "role": "user",
+            "id": "f7802400-aed0-4b44-bbfd-9efc7f04e4c5"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      },
+      "note": "1e-400 underflows to +0, a valid index"
+    },
+    {
+      "id": "image-offload-duplicate-after-normalization",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":5,\"imageIndexes\":[0]},{\"seq\":5.0,\"imageIndexes\":[1]}]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "invalid seed event at index 16: image/offload: duplicate target seq 5"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "restore/image-offload-duplicate"
+      }
+    },
+    {
+      "id": "image-offload-negative-zero-seq",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":-0,\"imageIndexes\":[0]}]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "invalid seed event at index 16: image/offload: each target must contain a seq and nonempty imageIndexes"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "restore/image-offload-target"
+      },
+      "note": "restoration takes no lossless snapshot, so -0 reaches the projection"
+    },
+    {
+      "id": "image-offload-negative-zero-index",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":5,\"imageIndexes\":[-0]}]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "invalid seed event at index 16: image/offload: imageIndexes must be strictly increasing non-negative safe integers"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "restore/image-offload-indexes"
+      }
+    },
+    {
+      "id": "image-offload-underflowing-negative-index",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":5,\"imageIndexes\":[-1e-400]}]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "invalid seed event at index 16: image/offload: imageIndexes must be strictly increasing non-negative safe integers"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "restore/image-offload-indexes"
+      },
+      "note": "-1e-400 underflows to -0"
+    },
+    {
+      "id": "image-offload-fractional-index",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":5,\"imageIndexes\":[0.5]}]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "invalid seed event at index 16: image/offload: imageIndexes must be strictly increasing non-negative safe integers"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "restore/image-offload-indexes"
+      }
+    },
+    {
+      "id": "image-offload-unsafe-seq",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":9007199254740992,\"imageIndexes\":[0]}]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "invalid seed event at index 16: image/offload: each target must contain a seq and nonempty imageIndexes"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "restore/image-offload-target"
+      }
+    },
+    {
+      "id": "image-offload-repeated-index",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":5,\"imageIndexes\":[1,1]}]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "invalid seed event at index 16: image/offload: imageIndexes must be strictly increasing non-negative safe integers"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "restore/image-offload-indexes"
+      }
+    },
+    {
+      "id": "image-offload-missing-index",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":5,\"imageIndexes\":[0,5]}]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "invalid seed event at index 16: image/offload: image index 5 does not exist"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "restore/image-offload-missing-index"
+      }
+    },
+    {
+      "id": "image-offload-not-a-node",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":9,\"imageIndexes\":[0]}]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "invalid seed event at index 16: image/offload: target seq 9 is not a current surface node"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "restore/image-offload-not-current"
+      }
+    },
+    {
+      "id": "image-offload-shadowed-node",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 10,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"echo: one\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"echo: one\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"tool/result\",\"seq\":16,\"time\":1791337579870,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"source\":{\"kind\":\"tool\",\"callId\":\"c1\"},\"content\":[{\"type\":\"tool-result\",\"toolCallId\":\"c1\",\"content\":[{\"type\":\"text\",\"text\":\"[pruned]\"}],\"isError\":false}],\"role\":\"user\",\"id\":\"df2fbed1-1421-4a96-8237-079e67740391\"}},\"sourceEventSeqs\":[10],\"surfaceOp\":{\"op\":\"replace\",\"startSeq\":10,\"endSeq\":10}}"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":17,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":10,\"imageIndexes\":[0]}]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "invalid seed event at index 17: image/offload: target seq 10 is not a current surface node"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "restore/image-offload-not-current"
+      },
+      "note": "a replaced tool result is no longer a current node, though its event is still a tool/result"
+    },
+    {
+      "id": "image-offload-replacement-node",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 10,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"echo: one\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"echo: one\"}]"
+        },
+        {
+          "append": "{\"type\":\"tool/result\",\"seq\":16,\"time\":1791337579870,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"source\":{\"kind\":\"tool\",\"callId\":\"c1\"},\"content\":[{\"type\":\"tool-result\",\"toolCallId\":\"c1\",\"content\":[{\"type\":\"text\",\"text\":\"[pruned]\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}],\"isError\":false}],\"role\":\"user\",\"id\":\"df2fbed1-1421-4a96-8237-079e67740391\"}},\"sourceEventSeqs\":[10],\"surfaceOp\":{\"op\":\"replace\",\"startSeq\":10,\"endSeq\":10}}"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":17,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":16,\"imageIndexes\":[0]}]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 5200,
+        "storedEventCount": 18,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "source": {
+              "kind": "tool",
+              "callId": "c1"
+            },
+            "content": [
+              {
+                "type": "tool-result",
+                "toolCallId": "c1",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "[pruned]"
+                  },
+                  {
+                    "type": "image",
+                    "attachment": {
+                      "attachmentId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                      "mediaType": "image/png",
+                      "bytes": 1024,
+                      "width": 2,
+                      "height": 2
+                    },
+                    "offloaded": true
+                  }
+                ],
+                "isError": false
+              }
+            ],
+            "role": "user",
+            "id": "df2fbed1-1421-4a96-8237-079e67740391"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      }
+    },
+    {
+      "id": "image-offload-then-replacement",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 10,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"echo: one\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"echo: one\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":10,\"imageIndexes\":[0]}]}}"
+        },
+        {
+          "append": "{\"type\":\"tool/result\",\"seq\":17,\"time\":1791337579870,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"source\":{\"kind\":\"tool\",\"callId\":\"c1\"},\"content\":[{\"type\":\"tool-result\",\"toolCallId\":\"c1\",\"content\":[{\"type\":\"text\",\"text\":\"echo: one\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}],\"isError\":false}],\"role\":\"user\",\"id\":\"df2fbed1-1421-4a96-8237-079e67740391\"}},\"sourceEventSeqs\":[10],\"surfaceOp\":{\"op\":\"replace\",\"startSeq\":10,\"endSeq\":10}}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 5380,
+        "storedEventCount": 18,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/17/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      },
+      "note": "the rewrite rule compares logged data; the replacement shows its own unprojected content"
+    },
+    {
+      "id": "image-offload-assistant-target",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":8,\"imageIndexes\":[0]}]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "invalid seed event at index 16: image/offload: target seq 8 must be user/message or tool/result"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "restore/image-offload-target-type"
+      }
+    },
+    {
+      "id": "image-offload-system-target",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":4,\"imageIndexes\":[0]}]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "invalid seed event at index 16: image/offload: target seq 4 must be user/message or tool/result"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "restore/image-offload-target-type"
+      }
+    },
+    {
+      "id": "image-offload-earlier-target-error-first",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2},\"offloaded\":true},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":5,\"imageIndexes\":[0]},null]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "invalid seed event at index 16: image/offload: image index 0 is already offloaded"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "restore/image-offload-already-offloaded"
+      },
+      "note": "each target is validated and projected before the next one is read"
+    },
+    {
+      "id": "image-offload-later-target-shape",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":5,\"imageIndexes\":[0]},null]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "invalid seed event at index 16: image/offload: each target must contain a seq and nonempty imageIndexes"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "restore/image-offload-target"
+      },
+      "note": "a valid first target does not commit when a later one fails"
+    },
+    {
+      "id": "image-offload-surface-marker",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":5,\"imageIndexes\":[0]}]},\"surfaceOp\":\"append\"}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "SessionPersistenceCorruptionError",
+        "message": "stored session \"a1\" failed validation: Error: session event \"image/offload\" is not surface-eligible and cannot carry surfaceOp"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "stored/non-surface-marker"
+      }
+    },
+    {
+      "id": "image-offload-extra-data-member",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":5,\"imageIndexes\":[0]}],\"x\":1}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "invalid seed event at index 16: image/offload: data must contain a nonempty targets array"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "restore/image-offload-data"
+      }
+    },
+    {
+      "id": "image-offload-empty-targets",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "invalid seed event at index 16: image/offload: data must contain a nonempty targets array"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "restore/image-offload-data"
+      }
+    },
+    {
+      "id": "image-offload-extra-target-member",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":5,\"imageIndexes\":[0],\"x\":1}]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "invalid seed event at index 16: image/offload: each target must contain a seq and nonempty imageIndexes"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "restore/image-offload-target"
+      }
+    },
+    {
+      "id": "image-offload-empty-indexes",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":5,\"imageIndexes\":[]}]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "invalid seed event at index 16: image/offload: each target must contain a seq and nonempty imageIndexes"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "restore/image-offload-target"
+      }
+    },
+    {
+      "id": "image-offload-null-block",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},null]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":5,\"imageIndexes\":[0]}]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "invalid seed event at index 16: Cannot read properties of null (reading 'type')"
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "projection"
+      },
+      "note": "the walk reads type from null after projecting index 0; Session construction wraps the engine's TypeError, so the message is V8's"
+    },
+    {
+      "id": "image-offload-non-array-tool-result-content",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"tool-result\",\"toolCallId\":\"n1\",\"content\":\"x\"}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":5,\"imageIndexes\":[0]}]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "invalid seed event at index 16: blocks.entries is not a function or its return value is not iterable"
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "projection"
+      },
+      "note": "the walk calls entries() on a string; Session construction wraps the engine's TypeError, so the message is V8's"
+    },
+    {
+      "id": "image-offload-already-offloaded-before-null-block",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2},\"offloaded\":true},null]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":5,\"imageIndexes\":[0]}]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "invalid seed event at index 16: image/offload: image index 0 is already offloaded"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "restore/image-offload-already-offloaded"
+      },
+      "note": "the walk throws at index 0 before it reaches the null block"
+    },
+    {
+      "id": "image-offload-ignorable",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":5,\"imageIndexes\":[0]}]},\"ignorable\":true}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 5013,
+        "storedEventCount": 17,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "text": "go"
+              },
+              {
+                "type": "image",
+                "attachment": {
+                  "attachmentId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "mediaType": "image/png",
+                  "bytes": 1024,
+                  "width": 2,
+                  "height": 2
+                },
+                "offloaded": true
+              },
+              {
+                "type": "image",
+                "attachment": {
+                  "attachmentId": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "mediaType": "image/png",
+                  "bytes": 1024,
+                  "width": 2,
+                  "height": 2
+                }
+              }
+            ],
+            "source": {
+              "kind": "user"
+            },
+            "role": "user",
+            "id": "f7802400-aed0-4b44-bbfd-9efc7f04e4c5"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      },
+      "note": "only unknown ignorable records skip interpretation"
+    },
+    {
+      "id": "image-offload-before-closers",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 10
+        },
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":10,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":5,\"imageIndexes\":[1]}]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 3476,
+        "storedEventCount": 11,
+        "closers": [
+          {
+            "type": "tool/result",
+            "seq": 11,
+            "time": 1791337579870,
+            "data": {
+              "turn": 1,
+              "step": 1,
+              "message": {
+                "id": "interrupted-tool-result-c1-11",
+                "role": "user",
+                "source": {
+                  "kind": "tool",
+                  "callId": "c1"
+                },
+                "content": [
+                  {
+                    "type": "tool-result",
+                    "toolCallId": "c1",
+                    "isError": true,
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "The tool call was interrupted after it was recorded, but no result was durably recorded. Its outcome is unknown. Decide whether to retry from the tool semantics: retry only if the operation is read-only or idempotent; if it may have side effects, first verify external state or ask the user. Do not retry blindly."
+                      }
+                    ]
+                  }
+                ]
+              },
+              "error": {
+                "name": "ToolOutcomeUnknownError",
+                "code": "TOOL_OUTCOME_UNKNOWN"
+              }
+            },
+            "surfaceOp": "append",
+            "sourceEventSeqs": [
+              9
+            ]
+          },
+          {
+            "type": "step/end",
+            "seq": 12,
+            "time": 1791337579870,
+            "data": {
+              "turn": 1,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 13,
+            "time": 1791337579870,
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "text": "go"
+              },
+              {
+                "type": "image",
+                "attachment": {
+                  "attachmentId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "mediaType": "image/png",
+                  "bytes": 1024,
+                  "width": 2,
+                  "height": 2
+                }
+              },
+              {
+                "type": "image",
+                "attachment": {
+                  "attachmentId": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "mediaType": "image/png",
+                  "bytes": 1024,
+                  "width": 2,
+                  "height": 2
+                },
+                "offloaded": true
+              }
+            ],
+            "source": {
+              "kind": "user"
+            },
+            "role": "user",
+            "id": "f7802400-aed0-4b44-bbfd-9efc7f04e4c5"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$closer": "/0/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      },
+      "note": "the closers follow the decision, reuse its time, and cite the recorded tool/call"
+    },
+    {
+      "id": "seeded-offload-across-cut",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "header": "{\"type\":\"session\",\"version\":3,\"id\":\"a1\",\"createdAt\":1791337579861,\"isSeeded\":true,\"delegationDepth\":0}"
+        },
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":5,\"imageIndexes\":[0]}]}}"
+        },
+        {
+          "append": "{\"type\":\"session/end-seed\",\"seq\":17,\"time\":1791337579870,\"data\":{\"inherited\":true}}"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":18,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":5,\"imageIndexes\":[1]}]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": true,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 17,
+        "committedBytes": 5184,
+        "storedEventCount": 19,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "text": "go"
+              },
+              {
+                "type": "image",
+                "attachment": {
+                  "attachmentId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "mediaType": "image/png",
+                  "bytes": 1024,
+                  "width": 2,
+                  "height": 2
+                },
+                "offloaded": true
+              },
+              {
+                "type": "image",
+                "attachment": {
+                  "attachmentId": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "mediaType": "image/png",
+                  "bytes": 1024,
+                  "width": 2,
+                  "height": 2
+                },
+                "offloaded": true
+              }
+            ],
+            "source": {
+              "kind": "user"
+            },
+            "role": "user",
+            "id": "f7802400-aed0-4b44-bbfd-9efc7f04e4c5"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      },
+      "production": true,
+      "note": "decisions keep absolute seqs on both sides of the inherited cut"
+    },
+    {
+      "id": "known-ignorable-routing-decision",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/routing-decision\",\"seq\":16,\"time\":1791337579870,\"data\":{\"childId\":\"child-1\",\"callId\":\"c1\",\"source\":\"auto\",\"route\":{\"provider\":\"mock\",\"model\":\"mock-small\",\"reasoningEffort\":\"low\"},\"router\":{\"reason\":\"short lookup\",\"fallback\":false,\"assessment\":{\"policy\":\"default\",\"status\":\"normal\",\"difficulty\":0.35,\"reasons\":[\"single file\"]}}},\"ignorable\":true}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 4897,
+        "storedEventCount": 17,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      },
+      "production": true,
+      "note": "production writes subagent/routing-decision with ignorable: true; its fraction is outside every projected payload"
+    },
+    {
+      "id": "image-offload-tool-update-anchor",
+      "log": "dynamic-tools",
+      "edits": [
+        {
+          "row": 10,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"installed\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"installed\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "row": 11,
+          "text": "{\"type\":\"image/offload\",\"seq\":11,\"time\":1791376787057,\"data\":{\"targets\":[{\"seq\":10,\"imageIndexes\":[0]}]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "dynamic-tools",
+          "createdAt": 1791376787048,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 9963,
+        "storedEventCount": 38,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "source": {
+              "kind": "tool",
+              "callId": "c1"
+            },
+            "content": [
+              {
+                "type": "tool-result",
+                "toolCallId": "c1",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "installed"
+                  },
+                  {
+                    "type": "image",
+                    "attachment": {
+                      "attachmentId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                      "mediaType": "image/png",
+                      "bytes": 1024,
+                      "width": 2,
+                      "height": 2
+                    },
+                    "offloaded": true
+                  }
+                ],
+                "isError": false
+              }
+            ],
+            "role": "user",
+            "id": "5491e94a-9b9d-48cb-a0f8-7e0cd7e9c916"
+          },
+          {
+            "$log": "/15/data/message"
+          },
+          {
+            "$log": "/22/data"
+          },
+          {
+            "$log": "/25/data/message"
+          },
+          {
+            "$log": "/32/data"
+          },
+          {
+            "$log": "/35/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/33/data/header/tools/0"
+            },
+            {
+              "$log": "/33/data/header/tools/1"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": [
+            {
+              "afterMessageId": "5491e94a-9b9d-48cb-a0f8-7e0cd7e9c916",
+              "additions": [
+                {
+                  "$log": "/13/data/header/tools/0"
+                }
+              ],
+              "removals": []
+            },
+            {
+              "afterMessageId": "a51892aa-8df9-4751-8654-f0b9606000ac",
+              "additions": [],
+              "removals": [
+                "fetch"
+              ]
+            },
+            {
+              "afterMessageId": "53b71392-013c-4f89-a9ff-4638c35dfe62",
+              "additions": [
+                {
+                  "$log": "/33/data/header/tools/0"
+                }
+              ],
+              "removals": []
+            }
+          ]
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      },
+      "note": "the tool update anchors to the projected tool result, whose identity is unchanged"
+    },
+    {
+      "id": "known-ignorable-tool-update-invalid-data",
+      "log": "dynamic-tools",
+      "edits": [
+        {
+          "row": 14,
+          "text": "{\"type\":\"request/tool-update\",\"seq\":14,\"time\":1791376787057,\"data\":{\"headerSeq\":13,\"afterMessageId\":\"5491e94a-9b9d-48cb-a0f8-7e0cd7e9c916\",\"additions\":[],\"removals\":[]},\"ignorable\":true}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "SessionPersistenceCorruptionError",
+        "message": "stored session \"dynamic-tools\" failed validation: Error: session event at seq 14 has an invalid tool update"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "stored/tool-update-data"
+      }
+    },
+    {
+      "id": "known-ignorable-tool-update-marker",
+      "log": "dynamic-tools",
+      "edits": [
+        {
+          "row": 14,
+          "text": "{\"type\":\"request/tool-update\",\"seq\":14,\"time\":1791376787057,\"data\":{\"headerSeq\":13,\"afterMessageId\":\"5491e94a-9b9d-48cb-a0f8-7e0cd7e9c916\",\"additions\":[\"fetch\"],\"removals\":[]},\"surfaceOp\":\"append\",\"ignorable\":true}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "SessionPersistenceCorruptionError",
+        "message": "stored session \"dynamic-tools\" failed validation: Error: session event \"request/tool-update\" is not surface-eligible and cannot carry surfaceOp"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "stored/non-surface-marker"
+      }
+    },
+    {
+      "id": "known-ignorable-tool-update-before-header-check",
+      "log": "dynamic-tools",
+      "edits": [
+        {
+          "row": 14,
+          "text": "{\"type\":\"request/tool-update\",\"seq\":14,\"time\":1791376787057,\"data\":{\"headerSeq\":12,\"afterMessageId\":\"5491e94a-9b9d-48cb-a0f8-7e0cd7e9c916\",\"additions\":[\"fetch\"],\"removals\":[]},\"ignorable\":true}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "invalid seed event at index 14: request/tool-update must be required on read"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "restore/tool-update-required"
+      },
+      "note": "the required-on-read check precedes the header reference check"
+    },
+    {
+      "id": "image-offload-first-missing-index",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":5,\"imageIndexes\":[0,5.0,6]}]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "invalid seed event at index 16: image/offload: image index 5 does not exist"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "restore/image-offload-missing-index"
+      },
+      "note": "the message names the first unmatched index as a JavaScript number"
+    },
+    {
+      "id": "image-offload-not-current-before-index-check",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":9,\"imageIndexes\":[-1]}]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "invalid seed event at index 16: image/offload: target seq 9 is not a current surface node"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "restore/image-offload-not-current"
+      }
+    },
+    {
+      "id": "image-offload-type-before-index-check",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":4,\"imageIndexes\":[1,0]}]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "invalid seed event at index 16: image/offload: target seq 4 must be user/message or tool/result"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "restore/image-offload-target-type"
+      }
+    },
+    {
+      "id": "image-offload-not-current-before-later-shape",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":9,\"imageIndexes\":[0]},null]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "invalid seed event at index 16: image/offload: target seq 9 is not a current surface node"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "restore/image-offload-not-current"
+      }
+    },
+    {
+      "id": "image-offload-offload-event-target",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":5,\"imageIndexes\":[0]}]}}"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":17,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":16,\"imageIndexes\":[0]}]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "invalid seed event at index 17: image/offload: target seq 16 is not a current surface node"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "restore/image-offload-not-current"
+      }
+    },
+    {
+      "id": "image-offload-duplicate-member-last-wins",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":9,\"imageIndexes\":[0],\"seq\":5}]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 5004,
+        "storedEventCount": 17,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "text": "go"
+              },
+              {
+                "type": "image",
+                "attachment": {
+                  "attachmentId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "mediaType": "image/png",
+                  "bytes": 1024,
+                  "width": 2,
+                  "height": 2
+                },
+                "offloaded": true
+              },
+              {
+                "type": "image",
+                "attachment": {
+                  "attachmentId": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "mediaType": "image/png",
+                  "bytes": 1024,
+                  "width": 2,
+                  "height": 2
+                }
+              }
+            ],
+            "source": {
+              "kind": "user"
+            },
+            "role": "user",
+            "id": "f7802400-aed0-4b44-bbfd-9efc7f04e4c5"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      },
+      "note": "JSON.parse keeps the last duplicate member, at its first position, so the target has two members"
+    },
+    {
+      "id": "image-offload-primitive-blocks",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[\"note\",7,[],{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":5,\"imageIndexes\":[0]}]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 4801,
+        "storedEventCount": 17,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "content": [
+              "note",
+              7,
+              [],
+              {
+                "type": "image",
+                "attachment": {
+                  "attachmentId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "mediaType": "image/png",
+                  "bytes": 1024,
+                  "width": 2,
+                  "height": 2
+                },
+                "offloaded": true
+              }
+            ],
+            "source": {
+              "kind": "user"
+            },
+            "role": "user",
+            "id": "f7802400-aed0-4b44-bbfd-9efc7f04e4c5"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      },
+      "note": "string, number, and array blocks have no image type; they are kept and not counted"
+    },
+    {
+      "id": "image-offload-null-block-before-missing-index",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},null]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":5,\"imageIndexes\":[5]}]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "invalid seed event at index 16: Cannot read properties of null (reading 'type')"
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "projection"
+      },
+      "note": "the walk visits every block before the missing-index check; the message is V8's, observed through Node in round 1"
+    },
+    {
+      "id": "image-offload-untargeted-null-block",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},null]"
+        },
+        {
+          "row": 10,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"echo: one\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"echo: one\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":10,\"imageIndexes\":[0]}]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 4823,
+        "storedEventCount": 17,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "source": {
+              "kind": "tool",
+              "callId": "c1"
+            },
+            "content": [
+              {
+                "type": "tool-result",
+                "toolCallId": "c1",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "echo: one"
+                  },
+                  {
+                    "type": "image",
+                    "attachment": {
+                      "attachmentId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                      "mediaType": "image/png",
+                      "bytes": 1024,
+                      "width": 2,
+                      "height": 2
+                    },
+                    "offloaded": true
+                  }
+                ],
+                "isError": false
+              }
+            ],
+            "role": "user",
+            "id": "df2fbed1-1421-4a96-8237-079e67740391"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      },
+      "note": "only targeted messages are walked"
+    },
+    {
+      "id": "image-offload-prune-then-reoffload",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 10,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"echo: one\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"echo: one\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":10,\"imageIndexes\":[0]}]}}"
+        },
+        {
+          "append": "{\"type\":\"tool/result\",\"seq\":17,\"time\":1791337579870,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"source\":{\"kind\":\"tool\",\"callId\":\"c1\"},\"content\":[{\"type\":\"tool-result\",\"toolCallId\":\"c1\",\"content\":[{\"type\":\"text\",\"text\":\"echo: one\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}],\"isError\":false}],\"role\":\"user\",\"id\":\"df2fbed1-1421-4a96-8237-079e67740391\"}},\"sourceEventSeqs\":[10],\"surfaceOp\":{\"op\":\"replace\",\"startSeq\":10,\"endSeq\":10}}"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":18,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":17,\"imageIndexes\":[0]}]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 5486,
+        "storedEventCount": 19,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "source": {
+              "kind": "tool",
+              "callId": "c1"
+            },
+            "content": [
+              {
+                "type": "tool-result",
+                "toolCallId": "c1",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "echo: one"
+                  },
+                  {
+                    "type": "image",
+                    "attachment": {
+                      "attachmentId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                      "mediaType": "image/png",
+                      "bytes": 1024,
+                      "width": 2,
+                      "height": 2
+                    },
+                    "offloaded": true
+                  }
+                ],
+                "isError": false
+              }
+            ],
+            "role": "user",
+            "id": "df2fbed1-1421-4a96-8237-079e67740391"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      },
+      "note": "projections are keyed by seq: the pruned replacement keeps the message id but not the original's projection"
+    },
+    {
+      "id": "image-offload-error-before-later-construction-error",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":5,\"imageIndexes\":[5]}]}}"
+        },
+        {
+          "append": "{\"type\":\"request/header\",\"seq\":17,\"time\":1791337579870,\"data\":{\"header\":{\"config\":{\"provider\":\"mock\",\"model\":\"mock\"}},\"reason\":\"nope\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "invalid seed event at index 16: image/offload: image index 5 does not exist"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "restore/image-offload-missing-index"
+      },
+      "note": "both fail in Session construction, which stops at the earlier row"
+    },
+    {
+      "id": "later-adoption-failure-beats-offload-error",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":5,\"imageIndexes\":[5]}]}}"
+        },
+        {
+          "append": "{\"type\":\"user/message\",\"seq\":17,\"time\":1791337579870,\"data\":{\"content\":[{\"type\":\"text\",\"text\":\"x\"}],\"source\":{\"kind\":\"user\"},\"role\":\"system\",\"id\":\"u17\"},\"surfaceOp\":\"append\"}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "SessionPersistenceCorruptionError",
+        "message": "stored session \"a1\" failed validation: Error: session event at seq 17 message must have role \"user\""
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "stored/message-role"
+      },
+      "note": "adoption of every stored event precedes Session construction"
+    },
+    {
+      "id": "later-adoption-failure-beats-ignorable-tool-update",
+      "log": "dynamic-tools",
+      "edits": [
+        {
+          "row": 14,
+          "find": "\"removals\":[]}",
+          "replace": "\"removals\":[]},\"ignorable\":true"
+        },
+        {
+          "append": "{\"type\":\"user/message\",\"seq\":38,\"time\":1791376787060,\"data\":{\"content\":[{\"type\":\"text\",\"text\":\"x\"}],\"source\":{\"kind\":\"user\"},\"role\":\"system\",\"id\":\"u38\"},\"surfaceOp\":\"append\"}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "SessionPersistenceCorruptionError",
+        "message": "stored session \"dynamic-tools\" failed validation: Error: session event at seq 38 message must have role \"user\""
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "stored/message-role"
+      },
+      "note": "adoption does not check ignorable; the required-on-read refusal belongs to Session construction"
+    },
+    {
+      "id": "seeded-reoffload-after-cut",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "header": "{\"type\":\"session\",\"version\":3,\"id\":\"a1\",\"createdAt\":1791337579861,\"isSeeded\":true,\"delegationDepth\":0}"
+        },
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":5,\"imageIndexes\":[0]}]}}"
+        },
+        {
+          "append": "{\"type\":\"session/end-seed\",\"seq\":17,\"time\":1791337579870,\"data\":{\"inherited\":true}}"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":18,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":5,\"imageIndexes\":[0]}]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "invalid seed event at index 18: image/offload: image index 0 is already offloaded"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "restore/image-offload-already-offloaded"
+      },
+      "note": "the inherited projection is the base for decisions after the cut"
+    },
+    {
+      "id": "known-ignorable-routing-decision-marker",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/routing-decision\",\"seq\":16,\"time\":1791337579870,\"data\":{\"childId\":\"child-1\",\"callId\":\"c1\",\"source\":\"auto\",\"route\":{\"provider\":\"mock\",\"model\":\"mock-small\",\"reasoningEffort\":\"low\"},\"router\":{\"reason\":\"short lookup\",\"fallback\":false,\"assessment\":{\"policy\":\"default\",\"status\":\"normal\",\"difficulty\":0.35,\"reasons\":[\"single file\"]}}},\"surfaceOp\":\"append\",\"ignorable\":true}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "SessionPersistenceCorruptionError",
+        "message": "stored session \"a1\" failed validation: Error: session event \"subagent/routing-decision\" is not surface-eligible and cannot carry surfaceOp"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "stored/non-surface-marker"
+      },
+      "note": "a known ignorable type keeps its marker check; only unknown ignorable rows are opaque"
+    },
+    {
+      "id": "known-ignorable-request-header",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 6,
+          "find": "\"reason\":\"initial\"}}",
+          "replace": "\"reason\":\"initial\"},\"ignorable\":true}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 4550,
+        "storedEventCount": 16,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      }
+    },
+    {
+      "id": "known-ignorable-request-context",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 7,
+          "text": "{\"type\":\"request/context\",\"seq\":7,\"time\":1791337579866,\"data\":{\"provider\":\"mock\",\"model\":\"mock\"},\"ignorable\":true}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 4550,
+        "storedEventCount": 16,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      }
+    },
+    {
+      "id": "known-ignorable-end-seed-last",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"session/end-seed\",\"seq\":16,\"time\":1791337579870,\"data\":{},\"ignorable\":true}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 4618,
+        "storedEventCount": 17,
+        "closers": [],
+        "endSeedAppended": false,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      }
+    },
+    {
+      "id": "known-ignorable-prune",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"tool/result\",\"seq\":16,\"time\":1791337579870,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"source\":{\"kind\":\"tool\",\"callId\":\"c1\"},\"content\":[{\"type\":\"tool-result\",\"toolCallId\":\"c1\",\"content\":[{\"type\":\"text\",\"text\":\"[pruned]\"}],\"isError\":false}],\"role\":\"user\",\"id\":\"df2fbed1-1421-4a96-8237-079e67740391\"}},\"sourceEventSeqs\":[10],\"surfaceOp\":{\"op\":\"replace\",\"startSeq\":10,\"endSeq\":10},\"ignorable\":true}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 4932,
+        "storedEventCount": 17,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/16/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      }
     }
   ]
 }

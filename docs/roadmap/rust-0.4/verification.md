@@ -67,17 +67,17 @@ Each row supplements the detailed scope specification. The final column is a req
 | 02 | Historical logical replay, surfaces, headers, inbox, forks and reconstructable requests | Reject unknown required event, invalid reference, and sequence corruption |
 | 03 | Both write/read directions, immutable generations, real leases and recovered tails | Crash during append/publication; TS/Rust writer contention; damaged compressed frame |
 | 04 | Real filesystem confinement and no surviving owned descendants on each OS | Escape attempt, missing backend, ignored termination, and timeout with exit 0 |
-| 05 | Layer precedence, profile migration, scope visibility, credential storage and disposal | Failed registration/reload, unsupported `!!js`, secret prompt cancellation and attempted secret leakage |
+| 05 | Layer precedence, retained native profiles, scope visibility, credential storage and disposal | Failed registration/reload; excluded custom Cordis profiles and presets, nonempty legacy built-in layers, user `!!js`, and npm profile installs refuse before execution or file changes; secret prompt cancellation and attempted secret leakage |
 | 06 | Equivalent stream assembly, finish/failure mapping and usage | Split chunk, malformed stream, abrupt EOF, consumer exception, cancellation at every stream phase |
 | 07 | Approved provider/auth matrix, sanitized request fixtures and live route smokes | Expired credentials, failed refresh, malformed tool arguments, idle timeout, invalid route override |
 | 08 | Exact tool schemas/results and independently checked coding effects | Stale edit, denied call, out-of-order completion, exclusive barrier, late progress |
 | 09 | Native edit/check/resume, event trace parity and paired eval | Cancel before admission and during tools; crash after effect but before result commit |
 | 10 | Exact composed context, image admission, reconstructable compaction and long-session task | Missing attachment, failed summary, orphaned tool pair, canceled checkpoint, byte-limit edge |
 | 11 | Durable child/job/goal/schedule results and shutdown | Parent/child race, duplicate wakeup, clock jump, router failure, restart at settlement |
-| 12 | MCP/hooks/web/VM, the native plugin API with a named consumer, and approved extension path through real runtime | Disconnect, invalid schema, private-address redirect, infinite loop, memory limit, denied nested tool, plugin API version mismatch |
+| 12 | MCP/hooks/web/VM, the native plugin API with a named consumer, and native extensions through real runtime | Disconnect, invalid schema, private-address redirect, infinite loop, memory limit, denied nested tool, plugin API version mismatch |
 | 13 | Built CLI flags/exits, public transport behavior and actual Desktop launch | Invalid envelope, dropped client, withdrawn approval, busy session, incompatible Electron entry |
 | 14 | Inline/fullscreen terminal cells, Unicode input, modes and restoration | Resize mid-stream, panic, hangup, malformed escape/input, constrained dimensions |
-| 15 | Complete PTY workflow map and all preset model surfaces | Cancel navigation/login/question; retain draft; deny approval; external-editor failure |
+| 15 | Complete PTY workflow map and all retained preset model surfaces | Cancel navigation/login/question; retain draft; deny approval; external-editor failure |
 | 16 | Signed fresh install, old-to-new update, no-Node native launch and data rollback | Bad signature/hash, candidate launch failure, disk-full, interrupted switch, locked Windows file |
 | 17 | Complete ledger, final artifacts/platforms, paired evals, performance and migration rehearsal | Revert default and resume with retained 0.3; reject release with missing required evidence |
 
