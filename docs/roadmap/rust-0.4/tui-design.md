@@ -55,7 +55,7 @@ Idle, after a turn:
 
   The registry is the list, so discovery should read it.
 
-  ✓ Bash  rg -n "commands.register" -g '*.ts'                            2 lines
+  ✓ Bash  rg -n "commands.register" -g '*.ts'  2 lines
     │ packages/app/src/controller.ts:45
     │ packages/app/src/controller.ts:52
 
@@ -122,7 +122,7 @@ Each difference from the TypeScript frontend needs its own reviewed acceptance c
 | D5 | A rounded box frames the draft in place of the two bare rules; rows outside it are inset two cells to align with its contents; hidden-row counts and mode hints sit on its edges instead of a right-hand slot beside the caret | The input reads as one control distinct from the transcript. The box spends the rules' two rows and no more, and hints on the edges take no column from the draft, so a mode change never rewraps it | Buffer tests of the box at every width from 1 to 200, the classic frame, and edge labels that drop whole; PTY resize scenarios |
 | D6 | The header's activity is text alone: no spinner glyph for a turn or for compaction. A band of light sweeps across the activity word, and the word list grows from 12 verbs to 32 | Words say what is happening without a symbol a terminal could measure differently, and a larger list keeps consecutive turns distinct | Pure tests pin the sweep, the colour levels, and the word choice; a PTY scenario checks that elapsed time advances without input and that no Braille glyph is drawn |
 | D7 | The header and the status line share one row directly above the composer box, the bar: the activity or the last turn's outcome on the left, the status right-aligned. The status is minimal and consolidated into three fields: the model with its thinking level (`deepseek-v4-flash high`), the context reading (`ctx ~11% (15.2k/128k)`), and the location, the directory with its branch (`~/bake ⎇ main`). Git change counts, token totals, the cache hit, and the update notice are not shown, and the goal moves to a standing row under the box | One row says what the session is doing and where it stands, next to where the next prompt is typed, and the box gains a row of transcript. Right-aligned, the status does not move when the activity starts or ends | Pure tests of each field, its tone, and its rank, including the TypeScript `fitStatus` cases; buffer tests that the activity and status share the row and give way in order; a PTY check of the shared row |
-| D8 | The transcript and the agent views use blocks and columns instead of the TypeScript verb column. The user's words run beside an accent bar, `▎`. A call is one row, `✓ Bash  argument`, its state mark (a green `✓` done, a red `✗` failed, and a white `●` that blinks while it runs, shown and then blank for 600 ms each, the TypeScript `PULSE_MS`, every running mark in phase) at column 2, the tool name in an aligned column, and a summary right-aligned: its own, such as `exit 1`, or its line count. Output hangs from a dim gutter, `│`, red when the call failed, and a long result's count reads `⋯ 4 more lines`. The standing row reads `Agents  2 · 1 working · 1 done`, without `↳`. The agent list is a column of cards, the selected one marked `▸`, each with its name, its id right-aligned, and one line of what it does; inspection opens with the agent's name and id, then the read-only line. The classic frame swaps every mark for ASCII: `|`, `+`, `x`, `*`, `...`, and `>` | Fewer marks and aligned columns let a long session be scanned by state and tool; the summary on the right edge answers "what happened" without reading the output. A code-mode script reads as one such block, its source numbered and its calls on a tree under it ([code mode](#code-mode)). Every mark comes from the frame's glyph set, so a terminal that cannot measure the round glyphs gets ASCII | Pure tests of each row's lines at fixed widths, in both glyph sets; buffer tests of the list and inspection; PTY checks of the new rows |
+| D8 | The transcript and the agent views use blocks and columns instead of the TypeScript verb column. The user's words run beside an accent bar, `▎`. A call is one row, `✓ Bash  argument`, its state mark (a green `✓` done, a red `✗` failed, and a white `●` that blinks while it runs, shown and then blank for 600 ms each, the TypeScript `PULSE_MS`, every running mark in phase) at column 2, the tool name in an aligned column, and its status two cells after the argument: its own, such as `exit 1`, or its line count. Where it does not fit, it takes its own row under the argument and wraps there. Output hangs from a dim gutter, `│`, red when the call failed, and a long result's count reads `⋯ 4 more lines`. The standing row reads `Agents  2 · 1 working · 1 done`, without `↳`. The agent list is a column of cards, the selected one marked `▸`, each with its name, its id right-aligned, and one line of what it does; inspection opens with the agent's name and id, then the read-only line. The classic frame swaps every mark for ASCII: `|`, `+`, `x`, `*`, `...`, and `>` | Fewer marks and aligned columns let a long session be scanned by state and tool; the status beside the call answers "what happened" without reading the output, and reads with the call at any width instead of across an empty middle. A code-mode script reads as one such block, its source numbered and its calls on a tree under it ([code mode](#code-mode)). Every mark comes from the frame's glyph set, so a terminal that cannot measure the round glyphs gets ASCII | Pure tests of each row's lines at fixed widths, in both glyph sets; buffer tests of the list and inspection; PTY checks of the new rows |
 
 ## Composer
 
@@ -256,25 +256,25 @@ Fullscreen's transcript is a viewport over immutable committed batches and the c
 A `run_code` call, a program the model writes in TypeScript and runs in the confined QuickJS VM, is one transcript block like any call ([D8](#intentional-differences)). Its head reads `Script` and the program's description, and its source, its calls, and its result hang under it:
 
 ```
-  ✓ Script  Find TODOs                                       13 calls · 1 failed
+  ✓ Script  Find TODOs  13 calls · 1 failed
     1  const found = [];
     2  for (const path of await tools.glob({ pattern: "src/**/*.ts" })) {
     ⋯ 2 more lines
     5  }
     6  return found;
-    ├ ✓ Glob  src/**/*.ts                                               12 files
-    ├ ✓ Read  src/m0.ts                                                  2 lines
+    ├ ✓ Glob  src/**/*.ts  12 files
+    ├ ✓ Read  src/m0.ts  2 lines
     ├ ⋯ 4 more calls
-    ├ ✗ Read  src/m5.ts                                        Permission denied
+    ├ ✗ Read  src/m5.ts  Permission denied
     ├ ⋯ 4 more calls
-    ├ ✓ Read  src/m10.ts                                                 2 lines
-    └ ✓ Read  src/m11.ts                                                 2 lines
+    ├ ✓ Read  src/m10.ts  2 lines
+    └ ✓ Read  src/m11.ts  2 lines
     → ["src/m3.ts", "src/m9.ts"]
 ```
 
-- **Head.** The script's own state mark, `Script`, and its description. At the right, how many calls it made, and once it has ended, how many failed, in red: `13 calls · 1 failed`. While it runs, each failed call is red on its own row instead, as the TypeScript `callTally` does.
+- **Head.** The script's own state mark, `Script`, and its description, then how many calls it made, and once it has ended, how many failed, in red: `13 calls · 1 failed`. While it runs, each failed call is red on its own row instead, as the TypeScript `callTally` does.
 - **Source.** Numbered from 1, the numbers dim, the code at full brightness with its indentation kept. A source longer than five lines shows its first two and last two lines around `⋯ N more lines`, and the numbers after the count keep their place, so a reader can still say which line is which.
-- **Calls.** One row each on a tree one level in, `├` and `└` at column 4, each with its own state mark, tool name, argument, and its note at the right: a size such as `2 lines` when it succeeded, its error in red when it failed. A call that succeeded never shows its output; the script's result is what it worked toward. The first two and last two calls stay, up to three that failed or never finished stay where they were, and every other run folds into `⋯ N more calls`; a count that would stand for one call is that call. These are the TypeScript `NESTED_ENDS` and `NESTED_FAILURES` rules. When a note does not fit beside its call, it moves to a row of its own and the tree's stem runs beside it.
+- **Calls.** One row each on a tree one level in, `├` and `└` at column 4, each with its own state mark, tool name, argument, and its note two cells after the argument: a size such as `2 lines` when it succeeded, its error in red when it failed. A call that succeeded never shows its output; the script's result is what it worked toward. The first two and last two calls stay, up to three that failed or never finished stay where they were, and every other run folds into `⋯ N more calls`; a count that would stand for one call is that call. These are the TypeScript `NESTED_ENDS` and `NESTED_FAILURES` rules. When a note does not fit beside its call, it moves to a row of its own under the argument, wrapping there rather than being cut, and the tree's stem runs beside it.
 - **Result.** What the program returned, after `→`, previewed like any output, and red when the script failed.
 - **Classic frame.** `|` and `` ` `` draw the tree and `>` the result.
 

@@ -450,7 +450,8 @@ fn red(look: Look) -> Style {
 
 /// A call's head: `lead`, its state mark, the tool name in its column, and
 /// the argument wrapped under itself. Wrapped rows open with `rest`, which
-/// takes as many cells as `lead`.
+/// takes as many cells as `lead`. Returns the rows and the lead of a row
+/// that continues under the argument, for [`ride`].
 fn head(
     lead: Vec<Span<'static>>,
     rest: Vec<Span<'static>>,
@@ -459,7 +460,7 @@ fn head(
     argument: &str,
     width: usize,
     look: Look,
-) -> Vec<Line<'static>> {
+) -> (Vec<Line<'static>>, Vec<Span<'static>>) {
     let (mark, mark_style) = mark_of(state, look);
     let lead_cells: usize = lead.iter().map(Span::width).sum();
     let name = format!("{tool:<width$}", width = TOOL_WIDTH.max(tool.width() + 2));
@@ -472,11 +473,16 @@ fn head(
     ]);
     let mut rest = rest;
     rest.push(pad(indent - lead_cells));
-    hang(argument, width, indent, first, rest, Style::new())
+    (
+        hang(argument, width, indent, first, rest.clone(), Style::new()),
+        rest,
+    )
 }
 
-/// Puts `summary` at the right edge of the last line, or right-aligned on a
-/// line of its own, opening with `lead`, when it does not fit beside it.
+/// Puts a call's status, such as `2 lines`, two cells after the last row's
+/// text, so it reads with the call at any width. When it does not fit there,
+/// it takes rows of its own opening with `lead`, under the argument, and a
+/// one-run status wraps there rather than being cut.
 fn ride(
     lines: &mut Vec<Line<'static>>,
     summary: Vec<Span<'static>>,
@@ -488,19 +494,25 @@ fn ride(
         return;
     }
     let last = lines.last_mut().expect("a head has a row");
-    let used = last.width();
-    if used + 2 + cells <= width {
-        last.spans.push(pad(width - used - cells));
+    if last.width() + 2 + cells <= width {
+        last.spans.push(pad(2));
         last.spans.extend(summary);
-    } else {
-        let lead_cells: usize = lead.iter().map(Span::width).sum();
-        if lead_cells + 2 + cells > width {
-            return;
-        }
+        return;
+    }
+    let lead_cells: usize = lead.iter().map(Span::width).sum();
+    if lead_cells + cells <= width {
         let mut spans = lead;
-        spans.push(pad(width - lead_cells - cells));
         spans.extend(summary);
         lines.push(Line::from(spans));
+    } else if let [only] = summary.as_slice() {
+        lines.extend(hang(
+            &only.content,
+            width,
+            lead_cells,
+            lead.clone(),
+            lead,
+            only.style,
+        ));
     }
 }
 
@@ -527,7 +539,7 @@ fn present_call(
     let marks = look.marks();
     let failed = state == CallState::Failed;
     let quiet = if failed { red(look) } else { dim() };
-    let mut lines = head(
+    let (mut lines, under) = head(
         vec![pad(RAIL)],
         vec![pad(RAIL)],
         state,
@@ -539,12 +551,7 @@ fn present_call(
     // Without a summary of its own, a call with output says how much.
     let counted = output.iter().filter(|line| !line.trim().is_empty()).count();
     if let Some(summary) = summary.map(str::to_owned).or_else(|| line_count(counted)) {
-        ride(
-            &mut lines,
-            vec![Span::styled(summary, quiet)],
-            Vec::new(),
-            width,
-        );
+        ride(&mut lines, vec![Span::styled(summary, quiet)], under, width);
     }
     let gutter = || {
         vec![
@@ -635,7 +642,7 @@ fn present_script(
     look: Look,
 ) -> Vec<Line<'static>> {
     let marks = look.marks();
-    let mut lines = head(
+    let (mut lines, under) = head(
         vec![pad(RAIL)],
         vec![pad(RAIL)],
         state,
@@ -663,7 +670,7 @@ fn present_script(
                 red(look),
             ));
         }
-        ride(&mut lines, tally, Vec::new(), width);
+        ride(&mut lines, tally, under, width);
     }
     lines.extend(numbered(source, width, marks));
     let entries = tree(calls);
@@ -685,9 +692,9 @@ fn present_script(
                 lines.push(Line::from(spans));
             }
             Branch::Call(call) => {
-                let mut rows = head(
+                let (mut rows, under) = head(
                     lead,
-                    rest.clone(),
+                    rest,
                     call.state,
                     &call.tool,
                     &call.argument,
@@ -703,7 +710,7 @@ fn present_script(
                     ride(
                         &mut rows,
                         vec![Span::styled(note.clone(), style)],
-                        rest,
+                        under,
                         width,
                     );
                 }
@@ -1129,18 +1136,18 @@ mod tests {
             "  The registry is the list, so discovery should read it."
         );
         assert_eq!(all[user + 3], "");
-        // The tool name has its own column; the summary is right-aligned.
-        let head = &all[user + 4];
-        assert!(
-            head.starts_with(r#"  ✓ Bash  rg -n "commands.register" -g '*.ts'"#),
-            "{head}"
+        // The tool name has its own column; the status follows the argument.
+        assert_eq!(
+            all[user + 4],
+            r#"  ✓ Bash  rg -n "commands.register" -g '*.ts'  2 lines"#
         );
-        assert!(head.ends_with("2 lines") && head.width() == 80, "{head}");
         assert_eq!(all[user + 5], "    │ packages/app/src/controller.ts:45");
         assert_eq!(all[user + 6], "    │ packages/app/src/controller.ts:52");
         // A call after a call joins its group without a blank.
-        assert!(all[user + 7].starts_with("  ✓ Read  packages/app/src/controller.ts"));
-        assert!(all[user + 7].ends_with("412 lines"));
+        assert_eq!(
+            all[user + 7],
+            "  ✓ Read  packages/app/src/controller.ts  412 lines"
+        );
         assert_eq!(all[user + 8], "");
         assert!(all[user + 9].starts_with("  Two registrations"));
     }
@@ -1162,13 +1169,7 @@ mod tests {
             .unwrap();
         let lines = text(&present(&rows, index, 60, PLAIN));
         assert_eq!(lines[0], "");
-        assert_eq!(
-            lines[1],
-            format!(
-                "  ✗ Bash  bun test tests/parser.test.ts{}exit 1",
-                " ".repeat(15)
-            )
-        );
+        assert_eq!(lines[1], "  ✗ Bash  bun test tests/parser.test.ts  exit 1");
         assert_eq!(
             lines[2..],
             [
@@ -1236,7 +1237,7 @@ mod tests {
                 "  ● Bash  one two",
                 "          three",
                 "          four",
-                "            1 line",
+                "          1 line",
                 "    │ 0123456789ab",
                 "    │ cdef",
             ]
@@ -1341,30 +1342,26 @@ mod tests {
     #[test]
     fn a_script_shows_its_source_calls_and_result_as_one_block() {
         let lines = script_lines(80, PLAIN);
-        let right = |left: &str, right: &str| {
-            format!(
-                "{left}{}{right}",
-                " ".repeat(80 - left.width() - right.width())
-            )
-        };
+        // Each call's status follows its text, two cells after it.
+        let then = |left: &str, status: &str| format!("{left}  {status}");
         assert_eq!(
             lines,
             [
                 String::new(),
-                right("  ✓ Script  Find TODOs", "13 calls · 1 failed"),
+                then("  ✓ Script  Find TODOs", "13 calls · 1 failed"),
                 "    1  const found = [];".into(),
                 r#"    2  for (const path of await tools.glob({ pattern: "src/**/*.ts" })) {"#
                     .into(),
                 "    ⋯ 2 more lines".into(),
                 "    5  }".into(),
                 "    6  return found;".into(),
-                right("    ├ ✓ Glob  src/**/*.ts", "12 files"),
-                right("    ├ ✓ Read  src/m0.ts", "2 lines"),
+                then("    ├ ✓ Glob  src/**/*.ts", "12 files"),
+                then("    ├ ✓ Read  src/m0.ts", "2 lines"),
                 "    ├ ⋯ 4 more calls".into(),
-                right("    ├ ✗ Read  src/m5.ts", "Permission denied"),
+                then("    ├ ✗ Read  src/m5.ts", "Permission denied"),
                 "    ├ ⋯ 4 more calls".into(),
-                right("    ├ ✓ Read  src/m10.ts", "2 lines"),
-                right("    └ ✓ Read  src/m11.ts", "2 lines"),
+                then("    ├ ✓ Read  src/m10.ts", "2 lines"),
+                then("    └ ✓ Read  src/m11.ts", "2 lines"),
                 r#"    → ["src/m3.ts", "src/m9.ts"]"#.into(),
             ]
         );
@@ -1374,10 +1371,10 @@ mod tests {
     fn a_narrow_script_keeps_its_tree_unbroken() {
         let lines = script_lines(40, PLAIN);
         let failed = lines.iter().position(|l| l.contains("src/m5.ts")).unwrap();
-        // The error moves under its call, and the stem runs beside it.
+        // The error moves under its call's argument, and the stem runs beside it.
         assert_eq!(
             lines[failed + 1],
-            format!("    │{}Permission denied", " ".repeat(18))
+            format!("    │{}Permission denied", " ".repeat(9))
         );
         assert!(lines.iter().all(|l| l.width() <= 40));
         let classic = Look {
@@ -1467,5 +1464,24 @@ mod tests {
         assert!(t.running());
         t.rows = sample_session();
         assert!(!t.running());
+    }
+
+    #[test]
+    fn a_status_too_long_for_its_row_wraps_under_the_argument() {
+        let rows = vec![Row::Call {
+            tool: "Bash".into(),
+            argument: "make".into(),
+            state: CallState::Failed,
+            summary: Some("error: no rule to make target build".into()),
+            output: Vec::new(),
+        }];
+        assert_eq!(
+            text(&present(&rows, 0, 30, PLAIN)),
+            [
+                "  ✗ Bash  make",
+                "          error: no rule to",
+                "          make target build"
+            ]
+        );
     }
 }
