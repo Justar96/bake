@@ -14,7 +14,8 @@
     "../packages/core/agent-loop/tests/runtime-fixture.ts",
     "../packages/core/agent-loop/tests/request-reconstruction.fixture.spec.ts",
     "../packages/session/session-persistence-jsonl/tests/header-conformance.spec.ts",
-    "../packages/session/session-format-v2-to-v3/tests/source-event-seqs-conformance.spec.ts"
+    "../packages/session/session-format-v2-to-v3/tests/source-event-seqs-conformance.spec.ts",
+    "../packages/session/session-format-v2-to-v3/tests/event-envelope-conformance.spec.ts"
   ],
   "references": [
     { "path": "../vendor/cordis" },

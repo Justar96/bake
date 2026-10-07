@@ -2,7 +2,7 @@
 
 ## Summary
 
-Run the same controlled fixtures through TypeScript and Rust, then compare prompt bytes, event order, permission records, and the files each runner changed. The fixtures qualify the comparison tooling for [migration scope 01](../docs/roadmap/rust-0.4/README.md#01--workspace-and-comparison-harness). They do not run Bake's agent, implement its permission policy, or establish runtime parity. The separate [native eval fixture adapter](../evals/README.md#native-fixture-adapter) checks a compiled fake arm with the evaluator's existing file predicates. The [qualification ledger](../docs/roadmap/rust-0.4/ledger/README.md) records partial evidence and failed attempts. A [runtime request-reconstruction fixture](#runtime-request-reconstruction) captures one real TypeScript tool-call turn. [Session header cases](#session-header-cases) compare one physical header record between the real TypeScript scanner and a development Rust reader. [Source-event seq cases](#source-event-seq-cases) compare one event's `sourceEventSeqs` field between the released TypeScript codec and a development Rust decoder. Rust replay and a live native eval arm remain open.
+Compare TypeScript and Rust using controlled fixtures and independently checked outcomes. The synthetic harness and [native eval fixture adapter](../evals/README.md#native-fixture-adapter) qualify comparison tooling for [migration scope 01](../docs/roadmap/rust-0.4/README.md#01--workspace-and-comparison-harness). Separate shared cases exercise Session headers, source references, and row envelopes against released codecs; a runtime fixture captures a real TypeScript tool-call turn. The [qualification ledger](../docs/roadmap/rust-0.4/ledger/README.md) records partial evidence. Rust Session replay and live native evals remain open.
 
 ## Table of Contents
 
@@ -12,6 +12,7 @@ Run the same controlled fixtures through TypeScript and Rust, then compare promp
 - [Runtime request reconstruction](#runtime-request-reconstruction)
 - [Session header cases](#session-header-cases)
 - [Source-event seq cases](#source-event-seq-cases)
+- [Row-envelope cases](#row-envelope-cases)
 - [Runner contract](#runner-contract)
 - [Ownership and limits](#ownership-and-limits)
 
@@ -79,7 +80,7 @@ The capture uses production sources at `5cd716c70fdc443c9e997ee7b5e67ed2d4a1b06f
 
 Keep the committed generation and expectation unchanged. A correction or another scenario belongs in a new directory, with its own provenance and review. The [fixture-layout policy](../scripts/session-fixture-layout.ts) explicitly recognizes this physical log so the logical-fixture formatter cannot strip its envelopes. The original [request-reconstruction tests](../packages/core/agent-loop/tests/request-reconstruction.spec.ts) remain in place, including the broader header-change scenario.
 
-The runtime suite exercises this fixture, and the ordinary TypeScript check includes its helper and spec. Rust reads its header record through the [Session header cases](#session-header-cases) and decodes its `sourceEventSeqs` fields through the [source-event seq cases](#source-event-seq-cases); there is no Rust event reader or reducer for it yet. Provider wire encodings, historical formats, seeded/forked logs, compaction, retries, cancellation, changing request headers, profile composition, and cross-platform release qualification remain separate work.
+The runtime suite exercises this fixture, and the ordinary TypeScript check includes its helper and spec. Rust reads its header record through the [Session header cases](#session-header-cases) and decodes its `sourceEventSeqs` fields and row envelopes through the [source-event seq cases](#source-event-seq-cases) and [row-envelope cases](#row-envelope-cases); there is no Rust event reader or reducer for it yet. Provider wire encodings, historical formats, seeded/forked logs, compaction, retries, cancellation, changing request headers, profile composition, and cross-platform release qualification remain separate work.
 
 ## Session header cases
 
@@ -128,6 +129,41 @@ A `rust` override marks a case whose TypeScript outcome Rust does not reproduce;
 Both harnesses pin the case count, require the cases to witness all eight messages and both limits, and reject unknown keys. Invalid JSON and UTF-8 are outside the field decoder, which takes an already parsed value. A Rust unit test refuses a range of 2^53 − 1 seqs against a budget of 16 without expanding it; the TypeScript spec never decodes such a range.
 
 `fixtureReferences` lists the decoded references of the unchanged [request-reconstruction log](#runtime-request-reconstruction): its `tool/result` at seq 10 cites seq 9. TypeScript decodes the whole log through the real V3 codec in strict mode; Rust decodes only each row's `sourceEventSeqs` field. Both compare the exact list, not only its length. Expected expanded values and TypeScript refusals are specified in the shared table and checked against the released codec.
+
+## Row-envelope cases
+
+[`session/event-envelope-cases.json`](session/event-envelope-cases.json) holds event rows and the outcome of one strict released v2 row decode. The [TypeScript spec](../packages/session/session-format-v2-to-v3/tests/event-envelope-conformance.spec.ts) creates the released v2 codec's strict decoder, decodes `expectedSeq` priming rows numbered from 0, and then decodes the case row. The development [`bake-session`](../rust/crates/bake-session/src/envelope.rs) crate passes the same parsed row and expected seq to `decode_row_envelope`. That call checks the envelope fields, decodes `sourceEventSeqs` against the row's own seq, checks the seq gap, and requires a `session/end-seed` row's data to be an object. The result borrows `data` and `surfaceOp` unvalidated.
+
+```sh
+bun run test:runtime packages/session/session-format-v2-to-v3/tests/event-envelope-conformance.spec.ts
+(cd rust && cargo test --locked -p bake-session)
+```
+
+Agreement covers that one call, not current-format row admission. The V3 codec checks `request/header` and `system/message` payloads and obsolete dispatch rows before the call, and known-event envelope and payload rules after it. V2 may accept rows that V3 rejects, such as a `turn/start` with `surfaceOp`, a `user/message` with empty sources, or a `-0` seq. Recovery modes, a seeded log's end-seed checks in `finish`, record framing, and replay are not modelled. Messages assume strict, contiguous decoding, where the row index equals the expected seq.
+
+Each case has an `id`, an `expectedSeq` of at most 16, and the row as JSON text in `row`, so number spellings such as `1.0` and `-0` reach both parsers unchanged. An optional `budget` replaces the table's `defaultBudget` of 64 for expanded source seqs. `ts` is one of:
+
+- `decoded`, with the envelope's `type`, `seq`, `time`, and `ignorable`, plus `sourceEventSeqs` and `surfaceOp` exactly when the row carries them. A present JSON `null` stays distinct from an omitted field. Both harnesses also check that the payload is the row's own value, not a copy.
+- `rejected`, with the exact `SessionFormatError` message.
+- `thrown`, for a `TypeError`. The gap message formats the seq with JavaScript string conversion outside the decoder's error handling, so a seq such as `{"toString":null}` throws instead.
+
+Checks run in TypeScript's order and the first failure wins: object, required fields in the order `type`, `seq`, `time`, `data`, unexpected fields, type, time, `ignorable`, then, only when `sourceEventSeqs` is present, the seq as a non-negative safe integer and the field itself, then the gap, then end-seed data. Without `sourceEventSeqs`, a wrong-typed seq reaches the gap message.
+
+A `rust` override marks a case whose TypeScript outcome Rust does not fully reproduce. A `native-subset` override names a limit; Rust claims nothing and fires it at the TypeScript check that reads the value, so it may hide a later rejection but never an earlier one:
+
+- `time-float-lexeme`, `seq-float-lexeme`, and `source-float-lexeme`: serde_json stores the number as an `f64` other than -0, such as `1.0`, `1e3`, or `1.5`. JavaScript accepts the integral ones. Negative values and negative zero are rejected exactly where TypeScript requires a count. Negative-zero times are also rejected exactly; other floating-point times remain subset-limited.
+- `negative-zero-seq`: a `-0` seq without `sourceEventSeqs`. The released v2 decoder accepts it as seq 0 at expected seq 0, and V3 rejects it.
+- `seq-diagnostic`: an object or array seq without `sourceEventSeqs`. JavaScript's string conversion yields text such as `[object Object]` or throws. With `sourceEventSeqs`, the same seq is rejected exactly as an invalid count.
+- `source-output-budget`: the source expansion exceeds the budget, which TypeScript does not have.
+
+A `rejected-class` override claims the refusal but not its message:
+
+- `unexpected-fields`, with the unexpected keys in byte order: JavaScript names the first key in its property order, integer-like keys first and then insertion order, which a parsed serde_json map does not keep. Rust's message is exact for one unexpected key.
+- `seq-gap`: an integer seq outside the safe range is certainly a gap, but Rust does not render JavaScript's rounded value. Safe integers, strings, `null`, and booleans are rendered exactly.
+
+An optional `v3` outcome records what the real V3 codec does with the same rows. The TypeScript spec checks it; Rust ignores it. These controls show V3 rejecting rows the released v2 decoder accepts, reporting its structural error before a v2 envelope error, and accepting an unknown type with opaque payload.
+
+Both harnesses pin the case count, reject unknown keys, and require every rejection kind, limit, and class-only refusal to be witnessed. `fixtureEnvelopes` lists the 16 envelopes of the unchanged [request-reconstruction log](#runtime-request-reconstruction), covering 12 event types. TypeScript checks the log's SHA-256 and decodes it through the real V3 codec; Rust, which has no hash dependency, checks its size and record count and decodes each row. Expected envelopes and messages are written in the shared table and checked against the released codec.
 
 ## Runner contract
 

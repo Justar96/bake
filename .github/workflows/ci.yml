@@ -145,7 +145,7 @@ jobs:
       - run: bun install --frozen-lockfile --prefer-offline
       - run: bun test scripts/workspace.test.ts scripts/release apps/tui/packages/app/tests/build.test.ts apps/tui/packages/app/tests/release.test.ts
       - run: bun run build
-      - run: bun run test:runtime apps/cli/tests/bin.spec.ts packages/session/session-persistence-jsonl/tests/win32.spec.ts packages/session/session-persistence-jsonl/tests/lease.spec.ts packages/session/session-persistence-jsonl/tests/lease.two-process.spec.ts packages/session/session-persistence-jsonl/tests/header-conformance.spec.ts packages/session/session-format-v2-to-v3/tests/source-event-seqs-conformance.spec.ts
+      - run: bun run test:runtime apps/cli/tests/bin.spec.ts packages/session/session-persistence-jsonl/tests/win32.spec.ts packages/session/session-persistence-jsonl/tests/lease.spec.ts packages/session/session-persistence-jsonl/tests/lease.two-process.spec.ts packages/session/session-persistence-jsonl/tests/header-conformance.spec.ts packages/session/session-format-v2-to-v3/tests/source-event-seqs-conformance.spec.ts packages/session/session-format-v2-to-v3/tests/event-envelope-conformance.spec.ts
       - run: bun run release:pack
       # A throwaway key: CI never holds the release signing key. verify-local
       # checks the manifest against it, then installs and updates through it.
