@@ -407,6 +407,9 @@ pub fn wrap(text: &str, width: usize) -> Vec<String> {
 pub struct Marks {
     /// The bar beside each row of the user's words.
     pub user: &'static str,
+    /// A call's state, [`MARK`] cells each. The round set draws one mark,
+    /// `{}`, and colour tells the states apart; the classic set differs by
+    /// glyph, so it reads without colour.
     pub done: &'static str,
     pub failed: &'static str,
     pub running: &'static str,
@@ -430,9 +433,9 @@ pub struct Marks {
 
 pub const ROUND_MARKS: Marks = Marks {
     user: ">",
-    done: "✓",
-    failed: "✗",
-    running: "●",
+    done: "{}",
+    failed: "{}",
+    running: "{}",
     gutter: "│",
     more: "⋯",
     site: "╰",
@@ -446,9 +449,9 @@ pub const ROUND_MARKS: Marks = Marks {
 
 pub const CLASSIC_MARKS: Marks = Marks {
     user: ">",
-    done: "+",
-    failed: "x",
-    running: "*",
+    done: "+ ",
+    failed: "x ",
+    running: "* ",
     gutter: "|",
     more: "...",
     site: "`",
@@ -513,7 +516,9 @@ pub const TOOL_WIDTH: usize = 6;
 /// script's source, and the counts of what is folded away. Column [`RAIL`]
 /// holds the call's structure: its state mark, the gutter, a script's mark
 /// of the line in flight, and the labels of what it handed back.
-pub const BODY: usize = 4;
+pub const BODY: usize = RAIL + MARK + 1;
+/// Cells a call's state mark takes.
+pub const MARK: usize = 2;
 /// Cells a call's text keeps clear of the box's right edge.
 pub const BOX_PAD: usize = 2;
 
@@ -791,14 +796,20 @@ impl Kind {
     }
 }
 
-/// A call state's mark and its colour: a white dot that blinks while the
-/// call runs, a green check when it is done, and a red cross when it failed.
+/// A call state's mark and its colour: braces, `{}`, white and blinking
+/// while the call runs, green when it is done, and red when it failed.
+/// Under `NO_COLOR` colour cannot tell them apart, so the classic marks
+/// stand in.
 fn mark_of(state: CallState, look: Look) -> (&'static str, Style) {
-    let marks = look.marks();
+    let marks = if look.tones == Tones::None {
+        &CLASSIC_MARKS
+    } else {
+        look.marks()
+    };
     match state {
         // A clean on and off, not a dim half-state, so it reads the same on
         // every theme and under `NO_COLOR`; hidden, a blank keeps the row still.
-        CallState::Running if !look.lit => (" ", Style::new()),
+        CallState::Running if !look.lit => ("  ", Style::new()),
         CallState::Running => (
             marks.running,
             colour(look.tones, (0xff, 0xff, 0xff), Color::White).add_modifier(Modifier::BOLD),
@@ -865,7 +876,7 @@ fn labelled(
     let lead_cells: usize = lead.iter().map(Span::width).sum();
     let name_cells: usize = name.iter().map(Span::width).sum();
     let column = column.max(name_cells + 1);
-    let indent = lead_cells + 2 + column;
+    let indent = lead_cells + MARK + 1 + column;
     let mut first = lead;
     first.extend([Span::styled(mark, mark_style), pad(1)]);
     first.extend(name);
@@ -1205,7 +1216,7 @@ fn line_count(count: usize) -> Option<String> {
     }
 }
 
-/// A call as one block: `✓ Bash: argument` with its status after it, then
+/// A call as one block: `{} Bash: argument` with its status after it, then
 /// its output hung from a gutter; an edit's output is its diff.
 fn present_call(
     tool: &str,
@@ -1255,7 +1266,12 @@ fn present_call(
     };
     ride(&mut lines, status, under, width);
     let glyph = gutter(look);
-    let gutter = || vec![pad(RAIL), Span::styled(format!("{glyph} "), quiet)];
+    let gutter = || {
+        vec![
+            pad(RAIL),
+            Span::styled(format!("{glyph:<0$}", BODY - RAIL), quiet),
+        ]
+    };
     let lang = if edit {
         syntax::lang_for_path(argument)
     } else {
@@ -1424,7 +1440,7 @@ fn shown(len: usize, keep: &[usize]) -> Vec<Shown> {
 }
 
 /// A code-mode program as one block, drawn as the program it is rather
-/// than as a list of calls. The head, `✓ Codemode: description` with its
+/// than as a list of calls. The head, `{} Codemode: description` with its
 /// call count; the source, numbered and coloured, with each call site hung
 /// under the line that makes its calls, `╰ ✓ tools.read ×12` and a meter of
 /// how they stand, and a `▶` in the gutter of the line whose calls are in
@@ -1480,12 +1496,15 @@ fn present_script(
             vec![
                 pad(RAIL),
                 Span::styled(
-                    format!("{} ", marks.active),
+                    format!("{:<1$}", marks.active, BODY - RAIL),
                     accent(look.tones).add_modifier(Modifier::BOLD),
                 ),
             ]
         } else {
-            vec![pad(RAIL), Span::styled(format!("{glyph} "), dim())]
+            vec![
+                pad(RAIL),
+                Span::styled(format!("{glyph:<0$}", BODY - RAIL), dim()),
+            ]
         }
     };
     for item in shown(source.len(), &anchors) {
@@ -1595,8 +1614,8 @@ fn site_state(site: &Site) -> CallState {
     }
 }
 
-/// One call site under its line: `╰ ✓ tools.glob  argument  note` for a
-/// single call, and for several, `╰ ● tools.read ×12`, a meter with a cell
+/// One call site under its line: `╰ {} tools.glob  argument  note` for a
+/// single call, and for several, `╰ {} tools.read ×12`, a meter with a cell
 /// per call, and how many are done, running, failed, or stopped, with the
 /// failures listed under it. `rail` opens every row; `offset` is the cells
 /// from the end of `rail` to the code column.
@@ -1679,7 +1698,7 @@ fn present_site(
         }
     }
     let mut under = rest.clone();
-    under.push(pad(2));
+    under.push(pad(MARK + 1));
     ride(&mut rows, tally, under.clone(), width);
     // The failures are the news; each is listed with its error.
     let failures: Vec<&&Nested> = site
@@ -1693,7 +1712,7 @@ fn present_site(
         first.extend([Span::styled(mark, mark_style), pad(1)]);
         let indent: usize = first.iter().map(Span::width).sum();
         let mut wrap = rest.clone();
-        wrap.push(pad(2));
+        wrap.push(pad(MARK + 1));
         let mut found = hang(
             &call.argument,
             width,
@@ -2294,19 +2313,19 @@ mod tests {
         // The tool name has its own column; the status follows the argument.
         assert_eq!(
             all[user + 4],
-            r#"  ✓ Bash: rg -n "commands.register" -g '*.ts'  2 lines"#
+            r#"  +  Bash: rg -n "commands.register" -g '*.ts'  2 lines"#
         );
         assert!(
-            all[user + 5] == "  │ packages/app/src/controller.ts:45:  commands.register(open);"
+            all[user + 5] == "  │  packages/app/src/controller.ts:45:  commands.register(open);"
         );
         assert!(
-            all[user + 6] == "  │ packages/app/src/controller.ts:52:  commands.register(close);"
+            all[user + 6] == "  │  packages/app/src/controller.ts:52:  commands.register(close);"
         );
         // Each call stands apart from the next, so its box does too.
         assert_eq!(all[user + 7], "");
         assert_eq!(
             all[user + 8],
-            "  ✓ Read: packages/app/src/controller.ts  412 lines"
+            "  +  Read: packages/app/src/controller.ts  412 lines"
         );
         assert_eq!(all[user + 9], "");
         assert!(all[user + 10].starts_with("  Two registrations"));
@@ -2329,15 +2348,18 @@ mod tests {
             .unwrap();
         let lines = text(&present(&rows, index, 60, PLAIN));
         assert_eq!(lines[0], "");
-        assert_eq!(lines[1], "  ✗ Bash: bun test tests/parser.test.ts   exit 1");
+        assert_eq!(
+            lines[1],
+            "  x  Bash: bun test tests/parser.test.ts   exit 1"
+        );
         assert_eq!(
             lines[2..],
             [
-                "  │ bun test v1.3.0",
-                "  │ tests/parser.test.ts:",
-                "  │ ⋯ 4 more lines",
-                "  │  3 pass",
-                "  │  1 fail",
+                "  │  bun test v1.3.0",
+                "  │  tests/parser.test.ts:",
+                "  │  ⋯ 4 more lines",
+                "  │   3 pass",
+                "  │   1 fail",
             ]
         );
         let lines = |n: usize| (0..n).map(|i| format!("l{i}")).collect::<Vec<_>>();
@@ -2368,8 +2390,8 @@ mod tests {
             "{all:#?}"
         );
         assert!(all.iter().any(|l| l.starts_with("> Run the parser tests")));
-        assert!(all.iter().any(|l| l.starts_with("  x Bash: bun test")));
-        assert!(all.iter().any(|l| l == "  | ... 4 more lines"));
+        assert!(all.iter().any(|l| l.starts_with("  x  Bash: bun test")));
+        assert!(all.iter().any(|l| l == "  |  ... 4 more lines"));
     }
 
     #[test]
@@ -2392,14 +2414,14 @@ mod tests {
             output: vec!["0123456789abcdef".into()],
         }];
         assert_eq!(
-            text(&present(&call, 0, 18, PLAIN)),
+            text(&present(&call, 0, 19, PLAIN)),
             [
-                "  ● Bash: one two",
-                "          three",
-                "          four",
-                "          1 line",
-                "  │ 0123456789abcd",
-                "  │ ef",
+                "  *  Bash: one two",
+                "           three",
+                "           four",
+                "           1 line",
+                "  │  0123456789abcd",
+                "  │  ef",
             ]
         );
     }
@@ -2508,24 +2530,24 @@ mod tests {
             lines,
             [
                 String::new(),
-                then("  ✓ Codemode: Find TODOs", "13 calls · 1 failed"),
-                "  │ 1  const found = [];".into(),
-                r#"  │ 2  for (const path of await tools.glob({ pattern: "src/**/*.ts" })) {"#
+                then("  +  Codemode: Find TODOs", "13 calls · 1 failed"),
+                "  │  1  const found = [];".into(),
+                r#"  │  2  for (const path of await tools.glob({ pattern: "src/**/*.ts" })) {"#
                     .into(),
                 // A call site hangs from the code column, under its line.
-                then("  │    ╰ ✓ tools.glob  src/**/*.ts", "12 files"),
-                "  │ 3    try {".into(),
-                r#"  │ 4      if ((await tools.read({ path })).includes("TODO")) found.push(path);"#
+                then("  │     ╰ +  tools.glob  src/**/*.ts", "12 files"),
+                "  │  3    try {".into(),
+                r#"  │  4      if ((await tools.read({ path })).includes("TODO")) found.push(path);"#
                     .into(),
                 // Twelve calls through one binding are one site: a meter
                 // with a cell per call, a tally, and the failure listed.
-                then("  │    ╰ ✓ tools.read ×12  ━━━━━✗━━━━━━", "11 done · 1 failed"),
-                then("  │      ✗ src/m5.ts", "Permission denied"),
-                "  │ 5    } catch (error) {".into(),
-                "  │ 6      console.log(`skipped ${path}: ${error.message}`);".into(),
-                "  │ 7    }".into(),
-                "  │ 8  }".into(),
-                "  │ 9  return found;".into(),
+                then("  │     ╰ +  tools.read ×12  ━━━━━✗━━━━━━", "11 done · 1 failed"),
+                then("  │       x  src/m5.ts", "Permission denied"),
+                "  │  5    } catch (error) {".into(),
+                "  │  6      console.log(`skipped ${path}: ${error.message}`);".into(),
+                "  │  7    }".into(),
+                "  │  8  }".into(),
+                "  │  9  return found;".into(),
                 // Apart, all the model reads back, named as the program wrote it.
                 String::new(),
                 "  console  skipped src/m5.ts: Permission denied".into(),
@@ -2586,9 +2608,9 @@ mod tests {
         assert_eq!(
             text(&present(&rows, 0, 60, PLAIN)),
             [
-                "  ✗ Codemode: Count lines",
-                r#"  │ 1  console.log("start");"#,
-                r#"  │ 2  throw new Error("boom");"#,
+                "  x  Codemode: Count lines",
+                r#"  │  1  console.log("start");"#,
+                r#"  │  2  throw new Error("boom");"#,
                 "",
                 "  console  start",
                 "  error    Error: boom",
@@ -2618,15 +2640,15 @@ mod tests {
         assert_eq!(
             lines[1..],
             [
-                "  │  1  step1();",
-                "  │  2  step2();",
-                "  │ ⋯ 7 more lines",
+                "  │   1  step1();",
+                "  │   2  step2();",
+                "  │  ⋯ 7 more lines",
                 // The line whose calls are in flight is marked in the gutter.
-                "  ▸ 10  await tools.read({ path });",
-                "  │     ╰ ● tools.read  a.ts",
-                "  │ ⋯ 8 more lines",
-                "  │ 19  step19();",
-                "  │ 20  step20();",
+                "  ▸  10  await tools.read({ path });",
+                "  │      ╰ *  tools.read  a.ts",
+                "  │  ⋯ 8 more lines",
+                "  │  19  step19();",
+                "  │  20  step20();",
             ]
         );
     }
@@ -2639,7 +2661,7 @@ mod tests {
             .iter()
             .position(|l| l.contains("tools.read ×12"))
             .unwrap();
-        assert!(lines[site].starts_with("  │    ╰ ✓ tools.read ×12"));
+        assert!(lines[site].starts_with("  │     ╰ +  tools.read ×12"));
         // The tally moves under the label when it does not fit beside it.
         assert_eq!(
             lines[site + 1].trim_start_matches([' ', '│']),
@@ -2659,7 +2681,7 @@ mod tests {
         assert!(
             ascii
                 .iter()
-                .any(|l| l.starts_with("  |    ` + tools.read ×12  =====x======"))
+                .any(|l| l.starts_with("  |     ` +  tools.read ×12  =====x======"))
         );
     }
 
@@ -2679,10 +2701,10 @@ mod tests {
         let on = present(&rows, 0, 40, look);
         let off = present(&rows, 0, 40, Look { lit: false, ..look });
         // In its box: a padding row, the call, and a padding row.
-        assert_eq!(text(&on), ["", "  ● Bash: bun run build", ""]);
-        assert_eq!(text(&off), ["", "    Bash: bun run build", ""]);
+        assert_eq!(text(&on), ["", "  {} Bash: bun run build", ""]);
+        assert_eq!(text(&off), ["", "     Bash: bun run build", ""]);
         assert_eq!(on[1].width(), off[1].width());
-        let mark = on[1].spans.iter().find(|s| s.content == "●").unwrap();
+        let mark = on[1].spans.iter().find(|s| s.content == "{}").unwrap();
         assert_eq!(mark.style.fg, Some(Color::Rgb(0xff, 0xff, 0xff)));
         // Shown for one pulse, hidden for the next; the loop wakes at each change.
         assert!(lit(Duration::ZERO) && lit(Duration::from_millis(599)));
@@ -2709,9 +2731,9 @@ mod tests {
         assert_eq!(
             text(&present(&rows, 0, 30, PLAIN)),
             [
-                "  ✗ Bash: make",
-                "          error: no rule to",
-                "          make target build"
+                "  x  Bash: make",
+                "           error: no rule to",
+                "           make target build"
             ]
         );
     }
@@ -2813,21 +2835,21 @@ mod tests {
             tones: Tones::TrueColor,
             ..PLAIN
         };
-        let lines = present(&rows, 0, 20, look);
+        let lines = present(&rows, 0, 21, look);
         // Text wraps two cells short of the edge, so the status moves under
         // the argument; the box still fills the row.
         assert_eq!(
             text(&lines),
             [
                 "",
-                "  ✓ Bash: x",
-                "          1 line",
-                "    0123456789abcd",
-                "    efghij",
+                "  {} Bash: x",
+                "           1 line",
+                "     0123456789abcd",
+                "     efghij",
                 ""
             ]
         );
-        assert!(lines.iter().all(|l| l.width() == 20));
+        assert!(lines.iter().all(|l| l.width() == 21));
     }
 
     /// The foreground colour of the span drawing `content` among `lines`.
@@ -2893,7 +2915,7 @@ mod tests {
         let lines = present(
             &rows,
             0,
-            24,
+            25,
             Look {
                 tones: Tones::TrueColor,
                 ..PLAIN
@@ -2903,9 +2925,9 @@ mod tests {
             text(&lines),
             [
                 "",
-                "  ✓ Bash: echo \"a long",
-                "          quoted",
-                "          string\"",
+                "  {} Bash: echo \"a long",
+                "           quoted",
+                "           string\"",
                 ""
             ]
         );
@@ -3030,22 +3052,22 @@ mod tests {
             [
                 "",
                 "",
-                "  ✓ Edit: src/parser.ts  +1 -1",
-                "       ⋯ 40 unmodified lines",
-                "    41     const fields = split(line);",
-                "    42 ▎   if (quote) fields.push(rest);",
-                r#"    42 ▎   if (quote) throw new SyntaxError("unterminated quote");"#,
-                "    43     return fields;",
+                "  {} Edit: src/parser.ts  +1 -1",
+                "        ⋯ 40 unmodified lines",
+                "     41     const fields = split(line);",
+                "     42 ▎   if (quote) fields.push(rest);",
+                r#"     42 ▎   if (quote) throw new SyntaxError("unterminated quote");"#,
+                "     43     return fields;",
                 "",
             ]
         );
         let head = &lines[2];
         assert!(
-            cell(head, 4).add_modifier.contains(Modifier::BOLD),
+            cell(head, 5).add_modifier.contains(Modifier::BOLD),
             "tool name"
         );
         assert!(
-            cell(head, 10).add_modifier.contains(Modifier::DIM),
+            cell(head, 11).add_modifier.contains(Modifier::DIM),
             "directory"
         );
         let (red, green) = (
@@ -3055,9 +3077,9 @@ mod tests {
         let (removed, added, context) = (&lines[5], &lines[6], &lines[4]);
         // Numbers dim on context, in the change's colour on a changed line;
         // the bar in the change's colour.
-        assert!(cell(context, 4).add_modifier.contains(Modifier::DIM));
-        assert_eq!((cell(removed, 4).fg, cell(removed, 7).fg), (red, red));
-        assert_eq!((cell(added, 4).fg, cell(added, 7).fg), (green, green));
+        assert!(cell(context, 5).add_modifier.contains(Modifier::DIM));
+        assert_eq!((cell(removed, 5).fg, cell(removed, 8).fg), (red, red));
+        assert_eq!((cell(added, 5).fg, cell(added, 8).fg), (green, green));
         // The line is tinted; what changed takes the stronger tint; the
         // code keeps its syntax colour.
         let line_tint = Some(Color::Rgb(0x21, 0x3a, 0x2c));
@@ -3086,10 +3108,10 @@ mod tests {
         let rows = sample_session();
         let index = edit_index(&rows);
         let plain = text(&present(&rows, index, 80, PLAIN));
-        assert_eq!(plain[4], "  │ 42 -   if (quote) fields.push(rest);");
+        assert_eq!(plain[4], "  │  42 -   if (quote) fields.push(rest);");
         assert_eq!(
             plain[5],
-            r#"  │ 42 +   if (quote) throw new SyntaxError("unterminated quote");"#
+            r#"  │  42 +   if (quote) throw new SyntaxError("unterminated quote");"#
         );
         let classic = text(&present(
             &rows,
@@ -3101,7 +3123,7 @@ mod tests {
                 lit: true,
             },
         ));
-        assert!(classic[4].starts_with("  | 42 -"));
+        assert!(classic[4].starts_with("  |  42 -"));
         // Sixteen colours: the changed line takes its colour, the changed
         // part is bold.
         let ansi = present(
@@ -3135,11 +3157,11 @@ mod tests {
         // 104 columns leave the call 102 cells; each side takes 47.
         let wide = present(&rows, index, 104, look);
         let side =
-            |left: &str, right: &str| format!("    {left:<47} │ {right}").trim_end().to_owned();
+            |left: &str, right: &str| format!("     {left:<47} │ {right}").trim_end().to_owned();
         assert_eq!(
             text(&wide)[3..8],
             [
-                "       ⋯ 40 unmodified lines".to_owned(),
+                "        ⋯ 40 unmodified lines".to_owned(),
                 side(
                     "41     const fields = split(line);",
                     "41     const fields = split(line);"
@@ -3163,7 +3185,7 @@ mod tests {
         assert_eq!(cell(&wide[6], 60).bg, Some(Color::Rgb(0x2a, 0x5e, 0x3f)));
         // Narrower, the same edit is unified.
         let narrow = text(&present(&rows, index, 100, look));
-        assert_eq!(narrow[5], "    42 ▎   if (quote) fields.push(rest);");
+        assert_eq!(narrow[5], "     42 ▎   if (quote) fields.push(rest);");
     }
 
     #[test]
@@ -3177,11 +3199,11 @@ mod tests {
             output,
         }];
         let lines = text(&present(&rows, 0, 80, PLAIN));
-        assert_eq!(lines[0], "  ✓ Write: notes.txt  +30");
+        assert_eq!(lines[0], "  +  Write: notes.txt  +30");
         assert_eq!(lines.len(), 1 + DIFF_ROWS + 1);
-        assert_eq!(lines.last().unwrap(), "  │    ⋯ 14 more lines");
-        assert_eq!(lines[1], "  │  1 + line 0");
-        assert_eq!(lines[DIFF_ROWS], "  │ 16 + line 15");
+        assert_eq!(lines.last().unwrap(), "  │     ⋯ 14 more lines");
+        assert_eq!(lines[1], "  │   1 + line 0");
+        assert_eq!(lines[DIFF_ROWS], "  │  16 + line 15");
     }
 
     #[test]
@@ -3277,7 +3299,7 @@ mod tests {
         for (tool, coloured) in [("Bash", true), ("Read", false)] {
             let rows = vec![call(tool)];
             let lines = present(&rows, 0, 40, look);
-            assert_eq!(lines[2].to_string().trim_end(), "    red    end", "{tool}");
+            assert_eq!(lines[2].to_string().trim_end(), "     red    end", "{tool}");
             let red = lines[2]
                 .spans
                 .iter()

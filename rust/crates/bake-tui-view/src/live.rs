@@ -326,9 +326,9 @@ mod tests {
             .iter()
             .map(|line| line.spans.iter().map(|s| s.content.as_ref()).collect())
             .filter(|line: &String| {
-                !line.starts_with("  │ ")
-                    || line.starts_with("  │    ╰")
-                    || line.starts_with("  │      ")
+                !line.starts_with("  │  ")
+                    || line.starts_with("  │     ╰")
+                    || line.starts_with("  │       ")
             })
             .collect()
     }
@@ -338,11 +338,11 @@ mod tests {
         assert_eq!(
             drawn(at(ms(900))),
             [
-                "  ● Codemode: Read every manifest, then build  13 calls · 9 running",
-                "  │    ╰ ✓ tools.glob  packages/*/package.json  12 files",
-                "  ▸ 3    paths.map((path) => tools.read({ path }).catch(() => \"\")),",
-                "  │    ╰ ● tools.read ×12  ━╌╌━╌╌╌✗╌╌╌╌  2 done · 9 running · 1 failed",
-                "  │      ✗ packages/goal/package.json  Permission denied",
+                "  *  Codemode: Read every manifest, then build  13 calls · 9 running",
+                "  │     ╰ +  tools.glob  packages/*/package.json  12 files",
+                "  ▸  3    paths.map((path) => tools.read({ path }).catch(() => \"\")),",
+                "  │     ╰ *  tools.read ×12  ━╌╌━╌╌╌✗╌╌╌╌  2 done · 9 running · 1 failed",
+                "  │       x  packages/goal/package.json  Permission denied",
             ]
         );
     }
@@ -353,10 +353,10 @@ mod tests {
         assert_eq!(
             lines,
             [
-                "  ✗ Codemode: Read every manifest, then build  13 calls · 1 failed   interrupted ",
-                "  │    ╰ ✓ tools.glob  packages/*/package.json  12 files",
-                "  │    ╰ ✗ tools.read ×12  ━╳╳━╳╳╳✗╳╳╳╳  2 done · 1 failed · 9 interrupted",
-                "  │      ✗ packages/goal/package.json  Permission denied",
+                "  x  Codemode: Read every manifest, then build  13 calls · 1 failed   interrupted ",
+                "  │     ╰ +  tools.glob  packages/*/package.json  12 files",
+                "  │     ╰ x  tools.read ×12  ━╳╳━╳╳╳✗╳╳╳╳  2 done · 1 failed · 9 interrupted",
+                "  │       x  packages/goal/package.json  Permission denied",
             ]
         );
     }
