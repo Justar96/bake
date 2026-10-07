@@ -1523,6 +1523,17 @@ pub struct Transcript {
     pub height: usize,
     /// How the last frame drew, so measuring matches drawing.
     pub look: Look,
+    /// Each row's height at `measured`, for the scrollbar. Measured once per
+    /// width and look, and again for rows appended or changed since.
+    heights: Vec<usize>,
+    measured: Option<(usize, Tones, bool)>,
+}
+
+/// Where the scrollbar's thumb sits on its track: its first row and length.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Thumb {
+    pub start: usize,
+    pub len: usize,
 }
 
 impl Transcript {
@@ -1539,6 +1550,97 @@ impl Transcript {
 
     fn count(&self, index: usize) -> usize {
         self.lines(index).len()
+    }
+
+    /// Brings the row heights up to date: all of them after a width or look
+    /// change, and otherwise only rows appended since.
+    fn measure(&mut self) {
+        let key = (self.width, self.look.tones, self.look.classic);
+        if self.measured != Some(key) {
+            self.heights.clear();
+            self.measured = Some(key);
+        }
+        self.heights.truncate(self.rows.len());
+        for index in self.heights.len()..self.rows.len() {
+            let height = self.count(index);
+            self.heights.push(height);
+        }
+    }
+
+    /// Marks row `index` as changed, so its height is measured again.
+    pub fn touched(&mut self, index: usize) {
+        self.heights.truncate(index);
+    }
+
+    /// Lines in the whole transcript, as last measured.
+    pub fn total(&self) -> usize {
+        self.heights.iter().sum()
+    }
+
+    /// The line the viewport's top is on, counted from the start.
+    pub fn offset(&self) -> usize {
+        let top = self.top();
+        self.heights.iter().take(top.row).sum::<usize>() + top.line
+    }
+
+    /// Moves the viewport so its top is line `offset` from the start;
+    /// reaching the bottom follows output.
+    pub fn jump(&mut self, offset: usize) {
+        let mut left = offset;
+        let mut anchor = Anchor::default();
+        for (row, &height) in self.heights.iter().enumerate() {
+            if left < height {
+                anchor = Anchor { row, line: left };
+                break;
+            }
+            left -= height;
+            anchor = Anchor {
+                row: row + 1,
+                line: 0,
+            };
+        }
+        if anchor.row >= self.rows.len() {
+            self.follow();
+            return;
+        }
+        self.anchor = Some(anchor);
+        self.settle();
+    }
+
+    /// The scrollbar's thumb on a track of `track` rows, or `None` when the
+    /// whole transcript fits. Its length is the visible share, at least one
+    /// row; following output, it rests at the bottom.
+    pub fn thumb(&self, track: usize) -> Option<Thumb> {
+        let total = self.total();
+        if track == 0 || total <= self.height {
+            return None;
+        }
+        let len = (track * self.height / total).clamp(1, track);
+        let room = track - len;
+        let scroll = total - self.height;
+        let start = if self.following() {
+            room
+        } else {
+            (self.offset().min(scroll) * room)
+                .div_ceil(scroll.max(1))
+                .min(room)
+        };
+        Some(Thumb { start, len })
+    }
+
+    /// The offset that puts the thumb's middle on track row `row`, for a
+    /// click or a drag on the scrollbar.
+    pub fn offset_at(&self, row: usize, track: usize) -> usize {
+        let Some(thumb) = self.thumb(track) else {
+            return 0;
+        };
+        let room = track - thumb.len;
+        if room == 0 {
+            return 0;
+        }
+        let start = row.saturating_sub(thumb.len / 2).min(room);
+        let scroll = self.total() - self.height;
+        start * scroll / room
     }
 
     /// The top of the viewport while following: walks up from the newest
@@ -1737,6 +1839,7 @@ impl Transcript {
         self.width = width;
         self.height = height;
         self.look = look;
+        self.measure();
         if let Some(anchor) = self.anchor {
             let count = self.count(anchor.row.min(self.rows.len().saturating_sub(1)));
             self.anchor = Some(Anchor {
@@ -2607,5 +2710,50 @@ mod tests {
         assert_eq!(lines.last().unwrap(), "  │    ⋯ 14 more lines");
         assert_eq!(lines[1], "  │  1 + line 0");
         assert_eq!(lines[DIFF_ROWS], "  │ 16 + line 15");
+    }
+
+    #[test]
+    fn the_thumb_shows_the_visible_share_and_where_it_is() {
+        let mut t = session(80, 10);
+        let total = t.total();
+        assert!(total > 40, "{total}");
+        let track = 10;
+        // Following: at the bottom, as long as the visible share.
+        let bottom = t.thumb(track).unwrap();
+        assert_eq!(bottom.len, (track * 10 / total).max(1));
+        assert_eq!(bottom.start + bottom.len, track);
+        // At the start: at the top.
+        t.to_start();
+        assert_eq!(t.thumb(track).unwrap().start, 0);
+        assert_eq!(t.offset(), 0);
+        // A jump lands where asked, and a jump past the end follows output.
+        t.jump(12);
+        assert_eq!(t.offset(), 12);
+        assert!(!t.following());
+        t.jump(total);
+        assert!(t.following());
+        // A click at the track's foot follows; at its head, the start.
+        t.jump(t.offset_at(track - 1, track));
+        assert!(t.following());
+        t.jump(t.offset_at(0, track));
+        assert_eq!(t.offset(), 0);
+        // A short history has no scrollbar.
+        let mut short = Transcript::new(vec![Row::Answer("only".into())]);
+        short.resize(80, 10, PLAIN);
+        assert_eq!(short.thumb(10), None);
+    }
+
+    #[test]
+    fn a_changed_row_is_measured_again() {
+        let mut t = session(80, 10);
+        let before = t.total();
+        let last = t.rows.len() - 1;
+        t.rows[last] = Row::Answer("short".into());
+        t.touched(last);
+        t.resize(80, 10, PLAIN);
+        assert!(t.total() < before);
+        t.rows.push(Row::Answer("more".into()));
+        t.resize(80, 10, PLAIN);
+        assert_eq!(t.heights.len(), t.rows.len());
     }
 }

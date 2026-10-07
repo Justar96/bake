@@ -49,7 +49,9 @@ pub const FAILED: &str = "failed";
 pub const MORE_CALLS: &str = "more calls";
 /// The transcript's hint row: its keys while following output, and the way
 /// back while reading history.
-pub const HINT_FOLLOWING: &[(&str, &str)] = &[("PgUp", "scroll"), ("Ctrl+↑", "prompts")];
+pub const HINT_FOLLOWING: &[(&str, &str)] = &[("Wheel/PgUp", "scroll"), ("Ctrl+↑", "prompts")];
+/// While reading history, how much lies below: `12 lines below`.
+pub const LINES_BELOW: &str = "lines below";
 pub const HINT_LATEST: &str = "↓ Latest · Ctrl+End";
 pub const BELOW: &str = "below";
 pub const NO_MODEL: &str = "Model connection is not available in this preview. Your draft is kept.";

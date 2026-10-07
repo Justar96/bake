@@ -73,7 +73,7 @@ class Preview {
     await this.wait('Rust preview ready', () => this.terminal.buffer.active.type === 'alternate'
       // The sample session's newest lines and the composer show on the first frame.
       && this.screen.includes('rejects it before splitting.') && this.screen.includes('❯ Type a draft')
-      && this.raw.includes('\x1b[?2004h'))
+      && this.raw.includes('\x1b[?2004h') && this.raw.includes('\x1b[?1000h\x1b[?1002h\x1b[?1006h'))
     assert.notDeepEqual(this.modes(), this.initialModes, 'preview did not acquire raw mode')
   }
 
@@ -118,6 +118,8 @@ class Preview {
     assert.equal(this.terminal.buffer.active.type, 'normal', 'alternate screen was not released')
     assert(this.raw.lastIndexOf('\x1b[?2004l') > this.raw.lastIndexOf('\x1b[?2004h'), 'paste mode was not released')
     assert(this.raw.lastIndexOf('\x1b[?7h') > this.raw.lastIndexOf('\x1b[?7l'), 'autowrap was not restored')
+    for (const mode of ['1000', '1002', '1006'])
+      assert(this.raw.lastIndexOf(`\x1b[?${mode}l`) > this.raw.lastIndexOf(`\x1b[?${mode}h`), `mouse mode ${mode} was not released`)
     assert(this.raw.lastIndexOf('\x1b[?2026l') > this.raw.lastIndexOf('\x1b[?2026h'), 'synchronized output was left open')
     assert(this.raw.lastIndexOf('\x1b[?25h') > this.raw.lastIndexOf('\x1b[?25l'), 'cursor was not restored')
     assert.throws(() => process.kill(this.process.pid, 0), 'application remains alive after exit')
@@ -215,6 +217,23 @@ await scenario('transcript pages, jumps between prompts, and follows output agai
   await preview.quit()
 })
 
+await scenario('the wheel scrolls the transcript and the scrollbar takes clicks and drags', async (preview) => {
+  // SGR reports: button 64 is the wheel toward older output, 65 toward newer; 0 the primary button.
+  const sgr = (button: number, column: number, row: number, press = true) => `\x1b[<${button};${column};${row}${press ? 'M' : 'm'}`
+  await preview.wait('scrollbar', () => preview.screen.split('\n').some(line => line.endsWith('┃') || line.endsWith('#')))
+  preview.send(sgr(64, 10, 5).repeat(3))
+  await preview.wait('wheel scrolled back', () => /↓ Latest · Ctrl\+End +\d+ lines below/u.test(preview.screen))
+  preview.send(sgr(65, 10, 5).repeat(40))
+  await preview.wait('wheel back to the newest line', () => preview.screen.includes('Wheel/PgUp scroll'))
+  // A press at the head of the scrollbar's track goes to the start; the bar is the last column.
+  preview.send(sgr(0, 80, 1) + sgr(0, 80, 1, false))
+  await preview.wait('scrollbar press at the head', () => /^ {2}Bake · Rust preview/mu.test(preview.screen))
+  // Dragged from the head past the foot, the transcript follows output again.
+  preview.send(sgr(0, 80, 1) + sgr(32, 40, 30) + sgr(0, 40, 30, false))
+  await preview.wait('scrollbar dragged to the foot', () => preview.screen.includes('Wheel/PgUp scroll'))
+  await preview.quit()
+})
+
 await scenario('sample activity is text that advances on its own, then compacts, and stops', async (preview) => {
   preview.send('\x14')
   await preview.wait('sample turn', () => /^ {2}\S+… {2}thinking · 0s +no model/mu.test(preview.screen) && preview.screen.includes('Esc interrupts')
@@ -227,7 +246,7 @@ await scenario('sample activity is text that advances on its own, then compacts,
   await preview.wait('elapsed time advances', () => preview.screen.includes('thinking · 1s'))
   assert(!/[\u2800-\u28ff]/u.test(preview.screen), 'the activity drew a spinner glyph')
   preview.send('\x14')
-  await preview.wait('call settles with the turn', () => /^ {2}✓ Bash: bun run build +exit 0 *$/mu.test(preview.screen))
+  await preview.wait('call settles with the turn', () => /^ {2}✓ Bash: bun run build +exit 0 *[┃│]?$/mu.test(preview.screen))
   await preview.wait('sample compaction', () => preview.screen.includes('Compacting history…  preparing · 0s')
     && preview.screen.includes('Compacting… Enter queues · Esc cancels') && !preview.screen.includes('Esc interrupts'))
   preview.send('\x1b')

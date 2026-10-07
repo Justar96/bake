@@ -22,9 +22,11 @@ use bake_tui_view::frame;
 use bake_tui_view::render::render;
 use bake_tui_view::state::{Effect, Msg, State, update};
 use bake_tui_view::status;
+use bake_tui_view::wheel::{self, WheelSteps};
 use crossterm::cursor::Show;
 use crossterm::event::{self, DisableBracketedPaste, EnableBracketedPaste};
 use crossterm::execute;
+use crossterm::style::Print;
 use crossterm::terminal::{
     BeginSynchronizedUpdate, Clear, ClearType, DisableLineWrap, EnableLineWrap,
     EndSynchronizedUpdate, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
@@ -44,6 +46,15 @@ const PASTE: u8 = 1 << 3;
 const NO_WRAP: u8 = 1 << 4;
 /// Set while a frame is between synchronized-update markers.
 const SYNC: u8 = 1 << 5;
+const MOUSE: u8 = 1 << 6;
+
+/// Report presses, releases, and the wheel (1000), and motion while a button
+/// is held (1002), in SGR encoding (1006), which has no coordinate limit; as
+/// the TypeScript TUI requests. Crossterm's own `EnableMouseCapture` also
+/// asks for every motion (1003), which floods the loop with reports. Native
+/// selection stays on Shift-drag, or Option-drag on macOS.
+const MOUSE_ON: &str = "\x1b[?1000h\x1b[?1002h\x1b[?1006h";
+const MOUSE_OFF: &str = "\x1b[?1006l\x1b[?1002l\x1b[?1000l";
 
 /// Modes the live session changed. Process-wide so the panic hook can restore
 /// them before the panic message is printed.
@@ -105,6 +116,8 @@ impl TerminalSession {
             execute!(out, EnterAlternateScreen, Clear(ClearType::All))?;
             MODES.fetch_or(PASTE, Ordering::SeqCst);
             execute!(out, EnableBracketedPaste)?;
+            MODES.fetch_or(MOUSE, Ordering::SeqCst);
+            execute!(out, Print(MOUSE_ON))?;
             // A row the terminal draws wider than measured is clipped at the
             // right edge instead of wrapping onto the row below.
             MODES.fetch_or(NO_WRAP, Ordering::SeqCst);
@@ -183,6 +196,9 @@ fn restore() -> io::Result<()> {
     if modes & NO_WRAP != 0 {
         keep(execute!(out, EnableLineWrap));
     }
+    if modes & MOUSE != 0 {
+        keep(execute!(out, Print(MOUSE_OFF)));
+    }
     if modes & PASTE != 0 {
         keep(execute!(out, DisableBracketedPaste));
     }
@@ -222,12 +238,15 @@ pub fn run_preview() -> io::Result<PreviewExit> {
     let env = |name: &str| std::env::var(name).ok();
     let mut state = State::new(frame::resolve(env, cfg!(windows)), Tones::resolve(env));
     state.status.cwd = working_directory(env);
+    state.wheel = WheelSteps::new(wheel::reports(env, cfg!(target_os = "macos")));
     state.status.branch = std::env::current_dir()
         .ok()
         .and_then(|cwd| git::branch(&cwd));
+    // One clock for the loop's ticks and the reader's timestamps.
+    let clock = Instant::now();
     // Started only once raw mode is on, so it never reads cooked input.
-    let outcome = Reader::start(sender).and_then(|reader| {
-        let outcome = run_loop(&mut session, &mut state, &inputs, Instant::now());
+    let outcome = Reader::start(sender, clock).and_then(|reader| {
+        let outcome = run_loop(&mut session, &mut state, &inputs, clock);
         // Joined before the terminal leaves raw mode, so it reads nothing
         // meant for the shell.
         let stopped = reader.stop();
@@ -311,12 +330,12 @@ struct Reader {
 }
 
 impl Reader {
-    fn start(sender: Sender<Source>) -> io::Result<Self> {
+    fn start(sender: Sender<Source>, clock: Instant) -> io::Result<Self> {
         let stop = Arc::new(AtomicBool::new(false));
         let flag = Arc::clone(&stop);
         let thread = thread::Builder::new()
             .name("bake-tui-input".into())
-            .spawn(move || read_input(Stopped(sender), &flag))?;
+            .spawn(move || read_input(Stopped(sender), &flag, clock))?;
         Ok(Self {
             stop,
             thread: Some(thread),
@@ -355,7 +374,7 @@ impl Drop for Stopped {
     }
 }
 
-fn read_input(out: Stopped, stop: &AtomicBool) {
+fn read_input(out: Stopped, stop: &AtomicBool, clock: Instant) {
     let fail = |err| {
         let _ = out.0.send(Source::Failed(err));
     };
@@ -367,7 +386,7 @@ fn read_input(out: Stopped, stop: &AtomicBool) {
         }
         match event::read() {
             Ok(event) => {
-                if let Some(msg) = input::decode(event)
+                if let Some(msg) = input::decode(event, clock.elapsed())
                     && out.0.send(Source::Msg(msg)).is_err()
                 {
                     return;

@@ -17,7 +17,9 @@ use crate::editor::{self, display};
 use crate::frame::FrameStyle;
 use crate::layout::{self, Needs};
 use crate::mode::{self, HINT_MIN_COLUMNS};
-use crate::state::{Focus, Notice, Outcome, SAMPLE_AGENTS, SampleAgent, SampleKind, State, agent};
+use crate::state::{
+    Focus, Notice, Outcome, SAMPLE_AGENTS, SampleAgent, SampleKind, ScrollTrack, State, agent,
+};
 use crate::status::{self, Tone};
 use crate::transcript::{self, Look, TagTone};
 
@@ -368,27 +370,49 @@ const HINT_ROW_MIN: u16 = 4;
 fn render_transcript(app: &mut State, area: Rect, buf: &mut Buffer) {
     let hint = area.height >= HINT_ROW_MIN;
     let rows = area.height - u16::from(hint);
+    // The last column is the scrollbar's, whether or not it is drawn, so
+    // the text never reflows when the history outgrows the viewport.
+    let bar = area.width > SCROLLBAR_MIN_WIDTH;
+    let width = area.width - u16::from(bar);
+    let classic = app.frame == FrameStyle::Classic;
     let view = &mut app.transcript;
     view.resize(
-        usize::from(area.width),
+        usize::from(width),
         usize::from(rows),
         Look {
             tones: app.tones,
-            classic: app.frame == FrameStyle::Classic,
+            classic,
             lit: transcript::lit(app.now),
         },
     );
     for (i, content) in view.visible().into_iter().enumerate() {
-        line(
-            buf,
-            Rect::new(area.x, area.y + i as u16, area.width, 1),
-            content,
-        );
+        line(buf, Rect::new(area.x, area.y + i as u16, width, 1), content);
     }
+    let thumb = bar.then(|| view.thumb(usize::from(rows))).flatten();
+    app.track = thumb.map(|_| ScrollTrack {
+        column: area.x + width,
+        top: area.y,
+        rows,
+    });
+    if let Some(thumb) = thumb {
+        let (glyphs, styles) = scrollbar_look(app.tones, classic, app.dragging);
+        for i in 0..usize::from(rows) {
+            let on = (thumb.start..thumb.start + thumb.len).contains(&i);
+            let (glyph, style) = if on {
+                (glyphs.0, styles.0)
+            } else {
+                (glyphs.1, styles.1)
+            };
+            buf[(area.x + width, area.y + i as u16)]
+                .set_symbol(glyph)
+                .set_style(style);
+        }
+    }
+    let view = &app.transcript;
     if !hint {
         return;
     }
-    let row = Rect::new(area.x, area.y + rows, area.width, 1);
+    let row = Rect::new(area.x, area.y + rows, width, 1);
     if view.following() {
         if !view.more_above() {
             return;
@@ -402,17 +426,59 @@ fn render_transcript(app: &mut State, area: Rect, buf: &mut Buffer) {
             spans.push(Span::styled(format!(" {does}"), dim()));
         }
         let hint = Line::from(spans);
-        let width = hint.width() as u16;
-        if width <= area.width {
+        let cells = hint.width() as u16;
+        if cells <= width {
             line(
                 buf,
-                Rect::new(area.x + area.width - width, row.y, width, 1),
+                Rect::new(area.x + width - cells, row.y, cells, 1),
                 hint,
             );
         }
     } else {
+        // Reading: the way back on the left, how far below on the right.
         line(buf, row, Line::styled(copy::HINT_LATEST, accent()));
+        let below = view.total().saturating_sub(view.offset() + view.height);
+        let count = Line::styled(format!("{below} {}", copy::LINES_BELOW), dim());
+        let cells = count.width() as u16;
+        if usize::from(cells) + copy::HINT_LATEST.width() + 2 <= usize::from(width) {
+            line(
+                buf,
+                Rect::new(area.x + width - cells, row.y, cells, 1),
+                count,
+            );
+        }
     }
+}
+
+/// Columns the transcript needs before it gives one to the scrollbar.
+const SCROLLBAR_MIN_WIDTH: u16 = 20;
+
+/// The scrollbar's glyphs and styles, thumb then track. The thumb is a heavy
+/// rule on a thin one, grey on dark grey, and accented while dragged; under
+/// `NO_COLOR` the thumb is bold and the track dim; the classic frame draws
+/// ASCII.
+fn scrollbar_look(
+    tones: Tones,
+    classic: bool,
+    dragging: bool,
+) -> ((&'static str, &'static str), (Style, Style)) {
+    let glyphs = if classic { ("#", "|") } else { ("┃", "│") };
+    let styles = match tones {
+        Tones::TrueColor => (
+            Style::new().fg(if dragging {
+                Color::Rgb(0x0e, 0xa5, 0xe9)
+            } else {
+                Color::Rgb(0x9c, 0xa3, 0xaf)
+            }),
+            Style::new().fg(Color::Rgb(0x37, 0x41, 0x51)),
+        ),
+        Tones::Ansi => (
+            Style::new().fg(if dragging { Color::Cyan } else { Color::Gray }),
+            Style::new().fg(Color::DarkGray),
+        ),
+        Tones::None => (Style::new().add_modifier(Modifier::BOLD), dim()),
+    };
+    (glyphs, styles)
 }
 
 fn render_body(app: &mut State, area: Rect, buf: &mut Buffer) {
@@ -576,7 +642,7 @@ mod tests {
     use crate::keys::{Key, KeyInput, Mods};
     use std::time::Duration;
 
-    use crate::state::{Msg, SampleActivity, update};
+    use crate::state::{Mouse, MouseKind, Msg, SampleActivity, update};
 
     /// Columns where boxed draft text starts.
     const TEXT_X: u16 = 4;
@@ -632,7 +698,7 @@ mod tests {
             // The transcript follows the sample session's newest line.
             assert!(
                 rows.iter()
-                    .any(|r| r.trim_end().ends_with("rejects it before splitting."))
+                    .any(|r| r.contains("rejects it before splitting."))
             );
             assert!(rows.iter().any(|r| r.contains("Agents  2 samples")));
             let prompt = row_index(&rows, "│ ❯ Type a draft");
@@ -1127,8 +1193,12 @@ mod tests {
         app.draft.type_text("draft");
         let (rows, _) = draw(&mut app, 80, 16);
         let hint = row_index(&rows, "PgUp scroll");
-        assert!(rows[hint].ends_with("PgUp scroll · Ctrl+↑ prompts"));
-        assert_eq!(rows[hint - 1].trim_end(), "  rejects it before splitting.");
+        assert!(
+            rows[hint]
+                .trim_end()
+                .ends_with("Wheel/PgUp scroll · Ctrl+↑ prompts")
+        );
+        assert!(rows[hint - 1].starts_with("  rejects it before splitting.     "));
         key(&mut app, Key::PageUp);
         let (rows, _) = draw(&mut app, 80, 16);
         assert!(rows.iter().any(|r| r.starts_with("↓ Latest · Ctrl+End")));
@@ -1142,5 +1212,134 @@ mod tests {
         assert!(rows.iter().any(|r| r.contains("PgUp scroll")));
         // Navigation never touches the draft.
         assert_eq!((app.draft.text(), app.draft.caret()), ("draft", 5));
+    }
+
+    fn mouse(kind: MouseKind, column: u16, row: u16, at_ms: u64) -> Msg {
+        Msg::Mouse(Mouse {
+            kind,
+            column,
+            row,
+            alt: false,
+            at: Duration::from_millis(at_ms),
+        })
+    }
+
+    /// The scrollbar column of a drawn screen, top to bottom.
+    fn bar(rows: &[String], track: ScrollTrack) -> String {
+        rows[usize::from(track.top)..usize::from(track.top + track.rows)]
+            .iter()
+            .map(|r| r.chars().nth(usize::from(track.column)).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn the_scrollbar_shows_where_the_viewport_is() {
+        let mut app = State::default();
+        let (rows, _) = draw(&mut app, 80, 24);
+        let track = app.track.expect("the history outgrows the viewport");
+        assert_eq!(track.column, 79);
+        // Following: the thumb rests at the foot of the track.
+        let column = bar(&rows, track);
+        assert!(column.ends_with('┃') && column.starts_with('│'), "{column}");
+        // At the start, at its head; reading, the hint counts what is below.
+        update(&mut app, Msg::Key(KeyInput::new(Key::Home, Mods::CTRL)));
+        let (rows, _) = draw(&mut app, 80, 24);
+        let column = bar(&rows, track);
+        assert!(column.starts_with('┃') && column.ends_with('│'), "{column}");
+        let hint = row_index(&rows, "↓ Latest · Ctrl+End");
+        let below = app.transcript.total() - app.transcript.height;
+        assert!(
+            rows[hint]
+                .trim_end()
+                .ends_with(&format!("{below} lines below"))
+        );
+        // The classic frame draws it in ASCII.
+        let mut classic = State::new(FrameStyle::Classic, Tones::None);
+        let (rows, _) = draw(&mut classic, 80, 24);
+        let column = bar(&rows, classic.track.unwrap());
+        assert!(column.chars().all(|c| c == '#' || c == '|'), "{column}");
+    }
+
+    #[test]
+    fn the_wheel_scrolls_the_transcript_and_steps_the_list() {
+        let mut app = State::default();
+        draw(&mut app, 80, 24);
+        update(&mut app, mouse(MouseKind::WheelUp, 10, 5, 1_000));
+        assert!(!app.transcript.following());
+        let one = app.transcript.offset();
+        update(&mut app, mouse(MouseKind::WheelUp, 10, 5, 2_000));
+        assert_eq!(
+            app.transcript.offset(),
+            one - 1,
+            "a lone notch moves one row"
+        );
+        // Alt moves five times as far.
+        update(
+            &mut app,
+            Msg::Mouse(Mouse {
+                alt: true,
+                ..match mouse(MouseKind::WheelUp, 10, 5, 3_000) {
+                    Msg::Mouse(m) => m,
+                    _ => unreachable!(),
+                }
+            }),
+        );
+        assert_eq!(app.transcript.offset(), one - 6);
+        for at in 0..20 {
+            update(
+                &mut app,
+                mouse(MouseKind::WheelDown, 10, 5, 4_000 + at * 1_000),
+            );
+        }
+        assert!(
+            app.transcript.following(),
+            "down to the bottom follows again"
+        );
+        // In the agent list, the wheel steps the selection.
+        key(&mut app, Key::Tab);
+        update(&mut app, mouse(MouseKind::WheelDown, 10, 5, 40_000));
+        assert_eq!(app.selected, "sample-reviewer");
+        update(&mut app, mouse(MouseKind::WheelUp, 10, 5, 41_000));
+        assert_eq!(app.selected, "sample-explorer");
+    }
+
+    #[test]
+    fn pressing_and_dragging_the_scrollbar_moves_the_transcript() {
+        let mut app = State::default();
+        app.draft.type_text("keep");
+        draw(&mut app, 80, 24);
+        let track = app.track.unwrap();
+        // A press at the head of the track goes to the start.
+        update(&mut app, mouse(MouseKind::Down, track.column, track.top, 0));
+        assert_eq!(app.transcript.offset(), 0);
+        // Dragging follows the pointer, even off the bar, and the thumb is
+        // accented while it is held.
+        update(
+            &mut app,
+            mouse(MouseKind::Drag, 3, track.top + track.rows / 2, 10),
+        );
+        let middle = app.transcript.offset();
+        assert!(middle > 0 && !app.transcript.following());
+        app.tones = Tones::TrueColor;
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|f| render(&mut app, f)).unwrap();
+        let thumb = app.transcript.thumb(usize::from(track.rows)).unwrap();
+        let y = track.top + thumb.start as u16;
+        assert_eq!(
+            terminal.backend().buffer()[(track.column, y)].fg,
+            Color::Rgb(0x0e, 0xa5, 0xe9)
+        );
+        update(
+            &mut app,
+            mouse(MouseKind::Drag, 3, track.top + track.rows + 10, 20),
+        );
+        assert!(app.transcript.following(), "dragged past the foot");
+        // Released, a drag does nothing; a press off the bar does nothing.
+        update(&mut app, mouse(MouseKind::Up, 3, 0, 30));
+        update(&mut app, mouse(MouseKind::Drag, 3, track.top, 40));
+        assert!(app.transcript.following());
+        update(&mut app, mouse(MouseKind::Down, 3, track.top, 50));
+        assert!(app.transcript.following());
+        assert_eq!(app.draft.text(), "keep");
     }
 }

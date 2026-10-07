@@ -12,6 +12,7 @@ use crate::keys::{self, Action, KeyInput, Scope};
 use crate::mode::Mode;
 use crate::status::StatusInput;
 use crate::transcript::{self, CallState, Row, Transcript};
+use crate::wheel::{self, WheelSteps};
 
 /// Everything the frontend applies, in arrival order.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -28,6 +29,41 @@ pub enum Msg {
     /// The current time on the terminal owner's monotonic clock, measured
     /// from when it started.
     Tick(Duration),
+    Mouse(Mouse),
+}
+
+/// A mouse report, at a cell of the screen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Mouse {
+    pub kind: MouseKind,
+    pub column: u16,
+    pub row: u16,
+    /// Alt held: the wheel moves [`wheel::ALT_FACTOR`] times as far.
+    pub alt: bool,
+    /// When the report arrived, on the same clock as [`Msg::Tick`], so the
+    /// wheel's acceleration sees the real gaps between reports in a batch.
+    pub at: Duration,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MouseKind {
+    /// The wheel toward older output.
+    WheelUp,
+    /// The wheel toward newer output.
+    WheelDown,
+    /// The primary button pressed, moved while held, and released.
+    Down,
+    Drag,
+    Up,
+}
+
+/// Where the transcript's scrollbar was last drawn: its column and the rows
+/// of its track.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ScrollTrack {
+    pub column: u16,
+    pub top: u16,
+    pub rows: u16,
 }
 
 /// Requests the terminal owner performs on the view's behalf.
@@ -157,6 +193,12 @@ pub struct State {
     samples: u32,
     /// The transcript row of the sample turn's running call.
     live_call: Option<usize>,
+    /// Rows per wheel report; the terminal owner sets how its terminal reports.
+    pub wheel: WheelSteps,
+    /// The scrollbar as last drawn, for clicks and drags; `None` when hidden.
+    pub track: Option<ScrollTrack>,
+    /// Whether a press on the scrollbar is being dragged.
+    pub(crate) dragging: bool,
 }
 
 impl Default for State {
@@ -185,6 +227,9 @@ impl State {
             window: ComposerWindow::default(),
             samples: 0,
             live_call: None,
+            wheel: WheelSteps::default(),
+            track: None,
+            dragging: false,
         }
     }
 
@@ -232,8 +277,50 @@ pub fn update(state: &mut State, msg: Msg) -> Vec<Effect> {
         },
         Msg::Resize { .. } => {}
         Msg::Tick(now) => state.now = now,
+        Msg::Mouse(mouse) => pointer(state, mouse),
     }
     Vec::new()
+}
+
+/// Applies a mouse report. The wheel scrolls what the arrows would: the
+/// transcript from the composer, the selection in the agent list. A press on
+/// the scrollbar's track moves the transcript there, and dragging follows
+/// the pointer until release, wherever it goes.
+fn pointer(state: &mut State, mouse: Mouse) {
+    let wheel = match mouse.kind {
+        MouseKind::WheelUp => Some(-1),
+        MouseKind::WheelDown => Some(1),
+        _ => None,
+    };
+    if let Some(direction) = wheel {
+        let factor = if mouse.alt { wheel::ALT_FACTOR } else { 1 };
+        let rows = state.wheel.rows(direction, mouse.at) * factor;
+        match state.focus {
+            Focus::Composer if direction < 0 => state.transcript.scroll_up(rows),
+            Focus::Composer => state.transcript.scroll_down(rows),
+            Focus::AgentList => step_selection(state, isize::from(direction)),
+            Focus::Inspect(_) => {}
+        }
+        return;
+    }
+    let Some(track) = state.track.filter(|_| state.focus == Focus::Composer) else {
+        state.dragging = false;
+        return;
+    };
+    let on_track =
+        mouse.column == track.column && (track.top..track.top + track.rows).contains(&mouse.row);
+    match mouse.kind {
+        MouseKind::Down if on_track => state.dragging = true,
+        MouseKind::Drag if state.dragging => {}
+        MouseKind::Up => {
+            state.dragging = false;
+            return;
+        }
+        _ => return,
+    }
+    let row = usize::from(mouse.row.clamp(track.top, track.top + track.rows - 1) - track.top);
+    let offset = state.transcript.offset_at(row, usize::from(track.rows));
+    state.transcript.jump(offset);
 }
 
 fn key(state: &mut State, input: KeyInput) -> Vec<Effect> {
@@ -390,14 +477,15 @@ fn end_turn(state: &mut State, outcome: Outcome) {
     }
     // The turn's call settles with it: done when it completed, failed when
     // Esc stopped it.
+    let live = state.live_call.take();
+    if let Some(index) = live {
+        state.transcript.touched(index);
+    }
     if let Some(Row::Call {
         state: call,
         summary,
         ..
-    }) = state
-        .live_call
-        .take()
-        .and_then(|index| state.transcript.rows.get_mut(index))
+    }) = live.and_then(|index| state.transcript.rows.get_mut(index))
     {
         let (settled, note) = match outcome {
             Outcome::Completed => (CallState::Done, crate::copy::SAMPLE_DONE),
