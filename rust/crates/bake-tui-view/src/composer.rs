@@ -5,10 +5,10 @@
 //! rewraps the draft. The window keeps its position between frames and moves
 //! only when the caret would leave it.
 
-use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
+use ratatui_core::buffer::Buffer;
+use ratatui_core::layout::Rect;
+use ratatui_core::style::{Modifier, Style};
+use ratatui_core::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
 use crate::frame::Glyphs;

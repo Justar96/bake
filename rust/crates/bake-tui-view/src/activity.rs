@@ -8,8 +8,8 @@
 
 use std::time::Duration;
 
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::Span;
+use ratatui_core::style::{Color, Modifier, Style};
+use ratatui_core::text::Span;
 use unicode_segmentation::UnicodeSegmentation;
 
 /// Verbs for a turn in progress; one is chosen per turn. The TypeScript
@@ -57,10 +57,37 @@ const FALLOFF: usize = 2;
 /// Beats the word rests unlit between sweeps.
 const REST: usize = 12;
 
-/// The running orange and the glint it brightens toward, from the
-/// TypeScript palette's `running` and progress `glint` tones.
-const RUNNING: (u8, u8, u8) = (0xf9, 0x73, 0x16);
-const GLINT: (u8, u8, u8) = (0xff, 0xf7, 0xed);
+type Rgb = (u8, u8, u8);
+
+/// What the activity line reports, which decides its colour.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Hue {
+    /// A turn: the TypeScript palette's `running` orange, brightening toward
+    /// its progress `glint`.
+    #[default]
+    Running,
+    /// History compaction: the palette's `compacting` blue, brightening
+    /// toward a lighter blue.
+    Compacting,
+}
+
+impl Hue {
+    /// The resting colour and the glint the band brightens it toward.
+    const fn blend(self) -> (Rgb, Rgb) {
+        match self {
+            Self::Running => ((0xf9, 0x73, 0x16), (0xff, 0xf7, 0xed)),
+            Self::Compacting => ((0x3b, 0x82, 0xf6), (0xdb, 0xea, 0xfe)),
+        }
+    }
+
+    /// The resting and middle ANSI colours; the brightest step is white.
+    const fn ansi(self) -> (Color, Color) {
+        match self {
+            Self::Running => (Color::Yellow, Color::LightYellow),
+            Self::Compacting => (Color::Blue, Color::LightBlue),
+        }
+    }
+}
 
 /// Picks the turn's word from `words`. The choice is deterministic in `seed`,
 /// so one turn keeps one word; it hashes as `activityWord` does.
@@ -137,37 +164,39 @@ impl Tones {
         self != Self::None
     }
 
-    /// The style of a grapheme at `brightness`, from 0 (the running colour)
-    /// to 1 (the glint).
-    pub fn style(self, brightness: f32) -> Style {
+    /// The style of a grapheme in `hue` at `brightness`, from 0 (the
+    /// resting colour) to 1 (the glint).
+    pub fn style(self, hue: Hue, brightness: f32) -> Style {
         match self {
             Self::None => Style::new().add_modifier(Modifier::BOLD),
             Self::TrueColor => {
+                let (rest, glint) = hue.blend();
                 let mix = |from: u8, to: u8| {
                     let value = f32::from(from) + (f32::from(to) - f32::from(from)) * brightness;
                     value.round().clamp(0.0, 255.0) as u8
                 };
                 Style::new().fg(Color::Rgb(
-                    mix(RUNNING.0, GLINT.0),
-                    mix(RUNNING.1, GLINT.1),
-                    mix(RUNNING.2, GLINT.2),
+                    mix(rest.0, glint.0),
+                    mix(rest.1, glint.1),
+                    mix(rest.2, glint.2),
                 ))
             }
             Self::Ansi if brightness > 0.6 => {
                 Style::new().fg(Color::White).add_modifier(Modifier::BOLD)
             }
-            Self::Ansi if brightness > 0.3 => Style::new().fg(Color::LightYellow),
-            Self::Ansi => Style::new().fg(Color::Yellow),
+            Self::Ansi if brightness > 0.3 => Style::new().fg(hue.ansi().1),
+            Self::Ansi => Style::new().fg(hue.ansi().0),
         }
     }
 }
 
-/// `text` as spans, each grapheme styled by the shimmer at `elapsed`. Without
-/// `motion` every grapheme takes the resting style.
+/// `text` as spans, each grapheme styled in `hue` by the shimmer at
+/// `elapsed`. Without `motion` every grapheme takes the resting style.
 pub fn shimmer_spans(
     text: &str,
     elapsed: Duration,
     tones: Tones,
+    hue: Hue,
     motion: bool,
 ) -> Vec<Span<'static>> {
     let graphemes: Vec<&str> = text.graphemes(true).collect();
@@ -179,7 +208,9 @@ pub fn shimmer_spans(
     graphemes
         .iter()
         .zip(light)
-        .map(|(grapheme, brightness)| Span::styled((*grapheme).to_owned(), tones.style(brightness)))
+        .map(|(grapheme, brightness)| {
+            Span::styled((*grapheme).to_owned(), tones.style(hue, brightness))
+        })
         .collect()
 }
 
@@ -274,29 +305,43 @@ mod tests {
     }
 
     #[test]
-    fn the_blend_runs_from_orange_to_glint() {
+    fn the_blend_runs_from_each_hue_to_its_glint() {
+        let fg = |tones: Tones, hue, brightness| tones.style(hue, brightness).fg;
         assert_eq!(
-            Tones::TrueColor.style(0.0).fg,
+            fg(Tones::TrueColor, Hue::Running, 0.0),
             Some(Color::Rgb(0xf9, 0x73, 0x16))
         );
         assert_eq!(
-            Tones::TrueColor.style(1.0).fg,
+            fg(Tones::TrueColor, Hue::Running, 1.0),
             Some(Color::Rgb(0xff, 0xf7, 0xed))
         );
-        assert_eq!(Tones::Ansi.style(1.0).fg, Some(Color::White));
-        assert_eq!(Tones::Ansi.style(0.0).fg, Some(Color::Yellow));
+        assert_eq!(
+            fg(Tones::TrueColor, Hue::Compacting, 0.0),
+            Some(Color::Rgb(0x3b, 0x82, 0xf6))
+        );
+        assert_eq!(
+            fg(Tones::TrueColor, Hue::Compacting, 1.0),
+            Some(Color::Rgb(0xdb, 0xea, 0xfe))
+        );
+        assert_eq!(fg(Tones::Ansi, Hue::Running, 1.0), Some(Color::White));
+        assert_eq!(fg(Tones::Ansi, Hue::Running, 0.5), Some(Color::LightYellow));
+        assert_eq!(fg(Tones::Ansi, Hue::Running, 0.0), Some(Color::Yellow));
+        assert_eq!(fg(Tones::Ansi, Hue::Compacting, 1.0), Some(Color::White));
+        assert_eq!(
+            fg(Tones::Ansi, Hue::Compacting, 0.5),
+            Some(Color::LightBlue)
+        );
+        assert_eq!(fg(Tones::Ansi, Hue::Compacting, 0.0), Some(Color::Blue));
+        assert_eq!(fg(Tones::None, Hue::Compacting, 1.0), None);
     }
 
     #[test]
     fn without_motion_every_grapheme_rests() {
-        let spans = shimmer_spans("Kneading…", BEAT * 5, Tones::TrueColor, false);
+        let rest = Tones::TrueColor.style(Hue::Running, 0.0);
+        let spans = shimmer_spans("Kneading…", BEAT * 5, Tones::TrueColor, Hue::Running, false);
         assert_eq!(spans.len(), 9);
-        assert!(spans.iter().all(|s| s.style == Tones::TrueColor.style(0.0)));
-        let moving = shimmer_spans("Kneading…", BEAT * 5, Tones::TrueColor, true);
-        assert!(
-            moving
-                .iter()
-                .any(|s| s.style != Tones::TrueColor.style(0.0))
-        );
+        assert!(spans.iter().all(|s| s.style == rest));
+        let moving = shimmer_spans("Kneading…", BEAT * 5, Tones::TrueColor, Hue::Running, true);
+        assert!(moving.iter().any(|s| s.style != rest));
     }
 }

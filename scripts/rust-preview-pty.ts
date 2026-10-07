@@ -185,14 +185,18 @@ await scenario('composer, agent inspection, paste, and resize', async (preview) 
   await preview.quit()
 })
 
-await scenario('sample activity is text that advances on its own and stops', async (preview) => {
+await scenario('sample activity is text that advances on its own, then compacts, and stops', async (preview) => {
   preview.send('\x14')
-  await preview.wait('sample activity', () => preview.screen.includes('thinking · 0s') && preview.screen.includes('Esc stops the sample'))
+  await preview.wait('sample turn', () => preview.screen.includes('thinking · 0s') && preview.screen.includes('Esc interrupts')
+    && preview.screen.includes('Enter steers the next step'))
   // No key is pressed: the loop's own timer must redraw the elapsed time.
   await preview.wait('elapsed time advances', () => preview.screen.includes('thinking · 1s'))
   assert(!/[\u2800-\u28ff]/u.test(preview.screen), 'the activity drew a spinner glyph')
+  preview.send('\x14')
+  await preview.wait('sample compaction', () => preview.screen.includes('Compacting history…  preparing · 0s')
+    && preview.screen.includes('Compacting… Enter queues · Esc cancels') && !preview.screen.includes('Esc interrupts'))
   preview.send('\x1b')
-  await preview.wait('sample stopped', () => preview.screen.includes('Rust preview · model not connected') && !preview.screen.includes('Esc stops the sample'))
+  await preview.wait('sample stopped', () => preview.screen.includes('Rust preview · model not connected') && !preview.screen.includes('Compacting'))
   await preview.quit()
 })
 

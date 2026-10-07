@@ -58,11 +58,6 @@ impl FrameStyle {
             Self::Classic => &CLASSIC,
         }
     }
-
-    /// Resolves the style from this process's environment.
-    pub fn from_env() -> Self {
-        resolve(|name| std::env::var(name).ok(), cfg!(windows))
-    }
 }
 
 /// Chooses the frame from environment values that `env` returns.

@@ -7,7 +7,7 @@
 use std::borrow::Cow;
 use std::collections::VecDeque;
 
-use ratatui::buffer::CellWidth;
+use ratatui_core::buffer::CellWidth;
 use unicode_segmentation::{GraphemeCursor, UnicodeSegmentation};
 
 /// Largest draft kept in memory; longer input is cut at a grapheme boundary.

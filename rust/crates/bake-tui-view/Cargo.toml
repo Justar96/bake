@@ -1,0 +1,15 @@
+[package]
+name = "bake-tui-view"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# Pure presentation: no terminal backend, threads, or clock. Keep Crossterm and
+# the `ratatui` umbrella crate out of this manifest.
+[dependencies]
+ratatui-core.workspace = true
+ratatui-widgets.workspace = true
+unicode-segmentation.workspace = true
+unicode-width.workspace = true

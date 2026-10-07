@@ -4,7 +4,7 @@
 
 This page proposes how Bake's Rust terminal frontend looks, behaves, and is built, starting with fullscreen mode. It keeps the shipped TypeScript layout and visual grammar, frames the draft in a rounded box that costs no more rows than the two rules it replaces, makes the composer render dynamically without moving text or the input row, and separates pure presentation from terminal effects so each layer can be tested on its own. It implements the [terminal direction](terminal.md), which owns the acceptance scenarios; the [layout design](../../../apps/tui/DESIGN-LAYOUT.md) and [TUI design](../../../apps/tui/DESIGN.md) remain the oracle for every behavior not listed here as an intentional difference.
 
-Status: proposed. The [Rust preview](../../../rust/README.md) implements the composer box, its wrapping and window, and the frame fallback; the rest of this page is not implemented. Fullscreen comes first by owner decision; inline scrollback remains a 0.4.0 requirement of [scope 14](README.md#14--terminal-engine-and-rendering), and this design keeps it possible without qualifying it.
+Status: proposed. The [Rust preview](../../../rust/README.md) implements the composer box, its wrapping and window, the frame fallback, and [delivery slice 1](#delivery-slices): the crate split, the update function, the key-binding table, and the channel-driven loop. The rest of this page is not implemented. Fullscreen comes first by owner decision; inline scrollback remains a 0.4.0 requirement of [scope 14](README.md#14--terminal-engine-and-rendering), and this design keeps it possible without qualifying it.
 
 ## Table of Contents
 
@@ -197,7 +197,7 @@ The header says what the session is doing in words alone, at the prompt column: 
 - **Phase and time.** The phase follows `phaseOf` (`thinking`, `writing`, `running <tool> +N`), and elapsed time reads `8s` or `1m 05s`. On a narrow header the right-hand keys give way first, then the phase and time together; the word is never cut for them.
 - **Shimmer.** A band of light three graphemes wide sweeps across the word, left to right, one grapheme every 70 ms, then the word rests unlit for twelve beats. On a truecolor terminal (`COLORTERM` of `truecolor` or `24bit`) the band blends from the running orange `#f97316` to the palette's glint `#fff7ed`. Otherwise it steps through yellow, light yellow, and bold bright white. The phase and time never shimmer.
 - **Motion off.** Under `NO_COLOR` the word is bold in the terminal's foreground and holds still, and only the seconds change, once a second. Under a screen reader the line changes only when its words do.
-- **Compaction.** `Compacting history…` takes the same row in the compacting blue, its band blending toward a lighter blue, and returns to the turn's word when compaction settles.
+- **Compaction.** `Compacting history…` takes the same row in the compacting blue `#3b82f6`, its band blending toward `#dbeafe` (blue, light blue, and bright white without truecolor), and returns to the turn's word when compaction settles.
 - **Redraws.** The line changes on each shimmer beat, or on each second with motion off. The event loop wakes for that deadline and nothing else; Ratatui's buffer diff writes only the cells that changed.
 
 ## Panels above the input
@@ -269,7 +269,7 @@ pub enum Msg {
     Paste(String),
     Mouse(MouseInput),
     Resize { cols: u16, rows: u16 },
-    Tick(Instant),          // time arrives as data; the view reads no clock
+    Tick(Duration),         // time since the loop started; the view reads no clock
     Runtime(RuntimeUpdate), // committed batch, live frame, status, projection change, request opened or closed
 }
 
@@ -284,17 +284,17 @@ pub enum Effect {
 }
 
 pub fn update(state: &mut State, msg: Msg) -> Vec<Effect>;
-pub fn render(state: &State, frame: &mut Frame);
+pub fn render(state: &mut State, frame: &mut Frame);
 ```
 
-`State` holds presentation state only: drafts, focus, open sheets, window and viewport positions, completion selection, notices, and the quit timer's deadline. Agent status, inboxes, permissions, context pressure, goals, and the transcript stay with their runtime owners and arrive through `RuntimeUpdate`, following the [one-authority rule](../../../apps/tui/DESIGN.md#3b-one-authority-per-fact). Key bindings live in one table that maps a focus and a `KeyInput` to an action, so Bake, not a widget, owns every shortcut.
+`render` changes only the composer window, because the rows the frame grants the composer decide where the window follows the caret. `State` holds presentation state only: drafts, focus, open sheets, window and viewport positions, completion selection, notices, and the quit timer's deadline. Agent status, inboxes, permissions, context pressure, goals, and the transcript stay with their runtime owners and arrive through `RuntimeUpdate`, following the [one-authority rule](../../../apps/tui/DESIGN.md#3b-one-authority-per-fact). Key bindings live in one table that maps a focus and a `KeyInput` to an action, so Bake, not a widget, owns every shortcut.
 
 ### Event loop
 
 The UI thread owns `State` and the terminal. Other threads only send messages to it.
 
-- **Sources.** A reader thread blocks on Crossterm input and sends decoded messages. The runtime sends updates through the runtime port. A signal thread forwards SIGINT, SIGTERM, and SIGHUP. Nothing polls on a timer.
-- **Batching.** The loop waits for the next message or the next deadline: a shimmer beat, an elapsed-second change, the quit timer, or a pending frame. It then drains every waiting message, applies them in order, and draws once.
+- **Sources.** A reader thread waits on Crossterm input and sends decoded messages. It wakes every 50 ms only to check whether to stop, so shutdown can join it before raw mode ends; a blocking read could not be interrupted, and it would hold Crossterm's reader lock against any query the UI thread makes. The runtime sends updates through the runtime port. A signal thread forwards SIGINT, SIGTERM, and SIGHUP. The UI thread never polls.
+- **Batching.** The loop waits for the next message or the next deadline: a shimmer beat, an elapsed-second change, the quit timer, or a pending frame. It then applies a `Tick` and every waiting message in order, up to 256, and draws once.
 - **Frame policy.** A batch that contains input is drawn at once. A batch of runtime updates alone is drawn at most once every 16 ms. The activity line is redrawn on each shimmer beat, or each second with motion off.
 - **Output.** Every frame is written between synchronized-update markers (DEC mode 2026), and Ratatui's buffer diff writes only changed cells. A slow terminal blocks only the UI thread; the reader thread keeps queueing keys, and the next batch applies all of them.
 - **Debris.** While the lease is held, nothing else writes to stdout or stderr. Diagnostics go to a file sink, and captured messages appear as notices, as [the debris rules](../../../apps/tui/DESIGN-LAYOUT.md#83-debris--someone-else-writes-to-the-terminal) require.
@@ -319,21 +319,24 @@ Qualifying a renderer for inline mode remains open work; this page does not choo
 
 ## Preview status
 
-The [Rust preview](../../../rust/README.md) implements the [composer shape](#shape), `wrapDraft`'s wrapping without dictionary word boundaries, the caret-independent layout, the persistent window with hidden-row counts on the edges, D1's window height, the notice above the header, the frame fallback, the text [activity line](#activity-line) with its shimmer as a sample started by Ctrl+T, batched input with one synchronized repaint per batch, and autowrap turned off while it owns the screen. These gaps from the oracle remain:
+The [Rust preview](../../../rust/README.md) implements the [composer shape](#shape), `wrapDraft`'s wrapping without dictionary word boundaries, the caret-independent layout, the persistent window with hidden-row counts on the edges, D1's window height, the notice above the header, the frame fallback, the text [activity line](#activity-line) with its shimmer, for a sample turn and a sample compaction that Ctrl+T steps through, the [modes table](#modes) for idle, running, compacting, and inspection, batched input with one synchronized repaint per batch, and autowrap turned off while it owns the screen. These gaps from the oracle remain:
 
 | Preview behavior | Oracle behavior | Source |
 |---|---|---|
-| Tab opens the sample-agent list | Tab accepts completion; Ctrl+G opens the subagent sheet, and Down from an empty composer selects the subagents row | `app.rs`, `composer_key` |
+| Tab opens the sample-agent list | Tab accepts completion; Ctrl+G opens the subagent sheet, and Down from an empty composer selects the subagents row | `keys.rs`, `BINDINGS` |
 | A word in Thai, Lao, Khmer, or Myanmar splits between graphemes | Those scripts break at dictionary word boundaries | `editor.rs`, `layout` |
-| Input is polled every 250 ms to notice signals | Signals arrive as messages; nothing polls | `terminal.rs`, `run_loop` |
 | The caret is the terminal cursor | D2 proposes the same; the oracle draws a reverse-video cell | `render.rs`, `render` |
+| Every wake draws a frame | A batch of runtime updates alone draws at most every 16 ms | `terminal.rs`, `run_loop`; there is no runtime port yet |
+| The idle placeholder names editing keys: `Type a draft · Alt+Enter newline · Ctrl+Z undo` | `Ask anything · / commands · @ files` | `copy.rs`, `PLACEHOLDER`; the preview has no commands or file mentions |
+| Enter shows the no-model notice in every mode, and Alt+↑ does nothing | Enter starts, steers, or queues a turn by mode; Alt+↑ sends steering now | `state.rs`, `composer_key`; there is no runtime port yet |
+| The completion and masked sign-in modes do not exist | Each has its own row in the modes table | `mode.rs`, `Mode`; they arrive with completion and sign-in |
 
 ## Delivery slices
 
 These slices are ordered PRs inside [scope 14](README.md#14--terminal-engine-and-rendering). Each keeps `bun run dev:rust` runnable and the shipped TypeScript frontend unchanged.
 
-1. **Split and update loop.** Create `bake-tui-view`, the `Msg`/`Effect` update function, the key-binding table, and the channel-driven loop. Port the preview's tests without changing the screen.
-2. **Composer parity.** The box, word wrapping, tab stops, the caret column, the persistent window, edge labels, and the modes table driven by sample state. The preview covers all but the modes table.
+1. **Split and update loop.** Implemented. `bake-tui-view` holds the `Msg`/`Effect` update function and the key-binding table; `bake-tui` decodes input and runs the channel-driven loop. The preview's tests moved with the code, and the screen is unchanged. `Msg` has no mouse or runtime variant until slices 4 and 6 add them, and `Effect` has only `Quit`.
+2. **Composer parity.** Implemented for the idle, running, compacting, and inspection rows of the modes table, driven by the sample activity; the box, wrapping, tab stops, caret column, window, and edge labels came before it. The completion and sign-in rows wait for slice 5 and provider login.
 3. **Chrome.** The layout planner, the header's activity line and summary, the rules with frame glyphs, status fitting by rank, and the standing rows.
 4. **Transcript.** The fixture port, row presentation for prose, user turns, and tool cards, the fullscreen viewport with its anchor and keys, and live rows.
 5. **Panels.** Completion with a sample catalog, notices, double-press Ctrl+C, pending input, and attachments.

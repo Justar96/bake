@@ -4,14 +4,25 @@
 //! is recorded before it is requested, so a partial setup failure, an error,
 //! a panic, or a handled SIGINT/SIGTERM/SIGHUP restores exactly what was
 //! changed.
+//!
+//! The loop owns the view's state and the terminal. An input thread and, on
+//! Unix, a signal thread only send it messages over one channel; the loop
+//! waits for the next message or the view's next timed change, applies every
+//! waiting message, and draws once.
 
 use std::io::{self, Stdout};
-use std::sync::Once;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::{Arc, Once};
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+use bake_tui_view::activity::Tones;
+use bake_tui_view::frame;
+use bake_tui_view::render::render;
+use bake_tui_view::state::{Effect, Msg, State, update};
 use crossterm::cursor::Show;
-use crossterm::event::{self, DisableBracketedPaste, EnableBracketedPaste, Event};
+use crossterm::event::{self, DisableBracketedPaste, EnableBracketedPaste};
 use crossterm::execute;
 use crossterm::terminal::{
     BeginSynchronizedUpdate, Clear, ClearType, DisableLineWrap, EnableLineWrap,
@@ -22,10 +33,7 @@ use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Rect;
 
-use crate::activity::{self, Tones};
-use crate::app::App;
-use crate::frame::FrameStyle;
-use crate::render::{View, render};
+use crate::input;
 
 const OWNED: u8 = 1;
 const RAW: u8 = 1 << 1;
@@ -39,10 +47,11 @@ const SYNC: u8 = 1 << 5;
 /// them before the panic message is printed.
 static MODES: AtomicU8 = AtomicU8::new(0);
 
-/// Bounds how long a pending signal waits for the loop to notice it.
-const POLL: Duration = Duration::from_millis(250);
-/// Events applied before a frame is drawn, so a burst of keys or resizes
-/// draws once while signals are still checked between batches.
+/// How long the input thread waits for input before it checks whether to
+/// stop. It bounds how long shutdown waits to join the thread; input itself
+/// is read as soon as it arrives.
+const READER_WAKE: Duration = Duration::from_millis(50);
+/// Messages applied before a frame is drawn, so a long burst still draws.
 const MAX_BATCH: usize = 256;
 
 /// How the preview ended.
@@ -51,6 +60,20 @@ pub enum PreviewExit {
     Quit,
     /// A handled termination signal, by number.
     Signal(i32),
+}
+
+/// What the loop receives from the threads that feed it.
+enum Source {
+    Msg(Msg),
+    Signal(i32),
+    Failed(io::Error),
+}
+
+/// Where the loop draws. [`TerminalSession`] is the real screen; tests use a
+/// recording one.
+trait Screen {
+    /// Draws one frame. When `stale`, every cell is repainted.
+    fn draw(&mut self, state: &mut State, stale: bool) -> io::Result<()>;
 }
 
 /// Owns raw mode, the alternate screen, bracketed paste, autowrap, cursor
@@ -101,7 +124,9 @@ impl TerminalSession {
         // `Drop` then finds nothing left to restore.
         restore()
     }
+}
 
+impl Screen for TerminalSession {
     /// Draws one frame as a single synchronized update, so a supporting
     /// terminal never shows it half drawn.
     ///
@@ -111,7 +136,7 @@ impl TerminalSession {
     /// showed; Ratatui's own size check would then skip the clear and leave
     /// stale rows. The clear is inside the update, so a resize does not flash
     /// an empty screen.
-    fn draw(&mut self, app: &App, view: &mut View, stale: bool) -> io::Result<()> {
+    fn draw(&mut self, state: &mut State, stale: bool) -> io::Result<()> {
         MODES.fetch_or(SYNC, Ordering::SeqCst);
         execute!(self.terminal.backend_mut(), BeginSynchronizedUpdate)?;
         let drawn = (|| {
@@ -119,7 +144,7 @@ impl TerminalSession {
                 let size = self.terminal.size()?;
                 self.terminal.resize(Rect::from(size))?;
             }
-            self.terminal.draw(|frame| render(frame, app, view))?;
+            self.terminal.draw(|frame| render(state, frame))?;
             Ok(())
         })();
         let ended = execute!(self.terminal.backend_mut(), EndSynchronizedUpdate);
@@ -183,61 +208,156 @@ fn install_panic_hook() {
 /// Runs the fullscreen preview until Ctrl-C or a handled signal. The caller
 /// must have checked that stdin and stdout are terminals.
 ///
-/// The terminal is restored before this returns. A loop error takes priority
-/// over a restoration error; otherwise a restoration error is returned.
+/// The input thread is joined and the terminal restored before this returns.
+/// A loop error takes priority over a restoration error; otherwise a
+/// restoration error is returned.
 pub fn run_preview() -> io::Result<PreviewExit> {
+    let (sender, inputs) = mpsc::channel();
     // Declared first so it is dropped last: signals stay handled until the
     // terminal is restored.
-    let signals = signals::Watch::register()?;
+    let signals = signals::Forwarder::start(sender.clone())?;
     let mut session = TerminalSession::acquire()?;
-    let outcome = run_loop(&mut session, &signals);
+    let env = |name: &str| std::env::var(name).ok();
+    let mut state = State::new(frame::resolve(env, cfg!(windows)), Tones::resolve(env));
+    // Started only once raw mode is on, so it never reads cooked input.
+    let outcome = Reader::start(sender).and_then(|reader| {
+        let outcome = run_loop(&mut session, &mut state, &inputs, Instant::now());
+        // Joined before the terminal leaves raw mode, so it reads nothing
+        // meant for the shell.
+        let stopped = reader.stop();
+        outcome.and_then(|exit| stopped.map(|()| exit))
+    });
     let closed = session.close();
+    drop(signals);
     let exit = outcome?;
     closed?;
     Ok(exit)
 }
 
-fn run_loop(session: &mut TerminalSession, signals: &signals::Watch) -> io::Result<PreviewExit> {
-    let mut app = App::default();
-    let env = |name: &str| std::env::var(name).ok();
-    let mut view = View::new(FrameStyle::from_env(), Tones::resolve(env));
-    // Pure state reads no clock; this one is passed to it as data.
-    let clock = Instant::now();
-    let mut dirty = true;
+/// Draws, waits for the next message or the view's next timed change, applies
+/// the current time and then every waiting message, and draws again. A burst
+/// of keys or resizes therefore draws once. Returns when the view asks to
+/// quit, a signal arrives, or input fails.
+fn run_loop(
+    screen: &mut impl Screen,
+    state: &mut State,
+    inputs: &Receiver<Source>,
+    clock: Instant,
+) -> io::Result<PreviewExit> {
     let mut stale = false;
     loop {
-        if let Some(signal) = signals.received() {
-            return Ok(PreviewExit::Signal(signal));
-        }
-        if dirty {
-            view.now = clock.elapsed();
-            session.draw(&app, &mut view, stale)?;
-            dirty = false;
-            stale = false;
-        }
-        // A running sample redraws on its next shimmer beat, or on the next
-        // second without motion; otherwise only input or a signal wakes us.
-        let next = app.activity.map(|sample| {
-            let elapsed = clock.elapsed().saturating_sub(sample.started);
-            activity::next_change(elapsed, view.tones.moves())
-        });
-        if !event::poll(next.map_or(POLL, |wait| wait.min(POLL)))? {
-            dirty |= next.is_some();
-            continue;
-        }
-        // Apply every event already waiting, then draw once: a burst of
-        // resizes repaints once at the final size, and pasted or fast typing
-        // is not drawn key by key.
-        for _ in 0..MAX_BATCH {
-            let event = event::read()?;
-            stale |= matches!(event, Event::Resize(..));
-            dirty |= app.handle_event_at(event, clock.elapsed());
-            if app.should_quit() {
-                return Ok(PreviewExit::Quit);
+        update(state, Msg::Tick(clock.elapsed()));
+        screen.draw(state, stale)?;
+        stale = false;
+        let first = match state.next_change() {
+            Some(wait) => match inputs.recv_timeout(wait) {
+                Ok(source) => source,
+                Err(RecvTimeoutError::Timeout) => continue,
+                Err(RecvTimeoutError::Disconnected) => return Err(input_stopped()),
+            },
+            None => inputs.recv().map_err(|_| input_stopped())?,
+        };
+        update(state, Msg::Tick(clock.elapsed()));
+        let mut source = first;
+        let mut applied = 0;
+        loop {
+            match source {
+                Source::Signal(signal) => return Ok(PreviewExit::Signal(signal)),
+                Source::Failed(err) => return Err(err),
+                Source::Msg(msg) => {
+                    stale |= matches!(msg, Msg::Resize { .. });
+                    if update(state, msg).contains(&Effect::Quit) {
+                        return Ok(PreviewExit::Quit);
+                    }
+                }
             }
-            if !event::poll(Duration::ZERO)? {
+            applied += 1;
+            // Past the cap, what is still waiting stays queued for the next batch.
+            if applied == MAX_BATCH {
                 break;
             }
+            match inputs.try_recv() {
+                Ok(waiting) => source = waiting,
+                Err(_) => break,
+            }
+        }
+    }
+}
+
+fn input_stopped() -> io::Error {
+    io::Error::other("terminal input stopped")
+}
+
+/// The input thread: decodes Crossterm events and sends them to the loop.
+struct Reader {
+    stop: Arc<AtomicBool>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl Reader {
+    fn start(sender: Sender<Source>) -> io::Result<Self> {
+        let stop = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&stop);
+        let thread = thread::Builder::new()
+            .name("bake-tui-input".into())
+            .spawn(move || read_input(Stopped(sender), &flag))?;
+        Ok(Self {
+            stop,
+            thread: Some(thread),
+        })
+    }
+
+    /// Stops the thread and waits for it; reports a panic in it.
+    fn stop(mut self) -> io::Result<()> {
+        self.join()
+    }
+
+    fn join(&mut self) -> io::Result<()> {
+        self.stop.store(true, Ordering::SeqCst);
+        match self.thread.take() {
+            Some(thread) => thread
+                .join()
+                .map_err(|_| io::Error::other("the terminal input thread panicked")),
+            None => Ok(()),
+        }
+    }
+}
+
+impl Drop for Reader {
+    fn drop(&mut self) {
+        let _ = self.join();
+    }
+}
+
+/// Tells the loop that input has ended however the input thread exits,
+/// including by a panic, so the loop never waits on a reader that is gone.
+struct Stopped(Sender<Source>);
+
+impl Drop for Stopped {
+    fn drop(&mut self) {
+        let _ = self.0.send(Source::Failed(input_stopped()));
+    }
+}
+
+fn read_input(out: Stopped, stop: &AtomicBool) {
+    let fail = |err| {
+        let _ = out.0.send(Source::Failed(err));
+    };
+    while !stop.load(Ordering::SeqCst) {
+        match event::poll(READER_WAKE) {
+            Ok(true) => {}
+            Ok(false) => continue,
+            Err(err) => return fail(err),
+        }
+        match event::read() {
+            Ok(event) => {
+                if let Some(msg) = input::decode(event)
+                    && out.0.send(Source::Msg(msg)).is_err()
+                {
+                    return;
+                }
+            }
+            Err(err) => return fail(err),
         }
     }
 }
@@ -245,53 +365,52 @@ fn run_loop(session: &mut TerminalSession, signals: &signals::Watch) -> io::Resu
 #[cfg(unix)]
 mod signals {
     use std::io;
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::mpsc::Sender;
+    use std::thread::{self, JoinHandle};
 
-    use signal_hook::SigId;
     use signal_hook::consts::{SIGHUP, SIGINT, SIGTERM};
+    use signal_hook::iterator::{Handle, Signals};
 
-    /// Records SIGINT, SIGTERM, and SIGHUP instead of terminating, so the loop
-    /// can restore the terminal. Raw mode turns the Ctrl-C key into input, so
-    /// SIGINT arrives only from another process.
+    use super::Source;
+
+    /// Forwards SIGINT, SIGTERM, and SIGHUP to the loop instead of
+    /// terminating, so the loop can restore the terminal. Raw mode turns the
+    /// Ctrl-C key into input, so SIGINT arrives only from another process.
     ///
-    /// Dropping it removes only these registrations. signal-hook keeps its
-    /// process handler installed and does not restore the previous
-    /// disposition, so the same signals are ignored from then until exit.
-    pub struct Watch {
-        received: Arc<AtomicUsize>,
-        ids: Vec<SigId>,
+    /// Dropping it closes and joins its thread, which removes only these
+    /// registrations. signal-hook keeps its process handler installed and does
+    /// not restore the previous disposition, so the same signals are ignored
+    /// from then until exit.
+    pub struct Forwarder {
+        handle: Handle,
+        thread: Option<JoinHandle<()>>,
     }
 
-    impl Watch {
-        pub fn register() -> io::Result<Self> {
-            let mut watch = Self {
-                received: Arc::new(AtomicUsize::new(0)),
-                ids: Vec::new(),
-            };
-            for signal in [SIGINT, SIGTERM, SIGHUP] {
-                let id = signal_hook::flag::register_usize(
-                    signal,
-                    Arc::clone(&watch.received),
-                    signal as usize,
-                )?;
-                watch.ids.push(id);
-            }
-            Ok(watch)
-        }
-
-        pub fn received(&self) -> Option<i32> {
-            match self.received.load(Ordering::SeqCst) {
-                0 => None,
-                signal => i32::try_from(signal).ok(),
-            }
+    impl Forwarder {
+        pub fn start(sender: Sender<Source>) -> io::Result<Self> {
+            let mut signals = Signals::new([SIGINT, SIGTERM, SIGHUP])?;
+            let handle = signals.handle();
+            let thread = thread::Builder::new()
+                .name("bake-tui-signals".into())
+                .spawn(move || {
+                    for signal in signals.forever() {
+                        if sender.send(Source::Signal(signal)).is_err() {
+                            break;
+                        }
+                    }
+                })?;
+            Ok(Self {
+                handle,
+                thread: Some(thread),
+            })
         }
     }
 
-    impl Drop for Watch {
+    impl Drop for Forwarder {
         fn drop(&mut self) {
-            for id in self.ids.drain(..) {
-                signal_hook::low_level::unregister(id);
+            self.handle.close();
+            if let Some(thread) = self.thread.take() {
+                let _ = thread.join();
             }
         }
     }
@@ -300,16 +419,158 @@ mod signals {
 #[cfg(not(unix))]
 mod signals {
     use std::io;
+    use std::sync::mpsc::Sender;
 
-    pub struct Watch;
+    use super::Source;
 
-    impl Watch {
-        pub fn register() -> io::Result<Self> {
+    pub struct Forwarder;
+
+    impl Forwarder {
+        pub fn start(_sender: Sender<Source>) -> io::Result<Self> {
             Ok(Self)
         }
+    }
+}
 
-        pub fn received(&self) -> Option<i32> {
-            None
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bake_tui_view::keys::{Key, KeyInput, Mods};
+
+    fn key(c: char) -> Source {
+        Source::Msg(Msg::Key(KeyInput::plain(Key::Char(c))))
+    }
+
+    fn ctrl(c: char) -> Source {
+        Source::Msg(Msg::Key(KeyInput::new(Key::Char(c), Mods::CTRL)))
+    }
+
+    /// Records each frame and, after the frame at index `n`, sends the `n`th
+    /// batch of the script, as if it had arrived while that frame was shown.
+    /// Once the script runs out it ends input, unless `wait_for_tick` holds
+    /// input open until a frame is drawn without any message.
+    struct Scripted {
+        sender: Option<Sender<Source>>,
+        script: Vec<Vec<Source>>,
+        frames: Vec<(String, bool, Duration)>,
+    }
+
+    impl Scripted {
+        fn new(script: Vec<Vec<Source>>) -> (Self, Receiver<Source>) {
+            let (sender, inputs) = mpsc::channel();
+            let screen = Self {
+                sender: Some(sender),
+                script: script.into_iter().rev().collect(),
+                frames: Vec::new(),
+            };
+            (screen, inputs)
         }
+    }
+
+    impl Screen for Scripted {
+        fn draw(&mut self, state: &mut State, stale: bool) -> io::Result<()> {
+            self.frames
+                .push((state.draft.text().to_owned(), stale, state.now));
+            match self.script.pop() {
+                Some(batch) => {
+                    for source in batch {
+                        self.sender.as_ref().unwrap().send(source).unwrap();
+                    }
+                }
+                None => self.sender = None,
+            }
+            Ok(())
+        }
+    }
+
+    fn run(screen: &mut Scripted, inputs: &Receiver<Source>) -> io::Result<PreviewExit> {
+        run_loop(screen, &mut State::default(), inputs, Instant::now())
+    }
+
+    #[test]
+    fn a_waiting_batch_is_applied_together_and_drawn_once() {
+        let (mut screen, inputs) = Scripted::new(vec![
+            vec![
+                key('a'),
+                Source::Msg(Msg::Resize { cols: 40, rows: 12 }),
+                Source::Msg(Msg::Paste("bc".into())),
+            ],
+            vec![key('d'), ctrl('c'), key('e')],
+        ]);
+        assert_eq!(run(&mut screen, &inputs).unwrap(), PreviewExit::Quit);
+        let frames: Vec<_> = screen
+            .frames
+            .iter()
+            .map(|(text, stale, _)| (text.as_str(), *stale))
+            .collect();
+        // The resize repaints every cell once; the quit is not drawn.
+        assert_eq!(frames, [("", false), ("abc", true)]);
+    }
+
+    #[test]
+    fn a_signal_ends_the_loop_before_the_rest_of_its_batch() {
+        let (mut screen, inputs) =
+            Scripted::new(vec![vec![key('x'), Source::Signal(15), key('y')]]);
+        assert_eq!(run(&mut screen, &inputs).unwrap(), PreviewExit::Signal(15));
+        assert_eq!(screen.frames.len(), 1);
+    }
+
+    #[test]
+    fn failed_or_ended_input_is_an_error() {
+        let (mut screen, inputs) =
+            Scripted::new(vec![vec![Source::Failed(io::Error::other("read failed"))]]);
+        let err = run(&mut screen, &inputs).unwrap_err();
+        assert_eq!(err.to_string(), "read failed");
+
+        let (mut screen, inputs) = Scripted::new(vec![vec![key('a')]]);
+        let err = run(&mut screen, &inputs).unwrap_err();
+        assert_eq!(err.to_string(), "terminal input stopped");
+        assert_eq!(screen.frames.last().unwrap().0, "a");
+    }
+
+    #[test]
+    fn a_long_burst_draws_after_each_full_batch() {
+        let burst = (0..MAX_BATCH + 4).map(|_| key('z')).collect();
+        let (mut screen, inputs) = Scripted::new(vec![burst, vec![], vec![ctrl('c')]]);
+        assert_eq!(run(&mut screen, &inputs).unwrap(), PreviewExit::Quit);
+        let lengths: Vec<_> = screen.frames.iter().map(|(text, ..)| text.len()).collect();
+        assert_eq!(lengths, [0, MAX_BATCH, MAX_BATCH + 4]);
+    }
+
+    /// Starts a sample activity, then ends the loop once a frame has been
+    /// drawn with no message behind it.
+    struct UntilTick {
+        sender: Sender<Source>,
+        frames: Vec<(Duration, Option<Duration>)>,
+    }
+
+    impl Screen for UntilTick {
+        fn draw(&mut self, state: &mut State, _stale: bool) -> io::Result<()> {
+            self.frames
+                .push((state.now, state.activity.map(|sample| sample.started)));
+            if self.frames.len() == 1 {
+                self.sender.send(ctrl('t')).unwrap();
+            } else if self.frames.len() > 2 {
+                self.sender.send(ctrl('c')).unwrap();
+            }
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_running_activity_redraws_at_its_next_beat_without_input() {
+        let (sender, inputs) = mpsc::channel();
+        let mut screen = UntilTick {
+            sender,
+            frames: Vec::new(),
+        };
+        let exit = run_loop(&mut screen, &mut State::default(), &inputs, Instant::now());
+        assert_eq!(exit.unwrap(), PreviewExit::Quit);
+        // Frame 1 shows the started sample; frame 2 came from its timer alone,
+        // no sooner than its first beat.
+        assert_eq!(screen.frames.len(), 3);
+        let (now, started) = screen.frames[2];
+        assert_eq!(started, screen.frames[1].1);
+        assert!(now >= started.unwrap() + bake_tui_view::activity::BEAT);
     }
 }
