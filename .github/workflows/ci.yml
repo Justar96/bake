@@ -21,22 +21,47 @@ concurrency:
 # already ran on every platform in its own pull request, and the release tag
 # after it builds and checks every platform again. Only the combination of
 # those changes is new, which no earlier run has tested, so the Linux jobs stay.
+#
+# A pull request into the Rust 0.4.0 line, rust/0.4.0, directly or through a
+# stack on it, runs the native job on every OS and TypeScript checks on Linux
+# only as far as its files need. The pull request that syncs the line into
+# develop runs everything. scripts/ci-scope.ts makes these choices.
 jobs:
+  scope:
+    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Merge pull request ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      preflight: ${{ steps.plan.outputs.preflight }}
+      rust: ${{ steps.plan.outputs.rust }}
+      windows_release: ${{ steps.plan.outputs.windows_release }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      # Branch names are untrusted input, so they reach the script as variables.
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: bun scripts/ci-scope.ts
+
   # TypeScript gates share the local preflight table; Rust has its own matrix.
   preflight:
-    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Merge pull request ')
+    needs: scope
+    if: needs.scope.outputs.preflight != '[]'
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(github.event_name == 'pull_request' && github.base_ref == 'main' && github.head_ref == 'develop'
-          && github.event.pull_request.head.repo.full_name == github.repository
-          && '["ubuntu-latest"]' || '["ubuntu-latest", "macos-latest"]') }}
-        part:
-          - name: checks
-            args: --full --skip runtime,native
-          - name: runtime
-            args: --full --only build,runtime
-    name: ${{ matrix.part.name }} (${{ matrix.os }})
+        include: ${{ fromJSON(needs.scope.outputs.preflight) }}
+    name: ${{ matrix.name }} (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
@@ -53,7 +78,7 @@ jobs:
       # Advisories against the locked packages are reported, never gating: a
       # new advisory must not fail an unrelated change. One runner is enough.
       - name: Audit dependencies
-        if: matrix.part.name == 'checks' && runner.os == 'Linux'
+        if: matrix.name == 'checks' && runner.os == 'Linux'
         continue-on-error: true
         run: |
           bun audit || {
@@ -71,13 +96,13 @@ jobs:
       # The plugin manager installs external profile plugins with pnpm, separate
       # from Bun's workspace, and one regression test runs a real pnpm install.
       - name: Install pnpm for the plugin manager
-        if: matrix.part.name == 'runtime'
+        if: matrix.name == 'runtime'
         run: npm install --global pnpm@11
-      - run: bun run preflight ${{ matrix.part.args }}
+      - run: bun run preflight ${{ matrix.args }}
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: ${{ matrix.part.name }}-failures-${{ matrix.os }}
+          name: ${{ matrix.name }}-failures-${{ matrix.os }}
           path: |
             .preflight/
             apps/tui/.smoke/
@@ -86,13 +111,11 @@ jobs:
           include-hidden-files: true
 
   rust:
-    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Merge pull request ')
+    needs: scope
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(github.event_name == 'pull_request' && github.base_ref == 'main' && github.head_ref == 'develop'
-          && github.event.pull_request.head.repo.full_name == github.repository
-          && '["ubuntu-latest"]' || '["ubuntu-latest", "macos-latest", "windows-latest"]') }}
+        os: ${{ fromJSON(needs.scope.outputs.rust) }}
     name: rust (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
@@ -118,10 +141,8 @@ jobs:
           include-hidden-files: true
 
   windows-release:
-    if: >-
-      (github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Merge pull request '))
-      && !(github.event_name == 'pull_request' && github.base_ref == 'main' && github.head_ref == 'develop'
-      && github.event.pull_request.head.repo.full_name == github.repository)
+    needs: scope
+    if: needs.scope.outputs.windows_release == 'true'
     runs-on: windows-latest
     timeout-minutes: 20
     steps:

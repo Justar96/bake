@@ -1294,6 +1294,7 @@
     {"path":"packages/web/web/tests/web.spec.ts","lane":"vitest-runtime","owner":"packages/web/web","scopes":["12"],"disposition":"reuse-oracle","basis":"packages/web"},
     {"path":"scripts/bun-invocation.test.ts","lane":"bun-scripts","owner":"scripts:workspace","scopes":["01"],"disposition":"replace-tooling","basis":"scripts:workspace"},
     {"path":"scripts/change-scope.test.ts","lane":"bun-scripts","owner":"scripts:workspace","scopes":["01"],"disposition":"replace-tooling","basis":"scripts:workspace"},
+    {"path":"scripts/ci-scope.test.ts","lane":"bun-scripts","owner":"scripts:workspace","scopes":["01"],"disposition":"replace-tooling","basis":"scripts:workspace"},
     {"path":"scripts/clean.test.ts","lane":"bun-scripts","owner":"scripts:workspace","scopes":["01"],"disposition":"replace-tooling","basis":"scripts:workspace"},
     {"path":"scripts/cordis-config-files.test.ts","lane":"bun-scripts","owner":"scripts:cordis","scopes":["05","12"],"disposition":"replace-tooling","basis":"scripts:cordis"},
     {"path":"scripts/cordis-core-api.test.ts","lane":"bun-scripts","owner":"scripts:cordis","scopes":["05","12"],"disposition":"replace-tooling","basis":"scripts:cordis"},
