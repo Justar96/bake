@@ -44,11 +44,11 @@ pub const INSPECT_READ_ONLY: &str =
     "Read-only. Typing here never reaches an agent or the parent draft.";
 pub const INSPECT_RETURN: &str = "Esc returns to the draft · Tab returns to the list.";
 pub const STATE: &str = "static sample";
-/// The status line's model field while no model is connected, and its hint.
+/// The status line's model field while no model is selected, and the dim
+/// labels before the thinking level and the context reading.
 pub const NO_MODEL_FIELD: &str = "no model";
-pub const NO_MODEL_HINT: &str = "rust preview";
-/// The preview names its quit key in the status line, having no other help.
-pub const QUIT_KEY: &str = "Ctrl+C quits";
+pub const THINK: &str = "think";
+pub const CONTEXT: &str = "ctx";
 /// The header's word for a sample turn that ran to its end, and for one Esc stopped.
 pub const COMPLETED: &str = "Completed";
 pub const INTERRUPTED: &str = "Interrupted";

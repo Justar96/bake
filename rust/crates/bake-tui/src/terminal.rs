@@ -34,6 +34,7 @@ use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Rect;
 
+use crate::git;
 use crate::input;
 
 const OWNED: u8 = 1;
@@ -220,7 +221,10 @@ pub fn run_preview() -> io::Result<PreviewExit> {
     let mut session = TerminalSession::acquire()?;
     let env = |name: &str| std::env::var(name).ok();
     let mut state = State::new(frame::resolve(env, cfg!(windows)), Tones::resolve(env));
-    state.cwd = working_directory(env);
+    state.status.cwd = working_directory(env);
+    state.status.branch = std::env::current_dir()
+        .ok()
+        .and_then(|cwd| git::branch(&cwd));
     // Started only once raw mode is on, so it never reads cooked input.
     let outcome = Reader::start(sender).and_then(|reader| {
         let outcome = run_loop(&mut session, &mut state, &inputs, Instant::now());

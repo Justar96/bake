@@ -1,7 +1,6 @@
 //! Draws [`State`] into a Ratatui frame. Rows from the top: body, gap, notice,
-//! header, the composer box (top edge, draft rows, bottom edge), the
-//! sample-agents row, and status, in the heights [`crate::layout::plan`]
-//! grants them.
+//! header, status, the composer box (top edge, draft rows, bottom edge), and
+//! the sample-agents row, in the heights [`crate::layout::plan`] grants them.
 
 use std::time::Duration;
 
@@ -14,7 +13,7 @@ use ratatui_core::widgets::Widget;
 use ratatui_widgets::paragraph::{Paragraph, Wrap};
 use unicode_width::UnicodeWidthStr;
 
-use crate::activity::{self, Hue};
+use crate::activity::{self, Hue, Tones};
 use crate::composer::{self, Edge};
 use crate::copy;
 use crate::editor::{self, display};
@@ -65,11 +64,11 @@ pub fn render(app: &mut State, frame: &mut Frame) {
     next(rows.gap);
     let notice = next(rows.notice);
     let header = next(rows.header);
+    let status = next(rows.status);
     let rule = next(rows.top_edge);
     let band = next(rows.composer);
     let base_rule = next(rows.bottom_edge);
     let agents = next(rows.standing);
-    let status = next(rows.status);
     // Rows outside the box start and end where its contents do.
     let inset = |r: Rect| {
         if geometry.boxed {
@@ -322,12 +321,33 @@ fn render_agents_row(columns: u16, area: Rect, buf: &mut Buffer) {
     );
 }
 
+/// A status tone in the palette's colour on a truecolor terminal, the nearest
+/// ANSI colour otherwise, and without colour under `NO_COLOR`.
+fn tone_style(tone: Tone, tones: Tones) -> Style {
+    let (rgb, ansi) = match tone {
+        Tone::Plain => return Style::new(),
+        Tone::Dim => return dim(),
+        Tone::Waiting => ((0xea, 0xb3, 0x08), Color::Yellow),
+        Tone::Asking => ((0x0e, 0xa5, 0xe9), Color::LightBlue),
+        Tone::Hot | Tone::Ramp(2) => ((0xfb, 0x92, 0x3c), Color::LightRed),
+        Tone::Max => ((0xf4, 0x72, 0xb6), Color::LightMagenta),
+        Tone::Ramp(0) => ((0xfd, 0xe6, 0x8a), Color::LightYellow),
+        Tone::Ramp(1) => ((0xfa, 0xcc, 0x15), Color::Yellow),
+        Tone::Ramp(_) => ((0xf8, 0x71, 0x71), Color::Red),
+    };
+    match tones {
+        Tones::TrueColor => Style::new().fg(Color::Rgb(rgb.0, rgb.1, rgb.2)),
+        Tones::Ansi => Style::new().fg(ansi),
+        Tones::None => Style::new(),
+    }
+}
+
 /// The status fields fitted to the row by rank, two spaces apart.
 fn render_status(app: &State, area: Rect, buf: &mut Buffer) {
     if area.is_empty() {
         return;
     }
-    let fields = status::preview_fields(&app.cwd);
+    let fields = status::fields(&app.status);
     let mut spans = Vec::new();
     for (i, fitted) in status::fit(&fields, usize::from(area.width))
         .iter()
@@ -337,12 +357,7 @@ fn render_status(app: &State, area: Rect, buf: &mut Buffer) {
             spans.push(Span::raw(" ".repeat(status::FIELD_GAP)));
         }
         for part in status::drawn(fitted) {
-            let style = match part.tone {
-                Tone::Plain => Style::new(),
-                Tone::Dim => dim(),
-                Tone::Waiting => Style::new().fg(Color::Yellow),
-            };
-            spans.push(Span::styled(part.text, style));
+            spans.push(Span::styled(part.text, tone_style(part.tone, app.tones)));
         }
     }
     line(buf, area, Line::from(spans));
@@ -467,7 +482,9 @@ mod tests {
             let prompt = row_index(&rows, "│ ❯ Type a draft");
             assert_eq!(cursor, Position::new(TEXT_X, prompt as u16));
             assert!(row_index(&rows, "model not connected") < prompt);
-            assert!(rows[usize::from(h) - 1].contains("rust preview"));
+            // Status sits on the box's top edge; the agents row ends the screen.
+            assert!(rows[prompt - 2].starts_with("  no model"));
+            assert!(rows[usize::from(h) - 1].contains("↳ Sample agents"));
         }
     }
 
@@ -480,14 +497,14 @@ mod tests {
         assert_eq!(rows[prompt - 1], format!("╭{}╮", "─".repeat(38)));
         assert_eq!(rows[prompt], format!("│ ❯ hello{}│", " ".repeat(30)));
         assert_eq!(rows[prompt + 1], format!("╰{}╯", "─".repeat(38)));
-        // Header, agents row, and status start where the prompt does.
-        assert!(rows[prompt - 2].starts_with("  Rust preview"));
+        // Header, status, and the agents row start where the prompt does.
+        assert!(rows[prompt - 3].starts_with("  Rust preview"));
+        assert_eq!(rows[prompt - 2].trim_end(), "  no model");
         assert!(rows[prompt + 2].starts_with("  ↳ Sample agents"));
-        assert!(rows[prompt + 3].starts_with("  no model  rust preview"));
         // Right-hand keys end where the box's contents do.
         let (rows, _) = draw(&mut app, 80, 24);
         let prompt = row_index(&rows, "❯ hello");
-        assert!(rows[prompt - 2].ends_with("Tab sample agents  "));
+        assert!(rows[prompt - 3].ends_with("Tab sample agents  "));
         assert!(rows[prompt + 2].ends_with("Tab  "));
     }
 
@@ -523,7 +540,7 @@ mod tests {
         app.draft.newline();
         app.draft.type_text("end");
         let (rows, cursor) = draw(&mut app, 40, 12);
-        let base_rule = rows.len() - 3;
+        let base_rule = rows.len() - 2;
         assert_eq!(usize::from(cursor.y), base_rule - 1);
         assert!(rows[base_rule - 1].contains("end"));
         assert_eq!(cursor.x, TEXT_X + 3);
@@ -855,15 +872,50 @@ mod tests {
     }
 
     #[test]
-    fn the_status_line_fits_its_fields_by_rank() {
+    fn the_status_line_sits_above_the_box_and_fits_its_fields_by_rank() {
         let mut app = State::default();
-        app.cwd = "~/projects/bake".into();
-        let (rows, _) = draw(&mut app, 80, 24);
+        app.status = status::StatusInput {
+            model: Some("deepseek-official/deepseek-v4-flash".into()),
+            thinking: Some("high".into()),
+            context: Some(status::ContextUsage {
+                used: 15_200,
+                window: 128_000,
+            }),
+            branch: Some(status::Branch {
+                name: "main".into(),
+                detached: false,
+            }),
+            cwd: "~/projects/bake".into(),
+            ascii: false,
+        };
+        let status_row = |rows: &[String]| rows[row_index(rows, "❯") - 2].trim_end().to_owned();
+        let (rows, _) = draw(&mut app, 90, 24);
         assert_eq!(
-            rows[23].trim_end(),
-            "  no model  rust preview  Ctrl+C quits  ~/projects/bake"
+            status_row(&rows),
+            "  deepseek-v4-flash  think high  ctx ~11% (15.2k/128k)  ⎇ main  ~/projects/bake"
         );
-        let (rows, _) = draw(&mut app, 34, 24);
-        assert_eq!(rows[23].trim_end(), "  no model  rust preview  …/bake");
+        let (rows, _) = draw(&mut app, 52, 24);
+        assert_eq!(
+            status_row(&rows),
+            "  deepseek-v4-flash  think high  ctx ~11%  ⎇ main"
+        );
+        // The level takes its tone; the label beside it is dim.
+        app.tones = Tones::TrueColor;
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|f| render(&mut app, f)).unwrap();
+        let (rows, _) = draw(&mut app, 80, 24);
+        let y = (row_index(&rows, "❯") - 2) as u16;
+        let x = 2 + "deepseek-v4-flash  think ".len() as u16;
+        let buffer = terminal.backend().buffer();
+        assert_eq!(
+            buffer[(x, y)].style().fg,
+            Some(Color::Rgb(0x0e, 0xa5, 0xe9))
+        );
+        assert!(
+            buffer[(x - 2, y)]
+                .style()
+                .add_modifier
+                .contains(Modifier::DIM)
+        );
     }
 }

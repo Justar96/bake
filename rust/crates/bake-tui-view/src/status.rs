@@ -1,6 +1,11 @@
 //! The status line's fields and the order they give way in as the row
 //! narrows; a port of the TypeScript `status-line.ts` fitting.
 //!
+//! The row is minimal: `deepseek-v4-flash  think high  ctx ~11% (15.2k/128k)
+//! ⎇ main  ~/bake`, the model, its thinking level, the context window's
+//! occupancy, the git branch, and the working directory. A reading the
+//! session does not have is left out.
+//!
 //! Fields keep their order. Each gives way at its own rank, whole or to a
 //! shorter complete reading, never cut mid-word, except the two fields that
 //! shrink: the model, cut from its end, and the working directory, which
@@ -38,7 +43,8 @@ pub const CWD_MIN: usize = 6;
 /// Cells between fields. A separator glyph would be another width to measure.
 pub const FIELD_GAP: usize = 2;
 
-/// How a run of a field is drawn.
+/// How a run of a field is drawn. Colours are the TypeScript palette's; the
+/// renderer maps them to what the terminal can show.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Tone {
     /// The terminal's own foreground.
@@ -46,9 +52,28 @@ pub enum Tone {
     Plain,
     /// Supporting text.
     Dim,
-    /// Something waiting on the user, such as a missing model.
+    /// Something waiting on the user, such as a missing model: `waiting`.
     Waiting,
+    /// A high thinking level: `asking` blue.
+    Asking,
+    /// The `xhigh` thinking level, and a context near its compaction point:
+    /// the context ramp's orange.
+    Hot,
+    /// The `max` thinking level: the second agent tone, pink.
+    Max,
+    /// Context occupancy, warming through the ramp's soft yellow, yellow,
+    /// orange, and red, by step 0 to 3.
+    Ramp(u8),
 }
+
+/// Context occupancy from here up warms the ramp toward orange.
+pub const CONTEXT_WARN: u64 = 70;
+/// Context occupancy from here up is close to the model's limit, and red.
+pub const CONTEXT_FULL: u64 = 90;
+/// Where the ramp turns orange; the preview knows no compaction mark.
+const CONTEXT_HOT: u64 = 80;
+/// Points between the ramp's steps below orange.
+const CONTEXT_STEP: u64 = 10;
 
 /// One run of a status field, in its own tone.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -305,32 +330,178 @@ pub fn home_relative(cwd: &str, home: Option<&str>) -> String {
     }
 }
 
-/// The preview's status fields, in display order: no model, which says the
-/// preview is not connected until the model's rank; the quit key, which the
-/// preview names because it has no other help; and the working directory.
-pub fn preview_fields(cwd: &str) -> Vec<Field> {
-    let no_model = Part::new(copy::NO_MODEL_FIELD, Tone::Waiting);
-    let mut fields = vec![
-        Field {
-            forms: vec![
-                vec![
-                    no_model.clone(),
-                    Part::new(format!("  {}", copy::NO_MODEL_HINT), Tone::Dim),
-                ],
-                vec![no_model],
-            ],
-            yields: vec![rank::MODEL],
+/// How full the context window is, in tokens.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ContextUsage {
+    /// Estimated tokens in the next request.
+    pub used: u64,
+    /// The model's context capacity.
+    pub window: u64,
+}
+
+/// The checked-out branch, or the abbreviated commit when HEAD is detached.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Branch {
+    pub name: String,
+    pub detached: bool,
+}
+
+/// What the status line reports. Each reading is optional except the
+/// directory, which is empty when unknown.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StatusInput {
+    /// `provider/model`, or a bare model name; the provider is left out.
+    /// Absent, the row says no model is selected.
+    pub model: Option<String>,
+    pub thinking: Option<String>,
+    pub context: Option<ContextUsage>,
+    pub branch: Option<Branch>,
+    /// The working directory, already shortened against home.
+    pub cwd: String,
+    /// Whether the terminal draws the classic frame, which also drops the
+    /// branch glyph.
+    pub ascii: bool,
+}
+
+/// The model name without its provider.
+pub fn compact_model(route: &str) -> &str {
+    route.rsplit('/').next().unwrap_or(route)
+}
+
+/// Whole-percent occupancy, rounded down so a context close to full never
+/// reads as 100%.
+pub fn context_percent(usage: ContextUsage) -> u64 {
+    usage
+        .used
+        .saturating_mul(100)
+        .checked_div(usage.window)
+        .unwrap_or(0)
+}
+
+/// A token count as the status line abbreviates it: `950`, `15.2k`, `1M`.
+pub fn format_tokens(tokens: u64) -> String {
+    fn trim(value: f64) -> String {
+        let fixed = format!("{value:.1}");
+        fixed
+            .strip_suffix(".0")
+            .map_or(fixed.clone(), str::to_owned)
+    }
+    if tokens < 1_000 {
+        return tokens.to_string();
+    }
+    // Promote on the rounded magnitude, so 999,999 reads `1M`, not `1000k`.
+    let thousands = tokens as f64 / 1_000.0;
+    if thousands < 999.95 {
+        format!("{}k", trim(thousands))
+    } else {
+        format!("{}M", trim(tokens as f64 / 1_000_000.0))
+    }
+}
+
+/// The context reading's tone: none while there is plenty of room, then the
+/// ramp's steps toward red.
+pub fn context_tone(percent: u64) -> Tone {
+    if percent >= CONTEXT_FULL {
+        Tone::Ramp(3)
+    } else if percent >= CONTEXT_HOT {
+        Tone::Ramp(2)
+    } else if percent >= CONTEXT_HOT - CONTEXT_STEP {
+        Tone::Ramp(1)
+    } else if percent >= CONTEXT_HOT - 2 * CONTEXT_STEP {
+        Tone::Ramp(0)
+    } else {
+        Tone::Plain
+    }
+}
+
+/// A thinking level's tone, warming as it asks for more: the light efforts
+/// dim, `medium` plain, `high` blue, `xhigh` orange, and `max` pink.
+pub fn thinking_tone(level: &str) -> Tone {
+    match level.to_lowercase().as_str() {
+        "none" | "off" | "minimal" | "low" => Tone::Dim,
+        "high" => Tone::Asking,
+        "xhigh" => Tone::Hot,
+        "max" => Tone::Max,
+        _ => Tone::Plain,
+    }
+}
+
+/// The status line's fields, in display order.
+pub fn fields(input: &StatusInput) -> Vec<Field> {
+    let mut fields = vec![match &input.model {
+        // It leads because it is what the row exists to say; it needs no label.
+        Some(model) => Field {
+            forms: vec![vec![Part::new(compact_model(model), Tone::Plain)]],
+            yields: Vec::new(),
+            shrink: Some(Shrink {
+                kind: ShrinkKind::End,
+                rank: rank::MODEL,
+                min: MODEL_MIN,
+            }),
+        },
+        None => Field {
+            forms: vec![vec![Part::new(copy::NO_MODEL_FIELD, Tone::Waiting)]],
+            yields: Vec::new(),
             shrink: None,
         },
-        Field {
-            forms: vec![vec![Part::new(copy::QUIT_KEY, Tone::Dim)]],
-            yields: vec![rank::UPDATE],
-            shrink: None,
-        },
-    ];
-    if !cwd.is_empty() {
+    }];
+    if let Some(level) = &input.thinking {
         fields.push(Field {
-            forms: vec![vec![Part::new(cwd, Tone::Dim)]],
+            forms: vec![vec![
+                Part::new(format!("{} ", copy::THINK), Tone::Dim),
+                Part::new(level.as_str(), thinking_tone(level)),
+            ]],
+            yields: vec![rank::THINKING],
+            shrink: None,
+        });
+    }
+    if let Some(usage) = input.context {
+        let percent = context_percent(usage);
+        let tone = context_tone(percent);
+        let label = Part::new(format!("{} ", copy::CONTEXT), Tone::Dim);
+        let absolute = format!(
+            "~{percent}% ({}/{})",
+            format_tokens(usage.used),
+            format_tokens(usage.window)
+        );
+        // The absolute count goes first, except near the limit, where it is
+        // among the last; the percentage never yields.
+        let absolute_rank = if percent >= CONTEXT_FULL {
+            rank::CONTEXT_ABSOLUTE_FULL
+        } else if percent >= CONTEXT_WARN {
+            rank::CONTEXT_ABSOLUTE_WARM
+        } else {
+            rank::CONTEXT_ABSOLUTE
+        };
+        fields.push(Field {
+            forms: vec![
+                vec![label.clone(), Part::new(absolute, tone)],
+                vec![label, Part::new(format!("~{percent}%"), tone)],
+            ],
+            yields: vec![absolute_rank],
+            shrink: None,
+        });
+    }
+    if let Some(branch) = &input.branch {
+        let mut form = Vec::new();
+        if !input.ascii {
+            form.push(Part::new("⎇ ", Tone::Dim));
+        }
+        let name = if branch.detached {
+            format!("({})", branch.name)
+        } else {
+            branch.name.clone()
+        };
+        form.push(Part::new(name, Tone::Plain));
+        fields.push(Field {
+            forms: vec![form],
+            yields: vec![rank::BRANCH],
+            shrink: None,
+        });
+    }
+    if !input.cwd.is_empty() {
+        fields.push(Field {
+            forms: vec![vec![Part::new(input.cwd.as_str(), Tone::Dim)]],
             yields: Vec::new(),
             shrink: Some(Shrink {
                 kind: ShrinkKind::Fill,
@@ -502,21 +673,147 @@ mod tests {
         assert_eq!(home_relative("/srv/x", Some("")), "/srv/x");
     }
 
+    fn text(form: &[Part]) -> String {
+        form.iter().map(|p| p.text.as_str()).collect()
+    }
+
+    fn full() -> StatusInput {
+        StatusInput {
+            model: Some("deepseek-official/deepseek-v4-flash".into()),
+            thinking: Some("high".into()),
+            context: Some(ContextUsage {
+                used: 15_200,
+                window: 128_000,
+            }),
+            branch: Some(Branch {
+                name: "main".into(),
+                detached: false,
+            }),
+            cwd: "~/bake".into(),
+            ascii: false,
+        }
+    }
+
     #[test]
-    fn the_preview_status_gives_up_the_directory_then_the_key_then_the_hint() {
-        let fields = preview_fields("~/projects/bake");
+    fn names_the_model_level_context_branch_and_directory() {
+        let fields = fields(&full());
+        let firsts: Vec<_> = fields.iter().map(|f| text(&f.forms[0])).collect();
+        assert_eq!(
+            firsts,
+            [
+                "deepseek-v4-flash",
+                "think high",
+                "ctx ~11% (15.2k/128k)",
+                "⎇ main",
+                "~/bake"
+            ]
+        );
+        assert_eq!(fields[1].forms[0][1].tone, Tone::Asking);
+        assert_eq!(fields[2].forms[0][0].tone, Tone::Dim);
+        assert_eq!(fields[2].forms[0][1].tone, Tone::Plain);
         assert_eq!(
             row(&fields, 80),
-            "no model  rust preview  Ctrl+C quits  ~/projects/bake"
+            "deepseek-v4-flash  think high  ctx ~11% (15.2k/128k)  ⎇ main  ~/bake"
+        );
+    }
+
+    #[test]
+    fn leaves_out_what_the_session_does_not_have() {
+        let input = StatusInput {
+            cwd: "~/bake".into(),
+            ..StatusInput::default()
+        };
+        assert_eq!(row(&fields(&input), 80), "no model  ~/bake");
+        assert_eq!(fields(&input)[0].forms[0][0].tone, Tone::Waiting);
+        let detached = StatusInput {
+            branch: Some(Branch {
+                name: "1a2b3c4".into(),
+                detached: true,
+            }),
+            ascii: true,
+            ..StatusInput::default()
+        };
+        assert_eq!(row(&fields(&detached), 80), "no model  (1a2b3c4)");
+    }
+
+    #[test]
+    fn narrowing_gives_up_the_count_directory_branch_and_level_in_turn() {
+        let fields = fields(&full());
+        assert_eq!(
+            row(&fields, 60),
+            "deepseek-v4-flash  think high  ctx ~11%  ⎇ main  ~/bake"
         );
         assert_eq!(
-            row(&fields, 46),
-            "no model  rust preview  Ctrl+C quits  …ts/bake"
+            row(&fields, 48),
+            "deepseek-v4-flash  think high  ctx ~11%  ⎇ main"
         );
-        // Past the filler's rank its tail is too short to name anything.
-        assert_eq!(row(&fields, 40), "no model  rust preview  Ctrl+C quits");
-        // The key giving way frees cells the directory takes back.
-        assert_eq!(row(&fields, 30), "no model  rust preview  …/bake");
-        assert_eq!(row(&fields, 12), "no model");
+        assert_eq!(row(&fields, 40), "deepseek-v4-flash  think high  ctx ~11%");
+        assert_eq!(row(&fields, 30), "deepseek-v4-flash  ctx ~11%");
+        assert_eq!(row(&fields, 20), "deepseek-…  ctx ~11%");
+    }
+
+    #[test]
+    fn a_nearly_full_context_keeps_its_count_longest_and_turns_red() {
+        let mut input = full();
+        input.context = Some(ContextUsage {
+            used: 120_000,
+            window: 128_000,
+        });
+        let fields = fields(&input);
+        assert_eq!(fields[2].forms[0][1].tone, Tone::Ramp(3));
+        assert_eq!(row(&fields, 44), "deepseek-v4-flash  ctx ~93% (120k/128k)");
+    }
+
+    #[test]
+    fn levels_and_occupancy_warm_as_they_rise() {
+        let tones: Vec<_> = ["minimal", "low", "medium", "high", "xhigh", "max", "Turbo"]
+            .map(thinking_tone)
+            .to_vec();
+        assert_eq!(
+            tones,
+            [
+                Tone::Dim,
+                Tone::Dim,
+                Tone::Plain,
+                Tone::Asking,
+                Tone::Hot,
+                Tone::Max,
+                Tone::Plain
+            ]
+        );
+        let ramp: Vec<_> = [10, 60, 70, 80, 90].map(context_tone).to_vec();
+        assert_eq!(
+            ramp,
+            [
+                Tone::Plain,
+                Tone::Ramp(0),
+                Tone::Ramp(1),
+                Tone::Ramp(2),
+                Tone::Ramp(3)
+            ]
+        );
+    }
+
+    #[test]
+    fn token_counts_abbreviate_as_the_typescript_status_line_does() {
+        let cases = [
+            (950, "950"),
+            (1_000, "1k"),
+            (15_200, "15.2k"),
+            (999_999, "1M"),
+            (1_260_000, "1.3M"),
+        ];
+        for (tokens, text) in cases {
+            assert_eq!(format_tokens(tokens), text, "{tokens}");
+        }
+        assert_eq!(
+            context_percent(ContextUsage {
+                used: 127_999,
+                window: 128_000
+            }),
+            99
+        );
+        assert_eq!(context_percent(ContextUsage { used: 5, window: 0 }), 0);
+        assert_eq!(compact_model("a/b/model-x"), "model-x");
     }
 }

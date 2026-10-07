@@ -10,6 +10,7 @@ use crate::editor::Draft;
 use crate::frame::FrameStyle;
 use crate::keys::{self, Action, KeyInput, Scope};
 use crate::mode::Mode;
+use crate::status::StatusInput;
 
 /// Everything the frontend applies, in arrival order.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -136,9 +137,9 @@ pub struct State {
     pub activity: Option<SampleActivity>,
     /// How the last sample turn ended.
     pub summary: Option<TurnSummary>,
-    /// The working directory as the status line reads it, already shortened
-    /// against home by the terminal owner; empty when unknown.
-    pub cwd: String,
+    /// What the status line reports. The terminal owner fills in the working
+    /// directory and branch; the preview has no model, level, or context.
+    pub status: StatusInput,
     /// Glyphs for the composer box, chosen once before the first frame.
     pub frame: FrameStyle,
     /// Colours the activity line may use; [`Tones::None`] also stops its shimmer.
@@ -167,7 +168,10 @@ impl State {
             notice: None,
             activity: None,
             summary: None,
-            cwd: String::new(),
+            status: StatusInput {
+                ascii: frame == FrameStyle::Classic,
+                ..StatusInput::default()
+            },
             frame,
             tones,
             now: Duration::ZERO,

@@ -23,19 +23,19 @@ pub struct Needs {
 }
 
 /// Rows granted to each region, top to bottom as drawn: body, gap, notice,
-/// header, the box's top edge, the draft, its bottom edge, the standing row,
-/// and status.
+/// header, status, the box's top edge, the draft, its bottom edge, and the
+/// standing row.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Rows {
     pub body: u16,
     pub gap: u16,
     pub notice: u16,
     pub header: u16,
+    pub status: u16,
     pub top_edge: u16,
     pub composer: u16,
     pub bottom_edge: u16,
     pub standing: u16,
-    pub status: u16,
 }
 
 impl Rows {
@@ -44,11 +44,11 @@ impl Rows {
             + self.gap
             + self.notice
             + self.header
+            + self.status
             + self.top_edge
             + self.composer
             + self.bottom_edge
             + self.standing
-            + self.status
     }
 }
 
@@ -87,11 +87,11 @@ pub fn plan(height: u16, needs: Needs) -> Rows {
         gap,
         notice,
         header,
+        status,
         top_edge,
         composer: composer + more,
         bottom_edge,
         standing,
-        status,
     }
 }
 

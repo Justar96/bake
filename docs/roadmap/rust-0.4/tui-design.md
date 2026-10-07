@@ -60,17 +60,18 @@ Idle, after a turn:
                                                   PgUp scroll · Ctrl+↑ prompts
 
   ✓ Completed  42s · read 1 · ran 1 · 42 tok/s             Ctrl+O ● Goal 3/256
+  deepseek-v4-flash  think high  ctx ~12% (15k/128k)  ⎇ main  ~/bake
 ╭──────────────────────────────────────────────────────────────────────────────╮
 │ ❯ Ask anything · / commands · @ files                                        │
 ╰──────────────────────────────────────────────────────────────────────────────╯
   ↳ Subagents 2 · 1 working · 1 done                                    Ctrl+G
-  deepseek-v4-flash  think high  ctx ~12% (15k/128k)  ⎇ main +2  ~/bake
 ```
 
 Running, with a draft taller than its window; the activity is words alone, the hidden-row count and the mode hint ride the box's edges:
 
 ```
   Kneading…  running bash · 12s                            Ctrl+O ● Goal 3/256
+  deepseek-v4-flash  think high  ctx ~14% (18k/128k)  ⎇ main  ~/bake
 ╭─────────────────────────────────────────────────────────────────── +2 above ─╮
 │ ^ Then thread the value through startup.ts and the session store, and add a  │
 │   regression test that sets both DSH_HOME and --home to prove which one      │
@@ -78,7 +79,6 @@ Running, with a draft taller than its window; the activity is words alone, the h
 │                                                                              │
 │   Keep the public API unchanged.▏                                            │
 ╰───────────────────────────────────────────────────────────── Esc interrupts ─╯
-  deepseek-v4-flash  think high  ctx ~14% (18k/128k)  ⎇ main +2  ~/bake
 ```
 
 Completion open; the panel sits on the header, nearest the token that opened it:
@@ -116,6 +116,7 @@ Each difference from the TypeScript frontend needs its own reviewed acceptance c
 | D4 | Child inspection shows the kept parent draft, dim, with `draft kept · Esc returns` on the box's bottom edge | Inspection must state where input goes and that the draft is safe ([agent handling](terminal.md#agent-handling)) | The existing inspection case, plus a buffer check that the dim draft matches the parent draft byte for byte |
 | D5 | A rounded box frames the draft in place of the two bare rules; rows outside it are inset two cells to align with its contents; hidden-row counts and mode hints sit on its edges instead of a right-hand slot beside the caret | The input reads as one control distinct from the transcript. The box spends the rules' two rows and no more, and hints on the edges take no column from the draft, so a mode change never rewraps it | Buffer tests of the box at every width from 1 to 200, the classic frame, and edge labels that drop whole; PTY resize scenarios |
 | D6 | The header's activity is text alone: no spinner glyph for a turn or for compaction. A band of light sweeps across the activity word, and the word list grows from 12 verbs to 32 | Words say what is happening without a symbol a terminal could measure differently, and a larger list keeps consecutive turns distinct | Pure tests pin the sweep, the colour levels, and the word choice; a PTY scenario checks that elapsed time advances without input and that no Braille glyph is drawn |
+| D7 | The status line sits directly above the composer box instead of under it, and is minimal: model, thinking level, context occupancy, git branch, and working directory. Git change counts, token totals, the cache hit, and the update notice are not shown | The readings that decide the next prompt sit next to where it is typed; the counts and totals that change on every turn are left to their own views | Pure tests of each field, its tone, and its rank; buffer tests that the row is on the box's top edge at every width; the TypeScript `fitStatus` cases |
 
 ## Composer
 
@@ -164,7 +165,7 @@ A draft taller than the window marks what it hides. A dim `^` in the prompt colu
 
 ### Height
 
-The composer's height is `min(draft rows, window maximum)`, and the [planner](#layout-planner) grants it before any panel above the input. Growth takes rows from the transcript viewport, never from the controls below the composer, so the bottom edge, standing rows, and status line never move.
+The composer's height is `min(draft rows, window maximum)`, and the [planner](#layout-planner) grants it before any panel above the input. Growth takes rows from the transcript viewport, never from the controls below the composer, so the bottom edge and standing rows never move.
 
 - **While following output,** the viewport stays anchored at its bottom, so a growing composer pushes the transcript up, in the same direction new output moves.
 - **While reading history,** the viewport's anchor is at its top, so a growing composer covers the bottom of the viewport and the passage being read does not move.
@@ -329,7 +330,7 @@ The [Rust preview](../../../rust/README.md) implements the [composer shape](#sha
 | Every wake draws a frame | A batch of runtime updates alone draws at most every 16 ms | `terminal.rs`, `run_loop`; there is no runtime port yet |
 | The idle placeholder names editing keys: `Type a draft · Alt+Enter newline · Ctrl+Z undo` | `Ask anything · / commands · @ files` | `copy.rs`, `PLACEHOLDER`; the preview has no commands or file mentions |
 | Enter shows the no-model notice in every mode, and Alt+↑ does nothing | Enter starts, steers, or queues a turn by mode; Alt+↑ sends steering now | `state.rs`, `composer_key`; there is no runtime port yet |
-| The status line reads `no model  rust preview  Ctrl+C quits` and the working directory | Model, thinking level, context, git, token totals, update notice, and working directory | `status.rs`, `preview_fields`; the fields need a runtime |
+| The status line reads `no model`, the branch, and the directory | It also names the model, thinking level, and context occupancy | `status.rs`, `fields`; those readings need a runtime |
 | The header has no standing state on its right, only the preview's `Tab sample agents` key | The goal sits at the right and steps down its readings as the row narrows | `render.rs`, `render_header`; goals arrive with the runtime |
 | The completion and masked sign-in modes do not exist | Each has its own row in the modes table | `mode.rs`, `Mode`; they arrive with completion and sign-in |
 

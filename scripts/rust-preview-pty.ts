@@ -196,9 +196,9 @@ await scenario('sample activity is text that advances on its own, then compacts,
   await preview.wait('sample compaction', () => preview.screen.includes('Compacting history…  preparing · 0s')
     && preview.screen.includes('Compacting… Enter queues · Esc cancels') && !preview.screen.includes('Esc interrupts'))
   preview.send('\x1b')
-  // The compaction ends; the header keeps the turn's outcome, and the status line reports no model.
+  // The compaction ends; the header keeps the turn's outcome, and the status line reports no model, then the directory.
   await preview.wait('sample stopped', () => /✓ Completed {2}\d+s/u.test(preview.screen) && !preview.screen.includes('Compacting')
-    && preview.screen.includes('no model  rust preview  Ctrl+C quits'))
+    && /^ {2}no model {2}\S/mu.test(preview.screen))
   await preview.quit()
 })
 
