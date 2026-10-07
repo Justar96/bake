@@ -12,7 +12,7 @@ fn shared_zstd_cases() {
     assert_eq!(table["schema"], "bake/session-conformance/zstd-cases");
     assert_eq!(table["version"], 1);
     let cases = table["cases"].as_array().unwrap();
-    assert_eq!(cases.len(), 46);
+    assert_eq!(cases.len(), 49);
     let mut ids = std::collections::BTreeSet::new();
     for case in cases {
         let id = case["id"].as_str().unwrap();

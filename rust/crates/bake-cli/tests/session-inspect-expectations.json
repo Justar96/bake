@@ -2,16 +2,21 @@
   "schema": "bake/cli/session-inspect-expectations",
   "version": 1,
   "provenance": "Authored 2026-10-07 before the first run of `bake-rs session inspect`; no candidate output was copied in. Restored cases reuse the hand-written expectations of conformance/session/restore-cases.json (\"restore\", its `ts` entry, which those cases do not override) and conformance/session/zstd-cases.json (\"zstd\", its `rust` or `expected` entry), mapped to this command's record by tests/session_inspect.rs; they are not new independent predictions. A plain `torn` value is authored from the table's committed byte count and stored event count. Refusal kinds, seqs, lines, and offsets come from the cited table entry where it names them; message text and every diagnostic below are this command's own design. `fileBytes` of \"$input\" is the input's length.",
+  "amendments": ["With Session projection restoration, the image-offload restoration case claims TypeScript's image-offload-data rejection instead of a native limit, so plain-image-offload now expects an invalid refusal. plain-image-offload-projected, plain-ignorable-routing-decision, zstd-image-offload, zstd-ignorable-routing-decision, plain-image-offload-native-limit, and plain-ignorable-tool-update were added. Their table cases were written from the TypeScript sources before either harness ran; refusal messages remain this command's own design."],
   "restored": [
     {"id": "plain-complete", "table": "restore", "case": "tool-call-turn", "name": "session.v3.jsonl", "maxBytes": 4533, "maxSourceSeqs": 64, "torn": null},
     {"id": "plain-interrupted-turn", "table": "restore", "case": "cut-after-step-start", "name": "session.v3.jsonl", "maxBytes": 620, "maxSourceSeqs": 64, "torn": null},
     {"id": "plain-torn", "table": "restore", "case": "torn-final-record", "name": "session.v3.jsonl", "maxBytes": 4533, "maxSourceSeqs": 64, "torn": {"truncateTo": 4435, "recoveredFrom": 15, "recoveredEventCount": 0}},
     {"id": "plain-seeded", "table": "restore", "case": "seeded-marker-last", "name": "session.v3.jsonl", "maxBytes": 4616, "maxSourceSeqs": 64, "torn": null},
     {"id": "plain-source-budget-exact", "table": "restore", "case": "packed-source-references", "name": "session.v3.jsonl", "maxBytes": 4537, "maxSourceSeqs": 2, "torn": null},
+    {"id": "plain-image-offload-projected", "table": "restore", "case": "image-offload-user-message", "name": "session.v3.jsonl", "maxBytes": 4996, "maxSourceSeqs": 64, "torn": null},
+    {"id": "plain-ignorable-routing-decision", "table": "restore", "case": "known-ignorable-routing-decision", "name": "session.v3.jsonl", "maxBytes": 4897, "maxSourceSeqs": 64, "torn": null},
     {"id": "zstd-complete", "table": "zstd", "case": "single-batch", "name": "session.v3.jsonl.zstd", "maxBytes": 444, "maxSourceSeqs": 64},
     {"id": "zstd-recovered", "table": "zstd", "case": "torn-checksum", "name": "session.v3.jsonl.zstd", "maxBytes": 458, "maxSourceSeqs": 64},
     {"id": "zstd-production-complete", "table": "zstd", "case": "production-compressed-block", "name": "session.v3.jsonl.zstd", "maxBytes": 418, "maxSourceSeqs": 64},
-    {"id": "zstd-production-recovered", "table": "zstd", "case": "production-compressed-torn-checksum", "name": "session.v3.jsonl.zstd", "maxBytes": 2097152, "maxSourceSeqs": 64}
+    {"id": "zstd-production-recovered", "table": "zstd", "case": "production-compressed-torn-checksum", "name": "session.v3.jsonl.zstd", "maxBytes": 2097152, "maxSourceSeqs": 64},
+    {"id": "zstd-image-offload", "table": "zstd", "case": "image-offload-projection", "name": "session.v3.jsonl.zstd", "maxBytes": 2097152, "maxSourceSeqs": 64},
+    {"id": "zstd-ignorable-routing-decision", "table": "zstd", "case": "known-ignorable-routing-decision", "name": "session.v3.jsonl.zstd", "maxBytes": 2097152, "maxSourceSeqs": 64}
   ],
   "refused": [
     {"id": "zstd-checksum", "table": "zstd", "case": "bad-checksum", "name": "session.v3.jsonl.zstd", "maxBytes": 444, "maxSourceSeqs": 64,
@@ -49,7 +54,13 @@
        "refusal": {"kind": "invalid", "message": "Session construction rejected an event (header-reason)", "line": null, "seq": 6, "offset": null}}},
     {"id": "plain-image-offload", "table": "restore", "case": "image-offload", "name": "session.v3.jsonl", "maxBytes": 9755, "maxSourceSeqs": 64,
      "stdout": {"status": "refused", "encoding": "none", "formatVersion": 3, "fileBytes": "$input",
-       "refusal": {"kind": "native-limit", "message": "image/offload events are not restored by this preview", "line": null, "seq": 7, "offset": null}}}
+       "refusal": {"kind": "invalid", "message": "Session construction rejected an event (image-offload-data)", "line": null, "seq": 7, "offset": null}}},
+    {"id": "plain-image-offload-native-limit", "table": "restore", "case": "image-offload-null-block", "name": "session.v3.jsonl", "maxBytes": 9755, "maxSourceSeqs": 64,
+     "stdout": {"status": "refused", "encoding": "none", "formatVersion": 3, "fileBytes": "$input",
+       "refusal": {"kind": "native-limit", "message": "an image/offload target's content holds a null block or a tool-result block whose content is not an array", "line": null, "seq": 16, "offset": null}}},
+    {"id": "plain-ignorable-tool-update", "table": "restore", "case": "known-ignorable-tool-update", "name": "session.v3.jsonl", "maxBytes": 16384, "maxSourceSeqs": 64,
+     "stdout": {"status": "refused", "encoding": "none", "formatVersion": 3, "fileBytes": "$input",
+       "refusal": {"kind": "invalid", "message": "Session construction rejected an event (tool-update-required)", "line": null, "seq": 14, "offset": null}}}
   ],
   "escaping": {
     "log": "{\"type\":\"session\",\"version\":3,\"id\":\"\\\"q\\u0007\",\"createdAt\":1,\"cwd\":\"/w/ü\\u001b[31m\",\"isSeeded\":false,\"delegationDepth\":0}\n",

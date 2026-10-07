@@ -43,8 +43,8 @@ describe('shared Zstd restoration cases', () => {
   it('pins the corpus and distinct case names', () => {
     expect(table.schema).toBe('bake/session-conformance/zstd-cases')
     expect(table.version).toBe(1)
-    expect(table.cases).toHaveLength(46)
-    expect(new Set(table.cases.map(entry => entry.id)).size).toBe(46)
+    expect(table.cases).toHaveLength(49)
+    expect(new Set(table.cases.map(entry => entry.id)).size).toBe(49)
   })
   for (const entry of table.cases) {
     it(entry.id, async () => {

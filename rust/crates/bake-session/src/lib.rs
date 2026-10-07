@@ -25,14 +25,16 @@
 //! its subset; its requests are not restored Session state.
 //! [`restore_plain_log`] restores such a log as the production read path
 //! does: it validates the stored events, builds the closers for an
-//! interrupted turn, and folds the Session's messages, request header, tool
-//! history, and request context into an immutable [`RestoredLog`]. It is not
+//! interrupted turn, and folds the Session's messages, with the catalog's
+//! `image/offload` projection applied, request header, tool history, and
+//! request context into an immutable [`RestoredLog`]. It is not
 //! Agent resume. [`restore_zstd_log`] restores default-format compressed bytes
 //! with a caller-supplied plaintext budget and physical torn-tail metadata.
 //! None reads or writes a file or encodes a log. The crate is
 //! unstable and unshipped; only the preview's `session inspect` uses it.
 
 mod envelope;
+mod offload;
 mod repair;
 mod replay;
 mod request;
@@ -46,6 +48,7 @@ pub use envelope::{
     EnvelopeLimit, EnvelopeRefusal, EnvelopeRejection, NumberField, RequiredField,
     UnadmittedEnvelope, decode_row_envelope,
 };
+pub use offload::OffloadRejection;
 pub use replay::{ReplayLimit, ReplayRefusal, SeedRejection, replay_requests};
 pub use request::Request;
 pub use restore::{

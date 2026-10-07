@@ -9,9 +9,12 @@
  * backend and `readColdSessionLog` in an owned temporary root, so the helper
  * cannot drift from the path it reproduces. A `rust` override names a native
  * limit, or the internal cause Rust reports for a rejection; TypeScript still
- * asserts its own outcome. Refusal classes and messages belong to this
- * helper; the file backend adds path context to unsupported-format refusals
- * and wraps other scan failures as SessionPersistenceCorruptionError.
+ * asserts its own outcome. Restored messages are also compared as
+ * `JSON.stringify` text, because `toStrictEqual` ignores member order and an
+ * image projection must keep each block's members in place. Refusal classes
+ * and messages belong to this helper; the file backend adds path context to
+ * unsupported-format refusals and wraps other scan failures as
+ * SessionPersistenceCorruptionError.
  * Each case edits one capture as text.
  */
 
@@ -48,10 +51,10 @@ const LOGS: Record<string, { path: string; sha256: string }> = {
   },
 }
 /** Both harnesses pin the table size, so a dropped case fails. */
-const CASE_COUNT = 57
+const CASE_COUNT = 118
 const CLASSES = ['Error', 'TypeError', 'SessionFormatUnsupportedError', 'SessionPersistenceCorruptionError']
 const LIMITS = [
-  'event-type', 'ignorable', 'number', 'depth', 'coordinate', 'config-member', 'tool-schema', 'context', 'repair',
+  'number', 'depth', 'coordinate', 'config-member', 'tool-schema', 'context', 'repair', 'projection',
 ]
 /** The `assertMessageEventShape`, tool-update data, and marker checks adoption runs. */
 const STORED_CHECKS = [
@@ -63,7 +66,9 @@ const RESTORE_CHECKS = [
   ...STORED_CHECKS, 'settlement', 'header-provider-model', 'header-reasoning-effort', 'header-adapter-defaults',
   'header-reason', 'header-starts-series', 'replace-start', 'replace-end', 'replace-order', 'replace-sources',
   'tool-result-span', 'tool-result-target', 'tool-result-rest', 'system-head', 'tool-update-header',
-  'tool-update-stale', 'tool-update-baseline', 'tool-update-change', 'tool-update-anchor',
+  'tool-update-stale', 'tool-update-baseline', 'tool-update-change', 'tool-update-anchor', 'tool-update-required',
+  'image-offload-data', 'image-offload-target', 'image-offload-duplicate', 'image-offload-not-current',
+  'image-offload-target-type', 'image-offload-indexes', 'image-offload-already-offloaded', 'image-offload-missing-index',
 ]
 const CAUSES = [
   'scan', 'unsupported/unknown-type', 'unsupported/fallback-header',
@@ -248,10 +253,11 @@ function parseRust(value: unknown, ts: Outcome, id: string): RustOverride {
 
 function loadTable(): RestoreCase[] {
   const table: unknown = JSON.parse(readFileSync(new URL('conformance/session/restore-cases.json', REPO), 'utf8'))
-  if (!isObject(table) || sortedKeys(table) !== 'cases,logs,oracle,schema,version' || table.schema !== SCHEMA
-    || table.version !== 1 || table.oracle !== ORACLE || !Array.isArray(table.cases)
+  if (!isObject(table) || sortedKeys(table) !== 'cases,history,logs,oracle,schema,version' || table.schema !== SCHEMA
+    || table.version !== 2 || table.oracle !== ORACLE || !Array.isArray(table.cases)
+    || !Array.isArray(table.history) || !table.history.every(isLine)
     || JSON.stringify(table.logs) !== JSON.stringify(Object.fromEntries(Object.entries(LOGS).map(([name, { path }]) => [name, path])))) {
-    throw new Error('restore-cases.json does not match its version-1 schema')
+    throw new Error('restore-cases.json does not match its version-2 schema')
   }
   return table.cases.map((entry: unknown): RestoreCase => {
     if (!isObject(entry) || typeof entry.id !== 'string' || typeof entry.log !== 'string') {
@@ -400,6 +406,7 @@ describe('shared restore cases', () => {
       const { events, ...actual } = result
       const want = expected({ ...entry, ts })
       expect(actual).toStrictEqual(want)
+      expect(JSON.stringify(actual.messages)).toBe(JSON.stringify(want.messages))
       for (const { seq, sourceEventSeqs } of ts.events ?? []) {
         expect(events[seq]?.sourceEventSeqs, `event ${seq}`).toStrictEqual(sourceEventSeqs)
       }

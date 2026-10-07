@@ -17,14 +17,18 @@
 //! protected-first-head rules, so it accepts an unknown required event type
 //! and some logs restoration refuses. Requests derived here therefore carry no
 //! restoration claim. This subset admits the 60 known event types other than
-//! `image/offload` and `session/end-seed`, and no `ignorable` row.
+//! `session/end-seed`, with or without `ignorable`, which Session construction
+//! ignores on a known type except to refuse it on a tool update. The helper
+//! constructs its Session without message projections, so an `image/offload`
+//! row in a checked prefix refuses the log after its marker check, however
+//! valid its decision.
 //!
 //! [`replay_requests`] runs the same stages in the same order:
 //!
 //! 1. [`scan_log`], with its documented refusal and native-limit contracts.
 //! 2. Uncommitted trailing bytes, including any record after the first issue
 //!    and a torn tail, then a seeded header or a nonzero inherited cut.
-//! 3. Subset qualification of every row, and the step and settlement
+//! 3. Event-type qualification of every row, and the step and settlement
 //!    coordinates. Each step yields one request per settlement with its
 //!    coordinate. Both `assistant/message` and `assistant/attempt` supply
 //!    cutoffs, including interrupted messages.
@@ -75,9 +79,8 @@
 //! marker on those types, as `surfaceOpOf` does, without reading its value.
 //! For the tool update it runs every Session check in Session construction's
 //! order: `validateToolUpdateData`, that marker refusal, and
-//! `validateToolUpdate`, whose header, change, and anchor checks the fold
-//! runs. Its `ignorable` check stays behind the whole-log
-//! [`ReplayLimit::Ignorable`]. Each request's tool history is the
+//! `validateToolUpdate`: its refusal of `ignorable`, then the header, change,
+//! and anchor checks the fold runs. Each request's tool history is the
 //! `ToolHistoryProjection` snapshot of its prefix, and its config and tools
 //! come from the latest header, as `foldRequestHeader` reads them.
 //!
@@ -91,6 +94,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Map, Value};
 
+use crate::offload::{self, OffloadRejection};
 use crate::request::{Fact, FoldRefusal, Request, RequestFold, SurfaceKind, SurfaceOp};
 use crate::{
     Count, MAX_SAFE_INTEGER, PathPlatform, ScanRefusal, UnadmittedEnvelope, V3CodecEvent, count,
@@ -162,9 +166,8 @@ pub(crate) const KNOWN_EVENT_TYPES: [&str; 60] = [
     "web/deepseek-search-llm-request",
     "workspace/changes",
 ];
-/// Known types this subset still refuses: `image/offload` needs a message
-/// projection, and `session/end-seed` belongs to seeded logs.
-const EXCLUDED_TYPES: [&str; 2] = ["image/offload", "session/end-seed"];
+/// The known type this subset still refuses: it belongs to seeded logs.
+const EXCLUDED_TYPE: &str = "session/end-seed";
 /// The types whose payload a request can carry. Their payloads keep the
 /// conservative number and depth qualification.
 const PROJECTED_TYPES: [&str; 6] = [
@@ -241,9 +244,9 @@ impl ReplayRefusal {
 /// Session construction runs them: the lossless snapshot, then
 /// `validateToolUpdateData`, then
 /// `assertCurrentLlmShape` in `packages/core/session/src/index.ts`, then the
-/// surface metadata and replacement checks of `planSurfaceEvent` in
-/// `packages/core/session/src/surface.ts`, then `validateToolUpdate` in
-/// `packages/core/session/src/tool-history.ts`.
+/// surface metadata, message projection, and replacement checks of
+/// `planSurfaceEvent` in `packages/core/session/src/surface.ts`, then
+/// `validateToolUpdate` in `packages/core/session/src/tool-history.ts`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SeedRejection {
     /// The event holds -0, which `snapshotJsonValue` refuses. TypeScript
@@ -284,9 +287,23 @@ pub enum SeedRejection {
     HeaderStartsSeries,
     /// A `request/tool-update`'s data fails `validateToolUpdateData`.
     ToolUpdateData,
-    /// A `request/tool-update` carries `surfaceOp` or `sourceEventSeqs`. The
-    /// codec treats the type as opaque; Session construction does not.
+    /// A valid, marker-free `request/tool-update` carries `ignorable`, which
+    /// `validateToolUpdate` refuses before its reference checks.
+    ToolUpdateRequired,
+    /// A `request/tool-update`, `image/offload`, or other codec-opaque known
+    /// type carries `surfaceOp` or `sourceEventSeqs`. The codec treats the
+    /// type as opaque; Session construction does not.
     NonSurfaceMarker,
+    /// An `image/offload` reaches a Session constructed without its
+    /// projection, as derivation's is. TypeScript throws "invalid seed event
+    /// at index `seq`: session event "image/offload" requires a message
+    /// projection; load its owning plugin or supply its projection
+    /// definition".
+    ProjectionRequired,
+    /// The `image/offload` projection of a restoring Session rejects the
+    /// decision. This variant also claims TypeScript's message; see
+    /// [`OffloadRejection`].
+    ImageOffload(OffloadRejection),
     /// A replacement's `startSeq` is not a current surface node.
     ReplaceStart,
     /// A replacement's `endSeq` is not a current surface node.
@@ -324,12 +341,8 @@ pub enum SeedRejection {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReplayLimit {
     /// A row type outside the 60 known types, required or ignorable, or the
-    /// known `image/offload`, which needs a message projection, or
-    /// `session/end-seed`, which belongs to seeded logs.
+    /// known `session/end-seed`, which belongs to seeded logs.
     EventType,
-    /// A row carries `ignorable`, including a tool update, which Session
-    /// construction refuses only after its data and surface checks.
-    Ignorable,
     /// A projected prefix payload, that of a surface message, request header,
     /// or tool update, holds a number other than a safe integer and not -0.
     /// JavaScript's rounding of what a request copies is not decided here.
@@ -385,13 +398,9 @@ pub fn replay_requests(
     for event in &events {
         let envelope = event.envelope();
         let seq = envelope.seq;
-        if !KNOWN_EVENT_TYPES.contains(&envelope.event_type)
-            || EXCLUDED_TYPES.contains(&envelope.event_type)
+        if !KNOWN_EVENT_TYPES.contains(&envelope.event_type) || envelope.event_type == EXCLUDED_TYPE
         {
             return Err(limit(seq, ReplayLimit::EventType));
-        }
-        if envelope.ignorable {
-            return Err(limit(seq, ReplayLimit::Ignorable));
         }
         if !matches!(
             envelope.event_type,
@@ -479,7 +488,9 @@ const fn seed(seq: u64, rejection: SeedRejection) -> ReplayRefusal {
     ReplayRefusal::Seed { seq, rejection }
 }
 
-pub(crate) const fn folded(seq: u64, refusal: FoldRefusal) -> ReplayRefusal {
+/// A fold refusal as Session construction's. Only a restoring fold projects,
+/// and restoration maps its walk's coercion to a native limit itself.
+pub(crate) fn folded(seq: u64, refusal: FoldRefusal) -> ReplayRefusal {
     let rejection = match refusal {
         FoldRefusal::ReplaceStart => SeedRejection::ReplaceStart,
         FoldRefusal::ReplaceEnd => SeedRejection::ReplaceEnd,
@@ -494,6 +505,9 @@ pub(crate) const fn folded(seq: u64, refusal: FoldRefusal) -> ReplayRefusal {
         FoldRefusal::ToolUpdateBaseline => SeedRejection::ToolUpdateBaseline,
         FoldRefusal::ToolUpdateChange => SeedRejection::ToolUpdateChange,
         FoldRefusal::ToolUpdateAnchor => SeedRejection::ToolUpdateAnchor,
+        FoldRefusal::ProjectionRequired => SeedRejection::ProjectionRequired,
+        FoldRefusal::ImageOffload(rejection) => SeedRejection::ImageOffload(rejection),
+        FoldRefusal::ProjectionCoercion => unreachable!("restoration maps a projection's coercion"),
     };
     seed(seq, rejection)
 }
@@ -527,8 +541,11 @@ fn lossless(seq: u64, row: &Value) -> Result<(), ReplayRefusal> {
 /// the Session construction checks the codec leaves, and convert it to a fact.
 /// It takes no lossless snapshot, which only replay's prefix loop takes. A row of an
 /// unknown type reaches it only when `ignorable`, and is opaque, as
-/// `surfaceOpOf` leaves it. Restoration also admits its synthetic closers,
-/// which the codec never saw; they are appends whose metadata it would prove.
+/// `surfaceOpOf` leaves it; a known type is checked whether or not it is
+/// `ignorable`. An `image/offload` decision is read, not judged: whether it
+/// applies depends on the fold's projections and history. Restoration also
+/// admits its synthetic closers, which the codec never saw; they are appends
+/// whose metadata it would prove.
 pub(crate) fn admit(envelope: &UnadmittedEnvelope<'_>) -> Result<Fact, ReplayRefusal> {
     let seq = envelope.seq;
     let data = envelope.data;
@@ -579,7 +596,16 @@ pub(crate) fn admit(envelope: &UnadmittedEnvelope<'_>) -> Result<Fact, ReplayRef
         "request/tool-update" => {
             let fact = tool_update(seq, data).ok_or(seed(seq, SeedRejection::ToolUpdateData))?;
             non_surface_marker(envelope).map_err(|rejection| seed(seq, rejection))?;
+            if envelope.ignorable {
+                return Err(seed(seq, SeedRejection::ToolUpdateRequired));
+            }
             Ok(fact)
+        }
+        "image/offload" => {
+            non_surface_marker(envelope).map_err(|rejection| seed(seq, rejection))?;
+            Ok(Fact::ImageOffload {
+                decision: offload::decision(data),
+            })
         }
         "assistant/attempt" => {
             settlement(seq, data)?;
