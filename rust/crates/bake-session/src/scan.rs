@@ -72,7 +72,8 @@ impl ScannedLog {
     }
 
     /// The length of the header record and every decoded row's record, LF
-    /// included: the offset after which the log can be truncated.
+    /// included, in plaintext bytes. For compressed input this is not a file
+    /// truncation offset; use [`crate::RestoredLog::torn`] for physical recovery.
     pub const fn committed_bytes(&self) -> usize {
         self.committed_bytes
     }
@@ -217,27 +218,97 @@ pub fn scan_log(
     let record = first_record(log).ok_or(ScanRefusal::Header(HeaderRefusal::Rejected(
         Rejection::Framing,
     )))?;
-    let header = read_header_record(record, platform).map_err(ScanRefusal::Header)?;
-    let mut rows = Vec::new();
-    let mut inherited = None;
-    let mut issue: Option<ScanIssue> = None;
-    let mut committed_bytes = record.len();
-    let mut start = record.len();
-    for (line, end) in (1u64..).zip(
-        log.iter()
-            .enumerate()
-            .skip(start)
-            .filter_map(|(index, byte)| (*byte == b'\n').then_some(index)),
-    ) {
-        let text = &log[start..end];
-        start = end + 1;
+    let mut scanner = LogScanner::new(record, platform, source_budget)?;
+    scanner.feed(&log[record.len()..])?;
+    scanner.finish()
+}
+
+/// Incremental plaintext scan. Complete-frame checks intentionally precede
+/// `finish`, whose inherited-marker check can otherwise hide a frame failure.
+pub(crate) struct LogScanner {
+    header: SessionHeader,
+    rows: Vec<Value>,
+    inherited: Option<u64>,
+    issue: Option<ScanIssue>,
+    committed_bytes: usize,
+    input_bytes: usize,
+    line: u64,
+    fragment: Vec<u8>,
+    source_budget: usize,
+}
+
+impl LogScanner {
+    pub(crate) fn new(
+        record: &[u8],
+        platform: PathPlatform,
+        source_budget: usize,
+    ) -> Result<Self, ScanRefusal> {
+        let header = read_header_record(record, platform).map_err(ScanRefusal::Header)?;
+        Ok(Self {
+            header,
+            rows: Vec::new(),
+            inherited: None,
+            issue: None,
+            committed_bytes: record.len(),
+            input_bytes: record.len(),
+            line: 0,
+            fragment: Vec::new(),
+            source_budget,
+        })
+    }
+
+    pub(crate) fn feed(&mut self, chunk: &[u8]) -> Result<(), ScanRefusal> {
+        let chunk_start = self.input_bytes;
+        self.input_bytes += chunk.len();
+        let mut start = 0;
+        for (end, _) in chunk.iter().enumerate().filter(|(_, byte)| **byte == b'\n') {
+            if self.fragment.is_empty() {
+                self.consume(&chunk[start..end], chunk_start + end + 1)?;
+            } else {
+                let mut fragment = std::mem::take(&mut self.fragment);
+                fragment.extend_from_slice(&chunk[start..end]);
+                self.consume(&fragment, chunk_start + end + 1)?;
+                fragment.clear();
+                self.fragment = fragment;
+            }
+            start = end + 1;
+        }
+        self.fragment.extend_from_slice(&chunk[start..]);
+        Ok(())
+    }
+
+    /// Input bytes, committed plaintext bytes, and decoded row count.
+    pub(crate) fn checkpoint(&self) -> (usize, usize, usize) {
+        (self.input_bytes, self.committed_bytes, self.rows.len())
+    }
+
+    pub(crate) fn finish(self) -> Result<ScannedLog, ScanRefusal> {
+        let inherited_event_count = match (self.header.is_seeded, self.inherited) {
+            (true, None) => return Err(ScanRefusal::Finish(FinishRejection::SeededWithoutMarker)),
+            (false, Some(_)) => {
+                return Err(ScanRefusal::Finish(FinishRejection::UnseededWithMarker));
+            }
+            (_, cut) => cut.unwrap_or(0),
+        };
+        Ok(ScannedLog {
+            header: self.header,
+            rows: self.rows,
+            inherited_event_count,
+            committed_bytes: self.committed_bytes,
+            source_budget: self.source_budget,
+        })
+    }
+
+    fn consume(&mut self, text: &[u8], end_byte: usize) -> Result<(), ScanRefusal> {
+        self.line += 1;
+        let line = self.line;
         let limit = |limit| ScanRefusal::NativeSubset { line, limit };
         let text = std::str::from_utf8(text).map_err(|_| limit(ScanLimit::InvalidUtf8))?;
         let row: Value = match serde_json::from_str(text) {
             Ok(row) => row,
             Err(error) if is_syntax_error(&error) => {
-                issue.get_or_insert(ScanIssue::Unparsable { line });
-                continue;
+                self.issue.get_or_insert(ScanIssue::Unparsable { line });
+                return Ok(());
             }
             Err(_) => return Err(limit(ScanLimit::JsonParser)),
         };
@@ -250,21 +321,21 @@ pub fn scan_log(
             Admission::Limit(codec) => limit(ScanLimit::Codec(codec)),
         })?;
         let turn_end = row.get("type").is_some_and(|value| value == "turn/end");
-        if let Some(issue) = &issue {
+        if let Some(issue) = &self.issue {
             if turn_end {
                 return Err(ScanRefusal::Corrupt {
                     line,
                     issue: issue.clone(),
                 });
             }
-            continue;
+            return Ok(());
         }
-        let seq = rows.len() as u64;
+        let seq = self.rows.len() as u64;
         let marker = row
             .get("type")
             .is_some_and(|value| value == "session/end-seed")
             && row["data"].get("inherited") == Some(&Value::Bool(true));
-        match decode_v3_row(&row, seq, source_budget) {
+        match decode_v3_row(&row, seq, self.source_budget) {
             Ok(_) => {}
             // The codec reruns the admission that passed above.
             Err(V3RowRefusal::Rejected(V3Rejection::Structural(rejection))) => {
@@ -273,7 +344,7 @@ pub fn scan_log(
             Err(V3RowRefusal::Rejected(rejection)) => {
                 // Only an event rejection follows the v2 marker.
                 if marker && matches!(rejection, V3Rejection::Event { .. }) {
-                    inherited = Some(seq);
+                    self.inherited = Some(seq);
                 }
                 let invalid = ScanIssue::Invalid { line, rejection };
                 if turn_end {
@@ -282,8 +353,8 @@ pub fn scan_log(
                         issue: invalid,
                     });
                 }
-                issue = Some(invalid);
-                continue;
+                self.issue = Some(invalid);
+                return Ok(());
             }
             Err(V3RowRefusal::NativeSubset(codec)) => return Err(limit(ScanLimit::Codec(codec))),
             Err(V3RowRefusal::ExpectedSeqOutOfRange) => return Err(limit(ScanLimit::EventCount)),
@@ -292,23 +363,12 @@ pub fn scan_log(
             }
         }
         if marker {
-            inherited = Some(seq);
+            self.inherited = Some(seq);
         }
-        rows.push(row);
-        committed_bytes = start;
+        self.rows.push(row);
+        self.committed_bytes = end_byte;
+        Ok(())
     }
-    let inherited_event_count = match (header.is_seeded, inherited) {
-        (true, None) => return Err(ScanRefusal::Finish(FinishRejection::SeededWithoutMarker)),
-        (false, Some(_)) => return Err(ScanRefusal::Finish(FinishRejection::UnseededWithMarker)),
-        (_, cut) => cut.unwrap_or(0),
-    };
-    Ok(ScannedLog {
-        header,
-        rows,
-        inherited_event_count,
-        committed_bytes,
-        source_budget,
-    })
 }
 
 /// The most integer-part digits serde_json 1.0.151 rounds as `JSON.parse`
@@ -356,4 +416,33 @@ fn starts_integer_part(before: &[u8]) -> bool {
         before,
         [.., b'.' | b'e' | b'E' | b'+'] | [.., b'e' | b'E', b'-']
     )
+}
+
+#[cfg(test)]
+mod chunk_tests {
+    use super::*;
+
+    #[test]
+    fn every_split_preserves_rows_utf8_and_failure_order() {
+        let header = b"{\"type\":\"session\",\"version\":3,\"id\":\"s\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n";
+        let row = "{\"type\":\"x/opaque\",\"seq\":0,\"time\":0,\"data\":\"🦀世界\"}\n";
+        let end = "{\"type\":\"turn/end\",\"seq\":1,\"time\":0,\"data\":{\"turn\":1}}\n";
+        for tail in [
+            row.to_owned(),
+            format!("{row}bad\n{end}"),
+            format!("{row}torn"),
+            format!("{row}\u{fffd}\n"),
+        ] {
+            let bytes = [header.as_slice(), tail.as_bytes()].concat();
+            let expected = scan_log(&bytes, PathPlatform::Posix, 64);
+            for split in 0..=tail.len() {
+                let mut scanner = LogScanner::new(header, PathPlatform::Posix, 64).unwrap();
+                let actual = scanner
+                    .feed(&tail.as_bytes()[..split])
+                    .and_then(|()| scanner.feed(&tail.as_bytes()[split..]))
+                    .and_then(|()| scanner.finish());
+                assert_eq!(actual, expected, "split {split} in {tail:?}");
+            }
+        }
+    }
 }

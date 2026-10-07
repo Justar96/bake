@@ -2,7 +2,7 @@
 
 ## Summary
 
-Compare TypeScript and Rust using controlled fixtures and independently checked outcomes. The synthetic harness and [native eval fixture adapter](../evals/README.md#native-fixture-adapter) qualify comparison tooling for [migration scope 01](../docs/roadmap/rust-0.4/README.md#01--workspace-and-comparison-harness). Separate shared cases exercise Session headers, source references, row envelopes, strict V3 codec rows, and scans of plain logs against released codecs, and restoration of plain logs as the production read path restores them; three runtime fixtures capture a real TypeScript tool-call turn, a tool added, removed, and restored across turns, and a model request retried under a changed model, and request derivation cases replay the first and its variants through the TypeScript replay helper. The [qualification ledger](../docs/roadmap/rust-0.4/ledger/README.md) records partial evidence. Agent resume, restoration of compressed or migrated logs, replay of seeded, resumed, or compressed logs, and live native evals remain open.
+Compare TypeScript and Rust using controlled fixtures and independently checked outcomes. The synthetic harness and [native eval fixture adapter](../evals/README.md#native-fixture-adapter) qualify comparison tooling for [migration scope 01](../docs/roadmap/rust-0.4/README.md#01--workspace-and-comparison-harness). Separate shared cases exercise Session headers, source references, row envelopes, strict V3 codec rows, and scans of plain logs against released codecs, and restoration of plain and Zstd-compressed bytes as the production read path restores them; three runtime fixtures capture a real TypeScript tool-call turn, a tool added, removed, and restored across turns, and a model request retried under a changed model, and request derivation cases replay the first and its variants through the TypeScript replay helper. The [qualification ledger](../docs/roadmap/rust-0.4/ledger/README.md) records partial evidence. Agent resume, restoration of migrated logs, replay of seeded, resumed, or compressed logs, and live native evals remain open.
 
 ## Table of Contents
 
@@ -17,6 +17,7 @@ Compare TypeScript and Rust using controlled fixtures and independently checked 
 - [Log scan cases](#log-scan-cases)
 - [Request derivation cases](#request-derivation-cases)
 - [Plain log restoration cases](#plain-log-restoration-cases)
+- [Zstd log restoration cases](#zstd-log-restoration-cases)
 - [Runner contract](#runner-contract)
 - [Ownership and limits](#ownership-and-limits)
 
@@ -342,6 +343,20 @@ A current-format read runs no `restoreReleasedV3Artifact`, so neither harness ch
 A `rust` override names a `native-subset` limit, which claims nothing, or a `rejected` cause: `scan`, which claims the exact message, or an `unsupported/`, `stored/`, or `restore/` check, which claims the layer and refused seq. Rust limits `image/offload`, every known type carrying `ignorable` (TypeScript accepts a hook result and a user message, and refuses a tool update, all witnessed), `request/context` data that is not an object, closers whose computation would depend on JavaScript coercion (`null` data, a `null` content block, a non-string pending call id, or an open turn or step that is not a safe count), and the request derivation subset's number, depth, coordinate, config-member, and tool-schema rules on projected payloads, including fields no output carries, such as usage. Unknown types carrying `ignorable` restore as opaque rows, markers included.
 
 Both harnesses pin the case count, reject unknown keys, and require every limit and refusal layer to be witnessed. Of the 57 cases, 29 restore identically, 13 are rejections with a Rust cause, and 15 are native limits, 11 of them on logs TypeScript restores. Nine restored cases, the three captures, a cut needing a closer, a torn and a recovered tail, a balanced end seed, and two seeded cuts, also run through the real JSONL backend and `readColdSessionLog` in a temporary store, and must match the table. Rust also checks that request derivation differs on the same bytes where its prefix rules do.
+
+## Zstd log restoration cases
+
+[`session/zstd-cases.json`](session/zstd-cases.json) holds 46 compressed inputs and fixed expectations. The [TypeScript spec](../packages/session/session-persistence-jsonl/tests/zstd-conformance.spec.ts) opens each through the production JSONL backend in its own temporary store, observes recovery metadata before any write-open, and restores its Session projections. The [Rust test](../rust/crates/bake-session/tests/zstd_cases.rs) calls `restore_zstd_log` on the same bytes. Successful cases compare the header, every stored row, inherited cut, physical truncation offset, recovered-row start, closers, end-seed decision, messages, request header, tool history, and request context. Rust also checks the independent expected committed plaintext offset, which the backend's stored-file view does not expose.
+
+The cases cover complete and empty frames, records and UTF-8 split across frames, RAW and RLE blocks, checksummed compressed blocks produced with Node's production encoder settings, incomplete headers/blocks/checksums, rejected window sizes and block lengths, structural errors, and decoder failures. Error-order witnesses distinguish structural pre-scan, per-frame decode and feed, the complete-frame committed check, and the final inherited-marker check. Torn-frame output is discarded on a decoder error; successfully decoded torn plaintext still passes row admission and can fail on an issue followed by `turn/end`. A padded header fills the native decoder's 64 KiB output buffer exactly.
+
+`RestoredLog::torn()` reports `truncate_to` in physical input bytes and `recovered_from` as an index into stored rows. The recovered rows remain stored once. For plain logs, that index is the stored row count because no rows are recovered from the discarded tail. `ScannedLog::committed_bytes()` always counts plaintext bytes; it is not a compressed-file offset.
+
+Four cases exceed the explicit native plaintext budget while TypeScript accepts their logs. They cover the header, a complete batch, and a recovered tail, with a zero budget included; an exact-budget case succeeds. These refusals have no invented event seq and make no TypeScript precedence claim. Existing scan and restoration native limits still apply.
+
+The first 43 expectations were authored from source before either new harness ran. Earlier independent decoder probes informed the construction and edge selection. Two additional expectations reuse the authored full state with Node-encoded bytes, including a torn checksum. A further source-authored case forces a decoder error after a full output buffer has already been emitted. Both harnesses pin the case count and distinct IDs. The unchanged 76 plain-scan and 57 plain-restoration cases also exercise the extracted incremental scanner. These finite cases qualify the pinned libzstd 1.5.7 behavior; they do not establish compatibility with arbitrary future decoder versions, migrations, file ownership, writeback, or live Agent resume.
+
+Run the focused comparison with `bun run test:runtime packages/session/session-persistence-jsonl/tests/zstd-conformance.spec.ts` and, from `rust/`, `cargo test --locked -p bake-session --test zstd_cases`.
 
 ## Runner contract
 
