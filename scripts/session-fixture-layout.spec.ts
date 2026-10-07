@@ -202,6 +202,9 @@ describe('isPhysicalSessionFixture', () => {
       'scripts/snapshots/python-sdk-single-exe/advanced/requests.jsonl',
     )).toBe(false)
     expect(isPhysicalSessionFixture('apps/web/tests/snapshots/example/session.jsonl')).toBe(false)
+    expect(isPhysicalSessionFixture('conformance/runtime/request-reconstruction/tool-call-turn/session.jsonl')).toBe(true)
+    expect(isPhysicalSessionFixture('conformance/runtime/request-reconstruction/unknown/session.jsonl')).toBe(false)
+    expect(isPhysicalSessionFixture('conformance/runtime/request-reconstruction/tool-call-turn/requests.jsonl')).toBe(false)
   })
 })
 
