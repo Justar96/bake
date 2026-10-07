@@ -10,9 +10,9 @@
 //!
 //! Every fold transition matches `packages/core/session` for the subset the
 //! import side admits: surface appends, positional surface replacements,
-//! request headers, and tool updates. A replacement is planned against the
-//! current nodes and refused, leaving the fold unchanged, unless it passes the
-//! replacement checks of `planSurfaceEvent` in
+//! message projections, request headers, and tool updates. A replacement is
+//! planned against the current nodes and refused, leaving the fold unchanged,
+//! unless it passes the replacement checks of `planSurfaceEvent` in
 //! `packages/core/session/src/surface.ts` that remain for this subset:
 //! endpoints located among the current nodes, source coverage of every
 //! shadowed node, the `tool/result` rewrite rule, and the protected system
@@ -21,7 +21,16 @@
 //! `validateToolUpdate` in `packages/core/session/src/tool-history.ts` after
 //! its ignorable check, in that function's order. Headers and accepted updates
 //! then fold as `ToolHistoryProjection` does, which cannot fail on a validated
-//! prefix. Message projections are refused before they reach the fold.
+//! prefix.
+//!
+//! The fold holds the message projections a Session was constructed with. A
+//! restoring fold, [`RequestFold::with_image_offload`], applies the catalog's
+//! `image/offload` projection, [`crate::offload`]; a derivation fold,
+//! [`RequestFold::new`], has none and refuses that event, as Session
+//! construction without projections does. A projection validates every target
+//! before it commits, and its messages are kept beside the nodes, keyed by the
+//! original seq: the logged payloads, which replacement checks compare, never
+//! change, and a later decision on the same node projects the earlier result.
 //!
 //! Besides request snapshots, the fold exposes the projections a restored
 //! Session reads: its messages, which need no header, the latest header in
@@ -30,6 +39,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Map, Value};
+
+use crate::offload::{Decision, OffloadRejection, Target, Walk, offload_images};
 
 /// A surface event type, which fixes how its message derives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -86,6 +97,8 @@ pub(crate) enum Fact {
         additions: Vec<String>,
         removals: Vec<String>,
     },
+    /// An `image/offload` decision, read but not yet validated.
+    ImageOffload { decision: Decision },
     /// An event derivation does not read.
     LogOnly,
 }
@@ -122,6 +135,12 @@ pub(crate) enum FoldRefusal {
     /// The last current non-system message is not the user or tool-result
     /// message the update names.
     ToolUpdateAnchor,
+    /// The fold has no projection for `image/offload`.
+    ProjectionRequired,
+    /// The `image/offload` projection rejects the decision.
+    ImageOffload(OffloadRejection),
+    /// The `image/offload` walk reaches a block that makes JavaScript throw.
+    ProjectionCoercion,
 }
 
 /// A tool `name` as a JavaScript `Map` or `Set` key. Session construction
@@ -223,19 +242,6 @@ impl Node {
             _ => &self.payload,
         }
     }
-
-    /// `deriveEventMessage`: an empty system message records "no system
-    /// prompt", and an empty assistant message only hosts usage; neither
-    /// reaches the model, but both keep their surface position.
-    fn derived(&self) -> Option<&Map<String, Value>> {
-        let message = self.message();
-        let empty = message
-            .get("content")
-            .and_then(Value::as_array)
-            .is_some_and(Vec::is_empty);
-        (!(empty && matches!(self.kind, SurfaceKind::System | SurfaceKind::Assistant)))
-            .then_some(message)
-    }
 }
 
 /// The derivation state of one Session prefix.
@@ -250,9 +256,16 @@ pub(crate) struct RequestFold {
     header_seqs: BTreeSet<u64>,
     last_update: Option<u64>,
     history: ToolHistory,
+    /// Whether the `image/offload` projection is installed.
+    projects_images: bool,
+    /// Projected messages keyed by their original seq, including those of
+    /// nodes a replacement has since shadowed.
+    projected: BTreeMap<u64, Map<String, Value>>,
 }
 
 impl RequestFold {
+    /// A fold without message projections, as `replayRequests` constructs its
+    /// Session.
     pub(crate) fn new(session_id: String) -> Self {
         Self {
             session_id,
@@ -262,6 +275,17 @@ impl RequestFold {
             header_seqs: BTreeSet::new(),
             last_update: None,
             history: ToolHistory::default(),
+            projects_images: false,
+            projected: BTreeMap::new(),
+        }
+    }
+
+    /// A fold with the catalog's message projections, as restoration
+    /// constructs its Session.
+    pub(crate) fn with_image_offload(session_id: String) -> Self {
+        Self {
+            projects_images: true,
+            ..Self::new(session_id)
         }
     }
 
@@ -325,9 +349,73 @@ impl RequestFold {
                     self.apply_tool_update(after_message_id, &additions, removals);
                 }
             }
+            Fact::ImageOffload { decision } => {
+                if !self.projects_images {
+                    return Err(FoldRefusal::ProjectionRequired);
+                }
+                let messages = self.project(&decision)?;
+                self.projected.extend(messages);
+            }
             Fact::LogOnly => {}
         }
         Ok(())
+    }
+
+    /// `imageOffloadProjection.project`: validate and project each target in
+    /// order against the current nodes and earlier projections, returning the
+    /// changed messages without committing any.
+    fn project(
+        &self,
+        decision: &Decision,
+    ) -> Result<BTreeMap<u64, Map<String, Value>>, FoldRefusal> {
+        let rejected = FoldRefusal::ImageOffload;
+        let targets = decision
+            .0
+            .as_ref()
+            .ok_or(rejected(OffloadRejection::Data))?;
+        let mut messages = BTreeMap::new();
+        for target in targets {
+            let Target::Valid { seq, indexes } = target else {
+                return Err(rejected(OffloadRejection::Target));
+            };
+            let seq = *seq;
+            if messages.contains_key(&seq) {
+                return Err(rejected(OffloadRejection::DuplicateTarget { seq }));
+            }
+            let Some(node) = self.nodes.iter().find(|node| node.seq == seq) else {
+                return Err(rejected(OffloadRejection::NotCurrent { seq }));
+            };
+            if !matches!(node.kind, SurfaceKind::User | SurfaceKind::ToolResult) {
+                return Err(rejected(OffloadRejection::TargetType { seq }));
+            }
+            let indexes = indexes
+                .as_deref()
+                .ok_or(rejected(OffloadRejection::ImageIndexes))?;
+            let message = self.projected.get(&seq).unwrap_or_else(|| node.message());
+            let projected = offload_images(message, indexes).map_err(|walk| match walk {
+                Walk::Rejected(rejection) => rejected(rejection),
+                Walk::Coercion => FoldRefusal::ProjectionCoercion,
+            })?;
+            messages.insert(seq, projected);
+        }
+        Ok(messages)
+    }
+
+    /// `deriveEventMessage`: a projected message replaces its node's logged
+    /// one. An empty system message records "no system prompt", and an empty
+    /// assistant message only hosts usage; neither reaches the model, but
+    /// both keep their surface position.
+    fn derived<'a>(&'a self, node: &'a Node) -> Option<&'a Map<String, Value>> {
+        if let Some(projected) = self.projected.get(&node.seq) {
+            return Some(projected);
+        }
+        let message = node.message();
+        let empty = message
+            .get("content")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty);
+        (!(empty && matches!(node.kind, SurfaceKind::System | SurfaceKind::Assistant)))
+            .then_some(message)
     }
 
     /// The node positions a replacement shadows, after the remaining
@@ -422,7 +510,7 @@ impl RequestFold {
             .iter()
             .rev()
             .filter(|node| node.kind != SurfaceKind::System)
-            .find_map(|node| node.derived().map(|message| (node.kind, message)));
+            .find_map(|node| self.derived(node).map(|message| (node.kind, message)));
         match last {
             Some((SurfaceKind::User | SurfaceKind::ToolResult, message))
                 if message.get("id").and_then(Value::as_str) == Some(after_message_id) =>
@@ -518,7 +606,7 @@ impl RequestFold {
 
     /// `deriveMessages`: each current node's derived message, in order.
     pub(crate) fn messages(&self) -> impl Iterator<Item = &Map<String, Value>> {
-        self.nodes.iter().filter_map(Node::derived)
+        self.nodes.iter().filter_map(|node| self.derived(node))
     }
 
     /// `foldRequestHeader`: the latest header's `canonicalHeader` form, or
@@ -1072,6 +1160,104 @@ mod tests {
         assert_eq!(
             request.messages[3]["content"][0]["content"][0]["text"],
             "pruned"
+        );
+    }
+
+    fn images(seq: u64) -> Fact {
+        Fact::Surface {
+            seq,
+            kind: SurfaceKind::User,
+            op: SurfaceOp::Append,
+            payload: message(
+                "u",
+                json!([{"type": "image", "n": 0}, {"type": "text"}, {"type": "image", "n": 1}]),
+            ),
+        }
+    }
+
+    fn offload(text: &str) -> Fact {
+        Fact::ImageOffload {
+            decision: crate::offload::decision(&serde_json::from_str(text).expect("JSON")),
+        }
+    }
+
+    fn offloaded(fold: &RequestFold) -> Vec<bool> {
+        let message = fold.messages().next().expect("message");
+        message["content"]
+            .as_array()
+            .expect("content")
+            .iter()
+            .filter(|block| block["type"] == "image")
+            .map(|block| block.get("offloaded") == Some(&Value::Bool(true)))
+            .collect()
+    }
+
+    #[test]
+    fn a_rejected_projection_commits_no_target() {
+        let mut fold = RequestFold::with_image_offload("s".to_owned());
+        fold.append(images(0)).expect("user");
+        let before = fold.clone();
+        // The first target projects before the second fails its shape check.
+        let refusal = FoldRefusal::ImageOffload(OffloadRejection::Target);
+        assert_eq!(
+            fold.append(offload(
+                r#"{"targets":[{"seq":0,"imageIndexes":[0]},null]}"#
+            )),
+            Err(refusal)
+        );
+        assert_unchanged(&fold, &before, refusal);
+        let refusal = FoldRefusal::ImageOffload(OffloadRejection::MissingIndex { index: 2 });
+        assert_eq!(
+            fold.append(offload(r#"{"targets":[{"seq":0,"imageIndexes":[0,2]}]}"#)),
+            Err(refusal)
+        );
+        assert_unchanged(&fold, &before, refusal);
+        // The reused fold projects index 0 as if no refusal had happened.
+        fold.append(offload(r#"{"targets":[{"seq":0,"imageIndexes":[0]}]}"#))
+            .expect("project");
+        assert_eq!(offloaded(&fold), [true, false]);
+        fold.append(offload(r#"{"targets":[{"seq":0,"imageIndexes":[1]}]}"#))
+            .expect("project the projection");
+        assert_eq!(offloaded(&fold), [true, true]);
+        let before = fold.clone();
+        let refusal = FoldRefusal::ImageOffload(OffloadRejection::AlreadyOffloaded { index: 0 });
+        assert_eq!(
+            fold.append(offload(r#"{"targets":[{"seq":0,"imageIndexes":[0]}]}"#)),
+            Err(refusal)
+        );
+        assert_unchanged(&fold, &before, refusal);
+    }
+
+    #[test]
+    fn a_projection_leaves_logged_payloads_and_identities_unchanged() {
+        let mut fold = RequestFold::with_image_offload("s".to_owned());
+        fold.append(images(0)).expect("user");
+        let logged = fold.nodes[0].payload.clone();
+        fold.append(offload(r#"{"targets":[{"seq":0,"imageIndexes":[1]}]}"#))
+            .expect("project");
+        assert_eq!(fold.nodes[0].payload, logged);
+        let message = fold.messages().next().expect("message");
+        assert_eq!(message["id"], "u");
+        assert_eq!(
+            message["content"],
+            json!([{"type": "image", "n": 0}, {"type": "text"}, {"type": "image", "n": 1, "offloaded": true}])
+        );
+    }
+
+    #[test]
+    fn a_derivation_fold_has_no_projection() {
+        let mut fold = RequestFold::new("s".to_owned());
+        fold.append(images(0)).expect("user");
+        let before = fold.clone();
+        let refusal = FoldRefusal::ProjectionRequired;
+        assert_eq!(
+            fold.append(offload(r#"{"targets":[{"seq":0,"imageIndexes":[0]}]}"#)),
+            Err(refusal)
+        );
+        assert_unchanged(&fold, &before, refusal);
+        assert_eq!(
+            fold.append(offload("{}")),
+            Err(FoldRefusal::ProjectionRequired)
         );
     }
 

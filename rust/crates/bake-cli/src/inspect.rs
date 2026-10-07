@@ -14,10 +14,10 @@ use std::io::{self, Read};
 use std::path::Path;
 
 use bake_session::{
-    CURRENT_SESSION_FORMAT_VERSION, EnvelopeLimit, HeaderOrigin, HeaderRefusal, PathPlatform,
-    Rejection, RestoreLimit, RestoreRefusal, RestoredLog, ScanLimit, ScanRefusal, SeedRejection,
-    SourceEventSeqsLimit, SubsetLimit, Unsupported, V3Limit, ZstdRefusal, restore_plain_log,
-    restore_zstd_log,
+    CURRENT_SESSION_FORMAT_VERSION, EnvelopeLimit, HeaderOrigin, HeaderRefusal, OffloadRejection,
+    PathPlatform, Rejection, RestoreLimit, RestoreRefusal, RestoredLog, ScanLimit, ScanRefusal,
+    SeedRejection, SourceEventSeqsLimit, SubsetLimit, Unsupported, V3Limit, ZstdRefusal,
+    restore_plain_log, restore_zstd_log,
 };
 use serde_json::{Value, json};
 
@@ -524,8 +524,6 @@ fn scan_limit(limit: ScanLimit, args: &InspectArgs) -> String {
 
 const fn restore_limit(limit: RestoreLimit) -> &'static str {
     match limit {
-        RestoreLimit::EventType => "image/offload events are not restored by this preview",
-        RestoreLimit::Ignorable => "a known event type is marked ignorable",
         RestoreLimit::Number => "a projected payload holds a number other than a safe integer",
         RestoreLimit::Depth => "a projected payload nests more than 64 arrays and objects",
         RestoreLimit::Coordinate => "a turn or step coordinate is not a safe count",
@@ -535,6 +533,10 @@ const fn restore_limit(limit: RestoreLimit) -> &'static str {
         RestoreLimit::ToolSchema => "a request header's tools are not an array of objects",
         RestoreLimit::Context => "request/context data is not an object",
         RestoreLimit::Repair => "the closers for an interrupted turn cannot be built",
+        RestoreLimit::Projection => {
+            "an image/offload target's content holds a null block or a tool-result block whose \
+             content is not an array"
+        }
     }
 }
 
@@ -557,6 +559,18 @@ const fn check(rejection: SeedRejection) -> &'static str {
         SeedRejection::HeaderReason => "header-reason",
         SeedRejection::HeaderStartsSeries => "header-starts-series",
         SeedRejection::ToolUpdateData => "tool-update-data",
+        SeedRejection::ToolUpdateRequired => "tool-update-required",
+        SeedRejection::ProjectionRequired => "projection-required",
+        SeedRejection::ImageOffload(rejection) => match rejection {
+            OffloadRejection::Data => "image-offload-data",
+            OffloadRejection::Target => "image-offload-target",
+            OffloadRejection::DuplicateTarget { .. } => "image-offload-duplicate",
+            OffloadRejection::NotCurrent { .. } => "image-offload-not-current",
+            OffloadRejection::TargetType { .. } => "image-offload-target-type",
+            OffloadRejection::ImageIndexes => "image-offload-indexes",
+            OffloadRejection::AlreadyOffloaded { .. } => "image-offload-already-offloaded",
+            OffloadRejection::MissingIndex { .. } => "image-offload-missing-index",
+        },
         SeedRejection::NonSurfaceMarker => "non-surface-marker",
         SeedRejection::ReplaceStart => "replace-start",
         SeedRejection::ReplaceEnd => "replace-end",

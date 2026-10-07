@@ -2,14 +2,16 @@
 //! `restore_plain_log`, over the same bytes the TypeScript spec builds. A
 //! case's expected outcome is its `rust` override when present, otherwise the
 //! hand-written restored state the TypeScript `restorePlainLog` helper also
-//! meets. Nothing here reads TypeScript output.
+//! meets, with messages also compared as serialized text, since `Value`
+//! equality ignores member order. An `image/offload` rejection also claims
+//! TypeScript's exact message. Nothing here reads TypeScript output.
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use bake_session::{
-    HeaderOrigin, PathPlatform, ReplayRefusal, RestoreLimit, RestoreRefusal, RestoredLog,
-    SeedRejection, SessionHeader, Unsupported, replay_requests, restore_plain_log,
+    HeaderOrigin, OffloadRejection, PathPlatform, ReplayRefusal, RestoreLimit, RestoreRefusal,
+    RestoredLog, SeedRejection, SessionHeader, Unsupported, replay_requests, restore_plain_log,
 };
 use serde_json::{Map, Value, json};
 
@@ -34,11 +36,18 @@ const LOGS: [(&str, &str, usize); 3] = [
     ),
 ];
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 57;
+const CASE_COUNT: usize = 118;
 const SOURCE_BUDGET: usize = 64;
-const LIMITS: [(&str, RestoreLimit); 9] = [
-    ("event-type", RestoreLimit::EventType),
-    ("ignorable", RestoreLimit::Ignorable),
+/// Cases whose `image/offload` rejection message is compared exactly.
+const OFFLOAD_MESSAGES: usize = 28;
+/// Refusals whose TypeScript message names no seq, and the row each names.
+const UNNAMED_SEQS: [(&str, u64); 4] = [
+    ("marker-on-opaque-type-after-last-settlement", 38),
+    ("image-offload-surface-marker", 16),
+    ("known-ignorable-tool-update-marker", 14),
+    ("known-ignorable-routing-decision-marker", 16),
+];
+const LIMITS: [(&str, RestoreLimit); 8] = [
     ("number", RestoreLimit::Number),
     ("depth", RestoreLimit::Depth),
     ("coordinate", RestoreLimit::Coordinate),
@@ -46,8 +55,9 @@ const LIMITS: [(&str, RestoreLimit); 9] = [
     ("tool-schema", RestoreLimit::ToolSchema),
     ("context", RestoreLimit::Context),
     ("repair", RestoreLimit::Repair),
+    ("projection", RestoreLimit::Projection),
 ];
-const SEED_CHECKS: [(&str, SeedRejection); 29] = [
+const SEED_CHECKS: [(&str, SeedRejection); 30] = [
     ("message-identity", SeedRejection::MessageIdentity),
     ("message-role", SeedRejection::MessageRole),
     ("message-source", SeedRejection::MessageSource),
@@ -83,6 +93,7 @@ const SEED_CHECKS: [(&str, SeedRejection); 29] = [
     ("tool-update-baseline", SeedRejection::ToolUpdateBaseline),
     ("tool-update-change", SeedRejection::ToolUpdateChange),
     ("tool-update-anchor", SeedRejection::ToolUpdateAnchor),
+    ("tool-update-required", SeedRejection::ToolUpdateRequired),
 ];
 /// The first ten checks are the ones adoption runs.
 const STORED_CHECKS: usize = 10;
@@ -192,10 +203,17 @@ fn load() -> Vec<Case> {
     let table = object(&table, "table");
     assert_eq!(
         keys(table),
-        BTreeSet::from(["cases", "logs", "oracle", "schema", "version"])
+        BTreeSet::from(["cases", "history", "logs", "oracle", "schema", "version"])
     );
     assert_eq!(table["schema"], SCHEMA);
-    assert_eq!(table["version"], 1);
+    assert_eq!(table["version"], 2);
+    assert!(
+        table["history"]
+            .as_array()
+            .expect("history")
+            .iter()
+            .all(Value::is_string)
+    );
     assert_eq!(table["oracle"], ORACLE);
     let logs = object(&table["logs"], "logs");
     assert_eq!(logs.len(), LOGS.len());
@@ -328,13 +346,28 @@ fn message_seq(message: &str) -> Option<u64> {
     })
 }
 
-fn check_rejection(case: &Case, cause: &str, refusal: &RestoreRefusal) {
+/// The table's name for an `image/offload` rejection.
+const fn offload_check(rejection: OffloadRejection) -> &'static str {
+    match rejection {
+        OffloadRejection::Data => "image-offload-data",
+        OffloadRejection::Target => "image-offload-target",
+        OffloadRejection::DuplicateTarget { .. } => "image-offload-duplicate",
+        OffloadRejection::NotCurrent { .. } => "image-offload-not-current",
+        OffloadRejection::TargetType { .. } => "image-offload-target-type",
+        OffloadRejection::ImageIndexes => "image-offload-indexes",
+        OffloadRejection::AlreadyOffloaded { .. } => "image-offload-already-offloaded",
+        OffloadRejection::MissingIndex { .. } => "image-offload-missing-index",
+    }
+}
+
+/// Check a claimed rejection; returns whether its exact message was compared.
+fn check_rejection(case: &Case, cause: &str, refusal: &RestoreRefusal) -> bool {
     let id = &case.id;
     let message = case.entry["ts"]["message"].as_str();
     let seq = match (cause, refusal) {
         ("scan", RestoreRefusal::Scan(scan)) => {
             assert_eq!(scan.message().as_deref(), message, "{id}");
-            return;
+            return false;
         }
         ("unsupported/unknown-type", RestoreRefusal::Unsupported { seq, cause })
             if *cause == Unsupported::UnknownType =>
@@ -357,6 +390,22 @@ fn check_rejection(case: &Case, cause: &str, refusal: &RestoreRefusal) {
             assert_eq!(rejection, expected, "{id}");
             *seq
         }
+        (
+            _,
+            RestoreRefusal::Restore {
+                seq,
+                rejection: SeedRejection::ImageOffload(rejection),
+            },
+        ) => {
+            assert_eq!(
+                Some(cause),
+                Some(format!("restore/{}", offload_check(*rejection))).as_deref(),
+                "{id}"
+            );
+            let text = format!("invalid seed event at index {seq}: {}", rejection.message());
+            assert_eq!(Some(text.as_str()), message, "{id}: exact message");
+            return true;
+        }
         (_, RestoreRefusal::Restore { seq, rejection }) => {
             let check = cause
                 .strip_prefix("restore/")
@@ -370,14 +419,14 @@ fn check_rejection(case: &Case, cause: &str, refusal: &RestoreRefusal) {
         }
         _ => panic!("{id}: expected {cause}, got {refusal:?}"),
     };
-    let expected = if id == "marker-on-opaque-type-after-last-settlement" {
-        38
-    } else {
-        message
-            .and_then(message_seq)
-            .expect("refusal message names its row")
-    };
+    let expected = UNNAMED_SEQS
+        .iter()
+        .find(|(case, _)| case == id)
+        .map(|(_, seq)| *seq)
+        .or_else(|| message.and_then(message_seq))
+        .expect("refusal message names its row");
     assert_eq!(seq, expected, "{id}: refused row");
+    false
 }
 
 #[test]
@@ -388,6 +437,7 @@ fn shared_cases_restore_like_the_read_path() {
     assert_eq!(ids.len(), CASE_COUNT);
     let mut limits = BTreeSet::new();
     let mut layers = BTreeSet::new();
+    let mut exact = 0;
     for case in &cases {
         let id = &case.id;
         let ts = object(&case.entry["ts"], id);
@@ -408,7 +458,7 @@ fn shared_cases_restore_like_the_read_path() {
                     ("rejected", Err(refusal)) => {
                         assert_eq!(ts["outcome"], "rejected", "{id}");
                         let cause = text(&rust["cause"], id);
-                        check_rejection(case, cause, refusal);
+                        exact += usize::from(check_rejection(case, cause, refusal));
                         layers.insert(cause.split('/').next().expect("layer").to_owned());
                     }
                     (outcome, actual) => panic!("{id}: expected {outcome}, got {actual:?}"),
@@ -426,7 +476,16 @@ fn shared_cases_restore_like_the_read_path() {
                     .as_object_mut()
                     .expect("restored outcome")
                     .remove("events");
-                assert_eq!(restored_value(&restored), expected, "{id}");
+                let actual = restored_value(&restored);
+                assert_eq!(actual, expected, "{id}");
+                assert_eq!(
+                    actual["messages"].to_string(),
+                    expected["messages"].to_string(),
+                    "{id}: member order"
+                );
+                // Restoration returns the scanned rows unchanged.
+                let stored = restored.stored().rows();
+                assert_eq!(stored, &case.rows[..stored.len()], "{id}: stored rows");
                 for check in checks
                     .iter()
                     .flat_map(|checks| checks.as_array().expect("events"))
@@ -451,6 +510,7 @@ fn shared_cases_restore_like_the_read_path() {
             }
         }
     }
+    assert_eq!(exact, OFFLOAD_MESSAGES, "exact image/offload messages");
     let all: BTreeSet<&str> = LIMITS.iter().map(|(name, _)| *name).collect();
     assert_eq!(limits, all, "every limit is witnessed");
     assert_eq!(
@@ -472,6 +532,13 @@ fn case(id: &str) -> Case {
 #[test]
 fn replay_and_restoration_differ_where_their_paths_do() {
     let replay = |id: &str| replay_requests(&case(id).log, PathPlatform::Posix, SOURCE_BUDGET);
+    assert_eq!(
+        replay("image-offload-tool-update-anchor"),
+        Err(ReplayRefusal::Seed {
+            seq: 11,
+            rejection: SeedRejection::ProjectionRequired
+        })
+    );
     assert_eq!(
         replay("negative-zero-hook-result"),
         Err(ReplayRefusal::Seed {

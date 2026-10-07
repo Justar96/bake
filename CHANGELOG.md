@@ -4,6 +4,7 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 ## [Unreleased]
 
+- Development: the opt-in Rust preview restores Session logs that offload images or carry known event types marked `ignorable`, such as a routed subagent's routing decision, in plain and Zstd restoration and `bake-rs session inspect`, instead of refusing them as native limits. Its request derivation refuses `image/offload` and an ignorable tool update as the TypeScript test helper does. Other native limits remain.
 - Development: the opt-in Rust preview adds `bake-rs session inspect` to read an explicitly named current-format plain or Zstd Session log and print its header, counts, and recovery metadata as JSON. Both input and decoded data have caller-supplied limits; the command leaves the file unchanged.
 
 - Shell change reports detect same-size edits made within Git's timestamp precision and show the bytes present before the command, including files that were already dirty.
