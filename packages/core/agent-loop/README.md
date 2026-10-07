@@ -148,6 +148,7 @@ The package-level contract is enough for most consumers; read these when you nee
 - [Explicit-cancellation Agent Note](../../../.agents/notes/implemented/architecture/2026-07-16-explicit-turn-cancellation.md) — signal lifetime and cancellation races.
 - [Core group map](../README.md) — how the core packages compose.
 - [Runtime request fixture](../../../conformance/README.md#runtime-request-reconstruction) — one captured tool-call turn and independent request expectations for migration comparisons.
+- [Request derivation cases](../../../conformance/README.md#request-derivation-cases) — [shared checks](tests/request-derivation-conformance.spec.ts) of `replayRequests` over the fixture and its variants, without restoration.
 
 -----
 

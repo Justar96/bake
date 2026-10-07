@@ -1,6 +1,7 @@
 //! Development-only Session format primitives: one current-format header
-//! record, one event's `sourceEventSeqs` field, one event row's envelope, and
-//! one strict V3 codec row decode.
+//! record, one event's `sourceEventSeqs` field, one event row's envelope, one
+//! strict V3 codec row decode, and request derivation over a closed subset of
+//! current-format logs.
 //!
 //! [`read_header_record`] decodes the first physical record of a current
 //! (format 3) Session log into its logical header metadata, or refuses it with
@@ -13,10 +14,15 @@
 //! already parsed row's envelope as the released v2 codec's strict decoder
 //! does, borrowing its payload unvalidated. [`decode_v3_row`] wraps it in the
 //! strict V3 codec's checks; its output is codec output, not a restored
-//! event. None reads a whole log, retains input bytes, or encodes anything.
+//! event. [`replay_requests`] rebuilds each step's model request from a header
+//! record and parsed rows, as the TypeScript test helper `replayRequests`
+//! does, and refuses input outside its subset; its requests are not restored
+//! Session state. None reads a file, frames records, or encodes a log.
 //! The crate is unstable and unshipped; nothing in the workspace depends on it.
 
 mod envelope;
+mod replay;
+mod request;
 mod source_event_seqs;
 mod v3_row;
 
@@ -24,6 +30,8 @@ pub use envelope::{
     EnvelopeLimit, EnvelopeRefusal, EnvelopeRejection, NumberField, RequiredField,
     UnadmittedEnvelope, decode_row_envelope,
 };
+pub use replay::{ReplayLimit, ReplayRefusal, SeedRejection, replay_requests};
+pub use request::Request;
 pub use source_event_seqs::{
     SourceEventSeqsLimit, SourceEventSeqsRefusal, SourceEventSeqsRejection,
     decode_source_event_seqs,

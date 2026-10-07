@@ -2,7 +2,7 @@
 
 ## Summary
 
-Compare TypeScript and Rust using controlled fixtures and independently checked outcomes. The synthetic harness and [native eval fixture adapter](../evals/README.md#native-fixture-adapter) qualify comparison tooling for [migration scope 01](../docs/roadmap/rust-0.4/README.md#01--workspace-and-comparison-harness). Separate shared cases exercise Session headers, source references, row envelopes, and strict V3 codec rows against released codecs; a runtime fixture captures a real TypeScript tool-call turn. The [qualification ledger](../docs/roadmap/rust-0.4/ledger/README.md) records partial evidence. Rust Session replay and live native evals remain open.
+Compare TypeScript and Rust using controlled fixtures and independently checked outcomes. The synthetic harness and [native eval fixture adapter](../evals/README.md#native-fixture-adapter) qualify comparison tooling for [migration scope 01](../docs/roadmap/rust-0.4/README.md#01--workspace-and-comparison-harness). Separate shared cases exercise Session headers, source references, row envelopes, and strict V3 codec rows against released codecs; a runtime fixture captures a real TypeScript tool-call turn, and request derivation cases replay it and its variants through the TypeScript replay helper. The [qualification ledger](../docs/roadmap/rust-0.4/ledger/README.md) records partial evidence. Rust Session restoration, replay outside a closed subset, and live native evals remain open.
 
 ## Table of Contents
 
@@ -14,6 +14,7 @@ Compare TypeScript and Rust using controlled fixtures and independently checked 
 - [Source-event seq cases](#source-event-seq-cases)
 - [Row-envelope cases](#row-envelope-cases)
 - [V3 row cases](#v3-row-cases)
+- [Request derivation cases](#request-derivation-cases)
 - [Runner contract](#runner-contract)
 - [Ownership and limits](#ownership-and-limits)
 
@@ -81,7 +82,7 @@ The capture uses production sources at `5cd716c70fdc443c9e997ee7b5e67ed2d4a1b06f
 
 Keep the committed generation and expectation unchanged. A correction or another scenario belongs in a new directory, with its own provenance and review. The [fixture-layout policy](../scripts/session-fixture-layout.ts) explicitly recognizes this physical log so the logical-fixture formatter cannot strip its envelopes. The original [request-reconstruction tests](../packages/core/agent-loop/tests/request-reconstruction.spec.ts) remain in place, including the broader header-change scenario.
 
-The runtime suite exercises this fixture, and the ordinary TypeScript check includes its helper and spec. Rust reads its header record through the [Session header cases](#session-header-cases) and decodes its `sourceEventSeqs` fields and row envelopes through the [source-event seq cases](#source-event-seq-cases) and [row-envelope cases](#row-envelope-cases); there is no Rust event reader or reducer for it yet. Provider wire encodings, historical formats, seeded/forked logs, compaction, retries, cancellation, changing request headers, profile composition, and cross-platform release qualification remain separate work.
+The runtime suite exercises this fixture, and the ordinary TypeScript check includes its helper and spec. Rust reads its header record through the [Session header cases](#session-header-cases) and decodes its `sourceEventSeqs` fields and row envelopes through the [source-event seq cases](#source-event-seq-cases) and [row-envelope cases](#row-envelope-cases). It derives the fixture's two requests through the [request derivation cases](#request-derivation-cases), over a closed subset and without restoration. Provider wire encodings, historical formats, seeded/forked logs, compaction, retries, cancellation, changing request headers, profile composition, and cross-platform release qualification remain separate work.
 
 ## Session header cases
 
@@ -195,6 +196,42 @@ A `rust` override follows the row-envelope conventions. A class-only `rejected-c
 The `fixture` section names the unchanged [request-reconstruction log](#runtime-request-reconstruction). Both harnesses decode its 16 rows of 12 types and check that payloads are borrowed; TypeScript checks its SHA-256 and `finish`, and Rust checks that each envelope equals the row-envelope decoder's. Each mutant replaces one fixture value in memory: an empty header `tools` list and a header `system` member are refused exactly, and an image system block is a Rust limit.
 
 `source_budget` bounds expanded sources only; Rust does not claim that every TypeScript resource failure, such as allocating a huge range, becomes a limit. The parsed row is the caller's, so the parser bounds its size and nesting, if anything does.
+
+## Request derivation cases
+
+[`runtime/request-derivation-cases.json`](runtime/request-derivation-cases.json) holds Session logs and the outcome of the TypeScript test helper `replayRequests` in [`runtime-fixture.ts`](../packages/core/agent-loop/tests/runtime-fixture.ts) for each. The [TypeScript spec](../packages/core/agent-loop/tests/request-derivation-conformance.spec.ts) runs every log through that helper and `normalizeRequests`. The development [`bake-session`](../rust/crates/bake-session/src/replay.rs) crate passes the same header record and parsed rows to `replay_requests`; only its test normalizes message IDs.
+
+```sh
+bun run test:runtime packages/core/agent-loop/tests/request-derivation-conformance.spec.ts
+(cd rust && cargo test --locked -p bake-session)
+```
+
+The helper does not restore its log. For a log already in format 3, `scanLog` runs the strict V3 codec on each row and its `finish` checks; the catalog's transformed validation leaves current input unchanged. The helper then builds a Session from the prefix that ends before each step's first matching Assistant settlement. Session construction checks each prefix event's envelope, message, settlement, and request-header fields, and its surface transition, including the rule that only a `system/message` may replace the system head. Agreement covers that pipeline: codec admission, Session construction checks, and request derivation. The helper skips full restoration (`restoreReleasedV3Artifact`) and with it the restored vocabulary, turn and step relationships, tool lifecycles, and the protected-first-head rule, so it accepts an unknown required event type. Rust instead admits only its own 12 event types and refuses every replacement. A derived request is not restored Session state.
+
+Rust derives requests only inside a closed subset and refuses everything else as a native limit:
+
+- an unseeded header;
+- the 12 event types of the request-reconstruction fixture, without `ignorable` markers;
+- append-only surface events;
+- one `step/start` and at most one Assistant message per turn and step;
+- at most one `request/header`, whose `config` members are `LlmCallConfig` members and whose `tools` are absent or an array of objects;
+- prefix payloads holding only safe integers and nesting arrays and objects at most 64 containers deep.
+
+Checks run in the helper's order: the header record, every row through the V3 codec with the first refusal winning, and then the Session construction checks on each prefix. Rows at or after the last cut are never checked by Session construction, as in the helper. For rows of the 12 subset types, the codec already proves the envelope, surface marker, source, and canonical request-header and tool-result rules that Session construction repeats, so Rust does not repeat them. A subset limit may fire before a check that TypeScript would fail, because a limit claims nothing.
+
+Each case has an `id` and a `log`:
+
+- `"fixture"` with `edits`: at most eight changes to the unchanged request-reconstruction log, applied in memory. An edit replaces the `header` record, replaces a `row` with exact `text`, sets or removes the value at a JSON `pointer` without `~` escapes in a `row`, or truncates to the first `truncate` rows. Unedited rows keep their exact text. A pointer edit re-serializes its row, so its `value` may hold only safe integers other than -0; cases that depend on a number's spelling replace the row's text.
+- A list of lines: a header record and rows written for the case.
+
+`ts` is the helper's outcome. `requests` lists the normalized requests, either explicitly or as pointer edits that set a `value`, `insert` an array item, or `remove` a member of the fixture's [`expected-requests.json`](runtime/request-reconstruction/tool-call-turn/expected-requests.json). `rejected` carries the exact error message, or the `TypeError` class without a message. Expected requests were written from the case's change and then checked against the helper; rejection messages were recorded from it.
+
+A `rust` override replaces the TypeScript outcome for Rust:
+
+- `native-subset` names a limit. Rust claims nothing about the case. The `header` and `codec` limits pass through the [header reader](#session-header-cases) and [V3 row](#v3-row-cases) native-subset outcomes.
+- `rejected` names the cause Rust reports: `header`, `codec`, a `seed/` Session construction check, `no-later-settlement`, or `no-request-header`. It is allowed only where the helper rejects, and it claims only that the helper throws, not its error class or message.
+
+Both harnesses pin the case count, reject unknown keys, and require every limit and cause to be witnessed, with limits covering both accepted and rejected input. The TypeScript spec checks both fixture files' SHA-256; Rust, which has no hash dependency, checks their sizes. Of the 52 cases, 13 agree on requests, including a three-turn log written for the table and a message with an own `__proto__` member; 20 are rejections with a Rust cause; and 19 are native limits, 11 of them on logs the helper accepts. One limit, `tools: null`, witnesses the helper's `TypeError` during request derivation. Requests compare as JSON values: equal values do not prove equal provider wire bytes or member order.
 
 ## Runner contract
 
