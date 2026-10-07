@@ -1,10 +1,10 @@
 //! The fullscreen transcript: rows, how each is presented at a width, and a
 //! viewport over them that follows new output or holds a reading position.
 //!
-//! Presentation follows the [layout design](../../../../apps/tui/DESIGN-LAYOUT.md):
-//! a user's words open with `›` at the rail, reasoning and answers are prose
-//! at column 2, and a call is one block, `● Tool(argument)` with its output
-//! hung from `⎿` and aligned at column 9. A blank row opens each section: a
+//! A user's words run beside an accent bar, reasoning (dim, italic) and
+//! answers are prose at column 2, and a call is one block: its state mark,
+//! the tool name in an aligned column, the argument, a summary right-aligned,
+//! and its output hung from a dim gutter. A blank row opens each section: a
 //! user turn, a reasoning block, a group of calls, and an answer. Lines wrap,
 //! never truncate, and a result's output is previewed, not replayed.
 //!
@@ -20,10 +20,8 @@ use crate::activity::Tones;
 use crate::copy;
 use crate::editor;
 
-/// Column a user's words, reasoning, and answers start at.
+/// Column a user's words, reasoning, answers, and call marks start at.
 pub const RAIL: usize = 2;
-/// Column a call's output starts at, under its `⎿`.
-pub const OUTPUT: usize = 9;
 /// Output lines a call's preview draws, first and last, around a count of
 /// the rest; the TypeScript `resultLines` default.
 pub const RESULT_LINES: usize = 4;
@@ -136,26 +134,88 @@ pub fn wrap(text: &str, width: usize) -> Vec<String> {
         .collect()
 }
 
-/// `text` wrapped at `width` less `indent`, each row indented, the first by
-/// `first` instead when given.
+/// The marks the transcript draws. The round set matches the composer's
+/// rounded frame; the classic set is ASCII, for terminals that get the
+/// classic frame, since a mark drawn wider than measured shifts its row.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Marks {
+    /// The bar beside each row of the user's words.
+    pub user: &'static str,
+    pub done: &'static str,
+    pub failed: &'static str,
+    pub running: &'static str,
+    /// The rule a call's output hangs from.
+    pub gutter: &'static str,
+    /// Before the count of output lines left out.
+    pub more: &'static str,
+}
+
+pub const ROUND_MARKS: Marks = Marks {
+    user: "▎",
+    done: "✓",
+    failed: "✗",
+    running: "●",
+    gutter: "│",
+    more: "⋯",
+};
+
+pub const CLASSIC_MARKS: Marks = Marks {
+    user: "|",
+    done: "+",
+    failed: "x",
+    running: "*",
+    gutter: "|",
+    more: "...",
+};
+
+/// How the transcript is drawn: its colours and its marks.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Look {
+    pub tones: Tones,
+    pub classic: bool,
+}
+
+impl Look {
+    pub fn marks(self) -> &'static Marks {
+        if self.classic {
+            &CLASSIC_MARKS
+        } else {
+            &ROUND_MARKS
+        }
+    }
+}
+
+/// Column a call's tool name starts at, after its state mark.
+pub const TOOL: usize = 4;
+/// Cells the tool name's column takes, its gap included, so arguments align.
+pub const TOOL_WIDTH: usize = 6;
+/// Column a call's output starts at, after the gutter at [`RAIL`] + 2.
+pub const OUTPUT: usize = 6;
+
+/// `text` wrapped at `width` less `indent`; each row after the first opens
+/// with `rest`, the first with `first`.
 fn hang(
     text: &str,
     width: usize,
     indent: usize,
-    first: Option<Span<'static>>,
+    first: Vec<Span<'static>>,
+    rest: Vec<Span<'static>>,
     style: Style,
 ) -> Vec<Line<'static>> {
     let room = width.saturating_sub(indent).max(1);
-    let mut first = first;
     wrap(text, room)
         .into_iter()
-        .map(|row| {
-            let lead = first
-                .take()
-                .unwrap_or_else(|| Span::raw(" ".repeat(indent)));
-            Line::from(vec![lead, Span::styled(row, style)])
+        .enumerate()
+        .map(|(i, row)| {
+            let mut spans = if i == 0 { first.clone() } else { rest.clone() };
+            spans.push(Span::styled(row, style));
+            Line::from(spans)
         })
         .collect()
+}
+
+fn pad(cells: usize) -> Span<'static> {
+    Span::raw(" ".repeat(cells))
 }
 
 fn dim() -> Style {
@@ -172,42 +232,51 @@ fn colour(tones: Tones, rgb: (u8, u8, u8), ansi: Color) -> Style {
     }
 }
 
+fn accent(tones: Tones) -> Style {
+    colour(tones, (0x0e, 0xa5, 0xe9), Color::Cyan)
+}
+
 /// The lines `rows[index]` draws at `width`, its opening blank included.
-pub fn present(rows: &[Row], index: usize, width: usize, tones: Tones) -> Vec<Line<'static>> {
+pub fn present(rows: &[Row], index: usize, width: usize, look: Look) -> Vec<Line<'static>> {
     let row = &rows[index];
+    let marks = look.marks();
     let mut lines = Vec::new();
     if opens_section(index.checked_sub(1).map(|i| &rows[i]), row) {
         lines.push(Line::default());
     }
+    let rail = || vec![pad(RAIL)];
     match row {
         Row::Welcome => {
-            lines.push(Line::styled(
-                copy::TITLE,
-                Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-            ));
-            for paragraph in copy::INTRO {
-                lines.push(Line::default());
-                lines.extend(hang(paragraph, width, 0, None, Style::new()));
+            lines.push(Line::from(vec![
+                pad(RAIL),
+                Span::styled(copy::TITLE, accent(look.tones).add_modifier(Modifier::BOLD)),
+            ]));
+            for paragraph in copy::INTRO.iter().filter(|p| !p.is_empty()) {
+                lines.extend(hang(paragraph, width, RAIL, rail(), rail(), dim()));
             }
         }
-        Row::User(text) => lines.extend(hang(
-            text,
-            width,
-            RAIL,
-            Some(Span::styled(
-                "› ",
+        // A bar runs beside every row of the user's words, so a long prompt
+        // reads as one block.
+        Row::User(text) => {
+            let bar = vec![Span::styled(format!("{} ", marks.user), accent(look.tones))];
+            lines.extend(hang(
+                text,
+                width,
+                RAIL,
+                bar.clone(),
+                bar,
                 Style::new().add_modifier(Modifier::BOLD),
-            )),
-            Style::new().add_modifier(Modifier::BOLD),
-        )),
+            ));
+        }
         Row::Reasoning(text) => lines.extend(hang(
             text,
             width,
             RAIL,
-            None,
+            rail(),
+            rail(),
             dim().add_modifier(Modifier::ITALIC),
         )),
-        Row::Answer(text) => lines.extend(hang(text, width, RAIL, None, Style::new())),
+        Row::Answer(text) => lines.extend(hang(text, width, RAIL, rail(), rail(), Style::new())),
         Row::Call {
             tool,
             argument,
@@ -221,12 +290,14 @@ pub fn present(rows: &[Row], index: usize, width: usize, tones: Tones) -> Vec<Li
             summary.as_deref(),
             output,
             width,
-            tones,
+            look,
         )),
     }
     lines
 }
 
+/// A call as one block: `✓ Bash  argument` with its summary right-aligned,
+/// then its output hung from a gutter.
 fn present_call(
     tool: &str,
     argument: &str,
@@ -234,71 +305,86 @@ fn present_call(
     summary: Option<&str>,
     output: &[String],
     width: usize,
-    tones: Tones,
+    look: Look,
 ) -> Vec<Line<'static>> {
-    let (marker, summary_style, output_style) = match state {
+    let marks = look.marks();
+    let red = colour(look.tones, (0xef, 0x44, 0x44), Color::Red);
+    let (mark, mark_style) = match state {
         CallState::Running => (
-            colour(tones, (0xf9, 0x73, 0x16), Color::LightRed),
-            dim(),
-            output_tone(tones),
+            marks.running,
+            colour(look.tones, (0xf9, 0x73, 0x16), Color::LightRed),
         ),
         CallState::Done => (
-            colour(tones, (0x22, 0xc5, 0x5e), Color::Green),
-            dim(),
-            output_tone(tones),
+            marks.done,
+            colour(look.tones, (0x22, 0xc5, 0x5e), Color::Green),
         ),
-        CallState::Failed => {
-            let red = colour(tones, (0xef, 0x44, 0x44), Color::Red);
-            (red, red, red)
-        }
+        CallState::Failed => (marks.failed, red),
     };
-    // The head wraps like prose, under its tool name; the summary rides its end.
-    let mut head = hang(
-        &format!("{tool}({argument})"),
+    let failed = state == CallState::Failed;
+    let previewed = preview(output);
+    // Without a summary of its own, a call with output says how much.
+    let counted = output.iter().filter(|line| !line.trim().is_empty()).count();
+    let summary = summary.map(str::to_owned).or_else(|| match counted {
+        0 => None,
+        1 => Some(format!("1 {}", copy::LINE)),
+        n => Some(format!("{n} {}", copy::LINES)),
+    });
+    let name = format!("{tool:<width$}", width = TOOL_WIDTH.max(tool.width() + 1));
+    let indent = TOOL + name.width();
+    let mut lines = hang(
+        argument,
         width,
-        RAIL,
-        Some(Span::styled("● ", marker)),
+        indent,
+        vec![
+            pad(RAIL),
+            Span::styled(mark, mark_style),
+            pad(TOOL - RAIL - 1),
+            Span::styled(name, Style::new().add_modifier(Modifier::BOLD)),
+        ],
+        vec![pad(indent)],
         Style::new(),
     );
-    if let Some(first) = head.first_mut() {
-        // The tool name is bold; the rest of the first row is its argument.
-        let text = first.spans[1].content.to_string();
-        let split = text.find('(').unwrap_or(text.len()).min(tool.len());
-        first.spans[1] = Span::styled(
-            text[..split].to_owned(),
-            Style::new().add_modifier(Modifier::BOLD),
-        );
-        first.spans.insert(2, Span::raw(text[split..].to_owned()));
-    }
     if let Some(summary) = summary {
-        let last = head.last_mut().expect("a head has a row");
-        if last.width() + 2 + summary.width() <= width {
-            last.spans
-                .push(Span::styled(format!("  {summary}"), summary_style));
-        } else {
-            head.push(Line::from(vec![
-                Span::raw(" ".repeat(RAIL)),
-                Span::styled(summary.to_owned(), summary_style),
+        let style = if failed { red } else { dim() };
+        let last = lines.last_mut().expect("a head has a row");
+        let used = last.width();
+        if used + 2 + summary.width() <= width {
+            last.spans.push(pad(width - used - summary.width()));
+            last.spans.push(Span::styled(summary, style));
+        } else if summary.width() + RAIL <= width {
+            lines.push(Line::from(vec![
+                pad(width - summary.width()),
+                Span::styled(summary, style),
             ]));
         }
     }
-    let mut lines = head;
-    let mut first = true;
-    for item in preview(output) {
-        let (text, style) = match item {
-            Preview::Line(text) => (text, output_style),
-            Preview::More(count) => (format!("+{count} {}", copy::MORE_LINES), dim()),
-        };
-        let lead = if first {
-            Span::styled(
-                format!("{}⎿{}", " ".repeat(RAIL), " ".repeat(OUTPUT - RAIL - 1)),
-                dim(),
-            )
-        } else {
-            Span::raw(" ".repeat(OUTPUT))
-        };
-        first = false;
-        lines.extend(hang(&text, width, OUTPUT, Some(lead), style));
+    let gutter_style = if failed { red } else { dim() };
+    let gutter = || {
+        vec![
+            pad(RAIL + 2),
+            Span::styled(format!("{} ", marks.gutter), gutter_style),
+        ]
+    };
+    for item in previewed {
+        match item {
+            Preview::Line(text) => lines.extend(hang(
+                &text,
+                width,
+                OUTPUT,
+                gutter(),
+                gutter(),
+                output_tone(look.tones),
+            )),
+            Preview::More(count) => lines.push(Line::from(
+                gutter()
+                    .into_iter()
+                    .chain([Span::styled(
+                        format!("{} {count} {}", marks.more, copy::MORE_LINES),
+                        dim(),
+                    )])
+                    .collect::<Vec<_>>(),
+            )),
+        }
     }
     lines
 }
@@ -362,8 +448,8 @@ pub struct Transcript {
     /// The viewport's size on the last frame; paging needs both.
     pub width: usize,
     pub height: usize,
-    /// Colours the last frame used, so measuring matches drawing.
-    pub tones: Tones,
+    /// How the last frame drew, so measuring matches drawing.
+    pub look: Look,
 }
 
 impl Transcript {
@@ -375,7 +461,7 @@ impl Transcript {
     }
 
     fn lines(&self, index: usize) -> Vec<Line<'static>> {
-        present(&self.rows, index, self.width, self.tones)
+        present(&self.rows, index, self.width, self.look)
     }
 
     fn count(&self, index: usize) -> usize {
@@ -500,7 +586,7 @@ impl Transcript {
         self.anchor = None;
     }
 
-    /// The line of a user row that holds its `›`, past its opening blank.
+    /// The line of a user row that holds its first row, past its opening blank.
     fn prompt_line(&self, index: usize) -> usize {
         usize::from(opens_section(
             index.checked_sub(1).map(|i| &self.rows[i]),
@@ -559,10 +645,10 @@ impl Transcript {
 
     /// Records the viewport's size for this frame and keeps the anchor in
     /// range after a width change renumbers a row's lines.
-    pub fn resize(&mut self, width: usize, height: usize, tones: Tones) {
+    pub fn resize(&mut self, width: usize, height: usize, look: Look) {
         self.width = width;
         self.height = height;
-        self.tones = tones;
+        self.look = look;
         if let Some(anchor) = self.anchor {
             let count = self.count(anchor.row.min(self.rows.len().saturating_sub(1)));
             self.anchor = Some(Anchor {
@@ -578,6 +664,11 @@ impl Transcript {
 mod tests {
     use super::*;
 
+    const PLAIN: Look = Look {
+        tones: Tones::None,
+        classic: false,
+    };
+
     fn text(lines: &[Line]) -> Vec<String> {
         lines
             .iter()
@@ -587,21 +678,21 @@ mod tests {
 
     fn session(width: usize, height: usize) -> Transcript {
         let mut t = Transcript::new(sample_session());
-        t.resize(width, height, Tones::None);
+        t.resize(width, height, PLAIN);
         t
     }
 
     #[test]
-    fn rows_follow_the_verb_column_grammar() {
+    fn rows_read_as_blocks_with_aligned_calls() {
         let rows = sample_session();
         let all: Vec<String> = (0..rows.len())
-            .flat_map(|i| text(&present(&rows, i, 80, Tones::None)))
+            .flat_map(|i| text(&present(&rows, i, 80, PLAIN)))
             .collect();
         let at = |needle: &str| all.iter().position(|l| l.contains(needle)).unwrap();
         let user = at("Find where");
         assert_eq!(
             all[user],
-            "› Find where the session controller registers commands"
+            "▎ Find where the session controller registers commands"
         );
         assert_eq!(all[user - 1], "", "a blank opens the turn");
         assert_eq!(all[user + 1], "");
@@ -610,17 +701,18 @@ mod tests {
             "  The registry is the list, so discovery should read it."
         );
         assert_eq!(all[user + 3], "");
-        assert_eq!(
-            all[user + 4],
-            r#"● Bash(rg -n "commands.register" -g '*.ts')"#
+        // The tool name has its own column; the summary is right-aligned.
+        let head = &all[user + 4];
+        assert!(
+            head.starts_with(r#"  ✓ Bash  rg -n "commands.register" -g '*.ts'"#),
+            "{head}"
         );
-        assert_eq!(all[user + 5], "  ⎿      packages/app/src/controller.ts:45");
-        assert_eq!(all[user + 6], "         packages/app/src/controller.ts:52");
+        assert!(head.ends_with("2 lines") && head.width() == 80, "{head}");
+        assert_eq!(all[user + 5], "    │ packages/app/src/controller.ts:45");
+        assert_eq!(all[user + 6], "    │ packages/app/src/controller.ts:52");
         // A call after a call joins its group without a blank.
-        assert_eq!(
-            all[user + 7],
-            "● Read(packages/app/src/controller.ts)  412 lines"
-        );
+        assert!(all[user + 7].starts_with("  ✓ Read  packages/app/src/controller.ts"));
+        assert!(all[user + 7].ends_with("412 lines"));
         assert_eq!(all[user + 8], "");
         assert!(all[user + 9].starts_with("  Two registrations"));
     }
@@ -640,16 +732,23 @@ mod tests {
                 )
             })
             .unwrap();
+        let lines = text(&present(&rows, index, 60, PLAIN));
+        assert_eq!(lines[0], "");
         assert_eq!(
-            text(&present(&rows, index, 80, Tones::None)),
+            lines[1],
+            format!(
+                "  ✗ Bash  bun test tests/parser.test.ts{}exit 1",
+                " ".repeat(15)
+            )
+        );
+        assert_eq!(
+            lines[2..],
             [
-                "",
-                "● Bash(bun test tests/parser.test.ts)  exit 1",
-                "  ⎿      bun test v1.3.0",
-                "         tests/parser.test.ts:",
-                "         +4 more lines",
-                "          3 pass",
-                "          1 fail",
+                "    │ bun test v1.3.0",
+                "    │ tests/parser.test.ts:",
+                "    │ ⋯ 4 more lines",
+                "    │  3 pass",
+                "    │  1 fail",
             ]
         );
         let lines = |n: usize| (0..n).map(|i| format!("l{i}")).collect::<Vec<_>>();
@@ -666,26 +765,52 @@ mod tests {
     }
 
     #[test]
-    fn prose_wraps_under_its_rail_and_never_opens_a_row_with_a_space() {
+    fn classic_frames_draw_ascii_marks() {
+        let rows = sample_session();
+        let classic = Look {
+            classic: true,
+            ..PLAIN
+        };
+        let all: Vec<String> = (0..rows.len())
+            .flat_map(|i| text(&present(&rows, i, 80, classic)))
+            .collect();
+        assert!(
+            all.iter().all(|l| l.is_ascii() || l.contains('·')),
+            "{all:#?}"
+        );
+        assert!(all.iter().any(|l| l.starts_with("| Run the parser tests")));
+        assert!(all.iter().any(|l| l.starts_with("  x Bash  bun test")));
+        assert!(all.iter().any(|l| l == "    | ... 4 more lines"));
+    }
+
+    #[test]
+    fn prose_and_arguments_wrap_under_their_own_columns() {
         let rows = vec![Row::Answer("alpha beta gamma delta epsilon".into())];
         assert_eq!(
-            text(&present(&rows, 0, 14, Tones::None)),
+            text(&present(&rows, 0, 14, PLAIN)),
             ["  alpha beta", "  gamma delta", "  epsilon"]
         );
-        let output = vec![Row::Call {
+        let user = vec![Row::User("alpha beta gamma".into())];
+        assert_eq!(
+            text(&present(&user, 0, 10, PLAIN)),
+            ["▎ alpha", "▎ beta", "▎ gamma"]
+        );
+        let call = vec![Row::Call {
             tool: "Bash".into(),
-            argument: "x".into(),
-            state: CallState::Done,
+            argument: "one two three four".into(),
+            state: CallState::Running,
             summary: None,
             output: vec!["0123456789abcdef".into()],
         }];
         assert_eq!(
-            text(&present(&output, 0, 16, Tones::None)),
+            text(&present(&call, 0, 18, PLAIN)),
             [
-                "● Bash(x)",
-                "  ⎿      0123456",
-                "         789abcd",
-                "         ef"
+                "  ● Bash  one two",
+                "          three",
+                "          four",
+                "            1 line",
+                "    │ 0123456789ab",
+                "    │ cdef",
             ]
         );
     }
@@ -727,17 +852,17 @@ mod tests {
     fn prompts_jump_to_the_top_and_the_ends_reach_start_and_output() {
         let mut t = session(80, 6);
         t.previous_prompt();
-        assert_eq!(text(&t.visible())[0], "› Run the parser tests");
+        assert_eq!(text(&t.visible())[0], "▎ Run the parser tests");
         t.previous_prompt();
         assert_eq!(
             text(&t.visible())[0],
-            "› Find where the session controller registers commands"
+            "▎ Find where the session controller registers commands"
         );
         t.previous_prompt();
         assert_eq!(t.top(), Anchor::default());
-        assert_eq!(text(&t.visible())[0], "Bake · Rust preview");
+        assert_eq!(text(&t.visible())[0], "  Bake · Rust preview");
         t.next_prompt();
-        assert!(text(&t.visible())[0].starts_with("› Find where"));
+        assert!(text(&t.visible())[0].starts_with("▎ Find where"));
         t.next_prompt();
         t.next_prompt();
         assert!(t.following());
@@ -750,7 +875,7 @@ mod tests {
     #[test]
     fn a_short_history_never_leaves_the_bottom() {
         let mut t = Transcript::new(vec![Row::Answer("only".into())]);
-        t.resize(80, 10, Tones::None);
+        t.resize(80, 10, PLAIN);
         t.scroll_up(5);
         t.scroll_down(1);
         assert!(t.following());
@@ -764,7 +889,7 @@ mod tests {
         let mut t = session(80, 6);
         t.scroll_up(3);
         let before = t.top();
-        t.resize(20, 6, Tones::None);
+        t.resize(20, 6, PLAIN);
         let after = t.top();
         assert_eq!(after.row, before.row);
         assert!(after.line < t.count(after.row));

@@ -8,18 +8,18 @@ use ratatui_core::layout::{Position, Rect};
 use ratatui_core::style::{Color, Modifier, Style};
 use ratatui_core::terminal::Frame;
 use ratatui_core::text::{Line, Span};
-use ratatui_core::widgets::Widget;
-use ratatui_widgets::paragraph::{Paragraph, Wrap};
 use unicode_width::UnicodeWidthStr;
 
 use crate::activity::{self, Hue, Tones};
 use crate::composer::{self, Edge};
 use crate::copy;
 use crate::editor::{self, display};
+use crate::frame::FrameStyle;
 use crate::layout::{self, Needs};
 use crate::mode::{self, HINT_MIN_COLUMNS};
-use crate::state::{Focus, Notice, Outcome, SAMPLE_AGENTS, SampleKind, State, agent};
+use crate::state::{Focus, Notice, Outcome, SAMPLE_AGENTS, SampleAgent, SampleKind, State, agent};
 use crate::status::{self, Tone};
+use crate::transcript::{self, Look};
 
 /// Cells between the terminal's edges and rows drawn outside the box, so
 /// they align with the box's contents.
@@ -299,31 +299,36 @@ fn bar_left(app: &State) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
             (None, None) => (Vec::new(), Vec::new()),
         },
         Focus::AgentList => (
-            vec![Span::styled(copy::HEADER_LIST, Style::new().bold())],
+            vec![Span::styled(
+                copy::AGENTS,
+                Style::new().add_modifier(Modifier::BOLD),
+            )],
             vec![Span::styled(format!("  {}", copy::HEADER_LIST_HINT), dim())],
         ),
-        Focus::Inspect(id) => {
-            let name = agent(id).map_or(id, |a| a.name);
-            (
-                vec![
-                    Span::styled("Inspecting ", Style::new().bold()),
-                    Span::styled(name, accent().bold()),
-                ],
-                vec![Span::styled(" · read-only", dim())],
-            )
-        }
+        Focus::Inspect(_) => (
+            vec![Span::styled(
+                copy::INSPECTING,
+                Style::new().add_modifier(Modifier::BOLD),
+            )],
+            vec![Span::styled(format!("  {}", copy::INSPECT_KEYS), dim())],
+        ),
     }
 }
 
+/// The agents' standing row: `Agents  2 samples · none running`, with the
+/// key that opens them at the right.
 fn render_agents_row(columns: u16, area: Rect, buf: &mut Buffer) {
     split_row(
         buf,
         columns,
         area,
-        Line::styled(
-            format!("↳ Sample agents {} · {}", SAMPLE_AGENTS.len(), copy::STATE),
-            dim(),
-        ),
+        Line::from(vec![
+            Span::styled(copy::AGENTS, Style::new().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!("  {} {}", SAMPLE_AGENTS.len(), copy::AGENTS_SUMMARY),
+                dim(),
+            ),
+        ]),
         Line::styled("Tab", dim()),
     );
 }
@@ -359,7 +364,14 @@ fn render_transcript(app: &mut State, area: Rect, buf: &mut Buffer) {
     let hint = area.height >= HINT_ROW_MIN;
     let rows = area.height - u16::from(hint);
     let view = &mut app.transcript;
-    view.resize(usize::from(area.width), usize::from(rows), app.tones);
+    view.resize(
+        usize::from(area.width),
+        usize::from(rows),
+        Look {
+            tones: app.tones,
+            classic: app.frame == FrameStyle::Classic,
+        },
+    );
     for (i, content) in view.visible().into_iter().enumerate() {
         line(
             buf,
@@ -401,48 +413,102 @@ fn render_body(app: &mut State, area: Rect, buf: &mut Buffer) {
     if area.is_empty() {
         return;
     }
-    let mut lines: Vec<Line> = Vec::new();
-    match app.focus {
+    let width = usize::from(area.width);
+    let classic = app.frame == FrameStyle::Classic;
+    let lines = match app.focus {
         Focus::Composer => return render_transcript(app, area, buf),
-        Focus::AgentList => {
-            lines.push(Line::styled(copy::LIST_TITLE, dim()));
-            for a in SAMPLE_AGENTS {
-                let selected = a.id == app.selected;
-                let style = if selected {
-                    Style::new().add_modifier(Modifier::REVERSED)
-                } else {
-                    Style::new()
-                };
-                lines.push(Line::from(vec![
-                    Span::raw(if selected { "› " } else { "  " }),
-                    Span::styled(a.name, style),
-                    Span::styled(format!("  {}  {}", a.id, copy::STATE), dim()),
-                ]));
-            }
-            lines.push(Line::default());
-            let selected = app.selected_agent();
-            lines.extend(selected.detail.iter().map(|t| Line::styled(*t, dim())));
-        }
-        Focus::Inspect(id) => {
-            let a = agent(id).unwrap_or(&SAMPLE_AGENTS[0]);
-            lines.push(Line::from(vec![
-                Span::styled(a.name, accent().bold()),
-                Span::styled(format!("  {}  {}", a.id, copy::STATE), dim()),
-            ]));
-            lines.push(Line::styled(
-                copy::INSPECT_READ_ONLY,
-                Style::new().fg(Color::Yellow),
-            ));
-            lines.push(Line::styled(copy::INSPECT_PARENT, dim()));
-            lines.push(Line::default());
-            lines.extend(a.detail.iter().map(|t| Line::raw(*t)));
-            lines.push(Line::default());
-            lines.push(Line::styled(copy::INSPECT_RETURN, dim()));
-        }
+        Focus::AgentList => agent_list(app.selected, width, classic),
+        Focus::Inspect(id) => inspection(agent(id).unwrap_or(&SAMPLE_AGENTS[0]), width),
+    };
+    // Anchored to the body's foot, beside the controls, as the transcript is.
+    let skip = lines.len().saturating_sub(usize::from(area.height));
+    let top = area.y + area.height - (lines.len() - skip) as u16;
+    for (i, content) in lines.into_iter().skip(skip).enumerate() {
+        line(
+            buf,
+            Rect::new(area.x, top + i as u16, area.width, 1),
+            content,
+        );
     }
-    Paragraph::new(lines)
-        .wrap(Wrap { trim: false })
-        .render(area, buf);
+}
+
+/// `text` wrapped at `width` less `indent`, every row indented.
+fn indented(text: &str, width: usize, indent: usize, style: Style) -> Vec<Line<'static>> {
+    transcript::wrap(text, width.saturating_sub(indent))
+        .into_iter()
+        .map(|row| {
+            Line::from(vec![
+                Span::raw(" ".repeat(indent)),
+                Span::styled(row, style),
+            ])
+        })
+        .collect()
+}
+
+/// A name on the left and an id right-aligned, when both fit.
+fn titled(lead: Vec<Span<'static>>, id: &str, width: usize) -> Line<'static> {
+    let mut line = Line::from(lead);
+    let used = line.width();
+    if used + 2 + id.width() <= width {
+        line.spans
+            .push(Span::raw(" ".repeat(width - used - id.width())));
+        line.spans.push(Span::styled(id.to_owned(), dim()));
+    }
+    line
+}
+
+/// The agents as cards: a marker on the selected one, its name and id, and
+/// the first line of what it does under it.
+fn agent_list(selected: &str, width: usize, classic: bool) -> Vec<Line<'static>> {
+    let marker = if classic { ">" } else { "▸" };
+    let mut lines = indented(copy::LIST_SUBTITLE, width, INSET.into(), dim());
+    for agent in SAMPLE_AGENTS {
+        let chosen = agent.id == selected;
+        let (mark, name) = if chosen {
+            (
+                Span::styled(format!("{marker} "), accent()),
+                Span::styled(agent.name, accent().add_modifier(Modifier::BOLD)),
+            )
+        } else {
+            (Span::raw("  "), Span::styled(agent.name, Style::new()))
+        };
+        lines.push(Line::default());
+        lines.push(titled(vec![Span::raw("  "), mark, name], agent.id, width));
+        let about = agent.detail.first().copied().unwrap_or_default();
+        lines.extend(indented(
+            about,
+            width,
+            4,
+            if chosen { Style::new() } else { dim() },
+        ));
+    }
+    lines
+}
+
+/// One agent, read only: its name and id, the read-only line, what it does,
+/// and that the draft is kept.
+fn inspection(agent: &SampleAgent, width: usize) -> Vec<Line<'static>> {
+    let mut lines = vec![titled(
+        vec![
+            Span::raw("  "),
+            Span::styled(agent.name, accent().add_modifier(Modifier::BOLD)),
+        ],
+        agent.id,
+        width,
+    )];
+    lines.extend(indented(
+        copy::INSPECT_READ_ONLY,
+        width,
+        2,
+        Style::new().fg(Color::Yellow),
+    ));
+    lines.push(Line::default());
+    for detail in agent.detail {
+        lines.extend(indented(detail, width, 2, Style::new()));
+    }
+    lines.push(Line::default());
+    lines.extend(indented(copy::INSPECT_PARENT, width, 2, dim()));
+    lines
 }
 
 #[cfg(test)]
@@ -510,14 +576,14 @@ mod tests {
         for (w, h) in [(80, 24), (120, 36)] {
             let (rows, cursor) = draw(&mut State::default(), w, h);
             // The transcript follows the sample session's newest lines.
-            assert!(rows.iter().any(|r| r.starts_with("› Run the parser tests")));
-            assert!(rows.iter().any(|r| r.contains("Sample agents")));
+            assert!(rows.iter().any(|r| r.starts_with("▎ Run the parser tests")));
+            assert!(rows.iter().any(|r| r.contains("Agents  2 samples")));
             let prompt = row_index(&rows, "│ ❯ Type a draft");
             assert_eq!(cursor, Position::new(TEXT_X, prompt as u16));
             // Idle, the bar above the box holds the status alone, right-aligned.
             assert!(rows[prompt - 2].ends_with("no model  "));
             assert!(rows[prompt - 2].starts_with("    "));
-            assert!(rows[usize::from(h) - 1].contains("↳ Sample agents"));
+            assert!(rows[usize::from(h) - 1].contains("Agents  2 samples"));
         }
     }
 
@@ -532,7 +598,7 @@ mod tests {
         assert_eq!(rows[prompt + 1], format!("╰{}╯", "─".repeat(38)));
         // The bar and the agents row align with the box's contents.
         assert_eq!(rows[prompt - 2], format!("{}no model  ", " ".repeat(30)));
-        assert!(rows[prompt + 2].starts_with("  ↳ Sample agents"));
+        assert!(rows[prompt + 2].starts_with("  Agents  2 samples · none running"));
         // Right-hand text ends where the box's contents do.
         let (rows, _) = draw(&mut app, 80, 24);
         let prompt = row_index(&rows, "❯ hello");
@@ -663,8 +729,11 @@ mod tests {
         let (rows, _) = draw(&mut app, 80, 24);
         assert!(
             rows.iter()
-                .any(|r| r.contains("Inspecting Sample explorer · read-only"))
+                .any(|r| r.starts_with("  Inspecting  Tab agents · Esc draft"))
         );
+        let name = row_index(&rows, "Sample explorer");
+        assert!(rows[name].trim_end().ends_with("sample-explorer"));
+        assert!(rows[name + 1].starts_with("  Read only · typing never reaches"));
         assert!(rows.iter().any(|r| r.contains("❯ draft")));
         assert!(
             rows.iter()
@@ -763,9 +832,20 @@ mod tests {
         let mut app = State::default();
         key(&mut app, Key::Tab);
         key(&mut app, Key::Down);
-        let (rows, _) = draw(&mut app, 40, 12);
-        assert!(rows.iter().any(|r| r.starts_with("› Sample reviewer")));
-        assert!(rows.iter().any(|r| r.starts_with("  Sample explorer")));
+        let (rows, _) = draw(&mut app, 60, 24);
+        let at = |needle| row_index(&rows, needle);
+        assert_eq!(
+            rows[at("Sample reviewer")].trim_end(),
+            format!("  ▸ Sample reviewer{}sample-reviewer", " ".repeat(26))
+        );
+        assert!(rows[at("Sample explorer")].starts_with("    Sample explorer"));
+        // Each card says what the agent does; a blank separates the cards.
+        assert!(
+            rows[at("Sample reviewer") + 1].starts_with("    Example of a child that would review")
+        );
+        assert_eq!(rows[at("Sample reviewer") - 1].trim(), "");
+        assert!(rows[at("Fixed examples")].starts_with("  Fixed examples · nothing is running"));
+        assert!(rows.iter().any(|r| r.starts_with("  Agents  ↑↓ select")));
     }
 
     /// The row holding the prompt and the box's bottom edge.
@@ -904,9 +984,9 @@ mod tests {
     fn row_keys_give_way_below_sixty_columns() {
         let mut app = State::default();
         let (rows, _) = draw(&mut app, 60, 24);
-        assert!(rows[row_index(&rows, "↳ Sample agents")].ends_with("Tab  "));
+        assert!(rows[row_index(&rows, "Agents  2 samples")].ends_with("Tab  "));
         let (rows, _) = draw(&mut app, 59, 24);
-        assert!(!rows[row_index(&rows, "↳ Sample agents")].contains("Tab"));
+        assert!(!rows[row_index(&rows, "Agents  2 samples")].contains("Tab"));
     }
 
     #[test]

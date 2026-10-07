@@ -10,6 +10,5 @@ publish.workspace = true
 # the `ratatui` umbrella crate out of this manifest.
 [dependencies]
 ratatui-core.workspace = true
-ratatui-widgets.workspace = true
 unicode-segmentation.workspace = true
 unicode-width.workspace = true

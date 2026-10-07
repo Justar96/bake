@@ -53,7 +53,6 @@ name = "bake-tui-view"
 version = "0.4.0-dev"
 dependencies = [
  "ratatui-core",
- "ratatui-widgets",
  "unicode-segmentation",
  "unicode-width",
 ]

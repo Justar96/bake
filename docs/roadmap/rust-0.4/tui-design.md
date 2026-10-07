@@ -42,20 +42,22 @@ Every row aligns to four edges:
 
 | Edge | Column | Holds |
 |---|---|---|
-| Rail | 0 | Transcript markers (`›`, `●`, `*`) and the box's left side |
+| Rail | 0 | The bar beside the user's words (`▎`) and the box's left side |
 | Prompt | 2 | The composer's `❯`, `^`, and `v`, and the first cell of every row drawn outside the box: the bar, panels, and standing rows |
-| Text | 4 in the box, 2 in the transcript | Draft and prose; tool output hangs from `⎿` as the [verb column](../../../apps/tui/DESIGN-LAYOUT.md#ascii-only-and-actions-are-named-rather-than-pictured) defines |
+| Text | 4 in the box, 2 in the transcript | Draft and prose. A call's state mark sits at 2, its tool name at 4, and its argument in an aligned column after the name; its output hangs from a gutter at 4 ([D8](#intentional-differences)) |
 | Right | last column less 2 | The end of right-aligned keys and hints outside the box, level with the box's inner padding |
 
 Idle, after a turn:
 
 ```
-› Find where the session controller registers commands
+▎ Find where the session controller registers commands
 
   The registry is the list, so discovery should read it.
-● Bash(rg -n "commands.register" -g '*.ts')
-  ⎿  packages/app/src/controller.ts:45
-     packages/app/src/controller.ts:52
+
+  ✓ Bash  rg -n "commands.register" -g '*.ts'                            2 lines
+    │ packages/app/src/controller.ts:45
+    │ packages/app/src/controller.ts:52
+
   Two registrations, both through ctx.effect.
                                                   PgUp scroll · Ctrl+↑ prompts
 
@@ -63,8 +65,8 @@ Idle, after a turn:
 ╭──────────────────────────────────────────────────────────────────────────────╮
 │ ❯ Ask anything · / commands · @ files                                        │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-  ↳ Subagents 2 · 1 working · 1 done                                    Ctrl+G
-  ● Goal 3/256 · writing tests                                          Ctrl+O
+  Agents  2 · 1 working · 1 done                                          Ctrl+G
+  Goal  3/256 · writing tests                                             Ctrl+O
 ```
 
 Running, with a draft taller than its window; the activity is words alone, the hidden-row count and the mode hint ride the box's edges:
@@ -96,11 +98,14 @@ Completion open; the panel sits on the bar, nearest the token that opened it:
 Inspecting a child; the parent draft is kept and shown dim:
 
 ```
-  ↳ explorer  child of main · read-only                 main: approval waiting
+  explorer                                                     child of main
+  Read only · typing never reaches an agent or your draft
+
+  Inspecting  Tab agents · Esc draft                      main: approval waiting
 ╭──────────────────────────────────────────────────────────────────────────────╮
 │ ❯ Then thread the value through startup.ts and the session store, and        │
 ╰─────────────────────────────────────────────────── draft kept · Esc returns ─╯
-  ↳ Subagents 2 · 1 working · 1 done                                    Ctrl+G
+  Agents  2 · 1 working · 1 done                                          Ctrl+G
 ```
 
 ## Intentional differences
@@ -116,6 +121,7 @@ Each difference from the TypeScript frontend needs its own reviewed acceptance c
 | D5 | A rounded box frames the draft in place of the two bare rules; rows outside it are inset two cells to align with its contents; hidden-row counts and mode hints sit on its edges instead of a right-hand slot beside the caret | The input reads as one control distinct from the transcript. The box spends the rules' two rows and no more, and hints on the edges take no column from the draft, so a mode change never rewraps it | Buffer tests of the box at every width from 1 to 200, the classic frame, and edge labels that drop whole; PTY resize scenarios |
 | D6 | The header's activity is text alone: no spinner glyph for a turn or for compaction. A band of light sweeps across the activity word, and the word list grows from 12 verbs to 32 | Words say what is happening without a symbol a terminal could measure differently, and a larger list keeps consecutive turns distinct | Pure tests pin the sweep, the colour levels, and the word choice; a PTY scenario checks that elapsed time advances without input and that no Braille glyph is drawn |
 | D7 | The header and the status line share one row directly above the composer box, the bar: the activity or the last turn's outcome on the left, the status right-aligned. The status is minimal and consolidated into three fields: the model with its thinking level (`deepseek-v4-flash high`), the context reading (`ctx ~11% (15.2k/128k)`), and the location, the directory with its branch (`~/bake ⎇ main`). Git change counts, token totals, the cache hit, and the update notice are not shown, and the goal moves to a standing row under the box | One row says what the session is doing and where it stands, next to where the next prompt is typed, and the box gains a row of transcript. Right-aligned, the status does not move when the activity starts or ends | Pure tests of each field, its tone, and its rank, including the TypeScript `fitStatus` cases; buffer tests that the activity and status share the row and give way in order; a PTY check of the shared row |
+| D8 | The transcript and the agent views use blocks and columns instead of the TypeScript verb column. The user's words run beside an accent bar, `▎`. A call is one row, `✓ Bash  argument`, its state mark (`✓` done, `✗` failed, `●` running) at column 2, the tool name in an aligned column, and a summary right-aligned: its own, such as `exit 1`, or its line count. Output hangs from a dim gutter, `│`, red when the call failed, and a long result's count reads `⋯ 4 more lines`. The standing row reads `Agents  2 · 1 working · 1 done`, without `↳`. The agent list is a column of cards, the selected one marked `▸`, each with its name, its id right-aligned, and one line of what it does; inspection opens with the agent's name and id, then the read-only line. The classic frame swaps every mark for ASCII: `|`, `+`, `x`, `*`, `...`, and `>` | Fewer marks and aligned columns let a long session be scanned by state and tool; the summary on the right edge answers "what happened" without reading the output. Every mark comes from the frame's glyph set, so a terminal that cannot measure the round glyphs gets ASCII | Pure tests of each row's lines at fixed widths, in both glyph sets; buffer tests of the list and inspection; PTY checks of the new rows |
 
 ## Composer
 
@@ -252,10 +258,10 @@ The design mirrors the TypeScript split between a pure presentation package and 
 
 | Crate | Owns | May depend on |
 |---|---|---|
-| `bake-tui-view` | Editor, presentation state and its update function, key bindings, view models, layout planner, widgets, palette, frame glyphs, and English copy | `ratatui-core`, `ratatui-widgets`, `unicode-segmentation`, `unicode-width`; no Crossterm, I/O, threads, or clock reads |
+| `bake-tui-view` | Editor, presentation state and its update function, key bindings, view models, layout planner, widgets, palette, frame glyphs, and English copy | `ratatui-core`, `unicode-segmentation`, `unicode-width`; no Crossterm, I/O, threads, or clock reads |
 | `bake-tui` | Terminal lease, input decoding, output, signals, the event loop, and the runtime port | `bake-tui-view`, `ratatui`, Crossterm, `signal-hook` |
 
-The crate boundary makes purity a compile-time fact: `bake-tui-view` cannot reach the terminal because it does not link Crossterm. Both Ratatui sub-crates already appear in `rust/Cargo.lock` at the pinned Ratatui version, so the split adds no new third-party crate. Terminal leases move to `bake-host` when that crate exists.
+The crate boundary makes purity a compile-time fact: `bake-tui-view` cannot reach the terminal because it does not link Crossterm. `ratatui-core` already appears in `rust/Cargo.lock` at the pinned Ratatui version, so the split adds no new third-party crate. Terminal leases move to `bake-host` when that crate exists.
 
 ### State and updates
 

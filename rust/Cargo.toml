@@ -18,10 +18,9 @@ publish = false
 bake-tui = { path = "crates/bake-tui" }
 bake-tui-view = { path = "crates/bake-tui-view" }
 ratatui = { version = "=0.30.2", default-features = false, features = ["crossterm"] }
-# The sub-crates the pinned Ratatui release depends on; the view crate uses them
+# The core crate the pinned Ratatui release depends on; the view crate uses it
 # without the terminal backend.
 ratatui-core = { version = "=0.1.2", default-features = false, features = ["std"] }
-ratatui-widgets = { version = "=0.3.2", default-features = false, features = ["std"] }
 crossterm = { version = "=0.29.0", default-features = false, features = ["bracketed-paste", "events"] }
 signal-hook = { version = "=0.3.18", default-features = false }
 unicode-segmentation = "=1.13.3"

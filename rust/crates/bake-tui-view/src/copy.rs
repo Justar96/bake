@@ -6,7 +6,6 @@ pub const INTRO: &[&str] = &[
     "",
     "Press Tab to inspect a sample agent. Esc brings you back to your draft.",
 ];
-pub const HEADER_LIST: &str = "Sample agents";
 pub const HEADER_LIST_HINT: &str = "↑↓ select · Enter inspect · Esc back";
 /// The idle placeholder's parts. The preview has no commands or file
 /// mentions to name, so it names its editing keys instead.
@@ -29,8 +28,11 @@ pub const COMPACTING: &str = "Compacting history";
 pub const COMPACTING_PHASES: &[&str] = &["preparing", "summarizing", "saving"];
 pub const PHASE_SECONDS: u64 = 4;
 pub const ABOVE: &str = "above";
-/// A result preview's count of the lines it leaves out: `+4 more lines`.
+/// A result preview's count of the lines it leaves out: `⋯ 4 more lines`.
 pub const MORE_LINES: &str = "more lines";
+/// A call's line count when it has no summary of its own: `1 line`, `2 lines`.
+pub const LINE: &str = "line";
+pub const LINES: &str = "lines";
 /// The transcript's hint row: its keys while following output, and the way
 /// back while reading history.
 pub const HINT_FOLLOWING: &[(&str, &str)] = &[("PgUp", "scroll"), ("Ctrl+↑", "prompts")];
@@ -41,12 +43,15 @@ pub const READ_ONLY: &str =
     "Read-only inspection: input does not reach any agent or your draft. Esc returns.";
 pub const LIST_KEYS: &str = "↑↓ select · Enter inspect · Esc returns to the draft.";
 pub const DRAFT_LIMIT: &str = "Draft limit reached; the rest of the input was not added.";
-pub const LIST_TITLE: &str = "Sample agents · fixed examples, nothing is running";
-pub const INSPECT_PARENT: &str = "Parent: this preview's draft, unchanged while you inspect.";
-pub const INSPECT_READ_ONLY: &str =
-    "Read-only. Typing here never reaches an agent or the parent draft.";
-pub const INSPECT_RETURN: &str = "Esc returns to the draft · Tab returns to the list.";
-pub const STATE: &str = "static sample";
+/// The agents: the standing row's label, the list's subtitle, and what
+/// inspection says about input and the draft.
+pub const AGENTS: &str = "Agents";
+pub const AGENTS_SUMMARY: &str = "samples · none running";
+pub const LIST_SUBTITLE: &str = "Fixed examples · nothing is running";
+pub const INSPECT_READ_ONLY: &str = "Read only · typing never reaches an agent or your draft";
+pub const INSPECT_PARENT: &str = "Your draft is kept unchanged while you inspect.";
+pub const INSPECTING: &str = "Inspecting";
+pub const INSPECT_KEYS: &str = "Tab agents · Esc draft";
 /// The status line's model field while no model is selected, and the dim
 /// label before the context reading.
 pub const NO_MODEL_FIELD: &str = "no model";

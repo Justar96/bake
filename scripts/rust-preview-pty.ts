@@ -72,7 +72,7 @@ class Preview {
   async ready(): Promise<void> {
     await this.wait('Rust preview ready', () => this.terminal.buffer.active.type === 'alternate'
       // The sample session's newest lines and the composer show on the first frame.
-      && this.screen.includes('› Run the parser tests') && this.screen.includes('❯ Type a draft')
+      && this.screen.includes('▎ Run the parser tests') && this.screen.includes('❯ Type a draft')
       && this.raw.includes('\x1b[?2004h'))
     assert.notDeepEqual(this.modes(), this.initialModes, 'preview did not acquire raw mode')
   }
@@ -104,7 +104,7 @@ class Preview {
   async quit(signal?: 'SIGINT' | 'SIGTERM' | 'SIGHUP'): Promise<void> {
     if (signal === 'SIGTERM') {
       this.send('\t')
-      await this.wait('agent list with hidden cursor', () => this.screen.includes('Sample agents · fixed examples')
+      await this.wait('agent list with hidden cursor', () => this.screen.includes('Fixed examples · nothing is running')
         && this.raw.lastIndexOf('\x1b[?25l') > this.raw.lastIndexOf('\x1b[?25h'))
     }
     if (signal === undefined) this.send('\x03')
@@ -163,11 +163,11 @@ await scenario('composer, agent inspection, paste, and resize', async (preview) 
   preview.send('draftAB\x1b[D')
   await preview.wait('typed draft', () => preview.screen.includes('draftAB'))
   preview.send('\t')
-  await preview.wait('sample agent picker', () => /sample agents/iu.test(preview.screen))
+  await preview.wait('sample agent picker', () => preview.screen.includes('Fixed examples · nothing is running'))
   preview.send('\x1b[B\r')
-  await preview.wait('read-only inspection', () => preview.screen.includes('Read-only. Typing here'))
+  await preview.wait('read-only inspection', () => preview.screen.includes('typing never reaches an agent'))
   preview.send('forbidden\x1b')
-  await preview.wait('return to composer', () => !preview.screen.includes('Read-only. Typing here') && preview.screen.includes('draftAB'))
+  await preview.wait('return to composer', () => !preview.screen.includes('typing never reaches an agent') && preview.screen.includes('draftAB'))
   preview.send('X')
   await preview.wait('restored caret', () => preview.screen.includes('draftAXB'))
   assert(!preview.screen.includes('forbidden'), 'inspection accepted draft input')
@@ -193,9 +193,9 @@ await scenario('transcript pages, jumps between prompts, and follows output agai
   preview.send('\x1b[5~')
   await preview.wait('reading history', () => preview.screen.includes('↓ Latest · Ctrl+End') && !preview.screen.includes('before splitting.'))
   preview.send('\x1b[1;5H')
-  await preview.wait('transcript start', () => /^Bake · Rust preview/mu.test(preview.screen))
+  await preview.wait('transcript start', () => /^ {2}Bake · Rust preview/mu.test(preview.screen))
   preview.send('\x1b[1;5B')
-  await preview.wait('next prompt at the top', () => /^› Find where the session controller/u.test(preview.screen))
+  await preview.wait('next prompt at the top', () => /^▎ Find where the session controller/u.test(preview.screen))
   preview.send('\x1b[1;5F')
   await preview.wait('following again', () => preview.screen.includes('PgUp scroll') && preview.screen.includes('before splitting.'))
   assert(preview.screen.includes('❯ keep'), 'transcript navigation changed the draft')
