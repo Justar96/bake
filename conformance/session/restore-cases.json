@@ -1,0 +1,3544 @@
+{
+  "schema": "bake/session-conformance/restore-cases",
+  "version": 1,
+  "oracle": "restorePlainLog(log) in packages/session/session-persistence-jsonl/tests/restore-conformance.spec.ts: scanLog, validateStoredEvents, interruptedTurnClosers, then Session.fromRestore(..., \"detached\", currentSessionMessageProjections)",
+  "logs": {
+    "tool-call-turn": "conformance/runtime/request-reconstruction/tool-call-turn/session.jsonl",
+    "dynamic-tools": "conformance/runtime/request-reconstruction/dynamic-tools/session.jsonl",
+    "retry-attempt": "conformance/runtime/request-reconstruction/retry-attempt/session.jsonl"
+  },
+  "cases": [
+    {
+      "id": "tool-call-turn",
+      "log": "tool-call-turn",
+      "edits": [],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 4533,
+        "storedEventCount": 16,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      },
+      "production": true
+    },
+    {
+      "id": "dynamic-tools",
+      "log": "dynamic-tools",
+      "edits": [],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "dynamic-tools",
+          "createdAt": 1791376787048,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 9755,
+        "storedEventCount": 38,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/15/data/message"
+          },
+          {
+            "$log": "/22/data"
+          },
+          {
+            "$log": "/25/data/message"
+          },
+          {
+            "$log": "/32/data"
+          },
+          {
+            "$log": "/35/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/33/data/header/tools/0"
+            },
+            {
+              "$log": "/33/data/header/tools/1"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": [
+            {
+              "afterMessageId": "5491e94a-9b9d-48cb-a0f8-7e0cd7e9c916",
+              "additions": [
+                {
+                  "$log": "/13/data/header/tools/0"
+                }
+              ],
+              "removals": []
+            },
+            {
+              "afterMessageId": "a51892aa-8df9-4751-8654-f0b9606000ac",
+              "additions": [],
+              "removals": [
+                "fetch"
+              ]
+            },
+            {
+              "afterMessageId": "53b71392-013c-4f89-a9ff-4638c35dfe62",
+              "additions": [
+                {
+                  "$log": "/33/data/header/tools/0"
+                }
+              ],
+              "removals": []
+            }
+          ]
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      },
+      "production": true
+    },
+    {
+      "id": "retry-attempt",
+      "log": "retry-attempt",
+      "edits": [],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "retry-attempt",
+          "createdAt": 1791378812486,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 3102,
+        "storedEventCount": 14,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/11/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock-b"
+          },
+          "tools": [
+            {
+              "$log": "/9/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock-b"
+        }
+      },
+      "production": true
+    },
+    {
+      "id": "cut-after-tool-call",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 10
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 3013,
+        "storedEventCount": 10,
+        "closers": [
+          {
+            "type": "tool/result",
+            "seq": 10,
+            "time": 1791337579868,
+            "data": {
+              "turn": 1,
+              "step": 1,
+              "message": {
+                "id": "interrupted-tool-result-c1-10",
+                "role": "user",
+                "source": {
+                  "kind": "tool",
+                  "callId": "c1"
+                },
+                "content": [
+                  {
+                    "type": "tool-result",
+                    "toolCallId": "c1",
+                    "isError": true,
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "The tool call was interrupted after it was recorded, but no result was durably recorded. Its outcome is unknown. Decide whether to retry from the tool semantics: retry only if the operation is read-only or idempotent; if it may have side effects, first verify external state or ask the user. Do not retry blindly."
+                      }
+                    ]
+                  }
+                ]
+              },
+              "error": {
+                "name": "ToolOutcomeUnknownError",
+                "code": "TOOL_OUTCOME_UNKNOWN"
+              }
+            },
+            "surfaceOp": "append",
+            "sourceEventSeqs": [
+              9
+            ]
+          },
+          {
+            "type": "step/end",
+            "seq": 11,
+            "time": 1791337579868,
+            "data": {
+              "turn": 1,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 12,
+            "time": 1791337579868,
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$closer": "/0/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      },
+      "production": true
+    },
+    {
+      "id": "cut-after-assistant-message",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 9
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 2875,
+        "storedEventCount": 9,
+        "closers": [
+          {
+            "type": "tool/result",
+            "seq": 9,
+            "time": 1791337579867,
+            "data": {
+              "turn": 1,
+              "step": 1,
+              "message": {
+                "id": "interrupted-tool-result-c1-9",
+                "role": "user",
+                "source": {
+                  "kind": "tool",
+                  "callId": "c1"
+                },
+                "content": [
+                  {
+                    "type": "tool-result",
+                    "toolCallId": "c1",
+                    "isError": true,
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "The tool call was interrupted before the Harness recorded it as started. Retry it if it is still needed."
+                      }
+                    ]
+                  }
+                ]
+              },
+              "error": {
+                "name": "ToolNotStartedError",
+                "code": "TOOL_NOT_STARTED"
+              }
+            },
+            "surfaceOp": "append"
+          },
+          {
+            "type": "step/end",
+            "seq": 10,
+            "time": 1791337579867,
+            "data": {
+              "turn": 1,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 11,
+            "time": 1791337579867,
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$closer": "/0/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      }
+    },
+    {
+      "id": "cut-after-step-start",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 4
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 620,
+        "storedEventCount": 4,
+        "closers": [
+          {
+            "type": "step/end",
+            "seq": 4,
+            "time": 1791337579865,
+            "data": {
+              "turn": 1,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 5,
+            "time": 1791337579865,
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [],
+        "requestHeader": null,
+        "toolHistory": {
+          "tools": [],
+          "updates": []
+        },
+        "requestContext": null
+      }
+    },
+    {
+      "id": "cut-after-turn-start",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 2
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 411,
+        "storedEventCount": 2,
+        "closers": [
+          {
+            "type": "turn/end",
+            "seq": 2,
+            "time": 1791337579864,
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [],
+        "requestHeader": null,
+        "toolHistory": {
+          "tools": [],
+          "updates": []
+        },
+        "requestContext": null
+      }
+    },
+    {
+      "id": "messages-without-header",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 6
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 1119,
+        "storedEventCount": 6,
+        "closers": [
+          {
+            "type": "step/end",
+            "seq": 6,
+            "time": 1791337579866,
+            "data": {
+              "turn": 1,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 7,
+            "time": 1791337579866,
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          }
+        ],
+        "requestHeader": null,
+        "toolHistory": {
+          "tools": [],
+          "updates": []
+        },
+        "requestContext": null
+      }
+    },
+    {
+      "id": "header-only",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 0
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 104,
+        "storedEventCount": 0,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [],
+        "requestHeader": null,
+        "toolHistory": {
+          "tools": [],
+          "updates": []
+        },
+        "requestContext": null
+      }
+    },
+    {
+      "id": "torn-final-record",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 15
+        },
+        {
+          "tail": "{\"type\":\"turn/end\",\"seq\":15,\"time\":1791337579870,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 4435,
+        "storedEventCount": 15,
+        "closers": [
+          {
+            "type": "turn/end",
+            "seq": 15,
+            "time": 1791337579870,
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      },
+      "production": true,
+      "note": "the torn turn/end leaves the turn open after step/end 14 closed its step and calls"
+    },
+    {
+      "id": "recovered-unparsable-tail-record",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 10
+        },
+        {
+          "append": "{"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 3013,
+        "storedEventCount": 10,
+        "closers": [
+          {
+            "type": "tool/result",
+            "seq": 10,
+            "time": 1791337579868,
+            "data": {
+              "turn": 1,
+              "step": 1,
+              "message": {
+                "id": "interrupted-tool-result-c1-10",
+                "role": "user",
+                "source": {
+                  "kind": "tool",
+                  "callId": "c1"
+                },
+                "content": [
+                  {
+                    "type": "tool-result",
+                    "toolCallId": "c1",
+                    "isError": true,
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "The tool call was interrupted after it was recorded, but no result was durably recorded. Its outcome is unknown. Decide whether to retry from the tool semantics: retry only if the operation is read-only or idempotent; if it may have side effects, first verify external state or ask the user. Do not retry blindly."
+                      }
+                    ]
+                  }
+                ]
+              },
+              "error": {
+                "name": "ToolOutcomeUnknownError",
+                "code": "TOOL_OUTCOME_UNKNOWN"
+              }
+            },
+            "surfaceOp": "append",
+            "sourceEventSeqs": [
+              9
+            ]
+          },
+          {
+            "type": "step/end",
+            "seq": 11,
+            "time": 1791337579868,
+            "data": {
+              "turn": 1,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 12,
+            "time": 1791337579868,
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$closer": "/0/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      },
+      "production": true,
+      "note": "an unparsable record with no later turn/end ends the committed prefix; committedBytes excludes it"
+    },
+    {
+      "id": "codec-invalid-tail-record",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"permission/preset\",\"seq\":16,\"time\":1791337579870,\"data\":{\"preset\":\"default\"},\"surfaceOp\":\"append\"}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 4533,
+        "storedEventCount": 16,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      },
+      "note": "the codec refuses the marker; the record is uncommitted, so restore reads the 16-row prefix"
+    },
+    {
+      "id": "two-calls-one-started",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 10
+        },
+        {
+          "row": 8,
+          "find": "\"text\":\"calling\"},{\"type\":\"tool-call\",\"id\":\"c1\"",
+          "replace": "\"text\":\"calling\"},{\"type\":\"tool-call\",\"id\":\"c0\",\"name\":\"echo\",\"arguments\":\"{}\"},{\"type\":\"tool-call\",\"id\":\"c1\""
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 3075,
+        "storedEventCount": 10,
+        "closers": [
+          {
+            "type": "tool/result",
+            "seq": 10,
+            "time": 1791337579868,
+            "data": {
+              "turn": 1,
+              "step": 1,
+              "message": {
+                "id": "interrupted-tool-result-c0-10",
+                "role": "user",
+                "source": {
+                  "kind": "tool",
+                  "callId": "c0"
+                },
+                "content": [
+                  {
+                    "type": "tool-result",
+                    "toolCallId": "c0",
+                    "isError": true,
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "The tool call was interrupted before the Harness recorded it as started. Retry it if it is still needed."
+                      }
+                    ]
+                  }
+                ]
+              },
+              "error": {
+                "name": "ToolNotStartedError",
+                "code": "TOOL_NOT_STARTED"
+              }
+            },
+            "surfaceOp": "append"
+          },
+          {
+            "type": "tool/result",
+            "seq": 11,
+            "time": 1791337579868,
+            "data": {
+              "turn": 1,
+              "step": 1,
+              "message": {
+                "id": "interrupted-tool-result-c1-11",
+                "role": "user",
+                "source": {
+                  "kind": "tool",
+                  "callId": "c1"
+                },
+                "content": [
+                  {
+                    "type": "tool-result",
+                    "toolCallId": "c1",
+                    "isError": true,
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "The tool call was interrupted after it was recorded, but no result was durably recorded. Its outcome is unknown. Decide whether to retry from the tool semantics: retry only if the operation is read-only or idempotent; if it may have side effects, first verify external state or ask the user. Do not retry blindly."
+                      }
+                    ]
+                  }
+                ]
+              },
+              "error": {
+                "name": "ToolOutcomeUnknownError",
+                "code": "TOOL_OUTCOME_UNKNOWN"
+              }
+            },
+            "surfaceOp": "append",
+            "sourceEventSeqs": [
+              9
+            ]
+          },
+          {
+            "type": "step/end",
+            "seq": 12,
+            "time": 1791337579868,
+            "data": {
+              "turn": 1,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 13,
+            "time": 1791337579868,
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$closer": "/0/data/message"
+          },
+          {
+            "$closer": "/1/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      }
+    },
+    {
+      "id": "repeated-call-id-keeps-position-and-resets",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 9
+        },
+        {
+          "row": 8,
+          "find": "\"text\":\"calling\"},{\"type\":\"tool-call\",\"id\":\"c1\"",
+          "replace": "\"text\":\"calling\"},{\"type\":\"tool-call\",\"id\":\"c0\",\"name\":\"echo\",\"arguments\":\"{}\"},{\"type\":\"tool-call\",\"id\":\"c1\""
+        },
+        {
+          "append": "{\"type\":\"tool/call\",\"seq\":9,\"time\":1791337579868,\"data\":{\"turn\":1,\"step\":1,\"callId\":\"c0\",\"name\":\"echo\",\"arguments\":\"{}\"}}"
+        },
+        {
+          "append": "{\"type\":\"assistant/message\",\"seq\":10,\"time\":1791337579868,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool-call\",\"id\":\"c0\",\"name\":\"echo\",\"arguments\":\"{}\"}],\"source\":{\"kind\":\"model\",\"provider\":\"mock\",\"model\":\"mock\"},\"id\":\"a2\"},\"stream\":[]},\"surfaceOp\":\"append\"}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 3352,
+        "storedEventCount": 11,
+        "closers": [
+          {
+            "type": "tool/result",
+            "seq": 11,
+            "time": 1791337579868,
+            "data": {
+              "turn": 1,
+              "step": 1,
+              "message": {
+                "id": "interrupted-tool-result-c0-11",
+                "role": "user",
+                "source": {
+                  "kind": "tool",
+                  "callId": "c0"
+                },
+                "content": [
+                  {
+                    "type": "tool-result",
+                    "toolCallId": "c0",
+                    "isError": true,
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "The tool call was interrupted before the Harness recorded it as started. Retry it if it is still needed."
+                      }
+                    ]
+                  }
+                ]
+              },
+              "error": {
+                "name": "ToolNotStartedError",
+                "code": "TOOL_NOT_STARTED"
+              }
+            },
+            "surfaceOp": "append"
+          },
+          {
+            "type": "tool/result",
+            "seq": 12,
+            "time": 1791337579868,
+            "data": {
+              "turn": 1,
+              "step": 1,
+              "message": {
+                "id": "interrupted-tool-result-c1-12",
+                "role": "user",
+                "source": {
+                  "kind": "tool",
+                  "callId": "c1"
+                },
+                "content": [
+                  {
+                    "type": "tool-result",
+                    "toolCallId": "c1",
+                    "isError": true,
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "The tool call was interrupted before the Harness recorded it as started. Retry it if it is still needed."
+                      }
+                    ]
+                  }
+                ]
+              },
+              "error": {
+                "name": "ToolNotStartedError",
+                "code": "TOOL_NOT_STARTED"
+              }
+            },
+            "surfaceOp": "append"
+          },
+          {
+            "type": "step/end",
+            "seq": 13,
+            "time": 1791337579868,
+            "data": {
+              "turn": 1,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 14,
+            "time": 1791337579868,
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$closer": "/0/data/message"
+          },
+          {
+            "$closer": "/1/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      },
+      "note": "Map.set on a pending id keeps its position and drops its recorded tool/call"
+    },
+    {
+      "id": "call-pending-across-step",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 10
+        },
+        {
+          "append": "{\"type\":\"step/start\",\"seq\":10,\"time\":1791337579868,\"data\":{\"turn\":1,\"step\":2}}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 3092,
+        "storedEventCount": 11,
+        "closers": [
+          {
+            "type": "tool/result",
+            "seq": 11,
+            "time": 1791337579868,
+            "data": {
+              "turn": 1,
+              "step": 1,
+              "message": {
+                "id": "interrupted-tool-result-c1-11",
+                "role": "user",
+                "source": {
+                  "kind": "tool",
+                  "callId": "c1"
+                },
+                "content": [
+                  {
+                    "type": "tool-result",
+                    "toolCallId": "c1",
+                    "isError": true,
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "The tool call was interrupted after it was recorded, but no result was durably recorded. Its outcome is unknown. Decide whether to retry from the tool semantics: retry only if the operation is read-only or idempotent; if it may have side effects, first verify external state or ask the user. Do not retry blindly."
+                      }
+                    ]
+                  }
+                ]
+              },
+              "error": {
+                "name": "ToolOutcomeUnknownError",
+                "code": "TOOL_OUTCOME_UNKNOWN"
+              }
+            },
+            "surfaceOp": "append",
+            "sourceEventSeqs": [
+              9
+            ]
+          },
+          {
+            "type": "step/end",
+            "seq": 12,
+            "time": 1791337579868,
+            "data": {
+              "turn": 1,
+              "step": 2
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 13,
+            "time": 1791337579868,
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$closer": "/0/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      },
+      "note": "a closer keeps its call's Assistant step; step/start clears nothing"
+    },
+    {
+      "id": "repeated-step-start",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 10
+        },
+        {
+          "append": "{\"type\":\"step/start\",\"seq\":10,\"time\":1791337579868,\"data\":{\"turn\":1,\"step\":1}}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 3092,
+        "storedEventCount": 11,
+        "closers": [
+          {
+            "type": "tool/result",
+            "seq": 11,
+            "time": 1791337579868,
+            "data": {
+              "turn": 1,
+              "step": 1,
+              "message": {
+                "id": "interrupted-tool-result-c1-11",
+                "role": "user",
+                "source": {
+                  "kind": "tool",
+                  "callId": "c1"
+                },
+                "content": [
+                  {
+                    "type": "tool-result",
+                    "toolCallId": "c1",
+                    "isError": true,
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "The tool call was interrupted after it was recorded, but no result was durably recorded. Its outcome is unknown. Decide whether to retry from the tool semantics: retry only if the operation is read-only or idempotent; if it may have side effects, first verify external state or ask the user. Do not retry blindly."
+                      }
+                    ]
+                  }
+                ]
+              },
+              "error": {
+                "name": "ToolOutcomeUnknownError",
+                "code": "TOOL_OUTCOME_UNKNOWN"
+              }
+            },
+            "surfaceOp": "append",
+            "sourceEventSeqs": [
+              9
+            ]
+          },
+          {
+            "type": "step/end",
+            "seq": 12,
+            "time": 1791337579868,
+            "data": {
+              "turn": 1,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 13,
+            "time": 1791337579868,
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$closer": "/0/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      }
+    },
+    {
+      "id": "step-start-without-turn",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 1
+        },
+        {
+          "append": "{\"type\":\"step/start\",\"seq\":1,\"time\":1791337579864,\"data\":{\"turn\":4,\"step\":7}}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 420,
+        "storedEventCount": 2,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [],
+        "requestHeader": null,
+        "toolHistory": {
+          "tools": [],
+          "updates": []
+        },
+        "requestContext": null
+      }
+    },
+    {
+      "id": "null-turn-closes",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 4
+        },
+        {
+          "row": 1,
+          "text": "{\"type\":\"turn/start\",\"seq\":1,\"time\":1791337579864,\"data\":{\"turn\":null}}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 623,
+        "storedEventCount": 4,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [],
+        "requestHeader": null,
+        "toolHistory": {
+          "tools": [],
+          "updates": []
+        },
+        "requestContext": null
+      },
+      "note": "openTurn === null means no open turn, though a step started"
+    },
+    {
+      "id": "closer-time-from-ignorable-last-row",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 10
+        },
+        {
+          "append": "{\"type\":\"x/unknown\",\"seq\":10,\"time\":5,\"data\":{},\"ignorable\":true}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 3079,
+        "storedEventCount": 11,
+        "closers": [
+          {
+            "type": "tool/result",
+            "seq": 11,
+            "time": 5,
+            "data": {
+              "turn": 1,
+              "step": 1,
+              "message": {
+                "id": "interrupted-tool-result-c1-11",
+                "role": "user",
+                "source": {
+                  "kind": "tool",
+                  "callId": "c1"
+                },
+                "content": [
+                  {
+                    "type": "tool-result",
+                    "toolCallId": "c1",
+                    "isError": true,
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "The tool call was interrupted after it was recorded, but no result was durably recorded. Its outcome is unknown. Decide whether to retry from the tool semantics: retry only if the operation is read-only or idempotent; if it may have side effects, first verify external state or ask the user. Do not retry blindly."
+                      }
+                    ]
+                  }
+                ]
+              },
+              "error": {
+                "name": "ToolOutcomeUnknownError",
+                "code": "TOOL_OUTCOME_UNKNOWN"
+              }
+            },
+            "surfaceOp": "append",
+            "sourceEventSeqs": [
+              9
+            ]
+          },
+          {
+            "type": "step/end",
+            "seq": 12,
+            "time": 5,
+            "data": {
+              "turn": 1,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 13,
+            "time": 5,
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$closer": "/0/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      }
+    },
+    {
+      "id": "empty-call-id-closer",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 9
+        },
+        {
+          "row": 8,
+          "find": "\"text\":\"calling\"},{\"type\":\"tool-call\",\"id\":\"c1\"",
+          "replace": "\"text\":\"calling\"},{\"type\":\"tool-call\",\"id\":\"\""
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "seed tool/result at index 9 message must have tool source"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "restore/tool-source"
+      },
+      "note": "closers skip adoption but not Session construction"
+    },
+    {
+      "id": "non-string-call-id",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 9
+        },
+        {
+          "row": 8,
+          "find": "\"text\":\"calling\"},{\"type\":\"tool-call\",\"id\":\"c1\"",
+          "replace": "\"text\":\"calling\"},{\"type\":\"tool-call\",\"id\":7"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "seed tool/result at index 9 message must have tool source"
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "repair"
+      }
+    },
+    {
+      "id": "open-turn-not-a-count",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 2
+        },
+        {
+          "row": 1,
+          "text": "{\"type\":\"turn/start\",\"seq\":1,\"time\":1791337579864,\"data\":{\"turn\":\"x\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 413,
+        "storedEventCount": 2,
+        "closers": [
+          {
+            "type": "turn/end",
+            "seq": 2,
+            "time": 1791337579864,
+            "data": {
+              "turn": "x",
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [],
+        "requestHeader": null,
+        "toolHistory": {
+          "tools": [],
+          "updates": []
+        },
+        "requestContext": null
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "coordinate"
+      }
+    },
+    {
+      "id": "turn-start-null-data",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 2
+        },
+        {
+          "row": 1,
+          "text": "{\"type\":\"turn/start\",\"seq\":1,\"time\":1791337579864,\"data\":null}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "TypeError"
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "repair"
+      }
+    },
+    {
+      "id": "end-seed-last-balanced",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"session/end-seed\",\"seq\":16,\"time\":1791337579870,\"data\":{}}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 4601,
+        "storedEventCount": 17,
+        "closers": [],
+        "endSeedAppended": false,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      },
+      "production": true
+    },
+    {
+      "id": "end-seed-mid-log",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 2,
+          "text": "{\"type\":\"session/end-seed\",\"seq\":2,\"time\":1791337579864,\"data\":{}}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 4469,
+        "storedEventCount": 16,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      }
+    },
+    {
+      "id": "end-seed-last-before-closers",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 10
+        },
+        {
+          "append": "{\"type\":\"session/end-seed\",\"seq\":10,\"time\":1791337579868,\"data\":{}}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 3081,
+        "storedEventCount": 11,
+        "closers": [
+          {
+            "type": "tool/result",
+            "seq": 11,
+            "time": 1791337579868,
+            "data": {
+              "turn": 1,
+              "step": 1,
+              "message": {
+                "id": "interrupted-tool-result-c1-11",
+                "role": "user",
+                "source": {
+                  "kind": "tool",
+                  "callId": "c1"
+                },
+                "content": [
+                  {
+                    "type": "tool-result",
+                    "toolCallId": "c1",
+                    "isError": true,
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "The tool call was interrupted after it was recorded, but no result was durably recorded. Its outcome is unknown. Decide whether to retry from the tool semantics: retry only if the operation is read-only or idempotent; if it may have side effects, first verify external state or ask the user. Do not retry blindly."
+                      }
+                    ]
+                  }
+                ]
+              },
+              "error": {
+                "name": "ToolOutcomeUnknownError",
+                "code": "TOOL_OUTCOME_UNKNOWN"
+              }
+            },
+            "surfaceOp": "append",
+            "sourceEventSeqs": [
+              9
+            ]
+          },
+          {
+            "type": "step/end",
+            "seq": 12,
+            "time": 1791337579868,
+            "data": {
+              "turn": 1,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 13,
+            "time": 1791337579868,
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$closer": "/0/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      },
+      "note": "the end seed is decided after the closers"
+    },
+    {
+      "id": "seeded-marker-last",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "header": "{\"type\":\"session\",\"version\":3,\"id\":\"a1\",\"createdAt\":1791337579861,\"isSeeded\":true,\"delegationDepth\":0}"
+        },
+        {
+          "append": "{\"type\":\"session/end-seed\",\"seq\":16,\"time\":1791337579870,\"data\":{\"inherited\":true}}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": true,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 16,
+        "committedBytes": 4616,
+        "storedEventCount": 17,
+        "closers": [],
+        "endSeedAppended": false,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      },
+      "production": true
+    },
+    {
+      "id": "seeded-then-open-turn",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "header": "{\"type\":\"session\",\"version\":3,\"id\":\"a1\",\"createdAt\":1791337579861,\"isSeeded\":true,\"delegationDepth\":0}"
+        },
+        {
+          "append": "{\"type\":\"session/end-seed\",\"seq\":16,\"time\":1791337579870,\"data\":{\"inherited\":true}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":1791337579871,\"data\":{\"turn\":2}}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": true,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 16,
+        "committedBytes": 4686,
+        "storedEventCount": 18,
+        "closers": [
+          {
+            "type": "turn/end",
+            "seq": 18,
+            "time": 1791337579871,
+            "data": {
+              "turn": 2,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      },
+      "production": true
+    },
+    {
+      "id": "negative-zero-hook-result",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 7,
+          "text": "{\"type\":\"hook/result\",\"seq\":7,\"time\":1791337579866,\"data\":{\"turn\":1,\"point\":\"PostToolUse\",\"handlerId\":\"h\",\"decision\":\"allow\",\"durationMs\":-0}}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 4578,
+        "storedEventCount": 16,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": null
+      },
+      "note": "the same bytes refuse in replay as seed/lossless-json (derivation case hook-result-negative-zero)"
+    },
+    {
+      "id": "negative-zero-in-user-message",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"role\":\"user\",\"id\":\"f7802400",
+          "replace": "\"role\":\"user\",\"n\":-0,\"id\":\"f7802400"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 4540,
+        "storedEventCount": 16,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "number"
+      }
+    },
+    {
+      "id": "usage-fraction",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 13,
+          "find": "\"usage\":{\"inputTokens\":10,\"outputTokens\":4},\"stream\"",
+          "replace": "\"usage\":{\"inputTokens\":10.5,\"outputTokens\":4},\"stream\""
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 4535,
+        "storedEventCount": 16,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "number"
+      },
+      "note": "usage is never emitted; the whole projected payload is qualified"
+    },
+    {
+      "id": "user-message-depth",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"role\":\"user\",\"id\":\"f7802400",
+          "replace": "\"role\":\"user\",\"x\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]],\"id\":\"f7802400"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 4678,
+        "storedEventCount": 16,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "depth"
+      }
+    },
+    {
+      "id": "context-fraction",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 7,
+          "text": "{\"type\":\"request/context\",\"seq\":7,\"time\":1791337579866,\"data\":{\"provider\":\"mock\",\"model\":\"mock\",\"contextWindow\":1.5}}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 4553,
+        "storedEventCount": 16,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock",
+          "contextWindow": 1.5
+        }
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "number"
+      }
+    },
+    {
+      "id": "context-not-object",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 7,
+          "text": "{\"type\":\"request/context\",\"seq\":7,\"time\":1791337579866,\"data\":\"mock\"}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 4505,
+        "storedEventCount": 16,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "0": "m",
+          "1": "o",
+          "2": "c",
+          "3": "k"
+        }
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "context"
+      },
+      "note": "requestContext spreads the data, so a string becomes its index members"
+    },
+    {
+      "id": "attempt-integral-float-turn",
+      "log": "retry-attempt",
+      "edits": [
+        {
+          "row": 8,
+          "find": "\"data\":{\"turn\":1,\"step\":1,\"stream\"",
+          "replace": "\"data\":{\"turn\":1.0,\"step\":1,\"stream\""
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "retry-attempt",
+          "createdAt": 1791378812486,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 3104,
+        "storedEventCount": 14,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/11/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock-b"
+          },
+          "tools": [
+            {
+              "$log": "/9/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock-b"
+        }
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "coordinate"
+      }
+    },
+    {
+      "id": "header-adapter-defaults",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 6,
+          "find": "\"config\":{\"provider\":\"mock\",\"model\":\"mock\"},\"tools\"",
+          "replace": "\"config\":{\"provider\":\"mock\",\"model\":\"mock\",\"reasoningEffort\":\"high\"},\"adapterDefaults\":{\"reasoningEffort\":true},\"tools\""
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 4601,
+        "storedEventCount": 16,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock",
+            "reasoningEffort": "high"
+          },
+          "adapterDefaults": {
+            "reasoningEffort": true
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      }
+    },
+    {
+      "id": "header-extra-member-dropped",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 6,
+          "find": "{\"header\":{\"config\"",
+          "replace": "{\"header\":{\"note\":\"x\",\"config\""
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 4544,
+        "storedEventCount": 16,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      },
+      "note": "canonicalHeader keeps only config, adapterDefaults, and non-empty tools"
+    },
+    {
+      "id": "config-member",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 6,
+          "find": "\"config\":{\"provider\":\"mock\",\"model\":\"mock\"}",
+          "replace": "\"config\":{\"provider\":\"mock\",\"model\":\"mock\",\"foo\":\"bar\"}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 4545,
+        "storedEventCount": 16,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock",
+            "foo": "bar"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "config-member"
+      }
+    },
+    {
+      "id": "tool-schema-not-object",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 6,
+          "text": "{\"type\":\"request/header\",\"seq\":6,\"time\":1791337579866,\"data\":{\"header\":{\"config\":{\"provider\":\"mock\",\"model\":\"mock\"},\"tools\":[\"x\"]},\"reason\":\"initial\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 4424,
+        "storedEventCount": 16,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            "x"
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            "x"
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "tool-schema"
+      }
+    },
+    {
+      "id": "known-ignorable-hook-result",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 7,
+          "text": "{\"type\":\"hook/result\",\"seq\":7,\"time\":1791337579866,\"data\":{\"turn\":1,\"point\":\"PostToolUse\",\"handlerId\":\"h\",\"decision\":\"allow\",\"durationMs\":1},\"ignorable\":true}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 4594,
+        "storedEventCount": 16,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": null
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "ignorable"
+      }
+    },
+    {
+      "id": "known-ignorable-user-message",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"surfaceOp\":\"append\"",
+          "replace": "\"surfaceOp\":\"append\",\"ignorable\":true"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 4550,
+        "storedEventCount": 16,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "ignorable"
+      }
+    },
+    {
+      "id": "known-ignorable-tool-update",
+      "log": "dynamic-tools",
+      "edits": [
+        {
+          "row": 14,
+          "find": "\"removals\":[]}",
+          "replace": "\"removals\":[]},\"ignorable\":true"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "invalid seed event at index 14: request/tool-update must be required on read"
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "ignorable"
+      }
+    },
+    {
+      "id": "unknown-ignorable-with-markers-and-numbers",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 7,
+          "text": "{\"type\":\"x/unknown\",\"seq\":7,\"time\":1791337579866,\"data\":{\"k\":-0,\"f\":0.1},\"ignorable\":true,\"surfaceOp\":\"append\",\"sourceEventSeqs\":[5]}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 4569,
+        "storedEventCount": 16,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": null
+      },
+      "note": "unknown ignorable rows keep opaque metadata and payloads"
+    },
+    {
+      "id": "unknown-required-type",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 7,
+          "text": "{\"type\":\"x/unknown\",\"seq\":7,\"time\":1791337579866,\"data\":{}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "SessionFormatUnsupportedError",
+        "message": "session \"a1\" contains event type \"x/unknown\" (seq 7) unknown to this harness and not marked ignorable; refusing to interpret the log — it was likely written by a newer harness"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "unsupported/unknown-type"
+      }
+    },
+    {
+      "id": "unknown-required-beats-earlier-adoption-failure",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"role\":\"user\",\"id\":\"f7802400",
+          "replace": "\"role\":\"system\",\"id\":\"f7802400"
+        },
+        {
+          "append": "{\"type\":\"x/unknown\",\"seq\":16,\"time\":1791337579870,\"data\":{}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "SessionFormatUnsupportedError",
+        "message": "session \"a1\" contains event type \"x/unknown\" (seq 16) unknown to this harness and not marked ignorable; refusing to interpret the log — it was likely written by a newer harness"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "unsupported/unknown-type"
+      }
+    },
+    {
+      "id": "fallback-header-before-unknown-type",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 6,
+          "find": "\"reason\":\"initial\"",
+          "replace": "\"reason\":\"fallback\""
+        },
+        {
+          "append": "{\"type\":\"x/unknown\",\"seq\":16,\"time\":1791337579870,\"data\":{}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "SessionFormatUnsupportedError",
+        "message": "session \"a1\" contains a request/header event (seq 6) with the unsupported legacy reason \"fallback\"; refusing to interpret the log — it was written by a retired pre-release harness"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "unsupported/fallback-header"
+      }
+    },
+    {
+      "id": "adoption-beats-earlier-settlement",
+      "log": "retry-attempt",
+      "edits": [
+        {
+          "row": 8,
+          "text": "{\"type\":\"assistant/attempt\",\"seq\":8,\"time\":1791378812492,\"data\":{\"turn\":1,\"step\":1,\"stream\":{}}}"
+        },
+        {
+          "row": 11,
+          "find": "\"source\":{\"kind\":\"model\",\"provider\":\"mock\",\"model\":\"mock-b\"}",
+          "replace": "\"source\":{\"kind\":\"model\",\"provider\":\"\",\"model\":\"mock-b\"}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "SessionPersistenceCorruptionError",
+        "message": "stored session \"retry-attempt\" failed validation: Error: session event at seq 11 message must have model source"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "stored/model-source"
+      }
+    },
+    {
+      "id": "adoption-beats-earlier-header-check",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 6,
+          "find": "\"config\":{\"provider\":\"mock\",\"model\":\"mock\"}",
+          "replace": "\"config\":{\"provider\":\"\",\"model\":\"mock\"}"
+        },
+        {
+          "row": 13,
+          "find": "\"source\":{\"kind\":\"model\",\"provider\":\"mock\",\"model\":\"mock\"}",
+          "replace": "\"source\":{\"kind\":\"model\",\"provider\":\"\",\"model\":\"mock\"}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "SessionPersistenceCorruptionError",
+        "message": "stored session \"a1\" failed validation: Error: session event at seq 13 message must have model source"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "stored/model-source"
+      }
+    },
+    {
+      "id": "stored-tool-update-data",
+      "log": "dynamic-tools",
+      "edits": [
+        {
+          "row": 14,
+          "find": "\"additions\":[\"fetch\"],\"removals\":[]",
+          "replace": "\"additions\":[],\"removals\":[]"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "SessionPersistenceCorruptionError",
+        "message": "stored session \"dynamic-tools\" failed validation: Error: session event at seq 14 has an invalid tool update"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "stored/tool-update-data"
+      }
+    },
+    {
+      "id": "marker-on-opaque-type-after-last-settlement",
+      "log": "dynamic-tools",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":38,\"time\":1791376787060,\"data\":{\"version\":0},\"surfaceOp\":\"append\"}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "SessionPersistenceCorruptionError",
+        "message": "stored session \"dynamic-tools\" failed validation: Error: session event \"subagent/catalog\" is not surface-eligible and cannot carry surfaceOp"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "stored/non-surface-marker"
+      },
+      "note": "replay never checks a row after the last settlement; restore validates the whole log"
+    },
+    {
+      "id": "marker-on-codec-known-type",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 7,
+          "text": "{\"type\":\"permission/preset\",\"seq\":7,\"time\":1791337579866,\"data\":{\"preset\":\"default\"},\"surfaceOp\":\"append\"}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "corrupt session log: invalid committed event at line 8: format v3 permission/preset at seq 7 has unexpected field surfaceOp"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "scan"
+      }
+    },
+    {
+      "id": "settlement-on-last-row",
+      "log": "retry-attempt",
+      "edits": [
+        {
+          "append": "{\"type\":\"assistant/attempt\",\"seq\":14,\"time\":1791378812493,\"data\":{\"turn\":1,\"step\":1,\"stream\":{}}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "seed assistant/attempt at index 14 has invalid settlement fields"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "restore/settlement"
+      },
+      "note": "replay yields requests for these bytes: the last row is outside every prefix"
+    },
+    {
+      "id": "header-reason",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 6,
+          "find": "\"reason\":\"initial\"",
+          "replace": "\"reason\":\"nope\""
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "seed request/header at index 6 has an invalid reason"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "restore/header-reason"
+      }
+    },
+    {
+      "id": "tool-update-anchor",
+      "log": "dynamic-tools",
+      "edits": [
+        {
+          "row": 14,
+          "find": "\"afterMessageId\":\"5491e94a-9b9d-48cb-a0f8-7e0cd7e9c916\"",
+          "replace": "\"afterMessageId\":\"nope\""
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "invalid seed event at index 14: request/tool-update must follow the current user or tool-result message"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "restore/tool-update-anchor"
+      }
+    },
+    {
+      "id": "image-offload",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 7,
+          "text": "{\"type\":\"image/offload\",\"seq\":7,\"time\":1791337579866,\"data\":{}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "invalid seed event at index 7: image/offload: data must contain a nonempty targets array"
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "event-type"
+      }
+    },
+    {
+      "id": "packed-source-references",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 10,
+          "find": "\"sourceEventSeqs\":[9]",
+          "replace": "\"sourceEventSeqs\":[[8,9]]"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 4537,
+        "storedEventCount": 16,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        },
+        "events": [
+          {
+            "seq": 10,
+            "sourceEventSeqs": [
+              8,
+              9
+            ]
+          }
+        ]
+      },
+      "note": "stored events carry expanded references; the raw row keeps its range"
+    },
+    {
+      "id": "unknown-type-before-fallback-header",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 0,
+          "text": "{\"type\":\"x/unknown\",\"seq\":0,\"time\":0,\"data\":{}}"
+        },
+        {
+          "row": 6,
+          "find": "\"reason\":\"initial\"",
+          "replace": "\"reason\":\"fallback\""
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "SessionFormatUnsupportedError",
+        "message": "session \"a1\" contains event type \"x/unknown\" (seq 0) unknown to this harness and not marked ignorable; refusing to interpret the log — it was likely written by a newer harness"
+      },
+      "rust": {
+        "outcome": "rejected",
+        "cause": "unsupported/unknown-type"
+      },
+      "note": "The first unsupported record wins: unknown seq 0 precedes fallback seq 6."
+    }
+  ]
+}

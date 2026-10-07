@@ -2,7 +2,7 @@
 //! record, one event's `sourceEventSeqs` field, one event row's envelope, one
 //! strict V3 codec row decode, a scan of a plain current-format log, and
 //! request derivation over unseeded, plain current-format logs of known event
-//! types.
+//! types, and restoration of a plain current-format log.
 //!
 //! [`read_header_record`] decodes the first physical record of a current
 //! (format 3) Session log into its logical header metadata, or refuses it with
@@ -22,13 +22,19 @@
 //! request before each recorded Assistant settlement in such a log, failed
 //! attempts included, as the TypeScript test helper `replayRequests` does,
 //! including tool history across request headers, and refuses input outside
-//! its subset; its requests are not restored Session state. None reads a file,
-//! restores a Session, or encodes a log. The crate is unstable and unshipped;
-//! nothing in the workspace depends on it.
+//! its subset; its requests are not restored Session state.
+//! [`restore_plain_log`] restores such a log as the production read path
+//! does: it validates the stored events, builds the closers for an
+//! interrupted turn, and folds the Session's messages, request header, tool
+//! history, and request context into an immutable [`RestoredLog`]. It is not
+//! Agent resume. None reads or writes a file or encodes a log. The crate is
+//! unstable and unshipped; nothing in the workspace depends on it.
 
 mod envelope;
+mod repair;
 mod replay;
 mod request;
+mod restore;
 mod scan;
 mod source_event_seqs;
 mod v3_row;
@@ -39,6 +45,7 @@ pub use envelope::{
 };
 pub use replay::{ReplayLimit, ReplayRefusal, SeedRejection, replay_requests};
 pub use request::Request;
+pub use restore::{RestoreLimit, RestoreRefusal, RestoredLog, Unsupported, restore_plain_log};
 pub use scan::{FinishRejection, ScanIssue, ScanLimit, ScanRefusal, ScannedLog, scan_log};
 pub use source_event_seqs::{
     SourceEventSeqsLimit, SourceEventSeqsRefusal, SourceEventSeqsRejection,

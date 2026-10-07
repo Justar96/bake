@@ -128,6 +128,7 @@ Read these pages when the package-level contract is not enough. They move from t
 - [Released Session format migrations](../../../.agents/notes/implemented/architecture/2026-08-31-released-session-format-migrations.md) — immutable generations, adjacent migration edges, and publication rules.
 - [Session header cases](../../../conformance/README.md#session-header-cases) — the shared header-record table this package's scanner checks for the development Rust reader.
 - [Log scan cases](../../../conformance/README.md#log-scan-cases) — [shared checks](tests/log-scan-conformance.spec.ts) of `scanLog` over plain logs for the development Rust scan.
+- [Plain log restoration cases](../../../conformance/README.md#plain-log-restoration-cases) — [shared checks](tests/restore-conformance.spec.ts) that this backend and `readColdSessionLog` restore plain logs as the development Rust restoration does.
 
 -----
 

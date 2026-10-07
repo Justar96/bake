@@ -61,6 +61,11 @@
 //! reach no request, so any number except -0 and any depth the scan parsed is
 //! admitted, as the lossless snapshot admits them.
 //!
+//! The -0 check belongs to this prefix loop alone. Per-event admission,
+//! [`admit`], runs the rest and is shared with [`crate::restore`], whose
+//! Session construction takes no lossless snapshot; [`adopt`] holds the
+//! subset of those checks that `adoptSessionEvent` runs on a stored log.
+//!
 //! The codec treats `request/tool-update` and five other known types
 //! (`deliverables/presented`, `image/offload`, `subagent/catalog`,
 //! `subagent/routing-decision`, and `workspace/changes`) as opaque: it checks
@@ -87,12 +92,15 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde_json::{Map, Value};
 
 use crate::request::{Fact, FoldRefusal, Request, RequestFold, SurfaceKind, SurfaceOp};
-use crate::{MAX_SAFE_INTEGER, PathPlatform, ScanRefusal, V3CodecEvent, scan_log};
+use crate::{
+    Count, MAX_SAFE_INTEGER, PathPlatform, ScanRefusal, UnadmittedEnvelope, V3CodecEvent, count,
+    scan_log,
+};
 
 /// `KNOWN_SESSION_EVENT_TYPES` in
 /// `packages/core/session/src/known-event-types.ts`, the vocabulary this build
 /// understands. A unit test pins the list against that generated file.
-const KNOWN_EVENT_TYPES: [&str; 60] = [
+pub(crate) const KNOWN_EVENT_TYPES: [&str; 60] = [
     "agent-preset/selected",
     "agent/inbox/spliced",
     "approval/asked",
@@ -434,7 +442,8 @@ pub fn replay_requests(
         if cut_set.contains(&seq) {
             snapshots.insert(seq, fold.request());
         }
-        if let Err(refusal) = admit(event, row)
+        if let Err(refusal) = lossless(seq, row)
+            .and_then(|()| admit(event.envelope()))
             .and_then(|fact| fold.append(fact).map_err(|refusal| folded(seq, refusal)))
         {
             failure = Some((seq, refusal));
@@ -470,7 +479,7 @@ const fn seed(seq: u64, rejection: SeedRejection) -> ReplayRefusal {
     ReplayRefusal::Seed { seq, rejection }
 }
 
-const fn folded(seq: u64, refusal: FoldRefusal) -> ReplayRefusal {
+pub(crate) const fn folded(seq: u64, refusal: FoldRefusal) -> ReplayRefusal {
     let rejection = match refusal {
         FoldRefusal::ReplaceStart => SeedRejection::ReplaceStart,
         FoldRefusal::ReplaceEnd => SeedRejection::ReplaceEnd,
@@ -505,16 +514,24 @@ fn non_empty_string(value: Option<&Value>) -> bool {
         .is_some_and(|text| !text.is_empty())
 }
 
-/// Admit one prefix row: check that the whole parsed `row` is lossless JSON,
-/// qualify a projected payload, run the Session construction checks the codec
-/// leaves, and convert it to a fact.
-fn admit(event: &V3CodecEvent<'_>, row: &Value) -> Result<Fact, ReplayRefusal> {
-    let envelope = event.envelope();
-    let seq = envelope.seq;
-    let data = envelope.data;
+/// The lossless snapshot Session construction takes of each prefix event
+/// before any other check.
+fn lossless(seq: u64, row: &Value) -> Result<(), ReplayRefusal> {
     if holds_negative_zero(row) {
         return Err(seed(seq, SeedRejection::LosslessJson));
     }
+    Ok(())
+}
+
+/// Admit one event to Session construction: qualify a projected payload, run
+/// the Session construction checks the codec leaves, and convert it to a fact.
+/// It takes no lossless snapshot, which only replay's prefix loop takes. A row of an
+/// unknown type reaches it only when `ignorable`, and is opaque, as
+/// `surfaceOpOf` leaves it. Restoration also admits its synthetic closers,
+/// which the codec never saw; they are appends whose metadata it would prove.
+pub(crate) fn admit(envelope: &UnadmittedEnvelope<'_>) -> Result<Fact, ReplayRefusal> {
+    let seq = envelope.seq;
+    let data = envelope.data;
     if PROJECTED_TYPES.contains(&envelope.event_type) {
         qualify_payload(data).map_err(|refusal| limit(seq, refusal))?;
     }
@@ -549,16 +566,8 @@ fn admit(event: &V3CodecEvent<'_>, row: &Value) -> Result<Fact, ReplayRefusal> {
         "assistant/message" => {
             let message = &data["message"];
             let fact = surface(SurfaceKind::Assistant, message, "assistant", message)?;
-            let source = &data["message"]["source"];
-            if source["kind"] != "model"
-                || !non_empty_string(source.get("provider"))
-                || !non_empty_string(source.get("model"))
-            {
-                return Err(seed(seq, SeedRejection::ModelSource));
-            }
-            if !data["stream"].is_array() {
-                return Err(seed(seq, SeedRejection::Settlement));
-            }
+            model_source(message).map_err(|rejection| seed(seq, rejection))?;
+            settlement(seq, data)?;
             Ok(fact)
         }
         "tool/result" => {
@@ -569,30 +578,88 @@ fn admit(event: &V3CodecEvent<'_>, row: &Value) -> Result<Fact, ReplayRefusal> {
         "request/header" => request_header(seq, data),
         "request/tool-update" => {
             let fact = tool_update(seq, data).ok_or(seed(seq, SeedRejection::ToolUpdateData))?;
-            non_surface_marker(event)?;
+            non_surface_marker(envelope).map_err(|rejection| seed(seq, rejection))?;
             Ok(fact)
         }
         "assistant/attempt" => {
-            // The coordinate scan proved `turn` and `step` safe counts.
-            if !data["stream"].is_array() {
-                return Err(seed(seq, SeedRejection::Settlement));
-            }
+            settlement(seq, data)?;
             Ok(Fact::LogOnly)
         }
+        event_type if !KNOWN_EVENT_TYPES.contains(&event_type) => Ok(Fact::LogOnly),
         _ => {
-            non_surface_marker(event)?;
+            non_surface_marker(envelope).map_err(|rejection| seed(seq, rejection))?;
             Ok(Fact::LogOnly)
         }
+    }
+}
+
+/// The checks `adoptSessionEvent` runs that the codec does not already prove,
+/// in its order: `validateSessionEventData`'s tool-update data, the marker
+/// refusal of `validateSurfaceMetadata`, and `assertMessageEventShape`. Session
+/// construction repeats each one, so [`admit`] runs them again. Unknown types
+/// reach it only when `ignorable`, and adoption leaves them opaque.
+pub(crate) fn adopt(envelope: &UnadmittedEnvelope<'_>) -> Result<(), SeedRejection> {
+    let data = envelope.data;
+    match envelope.event_type {
+        "system/message" => message_shape(&data["message"], "system").map(drop),
+        "user/message" => message_shape(data, "user").map(drop),
+        "assistant/message" => {
+            message_shape(&data["message"], "assistant")?;
+            model_source(&data["message"])
+        }
+        "tool/result" => {
+            message_shape(&data["message"], "user")?;
+            tool_result(&data["message"])
+        }
+        "request/tool-update" => {
+            tool_update(envelope.seq, data).ok_or(SeedRejection::ToolUpdateData)?;
+            non_surface_marker(envelope)
+        }
+        event_type if !KNOWN_EVENT_TYPES.contains(&event_type) => Ok(()),
+        _ => non_surface_marker(envelope),
     }
 }
 
 /// `surfaceOpOf`'s refusal of either marker on a known type that is not
 /// surface-eligible. The codec already refuses both on every such type it
 /// knows, so only its opaque known types can reach this check.
-fn non_surface_marker(event: &V3CodecEvent<'_>) -> Result<(), ReplayRefusal> {
-    let envelope = event.envelope();
+fn non_surface_marker(envelope: &UnadmittedEnvelope<'_>) -> Result<(), SeedRejection> {
     if envelope.surface_op.is_some() || envelope.source_event_seqs.is_some() {
-        return Err(seed(envelope.seq, SeedRejection::NonSurfaceMarker));
+        return Err(SeedRejection::NonSurfaceMarker);
+    }
+    Ok(())
+}
+
+/// `assertMessageEventShape`'s Assistant source check, after the common ones.
+fn model_source(message: &Value) -> Result<(), SeedRejection> {
+    let source = &message["source"];
+    if source["kind"] != "model"
+        || !non_empty_string(source.get("provider"))
+        || !non_empty_string(source.get("model"))
+    {
+        return Err(SeedRejection::ModelSource);
+    }
+    Ok(())
+}
+
+/// `assertAssistantSettlementShape`: safe-integer `turn` and `step` other
+/// than -0, and an array `stream`. Replay's coordinate scan already admitted
+/// only safe counts. A positive number with a fraction or exponent, which
+/// JavaScript may read as an integer, is [`ReplayLimit::Coordinate`] unless
+/// another field is invalid.
+fn settlement(seq: u64, data: &Value) -> Result<(), ReplayRefusal> {
+    let counts: Vec<Option<Count>> = ["turn", "step"]
+        .iter()
+        .map(|key| data.get(*key).and_then(count))
+        .collect();
+    if counts.iter().any(Option::is_none) || !data["stream"].is_array() {
+        return Err(seed(seq, SeedRejection::Settlement));
+    }
+    if counts
+        .iter()
+        .any(|count| matches!(count, Some(Count::Undecided)))
+    {
+        return Err(limit(seq, ReplayLimit::Coordinate));
     }
     Ok(())
 }
@@ -665,7 +732,7 @@ fn tool_update(seq: u64, data: &Value) -> Option<Fact> {
 /// one payload holds both an unqualified number and excess depth, which limit
 /// is reported depends on member order and is not specified; neither claims
 /// anything.
-fn qualify_payload(data: &Value) -> Result<(), ReplayLimit> {
+pub(crate) fn qualify_payload(data: &Value) -> Result<(), ReplayLimit> {
     let mut pending = vec![(data, 1usize)];
     while let Some((value, depth)) = pending.pop() {
         match value {
@@ -796,6 +863,10 @@ fn request_header(seq: u64, data: &Value) -> Result<Fact, ReplayRefusal> {
     Ok(Fact::Header {
         seq,
         config: config.clone(),
+        adapter_defaults: header
+            .get("adapterDefaults")
+            .and_then(Value::as_object)
+            .cloned(),
         tools,
         resets: data["reason"] == "series" || data.get("startsSeries").is_some(),
     })

@@ -22,6 +22,10 @@
 //! its ignorable check, in that function's order. Headers and accepted updates
 //! then fold as `ToolHistoryProjection` does, which cannot fail on a validated
 //! prefix. Message projections are refused before they reach the fold.
+//!
+//! Besides request snapshots, the fold exposes the projections a restored
+//! Session reads: its messages, which need no header, the latest header in
+//! `canonicalHeader` form, and the tool-history snapshot.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -63,12 +67,14 @@ pub(crate) enum Fact {
         op: SurfaceOp,
         payload: Map<String, Value>,
     },
-    /// A `request/header` in canonical form: `config` is copied verbatim and
-    /// `tools` is absent or a non-empty list of objects, in logged order.
-    /// `resets` is set for `reason: "series"` or `startsSeries: true`.
+    /// A `request/header` in canonical form: `config` and `adapterDefaults`
+    /// are copied verbatim and `tools` is absent or a non-empty list of
+    /// objects, in logged order. `resets` is set for `reason: "series"` or
+    /// `startsSeries: true`.
     Header {
         seq: u64,
         config: Map<String, Value>,
+        adapter_defaults: Option<Map<String, Value>>,
         tools: Option<Vec<Value>>,
         resets: bool,
     },
@@ -157,6 +163,7 @@ impl NameKey {
 struct Header {
     seq: u64,
     config: Map<String, Value>,
+    adapter_defaults: Option<Map<String, Value>>,
     tools: Option<Vec<Value>>,
     /// Each tool's name key, in tool order.
     names: Vec<NameKey>,
@@ -283,6 +290,7 @@ impl RequestFold {
             Fact::Header {
                 seq,
                 config,
+                adapter_defaults,
                 tools,
                 resets,
             } => {
@@ -295,6 +303,7 @@ impl RequestFold {
                 let header = Header {
                     seq,
                     config,
+                    adapter_defaults,
                     tools,
                     names,
                 };
@@ -499,18 +508,70 @@ impl RequestFold {
         let (history_tools, updates) = self.tool_history();
         Some(Request {
             config: header.config.clone(),
-            messages: self
-                .nodes
-                .iter()
-                .filter_map(Node::derived)
-                .cloned()
-                .collect(),
+            messages: self.messages().cloned().collect(),
             history_tools,
             updates,
             tools: header.tools.clone(),
             session_id: self.session_id.clone(),
         })
     }
+
+    /// `deriveMessages`: each current node's derived message, in order.
+    pub(crate) fn messages(&self) -> impl Iterator<Item = &Map<String, Value>> {
+        self.nodes.iter().filter_map(Node::derived)
+    }
+
+    /// `foldRequestHeader`: the latest header's `canonicalHeader` form, or
+    /// `None` before the first. `adapterDefaults` stays when it marks
+    /// `reasoningEffort` or `maxTokens`, and `tools` when present, which the
+    /// codec allows only non-empty.
+    pub(crate) fn request_header(&self) -> Option<Value> {
+        let header = self.header.as_ref()?;
+        let mut canonical = Map::new();
+        canonical.insert("config".to_owned(), Value::Object(header.config.clone()));
+        if let Some(defaults) = header.adapter_defaults.as_ref().filter(|defaults| {
+            ["reasoningEffort", "maxTokens"]
+                .iter()
+                .any(|key| defaults.get(*key) == Some(&Value::Bool(true)))
+        }) {
+            canonical.insert(
+                "adapterDefaults".to_owned(),
+                Value::Object(defaults.clone()),
+            );
+        }
+        if let Some(tools) = &header.tools {
+            canonical.insert("tools".to_owned(), Value::Array(tools.clone()));
+        }
+        Some(Value::Object(canonical))
+    }
+
+    /// `ToolHistoryProjection.snapshot` as JSON.
+    pub(crate) fn tool_history_json(&self) -> Value {
+        let (tools, updates) = self.tool_history();
+        history_json(&tools, &updates)
+    }
+}
+
+/// A `ToolHistory` value: the baseline declarations and ordered updates.
+fn history_json(tools: &[Value], updates: &[Update]) -> Value {
+    let updates = updates.iter().map(|update| {
+        let mut fields = Map::new();
+        fields.insert(
+            "afterMessageId".to_owned(),
+            Value::String(update.after_message_id.clone()),
+        );
+        fields.insert(
+            "additions".to_owned(),
+            Value::Array(update.additions.clone()),
+        );
+        let removals = update.removals.iter().cloned().map(Value::String).collect();
+        fields.insert("removals".to_owned(), Value::Array(removals));
+        Value::Object(fields)
+    });
+    let mut history = Map::new();
+    history.insert("tools".to_owned(), Value::Array(tools.to_vec()));
+    history.insert("updates".to_owned(), Value::Array(updates.collect()));
+    Value::Object(history)
 }
 
 /// Whether `JSON.stringify` writes the same text for two values the import
@@ -623,24 +684,10 @@ impl Request {
             "messages".to_owned(),
             Value::Array(self.messages.iter().cloned().map(Value::Object).collect()),
         );
-        let updates = self.updates.iter().map(|update| {
-            let mut fields = Map::new();
-            fields.insert(
-                "afterMessageId".to_owned(),
-                Value::String(update.after_message_id.clone()),
-            );
-            fields.insert(
-                "additions".to_owned(),
-                Value::Array(update.additions.clone()),
-            );
-            let removals = update.removals.iter().cloned().map(Value::String).collect();
-            fields.insert("removals".to_owned(), Value::Array(removals));
-            Value::Object(fields)
-        });
-        let mut history = Map::new();
-        history.insert("tools".to_owned(), Value::Array(self.history_tools.clone()));
-        history.insert("updates".to_owned(), Value::Array(updates.collect()));
-        request.insert("toolHistory".to_owned(), Value::Object(history));
+        request.insert(
+            "toolHistory".to_owned(),
+            history_json(&self.history_tools, &self.updates),
+        );
         if let Some(tools) = &self.tools {
             request.insert("tools".to_owned(), Value::Array(tools.clone()));
         }
@@ -672,6 +719,7 @@ mod tests {
         Fact::Header {
             seq,
             config: object(json!({"provider": "p", "model": "m"})),
+            adapter_defaults: None,
             tools: (!tools.is_empty()).then(|| tools.to_vec()),
             resets,
         }
@@ -1032,5 +1080,40 @@ mod tests {
         let mut fold = RequestFold::new("s".to_owned());
         fold.append(Fact::LogOnly).expect("log-only");
         assert_eq!(fold.request(), None);
+    }
+
+    #[test]
+    fn messages_and_tool_history_need_no_header() {
+        let mut fold = RequestFold::new("s".to_owned());
+        fold.append(surface(0, SurfaceKind::User, SurfaceOp::Append, "go"))
+            .expect("user");
+        assert_eq!(fold.request(), None);
+        assert_eq!(fold.request_header(), None);
+        assert_eq!(fold.messages().count(), 1);
+        assert_eq!(
+            fold.tool_history_json(),
+            json!({"tools": [], "updates": []})
+        );
+    }
+
+    #[test]
+    fn the_header_keeps_its_canonical_members() {
+        let mut fold = RequestFold::new("s".to_owned());
+        fold.append(Fact::Header {
+            seq: 0,
+            config: object(json!({"provider": "p", "model": "m", "maxTokens": 8})),
+            adapter_defaults: Some(object(json!({"maxTokens": true}))),
+            tools: Some(vec![tool("a")]),
+            resets: false,
+        })
+        .expect("header");
+        assert_eq!(
+            fold.request_header(),
+            Some(json!({
+                "config": {"provider": "p", "model": "m", "maxTokens": 8},
+                "adapterDefaults": {"maxTokens": true},
+                "tools": [tool("a")],
+            }))
+        );
     }
 }
