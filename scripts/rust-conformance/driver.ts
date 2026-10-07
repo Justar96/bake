@@ -263,8 +263,8 @@ const errorCode = (error: unknown): string => {
  * Run one owned child to completion. On POSIX it leads its own process group
  * so a timeout, overflow, or cancellation stops that group and nothing else;
  * when stopping the group fails, only the direct child is retried. Resolves
- * only after the child closes, including after an asynchronous spawn error,
- * and never starts a child once `signal` has aborted.
+ * only after the child closes and its stdin settles, including after an
+ * asynchronous spawn error, and never starts a child once `signal` has aborted.
  * @param argv - executable and arguments.
  * @param cwd - the working directory.
  * @param env - the complete child environment.
@@ -330,13 +330,23 @@ export function launch(argv: readonly string[], cwd: string, env: Record<string,
     }
     child.stdout.on('data', collect('stdout', STDOUT_LIMIT))
     child.stderr.on('data', collect('stderr', STDERR_LIMIT))
-    child.stdin.on('error', (error) => {
+    let pending = 2
+    const settle = (): void => {
+      if (--pending === 0) resolvePromise(state)
+    }
+    // The end callback receives the same error.
+    child.stdin.on('error', () => {})
+    // The runtime destroys stdin when the child exits, which can cancel a
+    // queued write without an `error` event and after `close`; only the end
+    // callback reports every outcome.
+    child.stdin.end(input, (error?: Error | null) => {
       // A spawn failure also closes stdin; that is reported as the spawn error.
-      if (child.pid === undefined) return
-      state.stdinError ??= errorCode(error)
-      state.errors.push(error.message)
+      if (error && child.pid !== undefined) {
+        state.stdinError = errorCode(error)
+        state.errors.push(error.message)
+      }
+      settle()
     })
-    child.stdin.end(input)
     child.on('error', (error) => {
       if (child.pid === undefined) state.spawnError ??= errorCode(error)
       state.errors.push(error.message)
@@ -351,7 +361,7 @@ export function launch(argv: readonly string[], cwd: string, env: Record<string,
         state.exitCode = code
         state.signal = killSignal
       }
-      resolvePromise(state)
+      settle()
     })
   })
 }
