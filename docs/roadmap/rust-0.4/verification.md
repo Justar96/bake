@@ -2,7 +2,7 @@
 
 ## Summary
 
-Each [roadmap scope](README.md#linear-development-sequence) closes only when an independent observer can reproduce its behavior, failure handling, and cleanup from identified commits and artifacts. This document defines that evidence and the comparison rules. Future test requirements below are planned work; only [planning-session evidence](#planning-session-evidence) records checks executed for this roadmap.
+Each [roadmap scope](README.md#linear-development-sequence) closes only when an independent observer can reproduce its behavior, failure handling, and cleanup from identified commits and artifacts. This document defines that evidence and the comparison rules. Future test requirements below are planned work; [planning-session evidence](#planning-session-evidence) and the [qualification ledger](ledger/README.md) distinguish observed checks from missing evidence.
 
 ## Table of Contents
 
@@ -18,26 +18,7 @@ Each [roadmap scope](README.md#linear-development-sequence) closes only when an 
 
 ## Evidence required for every scope
 
-Scope 01 must implement a machine-readable evidence ledger and validation for it. Use one record per scope qualification attempt, with links from the scope's PR; failed attempts remain visible. Existing eval records retain their own schema and immutable-history policy. The following fields are a proposed record shape, not an existing command or verifier.
-
-```yaml
-scope: "09"
-status: evidence-review
-base_commit: <exact PR-base SHA>
-candidate_commit: <exact candidate SHA>
-oracle_commit: <frozen TypeScript SHA>
-fixture_digest: <hash of shared inputs and expected external outcomes>
-artifact_digests: []
-support_entries: []
-commands: [] # argv, working directory, OS/arch, tool versions, exit code, counts
-results: [] # behavior ID, pass/fail/skip, test owner, report location
-negative_controls: [] # deliberate defect and observed failing assertion
-missing_evidence: [] # unavailable platform, credentials, consumer, or case
-eval_records: []
-performance_records: []
-rollback_result: <observed outcome or not applicable with reason>
-review: <reviewer and accepted evidence reference>
-```
+The [qualification ledger](ledger/README.md) holds one machine-readable record per attempt, including failed attempts. `bun run verify-rust-migration-ledger` checks their structure and internal consistency offline; it does not accept a scope. Link the relevant records from each scope's PR. Existing eval records retain their own schema and immutable-history policy.
 
 Every scope must supply:
 
@@ -142,7 +123,7 @@ Use barriers and explicit lifecycle signals for races. Register cleanup immediat
 
 Use property tests for pure admission/reduction, bounded fuzzing for JSONL/SSE/terminal/protocol parsers, and deterministic fault injection for persistence/publication/process ownership. Choose iteration/time budgets in the owning PR and record them. A test failure is investigated before adding retries, widening timeouts, weakening assertions, or serializing a whole suite.
 
-Scope 01's opt-in [native workspace](../../../rust/README.md) provides locked builds, Rust formatting/lints, unit tests, and preview PTY checks. The [synthetic comparison harness](../../../conformance/README.md) runs shared fixtures through TypeScript and Rust and checks prompt bytes, event order, permission records, and independently observed file effects. Its deliberate mismatches qualify the comparators, not runtime parity. [Keyless eval-launch checks](../../../evals/README.md#launcher-contract-checks) pin the existing Bake and pi configuration before a native arm is added. The [native eval fixture adapter](../../../evals/README.md#native-fixture-adapter) accepts a compiled fake arm's correct edit and rejects tampered tests, false success claims, and unsuccessful processes. Real-runtime fixture extraction, a live native model arm, and the qualification ledger remain open. Exact Cargo/test-wrapper commands belong to the workspace README and its CI. Keep current Bun/Node checks until the consumers they protect are retired through scope 17.
+Scope 01's opt-in [native workspace](../../../rust/README.md) provides locked builds, Rust formatting/lints, unit tests, and preview PTY checks. The [synthetic comparison harness](../../../conformance/README.md) runs shared fixtures through TypeScript and Rust and checks prompt bytes, event order, permission records, and independently observed file effects. Its deliberate mismatches qualify the comparators, not runtime parity. [Keyless eval-launch checks](../../../evals/README.md#launcher-contract-checks) pin the existing Bake and pi configuration before a native arm is added. The [native eval fixture adapter](../../../evals/README.md#native-fixture-adapter) accepts a compiled fake arm's correct edit and rejects tampered tests, false success claims, and unsuccessful processes. The [qualification ledger](ledger/README.md) records partial evidence and failed attempts. Real-runtime fixture extraction and a live native model arm remain open. Exact Cargo/test-wrapper commands belong to the workspace README and its CI. Keep current Bun/Node checks until the consumers they protect are retired through scope 17.
 
 ## Planning-session evidence
 

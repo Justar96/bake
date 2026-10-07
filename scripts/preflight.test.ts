@@ -16,7 +16,7 @@ describe('preflight', () => {
     expect(new Set(names).size).toBe(names.length)
     expect(selected([])).toEqual(names)
     for (const gate of ['rescope-vendor', 'typecheck', 'lint', 'actionlint', 'build', 'tui-spec', 'runtime', 'integration', 'e2e', 'verify-type-equiv',
-      'verify-cordis-config', 'verify-package-invariants', 'verify-rust-migration-inventory']) expect(names).toContain(gate)
+      'verify-cordis-config', 'verify-package-invariants', 'verify-rust-migration-inventory', 'verify-rust-migration-ledger']) expect(names).toContain(gate)
   })
 
   it('checks vendored names in the static phase', () => {

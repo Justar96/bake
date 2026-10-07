@@ -291,6 +291,9 @@
     "scripts:persistence": {
       "reason": "Pins released Session formats, persistence digests, and frozen fixture layout that native readers must honor."
     },
+    "scripts:qualification-ledger": {
+      "reason": "Evidence record integrity is separate from accepting a migration scope or release."
+    },
     "scripts:release": {
       "reason": "Release packing, installers, and manifest tooling; scope 16 changes the archive layout for native artifacts."
     },
@@ -1326,6 +1329,7 @@
     {"path":"scripts/rust-conformance/runner.test.ts","lane":"bun-scripts","owner":"scripts:conformance","scopes":["01"],"disposition":"reuse-oracle","basis":"scripts:conformance"},
     {"path":"scripts/rust-migration-baseline.test.ts","lane":"bun-scripts","owner":"scripts:migration","scopes":["00"],"disposition":"replace-tooling","basis":"scripts:migration"},
     {"path":"scripts/rust-migration-inventory.test.ts","lane":"bun-scripts","owner":"scripts:migration","scopes":["00"],"disposition":"replace-tooling","basis":"scripts:migration"},
+    {"path":"scripts/rust-migration-ledger.test.ts","lane":"bun-scripts","owner":"scripts:qualification-ledger","scopes":["01","17"],"disposition":"reuse-oracle","basis":"scripts:qualification-ledger"},
     {"path":"scripts/session-fixture-layout.spec.ts","lane":"vitest-runtime","owner":"scripts:persistence","scopes":["02","03"],"disposition":"reuse-oracle","basis":"scripts:persistence"},
     {"path":"scripts/session-query-spill-command.spec.ts","lane":"vitest-runtime","owner":"scripts:persistence","scopes":["02","03"],"disposition":"reuse-oracle","basis":"scripts:persistence"},
     {"path":"scripts/session-snapshot-corpus-policy.spec.ts","lane":"vitest-runtime","owner":"scripts:persistence","scopes":["02","03"],"disposition":"reuse-oracle","basis":"scripts:persistence"},
