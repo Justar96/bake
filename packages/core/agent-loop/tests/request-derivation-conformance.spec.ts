@@ -24,11 +24,11 @@ const FIXTURE_EXPECTED = 'conformance/runtime/request-reconstruction/tool-call-t
 const LOG_SHA256 = 'a7a8222990ef9f4c4f00a051c019de86d3156ca7f6c3c0d28af4be4cc3fbe657'
 const EXPECTED_SHA256 = '460b031e6fd308bd9ac3fd97834aad64729b2384f0f3e803c424d7502f9dfa02'
 /** Both harnesses pin the table size, so a dropped case fails. */
-const CASE_COUNT = 149
+const CASE_COUNT = 158
 /** Bounds each case's input edits. */
 const MAX_EDITS = 8
 const LIMITS = [
-  'seeded-header', 'event-type', 'ignorable', 'number', 'depth', 'coordinate',
+  'event-type', 'ignorable', 'number', 'depth', 'coordinate',
   'repeated-coordinate', 'config-member', 'tool-schema', 'header', 'codec',
 ]
 const SEED_CHECKS = [
@@ -39,7 +39,10 @@ const SEED_CHECKS = [
   'tool-result-rest', 'system-head', 'tool-update-header', 'tool-update-stale', 'tool-update-baseline',
   'tool-update-change', 'tool-update-anchor',
 ]
-const CAUSES = ['header', 'codec', ...SEED_CHECKS.map(check => `seed/${check}`), 'no-later-settlement', 'no-request-header']
+const CAUSES = [
+  'header', 'codec', 'finish', 'uncommitted', 'seeded',
+  ...SEED_CHECKS.map(check => `seed/${check}`), 'no-later-settlement', 'no-request-header',
+]
 
 type JsonObject = { [key: string]: JsonValue }
 
@@ -49,6 +52,7 @@ type LogEdit =
   | { row: number; pointer: string; value: JsonValue }
   | { row: number; pointer: string; remove: true }
   | { truncate: number }
+  | { tail: string }
 
 type RequestEdit =
   | { pointer: string; value: JsonValue }
@@ -66,6 +70,8 @@ interface DerivationCase {
   id: string
   /** The header record and rows, without newlines. */
   lines: string[]
+  /** Bytes after the final LF, never a complete record. */
+  tail: string
   ts: Outcome
   rust?: RustOverride
 }
@@ -144,6 +150,7 @@ function parseLogEdit(value: unknown, rows: number, context: string): LogEdit {
     const keys = sortedKeys(value)
     if (keys === 'header' && typeof value.header === 'string') return { header: value.header }
     if (keys === 'truncate' && isCount(value.truncate) && value.truncate < rows) return { truncate: value.truncate }
+    if (keys === 'tail' && typeof value.tail === 'string') return { tail: value.tail }
     if (isCount(value.row) && value.row < rows) {
       if (keys === 'row,text' && typeof value.text === 'string') return { row: value.row, text: value.text }
       if (keys === 'pointer,row,value' && typeof value.pointer === 'string') {
@@ -168,10 +175,12 @@ function parseRequestEdit(value: unknown, context: string): RequestEdit {
   throw new Error(`${context}: invalid request edit ${JSON.stringify(value)}`)
 }
 
-function editLines(fixture: readonly string[], edits: readonly LogEdit[]): string[] {
+function editLines(fixture: readonly string[], edits: readonly LogEdit[]): { lines: string[]; tail: string } {
   let lines = [...fixture]
+  let tail = ''
   for (const edit of edits) {
     if ('header' in edit) lines[0] = edit.header
+    else if ('tail' in edit) tail = edit.tail
     else if ('truncate' in edit) lines = lines.slice(0, edit.truncate + 1)
     else if ('text' in edit) lines[edit.row + 1] = edit.text
     else {
@@ -181,7 +190,7 @@ function editLines(fixture: readonly string[], edits: readonly LogEdit[]): strin
       lines[edit.row + 1] = JSON.stringify(row)
     }
   }
-  return lines
+  return { lines, tail }
 }
 
 function editRequests(expected: readonly JsonValue[], edits: readonly RequestEdit[]): JsonValue[] {
@@ -250,23 +259,26 @@ function loadTable() {
     const unknown = Object.keys(value).filter(key => !['id', 'log', 'edits', 'ts', 'rust'].includes(key))
     if (unknown.length > 0) throw new Error(`${id}: unknown keys ${unknown.join()}`)
     let lines: string[]
+    let tail = ''
     if (value.log === 'fixture') {
       if (!Array.isArray(value.edits) || value.edits.length > MAX_EDITS) throw new Error(`${id}: a fixture case needs at most ${MAX_EDITS} edits`)
-      lines = editLines(fixtureLines, value.edits.map(edit => parseLogEdit(edit, fixtureLines.length - 1, id)))
+      const edited = editLines(fixtureLines, value.edits.map(edit => parseLogEdit(edit, fixtureLines.length - 1, id)))
+      lines = edited.lines
+      tail = edited.tail
     } else if (Array.isArray(value.log) && value.log.length > 0 && value.log.every(line => typeof line === 'string')
       && !Object.hasOwn(value, 'edits')) {
       lines = value.log as string[]
     } else {
       throw new Error(`${id}: log must be "fixture" with edits, or its own lines`)
     }
-    if (lines.some(line => line.includes('\n'))) throw new Error(`${id}: a line holds a newline`)
+    if ([...lines, tail].some(line => line.includes('\n'))) throw new Error(`${id}: a line or tail holds a newline`)
     const ts = parseOutcome(value.ts, expected, id)
     if ('class' in ts && !(isObject(value.rust) && value.rust.outcome === 'native-subset')) {
       throw new Error(`${id}: Rust cannot claim a TypeError`)
     }
     const rust = Object.hasOwn(value, 'rust') ? parseRust(value.rust, ts, id) : undefined
     if (ts.outcome === 'rejected' && rust === undefined) throw new Error(`${id}: a rejection needs a Rust cause or limit`)
-    return { id, lines, ts, ...(rust === undefined ? {} : { rust }) }
+    return { id, lines, tail, ts, ...(rust === undefined ? {} : { rust }) }
   })
   if (new Set(cases.map(entry => entry.id)).size !== cases.length) throw new Error('case ids must be unique')
   return { cases, log, expectedBytes, fixtureLines }
@@ -277,10 +289,10 @@ function loadTable() {
  * Normalization runs outside the `try`, so a non-generated message ID fails
  * the case instead of passing as a helper rejection.
  */
-function replay(lines: readonly string[]): Outcome {
+function replay(lines: readonly string[], tail: string): Outcome {
   let requests: ReturnType<typeof replayRequests>
   try {
-    requests = replayRequests(Buffer.from(`${lines.join('\n')}\n`))
+    requests = replayRequests(Buffer.from(`${lines.join('\n')}\n${tail}`))
   } catch (error) {
     if (!(error instanceof Error)) throw error
     if (error.constructor === TypeError) return { outcome: 'rejected', class: 'TypeError' }
@@ -310,13 +322,13 @@ describe('shared request-derivation cases', () => {
     }
     // Every fixture case but the first changes its input.
     const fixtureCases = cases.filter(entry => entry.lines.length > 1 && entry.id !== 'fixture'
-      && entry.lines.join('\n') === fixtureLines.join('\n'))
+      && entry.tail === '' && entry.lines.join('\n') === fixtureLines.join('\n'))
     expect(fixtureCases.map(entry => entry.id)).toEqual([])
   })
 
   for (const entry of cases) {
     it(entry.id, () => {
-      const actual = replay(entry.lines)
+      const actual = replay(entry.lines, entry.tail)
       if (entry.ts.outcome === 'requests' && actual.outcome === 'requests') {
         expect(compareJson(entry.ts.requests as JsonValue, actual.requests as JsonValue, 'requests')).toEqual({ outcome: 'pass' })
       } else {

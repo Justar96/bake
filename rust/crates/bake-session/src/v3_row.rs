@@ -417,8 +417,8 @@ pub enum V3Limit {
     ObsoleteSeqDiagnostic,
     /// serde_json stores the count as an `f64` without a negative sign, such
     /// as `1.0` or `1.5`. Negative spellings, -0 included, are rejected
-    /// exactly: an underflow serde_json reads as -0 is a negative number in
-    /// JavaScript, so either reading fails the count.
+    /// exactly: each is a negative number or -0 in JavaScript, which fails
+    /// the count.
     FloatLexeme(V3NumberField),
     /// A `system/message` row passes the codec's own checks, but its content
     /// or source falls outside the closed shape this crate knows the frozen
@@ -445,9 +445,7 @@ pub fn decode_v3_row(
     if expected_seq > MAX_SAFE_INTEGER {
         return Err(V3RowRefusal::ExpectedSeqOutOfRange);
     }
-    if let Value::Object(fields) = row {
-        admit_row(fields)?;
-    }
+    admit_v3_row(row).map_err(V3RowRefusal::from)?;
     let envelope =
         decode_row_envelope(row, expected_seq, source_budget).map_err(|refusal| match refusal {
             EnvelopeRefusal::ExpectedSeqOutOfRange => V3RowRefusal::ExpectedSeqOutOfRange,
@@ -462,16 +460,47 @@ pub fn decode_v3_row(
     Ok(V3CodecEvent { envelope })
 }
 
-const fn structural<T>(rejection: StructuralRejection) -> Result<T, V3RowRefusal> {
-    Err(V3RowRefusal::Rejected(V3Rejection::Structural(rejection)))
+const fn structural<T>(rejection: StructuralRejection) -> Result<T, Admission> {
+    Err(Admission::Structural(rejection))
 }
 
 const fn subset<T>(limit: V3Limit) -> Result<T, V3RowRefusal> {
     Err(V3RowRefusal::NativeSubset(limit))
 }
 
+/// A refusal of raw-row admission, the subset of [`V3RowRefusal`] it raises.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Admission {
+    /// TypeScript throws `SessionFormatError`.
+    Structural(StructuralRejection),
+    /// TypeScript throws `SessionFormatUnsupportedMigrationError`.
+    Unsupported(V3Unsupported),
+    /// `SystemPayload`, `ObsoleteSeqDiagnostic`, or a system coordinate's
+    /// `FloatLexeme`.
+    Limit(V3Limit),
+}
+
+impl From<Admission> for V3RowRefusal {
+    fn from(refusal: Admission) -> Self {
+        match refusal {
+            Admission::Structural(rejection) => Self::Rejected(V3Rejection::Structural(rejection)),
+            Admission::Unsupported(unsupported) => Self::Unsupported(unsupported),
+            Admission::Limit(limit) => Self::NativeSubset(limit),
+        }
+    }
+}
+
+/// TypeScript's `assertV3RowAdmission`, which admits every row that is not
+/// an object.
+pub(crate) fn admit_v3_row(row: &Value) -> Result<(), Admission> {
+    match row {
+        Value::Object(fields) => admit_row(fields),
+        _ => Ok(()),
+    }
+}
+
 /// TypeScript's `assertV3RowAdmission` on an object row.
-fn admit_row(fields: &Map<String, Value>) -> Result<(), V3RowRefusal> {
+fn admit_row(fields: &Map<String, Value>) -> Result<(), Admission> {
     match fields.get("type").and_then(Value::as_str) {
         Some("request/header") => {
             let Some(Value::Object(data)) = fields.get("data") else {
@@ -481,9 +510,7 @@ fn admit_row(fields: &Map<String, Value>) -> Result<(), V3RowRefusal> {
                 return structural(StructuralRejection::HeaderNotObject);
             };
             if header.contains_key("system") {
-                return Err(V3RowRefusal::Unsupported(
-                    V3Unsupported::RetiredHeaderSystem,
-                ));
+                return Err(Admission::Unsupported(V3Unsupported::RetiredHeaderSystem));
             }
             Ok(())
         }
@@ -498,9 +525,9 @@ fn admit_row(fields: &Map<String, Value>) -> Result<(), V3RowRefusal> {
                 return Ok(());
             };
             let Some(seq) = obsolete_seq(fields.get("seq")) else {
-                return subset(V3Limit::ObsoleteSeqDiagnostic);
+                return Err(Admission::Limit(V3Limit::ObsoleteSeqDiagnostic));
             };
-            Err(V3RowRefusal::Unsupported(V3Unsupported::ObsoleteType {
+            Err(Admission::Unsupported(V3Unsupported::ObsoleteType {
                 event_type,
                 seq,
             }))
@@ -510,8 +537,8 @@ fn admit_row(fields: &Map<String, Value>) -> Result<(), V3RowRefusal> {
 }
 
 /// JavaScript's `String(seq)` where this crate renders it. Every `f64` is
-/// refused, -0 included: serde_json also reads an underflowing spelling such
-/// as `-2.4703282292062328e-324` as -0, where `JSON.parse` yields `-5e-324`.
+/// refused, -0 included: this crate does not reproduce JavaScript's number
+/// formatting.
 fn obsolete_seq(seq: Option<&Value>) -> Option<String> {
     let Some(seq) = seq else {
         return Some("undefined".to_owned());
@@ -538,7 +565,7 @@ fn exact_keys(
     record: &Map<String, Value>,
     required: &[&'static str],
     which: SystemRecord,
-) -> Result<(), V3RowRefusal> {
+) -> Result<(), Admission> {
     if let Some(key) = required.iter().find(|key| !record.contains_key(**key)) {
         return structural(StructuralRejection::MissingField { record: which, key });
     }
@@ -561,7 +588,7 @@ fn exact_keys(
 /// TypeScript's `assertSystem`. Its own checks are exact; its final call to
 /// the frozen `assertReleasedPayloadSemantics` is claimed only for the closed
 /// shape in [`frozen_payload_accepts`].
-fn admit_system(data: &Map<String, Value>) -> Result<(), V3RowRefusal> {
+fn admit_system(data: &Map<String, Value>) -> Result<(), Admission> {
     exact_keys(data, &SYSTEM_DATA_KEYS, SystemRecord::Data)?;
     for coordinate in [Coordinate::Turn, Coordinate::Step] {
         match count(&data[coordinate.key()]) {
@@ -571,8 +598,8 @@ fn admit_system(data: &Map<String, Value>) -> Result<(), V3RowRefusal> {
             }
             Some(Count::Safe(_)) => {}
             Some(Count::Undecided) => {
-                return subset(V3Limit::FloatLexeme(V3NumberField::SystemCoordinate(
-                    coordinate,
+                return Err(Admission::Limit(V3Limit::FloatLexeme(
+                    V3NumberField::SystemCoordinate(coordinate),
                 )));
             }
         }
@@ -597,7 +624,7 @@ fn admit_system(data: &Map<String, Value>) -> Result<(), V3RowRefusal> {
     if frozen_payload_accepts(source, plugin, &message["content"]) {
         Ok(())
     } else {
-        subset(V3Limit::SystemPayload)
+        Err(Admission::Limit(V3Limit::SystemPayload))
     }
 }
 

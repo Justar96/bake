@@ -1,7 +1,7 @@
 //! Development-only Session format primitives: one current-format header
 //! record, one event's `sourceEventSeqs` field, one event row's envelope, one
-//! strict V3 codec row decode, and request derivation over a closed subset of
-//! current-format logs.
+//! strict V3 codec row decode, a scan of a plain current-format log, and
+//! request derivation over a closed subset of current-format logs.
 //!
 //! [`read_header_record`] decodes the first physical record of a current
 //! (format 3) Session log into its logical header metadata, or refuses it with
@@ -14,15 +14,20 @@
 //! already parsed row's envelope as the released v2 codec's strict decoder
 //! does, borrowing its payload unvalidated. [`decode_v3_row`] wraps it in the
 //! strict V3 codec's checks; its output is codec output, not a restored
-//! event. [`replay_requests`] rebuilds each step's model request from a header
-//! record and parsed rows, as the TypeScript test helper `replayRequests`
-//! does, including tool history across request headers, and refuses input
-//! outside its subset; its requests are not restored Session state. None reads a file, frames records, or encodes a log.
-//! The crate is unstable and unshipped; nothing in the workspace depends on it.
+//! event. [`scan_log`] frames, parses, and decodes an in-memory plain log as
+//! TypeScript's `scanLog` does, keeping the decoded prefix, the inherited cut,
+//! and the committed byte offset. It does not decompress, so it cannot read a
+//! default Zstd-compressed Session file. [`replay_requests`] rebuilds each
+//! step's model request from such a log, as the TypeScript test helper
+//! `replayRequests` does, including tool history across request headers, and
+//! refuses input outside its subset; its requests are not restored Session
+//! state. None reads a file, restores a Session, or encodes a log. The crate
+//! is unstable and unshipped; nothing in the workspace depends on it.
 
 mod envelope;
 mod replay;
 mod request;
+mod scan;
 mod source_event_seqs;
 mod v3_row;
 
@@ -32,6 +37,7 @@ pub use envelope::{
 };
 pub use replay::{ReplayLimit, ReplayRefusal, SeedRejection, replay_requests};
 pub use request::Request;
+pub use scan::{FinishRejection, ScanIssue, ScanLimit, ScanRefusal, ScannedLog, scan_log};
 pub use source_event_seqs::{
     SourceEventSeqsLimit, SourceEventSeqsRefusal, SourceEventSeqsRejection,
     decode_source_event_seqs,
@@ -58,8 +64,9 @@ const REQUIRED_KEYS: [&str; 6] = [
 const OPTIONAL_KEYS: [&str; 4] = ["cwd", "parentSession", "origin", "agentPreset"];
 
 /// serde_json 1.0.151 error codes for input that violates the JSON grammar.
-/// `JSON.parse` rejects the same input, so these map to [`Rejection::Json`];
-/// any other parse error is a [`SubsetLimit::JsonParser`]. A unit test requires
+/// `JSON.parse` rejects the same input, so these map to [`Rejection::Json`]
+/// for a header and to an unparsable record for [`scan_log`]; any other parse
+/// error is a native limit. A unit test requires
 /// a shared header case witnessing each entry under both runtimes.
 const JSON_SYNTAX_ERRORS: [&str; 15] = [
     "EOF while parsing a list",
@@ -187,7 +194,9 @@ pub fn read_header_record(
     };
     let text = std::str::from_utf8(body)
         .map_err(|_| HeaderRefusal::NativeSubset(SubsetLimit::InvalidUtf8))?;
-    let Value::Object(fields) = serde_json::from_str(text).map_err(parse_refusal)? else {
+    let Value::Object(fields) =
+        serde_json::from_str(text).map_err(|error| parse_refusal(&error))?
+    else {
         return Err(HeaderRefusal::Rejected(Rejection::NotObject));
     };
     refuse_foreign_version(&fields)?;
@@ -197,16 +206,22 @@ pub fn read_header_record(
     header_line(&fields, platform)
 }
 
-fn parse_refusal(error: serde_json::Error) -> HeaderRefusal {
-    let message = error.to_string();
-    let code = message
-        .split_once(" at line ")
-        .map_or(message.as_str(), |(code, _)| code);
-    if JSON_SYNTAX_ERRORS.contains(&code) {
+fn parse_refusal(error: &serde_json::Error) -> HeaderRefusal {
+    if is_syntax_error(error) {
         HeaderRefusal::Rejected(Rejection::Json)
     } else {
         HeaderRefusal::NativeSubset(SubsetLimit::JsonParser)
     }
+}
+
+/// Whether serde_json refused input that `JSON.parse` also rejects, by its
+/// [`JSON_SYNTAX_ERRORS`] code. Any other parse error decides nothing.
+fn is_syntax_error(error: &serde_json::Error) -> bool {
+    let message = error.to_string();
+    let code = message
+        .split_once(" at line ")
+        .map_or(message.as_str(), |(code, _)| code);
+    JSON_SYNTAX_ERRORS.contains(&code)
 }
 
 /// TypeScript's `refuseForeignFormatVersion`: only a numeric version is compared.
