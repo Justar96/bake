@@ -1,9 +1,9 @@
 /**
- * The `tool-call-turn` and `dynamic-tools` request-reconstruction fixtures:
- * composes the real loop around the scripted model, replays requests from a
- * Session log, maps generated message ids to stable placeholders, and compares requests as
- * exact JSON values. Committed fixture files are read by the spec and never
- * written here.
+ * The `tool-call-turn`, `dynamic-tools`, and `retry-attempt`
+ * request-reconstruction fixtures: composes the real loop around the scripted
+ * model, replays requests from a Session log, maps generated message ids to
+ * stable placeholders, and compares requests as exact JSON values. Committed
+ * fixture files are read by the spec and never written here.
  */
 
 import { Context } from '@deepseek-ai/cordis'
@@ -186,6 +186,101 @@ export async function runDynamicToolsScenario(signal: AbortSignal, options: Dyna
   return capture
 }
 
+/** One model stream that fails with a retryable server error before any content. */
+export const FAILED_ATTEMPT: StreamChunk[] = [
+  { type: 'finish', reason: { kind: 'error', failure: { message: 'retry', code: 'SERVER' } } },
+]
+
+/** Optional variations of {@link runRetryAttemptScenario}; both counts bound the run. */
+export interface RetryAttemptOptions {
+  /** Failed attempts the script holds before its answer `done`; default 1. */
+  readonly failures?: number
+  /** Failures the retry listener recovers before delegating; default 1. */
+  readonly retries?: number
+  /** Called when the listener decides to retry, before the next attempt. */
+  readonly onRetry?: () => void
+}
+
+/** A retry scenario run, with each decision the retry listener made. */
+export interface RetryCapture extends ScenarioCapture {
+  readonly decisions: readonly ('retry' | 'delegate')[]
+}
+
+/**
+ * Run the user message `go` through the {@link runToolCallTurn} composition
+ * with Session `retry-attempt`, where the first model stream fails. An
+ * `agent/request-error` listener recovers it with `{ kind: 'retry' }` once,
+ * then delegates, and an `agent/request` listener switches every request
+ * after the first retry to model `mock-b`. Tools and the system prompt are
+ * assembled once per step, so the retried request differs only in its model.
+ * No retry policy is loaded, so nothing waits on a timer. The Context owns
+ * both listeners; disposal is awaited on every exit.
+ * @param signal - aborts the idle wait, typically the test's own signal.
+ * @param options - failure and retry counts, and a retry callback.
+ * @returns the dispatched requests, the retry decisions, and a detached Session snapshot taken before disposal.
+ * @throws when the wait is aborted, or when a model request is dispatched once disposal begins.
+ */
+export async function runRetryAttemptScenario(signal: AbortSignal, options: RetryAttemptOptions = {}): Promise<RetryCapture> {
+  const { failures = 1, retries = 1, onRetry } = options
+  const ctx = new Context()
+  const adapter = new MockAdapter([...Array.from({ length: failures }, () => FAILED_ATTEMPT), textResponse('done')])
+  const decisions: ('retry' | 'delegate')[] = []
+  let stopWaiting: (() => void) | undefined
+  let capture: RetryCapture
+  try {
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(SessionProjectionRegistry)
+    await ctx.plugin(SystemPrompt, { personaPrefix: 'stable base', includeHarnessIdentity: false })
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(AgentLoop, { agents: [] })
+    ctx.llm.registerAdapter(['mock'], adapter)
+    ctx.tools.register(defineContentToolFixture({
+      name: 'echo',
+      description: 'echo back',
+      parameters: { text: { type: 'string' } },
+      async execute(args) {
+        return [{ type: 'text', text: `echo: ${String(args.text)}` }]
+      },
+    }))
+    const agent = await ctx.agentLoop.create(SessionId('retry-attempt'), { provider: 'mock', model: 'mock' })
+    const retried = (): number => decisions.filter(decision => decision === 'retry').length
+    ctx.on('agent/request-error', async (payload, next) => {
+      if (payload.agent !== agent) return next()
+      if (retried() >= retries) {
+        decisions.push('delegate')
+        return next()
+      }
+      decisions.push('retry')
+      onRetry?.()
+      return { kind: 'retry' as const }
+    })
+    ctx.on('agent/request', async (payload, next) => {
+      const config = await next()
+      return payload.agent === agent && retried() > 0 ? { ...config, model: 'mock-b' } : config
+    })
+    // Subscribe before the follow-up so a fast turn cannot finish unobserved.
+    const idle = waitForIdle(ctx, agent, signal)
+    stopWaiting = idle.stop
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
+    await idle.done
+    capture = {
+      requests: [...adapter.requests],
+      decisions: [...decisions],
+      header: structuredClone(agent.session.header),
+      events: structuredClone(agent.session.snapshotEvents()),
+    }
+  } finally {
+    stopWaiting?.()
+    const dispatched = adapter.requests.length
+    await ctx.fiber.dispose()
+    // Checked on every exit, so an aborted run also proves no late model call.
+    if (adapter.requests.length !== dispatched) throw new Error('a model request was dispatched during disposal')
+  }
+  return capture
+}
+
 function waitForIdle(ctx: Context, agent: Agent, signal: AbortSignal): { done: Promise<void>; stop: () => void } {
   let stop = (): void => {}
   const done = new Promise<void>((resolve, reject) => {
@@ -352,15 +447,19 @@ export function encodeLog(header: SessionHeader, events: readonly SessionEvent[]
 }
 
 /**
- * Rebuild each step's request from committed log bytes alone: the messages a
- * fresh Session derives from the prefix ending before that step's Assistant
- * settlement, and the request header folded over the same prefix. This
- * mirrors how the loop assembles a request; the expected file, not this
+ * Rebuild each dispatched request from committed log bytes alone: the
+ * messages a fresh Session derives from the prefix ending before one Assistant
+ * settlement, and the request header folded over the same prefix. Both
+ * `assistant/message` and `assistant/attempt` supply cutoffs, including
+ * interrupted messages. A step yields one request per recorded settlement
+ * with its coordinate; a step with no recorded settlement is refused.
+ * This mirrors how the loop assembles a request; the expected file, not this
  * function, is the independent specification.
- * This fixture assumes one settlement per step; retries need per-attempt cutoffs.
  * @param log - a complete current-format log.
- * @returns one projected request per `step/start`, in log order.
- * @throws when the log is torn, seeded, or a step lacks a later settlement or header.
+ * @returns for each `step/start` in log order, one projected request per later
+ * settlement with its coordinate, in log order.
+ * @throws when the log is torn or seeded, a step's first settlement is missing
+ * or precedes it, a prefix fails Session construction, or a prefix has no header.
  */
 export function replayRequests(log: Buffer): { [key: string]: JsonValue }[] {
   const { meta, events, inheritedEventCount, committedBytes } = scanLog(log)
@@ -369,28 +468,30 @@ export function replayRequests(log: Buffer): { [key: string]: JsonValue }[] {
   events.forEach((event, index) => {
     if (event.seq !== index) throw new Error(`events[${index}] has seq ${event.seq}`)
   })
-  return events.filter(event => event.type === 'step/start').map((start) => {
-    const settlement = events.find(event =>
+  return events.filter(event => event.type === 'step/start').flatMap((start) => {
+    const settlements = events.filter(event =>
       (event.type === 'assistant/message' || event.type === 'assistant/attempt')
       && event.data.turn === start.data.turn
       && event.data.step === start.data.step)
-    if (settlement === undefined || settlement.seq < start.seq) {
+    if (settlements[0] === undefined || settlements[0].seq < start.seq) {
       throw new Error(`step ${start.data.turn}.${start.data.step} has no later Assistant settlement`)
     }
-    // The cut excludes the settlement: a request never contains its own response.
-    const prefix = events.slice(0, settlement.seq)
-    const session = Session.create(SessionId(meta.id), prefix, meta)
-    const header = foldRequestHeader(prefix)
-    if (header === undefined) throw new Error(`step ${start.data.turn}.${start.data.step} has no request header`)
-    const request = snapshotJsonValue<unknown>({
-      ...header.config,
-      messages: session.deriveMessages(),
-      toolHistory: session.toolHistory(),
-      ...header.tools !== undefined ? { tools: header.tools } : {},
-      sessionId: meta.id,
+    return settlements.map((settlement) => {
+      // The cut excludes the settlement: a request never contains its own response.
+      const prefix = events.slice(0, settlement.seq)
+      const session = Session.create(SessionId(meta.id), prefix, meta)
+      const header = foldRequestHeader(prefix)
+      if (header === undefined) throw new Error(`step ${start.data.turn}.${start.data.step} has no request header`)
+      const request = snapshotJsonValue<unknown>({
+        ...header.config,
+        messages: session.deriveMessages(),
+        toolHistory: session.toolHistory(),
+        ...header.tools !== undefined ? { tools: header.tools } : {},
+        sessionId: meta.id,
+      })
+      if (request === undefined) throw new Error('replayed request is not lossless JSON')
+      return request as { [key: string]: JsonValue }
     })
-    if (request === undefined) throw new Error('replayed request is not lossless JSON')
-    return request as { [key: string]: JsonValue }
   })
 }
 

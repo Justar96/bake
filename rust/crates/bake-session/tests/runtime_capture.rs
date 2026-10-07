@@ -38,6 +38,13 @@ const DYNAMIC_TOOLS: Capture = Capture {
     rows: 38,
 };
 
+const RETRY_ATTEMPT: Capture = Capture {
+    scenario: "retry-attempt",
+    log_bytes: 3102,
+    expected_bytes: 2090,
+    rows: 14,
+};
+
 fn repo_path(relative: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")
@@ -195,7 +202,7 @@ fn replace_in_row(log: &[u8], seq: usize, from: &str, to: &str) -> Vec<u8> {
 
 #[test]
 fn committed_captures_replay_to_their_expectations() {
-    for capture in [TOOL_CALL_TURN, DYNAMIC_TOOLS] {
+    for capture in [TOOL_CALL_TURN, DYNAMIC_TOOLS, RETRY_ATTEMPT] {
         let (log, expected) = read(&capture);
         let replayed = replay(&log).unwrap_or_else(|refusal| panic!("{refusal:?}"));
         let normalized = normalize(&replayed).expect("normalize");
@@ -374,4 +381,84 @@ fn the_normalizer_refuses_foreign_anchors() {
     ] {
         assert_eq!(first_difference(&left, &right, "").as_deref(), Some(anchor));
     }
+}
+
+/// Replace the whole row with seq `seq`.
+fn replace_row(log: &[u8], seq: usize, row: &Value) -> Vec<u8> {
+    let text = std::str::from_utf8(log).expect("UTF-8 log");
+    let mut lines: Vec<String> = text.split('\n').map(str::to_owned).collect();
+    assert!(
+        lines[seq + 1].contains(&format!("\"seq\":{seq},")),
+        "row {seq}"
+    );
+    lines[seq + 1] = row.to_string();
+    lines.join("\n").into_bytes()
+}
+
+#[test]
+fn retry_attempt_log_cuts_one_request_per_settlement() {
+    let (log, expected) = read(&RETRY_ATTEMPT);
+    let rows = rows(&log);
+    let at = |kind: &str| -> Vec<usize> {
+        rows.iter()
+            .enumerate()
+            .filter(|(_, (row, _))| row == kind)
+            .map(|(seq, _)| seq)
+            .collect()
+    };
+    assert_eq!(at("assistant/attempt"), [8]);
+    assert_eq!(at("assistant/message"), [11]);
+    assert_eq!(at("request/header"), [6, 9]);
+    assert_eq!(rows[9].1["reason"], "change");
+    assert_eq!(rows[9].1["header"]["config"]["model"], "mock-b");
+    let replayed = normalize(&replay(&log).expect("replay")).expect("normalize");
+    assert_eq!(replayed, expected);
+}
+
+#[test]
+fn retry_attempt_controls_fail_for_their_reason() {
+    let (log, expected) = read(&RETRY_ATTEMPT);
+    let rows = rows(&log);
+    let row = |seq: usize, kind: &str, data: Value| json!({"type": kind, "seq": seq, "time": 1, "data": data});
+    let context = |seq| {
+        row(
+            seq,
+            "request/context",
+            json!({"provider": "mock", "model": "mock"}),
+        )
+    };
+    let differs = |log: &[u8]| {
+        let replayed = normalize(&replay(log).expect("replay")).expect("normalize");
+        first_difference(&Value::Array(expected.clone()), &Value::Array(replayed), "")
+    };
+    // Without the attempt settlement, only the message cuts a request.
+    assert_eq!(
+        differs(&replace_row(&log, 8, &context(8))).as_deref(),
+        Some("")
+    );
+    // Without the changed header, the second request keeps the first model.
+    let unchanged = replace_row(&replace_row(&log, 9, &context(9)), 10, &context(10));
+    assert_eq!(differs(&unchanged).as_deref(), Some("/1/model"));
+    let attempt = |stream: Value| {
+        let mut data = rows[8].1.clone();
+        data["stream"] = stream;
+        replace_row(&log, 8, &row(8, "assistant/attempt", data))
+    };
+    assert_eq!(
+        replay(&attempt(json!({}))),
+        Err(ReplayRefusal::Seed {
+            seq: 8,
+            rejection: SeedRejection::Settlement
+        })
+    );
+    let negative_zero = String::from_utf8(attempt(json!([{"dt": 0}])))
+        .expect("UTF-8")
+        .replace("\"dt\":0", "\"dt\":-0");
+    assert_eq!(
+        replay(negative_zero.as_bytes()),
+        Err(ReplayRefusal::Seed {
+            seq: 8,
+            rejection: SeedRejection::LosslessJson
+        })
+    );
 }

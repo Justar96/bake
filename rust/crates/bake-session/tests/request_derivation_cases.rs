@@ -25,7 +25,7 @@ const FIXTURE_EXPECTED: &str =
 const LOG_BYTES: usize = 4533;
 const EXPECTED_BYTES: usize = 2775;
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 158;
+const CASE_COUNT: usize = 184;
 const MAX_EDITS: usize = 8;
 const SOURCE_BUDGET: usize = 64;
 const LIMITS: [&str; 10] = [
@@ -43,8 +43,9 @@ const LIMITS: [&str; 10] = [
 /// Causes whose refusal renders TypeScript's exact message, and the number of
 /// cases that check it.
 const EXACT_CAUSES: [&str; 4] = ["codec", "finish", "uncommitted", "seeded"];
-const EXACT_CASES: usize = 13;
-const SEED_CHECKS: [(&str, SeedRejection); 29] = [
+const EXACT_CASES: usize = 15;
+const SEED_CHECKS: [(&str, SeedRejection); 30] = [
+    ("lossless-json", SeedRejection::LosslessJson),
     ("message-identity", SeedRejection::MessageIdentity),
     ("message-role", SeedRejection::MessageRole),
     ("message-source", SeedRejection::MessageSource),
