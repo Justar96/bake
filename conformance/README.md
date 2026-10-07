@@ -2,7 +2,7 @@
 
 ## Summary
 
-Compare TypeScript and Rust using controlled fixtures and independently checked outcomes. The synthetic harness and [native eval fixture adapter](../evals/README.md#native-fixture-adapter) qualify comparison tooling for [migration scope 01](../docs/roadmap/rust-0.4/README.md#01--workspace-and-comparison-harness). Separate shared cases exercise Session headers, source references, and row envelopes against released codecs; a runtime fixture captures a real TypeScript tool-call turn. The [qualification ledger](../docs/roadmap/rust-0.4/ledger/README.md) records partial evidence. Rust Session replay and live native evals remain open.
+Compare TypeScript and Rust using controlled fixtures and independently checked outcomes. The synthetic harness and [native eval fixture adapter](../evals/README.md#native-fixture-adapter) qualify comparison tooling for [migration scope 01](../docs/roadmap/rust-0.4/README.md#01--workspace-and-comparison-harness). Separate shared cases exercise Session headers, source references, row envelopes, and strict V3 codec rows against released codecs; a runtime fixture captures a real TypeScript tool-call turn. The [qualification ledger](../docs/roadmap/rust-0.4/ledger/README.md) records partial evidence. Rust Session replay and live native evals remain open.
 
 ## Table of Contents
 
@@ -13,6 +13,7 @@ Compare TypeScript and Rust using controlled fixtures and independently checked 
 - [Session header cases](#session-header-cases)
 - [Source-event seq cases](#source-event-seq-cases)
 - [Row-envelope cases](#row-envelope-cases)
+- [V3 row cases](#v3-row-cases)
 - [Runner contract](#runner-contract)
 - [Ownership and limits](#ownership-and-limits)
 
@@ -139,7 +140,7 @@ bun run test:runtime packages/session/session-format-v2-to-v3/tests/event-envelo
 (cd rust && cargo test --locked -p bake-session)
 ```
 
-Agreement covers that one call, not current-format row admission. The V3 codec checks `request/header` and `system/message` payloads and obsolete dispatch rows before the call, and known-event envelope and payload rules after it. V2 may accept rows that V3 rejects, such as a `turn/start` with `surfaceOp`, a `user/message` with empty sources, or a `-0` seq. Recovery modes, a seeded log's end-seed checks in `finish`, record framing, and replay are not modelled. Messages assume strict, contiguous decoding, where the row index equals the expected seq.
+Agreement covers that one call, not current-format row admission; [V3 row cases](#v3-row-cases) cover the whole codec call. The V3 codec checks `request/header` and `system/message` payloads and obsolete dispatch rows before the call, and known-event envelope and payload rules after it. V2 may accept rows that V3 rejects, such as a `turn/start` with `surfaceOp`, a `user/message` with empty sources, or a `-0` seq. Recovery modes, a seeded log's end-seed checks in `finish`, record framing, and replay are not modelled. Messages assume strict, contiguous decoding, where the row index equals the expected seq.
 
 Each case has an `id`, an `expectedSeq` of at most 16, and the row as JSON text in `row`, so number spellings such as `1.0` and `-0` reach both parsers unchanged. An optional `budget` replaces the table's `defaultBudget` of 64 for expanded source seqs. `ts` is one of:
 
@@ -164,6 +165,36 @@ A `rejected-class` override claims the refusal but not its message:
 An optional `v3` outcome records what the real V3 codec does with the same rows. The TypeScript spec checks it; Rust ignores it. These controls show V3 rejecting rows the released v2 decoder accepts, reporting its structural error before a v2 envelope error, and accepting an unknown type with opaque payload.
 
 Both harnesses pin the case count, reject unknown keys, and require every rejection kind, limit, and class-only refusal to be witnessed. `fixtureEnvelopes` lists the 16 envelopes of the unchanged [request-reconstruction log](#runtime-request-reconstruction), covering 12 event types. TypeScript checks the log's SHA-256 and decodes it through the real V3 codec; Rust, which has no hash dependency, checks its size and record count and decodes each row. Expected envelopes and messages are written in the shared table and checked against the released codec.
+
+## V3 row cases
+
+[`session/v3-row-cases.json`](session/v3-row-cases.json) holds event rows and the outcome of one strict V3 codec row decode. The [TypeScript spec](../packages/session/session-format-v2-to-v3/tests/v3-row-conformance.spec.ts) primes the real V3 codec's strict decoder with `expectedSeq` rows numbered from 0, then decodes the case row. The development [`bake-session`](../rust/crates/bake-session/src/v3_row.rs) crate passes the same parsed row and expected seq to `decode_v3_row`.
+
+```sh
+bun run test:runtime packages/session/session-format-v2-to-v3/tests/v3-row-conformance.spec.ts
+(cd rust && cargo test --locked -p bake-session)
+```
+
+The call runs three steps, and the first failure wins:
+
+1. Raw-row admission, before any envelope check. A `request/header` row needs object data and an object header without its own `system` member. `system/message` data must pass the codec's own key, coordinate, identity, and plugin-source checks, then the frozen payload validator. An obsolete `tool/code-dispatch` or `tool/code-dispatch-start` row that is not ignorable is unsupported; the message renders its raw seq with JavaScript's `String`.
+2. The [row envelope](#row-envelope-cases), unchanged.
+3. Per-event checks. A known type other than a surface accepts only `ignorable` beside the required fields. A surface requires `surfaceOp`: `"append"`, or exactly `op: "replace"`, `startSeq`, and `endSeq`, each counted and then required to be earlier than the row; `startSeq` may exceed `endSeq`. Then `assistant/message` refuses sources, and other surfaces refuse an empty list. A `request/header` refuses `tools: []` and `adapterDefaults: {}`. A `tool/result` with an `error` member, `null` included, needs an object message holding exactly one `tool-result` block whose `isError` is `true`.
+
+A decoded row is codec output, not a restored event. Unknown types and ignorable obsolete types decode with any optional fields and an opaque payload, and other payloads stay unvalidated; restoration later requires an installed vocabulary and checks relationships between events. Known types are the surfaces, the released v2 disposition keys other than the obsolete types, `tool/ptc-dispatch-start`, `tool/ptc-dispatch`, `feedback/message-put`, `feedback/message-delete`, and the 12 `Object.prototype` names, which the frozen dispositions object inherits. The table's `vocabulary` lists them with near-miss opaque names. The TypeScript spec checks the lists against the real exports, Rust checks its constants against them, and both harnesses decode a row of every listed name. Recovery modes, `finish`, framing, and replay are not modelled.
+
+`ts` is `decoded`, with the envelope as for row envelopes, or `rejected` with an exact `class`. `SessionFormatError` and `SessionFormatUnsupportedMigrationError` carry the exact message; `TypeError` carries none, because a `{"toString":null}` seq on an obsolete row throws with different messages in Bun and Node.
+
+A `rust` override follows the row-envelope conventions. A class-only `rejected-class` lists `unexpectedKeys` when two or more keys are unexpected, and nothing for an unrendered seq gap. A `native-subset` override names a limit:
+
+- `system-payload`: Rust claims the frozen validator's acceptance only for a source of exactly `kind` and a plugin other than `compact`, and content blocks that are each exactly `{type: "text" | "reasoning", text: <string>}`, an empty list included. Any other shape is a limit, including ones TypeScript accepts.
+- `obsolete-seq-diagnostic`: an obsolete row's seq is an array, an object, an integer outside the safe range, or any number serde_json stores as an `f64`, -0 included. serde_json also reads an underflowing spelling such as `-2.4703282292062328e-324` as -0, where `JSON.parse` reads `-5e-324`, so Rust cannot render the seq from the parsed value. Both readings fail count and time validation, so this parser difference does not change their rejection.
+- `system-turn-float-lexeme`, `system-step-float-lexeme`, `start-seq-float-lexeme`, and `end-seq-float-lexeme`: as for row envelopes, negative spellings are rejected exactly.
+- `envelope/` limits are row-envelope limits passed through. A -0 seq stays `envelope/negative-zero-seq` even though V3 rejects it, because the rejection follows V2 checks the envelope decoder does not complete.
+
+The `fixture` section names the unchanged [request-reconstruction log](#runtime-request-reconstruction). Both harnesses decode its 16 rows of 12 types and check that payloads are borrowed; TypeScript checks its SHA-256 and `finish`, and Rust checks that each envelope equals the row-envelope decoder's. Each mutant replaces one fixture value in memory: an empty header `tools` list and a header `system` member are refused exactly, and an image system block is a Rust limit.
+
+`source_budget` bounds expanded sources only; Rust does not claim that every TypeScript resource failure, such as allocating a huge range, becomes a limit. The parsed row is the caller's, so the parser bounds its size and nesting, if anything does.
 
 ## Runner contract
 

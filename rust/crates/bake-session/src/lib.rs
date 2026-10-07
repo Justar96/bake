@@ -1,5 +1,6 @@
 //! Development-only Session format primitives: one current-format header
-//! record, one event's `sourceEventSeqs` field, and one event row's envelope.
+//! record, one event's `sourceEventSeqs` field, one event row's envelope, and
+//! one strict V3 codec row decode.
 //!
 //! [`read_header_record`] decodes the first physical record of a current
 //! (format 3) Session log into its logical header metadata, or refuses it with
@@ -10,13 +11,14 @@
 //! [`decode_source_event_seqs`] expands one already parsed field value; it does
 //! not admit the row that carries it. [`decode_row_envelope`] decodes one
 //! already parsed row's envelope as the released v2 codec's strict decoder
-//! does, borrowing its payload unvalidated; it is not current-format row
-//! admission. None reads a whole log, retains input bytes, or encodes anything.
-//! The crate is unstable and unshipped; nothing in
-//! the workspace depends on it.
+//! does, borrowing its payload unvalidated. [`decode_v3_row`] wraps it in the
+//! strict V3 codec's checks; its output is codec output, not a restored
+//! event. None reads a whole log, retains input bytes, or encodes anything.
+//! The crate is unstable and unshipped; nothing in the workspace depends on it.
 
 mod envelope;
 mod source_event_seqs;
+mod v3_row;
 
 pub use envelope::{
     EnvelopeLimit, EnvelopeRefusal, EnvelopeRejection, NumberField, RequiredField,
@@ -25,6 +27,10 @@ pub use envelope::{
 pub use source_event_seqs::{
     SourceEventSeqsLimit, SourceEventSeqsRefusal, SourceEventSeqsRejection,
     decode_source_event_seqs,
+};
+pub use v3_row::{
+    Coordinate, Endpoint, EventRejection, StructuralRejection, SystemRecord, V3CodecEvent, V3Limit,
+    V3NumberField, V3Rejection, V3RowRefusal, V3Unsupported, decode_v3_row,
 };
 
 use serde_json::{Map, Value};

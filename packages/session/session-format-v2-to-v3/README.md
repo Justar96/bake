@@ -169,6 +169,7 @@ The [stage](src/migration.ts) owns synchronous per-artifact sequence maps, messa
 - [Canonical V3 envelope decision](../../../.agents/notes/implemented/architecture/2026-09-06-v3-canonical-session-envelopes.md) — strict acceptance and validation ownership.
 - [Source-event seq cases](../../../conformance/README.md#source-event-seq-cases) — [shared field checks](tests/source-event-seqs-conformance.spec.ts) for TypeScript and development Rust, including one V3 fixture.
 - [Row-envelope cases](../../../conformance/README.md#row-envelope-cases) — [shared checks](tests/event-envelope-conformance.spec.ts) of one strict released v2 row decode, with V3 divergence controls.
+- [V3 row cases](../../../conformance/README.md#v3-row-cases) — [shared checks](tests/v3-row-conformance.spec.ts) of one strict V3 codec row decode, without restoration.
 
 -----
 
