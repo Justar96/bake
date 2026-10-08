@@ -29,6 +29,7 @@ use serde_json::Value;
 use crate::DecodedV1Rows;
 use crate::v2_to_v3::StageError;
 use normalize::{LegacyState, TYPE_COERCION, normalize_event};
+pub(crate) use normalize::{assert_event_payload, has_released_v0_disposition};
 
 const MIGRATION: &str = "bake-session-format-v0-to-v1";
 /// The input is not the output of a released v0 decode.

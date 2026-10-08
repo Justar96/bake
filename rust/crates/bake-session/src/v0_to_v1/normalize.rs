@@ -2,7 +2,8 @@
 //! `packages/session/session-format-v0-to-v1/src/migration.ts`: the legacy
 //! rewrites of one decoded v0 event, in TypeScript's order, then
 //! `assertReleasedEventPayload(event, 0)` from `validation.ts` for every
-//! event other than `assistant/chunk`.
+//! event other than `assistant/chunk`. The v1→v2 decoded stage runs the same
+//! payload check at version 1.
 //!
 //! Object rewrites follow JavaScript's spread and delete order: a replaced
 //! member keeps its position, an added member is appended, and a removed
@@ -93,7 +94,7 @@ pub(super) fn normalize_event(
     let message = normalize_message(compaction, seq, session_id, &state.message_ids)?;
     let current_type = event_type(&message).to_owned();
     if current_type != "assistant/chunk" {
-        assert_event_payload(&current_type, seq, message.get("data"))?;
+        assert_event_payload(&current_type, seq, message.get("data"), 0)?;
     }
     if let Some(id) = event_message_id(&message, &current_type, seq)? {
         state.message_ids.insert(seq, id);
@@ -544,8 +545,22 @@ fn replacement_start(event: &Record) -> Checked<Option<Option<u64>>> {
     }
 }
 
-/// `assertReleasedEventPayload(event, 0)`.
-fn assert_event_payload(event_type: &str, seq: u64, data: Option<&Value>) -> Checked {
+/// Whether `RELEASED_V0_EVENT_DISPOSITIONS[event_type]` is defined: an own
+/// released type or an inherited `Object.prototype` name.
+pub(crate) fn has_released_v0_disposition(event_type: &str) -> bool {
+    !matches!(dispositions::lookup(event_type), Lookup::Absent)
+}
+
+/// `assertReleasedEventPayload(event, version)` at payload generation
+/// `version`, 0 or 1. Version 1 counts a descriptor `version` other than 3
+/// and then admits the payload unchecked, and admits a delivery marker's
+/// `sessionFormatVersion` member.
+pub(crate) fn assert_event_payload(
+    event_type: &str,
+    seq: u64,
+    data: Option<&Value>,
+    version: u8,
+) -> Checked {
     let label = format!("{event_type} {seq} data");
     let disposition = match dispositions::lookup(event_type) {
         Lookup::Own(disposition) => disposition,
@@ -564,15 +579,22 @@ fn assert_event_payload(event_type: &str, seq: u64, data: Option<&Value>) -> Che
     };
     let record = released_record(data, &label)?;
     if event_type == "subagent/descriptor" && !is_three(record.get("version"))? {
-        let version = count(
+        let descriptor_version = count(
             record.get("version"),
             &format!("{event_type} {seq} version"),
         )?;
-        return unsupported(format!(
-            "{event_type} {seq} uses unsupported descriptor version {version}"
-        ));
+        if version == 0 {
+            return unsupported(format!(
+                "{event_type} {seq} uses unsupported descriptor version {descriptor_version}"
+            ));
+        }
+        return Ok(());
     }
-    released_keys(record, disposition.required, disposition.optional, &label)?;
+    let mut optional = disposition.optional.to_vec();
+    if version == 1 && event_type == "session-log-deepseek/delivery-accepted" {
+        optional.push("sessionFormatVersion");
+    }
+    released_keys(record, disposition.required, &optional, &label)?;
     for key in disposition.opaque {
         if record.get(*key).is_some_and(contains_negative_zero) {
             return invalid(format!(
@@ -580,7 +602,7 @@ fn assert_event_payload(event_type: &str, seq: u64, data: Option<&Value>) -> Che
             ));
         }
     }
-    assert_released_payload_semantics(event_type, seq, data, 0)
+    assert_released_payload_semantics(event_type, seq, data, version)
 }
 
 /// `value === 3`, undecided for a non-negative `f64`.

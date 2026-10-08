@@ -14,7 +14,8 @@
 //! Its sources are `packages/session/session-format/src/chain.ts` and the
 //! three migrations' `migration.ts`. The v1→v2 stage is the transformed one,
 //! as a chain runs it after v0→v1. A directly decoded v1 Session takes the
-//! decoded stage instead, which is not ported.
+//! decoded stage instead, ported as [`crate::migrate_v1_to_v2_decoded`] but
+//! not yet routed through this chain.
 
 use serde_json::Value;
 

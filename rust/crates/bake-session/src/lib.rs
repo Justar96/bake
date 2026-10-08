@@ -50,6 +50,9 @@
 //! [`ReleasedChunkRun`], and [`migrate_v1_to_v2_transformed_items`] sends
 //! each run through the stage's `transformRun`, merging it into the
 //! attempt's stream, as a chain reading the file does.
+//! [`migrate_v1_to_v2_decoded`] runs the decoded stage production reads a v1
+//! file with: each payload checked at version 1, then the transformed stage;
+//! Assistant chunks are a native limit.
 //! [`migrate_released_v0_history`] reads a decoded v0 Session through all
 //! three edges to format v3, reporting the refusal TypeScript's streaming
 //! chain reports first; Assistant chunks and a decoded v1 Session are native
@@ -101,6 +104,7 @@ mod usage;
 mod v0_to_v1;
 mod v1_codec;
 mod v1_to_v2;
+mod v1_to_v2_decoded;
 mod v2_to_v3;
 mod v3_row;
 mod zstd;
@@ -159,6 +163,9 @@ pub use v1_codec::{
 pub use v1_to_v2::{
     MigratedV1ToV2, V1ToV2Limit, V1ToV2Location, V1ToV2Refusal, migrate_v1_to_v2_transformed,
     migrate_v1_to_v2_transformed_items,
+};
+pub use v1_to_v2_decoded::{
+    V1ToV2DecodedClass, V1ToV2DecodedLimit, V1ToV2DecodedRefusal, migrate_v1_to_v2_decoded,
 };
 pub use v2_to_v3::{MigratedV2, V2ToV3Layer, V2ToV3Location, V2ToV3Refusal, migrate_v2_rows};
 pub use v3_row::{

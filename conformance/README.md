@@ -36,6 +36,7 @@ Compare TypeScript and Rust using controlled fixtures and independently checked 
 - [V1 to V2 packed-run cases](#v1-to-v2-packed-run-cases)
 - [Subagent identity and timing cases](#subagent-identity-and-timing-cases)
 - [Subagent catalog cases](#subagent-catalog-cases)
+- [V1 to V2 decoded-stage cases](#v1-to-v2-decoded-stage-cases)
 - [Runner contract](#runner-contract)
 - [Ownership and limits](#ownership-and-limits)
 
@@ -571,7 +572,7 @@ bun run test:runtime packages/session/session-format-v1-to-v2/tests/migration-co
 (cd rust && cargo test --locked -p bake-session --test v1_to_v2_cases)
 ```
 
-This is the stage a migration chain runs after v0→v1, not the one production runs on a v1 file. Production's decoded stage first checks each payload with `assertReleasedEventPayload`, and that check is not ported. Because the transformed stage trusts its input, these cases feed it unvalidated codec output.
+This is the stage a migration chain runs after v0→v1, not the one production runs on a v1 file. Production's decoded stage first checks each payload with `assertReleasedEventPayload`; the [decoded-stage cases](#v1-to-v2-decoded-stage-cases) cover that check. Because the transformed stage trusts its input, these cases feed it unvalidated codec output.
 
 Both arms pass `assistant/chunk` events to `transformEvent`, including the events the codec expands from packed chunk rows. Rust ports the stage's attempt grouping and its `AssistantStreamAccumulator` from [`assistant-stream.ts`](../packages/llm/llm/src/assistant-stream.ts) in [`assistant_stream.rs`](../rust/crates/bake-session/src/assistant_stream.rs). A chain reading a file sends a packed row through `transformRun` instead, which merges records with `appendStreamRecord`. The [packed-run cases](#v1-to-v2-packed-run-cases) compare that path.
 
@@ -608,7 +609,7 @@ Of the 180 cases, 87 migrate and 46 are refusals in both arms. The remaining 47 
 - emitting held-back events before their attempt fails `step-end-closes-after-buffer` and seven other cases in both arms;
 - removing the `rust` marker from `chunk-null` fails that case in both arms.
 
-The result is stage output: the `restoreReleasedV2Artifact` check of the complete artifact is not run. Recoverable decoding, the decoded stage's payload checks, `expandAssistantStream` and its validation, and the v0→v1 edge remain separate work. These cases close no roadmap scope.
+The result is stage output: the `restoreReleasedV2Artifact` check of the complete artifact is not run. Recoverable decoding, `expandAssistantStream` and its validation, and the v0→v1 edge remain separate work. These cases close no roadmap scope.
 
 ## V0 to V1 migration cases
 
@@ -701,7 +702,7 @@ The chain streams each decoded event through every stage before the next one sta
 
 A `rust` marker names a native limit and its location, and Rust claims nothing there. Each such case still asserts TypeScript's outcome. The limits are:
 
-- `v1-decoded-stage`: a v1 Session, which a chain reads with the v1→v2 decoded stage and its payload checks, which are not ported.
+- `v1-decoded-stage`: a v1 Session, which a chain reads with the v1→v2 decoded stage and its payload checks. The history chain does not yet route a v1 Session through [`migrate_v1_to_v2_decoded`](#v1-to-v2-decoded-stage-cases).
 - `assistant-chunk`: an `assistant/chunk` event that v0→v1 admitted. TypeScript starts an Assistant attempt and then buffers later events, and a packed run takes `transformRun` rather than its expanded events.
 - `untimed-event`: an event without `time`, which v1→v2 can copy into an event it synthesizes.
 - `interleaved-emission`: a v1→v2 refusal of an event for which v1→v2 may already have emitted an end-seed, an interrupted `turn/end`, or a `goal/change` into v2→v3. Rust applies the rule to every refusal of an event at the cut of a seeded log other than a `session/end-seed` there, which v1→v2 does not precede with a synthesized one, of a `turn/start` right after an inbox splice, and of a goal `user/message` carrying its change, including one raised before any emission. v0→v1 already refuses such a goal message as its own `legacy-goal-message` limit, so its arm is not reached.
@@ -751,7 +752,7 @@ A run's stream record never holds -0: the codec refuses it in `time0` and `dt`, 
 - checking the cut against the attempt's first span fails `pre-cut-chunk-then-post-cut-run` and `pre-cut-run-then-post-cut-run` in Rust;
 - dropping the `expandedDiverges` flag from `pre-cut-chunk-then-post-cut-run` fails that case in both arms.
 
-The result is stage output: the `restoreReleasedV2Artifact` check of the complete artifact is not run. A v0 header, which `migrateHeader` refuses, the history chain, and the decoded stage remain separate work. These cases close no roadmap scope.
+The result is stage output: the `restoreReleasedV2Artifact` check of the complete artifact is not run. A v0 header, which `migrateHeader` refuses, and the history chain remain separate work, and the [decoded stage](#v1-to-v2-decoded-stage-cases) does not yet route packed runs through this path. These cases close no roadmap scope.
 
 ## Subagent identity and timing cases
 
@@ -782,6 +783,42 @@ Only `subagent/catalog` events at or after the inherited cut contribute. Filteri
 All 82 cases match: 34 catalogs and 48 refusals. They cover both child modes, strict payload validation, repeated IDs and JSON keys, numeric rounding and negative zero, inherited cuts, interrupted turns, truncated prefixes, and catalog sizes crossing the TypeScript list's 64-entry chunk boundary. Both harnesses pin the case count and compare independently specified outcomes.
 
 An invalid own fact refuses the whole fold at its seq. TypeScript throws `ZodError`; the native refusal identifies the same event without reproducing Zod's issue tree or message. The output is the catalog view, not the TypeScript chunked-list checkpoint representation. The fold reads no child file and implements no registry lifecycle, child execution, or resume. Existing scan and restoration limits apply.
+
+## V1 to V2 decoded-stage cases
+
+[`session/v1-to-v2-decoded-cases.json`](session/v1-to-v2-decoded-cases.json) holds 50 synthetic Sessions: 49 released v1 Sessions and one v0 Session, which the header check refuses. Each is a physical header and rows as JSON text. The [TypeScript spec](../packages/session/session-format-v1-to-v2/tests/decoded-conformance.spec.ts) first decodes each case strictly with the released codec, and that decode must succeed. It then calls `sessionFormatV1ToV2.migrateHeader` and `assertReleasedV2Header` from [`migration.ts`](../packages/session/session-format-v1-to-v2/src/migration.ts), builds the stage with `sourceKind: 'decoded'`, decodes the rows again into a context that passes each event to `transformEvent` and each packed chunk run to `transformRun`, and calls `finish`. The [Rust test](../rust/crates/bake-session/tests/v1_to_v2_decoded_cases.rs) decodes the same parsed rows with `decode_v0_v1_rows` under both path platforms, requires the decode to succeed, and passes the result to [`migrate_v1_to_v2_decoded`](../rust/crates/bake-session/src/v1_to_v2_decoded.rs).
+
+```sh
+bun run test:runtime packages/session/session-format-v1-to-v2/tests/decoded-conformance.spec.ts
+(cd rust && cargo test --locked -p bake-session --test v1_to_v2_decoded_cases)
+```
+
+This is the stage a chain builds when v1 is its first format, which is how production reads a v1 file. It is the [transformed stage](#v1-to-v2-transformed-stage-cases) with one addition: before each event whose `type` is not `assistant/chunk` and has a released-v0 disposition, it runs `assertReleasedEventPayload(event, 1)`. A type without a disposition skips that check and reaches the transformed stage, which refuses it. The payload check reads only its own event, so TypeScript refuses at the earliest event where either step refuses, and at one event the payload check refuses first. Rust runs the transformed stage over the whole log, then checks payloads up to and including the event it refused. At version 1, the payload check counts a descriptor `version` other than 3 and admits that payload unchecked, admits a delivery marker's `sessionFormatVersion`, checks a marker's coordinates only when it was accepted at version 1, and admits a session reference's `capturedFormatVersion` of 1.
+
+A migrated outcome compares the v2 header, the transformed events, and the inherited cut, with numbers compared as JavaScript doubles and object members in JavaScript key order. A refusal compares the header, decoded-event index, or finish location, the error class, and the exact message. The class is `format` for a `SessionFormatError` from the header or payload check, `unsupported` for the stage's `SessionFormatUnsupportedMigrationError`, and `engine` for a `TypeError`, which only a case with a `rust` marker may expect. The cases cover:
+
+- clean logs across the turn, message, tool, title, settings, and command payload families;
+- delivery markers with and without `sessionFormatVersion`, accepted at version 0, 1, or 2, with their coordinate and Session checks and the inherited exemption;
+- descriptor versions 1, 3, absent, and not a count, and session references captured at versions 1 and 2;
+- unknown, ignorable unknown, and retired types, and an inherited `Object.prototype` name;
+- payload and stage refusals at the same event, where the payload check wins, and at earlier and later events;
+- a `finish` refusal hidden by an earlier payload refusal, seeded cuts, and a legacy interrupted turn;
+- Assistant chunks before and after a refusal, and a stage refusal at the first chunk.
+
+A `rust` marker names a native limit and its location, and Rust claims nothing there. Each such case still asserts TypeScript's outcome. The limits are:
+
+- `assistant-chunk`: the first `assistant/chunk` event when no earlier event refuses. The decoder sends a packed row to `transformRun`, while this stage's input holds only the expanded events.
+- `non-string-type`: an event `type` that is not a string, which the disposition lookup converts to a property key, so an array can name a known type and run its payload check.
+- `payload/<name>`: a limit of the payload check, such as `payload/legacy-goal-message`, `payload/object-prototype-type`, or `payload/payload-float-lexeme`. The [v0 to v1 cases](#v0-to-v1-migration-cases) describe them.
+- `transformed/<name>`: a limit of the transformed stage, such as `transformed/unchecked-shape` or `transformed/undefined-member`.
+
+Of the 50 cases, 14 migrate and 25 are refusals in both arms. The remaining 11 are limits: 1 that TypeScript migrates, 9 other TypeScript refusals, and 1 `TypeError`. Both harnesses pin the case count and require every listed limit to be witnessed. The expectations were written from the TypeScript sources before either harness ran, and both arms passed on their first run. Three negative controls were observed:
+
+- running the payload check at version 0 fails 12 cases in each arm, including `descriptor-version-one-admitted`, `delivery-marker-current-own-session`, and `session-reference-captured-version-one`;
+- running the transformed stage's refusal before a payload refusal at the same event fails `delivery-marker-tie-payload-first`, `turn-start-tie-payload-first`, and five other cases in Rust;
+- removing the `rust` marker from `ordinary-chunk-rows-migrate-in-typescript` fails that case in Rust.
+
+The result is stage output: the `restoreReleasedV2Artifact` check of the complete artifact is not run. Routing packed runs through the [packed-run path](#v1-to-v2-packed-run-cases), recoverable decoding, and a v1 Session read through the whole chain remain separate work. These cases close no roadmap scope.
 
 ## Runner contract
 

@@ -7,7 +7,8 @@
 //!
 //! This is the stage a chain runs after v0→v1, not the one production runs
 //! on a directly decoded v1 file: that stage first checks each payload with
-//! `assertReleasedEventPayload`, which this port does not include. The input
+//! `assertReleasedEventPayload`, which [`crate::migrate_v1_to_v2_decoded`]
+//! adds. The input
 //! is unvalidated codec output, so this port follows the stage's unchecked
 //! casts and refuses with a [`V1ToV2Limit`] wherever TypeScript would throw a
 //! `TypeError` or coerce a value.
