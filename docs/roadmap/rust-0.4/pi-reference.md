@@ -66,7 +66,7 @@ These are recommended candidates within their existing scope dependencies; they 
 
 ## Compatibility and adoption
 
-Bake's accepted support matrix, Session format 3, request reconstruction, tool contracts, and native conformance evidence remain authoritative. Pi's session format, experimental durable storage, TypeScript extension loader, package manager, and terminal implementation are not compatibility targets. Ratatui/Crossterm and the Bake-owned composer remain the [terminal direction](terminal.md). Review DeepSeek Harness selectively as the existing repository rules require.
+Bake's accepted support matrix, Session format 3, request reconstruction, tool contracts, and native conformance evidence remain authoritative. Pi's session format, experimental durable storage, TypeScript extension loader, package manager, and terminal implementation are not compatibility targets. Pi Durable's execution model informs the native runtime's internal structure through the separate [durable execution direction](durable-execution.md), which records its own Pi revision. Ratatui/Crossterm and the Bake-owned composer remain the [terminal direction](terminal.md). Review DeepSeek Harness selectively as the existing repository rules require.
 
 For each adopted behavior, record the exact Pi revision and source, explain the Bake requirement it serves, and verify it through the owning native scope. Changes to model-visible behavior require Bake's paired eval procedure. Retain the [MIT license and attribution](https://github.com/earendil-works/pi/blob/503c605528f9af993c0e37ede468cf884fb0ff5b/LICENSE) whenever code is copied or adapted. This reference adds no runtime dependency and closes no roadmap scope.
 

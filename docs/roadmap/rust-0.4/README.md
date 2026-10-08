@@ -11,6 +11,7 @@ Port Bake's runtime and terminal application to Rust in a sequence of independen
 - [Release lines and change policy](#release-lines-and-change-policy)
 - [Target architecture](#target-architecture)
 - [Pi agent source reference](pi-reference.md)
+- [Durable execution direction](durable-execution.md)
 - [Terminal direction](terminal.md)
 - [Linear development sequence](#linear-development-sequence)
 - [Scope specifications](#scope-specifications)
@@ -77,6 +78,8 @@ The [terminal direction](terminal.md) keeps the current transcript and composer 
 Keep `run_code`'s JavaScript semantics through an explicitly confined embedded engine; moving the host to Rust does not authorize changing the model's programming language. 0.4 ships Rust only, with no bundled or selectable Node/TypeScript compatibility runtime ([D5](scope-00/support.md#decision-register), approved 2026-10-07). The TypeScript runtime stays runnable during development as the comparison oracle; it cannot count as native parity or serve behind a supposedly native profile. Custom JavaScript/Cordis profiles, user executable YAML, custom bundles, and npm profile plugins are excluded from 0.4.0; no profile compatibility loader or migration deliverable is required. Native entry paths must reject them before execution or file changes. 0.4.0 must ship a native plugin API; MCP servers and hook processes alone do not satisfy that requirement ([D6](scope-00/support.md#decision-register), decided 2026-10-07). Electron message ports remain a separate Desktop decision. Scope 00 resolves the shipped support matrix; scopes 05, 12, and 13 prove it.
 
 Use the latest official Pi agent source as an architecture reference for the Rust harness ([D20](scope-00/support.md#decision-register)). [The pinned source review](pi-reference.md) maps its agent loop, session services, provider boundary, and tool lifecycle to Bake scopes. Bake's retained behavior and persistence contracts remain the acceptance target; refreshing the reference does not change them.
+
+Structure the native runtime for durable execution, not only a durable transcript. The [durable execution direction](durable-execution.md) takes Pi Durable's task model as a reference: every model request, tool call, compaction, child agent, and job is an owned task whose unfinished state is derivable from the Session log; tools declare a replay class; one ownership tree governs cancellation, with an explicit foreground/background boundary; and clients attach to the owner's view. These rules stay inside Session format 3 and the 0.3 model surface. Its scope additions and crash-recovery matrix extend scopes 02–13; behavior that would change the model surface or format is listed there as post-0.4.0 candidates.
 
 ## Linear development sequence
 

@@ -58,7 +58,7 @@ For model-visible scopes before the complete native loop exists, scope 01's eval
 
 ## Acceptance matrix
 
-Each row supplements the detailed scope specification. The final column is a required falsification or fault case, not a test reported as already run.
+Each row supplements the detailed scope specification. The final column is a required falsification or fault case, not a test reported as already run. The [crash-recovery matrix](durable-execution.md#crash-recovery-matrix) adds kill-and-restart cases to scopes 02–13 as each begins.
 
 | Scope | Required observable evidence | Required failure/control |
 |---|---|---|
