@@ -42,6 +42,9 @@
 //! and rows as the released physical codec does, without migrating them, and
 //! [`migrate_v0_to_v1`] runs the v0→v1 migration over a decoded v0 Session;
 //! its output is the edge's, not an opened Session.
+//! [`migrate_v1_to_v2_transformed`] runs the released v1→v2 migration's
+//! transformed stage over a decoded v1 Session, without Assistant chunks; it
+//! is the stage a chain runs after v0→v1, not production's read of a v1 file.
 //! [`token_usage`] folds a [`RestoredLog`]'s provider-reported token usage,
 //! and [`context_pressure`] its context occupancy with the surface's
 //! heuristic token total.
@@ -73,6 +76,7 @@ mod source_event_seqs;
 mod usage;
 mod v0_to_v1;
 mod v1_codec;
+mod v1_to_v2;
 mod v2_to_v3;
 mod v3_row;
 mod zstd;
@@ -118,6 +122,9 @@ pub use v0_to_v1::{MigratedV1, V0ToV1Location, V0ToV1Refusal, migrate_v0_to_v1};
 pub use v1_codec::{
     DecodedV1Rows, V1CodecLimit, V1CodecLocation, V1CodecRecovery, V1CodecRefusal, V1CodecVersion,
     decode_v0_v1_rows,
+};
+pub use v1_to_v2::{
+    MigratedV1ToV2, V1ToV2Limit, V1ToV2Location, V1ToV2Refusal, migrate_v1_to_v2_transformed,
 };
 pub use v2_to_v3::{MigratedV2, V2ToV3Layer, V2ToV3Location, V2ToV3Refusal, migrate_v2_rows};
 pub use v3_row::{
