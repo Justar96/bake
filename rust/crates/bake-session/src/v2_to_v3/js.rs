@@ -56,7 +56,7 @@ fn array_index(key: &str) -> Option<u64> {
 }
 
 /// TypeScript's `isSessionFormatJsonObject` check with a `<label> must be an object` error.
-pub(super) fn record<'a>(
+pub(crate) fn record<'a>(
     value: Option<&'a Value>,
     label: &str,
 ) -> Result<&'a Map<String, Value>, StageError> {
@@ -68,7 +68,7 @@ pub(super) fn record<'a>(
 
 /// The required-then-unexpected key check shared by `keys` in `payload.ts`
 /// and `assertReleasedV2Keys`. `fields` must already be in JavaScript order.
-pub(super) fn exact_keys(
+pub(crate) fn exact_keys(
     fields: &Map<String, Value>,
     required: &[&str],
     optional: &[&str],

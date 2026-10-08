@@ -9,9 +9,10 @@
  * memory, so the Session directory must still hold only the unchanged source
  * file afterwards. The development Rust `restore_migrated` in
  * `rust/crates/bake-session` checks the same table over the migration's
- * output. A `rust` override names a native limit, a Rust refusal, or an
- * input outside Rust's domain; TypeScript still asserts its own outcome. A
- * rejection's message spells the source path as `{src}`. Restored messages
+ * output. A `rust` override names a native limit or a Rust refusal;
+ * TypeScript still asserts its own outcome. A rejection without one is the
+ * catalog's final-check refusal, which Rust claims with the same message.
+ * A rejection's message spells the source path as `{src}`. Restored messages
  * are also compared as `JSON.stringify` text, because `toStrictEqual`
  * ignores member order. The spec reads only the table.
  */
@@ -32,7 +33,7 @@ const REPO = new URL('../../../../', import.meta.url)
 const SCHEMA = 'bake/session-conformance/migrated-restore-cases'
 const ORACLE = "JsonlSessionPersistence({compression: 'none'}) with session.v<N>.jsonl in its Session directory, readColdSessionLog, then Session.fromRestore(..., currentSessionMessageProjections)"
 /** Both harnesses pin the table size, so a dropped case fails. */
-const CASE_COUNT = 15
+const CASE_COUNT = 18
 /** Rust's native limits; each must be witnessed. */
 const LIMITS = ['encode', 'scan']
 const CLASSES = ['Error', 'SessionFormatUnsupportedError', 'SessionPersistenceCorruptionError']
@@ -61,7 +62,6 @@ type Outcome = Restored | { outcome: 'rejected'; class: string; message: string 
 type RustOverride =
   | { outcome: 'native-subset'; limit: string }
   | { outcome: 'refused'; cause: string }
-  | { outcome: 'outside-domain' }
 
 interface MigratedCase {
   id: string
@@ -106,17 +106,15 @@ function parseRust(value: unknown, ts: Outcome, id: string): RustOverride {
     && LIMITS.includes(value.limit as string)) return value as RustOverride
   if (isObject(value) && value.outcome === 'refused' && sortedKeys(value) === 'cause,outcome'
     && typeof value.cause === 'string' && ts.outcome === 'rejected') return value as RustOverride
-  if (isObject(value) && value.outcome === 'outside-domain' && sortedKeys(value) === 'outcome'
-    && ts.outcome === 'rejected') return value as RustOverride
   throw new Error(`${id}: invalid rust override ${JSON.stringify(value)}`)
 }
 
 function loadTable(): MigratedCase[] {
   const table: unknown = JSON.parse(readFileSync(new URL('conformance/session/migrated-restore-cases.json', REPO), 'utf8'))
   if (!isObject(table) || sortedKeys(table) !== 'cases,history,oracle,schema,version' || table.schema !== SCHEMA
-    || table.version !== 1 || table.oracle !== ORACLE || !Array.isArray(table.cases)
+    || table.version !== 2 || table.oracle !== ORACLE || !Array.isArray(table.cases)
     || !Array.isArray(table.history) || !table.history.every(isLine)) {
-    throw new Error('migrated-restore-cases.json does not match its version-1 schema')
+    throw new Error('migrated-restore-cases.json does not match its version-2 schema')
   }
   return table.cases.map((entry: unknown): MigratedCase => {
     if (!isObject(entry) || typeof entry.id !== 'string') throw new Error(`invalid case ${JSON.stringify(entry)}`)
@@ -132,7 +130,9 @@ function loadTable(): MigratedCase[] {
     if (entry.sourceBudget !== undefined && !isCount(entry.sourceBudget)) throw new Error(`${id}: invalid sourceBudget`)
     if (entry.note !== undefined && typeof entry.note !== 'string') throw new Error(`${id}: invalid note`)
     const ts = parseOutcome(entry.ts, id)
-    if (ts.outcome === 'rejected' && entry.rust === undefined) throw new Error(`${id}: a rejection names its Rust outcome`)
+    if (ts.outcome === 'rejected' && entry.rust === undefined && ts.class !== 'SessionFormatUnsupportedError') {
+      throw new Error(`${id}: only the final check's refusal needs no Rust outcome`)
+    }
     const rust = entry.rust === undefined ? undefined : parseRust(entry.rust, ts, id)
     return {
       id,
@@ -208,8 +208,7 @@ describe('shared migrated restore cases', () => {
     expect(new Set(cases.map(entry => entry.id)).size).toBe(CASE_COUNT)
     const limits = new Set(cases.flatMap(entry => entry.rust?.outcome === 'native-subset' ? [entry.rust.limit] : []))
     expect(limits).toEqual(new Set(LIMITS))
-    expect(cases.some(entry => entry.rust?.outcome === 'refused')).toBe(true)
-    expect(cases.some(entry => entry.rust?.outcome === 'outside-domain')).toBe(true)
+    expect(cases.some(entry => entry.ts.outcome === 'rejected' && entry.rust === undefined)).toBe(true)
   })
 
   for (const entry of cases) {

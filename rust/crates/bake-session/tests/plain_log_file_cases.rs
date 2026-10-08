@@ -28,7 +28,7 @@ use serde_json::{Map, Value};
 const SCHEMA: &str = "bake/session-conformance/plain-log-file-cases";
 const ORACLE: &str = "in an owned temporary root holding the seeded entries, run each step through the JSONL backend with compression none on the step's handle, a or b, each its own backend instance over the root: create, a write open, or the open handle's append, flush, or close; after each step list every file beneath the root with its text, an empty session.lock by its size";
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 61;
+const CASE_COUNT: usize = 63;
 const SOURCE_BUDGET: usize = 64;
 const LIMITS: [&str; 12] = [
     "empty-id",
@@ -114,7 +114,7 @@ fn load() -> Vec<Map<String, Value>> {
         BTreeSet::from(["cases", "history", "oracle", "schema", "version"])
     );
     assert_eq!(table["schema"], SCHEMA);
-    assert_eq!(table["version"], 3);
+    assert_eq!(table["version"], 4);
     assert_eq!(table["oracle"], ORACLE);
     assert!(
         table["history"]
@@ -454,7 +454,6 @@ fn shared_cases_lay_out_and_write_like_the_typescript_backend() {
     let mut witnessed = BTreeSet::new();
     let mut refusals = BTreeSet::new();
     let mut ran = 0;
-    let mut outside_domain = 0;
     for entry in &cases {
         let id = text(&entry["id"], "case id");
         assert!(
@@ -494,7 +493,6 @@ fn shared_cases_lay_out_and_write_like_the_typescript_backend() {
             if let Some(rust) = step.get("rust")
                 && override_limit(rust, &context).is_none()
             {
-                outside_domain += 1;
                 break;
             }
             let actual = run_step(root, step, &mut handles, &context);
@@ -527,7 +525,6 @@ fn shared_cases_lay_out_and_write_like_the_typescript_backend() {
         }
     }
     assert!(ran > 0);
-    assert_eq!(outside_domain, 1, "one step is outside the model's domain");
     let applicable: BTreeSet<String> = cases
         .iter()
         .filter(|entry| applies(entry, text(&entry["id"], "case id")))

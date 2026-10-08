@@ -13,7 +13,8 @@
 //!
 //! [`restore_migrated`] takes the migration's output, a [`MigratedV2`] from
 //! [`migrate_v2_rows`](crate::migrate_v2_rows) or
-//! [`migrate_released_history`](crate::migrate_released_history), encodes
+//! [`migrate_released_history`](crate::migrate_released_history), runs the
+//! catalog's final check over it with [`check_transformed_artifact`], encodes
 //! its header and events as the current writer would with
 //! [`encode_header_line`] and [`encode_event_line`], and restores those bytes
 //! with [`scan_log`] and the stages of [`StagedLog::restore`].
@@ -22,25 +23,31 @@
 //! decodes back to the same event, so on admitted input the restored state is
 //! the one TypeScript folds from the artifact in memory.
 //!
-//! The final check is not ported. A Session it refuses, or whose stored id
-//! or `cwd` names another path, is outside this function's domain: the
+//! The stored identity check is not modelled: a Session whose stored id or
+//! `cwd` names another path is outside this function's domain, and the
 //! result claims nothing about it.
 //! Nothing is read from or written to a file.
 
 use crate::{
-    EncodeRefusal, MigratedV2, PathPlatform, RestoreLimit, RestoreRefusal, RestoredLog,
-    ScanRefusal, StagedLog, encode_event_line, encode_header_line, scan_log,
+    EncodeRefusal, FinalCheckRefusal, MigratedV2, PathPlatform, RestoreLimit, RestoreRefusal,
+    RestoredLog, ScanRefusal, StagedLog, check_transformed_artifact, encode_event_line,
+    encode_header_line, scan_log,
 };
 
 /// Why a migrated Session restored nothing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MigratedRestoreRefusal {
+    /// The catalog's final check refused the migrated Session. TypeScript's
+    /// read throws `SessionFormatUnsupportedError` with
+    /// [`FinalCheckRefusal::catalog_message`], given the source's version,
+    /// followed by `; source v<N> artifact remains unchanged (raw log:
+    /// <path>)`; a [`FinalCheckRefusal::NativeSubset`] claims nothing.
+    FinalCheck(FinalCheckRefusal),
     /// `validateStoredEvents` or Session construction refused the migrated
     /// events or the closers: [`RestoreRefusal::Unsupported`],
     /// [`RestoreRefusal::Stored`], or [`RestoreRefusal::Restore`]. TypeScript
-    /// refuses the read or the restore too, but its final check runs first
-    /// and may refuse with its own class and message, so only that
-    /// TypeScript refuses is claimed.
+    /// refuses the read or the restore too, but with its own class and
+    /// message, so only that TypeScript refuses is claimed.
     Refused(RestoreRefusal),
     /// This crate does not reproduce the TypeScript outcome; nothing is claimed.
     NativeSubset(MigratedRestoreLimit),
@@ -65,7 +72,8 @@ pub enum MigratedRestoreLimit {
     /// whose `seq` is not its index, or found an inherited cut other than the
     /// migration's. Output of [`migrate_v2_rows`](crate::migrate_v2_rows) and
     /// [`migrate_released_history`](crate::migrate_released_history) never
-    /// does this; a hand-built [`MigratedV2`] may.
+    /// does this, and the final check first refuses a hand-built
+    /// [`MigratedV2`] whose event `seq` is not its index.
     Rescan,
     /// A limit of the restoration stages at row `seq`; see [`RestoreLimit`].
     Restore { seq: u64, limit: RestoreLimit },
@@ -102,9 +110,10 @@ const fn restore_limit_name(limit: RestoreLimit) -> &'static str {
 /// Restore a migrated Session as the production read path restores the
 /// historical file it came from.
 ///
-/// The header is encoded with the migration's inherited cut, each event as
-/// one row, every record followed by LF, and the bytes are scanned with
-/// `platform` and `source_budget` as in
+/// The final check runs first, with `platform`'s rule for an absolute
+/// `cwd`. The header is then encoded with the migration's inherited cut,
+/// each event as one row, every record followed by LF, and the bytes are
+/// scanned with `platform` and `source_budget` as in
 /// [`stage_plain_log`](crate::stage_plain_log). The scan must read back every
 /// encoded event and the migration's inherited cut, or the result is the
 /// `rescan` limit; its header, inherited cut, and rows are then the restored
@@ -116,6 +125,7 @@ pub fn restore_migrated(
     platform: PathPlatform,
     source_budget: usize,
 ) -> Result<RestoredLog, MigratedRestoreRefusal> {
+    check_transformed_artifact(migrated, platform).map_err(MigratedRestoreRefusal::FinalCheck)?;
     let encode = |event: Option<usize>| {
         move |refusal| {
             MigratedRestoreRefusal::NativeSubset(MigratedRestoreLimit::Encode { event, refusal })
@@ -163,7 +173,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn restore_migrated_refuses_events_the_scan_does_not_read_back() {
+    fn restore_migrated_checks_a_hand_built_gap_before_the_scan() {
         let header = json!({
             "version": 3,
             "id": "x",
@@ -173,15 +183,20 @@ mod tests {
         });
         let turn_start =
             |seq: u64| json!({"type": "turn/start", "seq": seq, "time": 0, "data": {"turn": 1}});
-        let rescan = Err(MigratedRestoreRefusal::NativeSubset(
-            MigratedRestoreLimit::Rescan,
+        // The scan would stop before the gap, but the final check refuses
+        // the event first.
+        let precondition = Err(MigratedRestoreRefusal::FinalCheck(
+            FinalCheckRefusal::NativeSubset("precondition".to_owned()),
         ));
         let gap = MigratedV2 {
             header: header.clone(),
             events: vec![turn_start(1)],
             inherited_event_count: 0,
         };
-        assert_eq!(restore_migrated(&gap, PathPlatform::Posix, 16), rescan);
+        assert_eq!(
+            restore_migrated(&gap, PathPlatform::Posix, 16),
+            precondition
+        );
         let contiguous = MigratedV2 {
             header,
             events: vec![turn_start(0)],
