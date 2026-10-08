@@ -1,0 +1,1009 @@
+{
+  "schema": "bake/session-format-conformance/generation-header-cases",
+  "version": 1,
+  "oracle": "JsonlSessionPersistence.stat(id) through readGenerationHeader in packages/session/session-persistence-jsonl/src/index.ts",
+  "cases": [
+    {
+      "id": "v0-minimal",
+      "sourceVersion": 0,
+      "record": "{\"type\":\"session\",\"version\":0,\"id\":\"s1\",\"createdAt\":1700000000000,\"delegationDepth\":0}",
+      "expect": {
+        "outcome": "header",
+        "header": {
+          "version": 3,
+          "id": "s1",
+          "createdAt": 1700000000000,
+          "isSeeded": false,
+          "delegationDepth": 0
+        }
+      }
+    },
+    {
+      "id": "v0-seed-length-zero-is-seeded",
+      "sourceVersion": 0,
+      "record": "{\"type\":\"session\",\"version\":0,\"id\":\"s1\",\"createdAt\":1700000000000,\"delegationDepth\":0,\"seedLength\":0}",
+      "expect": {
+        "outcome": "header",
+        "header": {
+          "version": 3,
+          "id": "s1",
+          "createdAt": 1700000000000,
+          "isSeeded": true,
+          "delegationDepth": 0
+        }
+      }
+    },
+    {
+      "id": "v0-every-field-code-becomes-ptc",
+      "sourceVersion": 0,
+      "record": "{\"type\":\"session\",\"version\":0,\"id\":\"s1\",\"createdAt\":1700000000000,\"delegationDepth\":2,\"seedLength\":5,\"cwd\":\"/w\",\"parentSession\":\"p\",\"origin\":\"subagent\",\"agentPreset\":\"code\"}",
+      "expect": {
+        "outcome": "header",
+        "header": {
+          "version": 3,
+          "id": "s1",
+          "createdAt": 1700000000000,
+          "isSeeded": true,
+          "delegationDepth": 2,
+          "cwd": "/w",
+          "parentSession": "p",
+          "origin": "subagent",
+          "agentPreset": "ptc"
+        }
+      }
+    },
+    {
+      "id": "v0-is-seeded-member-is-unexpected",
+      "sourceVersion": 0,
+      "record": "{\"type\":\"session\",\"version\":0,\"id\":\"s1\",\"createdAt\":1700000000000,\"delegationDepth\":0,\"isSeeded\":false}",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "v0-missing-created-at",
+      "sourceVersion": 0,
+      "record": "{\"type\":\"session\",\"version\":0,\"id\":\"s1\",\"delegationDepth\":0}",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "v1-minimal",
+      "sourceVersion": 1,
+      "record": "{\"type\":\"session\",\"version\":1,\"id\":\"s1\",\"createdAt\":1700000000000,\"delegationDepth\":0}",
+      "expect": {
+        "outcome": "header",
+        "header": {
+          "version": 3,
+          "id": "s1",
+          "createdAt": 1700000000000,
+          "isSeeded": false,
+          "delegationDepth": 0
+        }
+      }
+    },
+    {
+      "id": "v1-seed-length-zero-is-seeded",
+      "sourceVersion": 1,
+      "record": "{\"type\":\"session\",\"version\":1,\"id\":\"s1\",\"createdAt\":1700000000000,\"delegationDepth\":0,\"seedLength\":0}",
+      "expect": {
+        "outcome": "header",
+        "header": {
+          "version": 3,
+          "id": "s1",
+          "createdAt": 1700000000000,
+          "isSeeded": true,
+          "delegationDepth": 0
+        }
+      }
+    },
+    {
+      "id": "v1-seed-length-max-safe",
+      "sourceVersion": 1,
+      "record": "{\"type\":\"session\",\"version\":1,\"id\":\"s1\",\"createdAt\":1700000000000,\"delegationDepth\":0,\"seedLength\":9007199254740991}",
+      "expect": {
+        "outcome": "header",
+        "header": {
+          "version": 3,
+          "id": "s1",
+          "createdAt": 1700000000000,
+          "isSeeded": true,
+          "delegationDepth": 0
+        }
+      }
+    },
+    {
+      "id": "v1-seed-length-unsafe",
+      "sourceVersion": 1,
+      "record": "{\"type\":\"session\",\"version\":1,\"id\":\"s1\",\"createdAt\":1700000000000,\"delegationDepth\":0,\"seedLength\":9007199254740992}",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "v1-seed-length-negative",
+      "sourceVersion": 1,
+      "record": "{\"type\":\"session\",\"version\":1,\"id\":\"s1\",\"createdAt\":1700000000000,\"delegationDepth\":0,\"seedLength\":-1}",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "v1-seed-length-negative-zero",
+      "sourceVersion": 1,
+      "record": "{\"type\":\"session\",\"version\":1,\"id\":\"s1\",\"createdAt\":1700000000000,\"delegationDepth\":0,\"seedLength\":-0}",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "v1-seed-length-null",
+      "sourceVersion": 1,
+      "record": "{\"type\":\"session\",\"version\":1,\"id\":\"s1\",\"createdAt\":1700000000000,\"delegationDepth\":0,\"seedLength\":null}",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "v1-seed-length-fraction",
+      "sourceVersion": 1,
+      "record": "{\"type\":\"session\",\"version\":1,\"id\":\"s1\",\"createdAt\":1700000000000,\"delegationDepth\":0,\"seedLength\":1.5}",
+      "expect": {
+        "outcome": "absent"
+      },
+      "rust": {
+        "limit": "float-lexeme"
+      }
+    },
+    {
+      "id": "v1-code-becomes-ptc",
+      "sourceVersion": 1,
+      "record": "{\"type\":\"session\",\"version\":1,\"id\":\"s1\",\"createdAt\":1700000000000,\"delegationDepth\":0,\"agentPreset\":\"code\"}",
+      "expect": {
+        "outcome": "header",
+        "header": {
+          "version": 3,
+          "id": "s1",
+          "createdAt": 1700000000000,
+          "isSeeded": false,
+          "delegationDepth": 0,
+          "agentPreset": "ptc"
+        }
+      }
+    },
+    {
+      "id": "v1-other-preset-kept",
+      "sourceVersion": 1,
+      "record": "{\"type\":\"session\",\"version\":1,\"id\":\"s1\",\"createdAt\":1700000000000,\"delegationDepth\":0,\"agentPreset\":\"plan\"}",
+      "expect": {
+        "outcome": "header",
+        "header": {
+          "version": 3,
+          "id": "s1",
+          "createdAt": 1700000000000,
+          "isSeeded": false,
+          "delegationDepth": 0,
+          "agentPreset": "plan"
+        }
+      }
+    },
+    {
+      "id": "v1-is-seeded-member-is-unexpected",
+      "sourceVersion": 1,
+      "record": "{\"type\":\"session\",\"version\":1,\"id\":\"s1\",\"createdAt\":1700000000000,\"delegationDepth\":0,\"isSeeded\":true}",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "v1-unknown-member",
+      "sourceVersion": 1,
+      "record": "{\"type\":\"session\",\"version\":1,\"id\":\"s1\",\"createdAt\":1700000000000,\"delegationDepth\":0,\"extra\":1}",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "v1-missing-delegation-depth",
+      "sourceVersion": 1,
+      "record": "{\"type\":\"session\",\"version\":1,\"id\":\"s1\",\"createdAt\":1}",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "v1-cwd-null",
+      "sourceVersion": 1,
+      "record": "{\"type\":\"session\",\"version\":1,\"id\":\"s1\",\"createdAt\":1700000000000,\"delegationDepth\":0,\"cwd\":null}",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "v1-parent-session-null",
+      "sourceVersion": 1,
+      "record": "{\"type\":\"session\",\"version\":1,\"id\":\"s1\",\"createdAt\":1700000000000,\"delegationDepth\":0,\"parentSession\":null}",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "v1-origin-null",
+      "sourceVersion": 1,
+      "record": "{\"type\":\"session\",\"version\":1,\"id\":\"s1\",\"createdAt\":1700000000000,\"delegationDepth\":0,\"origin\":null}",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "v1-origin-other",
+      "sourceVersion": 1,
+      "record": "{\"type\":\"session\",\"version\":1,\"id\":\"s1\",\"createdAt\":1700000000000,\"delegationDepth\":0,\"origin\":\"user\"}",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "v1-relative-cwd",
+      "sourceVersion": 1,
+      "record": "{\"type\":\"session\",\"version\":1,\"id\":\"s1\",\"createdAt\":1700000000000,\"delegationDepth\":0,\"cwd\":\"w\"}",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "v1-drive-cwd",
+      "sourceVersion": 1,
+      "record": "{\"type\":\"session\",\"version\":1,\"id\":\"s1\",\"createdAt\":1700000000000,\"delegationDepth\":0,\"cwd\":\"C:\\\\w\"}",
+      "expect": {
+        "outcome": "absent"
+      },
+      "win32": {
+        "outcome": "header",
+        "header": {
+          "version": 3,
+          "id": "s1",
+          "createdAt": 1700000000000,
+          "isSeeded": false,
+          "delegationDepth": 0,
+          "cwd": "C:\\w"
+        }
+      }
+    },
+    {
+      "id": "v1-backslash-root-cwd",
+      "sourceVersion": 1,
+      "record": "{\"type\":\"session\",\"version\":1,\"id\":\"s1\",\"createdAt\":1700000000000,\"delegationDepth\":0,\"cwd\":\"\\\\w\"}",
+      "expect": {
+        "outcome": "absent"
+      },
+      "win32": {
+        "outcome": "header",
+        "header": {
+          "version": 3,
+          "id": "s1",
+          "createdAt": 1700000000000,
+          "isSeeded": false,
+          "delegationDepth": 0,
+          "cwd": "\\w"
+        }
+      }
+    },
+    {
+      "id": "v1-drive-relative-cwd",
+      "sourceVersion": 1,
+      "record": "{\"type\":\"session\",\"version\":1,\"id\":\"s1\",\"createdAt\":1700000000000,\"delegationDepth\":0,\"cwd\":\"C:w\"}",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "v1-wrong-type",
+      "sourceVersion": 1,
+      "record": "{\"type\":\"Session\",\"version\":1,\"id\":\"s1\",\"createdAt\":1700000000000,\"delegationDepth\":0}",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "v1-numeric-id",
+      "sourceVersion": 1,
+      "record": "{\"type\":\"session\",\"version\":1,\"id\":5,\"createdAt\":1700000000000,\"delegationDepth\":0}",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "v2-minimal-seeded",
+      "sourceVersion": 2,
+      "record": "{\"type\":\"session\",\"version\":2,\"id\":\"s1\",\"createdAt\":1700000000000,\"isSeeded\":true,\"delegationDepth\":0}",
+      "expect": {
+        "outcome": "header",
+        "header": {
+          "version": 3,
+          "id": "s1",
+          "createdAt": 1700000000000,
+          "isSeeded": true,
+          "delegationDepth": 0
+        }
+      }
+    },
+    {
+      "id": "v2-code-becomes-ptc",
+      "sourceVersion": 2,
+      "record": "{\"type\":\"session\",\"version\":2,\"id\":\"s1\",\"createdAt\":1700000000000,\"isSeeded\":false,\"delegationDepth\":0,\"agentPreset\":\"code\",\"cwd\":\"/w\"}",
+      "expect": {
+        "outcome": "header",
+        "header": {
+          "version": 3,
+          "id": "s1",
+          "createdAt": 1700000000000,
+          "isSeeded": false,
+          "delegationDepth": 0,
+          "agentPreset": "ptc",
+          "cwd": "/w"
+        }
+      }
+    },
+    {
+      "id": "v2-missing-is-seeded",
+      "sourceVersion": 2,
+      "record": "{\"type\":\"session\",\"version\":2,\"id\":\"s1\",\"createdAt\":1,\"delegationDepth\":0}",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "v2-is-seeded-string",
+      "sourceVersion": 2,
+      "record": "{\"type\":\"session\",\"version\":2,\"id\":\"s1\",\"createdAt\":1700000000000,\"isSeeded\":\"true\",\"delegationDepth\":0}",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "v2-seed-length-is-unexpected",
+      "sourceVersion": 2,
+      "record": "{\"type\":\"session\",\"version\":2,\"id\":\"s1\",\"createdAt\":1700000000000,\"isSeeded\":false,\"delegationDepth\":0,\"seedLength\":0}",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "v2-agent-preset-null",
+      "sourceVersion": 2,
+      "record": "{\"type\":\"session\",\"version\":2,\"id\":\"s1\",\"createdAt\":1700000000000,\"isSeeded\":false,\"delegationDepth\":0,\"agentPreset\":null}",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "v2-relative-cwd",
+      "sourceVersion": 2,
+      "record": "{\"type\":\"session\",\"version\":2,\"id\":\"s1\",\"createdAt\":1700000000000,\"isSeeded\":false,\"delegationDepth\":0,\"cwd\":\"w\"}",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "v2-drive-cwd",
+      "sourceVersion": 2,
+      "record": "{\"type\":\"session\",\"version\":2,\"id\":\"s1\",\"createdAt\":1700000000000,\"isSeeded\":false,\"delegationDepth\":0,\"cwd\":\"D:/w\"}",
+      "expect": {
+        "outcome": "absent"
+      },
+      "win32": {
+        "outcome": "header",
+        "header": {
+          "version": 3,
+          "id": "s1",
+          "createdAt": 1700000000000,
+          "isSeeded": false,
+          "delegationDepth": 0,
+          "cwd": "D:/w"
+        }
+      }
+    },
+    {
+      "id": "v3-code-stays-code",
+      "sourceVersion": 3,
+      "record": "{\"type\":\"session\",\"version\":3,\"id\":\"s1\",\"createdAt\":1700000000000,\"isSeeded\":false,\"delegationDepth\":0,\"agentPreset\":\"code\"}",
+      "expect": {
+        "outcome": "header",
+        "header": {
+          "version": 3,
+          "id": "s1",
+          "createdAt": 1700000000000,
+          "isSeeded": false,
+          "delegationDepth": 0,
+          "agentPreset": "code"
+        }
+      }
+    },
+    {
+      "id": "v3-every-field",
+      "sourceVersion": 3,
+      "record": "{\"type\":\"session\",\"version\":3,\"id\":\"s1\",\"createdAt\":1700000000000,\"isSeeded\":true,\"delegationDepth\":4,\"cwd\":\"/w\",\"parentSession\":\"p\",\"origin\":\"subagent\",\"agentPreset\":\"ptc\"}",
+      "expect": {
+        "outcome": "header",
+        "header": {
+          "version": 3,
+          "id": "s1",
+          "createdAt": 1700000000000,
+          "isSeeded": true,
+          "delegationDepth": 4,
+          "cwd": "/w",
+          "parentSession": "p",
+          "origin": "subagent",
+          "agentPreset": "ptc"
+        }
+      }
+    },
+    {
+      "id": "v3-seed-length-is-unexpected",
+      "sourceVersion": 3,
+      "record": "{\"type\":\"session\",\"version\":3,\"id\":\"s1\",\"createdAt\":1700000000000,\"isSeeded\":false,\"delegationDepth\":0,\"seedLength\":0}",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "v3-relative-cwd",
+      "sourceVersion": 3,
+      "record": "{\"type\":\"session\",\"version\":3,\"id\":\"s1\",\"createdAt\":1700000000000,\"isSeeded\":false,\"delegationDepth\":0,\"cwd\":\"w\"}",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "v3-crlf",
+      "sourceVersion": 3,
+      "record": "{\"type\":\"session\",\"version\":3,\"id\":\"s1\",\"createdAt\":1700000000000,\"isSeeded\":false,\"delegationDepth\":0}\r",
+      "expect": {
+        "outcome": "header",
+        "header": {
+          "version": 3,
+          "id": "s1",
+          "createdAt": 1700000000000,
+          "isSeeded": false,
+          "delegationDepth": 0
+        }
+      }
+    },
+    {
+      "id": "v3-duplicate-id-last-wins",
+      "sourceVersion": 3,
+      "record": "{\"type\":\"session\",\"version\":3,\"id\":\"other\",\"id\":\"s1\",\"createdAt\":1700000000000,\"isSeeded\":false,\"delegationDepth\":0}",
+      "expect": {
+        "outcome": "header",
+        "header": {
+          "version": 3,
+          "id": "s1",
+          "createdAt": 1700000000000,
+          "isSeeded": false,
+          "delegationDepth": 0
+        }
+      }
+    },
+    {
+      "id": "v3-duplicate-version-last-wins",
+      "sourceVersion": 3,
+      "record": "{\"type\":\"session\",\"version\":2,\"version\":3,\"id\":\"s1\",\"createdAt\":1700000000000,\"isSeeded\":false,\"delegationDepth\":0}",
+      "expect": {
+        "outcome": "header",
+        "header": {
+          "version": 3,
+          "id": "s1",
+          "createdAt": 1700000000000,
+          "isSeeded": false,
+          "delegationDepth": 0
+        }
+      }
+    },
+    {
+      "id": "v3-duplicate-version-last-is-v2",
+      "sourceVersion": 3,
+      "record": "{\"type\":\"session\",\"version\":3,\"version\":2,\"id\":\"s1\",\"createdAt\":1700000000000,\"isSeeded\":false,\"delegationDepth\":0}",
+      "expect": {
+        "outcome": "rejected",
+        "message": "session generation filename identifies v3, but its header identifies v2"
+      }
+    },
+    {
+      "id": "v3-created-at-zero",
+      "sourceVersion": 3,
+      "record": "{\"type\":\"session\",\"version\":3,\"id\":\"s1\",\"createdAt\":0,\"isSeeded\":false,\"delegationDepth\":0}",
+      "expect": {
+        "outcome": "header",
+        "header": {
+          "version": 3,
+          "id": "s1",
+          "createdAt": 0,
+          "isSeeded": false,
+          "delegationDepth": 0
+        }
+      }
+    },
+    {
+      "id": "v3-created-at-max-safe",
+      "sourceVersion": 3,
+      "record": "{\"type\":\"session\",\"version\":3,\"id\":\"s1\",\"createdAt\":9007199254740991,\"isSeeded\":false,\"delegationDepth\":0}",
+      "expect": {
+        "outcome": "header",
+        "header": {
+          "version": 3,
+          "id": "s1",
+          "createdAt": 9007199254740991,
+          "isSeeded": false,
+          "delegationDepth": 0
+        }
+      }
+    },
+    {
+      "id": "v3-created-at-unsafe",
+      "sourceVersion": 3,
+      "record": "{\"type\":\"session\",\"version\":3,\"id\":\"s1\",\"createdAt\":9007199254740992,\"isSeeded\":false,\"delegationDepth\":0}",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "v3-created-at-negative",
+      "sourceVersion": 3,
+      "record": "{\"type\":\"session\",\"version\":3,\"id\":\"s1\",\"createdAt\":-1,\"isSeeded\":false,\"delegationDepth\":0}",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "v3-created-at-negative-zero",
+      "sourceVersion": 3,
+      "record": "{\"type\":\"session\",\"version\":3,\"id\":\"s1\",\"createdAt\":-0,\"isSeeded\":false,\"delegationDepth\":0}",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "v3-created-at-integral-fraction",
+      "sourceVersion": 3,
+      "record": "{\"type\":\"session\",\"version\":3,\"id\":\"s1\",\"createdAt\":1.0,\"isSeeded\":false,\"delegationDepth\":0}",
+      "expect": {
+        "outcome": "header",
+        "header": {
+          "version": 3,
+          "id": "s1",
+          "createdAt": 1,
+          "isSeeded": false,
+          "delegationDepth": 0
+        }
+      },
+      "rust": {
+        "limit": "float-lexeme"
+      }
+    },
+    {
+      "id": "v3-created-at-exponent",
+      "sourceVersion": 3,
+      "record": "{\"type\":\"session\",\"version\":3,\"id\":\"s1\",\"createdAt\":1e2,\"isSeeded\":false,\"delegationDepth\":0}",
+      "expect": {
+        "outcome": "header",
+        "header": {
+          "version": 3,
+          "id": "s1",
+          "createdAt": 100,
+          "isSeeded": false,
+          "delegationDepth": 0
+        }
+      },
+      "rust": {
+        "limit": "float-lexeme"
+      }
+    },
+    {
+      "id": "v3-created-at-infinite",
+      "sourceVersion": 3,
+      "record": "{\"type\":\"session\",\"version\":3,\"id\":\"s1\",\"createdAt\":1e400,\"isSeeded\":false,\"delegationDepth\":0}",
+      "expect": {
+        "outcome": "absent"
+      },
+      "rust": {
+        "limit": "json-parser"
+      }
+    },
+    {
+      "id": "v3-created-at-string",
+      "sourceVersion": 3,
+      "record": "{\"type\":\"session\",\"version\":3,\"id\":\"s1\",\"createdAt\":\"1\",\"isSeeded\":false,\"delegationDepth\":0}",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "v3-negative-fraction-depth-with-float",
+      "sourceVersion": 3,
+      "record": "{\"type\":\"session\",\"version\":3,\"id\":\"s1\",\"createdAt\":2.5,\"isSeeded\":false,\"delegationDepth\":-0.5}",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "version-negative-zero-has-no-stored-version",
+      "sourceVersion": 3,
+      "record": "{\"type\":\"session\",\"version\":-0,\"id\":\"s1\"}",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "version-string",
+      "sourceVersion": 3,
+      "record": "{\"type\":\"session\",\"version\":\"3\",\"id\":\"s1\"}",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "version-missing",
+      "sourceVersion": 3,
+      "record": "{\"type\":\"session\",\"id\":\"s1\"}",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "version-negative",
+      "sourceVersion": 0,
+      "record": "{\"type\":\"session\",\"version\":-1,\"id\":\"s1\"}",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "version-unsafe",
+      "sourceVersion": 3,
+      "record": "{\"type\":\"session\",\"version\":9007199254740992,\"id\":\"s1\"}",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "version-fraction",
+      "sourceVersion": 1,
+      "record": "{\"type\":\"session\",\"version\":1.5,\"id\":\"s1\"}",
+      "expect": {
+        "outcome": "absent"
+      },
+      "rust": {
+        "limit": "float-lexeme"
+      }
+    },
+    {
+      "id": "version-integral-fraction",
+      "sourceVersion": 3,
+      "record": "{\"type\":\"session\",\"version\":3.0,\"id\":\"s1\",\"createdAt\":1700000000000,\"isSeeded\":false,\"delegationDepth\":0}",
+      "expect": {
+        "outcome": "header",
+        "header": {
+          "version": 3,
+          "id": "s1",
+          "createdAt": 1700000000000,
+          "isSeeded": false,
+          "delegationDepth": 0
+        }
+      },
+      "rust": {
+        "limit": "float-lexeme"
+      }
+    },
+    {
+      "id": "not-object-array",
+      "sourceVersion": 3,
+      "record": "[]",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "not-object-null",
+      "sourceVersion": 3,
+      "record": "null",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "not-object-string",
+      "sourceVersion": 3,
+      "record": "\"session\"",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "not-object-number",
+      "sourceVersion": 3,
+      "record": "3",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "invalid-json-open-brace",
+      "sourceVersion": 3,
+      "record": "{",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "invalid-json-trailing-comma",
+      "sourceVersion": 3,
+      "record": "{\"type\":\"session\",\"version\":3,\"id\":\"s1\",\"createdAt\":1700000000000,\"isSeeded\":false,\"delegationDepth\":0,}",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "empty-line",
+      "sourceVersion": 3,
+      "record": "",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "empty-file",
+      "sourceVersion": 3,
+      "bytesHex": "",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "no-line-feed",
+      "sourceVersion": 3,
+      "bytesHex": "7b2274797065223a2273657373696f6e222c2276657273696f6e223a332c226964223a227331222c22637265617465644174223a313730303030303030303030302c226973536565646564223a66616c73652c2264656c65676174696f6e4465707468223a307d",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "line-feed-inside-object",
+      "sourceVersion": 3,
+      "bytesHex": "7b0a2274797065223a2273657373696f6e222c2276657273696f6e223a332c226964223a227331222c22637265617465644174223a313730303030303030303030302c226973536565646564223a66616c73652c2264656c65676174696f6e4465707468223a307d0a",
+      "expect": {
+        "outcome": "absent"
+      }
+    },
+    {
+      "id": "invalid-utf8-in-unexpected-member",
+      "sourceVersion": 3,
+      "bytesHex": "7b2274797065223a2273657373696f6e222c2276657273696f6e223a332c2278223a22ff227d0a",
+      "expect": {
+        "outcome": "absent"
+      },
+      "rust": {
+        "limit": "invalid-utf8"
+      }
+    },
+    {
+      "id": "lone-surrogate-in-unexpected-member",
+      "sourceVersion": 3,
+      "record": "{\"type\":\"session\",\"version\":3,\"x\":\"\\ud800\"}",
+      "expect": {
+        "outcome": "absent"
+      },
+      "rust": {
+        "limit": "json-parser"
+      }
+    },
+    {
+      "id": "filename-v3-header-v2",
+      "sourceVersion": 3,
+      "record": "{\"type\":\"session\",\"version\":2,\"id\":\"s1\",\"createdAt\":1700000000000,\"isSeeded\":false,\"delegationDepth\":0}",
+      "expect": {
+        "outcome": "rejected",
+        "message": "session generation filename identifies v3, but its header identifies v2"
+      }
+    },
+    {
+      "id": "filename-v2-malformed-header-v1",
+      "sourceVersion": 2,
+      "record": "{\"version\":1}",
+      "expect": {
+        "outcome": "rejected",
+        "message": "session generation filename identifies v2, but its header identifies v1"
+      }
+    },
+    {
+      "id": "filename-v0-header-v3",
+      "sourceVersion": 0,
+      "record": "{\"type\":\"session\",\"version\":3,\"id\":\"s1\",\"createdAt\":1700000000000,\"isSeeded\":false,\"delegationDepth\":0}",
+      "expect": {
+        "outcome": "rejected",
+        "message": "session generation filename identifies v0, but its header identifies v3"
+      }
+    },
+    {
+      "id": "filename-v1-header-newer-v5",
+      "sourceVersion": 1,
+      "record": "{\"type\":\"session\",\"version\":5,\"id\":\"s1\"}",
+      "expect": {
+        "outcome": "rejected",
+        "message": "session generation filename identifies v1, but its header identifies v5"
+      }
+    },
+    {
+      "id": "filename-v4-header-v3",
+      "sourceVersion": 4,
+      "record": "{\"type\":\"session\",\"version\":3,\"id\":\"s1\",\"createdAt\":1700000000000,\"isSeeded\":false,\"delegationDepth\":0}",
+      "expect": {
+        "outcome": "rejected",
+        "message": "session generation filename identifies v4, but its header identifies v3"
+      }
+    },
+    {
+      "id": "retired-sandbox-mode-v1",
+      "sourceVersion": 1,
+      "record": "{\"type\":\"session\",\"version\":1,\"id\":\"s1\",\"createdAt\":1700000000000,\"delegationDepth\":0,\"sandboxMode\":\"x\"}",
+      "expect": {
+        "outcome": "rejected",
+        "message": "session header uses retired policy baseline fields"
+      }
+    },
+    {
+      "id": "retired-null-approval-policy",
+      "sourceVersion": 3,
+      "record": "{\"type\":\"session\",\"version\":3,\"id\":\"s1\",\"createdAt\":1700000000000,\"isSeeded\":false,\"delegationDepth\":0,\"approvalPolicy\":null}",
+      "expect": {
+        "outcome": "rejected",
+        "message": "session header uses retired policy baseline fields"
+      }
+    },
+    {
+      "id": "retired-precedes-mismatch",
+      "sourceVersion": 3,
+      "record": "{\"type\":\"session\",\"version\":1,\"id\":\"s1\",\"createdAt\":1700000000000,\"delegationDepth\":0,\"approvalPolicy\":\"never\"}",
+      "expect": {
+        "outcome": "rejected",
+        "message": "session header uses retired policy baseline fields"
+      }
+    },
+    {
+      "id": "retired-precedes-newer",
+      "sourceVersion": 9,
+      "record": "{\"type\":\"session\",\"version\":9,\"id\":\"s1\",\"sandboxMode\":\"x\"}",
+      "expect": {
+        "outcome": "rejected",
+        "message": "session header uses retired policy baseline fields"
+      }
+    },
+    {
+      "id": "retired-without-version",
+      "sourceVersion": 3,
+      "record": "{\"approvalPolicy\":1}",
+      "expect": {
+        "outcome": "rejected",
+        "message": "session header uses retired policy baseline fields"
+      }
+    },
+    {
+      "id": "retired-precedes-invalid-version",
+      "sourceVersion": 3,
+      "record": "{\"version\":-0,\"sandboxMode\":1}",
+      "expect": {
+        "outcome": "rejected",
+        "message": "session header uses retired policy baseline fields"
+      }
+    },
+    {
+      "id": "newer-v4",
+      "sourceVersion": 4,
+      "record": "{\"type\":\"session\",\"version\":4,\"id\":\"s1\"}",
+      "expect": {
+        "outcome": "unsupported",
+        "message": "session \"s1\" uses log format v4, but this harness reads only v3: the log was written by a newer harness — upgrade the harness to open it"
+      }
+    },
+    {
+      "id": "newer-v10-garbage-members",
+      "sourceVersion": 10,
+      "record": "{\"version\":10,\"id\":\"s1\",\"anything\":[1,{}]}",
+      "expect": {
+        "outcome": "unsupported",
+        "message": "session \"s1\" uses log format v10, but this harness reads only v3: the log was written by a newer harness — upgrade the harness to open it"
+      }
+    },
+    {
+      "id": "newer-missing-id",
+      "sourceVersion": 4,
+      "record": "{\"version\":4}",
+      "expect": {
+        "outcome": "unsupported",
+        "message": "session \"undefined\" uses log format v4, but this harness reads only v3: the log was written by a newer harness — upgrade the harness to open it"
+      }
+    },
+    {
+      "id": "newer-null-id",
+      "sourceVersion": 4,
+      "record": "{\"version\":4,\"id\":null}",
+      "expect": {
+        "outcome": "unsupported",
+        "message": "session \"null\" uses log format v4, but this harness reads only v3: the log was written by a newer harness — upgrade the harness to open it"
+      }
+    },
+    {
+      "id": "newer-boolean-id",
+      "sourceVersion": 4,
+      "record": "{\"version\":4,\"id\":true}",
+      "expect": {
+        "outcome": "unsupported",
+        "message": "session \"true\" uses log format v4, but this harness reads only v3: the log was written by a newer harness — upgrade the harness to open it"
+      }
+    },
+    {
+      "id": "newer-integer-id",
+      "sourceVersion": 4,
+      "record": "{\"version\":4,\"id\":-12}",
+      "expect": {
+        "outcome": "unsupported",
+        "message": "session \"-12\" uses log format v4, but this harness reads only v3: the log was written by a newer harness — upgrade the harness to open it"
+      }
+    },
+    {
+      "id": "newer-unsafe-integer-id",
+      "sourceVersion": 4,
+      "record": "{\"version\":4,\"id\":9007199254740993}",
+      "expect": {
+        "outcome": "unsupported",
+        "message": "session \"9007199254740992\" uses log format v4, but this harness reads only v3: the log was written by a newer harness — upgrade the harness to open it"
+      }
+    },
+    {
+      "id": "newer-large-integer-id",
+      "sourceVersion": 4,
+      "record": "{\"version\":4,\"id\":1152921504606846977}",
+      "expect": {
+        "outcome": "unsupported",
+        "message": "session \"1152921504606847000\" uses log format v4, but this harness reads only v3: the log was written by a newer harness — upgrade the harness to open it"
+      }
+    },
+    {
+      "id": "newer-fraction-id",
+      "sourceVersion": 4,
+      "record": "{\"version\":4,\"id\":1.5}",
+      "expect": {
+        "outcome": "unsupported",
+        "message": "session \"1.5\" uses log format v4, but this harness reads only v3: the log was written by a newer harness — upgrade the harness to open it"
+      },
+      "rust": {
+        "limit": "float-lexeme"
+      }
+    },
+    {
+      "id": "newer-object-id",
+      "sourceVersion": 4,
+      "record": "{\"version\":4,\"id\":{}}",
+      "expect": {
+        "outcome": "unsupported",
+        "message": "session \"[object Object]\" uses log format v4, but this harness reads only v3: the log was written by a newer harness — upgrade the harness to open it"
+      },
+      "rust": {
+        "limit": "version-diagnostic"
+      }
+    },
+    {
+      "id": "newer-array-id",
+      "sourceVersion": 4,
+      "record": "{\"version\":4,\"id\":[\"a\",\"b\"]}",
+      "expect": {
+        "outcome": "unsupported",
+        "message": "session \"a,b\" uses log format v4, but this harness reads only v3: the log was written by a newer harness — upgrade the harness to open it"
+      },
+      "rust": {
+        "limit": "version-diagnostic"
+      }
+    }
+  ]
+}
