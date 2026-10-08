@@ -38,19 +38,27 @@
 //! [`migrate_v2_rows`] strictly decodes a released v2 Session's parsed header
 //! and rows and runs the v2→v3 migration over them; its output is not an
 //! opened Session, since the final check of the transformed log is not run.
-//! [`token_usage`] folds a [`RestoredLog`]'s provider-reported token usage.
+//! [`decode_v0_v1_rows`] decodes a released v0 or v1 Session's parsed header
+//! and rows as the released physical codec does, without migrating them.
+//! [`token_usage`] folds a [`RestoredLog`]'s provider-reported token usage,
+//! and [`context_pressure`] its context occupancy with the surface's
+//! heuristic token total.
 //! [`restored_inbox`] and [`consumed_work`] fold a [`RestoredLog`]'s events
 //! into its pending inbox and its account of consumed work.
 //! [`fork_seed`] selects the events `SessionStore.fork` copies from a
 //! [`RestoredLog`] into a child, or refuses as `SessionForkError` does.
+//! [`goal_projection`] folds a [`RestoredLog`]'s goal changes and goal rounds
+//! into its durable goal state, keeping the first replay failure.
 //! None reads or writes a file or encodes a log. The crate is
 //! unstable and unshipped; the preview's `session inspect` and `session stat` use it.
 
 mod envelope;
 mod fork;
 mod generation_header;
+mod goal;
 mod inbox;
 mod offload;
+mod pressure;
 mod repair;
 mod replay;
 mod request;
@@ -58,6 +66,7 @@ mod restore;
 mod scan;
 mod source_event_seqs;
 mod usage;
+mod v1_codec;
 mod v2_to_v3;
 mod v3_row;
 mod zstd;
@@ -68,11 +77,19 @@ pub use envelope::{
 };
 pub use fork::{ForkLimit, ForkRefusal, ForkSeed, fork_seed};
 pub use generation_header::{GenerationHeaderRefusal, read_generation_header_record};
+pub use goal::{
+    GoalBlockReason, GoalLimit, GoalPhase, GoalProjection, GoalProjectionState, GoalRefusal,
+    GoalSnapshot, goal_projection,
+};
 pub use inbox::{
     ConsumedWork, ConsumedWorkCoercion, ConsumedWorkLimit, InboxLimit, InboxRefusal, PendingInbox,
     consumed_work, restored_inbox,
 };
 pub use offload::OffloadRejection;
+pub use pressure::{
+    ContextPressureState, ContextPressureView, PressureLimit, PressureRefusal, RequestRoute,
+    context_pressure,
+};
 pub use replay::{ReplayLimit, ReplayRefusal, SeedRejection, replay_requests};
 pub use request::Request;
 pub use restore::{
@@ -86,6 +103,10 @@ pub use source_event_seqs::{
 };
 pub use usage::{
     LastTokenUsage, TokenUsageBuckets, TokenUsageState, UsageLimit, UsageRefusal, token_usage,
+};
+pub use v1_codec::{
+    DecodedV1Rows, V1CodecLimit, V1CodecLocation, V1CodecRecovery, V1CodecRefusal, V1CodecVersion,
+    decode_v0_v1_rows,
 };
 pub use v2_to_v3::{MigratedV2, V2ToV3Layer, V2ToV3Location, V2ToV3Refusal, migrate_v2_rows};
 pub use v3_row::{

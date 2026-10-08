@@ -1,0 +1,1370 @@
+{
+  "schema": "bake/session-conformance/pressure-cases",
+  "version": 1,
+  "oracle": "contextPressureProjectionDefinition.init/apply and wire.view in packages/llm/token-meter/src/usage-projection.ts, folded over the events Session.fromRestore holds for each case's parsed rows and their interruptedTurnClosers",
+  "history": [
+    "Version 1: 36 cases, written from the TypeScript sources before either harness ran."
+  ],
+  "logs": {
+    "tool-call-turn": "conformance/runtime/request-reconstruction/tool-call-turn/session.jsonl",
+    "dynamic-tools": "conformance/runtime/request-reconstruction/dynamic-tools/session.jsonl",
+    "retry-attempt": "conformance/runtime/request-reconstruction/retry-attempt/session.jsonl"
+  },
+  "cases": [
+    {
+      "id": "tool-call-turn",
+      "log": "tool-call-turn",
+      "edits": [],
+      "ts": {
+        "outcome": "folded",
+        "state": {
+          "pressureTokens": 10,
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "surfaceTokens": 59,
+          "sampledSurfaceTokens": 50
+        },
+        "view": {
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "pressureTokens": 10,
+          "projectedTokens": 19
+        }
+      },
+      "note": "Surface after seqs 4, 5, 8, 10, 13: 7, 16, 35, 50, 59; the seq 13 sample saw 50."
+    },
+    {
+      "id": "dynamic-tools",
+      "log": "dynamic-tools",
+      "edits": [],
+      "ts": {
+        "outcome": "folded",
+        "state": {
+          "pressureTokens": 10,
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "surfaceTokens": 108,
+          "sampledSurfaceTokens": 98
+        },
+        "view": {
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "pressureTokens": 10,
+          "projectedTokens": 20
+        }
+      },
+      "note": "Header changes keep the route; the seq 35 sample saw 98 of the final 108."
+    },
+    {
+      "id": "retry-attempt",
+      "log": "retry-attempt",
+      "edits": [],
+      "ts": {
+        "outcome": "folded",
+        "state": {
+          "pressureTokens": 10,
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock-b"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock-b"
+          },
+          "surfaceTokens": 25,
+          "sampledSurfaceTokens": 16
+        },
+        "view": {
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock-b"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock-b"
+          },
+          "pressureTokens": 10,
+          "projectedTokens": 19
+        }
+      },
+      "note": "The failed attempt reports no usage; the message's sample stamps the changed route."
+    },
+    {
+      "id": "truncated-before-any-settlement",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 8
+        }
+      ],
+      "ts": {
+        "outcome": "folded",
+        "state": {
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "surfaceTokens": 16
+        },
+        "view": {
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          }
+        }
+      },
+      "note": "No sample, so neither pressure nor projection; the closers are off the surface."
+    },
+    {
+      "id": "closer-tool-not-started",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 9
+        }
+      ],
+      "ts": {
+        "outcome": "folded",
+        "state": {
+          "pressureTokens": 10,
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "surfaceTokens": 73,
+          "sampledSurfaceTokens": 16
+        },
+        "view": {
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "pressureTokens": 10,
+          "projectedTokens": 67
+        }
+      },
+      "note": "The synthetic TOOL_NOT_STARTED result, 104 characters, prices 26 + 4 + 4 + 4."
+    },
+    {
+      "id": "closer-tool-outcome-unknown",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 10
+        }
+      ],
+      "ts": {
+        "outcome": "folded",
+        "state": {
+          "pressureTokens": 10,
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "surfaceTokens": 126,
+          "sampledSurfaceTokens": 16
+        },
+        "view": {
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "pressureTokens": 10,
+          "projectedTokens": 120
+        }
+      },
+      "note": "The synthetic TOOL_OUTCOME_UNKNOWN result, 313 characters, prices 79 + 4 + 4 + 4."
+    },
+    {
+      "id": "empty-assistant-content",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 13,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"done\"}]",
+          "replace": "\"content\":[]"
+        }
+      ],
+      "ts": {
+        "outcome": "folded",
+        "state": {
+          "pressureTokens": 10,
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "surfaceTokens": 50,
+          "sampledSurfaceTokens": 50
+        },
+        "view": {
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "pressureTokens": 10,
+          "projectedTokens": 10
+        }
+      },
+      "note": "An empty Assistant message derives no message but still samples."
+    },
+    {
+      "id": "empty-system-content",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 4,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"stable base\"}]",
+          "replace": "\"content\":[]"
+        }
+      ],
+      "ts": {
+        "outcome": "folded",
+        "state": {
+          "pressureTokens": 10,
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "surfaceTokens": 52,
+          "sampledSurfaceTokens": 43
+        },
+        "view": {
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "pressureTokens": 10,
+          "projectedTokens": 19
+        }
+      },
+      "note": "An empty system prompt prices 0, without role framing."
+    },
+    {
+      "id": "system-reasoning-block",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 4,
+          "find": "{\"type\":\"text\",\"text\":\"stable base\"}",
+          "replace": "{\"type\":\"reasoning\",\"text\":\"stable base\"}"
+        }
+      ],
+      "ts": {
+        "outcome": "folded",
+        "state": {
+          "pressureTokens": 10,
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "surfaceTokens": 67,
+          "sampledSurfaceTokens": 58
+        },
+        "view": {
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "pressureTokens": 10,
+          "projectedTokens": 19
+        }
+      },
+      "note": "A system reasoning block prices its 41-character JSON: ceil(41 / 4) + 4 = 15."
+    },
+    {
+      "id": "system-text-blocks-share-one-ceiling",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 4,
+          "find": "[{\"type\":\"text\",\"text\":\"stable base\"}]",
+          "replace": "[{\"type\":\"text\",\"text\":\"a\"},{\"type\":\"text\",\"text\":\"b\"}]"
+        }
+      ],
+      "ts": {
+        "outcome": "folded",
+        "state": {
+          "pressureTokens": 10,
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "surfaceTokens": 57,
+          "sampledSurfaceTokens": 48
+        },
+        "view": {
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "pressureTokens": 10,
+          "projectedTokens": 19
+        }
+      },
+      "note": "System characters sum before one ceiling and carry no block overhead: ceil(2 / 4) + 4 = 5."
+    },
+    {
+      "id": "utf16-text-length",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"text\":\"go\"",
+          "replace": "\"text\":\"😀😀é\""
+        }
+      ],
+      "ts": {
+        "outcome": "folded",
+        "state": {
+          "pressureTokens": 10,
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "surfaceTokens": 60,
+          "sampledSurfaceTokens": 51
+        },
+        "view": {
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "pressureTokens": 10,
+          "projectedTokens": 19
+        }
+      },
+      "note": "Two astral characters and one BMP character are 5 UTF-16 units (ceil 2) but 10 UTF-8 bytes (ceil 3)."
+    },
+    {
+      "id": "image-block-structural-price",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"image\",\"mediaType\":\"image/png\",\"data\":\"a\\\"b\\n\\u0001\",\"n\":[640,-12,true,null],\"offloaded\":true}]"
+        }
+      ],
+      "ts": {
+        "outcome": "folded",
+        "state": {
+          "pressureTokens": 10,
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "surfaceTokens": 85,
+          "sampledSurfaceTokens": 76
+        },
+        "view": {
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "pressureTokens": 10,
+          "projectedTokens": 19
+        }
+      },
+      "note": "Without offloaded, the image's JSON is 86 characters: 4 + ceil(86 / 4) = 26."
+    },
+    {
+      "id": "unknown-block-structural-price",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 13,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"done\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"done\"},{\"type\":\"widget\",\"x\":\"é😀\"}]"
+        }
+      ],
+      "ts": {
+        "outcome": "folded",
+        "state": {
+          "pressureTokens": 10,
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "surfaceTokens": 70,
+          "sampledSurfaceTokens": 50
+        },
+        "view": {
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "pressureTokens": 10,
+          "projectedTokens": 30
+        }
+      },
+      "note": "An unknown block's 27-character JSON prices 4 + 7, after the seq 13 sample is stamped."
+    },
+    {
+      "id": "nested-tool-result",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 10,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"echo: one\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"echo: one\"},{\"type\":\"tool-result\",\"toolCallId\":\"x\",\"content\":[{\"type\":\"reasoning\",\"text\":\"abcde\"}]}]"
+        }
+      ],
+      "ts": {
+        "outcome": "folded",
+        "state": {
+          "pressureTokens": 10,
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "surfaceTokens": 69,
+          "sampledSurfaceTokens": 60
+        },
+        "view": {
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "pressureTokens": 10,
+          "projectedTokens": 19
+        }
+      },
+      "note": "A nested tool result adds its content and its own block overhead: 6 + 4."
+    },
+    {
+      "id": "message-usage-with-cache",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 13,
+          "find": "\"usage\":{\"inputTokens\":10,\"outputTokens\":4},\"stream\"",
+          "replace": "\"usage\":{\"inputTokens\":3,\"outputTokens\":4,\"cacheReadTokens\":20,\"cacheWriteTokens\":null},\"stream\""
+        }
+      ],
+      "ts": {
+        "outcome": "folded",
+        "state": {
+          "pressureTokens": 23,
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "surfaceTokens": 59,
+          "sampledSurfaceTokens": 50
+        },
+        "view": {
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "pressureTokens": 23,
+          "projectedTokens": 32
+        }
+      },
+      "note": "Pressure is input plus cache traffic, no output; null cache counts are 0."
+    },
+    {
+      "id": "stream-usage-without-field",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 13,
+          "find": "\"usage\":{\"inputTokens\":10,\"outputTokens\":4},\"stream\"",
+          "replace": "\"stream\""
+        },
+        {
+          "row": 13,
+          "find": "\"usage\":{\"inputTokens\":10,\"outputTokens\":4}",
+          "replace": "\"usage\":{\"inputTokens\":7,\"outputTokens\":4,\"cacheWriteTokens\":5}"
+        }
+      ],
+      "ts": {
+        "outcome": "folded",
+        "state": {
+          "pressureTokens": 12,
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "surfaceTokens": 59,
+          "sampledSurfaceTokens": 50
+        },
+        "view": {
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "pressureTokens": 12,
+          "projectedTokens": 21
+        }
+      },
+      "note": "Without data.usage, the stream's last usage chunk is the sample."
+    },
+    {
+      "id": "context-window-sampled",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 7,
+          "find": "\"data\":{\"provider\":\"mock\",\"model\":\"mock\"}",
+          "replace": "\"data\":{\"provider\":\"mock\",\"model\":\"mock\",\"contextWindow\":1000}"
+        }
+      ],
+      "ts": {
+        "outcome": "folded",
+        "state": {
+          "contextWindow": 1000,
+          "sampledContextWindow": 1000,
+          "pressureTokens": 10,
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "surfaceTokens": 59,
+          "sampledSurfaceTokens": 50
+        },
+        "view": {
+          "contextWindow": 1000,
+          "sampledContextWindow": 1000,
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "pressureTokens": 10,
+          "projectedTokens": 19
+        }
+      }
+    },
+    {
+      "id": "context-window-removed-after-sample",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 7,
+          "find": "\"data\":{\"provider\":\"mock\",\"model\":\"mock\"}",
+          "replace": "\"data\":{\"provider\":\"mock\",\"model\":\"mock\",\"contextWindow\":1000}"
+        },
+        {
+          "append": "{\"type\":\"request/context\",\"seq\":16,\"time\":1791337579871,\"data\":{\"provider\":\"mock\",\"model\":\"mock-c\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "folded",
+        "state": {
+          "sampledContextWindow": 1000,
+          "pressureTokens": 10,
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock-c"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "surfaceTokens": 59,
+          "sampledSurfaceTokens": 50
+        },
+        "view": {
+          "sampledContextWindow": 1000,
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock-c"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "pressureTokens": 10,
+          "projectedTokens": 19
+        }
+      },
+      "note": "A later context without a window removes it; the sample keeps the window and route it saw."
+    },
+    {
+      "id": "header-route-change-after-sample",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"request/header\",\"seq\":16,\"time\":1791337579871,\"data\":{\"header\":{\"config\":{\"provider\":\"mock\",\"model\":\"mock-h\"},\"tools\":[{\"name\":\"echo\",\"description\":\"echo back\",\"parameters\":{\"type\":\"object\",\"properties\":{\"text\":{\"type\":\"string\"}}}}]},\"reason\":\"change\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "folded",
+        "state": {
+          "pressureTokens": 10,
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock-h"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "surfaceTokens": 59,
+          "sampledSurfaceTokens": 50
+        },
+        "view": {
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock-h"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "pressureTokens": 10,
+          "projectedTokens": 19
+        }
+      }
+    },
+    {
+      "id": "attempt-sample-before-retry",
+      "log": "retry-attempt",
+      "edits": [
+        {
+          "row": 8,
+          "find": "\"stream\":[{\"type\":\"chunk\"",
+          "replace": "\"stream\":[{\"type\":\"chunk\",\"time\":1791378812492,\"chunk\":{\"type\":\"usage\",\"usage\":{\"inputTokens\":30,\"outputTokens\":1,\"cacheReadTokens\":2}}},{\"type\":\"chunk\""
+        },
+        {
+          "truncate": 9
+        }
+      ],
+      "ts": {
+        "outcome": "folded",
+        "state": {
+          "pressureTokens": 32,
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "surfaceTokens": 16,
+          "sampledSurfaceTokens": 16
+        },
+        "view": {
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "pressureTokens": 32,
+          "projectedTokens": 32
+        }
+      },
+      "note": "A failed attempt's usage chunk samples with the route before the retry's change."
+    },
+    {
+      "id": "summary-claim-matched-replace",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"compaction/summary\",\"seq\":16,\"time\":1791337579871,\"data\":{\"compactionId\":\"k1\",\"summary\":[{\"type\":\"text\",\"text\":\"s\"}],\"shadowedRange\":{\"start\":5,\"end\":13},\"shadowedTokenCount\":52}}"
+        },
+        {
+          "append": "{\"type\":\"user/message\",\"seq\":17,\"time\":1791337579871,\"data\":{\"content\":[{\"type\":\"text\",\"text\":\"summary of work\"}],\"source\":{\"kind\":\"plugin\",\"plugin\":\"compact\",\"compactionId\":\"k1\"},\"role\":\"user\",\"id\":\"summary-1\"},\"sourceEventSeqs\":[5,8,10,13],\"surfaceOp\":{\"op\":\"replace\",\"startSeq\":5,\"endSeq\":13}}"
+        }
+      ],
+      "ts": {
+        "outcome": "folded",
+        "state": {
+          "pressureTokens": 10,
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "surfaceTokens": 19,
+          "sampledSurfaceTokens": 50
+        },
+        "view": {
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "pressureTokens": 10,
+          "projectedTokens": 0
+        }
+      },
+      "note": "The replacement prices 12 and its claim 52: the surface drops by 40 and the projection clamps at 0."
+    },
+    {
+      "id": "prune-claim-matched-tool-result",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"compaction/prune\",\"seq\":16,\"time\":1791337579871,\"data\":{\"shadowedRange\":{\"start\":10,\"end\":10},\"shadowedTokenCount\":15}}"
+        },
+        {
+          "append": "{\"type\":\"tool/result\",\"seq\":17,\"time\":1791337579871,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"source\":{\"kind\":\"tool\",\"callId\":\"c1\"},\"content\":[{\"type\":\"tool-result\",\"toolCallId\":\"c1\",\"content\":[{\"type\":\"text\",\"text\":\"[pruned]\"}],\"isError\":false}],\"role\":\"user\",\"id\":\"df2fbed1-1421-4a96-8237-079e67740391\"}},\"sourceEventSeqs\":[10],\"surfaceOp\":{\"op\":\"replace\",\"startSeq\":10,\"endSeq\":10}}"
+        }
+      ],
+      "ts": {
+        "outcome": "folded",
+        "state": {
+          "pressureTokens": 10,
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "surfaceTokens": 58,
+          "sampledSurfaceTokens": 50
+        },
+        "view": {
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "pressureTokens": 10,
+          "projectedTokens": 18
+        }
+      },
+      "note": "The pruned result prices 14 against its claim of 15."
+    },
+    {
+      "id": "unclaimed-replace-folds-neutrally",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"user/message\",\"seq\":16,\"time\":1791337579871,\"data\":{\"content\":[{\"type\":\"text\",\"text\":\"summary of work\"}],\"source\":{\"kind\":\"plugin\",\"plugin\":\"compact\",\"compactionId\":\"k1\"},\"role\":\"user\",\"id\":\"summary-1\"},\"sourceEventSeqs\":[5,8,10,13],\"surfaceOp\":{\"op\":\"replace\",\"startSeq\":5,\"endSeq\":13}}"
+        }
+      ],
+      "ts": {
+        "outcome": "folded",
+        "state": {
+          "pressureTokens": 10,
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "surfaceTokens": 59,
+          "sampledSurfaceTokens": 50
+        },
+        "view": {
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "pressureTokens": 10,
+          "projectedTokens": 19
+        }
+      },
+      "note": "A replacement without a claim changes nothing."
+    },
+    {
+      "id": "mismatched-claim-throws",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"compaction/summary\",\"seq\":16,\"time\":1791337579871,\"data\":{\"compactionId\":\"k1\",\"summary\":[{\"type\":\"text\",\"text\":\"s\"}],\"shadowedRange\":{\"start\":5,\"end\":10},\"shadowedTokenCount\":52}}"
+        },
+        {
+          "append": "{\"type\":\"user/message\",\"seq\":17,\"time\":1791337579871,\"data\":{\"content\":[{\"type\":\"text\",\"text\":\"summary of work\"}],\"source\":{\"kind\":\"plugin\",\"plugin\":\"compact\",\"compactionId\":\"k1\"},\"role\":\"user\",\"id\":\"summary-1\"},\"sourceEventSeqs\":[5,8,10,13],\"surfaceOp\":{\"op\":\"replace\",\"startSeq\":5,\"endSeq\":13}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "seq": 17,
+        "message": "token surface: replace at seq 17 over range 5-13 has no adjacent shadow price (armed claim covers 5-10)"
+      }
+    },
+    {
+      "id": "claim-expired-by-intervening-event",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"compaction/summary\",\"seq\":16,\"time\":1791337579871,\"data\":{\"compactionId\":\"k1\",\"summary\":[{\"type\":\"text\",\"text\":\"s\"}],\"shadowedRange\":{\"start\":5,\"end\":13},\"shadowedTokenCount\":52}}"
+        },
+        {
+          "append": "{\"type\":\"request/context\",\"seq\":17,\"time\":1791337579871,\"data\":{\"provider\":\"mock\",\"model\":\"mock\"}}"
+        },
+        {
+          "append": "{\"type\":\"user/message\",\"seq\":18,\"time\":1791337579871,\"data\":{\"content\":[{\"type\":\"text\",\"text\":\"summary of work\"}],\"source\":{\"kind\":\"plugin\",\"plugin\":\"compact\",\"compactionId\":\"k1\"},\"role\":\"user\",\"id\":\"summary-1\"},\"sourceEventSeqs\":[5,8,10,13],\"surfaceOp\":{\"op\":\"replace\",\"startSeq\":5,\"endSeq\":13}}"
+        }
+      ],
+      "ts": {
+        "outcome": "folded",
+        "state": {
+          "pressureTokens": 10,
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "surfaceTokens": 59,
+          "sampledSurfaceTokens": 50
+        },
+        "view": {
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "pressureTokens": 10,
+          "projectedTokens": 19
+        }
+      },
+      "note": "Any event between the claim and the replacement expires the claim."
+    },
+    {
+      "id": "later-claim-replaces-earlier",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"compaction/summary\",\"seq\":16,\"time\":1791337579871,\"data\":{\"compactionId\":\"k1\",\"summary\":[{\"type\":\"text\",\"text\":\"s\"}],\"shadowedRange\":{\"start\":5,\"end\":10},\"shadowedTokenCount\":99}}"
+        },
+        {
+          "append": "{\"type\":\"compaction/summary\",\"seq\":17,\"time\":1791337579871,\"data\":{\"compactionId\":\"k1\",\"summary\":[{\"type\":\"text\",\"text\":\"s\"}],\"shadowedRange\":{\"start\":5,\"end\":13},\"shadowedTokenCount\":52}}"
+        },
+        {
+          "append": "{\"type\":\"user/message\",\"seq\":18,\"time\":1791337579871,\"data\":{\"content\":[{\"type\":\"text\",\"text\":\"summary of work\"}],\"source\":{\"kind\":\"plugin\",\"plugin\":\"compact\",\"compactionId\":\"k1\"},\"role\":\"user\",\"id\":\"summary-1\"},\"sourceEventSeqs\":[5,8,10,13],\"surfaceOp\":{\"op\":\"replace\",\"startSeq\":5,\"endSeq\":13}}"
+        }
+      ],
+      "ts": {
+        "outcome": "folded",
+        "state": {
+          "pressureTokens": 10,
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "surfaceTokens": 19,
+          "sampledSurfaceTokens": 50
+        },
+        "view": {
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "pressureTokens": 10,
+          "projectedTokens": 0
+        }
+      }
+    },
+    {
+      "id": "limit-number-attempt-exponent",
+      "log": "retry-attempt",
+      "edits": [
+        {
+          "row": 8,
+          "find": "\"stream\":[{\"type\":\"chunk\"",
+          "replace": "\"stream\":[{\"type\":\"chunk\",\"time\":1791378812492,\"chunk\":{\"type\":\"usage\",\"usage\":{\"inputTokens\":1e3,\"outputTokens\":1}}},{\"type\":\"chunk\""
+        }
+      ],
+      "ts": {
+        "outcome": "folded",
+        "state": {
+          "pressureTokens": 10,
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock-b"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock-b"
+          },
+          "surfaceTokens": 25,
+          "sampledSurfaceTokens": 16
+        },
+        "view": {
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock-b"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock-b"
+          },
+          "pressureTokens": 10,
+          "projectedTokens": 19
+        }
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "number",
+        "seq": 8
+      },
+      "note": "JSON.parse reads 1000, and the message's sample later replaces it."
+    },
+    {
+      "id": "limit-number-claim-price-string",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"compaction/summary\",\"seq\":16,\"time\":1791337579871,\"data\":{\"compactionId\":\"k1\",\"summary\":[{\"type\":\"text\",\"text\":\"s\"}],\"shadowedRange\":{\"start\":5,\"end\":13},\"shadowedTokenCount\":\"52\"}}"
+        },
+        {
+          "append": "{\"type\":\"user/message\",\"seq\":17,\"time\":1791337579871,\"data\":{\"content\":[{\"type\":\"text\",\"text\":\"summary of work\"}],\"source\":{\"kind\":\"plugin\",\"plugin\":\"compact\",\"compactionId\":\"k1\"},\"role\":\"user\",\"id\":\"summary-1\"},\"sourceEventSeqs\":[5,8,10,13],\"surfaceOp\":{\"op\":\"replace\",\"startSeq\":5,\"endSeq\":13}}"
+        }
+      ],
+      "ts": {
+        "outcome": "folded",
+        "state": {
+          "pressureTokens": 10,
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "surfaceTokens": 19,
+          "sampledSurfaceTokens": 50
+        },
+        "view": {
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "pressureTokens": 10,
+          "projectedTokens": 0
+        }
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "number",
+        "seq": 17
+      },
+      "note": "Subtraction coerces the string price."
+    },
+    {
+      "id": "limit-usage-string-input",
+      "log": "retry-attempt",
+      "edits": [
+        {
+          "row": 8,
+          "find": "\"stream\":[{\"type\":\"chunk\"",
+          "replace": "\"stream\":[{\"type\":\"chunk\",\"time\":1791378812492,\"chunk\":{\"type\":\"usage\",\"usage\":{\"inputTokens\":\"5\",\"outputTokens\":1}}},{\"type\":\"chunk\""
+        }
+      ],
+      "ts": {
+        "outcome": "folded",
+        "state": {
+          "pressureTokens": 10,
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock-b"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock-b"
+          },
+          "surfaceTokens": 25,
+          "sampledSurfaceTokens": 16
+        },
+        "view": {
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock-b"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock-b"
+          },
+          "pressureTokens": 10,
+          "projectedTokens": 19
+        }
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "usage",
+        "seq": 8
+      },
+      "note": "Addition concatenates the string, and the message's sample later replaces it."
+    },
+    {
+      "id": "limit-stream-null-record",
+      "log": "retry-attempt",
+      "edits": [
+        {
+          "row": 8,
+          "find": "\"code\":\"SERVER\"}}}}]",
+          "replace": "\"code\":\"SERVER\"}}}},null]"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "TypeError",
+        "seq": 8
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "stream",
+        "seq": 8
+      }
+    },
+    {
+      "id": "limit-claim-missing-range",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"compaction/summary\",\"seq\":16,\"time\":1791337579871,\"data\":{\"compactionId\":\"k1\",\"shadowedTokenCount\":52}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "TypeError",
+        "seq": 16
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "claim",
+        "seq": 16
+      }
+    },
+    {
+      "id": "limit-claim-negative-start",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"compaction/summary\",\"seq\":16,\"time\":1791337579871,\"data\":{\"compactionId\":\"k1\",\"summary\":[{\"type\":\"text\",\"text\":\"s\"}],\"shadowedRange\":{\"start\":-1,\"end\":13},\"shadowedTokenCount\":52}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "TypeError",
+        "seq": 16
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "claim",
+        "seq": 16
+      },
+      "note": "SessionSeq throws for -1."
+    },
+    {
+      "id": "limit-claim-fraction-endpoint",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"compaction/summary\",\"seq\":16,\"time\":1791337579871,\"data\":{\"compactionId\":\"k1\",\"shadowedRange\":{\"start\":5.0,\"end\":13},\"shadowedTokenCount\":52}}"
+        },
+        {
+          "append": "{\"type\":\"user/message\",\"seq\":17,\"time\":1791337579871,\"data\":{\"content\":[{\"type\":\"text\",\"text\":\"summary of work\"}],\"source\":{\"kind\":\"plugin\",\"plugin\":\"compact\",\"compactionId\":\"k1\"},\"role\":\"user\",\"id\":\"summary-1\"},\"sourceEventSeqs\":[5,8,10,13],\"surfaceOp\":{\"op\":\"replace\",\"startSeq\":5,\"endSeq\":13}}"
+        }
+      ],
+      "ts": {
+        "outcome": "folded",
+        "state": {
+          "pressureTokens": 10,
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "surfaceTokens": 19,
+          "sampledSurfaceTokens": 50
+        },
+        "view": {
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "pressureTokens": 10,
+          "projectedTokens": 0
+        }
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "claim",
+        "seq": 16
+      },
+      "note": "JSON.parse reads 5.0 as 5."
+    },
+    {
+      "id": "limit-block-missing-text",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"text\"}]"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "TypeError",
+        "seq": 5
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "block",
+        "seq": 5
+      }
+    },
+    {
+      "id": "limit-route-numeric-provider",
+      "log": "retry-attempt",
+      "edits": [
+        {
+          "row": 7,
+          "find": "\"data\":{\"provider\":\"mock\",\"model\":\"mock\"}",
+          "replace": "\"data\":{\"provider\":5,\"model\":\"mock\"}"
+        }
+      ],
+      "ts": {
+        "outcome": "folded",
+        "state": {
+          "pressureTokens": 10,
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock-b"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock-b"
+          },
+          "surfaceTokens": 25,
+          "sampledSurfaceTokens": 16
+        },
+        "view": {
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock-b"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock-b"
+          },
+          "pressureTokens": 10,
+          "projectedTokens": 19
+        }
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "route",
+        "seq": 7
+      },
+      "note": "The next header replaces the numeric route before any sample."
+    },
+    {
+      "id": "limit-context-window-string",
+      "log": "retry-attempt",
+      "edits": [
+        {
+          "row": 7,
+          "find": "\"data\":{\"provider\":\"mock\",\"model\":\"mock\"}",
+          "replace": "\"data\":{\"provider\":\"mock\",\"model\":\"mock\",\"contextWindow\":\"big\"}"
+        }
+      ],
+      "ts": {
+        "outcome": "folded",
+        "state": {
+          "pressureTokens": 10,
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock-b"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock-b"
+          },
+          "surfaceTokens": 25,
+          "sampledSurfaceTokens": 16
+        },
+        "view": {
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock-b"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock-b"
+          },
+          "pressureTokens": 10,
+          "projectedTokens": 19
+        }
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "context-window",
+        "seq": 7
+      },
+      "note": "The next context removes the window before any sample."
+    }
+  ]
+}

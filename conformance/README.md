@@ -24,6 +24,9 @@ Compare TypeScript and Rust using controlled fixtures and independently checked 
 - [Token usage cases](#token-usage-cases)
 - [Pending inbox and consumed-work cases](#pending-inbox-and-consumed-work-cases)
 - [Fork seed cases](#fork-seed-cases)
+- [Context pressure cases](#context-pressure-cases)
+- [Released v0 and v1 codec cases](#released-v0-and-v1-codec-cases)
+- [Goal projection cases](#goal-projection-cases)
 - [Runner contract](#runner-contract)
 - [Ownership and limits](#ownership-and-limits)
 
@@ -427,6 +430,7 @@ bun run test:runtime packages/session/session-format-v2-to-v3/tests/v2-to-v3-mig
 The API consumes parsed JSON values and leaves framing, compression, and parser limits to its caller. Numbers compare with JavaScript semantics, preserving negative zero; integer-to-integer comparisons remain exact. Rust refuses retained integer values outside JavaScript's safe range after the row's ordinary checks succeed. Native limits also identify undecided integer spellings, engine-specific or numeric diagnostic text, and expanded source lists that exceed the caller's budget. Each fixture with a native limit still asserts TypeScript's outcome. Opaque floating-point values are preserved, but this suite does not qualify a byte encoder.
 
 The result stops before `restoreReleasedV3Artifact`, which validates relationships, protected system messages, and vocabulary across the complete transformed artifact. It therefore does not establish that TypeScript would open the migrated Session. Recoverable decoding, earlier adjacent migrations, historical plain or Zstd file reads, publication, and Agent resume remain separate work. These cases close no roadmap scope.
+
 ## Token usage cases
 
 [`session/usage-cases.json`](session/usage-cases.json) holds 34 edited runtime captures and the token-usage state token-meter folds from each. The [TypeScript spec](../packages/llm/token-meter/tests/usage-conformance.spec.ts) folds `tokenUsageProjectionDefinition.init` and `apply` from [`usage-projection.ts`](../packages/llm/token-meter/src/usage-projection.ts) over each case's `JSON.parse`d rows and their `interruptedTurnClosers`, and requires `Session.fromRestore`, without message projections, to admit the same events. The [Rust test](../rust/crates/bake-session/tests/usage_cases.rs) restores the same bytes with `restore_plain_log`, requires every case to restore with no torn tail, and folds the result with [`token_usage`](../rust/crates/bake-session/src/usage.rs).
@@ -479,6 +483,62 @@ The restored source is its stored events, then its closers, then the ordinary `s
 `ts` gives the inherited stored-event and closer counts and whether the appended end seed is inherited, or the error class, code, and exact message. Both harnesses check the inherited events against the decoded rows and closers. The appended end seed carries the time Session construction read from the clock, so neither table nor Rust claims it: Rust reports only that it is inherited, and TypeScript checks its type, seq, and `{}` data, its time against clock readings taken around the source's construction, and the whole prefix against the source's own events. Every case's source restores in both harnesses; the message projections are not registered, so no case holds an `image/offload` row.
 
 A `rust` override replaces the outcome for Rust. `unrepresentable` marks a boundary `fork_seed`'s `u64` cannot carry: -1, 0.5, and `15.0`, which `JSON.parse` reads as 15. A boundary above 2^53 − 1 is refused with the message JavaScript formats from the rounded number, including 2^64 − 1. `native-subset` with `turn-diagnostic` marks an `OPEN_TURN` message whose `turn` is not a string, `null`, absent, or a non-negative safe integer written without a fraction or exponent, which JavaScript formats with `String`; Rust claims nothing there. Both harnesses pin the case count and require every limit, refusal class and code, an unrepresentable boundary, and an inherited end seed to be witnessed. The expectations were written from the TypeScript sources before either harness ran. The cases claim nothing about the live store's source and child-id checks or the child's own tagged end seed.
+
+## Context pressure cases
+
+[`session/pressure-cases.json`](session/pressure-cases.json) holds 36 edited runtime captures and, for each, the context-pressure state token-meter folds and its wire view. The [TypeScript spec](../packages/llm/token-meter/tests/pressure-conformance.spec.ts) passes each case's `JSON.parse`d rows and their `interruptedTurnClosers` to `Session.fromRestore`, without message projections, folds `contextPressureProjectionDefinition.init` and `apply` from [`usage-projection.ts`](../packages/llm/token-meter/src/usage-projection.ts) over the Session's events, end seed included, and takes `wire.view`. The [Rust test](../rust/crates/bake-session/tests/pressure_cases.rs) restores the same bytes with `restore_plain_log`, requires every case to restore with no torn tail, and folds the result with [`context_pressure`](../rust/crates/bake-session/src/pressure.rs).
+
+```sh
+bun run test:runtime packages/llm/token-meter/tests/pressure-conformance.spec.ts
+(cd rust && cargo test --locked -p bake-session --test pressure_cases)
+```
+
+The newest `request/header` or `request/context` sets the request route, and the newest `request/context` sets or removes the context window. A usage sample, read as the [token-usage fold](#token-usage-cases) reads it, stamps the prompt-side pressure (input plus cache counts) with the route, window, and surface total its request saw. The surface total is `foldSurfaceProjection` from [`surface-projection.ts`](../packages/llm/token-meter/src/surface-projection.ts), with each append priced by `estimateMessage` from [`estimate.ts`](../packages/llm/token-meter/src/estimate.ts): text lengths in UTF-16 units, other blocks by their `JSON.stringify` length, and an image without its `offloaded` mark. A `compaction/summary` or `compaction/prune` arms a shadow-price claim. A surface replacement immediately after it consumes a claim for its exact range, a replacement with no armed claim changes nothing, and one after a claim for another range throws the exact `token surface: replace at seq …` error. Restoration admits these synthetic compaction rows and replacements in both harnesses. The view's projection is the sample plus the surface's movement since it, clamped at 0. The end seed expires any claim, so no folded state holds one.
+
+`ts` is the folded `{state, view}`, the replacement error with its seq and message, or a `TypeError` and the seq of the event that throws it, written from the TypeScript sources and the committed captures before either harness ran. The cases cover the unedited captures, interrupted tool closers, empty Assistant and system content, system reasoning and multi-block prompts, astral text, image, unknown, and nested tool-result blocks, cache counts, stream-only samples, window and route changes after a sample, a failed attempt's sample, matched, unclaimed, mismatched, expired, and superseded claims.
+
+A `rust` override names a native limit and the refused seq, which must equal a TypeScript `TypeError`'s: `number` for a sampled count not spelled as a safe integer, a consumed claim's `shadowedTokenCount` that is not such a number, or a pressure sum, surface total, or projection sum past the safe-integer range; `usage` for a sample that is not an object or whose counts JavaScript would coerce; `stream` for a `null` record, or a `chunk` record whose `chunk` is absent or `null`, before a `usage` chunk; `claim` for compaction data without an object `shadowedRange` or with an endpoint not spelled as a non-negative safe integer; `block` for a priced block that is not an object, a non-string `text`, `name`, or `arguments`, or a non-array tool-result `content`; `route` for a non-string `request/context` `provider` or `model`; and `context-window` for a present `contextWindow` that is not a number. Of the 36 cases, 26 match in both arms, one of them the replacement error; 4 are TypeScript throws and 6 are limits on input TypeScript folds through coercion or rounding. Both harnesses pin the case count and require every limit to be witnessed. Negative controls were observed: counting UTF-8 bytes fails `utf16-text-length`, and dropping the tool-result block overhead fails `tool-call-turn`, in both arms. In Rust, keeping a claim past an intervening event, removing the clamp, keeping `offloaded`, pricing an unclaimed replacement, and ignoring a mismatched claim each fail a named case. The fold prices messages as logged, without the `image/offload` projection, and does not cover turn usage, pricing, or the context breakdown.
+
+## Released v0 and v1 codec cases
+
+[`session/v1-codec-cases.json`](session/v1-codec-cases.json) holds 140 synthetic released v0 and v1 Sessions, each a physical header and rows as JSON text with a codec version and a recovery mode. The [TypeScript spec](../packages/session/session-format-v0-to-v1/tests/codec-conformance.spec.ts) calls `createDecoder(header, recovery)` on `releasedV0SessionFormatCodec` or `releasedV1SessionFormatCodec` from [`codec.ts`](../packages/session/session-format-v0-to-v1/src/codec.ts), passes each parsed row to `decodeRow` with a `SessionFormatEventCollector`, which expands packed Assistant chunk runs, then calls `finish`. The [Rust test](../rust/crates/bake-session/tests/v1_codec_cases.rs) passes the same parsed header and rows to [`decode_v0_v1_rows`](../rust/crates/bake-session/src/v1_codec.rs) under both path platforms. TypeScript checks its host's path behavior.
+
+```sh
+bun run test:runtime packages/session/session-format-v0-to-v1/tests/codec-conformance.spec.ts
+(cd rust && cargo test --locked -p bake-session --test v1_codec_cases)
+```
+
+A decoded outcome compares the logical header, the inherited cut from `seedLength`, and the emitted events, with numbers compared as JavaScript doubles and object members in JavaScript key order. A refusal compares the header, row, or finish location and the exact `SessionFormatError` message. The cases cover:
+
+- header members, types, order, the lossless-JSON check, `origin`, `seedLength` present or absent, path platforms, and a v0 or v2 header given to the v1 codec and the reverse;
+- ordinary rows, which the codec passes through unvalidated except for their seq order and `sourceEventSeqs`, including seq gaps whose message converts a missing, string, `null`, boolean, negative, unsafe, or -0 seq with `String`;
+- `sourceEventSeqs` members and ranges, their bound by the row's seq, and their ordering;
+- each packed tag, `dt` and payload mismatches, member times at and past the safe range, and a final seq that JavaScript's rounding brings back into range;
+- recoverable decoding, where the first issue ends the decoded prefix and a later row decoding as a `turn/end` event refuses with that issue, and an inherited cut beyond the decoded events.
+
+A `rust` marker names a native limit and its location, and Rust claims nothing there; each such case still asserts TypeScript's outcome. `header-float-lexeme`, `seq-float-lexeme`, `source-float-lexeme`, and `packed-float-lexeme` mark a fraction or exponent spelling where TypeScript compares or reads a number; `seq-diagnostic` marks an array or object seq that a gap message converts with `String`; `source-output-budget` marks an expanded `sourceEventSeqs` list beyond the caller's budget; and `unsafe-json-integer` marks an emitted row retaining an integer that `JSON.parse` rounds. Of the 140 cases, 31 decode, 95 are refusals both arms report exactly, 2 of which decode on Win32, and 14 are limits. Both harnesses pin the case count and require every limit, both versions, and both recovery modes to be witnessed. The expectations were written from the TypeScript sources before either harness ran. Three negative controls were observed: dropping the rethrow of the first issue at a later `turn/end` fails `recoverable-turn-end-after-issue` in both arms, offsetting the expanded chunk times fails `packed-text-expands` in both arms, and computing the final seq exactly instead of in doubles fails `packed-final-seq-rounds-into-range` in Rust. No migration runs: the events are codec output, not v1 or v2 events, and their vocabulary, payloads, and relationships are unchecked.
+
+## Goal projection cases
+
+[`session/goal-cases.json`](session/goal-cases.json) holds 112 logs, each the [tool-call-turn capture](#runtime-request-reconstruction) with goal rows appended, and the goal projection state folded from each. The [TypeScript spec](../packages/goal/goal/tests/goal-conformance.spec.ts) folds `goalProjectionDefinition.init` and `applyGoalProjection` from [`index.ts`](../packages/goal/goal/src/index.ts) over each case's `JSON.parse`d rows and their `interruptedTurnClosers`, and requires `Session.fromRestore`, without message projections, to admit the same events. The [Rust test](../rust/crates/bake-session/tests/goal_cases.rs) restores the same bytes with `restore_plain_log`, requires every case to restore with no torn tail, and folds the result with [`goal_projection`](../rust/crates/bake-session/src/goal.rs).
+
+```sh
+bun run test:runtime packages/goal/goal/tests/goal-conformance.spec.ts
+(cd rust && cargo test --locked -p bake-session --test goal_cases)
+```
+
+Only `goal/change` events and `user/message` events whose source `kind` is `goal` are read, through the strict rules of [`fold.ts`](../packages/goal/goal/src/fold.ts). `ts` is the `{current, seenGoalIds, failure}` state. `failure` is the exact `goal replay failed at session event N: <message>` string for the first event the fold rejects; `current` and `seenGoalIds` keep their values from before that event, and later events are ignored. The expectations were written from the TypeScript sources before either harness ran.
+
+The cases cover:
+
+- each operation's valid transitions and each invalid one, a revision that does not advance by exactly one, and changed counters, creation times, or a regressed update time;
+- `create` after `complete` and after `clear`, with a fresh id and with a reused one;
+- exact key sets for each phase, the change, the clear tombstone, and the blocked reason, including a single key spelled `id,revision` that passes the comma-joined key check;
+- lower-kebab-case codes, and messages and objectives trimmed as JavaScript's `trim` does, which removes U+FEFF but keeps U+0085;
+- goal-round admission: the next round, a skipped round, a round past `maxGoalRounds`, a wrong goal or revision, a paused goal, and an invalid source;
+- unsupported versions, formatted with `String`, and non-goal payloads, which fail with `has an invalid kind`.
+
+A `rust` override names a native limit and the seq Rust refuses; TypeScript still asserts its own state. `number` marks a `goal/change` count spelled with a fraction or exponent, written as -0, or beyond `u64`, which Rust refuses rather than decides whether JavaScript reads it as a safe integer; `version-diagnostic` marks an unsupported `version` that JavaScript would format with `String` from a number other than a safe integer written without a fraction or exponent, or from an object or array, which Rust refuses rather than formats. Restoration already refuses such numbers in a `user/message`, so a goal source never reaches a limit. Of the 112 cases, 106 fold identically, 90 of them to a failure, and 6 are limits. Both harnesses pin the case count and require every limit to be witnessed. Three negative controls were observed: accepting any revision not below the current one fails `failure-freezes-state` in both arms (and `edit-same-revision` in TypeScript), folding after a failure fails `failure-freezes-state` in both, and trimming with Rust's `str::trim` fails `block-message-byte-order-mark`. The fold does not cover goal activation or the round driver.
 
 ## Runner contract
 
