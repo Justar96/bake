@@ -39,7 +39,9 @@
 //! and rows and runs the v2→v3 migration over them; its output is not an
 //! opened Session, since the final check of the transformed log is not run.
 //! [`decode_v0_v1_rows`] decodes a released v0 or v1 Session's parsed header
-//! and rows as the released physical codec does, without migrating them.
+//! and rows as the released physical codec does, without migrating them, and
+//! [`migrate_v0_to_v1`] runs the v0→v1 migration over a decoded v0 Session;
+//! its output is the edge's, not an opened Session.
 //! [`token_usage`] folds a [`RestoredLog`]'s provider-reported token usage,
 //! and [`context_pressure`] its context occupancy with the surface's
 //! heuristic token total.
@@ -69,6 +71,7 @@ mod restore;
 mod scan;
 mod source_event_seqs;
 mod usage;
+mod v0_to_v1;
 mod v1_codec;
 mod v2_to_v3;
 mod v3_row;
@@ -111,6 +114,7 @@ pub use source_event_seqs::{
 pub use usage::{
     LastTokenUsage, TokenUsageBuckets, TokenUsageState, UsageLimit, UsageRefusal, token_usage,
 };
+pub use v0_to_v1::{MigratedV1, V0ToV1Location, V0ToV1Refusal, migrate_v0_to_v1};
 pub use v1_codec::{
     DecodedV1Rows, V1CodecLimit, V1CodecLocation, V1CodecRecovery, V1CodecRefusal, V1CodecVersion,
     decode_v0_v1_rows,

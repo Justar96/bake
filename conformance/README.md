@@ -27,6 +27,7 @@ Compare TypeScript and Rust using controlled fixtures and independently checked 
 - [Context pressure cases](#context-pressure-cases)
 - [Released v0 and v1 codec cases](#released-v0-and-v1-codec-cases)
 - [Goal projection cases](#goal-projection-cases)
+- [V0 to V1 migration cases](#v0-to-v1-migration-cases)
 - [Turn boundary and title cases](#turn-boundary-and-title-cases)
 - [Runner contract](#runner-contract)
 - [Ownership and limits](#ownership-and-limits)
@@ -540,6 +541,28 @@ The cases cover:
 - unsupported versions, formatted with `String`, and non-goal payloads, which fail with `has an invalid kind`.
 
 A `rust` override names a native limit and the seq Rust refuses; TypeScript still asserts its own state. `number` marks a `goal/change` count spelled with a fraction or exponent, written as -0, or beyond `u64`, which Rust refuses rather than decides whether JavaScript reads it as a safe integer; `version-diagnostic` marks an unsupported `version` that JavaScript would format with `String` from a number other than a safe integer written without a fraction or exponent, or from an object or array, which Rust refuses rather than formats. Restoration already refuses such numbers in a `user/message`, so a goal source never reaches a limit. Of the 112 cases, 106 fold identically, 90 of them to a failure, and 6 are limits. Both harnesses pin the case count and require every limit to be witnessed. Three negative controls were observed: accepting any revision not below the current one fails `failure-freezes-state` in both arms (and `edit-same-revision` in TypeScript), folding after a failure fails `failure-freezes-state` in both, and trimming with Rust's `str::trim` fails `block-message-byte-order-mark`. The fold does not cover goal activation or the round driver.
+
+## V0 to V1 migration cases
+
+[`session/v0-to-v1-cases.json`](session/v0-to-v1-cases.json) holds 95 synthetic released v0 Sessions, each a physical header and rows as JSON text with a recovery mode, and the table of released-v0 payload dispositions. The [TypeScript spec](../packages/session/session-format-v0-to-v1/tests/migration-conformance.spec.ts) feeds `releasedV0SessionFormatCodec.createDecoder(header, recovery)` into the stream of a `createSessionFormatChain` holding only `sessionFormatV0ToV1` from [`migration.ts`](../packages/session/session-format-v0-to-v1/src/migration.ts), then finishes the decoder and the stream. It also requires the shared disposition table to equal `RELEASED_V0_EVENT_DISPOSITIONS`. The [Rust test](../rust/crates/bake-session/tests/v0_to_v1_cases.rs) decodes the same parsed header and rows with `decode_v0_v1_rows` and passes the result to [`migrate_v0_to_v1`](../rust/crates/bake-session/src/v0_to_v1/mod.rs).
+
+```sh
+bun run test:runtime packages/session/session-format-v0-to-v1/tests/migration-conformance.spec.ts
+(cd rust && cargo test --locked -p bake-session --test v0_to_v1_cases)
+```
+
+TypeScript migrates each row as the codec admits it, while Rust migrates a completed decode. Both harnesses therefore require every case to decode cleanly first, and codec refusals stay in the [codec cases](#released-v0-and-v1-codec-cases). A migrated outcome compares the v1 header, the events in order with object members in JavaScript key order, and the inherited cut. A refusal compares the index of the event being migrated and the exact message: the edge's unsupported errors pass through the chain, and its other errors are wrapped as `bake-session-format-v0-to-v1 refuses this format v0 Session: <detail>`. The cases cover:
+
+- `compact/*` renames, legacy compaction ids carried into summaries, ends, and compact plugin messages, and their reset at `compaction/end` and `session/end-seed`;
+- the unsupported `request/header-delta`, `mode/set`, and `fallback` request headers;
+- legacy `turn/start` triggers, every legacy `turn/end` reason, and `messagePrefix` removal;
+- both steering forms, legacy retry ids reused along one retry chain, and explicit ids, including `null`;
+- legacy user, Assistant, and tool result messages, replacement ids looked up by `surfaceOp.start`, and replacements without identity;
+- the delivery marker's Session check and its inherited exemption;
+- unknown types, payload member and semantic refusals in JavaScript key order, descriptor versions, version-0 session references, and opaque negative zero;
+- packed chunk rows passing through, and a recoverable tail.
+
+A `rust` marker names a native limit and its event index, and Rust claims nothing there; each such case still asserts TypeScript's outcome. `seq-float-lexeme`, `payload-float-lexeme`, and `reference-float-lexeme` mark a float spelling where TypeScript reads a seq, a count, or a replacement `Map` key; `type-coercion` marks a non-string `type`, which TypeScript coerces; `object-prototype-type` marks an inherited `Object.prototype` name, where V8 throws a `TypeError`; and `legacy-goal-message` marks a pre-v2 goal message carrying its change, whose check against a `JSON.stringify` rendering is not ported. Of the 95 cases, 36 migrate, 53 are refusals both arms report exactly, 6 of them unwrapped, and 6 are limits. Both harnesses pin the case count and require every limit to be witnessed. The expectations were written from the TypeScript sources before either harness ran; the first TypeScript run corrected only the V8 text of `object-prototype-type`, which Rust does not decide. Three negative controls were observed: dropping the retry chain's reuse fails `retry-legacy-ids-chain` and `retry-existing-id-seeds-chain` in both arms, minting a legacy id for an explicit `null` retry id fails `retry-explicit-null-id-kept` in both arms, and validating payloads at version 2 instead of 0 fails three cases in Rust. The whole-artifact checks in `relationships.ts` and the later edges do not run, so the output is not an opened Session.
 
 ## Turn boundary and title cases
 

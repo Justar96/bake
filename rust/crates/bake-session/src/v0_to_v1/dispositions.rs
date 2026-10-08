@@ -1,18 +1,20 @@
-//! `RELEASED_V2_EVENT_DISPOSITIONS` from
-//! `packages/session/session-format-v1-to-v2/src/dispositions.ts`: the
-//! released-v0 inventory without `assistant/chunk`, with the v2 forms of
-//! `assistant/message`, `session-log-deepseek/delivery-accepted`, and
-//! `session/end-seed`, and with `assistant/attempt`. Opaque members need no
-//! entry here: a parsed [`serde_json::Value`] is always lossless JSON.
+//! `RELEASED_V0_EVENT_DISPOSITIONS` from
+//! `packages/session/session-format-v0-to-v1/src/dispositions.ts`: the exact
+//! top-level `data` members of every released-v0 event type, and the members
+//! kept as owner-opaque JSON.
 
-/// Exact top-level `data` members of one released-v2 event type.
+use crate::v2_to_v3::OBJECT_PROTOTYPE_NAMES;
+
+/// One released-v0 event type's payload members.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct Disposition {
     pub(super) required: &'static [&'static str],
     pub(super) optional: &'static [&'static str],
+    /// Members checked only as lossless JSON.
+    pub(super) opaque: &'static [&'static str],
 }
 
-/// How the frozen object literal answers `RELEASED_V2_EVENT_DISPOSITIONS[type]`.
+/// How the frozen object literal answers `RELEASED_V0_EVENT_DISPOSITIONS[type]`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Lookup {
     Own(Disposition),
@@ -22,24 +24,20 @@ pub(super) enum Lookup {
     Absent,
 }
 
-/// `Object.getOwnPropertyNames(Object.prototype)`.
-pub(crate) const OBJECT_PROTOTYPE_NAMES: [&str; 12] = [
-    "constructor",
-    "__defineGetter__",
-    "__defineSetter__",
-    "hasOwnProperty",
-    "__lookupGetter__",
-    "__lookupSetter__",
-    "isPrototypeOf",
-    "propertyIsEnumerable",
-    "toString",
-    "valueOf",
-    "__proto__",
-    "toLocaleString",
-];
-
 const fn own(required: &'static [&'static str], optional: &'static [&'static str]) -> Lookup {
-    Lookup::Own(Disposition { required, optional })
+    opaque(required, optional, &[])
+}
+
+const fn opaque(
+    required: &'static [&'static str],
+    optional: &'static [&'static str],
+    opaque: &'static [&'static str],
+) -> Lookup {
+    Lookup::Own(Disposition {
+        required,
+        optional,
+        opaque,
+    })
 }
 
 pub(super) fn lookup(event_type: &str) -> Lookup {
@@ -52,11 +50,8 @@ pub(super) fn lookup(event_type: &str) -> Lookup {
         "approval/asked" => own(&["id", "toolName"], &["callId", "reason"]),
         "approval/decided" => own(&["id", "outcome"], &[]),
         "approval/policy" => own(&["policy"], &["source"]),
-        "assistant/attempt" => own(&["turn", "step", "stream"], &[]),
-        "assistant/message" => own(
-            &["turn", "step", "message", "stream"],
-            &["usage", "interrupted"],
-        ),
+        "assistant/chunk" => own(&["turn", "step", "chunk"], &[]),
+        "assistant/message" => own(&["turn", "step", "message"], &["usage", "interrupted"]),
         "command/done" => own(&["commandId", "kind"], &["text", "sourceEventSeq"]),
         "command/run" => own(&["commandId", "name", "source"], &["args"]),
         "compaction/end" => own(&["compactionId", "turn"], &["sourceCommandId", "error"]),
@@ -122,10 +117,8 @@ pub(super) fn lookup(event_type: &str) -> Lookup {
         "request/header" => own(&["header", "reason"], &["startsSeries"]),
         "sandbox/mode" => own(&["mode"], &["source"]),
         "schedule/change" => own(&["version", "operation"], &["schedule", "id", "acceptedAt"]),
-        "session-log-deepseek/delivery-accepted" => {
-            own(&["sessionId", "throughSeq"], &["sessionFormatVersion"])
-        }
-        "session/end-seed" => own(&[], &["inherited"]),
+        "session-log-deepseek/delivery-accepted" => own(&["sessionId", "throughSeq"], &[]),
+        "session/end-seed" => own(&[], &[]),
         "session/title" => own(&["title", "messageSeqs", "source"], &[]),
         "session/title-llm-request" => own(
             &[
@@ -138,7 +131,8 @@ pub(super) fn lookup(event_type: &str) -> Lookup {
             ],
             &[],
         ),
-        "step/end" | "step/start" => own(&["turn", "step"], &[]),
+        "step/end" => own(&["turn", "step"], &[]),
+        "step/start" => own(&["turn", "step"], &[]),
         "subagent/descriptor" => own(
             &["mode", "version", "provider"],
             &[
@@ -161,7 +155,7 @@ pub(super) fn lookup(event_type: &str) -> Lookup {
         "tool-workflow/run-end" => own(&["runId", "stopReason"], &[]),
         "tool-workflow/run-start" => own(&["runId", "name"], &[]),
         "tool/call" => own(&["turn", "step", "callId", "name", "arguments"], &[]),
-        "tool/code-dispatch" => own(
+        "tool/code-dispatch" => opaque(
             &[
                 "rootCallId",
                 "parentCallId",
@@ -172,8 +166,9 @@ pub(super) fn lookup(event_type: &str) -> Lookup {
                 "content",
             ],
             &[],
+            &["arguments"],
         ),
-        "tool/code-dispatch-start" => own(
+        "tool/code-dispatch-start" => opaque(
             &[
                 "rootCallId",
                 "parentCallId",
@@ -182,8 +177,9 @@ pub(super) fn lookup(event_type: &str) -> Lookup {
                 "arguments",
             ],
             &[],
+            &["arguments"],
         ),
-        "tool/result" => own(&["turn", "step", "message"], &["error", "meta"]),
+        "tool/result" => opaque(&["turn", "step", "message"], &["error", "meta"], &["meta"]),
         "turn/end" => own(&["turn", "reason"], &[]),
         "turn/start" => own(&["turn"], &[]),
         "user/message" => own(&["role", "id", "content", "source"], &[]),
@@ -197,50 +193,43 @@ pub(super) fn lookup(event_type: &str) -> Lookup {
 mod tests {
     use super::*;
     use serde_json::Value;
-    use std::collections::BTreeSet;
 
-    fn shared_list(table: &Value, list: &str) -> Vec<String> {
-        table["vocabulary"][list]
+    fn names(value: &Value) -> Vec<&str> {
+        value
             .as_array()
-            .unwrap_or_else(|| panic!("vocabulary.{list} array"))
+            .expect("member list")
             .iter()
-            .map(|name| name.as_str().expect("type name").to_owned())
+            .map(|name| name.as_str().expect("member name"))
             .collect()
     }
 
     #[test]
-    fn own_and_inherited_types_equal_the_shared_v3_row_table() {
-        // The v3 row conformance spec checks these lists against the real exports.
+    fn own_types_equal_the_shared_v0_to_v1_table() {
+        // The v0→v1 conformance spec checks this table against the real export.
         let path = concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../../conformance/session/v3-row-cases.json"
+            "/../../../conformance/session/v0-to-v1-cases.json"
         );
-        let text = std::fs::read_to_string(path).expect("read v3-row-cases.json");
-        let table: Value = serde_json::from_str(&text).expect("parse v3-row-cases.json");
-        let owned = shared_list(&table, "dispositionTypes");
-        assert!(
-            owned
-                .iter()
-                .all(|name| matches!(lookup(name), Lookup::Own(_)))
-        );
-        let inherited = shared_list(&table, "objectPrototypeNames");
-        assert!(
-            inherited
-                .iter()
-                .all(|name| lookup(name) == Lookup::Inherited)
-        );
-        assert_eq!(
-            inherited.iter().cloned().collect::<BTreeSet<_>>(),
-            OBJECT_PROTOTYPE_NAMES
-                .iter()
-                .map(|name| (*name).to_owned())
-                .collect()
-        );
+        let text = std::fs::read_to_string(path).expect("read v0-to-v1-cases.json");
+        let table: Value = serde_json::from_str(&text).expect("parse v0-to-v1-cases.json");
+        let shared = table["dispositions"].as_object().expect("dispositions");
+        assert_eq!(shared.len(), 51);
+        for (name, entry) in shared {
+            let Lookup::Own(disposition) = lookup(name) else {
+                panic!("{name} is not an own disposition");
+            };
+            assert_eq!(disposition.required, names(&entry["required"]), "{name}");
+            assert_eq!(disposition.optional, names(&entry["optional"]), "{name}");
+            assert_eq!(disposition.opaque, names(&entry["opaque"]), "{name}");
+        }
+        for name in OBJECT_PROTOTYPE_NAMES {
+            assert_eq!(lookup(name), Lookup::Inherited, "{name}");
+        }
         for absent in [
-            "assistant/chunk",
-            "feedback/message-put",
+            "steering/message",
+            "compact/start",
             "system/message",
-            "tool/ptc-dispatch",
+            "assistant/attempt",
         ] {
             assert_eq!(lookup(absent), Lookup::Absent, "{absent}");
         }

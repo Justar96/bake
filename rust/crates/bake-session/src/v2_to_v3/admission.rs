@@ -22,6 +22,7 @@ use super::payload_semantics::{
 };
 use crate::MAX_SAFE_INTEGER;
 use dispositions::Lookup;
+pub(crate) use dispositions::OBJECT_PROTOTYPE_NAMES;
 
 type Record = Map<String, Value>;
 
@@ -151,7 +152,7 @@ pub(super) fn assert_source_event(event: &Value) -> Checked {
     assert_owned_content(event_type, seq, data)?;
     // Assistant attempts are introduced by V2; the frozen helper has no case for them.
     if event_type != "assistant/attempt" {
-        assert_released_payload_semantics(event_type, seq, event.get("data"))?;
+        assert_released_payload_semantics(event_type, seq, event.get("data"), 2)?;
     }
     if matches!(event_type, "assistant/message" | "assistant/attempt") {
         for coordinate in ["turn", "step"] {
