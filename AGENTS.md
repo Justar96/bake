@@ -40,6 +40,10 @@ bun run test              # pure and Node integration tests
 bun run test:runtime <file>  # focused shared-runtime tests
 bun run test:e2e           # keyless built-profile PTY scenarios
 bun run test:integration   # *.e2e.ts suites: built profiles, sandboxes, artifacts; keyless
+bun run build:native-system  # native addon the JSONL persistence specs need
+bun run typecheck         # workspace sources; not packages/**/tests
+bun run doc-sync          # entry documents and terminal Markdown
+bun run gen-rust-migration-inventory  # after a Rust port change; verify-rust-migration-inventory checks it
 bun run lint              # Oxlint over apps, packages, scripts, and evals
 bun run preflight         # every CI gate before a PR; --fast for the static half
 bun run verify            # preflight with the whole runtime suite
@@ -54,7 +58,7 @@ Run the checks relevant to your change while you work, and `bun run preflight` b
 `develop` is where work lands; `main` holds released code; `rust/0.4.0` collects the Rust 0.4 port. [CONTRIBUTING.md](CONTRIBUTING.md) covers pull requests and [distribution/README.md](distribution/README.md#release-with-github-actions) the release workflow.
 
 - Start every change, hotfixes included, on a new branch from an up-to-date `origin/develop`, and open its pull request against `develop`. Never commit to `main`, `develop`, or `rust/0.4.0` directly.
-- Rust port work, a change under the [0.4 roadmap](docs/roadmap/rust-0.4/README.md), starts instead from an up-to-date `origin/rust/0.4.0` and targets it. CI runs its native job on every OS and its TypeScript checks on Linux only as far as its files need. A pull request from `rust/0.4.0` into `develop` brings the line over with a merge commit and full CI; a pull request from `develop` into `rust/0.4.0` brings 0.3 fixes forward. A 0.3 fix still lands on `develop` first.
+- Rust port work, a change under the [0.4 roadmap](docs/roadmap/rust-0.4/README.md) (see [Rust 0.4 port](#rust-04-port)), starts instead from an up-to-date `origin/rust/0.4.0` and targets it. CI runs its native job on every OS and its TypeScript checks on Linux only as far as its files need. A pull request from `rust/0.4.0` into `develop` brings the line over with a merge commit and full CI; a pull request from `develop` into `rust/0.4.0` brings 0.3 fixes forward. A 0.3 fix still lands on `develop` first.
 - Split dependent changes into a stack of pull requests, each based on the one below, and link them with `gh stack link --base <trunk> <bottom> … <top>` so GitHub owns their order. The [stack review guide](docs/cookbook/responding-to-pr-review-on-a-stack.md) covers review fixes, and the `dsh-merging-stacked-prs` skill covers landing with `gh stack merge`.
 - `main` accepts only a merge-commit pull request from `develop`, which the `develop only` check enforces. Open one only to ship a release.
 - To release, finish the change on its branch, then:
@@ -62,6 +66,18 @@ Run the checks relevant to your change while you work, and `bun run preflight` b
   2. Run `bun run release:preflight --offline --tag v<version>`, then commit only those edits as `release: <version>`.
   3. Merge into `develop`, then open the pull request from `develop` to `main`.
   4. Once that merges, tag `main`'s merge commit `v<version>` and push only the tag. The tag publishes to every install, so push it only when the user asks for that release.
+
+## Rust 0.4 port
+
+The [roadmap](docs/roadmap/rust-0.4/README.md) and its [support register](docs/roadmap/rust-0.4/scope-00/support.md#decision-register) own the port's decisions; the [Pi-first scope plan](docs/roadmap/rust-0.4/pi-first-plan.md) governs scopes 04 to 17 where older scope text still assumes 0.3 parity.
+
+- Port primarily from Pi's latest official release (D22). Re-check the release when a scope starts, record the Pi revision and files a PR adapts, and keep Pi's MIT notice. Port Bake's TypeScript only where the plan, a decision, or a retained contract needs it, and name its source.
+- Four Bake contracts are retained: the CLIProxyAPI provider route, reading existing Session logs, Session format 3 for new writes, and the model-visible surface (tool names, schemas, results, prompts, and repair text). Bake's sandbox, approvals, and permission presets are kept (D24). Changing what the model sees needs a paired eval record.
+- Prove equivalence with a shared JSON case table under `conformance/`, read by a Rust test under `rust/crates/<crate>/tests/` and a vitest spec in the owning TypeScript package. Write expectations from the TypeScript source before running either arm, pin the case count and schema version in both, and run negative controls that you observe failing. Extend a committed table only with a version bump and a history line.
+- The TypeScript arm calls production code. Do not change TypeScript product source to make it testable; a 0.3 change lands on `develop` first.
+- Refuse only what [D21](docs/roadmap/rust-0.4/scope-00/support.md#decision-register) permits, as a named native limit that a case witnesses; never guess a result JavaScript decides by coercion or a `TypeError`. A spelling a released writer produces must be ported, not refused. Rust code never panics on untrusted input.
+- With each change to a Rust public API, update the `rust/README.md` crate row and test paragraph, the roadmap Dev Note, and the `conformance/README.md` section, which goes before `## Runner contract` with a contents line. Then run `bun run gen-rust-migration-inventory`, `verify-rust-migration-inventory`, and `bun run doc-sync`.
+- `bun run typecheck` does not compile `packages/**/tests`; type-check a new spec with a temporary tsconfig and delete it. Declare every workspace package a spec imports in that package's `devDependencies` and update `bun.lock`, because hoisting hides a missing declaration.
 
 ## Evals
 
@@ -74,7 +90,7 @@ Every version keeps its agent-loop metrics so the next one can be checked for re
 
 ## Engineering
 
-- Use ESM and strict TypeScript in the TypeScript workspace. Rust belongs under `rust/`, with formatting and Clippy checks; keep terminal effects separate from pure editor and view state. Local TypeScript relative imports use `.ts`; cross-package imports use declared package names. Every workspace package outside `vendor/` and `native/` uses a `bake-` name: runtime packages under `packages/` use `bake-<name>`, the CLI is `bake-cli`, and the terminal packages are `bake-tui-<name>`. When porting fixes, map upstream `@deepseek-ai/dsh-<name>` imports to `bake-<name>`, `@deepseek-ai/dsh` to `bake-cli`, and `@dsh-tui/<name>` to `bake-tui-<name>`, and preserve vendored `@deepseek-ai/*` identifiers. Add each rename to the legacy package-name map in `packages/boot/app-boot/src/legacy-package-names.ts`.
+- Use ESM and strict TypeScript in the TypeScript workspace. Rust belongs under `rust/`, with formatting and Clippy checks; keep terminal effects separate from pure editor and view state. Local TypeScript relative imports use `.ts`; cross-package imports use package names the importing package declares. Every workspace package outside `vendor/` and `native/` uses a `bake-` name: runtime packages under `packages/` use `bake-<name>`, the CLI is `bake-cli`, and the terminal packages are `bake-tui-<name>`. When porting fixes, map upstream `@deepseek-ai/dsh-<name>` imports to `bake-<name>`, `@deepseek-ai/dsh` to `bake-cli`, and `@dsh-tui/<name>` to `bake-tui-<name>`, and preserve vendored `@deepseek-ai/*` identifiers. Add each rename to the legacy package-name map in `packages/boot/app-boot/src/legacy-package-names.ts`.
 - Extend behavior through Cordis plugins and documented events, not ad hoc hooks. Registrations are effects that must supply disposers; waterfall listeners call `next()` when delegating.
 - Model-visible input must be reconstructable from the session log. Preserve released data and migration behavior; consult [session format status](docs/session-format-status.md) before any persistence change.
 - Read [defensive patterns](docs/defensive-patterns.md) before lifecycle or concurrency work. Teardown must await owned work, restore terminal state, and leave no late callbacks.
