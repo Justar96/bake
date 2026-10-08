@@ -12,7 +12,7 @@ This page re-plans roadmap scopes 04 to 17 around [D22](scope-00/support.md#deci
 - [Retained contracts](#retained-contracts)
 - [Porting rules](#porting-rules)
 - [Scope plan](#scope-plan)
-- [Open decisions](#open-decisions)
+- [Owner decisions](#owner-decisions)
 - [Dev Note](#dev-note)
 
 ## Pinned Pi revision
@@ -68,8 +68,8 @@ Not retained: the Desktop contract (D9), CLI flags and exits, and the settings a
 
 | Scope | Port from Pi | Port selectively from Bake | Exit evidence |
 |---|---|---|---|
-| 04 Filesystem, processes, and sandbox | `coding-agent/src/core/{exec.ts, bash-executor.ts, tools/powershell.ts, tools/output-accumulator.ts, tools/file-mutation-queue.ts}` for spawning, output handling across chunk boundaries, and mutation ordering | The sandbox backends (bubblewrap, Landlock, Seatbelt, Windows restricted token) and process-tree ownership, if [D24](scope-00/support.md#decision-register) keeps them | Denied effects and process-tree quiescence on each OS; Pi's chunk-boundary regressions as tests |
-| 05 Composition, settings, credentials, and lifecycle | `chord` (services, plugins, lifetimes), `coding-agent/src/core/{settings-manager.ts, auth-storage.ts, model-registry.ts, resource-loader.ts, agent-session-services.ts}` | Ownership-tree teardown rules; CLIProxyAPI credential and route storage; import of existing settings per [D25](scope-00/support.md#decision-register) | Scoped teardown with no surviving task; a CLIProxyAPI login survives restart; existing route imported |
+| 04 Filesystem, processes, and sandbox | `coding-agent/src/core/{exec.ts, bash-executor.ts, tools/powershell.ts, tools/output-accumulator.ts, tools/file-mutation-queue.ts}` for spawning, output handling across chunk boundaries, and mutation ordering | The sandbox backends (bubblewrap, Landlock, Seatbelt, Windows restricted token), approval prompts, permission presets, and process-tree ownership ([D24](scope-00/support.md#decision-register)) | Denied effects and process-tree quiescence on each OS; Pi's chunk-boundary regressions as tests |
+| 05 Composition, settings, credentials, and lifecycle | `chord` (services, plugins, lifetimes), `coding-agent/src/core/{settings-manager.ts, auth-storage.ts, model-registry.ts, resource-loader.ts, agent-session-services.ts}` | Ownership-tree teardown rules; CLIProxyAPI credential and route storage; read-only import of the CLIProxyAPI route, key, and default model per [D25](scope-00/support.md#decision-register) | Scoped teardown with no surviving task; a CLIProxyAPI login survives restart; existing route imported |
 | 06 Provider-neutral streaming and failures | `ai/src/{types.ts, utils/event-stream.ts, utils/provider-retry.ts}` | The compact stream record written to `assistant/attempt` and `assistant/message` (format 3) and the retry events the log carries | Stream assembly, cancellation, and retry classification tests; recorded attempts match format 3 |
 | 07 Provider protocols and authentication | `ai` providers for `openai-responses`, `openai-completions`, and `anthropic-messages`, and Pi's model discovery | All of CLIProxyAPI (retained); other routes per [D8](scope-00/support.md#decision-register) | CLIProxyAPI fixtures plus a live smoke test; wire fixtures for each protocol |
 | 08 Tool dispatch and local coding tools | `agent/src/agent-loop.ts` prepare, execute, and finalize phases; `coding-agent/src/core/tools/{read,write,edit,edit-diff,bash,grep,find,ls,truncate}.ts` | Tool names, schemas, results, and errors (retained); `tool/call` before effect; approval events; replay classes | Tool schema and result snapshots equal 0.3; crash during each replay class gives the 0.3 repair result |
@@ -85,12 +85,12 @@ Not retained: the Desktop contract (D9), CLI flags and exits, and the settings a
 
 Scopes 02 and 03 continue as planned. Their remaining work is the D21 classification of native limits, the writer-reachable fractional-number port, the evidence ledger, and the scope 03 fault-injection and cross-runtime harnesses.
 
-## Open decisions
+## Owner decisions
 
-These rows are added to the [support register](scope-00/support.md#decision-register) as owner decisions:
+Two decisions were added to the [support register](scope-00/support.md#decision-register) with this plan and decided by request on 2026-10-09:
 
-- **D24, sandbox and permissions.** Pi runs tools without a sandbox and without Bake's approval policy. Recommendation: keep Bake's sandbox backends, approval prompts, and permission presets. The results of denied calls are part of the model-visible surface, and dropping enforcement would be a safety regression.
-- **D25, existing settings and credentials.** Their file formats are not retained. Recommendation: on first run, import the CLIProxyAPI route and key and the default model from `~/.bake/settings.yaml` and the credentials file, read-only, so the retained provider works without signing in again.
+- **D24, sandbox and permissions.** Pi runs tools without a sandbox or Bake's approval policy. 0.4 keeps Bake's sandbox backends, approval prompts, and permission presets, ported selectively into Pi's structure in scope 04, so denied-call results stay as the model sees them today.
+- **D25, existing settings and credentials.** Their file formats are not retained. On first run, 0.4 imports the CLIProxyAPI route and key and the default model from `~/.bake/settings.yaml` and the credentials file, read-only, so the retained provider works without signing in again.
 
 ## Dev Note
 
