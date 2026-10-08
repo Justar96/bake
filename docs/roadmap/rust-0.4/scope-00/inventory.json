@@ -900,6 +900,7 @@
     {"path":"packages/goal/command-goal/tests/command-goal.spec.ts","lane":"vitest-runtime","owner":"packages/goal/command-goal","scopes":["11"],"disposition":"reuse-oracle","basis":"packages/goal"},
     {"path":"packages/goal/goal-round-driver/tests/goal-round-driver.spec.ts","lane":"vitest-runtime","owner":"packages/goal/goal-round-driver","scopes":["11"],"disposition":"reuse-oracle","basis":"packages/goal"},
     {"path":"packages/goal/goal-round-driver/tests/invariant.spec.ts","lane":"vitest-runtime","owner":"packages/goal/goal-round-driver","scopes":["11"],"disposition":"reuse-oracle","basis":"packages/goal"},
+    {"path":"packages/goal/goal/tests/goal-conformance.spec.ts","lane":"vitest-runtime","owner":"packages/goal/goal","scopes":["11"],"disposition":"reuse-oracle","basis":"packages/goal"},
     {"path":"packages/goal/goal/tests/goal.e2e.ts","lane":"vitest-integration","owner":"packages/goal/goal","scopes":["11"],"disposition":"reuse-oracle","basis":"packages/goal"},
     {"path":"packages/goal/goal/tests/goal.spec.ts","lane":"vitest-runtime","owner":"packages/goal/goal","scopes":["11"],"disposition":"reuse-oracle","basis":"packages/goal"},
     {"path":"packages/goal/goal/tests/invariant.spec.ts","lane":"vitest-runtime","owner":"packages/goal/goal","scopes":["11"],"disposition":"reuse-oracle","basis":"packages/goal"},

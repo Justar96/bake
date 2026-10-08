@@ -43,12 +43,15 @@
 //! into its pending inbox and its account of consumed work.
 //! [`fork_seed`] selects the events `SessionStore.fork` copies from a
 //! [`RestoredLog`] into a child, or refuses as `SessionForkError` does.
+//! [`goal_projection`] folds a [`RestoredLog`]'s goal changes and goal rounds
+//! into its durable goal state, keeping the first replay failure.
 //! None reads or writes a file or encodes a log. The crate is
 //! unstable and unshipped; the preview's `session inspect` and `session stat` use it.
 
 mod envelope;
 mod fork;
 mod generation_header;
+mod goal;
 mod inbox;
 mod offload;
 mod repair;
@@ -68,6 +71,10 @@ pub use envelope::{
 };
 pub use fork::{ForkLimit, ForkRefusal, ForkSeed, fork_seed};
 pub use generation_header::{GenerationHeaderRefusal, read_generation_header_record};
+pub use goal::{
+    GoalBlockReason, GoalLimit, GoalPhase, GoalProjection, GoalProjectionState, GoalRefusal,
+    GoalSnapshot, goal_projection,
+};
 pub use inbox::{
     ConsumedWork, ConsumedWorkCoercion, ConsumedWorkLimit, InboxLimit, InboxRefusal, PendingInbox,
     consumed_work, restored_inbox,

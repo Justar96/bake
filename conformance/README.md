@@ -24,6 +24,7 @@ Compare TypeScript and Rust using controlled fixtures and independently checked 
 - [Token usage cases](#token-usage-cases)
 - [Pending inbox and consumed-work cases](#pending-inbox-and-consumed-work-cases)
 - [Fork seed cases](#fork-seed-cases)
+- [Goal projection cases](#goal-projection-cases)
 - [Runner contract](#runner-contract)
 - [Ownership and limits](#ownership-and-limits)
 
@@ -427,6 +428,7 @@ bun run test:runtime packages/session/session-format-v2-to-v3/tests/v2-to-v3-mig
 The API consumes parsed JSON values and leaves framing, compression, and parser limits to its caller. Numbers compare with JavaScript semantics, preserving negative zero; integer-to-integer comparisons remain exact. Rust refuses retained integer values outside JavaScript's safe range after the row's ordinary checks succeed. Native limits also identify undecided integer spellings, engine-specific or numeric diagnostic text, and expanded source lists that exceed the caller's budget. Each fixture with a native limit still asserts TypeScript's outcome. Opaque floating-point values are preserved, but this suite does not qualify a byte encoder.
 
 The result stops before `restoreReleasedV3Artifact`, which validates relationships, protected system messages, and vocabulary across the complete transformed artifact. It therefore does not establish that TypeScript would open the migrated Session. Recoverable decoding, earlier adjacent migrations, historical plain or Zstd file reads, publication, and Agent resume remain separate work. These cases close no roadmap scope.
+
 ## Token usage cases
 
 [`session/usage-cases.json`](session/usage-cases.json) holds 34 edited runtime captures and the token-usage state token-meter folds from each. The [TypeScript spec](../packages/llm/token-meter/tests/usage-conformance.spec.ts) folds `tokenUsageProjectionDefinition.init` and `apply` from [`usage-projection.ts`](../packages/llm/token-meter/src/usage-projection.ts) over each case's `JSON.parse`d rows and their `interruptedTurnClosers`, and requires `Session.fromRestore`, without message projections, to admit the same events. The [Rust test](../rust/crates/bake-session/tests/usage_cases.rs) restores the same bytes with `restore_plain_log`, requires every case to restore with no torn tail, and folds the result with [`token_usage`](../rust/crates/bake-session/src/usage.rs).
@@ -479,6 +481,28 @@ The restored source is its stored events, then its closers, then the ordinary `s
 `ts` gives the inherited stored-event and closer counts and whether the appended end seed is inherited, or the error class, code, and exact message. Both harnesses check the inherited events against the decoded rows and closers. The appended end seed carries the time Session construction read from the clock, so neither table nor Rust claims it: Rust reports only that it is inherited, and TypeScript checks its type, seq, and `{}` data, its time against clock readings taken around the source's construction, and the whole prefix against the source's own events. Every case's source restores in both harnesses; the message projections are not registered, so no case holds an `image/offload` row.
 
 A `rust` override replaces the outcome for Rust. `unrepresentable` marks a boundary `fork_seed`'s `u64` cannot carry: -1, 0.5, and `15.0`, which `JSON.parse` reads as 15. A boundary above 2^53 − 1 is refused with the message JavaScript formats from the rounded number, including 2^64 − 1. `native-subset` with `turn-diagnostic` marks an `OPEN_TURN` message whose `turn` is not a string, `null`, absent, or a non-negative safe integer written without a fraction or exponent, which JavaScript formats with `String`; Rust claims nothing there. Both harnesses pin the case count and require every limit, refusal class and code, an unrepresentable boundary, and an inherited end seed to be witnessed. The expectations were written from the TypeScript sources before either harness ran. The cases claim nothing about the live store's source and child-id checks or the child's own tagged end seed.
+
+## Goal projection cases
+
+[`session/goal-cases.json`](session/goal-cases.json) holds 112 logs, each the [tool-call-turn capture](#runtime-request-reconstruction) with goal rows appended, and the goal projection state folded from each. The [TypeScript spec](../packages/goal/goal/tests/goal-conformance.spec.ts) folds `goalProjectionDefinition.init` and `applyGoalProjection` from [`index.ts`](../packages/goal/goal/src/index.ts) over each case's `JSON.parse`d rows and their `interruptedTurnClosers`, and requires `Session.fromRestore`, without message projections, to admit the same events. The [Rust test](../rust/crates/bake-session/tests/goal_cases.rs) restores the same bytes with `restore_plain_log`, requires every case to restore with no torn tail, and folds the result with [`goal_projection`](../rust/crates/bake-session/src/goal.rs).
+
+```sh
+bun run test:runtime packages/goal/goal/tests/goal-conformance.spec.ts
+(cd rust && cargo test --locked -p bake-session --test goal_cases)
+```
+
+Only `goal/change` events and `user/message` events whose source `kind` is `goal` are read, through the strict rules of [`fold.ts`](../packages/goal/goal/src/fold.ts). `ts` is the `{current, seenGoalIds, failure}` state. `failure` is the exact `goal replay failed at session event N: <message>` string for the first event the fold rejects; `current` and `seenGoalIds` keep their values from before that event, and later events are ignored. The expectations were written from the TypeScript sources before either harness ran.
+
+The cases cover:
+
+- each operation's valid transitions and each invalid one, a revision that does not advance by exactly one, and changed counters, creation times, or a regressed update time;
+- `create` after `complete` and after `clear`, with a fresh id and with a reused one;
+- exact key sets for each phase, the change, the clear tombstone, and the blocked reason, including a single key spelled `id,revision` that passes the comma-joined key check;
+- lower-kebab-case codes, and messages and objectives trimmed as JavaScript's `trim` does, which removes U+FEFF but keeps U+0085;
+- goal-round admission: the next round, a skipped round, a round past `maxGoalRounds`, a wrong goal or revision, a paused goal, and an invalid source;
+- unsupported versions, formatted with `String`, and non-goal payloads, which fail with `has an invalid kind`.
+
+A `rust` override names a native limit and the seq Rust refuses; TypeScript still asserts its own state. `number` marks a `goal/change` count spelled with a fraction or exponent, written as -0, or beyond `u64`, which Rust refuses rather than decides whether JavaScript reads it as a safe integer; `version-diagnostic` marks an unsupported `version` that JavaScript would format with `String` from a number other than a safe integer written without a fraction or exponent, or from an object or array, which Rust refuses rather than formats. Restoration already refuses such numbers in a `user/message`, so a goal source never reaches a limit. Of the 112 cases, 106 fold identically, 90 of them to a failure, and 6 are limits. Both harnesses pin the case count and require every limit to be witnessed. Three negative controls were observed: accepting any revision not below the current one fails `failure-freezes-state` in both arms (and `edit-same-revision` in TypeScript), folding after a failure fails `failure-freezes-state` in both, and trimming with Rust's `str::trim` fails `block-message-byte-order-mark`. The fold does not cover goal activation or the round driver.
 
 ## Runner contract
 
