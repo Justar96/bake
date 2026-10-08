@@ -58,6 +58,11 @@
 //! runs kept, through every edge to format v3, reporting the refusal
 //! TypeScript's streaming chain reports first; a v1 Session takes the decoded
 //! v1→v2 stage.
+//! [`restore_migrated`] restores a v0, v1, or v2 Session that
+//! [`migrate_v2_rows`] or [`migrate_released_history`] migrated, as the
+//! production read path restores its historical file, by encoding the
+//! migration's output and restoring those bytes as [`restore_plain_log`]
+//! does; a Session the catalog's final check refuses is outside its domain.
 //! [`token_usage`] folds a [`RestoredLog`]'s provider-reported token usage,
 //! and [`context_pressure`] its context occupancy with the surface's
 //! heuristic token total.
@@ -89,8 +94,17 @@
 //! [`project_key`]: it creates, or finds and opens, a Session's current plain
 //! log as the backend's `create` and write `open` do, refusing an existing,
 //! missing, or duplicated id with TypeScript's message, and writes the
-//! model's bytes after each append or flush. It is the only part that reads
-//! or writes a file. The crate is
+//! model's bytes after each append or flush. It holds the Session
+//! directory's `session.lock` kernel write lock from a write `open`, or from
+//! a created handle's first write, until it is dropped, refusing a lock
+//! another handle holds with TypeScript's already-owned message. A write
+//! `open` of a plain v0, v1, or v2 log migrates it as the backend does,
+//! through the recoverable released codec and every format edge, writing the
+//! encoded v3 log beside the unchanged source, or refuses with TypeScript's
+//! corruption or unsupported-migration message. The catalog's final check of the migrated
+//! log, the publication's verifier, and `validateStoredEvents` are not run,
+//! so a log one of them refuses is outside that model's domain. It is the
+//! only part that reads or writes a file. The crate is
 //! unstable and unshipped; the preview's `session inspect` and `session stat` use it.
 
 mod assistant_stream;
@@ -102,10 +116,12 @@ mod goal;
 mod history;
 mod inbox;
 mod log_layout;
+mod migrated_restore;
 mod offload;
 mod plain_append;
 mod plain_log_file;
 mod pressure;
+mod released_rows;
 mod repair;
 mod replay;
 mod request;
@@ -122,6 +138,7 @@ mod v1_to_v2;
 mod v1_to_v2_decoded;
 mod v2_to_v3;
 mod v3_row;
+mod write_lease;
 mod zstd;
 
 pub use boundary::{
@@ -144,6 +161,7 @@ pub use inbox::{
     consumed_work, restored_inbox,
 };
 pub use log_layout::{encode_segment, project_key, session_log_path};
+pub use migrated_restore::{MigratedRestoreLimit, MigratedRestoreRefusal, restore_migrated};
 pub use offload::OffloadRejection;
 pub use plain_append::{AppendLimit, AppendRefusal, CreateLimit, CreateRefusal, PlainAppendLog};
 pub use plain_log_file::{LogFileLimit, LogFileRefusal, PlainLogFile};

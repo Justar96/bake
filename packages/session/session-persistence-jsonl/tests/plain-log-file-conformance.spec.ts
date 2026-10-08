@@ -3,48 +3,58 @@
  * that apply to this host through the real JSONL backend with
  * `compression: 'none'`, each in its own temporary root. A case seeds files
  * and directories, then runs its steps in order: `create` and a write `open`
- * start a handle, and `append`, `flush`, and `close` use it. After each step
- * every file beneath the root, `session.lock` excepted, must have the
- * expected text, and no other file may exist; directories are not compared.
+ * start a handle, and `append`, `flush`, and `close` use it. A step names its
+ * handle, `a` unless `handle` says `b`, and each handle is a separate backend
+ * instance in its own Context over the same root, so only the kernel write
+ * lock arbitrates between them. After each step every file beneath the root
+ * must have the expected text, a `session.lock` file read only by its size,
+ * since Windows refuses to read a locked range, and no other file may exist;
+ * directories are not compared.
  * The development Rust model `PlainLogFile` in `rust/crates/bake-session`
  * checks the same table. `ts` is the step's outcome, or the thrown class
- * with its exact message where the message names no temporary path. A
- * `rust` override names a native limit; it ends the case in Rust, and
- * TypeScript still asserts every step. The spec reads only the table.
+ * with its exact message, in which `{src}` stands for the case root joined
+ * with the open step's `src` path. A `rust` override names a native limit or
+ * marks the step outside the Rust model's domain; it ends the case in Rust,
+ * and TypeScript still asserts every step. The spec reads only the table.
  */
 
 import { readFileSync } from 'node:fs'
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join, sep } from 'node:path'
+import { dirname, join, resolve, sep } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { SessionId } from 'bake-session'
 import type { SessionEvent, SessionHeader, SessionLogOffset } from 'bake-session'
 import { SessionFormatError } from 'bake-session-format'
 import {
-  SessionAlreadyExistsError, SessionFormatUnsupportedError, SessionPersistenceCorruptionError,
-  SessionPersistenceNotFoundError,
+  SessionAlreadyExistsError, SessionAlreadyOwnedError, SessionFormatUnsupportedError,
+  SessionPersistenceCorruptionError, SessionPersistenceNotFoundError,
 } from 'bake-session-persistence'
 import type { SessionHandle } from 'bake-session-persistence'
 import JsonlSessionPersistence from '../src/index.ts'
 
 const REPO = new URL('../../../../', import.meta.url)
 const SCHEMA = 'bake/session-conformance/plain-log-file-cases'
-const ORACLE = 'in an owned temporary root holding the seeded entries, run each step through the JSONL backend with compression none: create, a write open, or the open handle\'s append, flush, or close; after each step list every file beneath the root except session.lock with its text'
+const ORACLE = 'in an owned temporary root holding the seeded entries, run each step through the JSONL backend with compression none on the step\'s handle, a or b, each its own backend instance over the root: create, a write open, or the open handle\'s append, flush, or close; after each step list every file beneath the root with its text, an empty session.lock by its size'
 /** Both harnesses pin the table size, so a dropped case fails. */
-const CASE_COUNT = 33
+const CASE_COUNT = 61
 const LIMITS = [
   'empty-id', 'encode', 'seq-value', 'windows-name', 'legacy-layout', 'opposite-encoding',
-  'non-utf8-name', 'older-generation', 'newer-generation', 'identity', 'scan',
+  'non-utf8-name', 'newer-generation', 'identity', 'scan', 'migration/v2-codec-recovery',
+  'migration/row/json-parser',
 ]
+/** A `rust` override marking a step outside the Rust model's domain. */
+const OUTSIDE_DOMAIN = 'outside-domain'
 const LEASE_FILE = 'session.lock'
+const HANDLES = ['a', 'b'] as const
 /** Classes are matched exactly. */
 const CLASSES = new Map<string, abstract new (...args: never[]) => Error>([
   ['Error', Error],
   ['TypeError', TypeError],
   ['SessionFormatError', SessionFormatError],
   ['SessionAlreadyExistsError', SessionAlreadyExistsError],
+  ['SessionAlreadyOwnedError', SessionAlreadyOwnedError],
   ['SessionPersistenceNotFoundError', SessionPersistenceNotFoundError],
   ['SessionPersistenceCorruptionError', SessionPersistenceCorruptionError],
   ['SessionFormatUnsupportedError', SessionFormatUnsupportedError],
@@ -54,12 +64,13 @@ type Platform = 'posix' | 'linux' | 'win32'
 type Outcome = { outcome: 'ok' } | { outcome: 'thrown'; class: string; message?: string }
 type Seed = { file: string; text: string } | { dir: string; rawNameHex: string }
 type Tree = Record<string, string>
-type Step =
+type Handle = typeof HANDLES[number]
+type Step = { handle: Handle } & (
   | { step: 'create'; header: unknown; inheritedEventCount?: number; ts: Outcome; rust?: string; tree: Tree }
-  | { step: 'open'; id: string; ts: Outcome; rust?: string; tree: Tree }
+  | { step: 'open'; id: string; src?: string; ts: Outcome; rust?: string; tree: Tree }
   | { step: 'append'; events: unknown[]; ts: Outcome; rust?: string; tree: Tree }
   | { step: 'flush'; ts: Outcome; rust?: string; tree: Tree }
-  | { step: 'close'; ts: Outcome; tree: Tree }
+  | { step: 'close'; ts: Outcome; tree: Tree })
 
 interface FileCase {
   id: string
@@ -69,11 +80,11 @@ interface FileCase {
 }
 
 const STEP_KEYS: Record<Step['step'], string[]> = {
-  create: ['step', 'header', 'inheritedEventCount', 'ts', 'rust', 'tree'],
-  open: ['step', 'id', 'ts', 'rust', 'tree'],
-  append: ['step', 'events', 'ts', 'rust', 'tree'],
-  flush: ['step', 'ts', 'rust', 'tree'],
-  close: ['step', 'ts', 'tree'],
+  create: ['step', 'handle', 'header', 'inheritedEventCount', 'ts', 'rust', 'tree'],
+  open: ['step', 'handle', 'id', 'src', 'ts', 'rust', 'tree'],
+  append: ['step', 'handle', 'events', 'ts', 'rust', 'tree'],
+  flush: ['step', 'handle', 'ts', 'rust', 'tree'],
+  close: ['step', 'handle', 'ts', 'tree'],
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -98,8 +109,10 @@ function parseOutcome(value: unknown, id: string): Outcome {
   throw new Error(`${id}: invalid ts outcome ${JSON.stringify(value)}`)
 }
 
+/** A limit name, `OUTSIDE_DOMAIN`, or `undefined` without an override. */
 function parseRust(value: unknown, id: string): string | undefined {
   if (value === undefined) return undefined
+  if (isObject(value) && sortedKeys(value) === 'outcome' && value.outcome === OUTSIDE_DOMAIN) return OUTSIDE_DOMAIN
   if (isObject(value) && sortedKeys(value) === 'limit,outcome' && value.outcome === 'native-subset'
     && LIMITS.includes(value.limit as string)) return value.limit as string
   throw new Error(`${id}: invalid rust override ${JSON.stringify(value)}`)
@@ -123,8 +136,8 @@ function parseSeed(value: unknown, id: string): Seed {
 }
 
 /**
- * Parse one step. Only one handle is open at a time, a throw without a
- * message needs a limit, and `close` always succeeds.
+ * Parse one step. Its handle is `a` unless named, a throw without a message
+ * needs a limit, and `close` always succeeds.
  */
 function parseStep(value: unknown, id: string): Step {
   if (!isObject(value) || typeof value.step !== 'string' || !Object.hasOwn(STEP_KEYS, value.step)) {
@@ -141,7 +154,9 @@ function parseStep(value: unknown, id: string): Step {
   if (ts.outcome === 'thrown' && ts.message === undefined && rust === undefined) {
     throw new Error(`${id}: a throw without a message needs a rust limit`)
   }
-  const extra = rust === undefined ? {} : { rust }
+  const handle = value.handle ?? 'a'
+  if (!HANDLES.includes(handle as Handle)) throw new Error(`${id}: invalid handle ${JSON.stringify(handle)}`)
+  const extra = { handle: handle as Handle, ...(rust === undefined ? {} : { rust }) }
   switch (name) {
     case 'create': {
       const count = value.inheritedEventCount
@@ -153,9 +168,13 @@ function parseStep(value: unknown, id: string): Step {
         ...(count === undefined ? {} : { inheritedEventCount: count as number }),
       }
     }
-    case 'open':
-      if (typeof value.id !== 'string') throw new Error(`${id}: invalid open`)
-      return { step: 'open', id: value.id, ts, tree, ...extra }
+    case 'open': {
+      const src = value.src
+      const placeholder = ts.outcome === 'thrown' && ts.message?.includes('{src}') === true
+      if (typeof value.id !== 'string' || (src !== undefined && typeof src !== 'string')
+        || placeholder !== (src !== undefined)) throw new Error(`${id}: invalid open`)
+      return { step: 'open', id: value.id, ts, tree, ...extra, ...(src === undefined ? {} : { src }) }
+    }
     case 'append':
       if (!Array.isArray(value.events)) throw new Error(`${id}: invalid append`)
       return { step: 'append', events: value.events, ts, tree, ...extra }
@@ -163,16 +182,16 @@ function parseStep(value: unknown, id: string): Step {
       return { step: 'flush', ts, tree, ...extra }
     case 'close':
       if (ts.outcome !== 'ok') throw new Error(`${id}: close succeeds`)
-      return { step: 'close', ts, tree }
+      return { step: 'close', handle: handle as Handle, ts, tree }
   }
 }
 
 function loadTable(): FileCase[] {
   const table: unknown = JSON.parse(readFileSync(new URL('conformance/session/plain-log-file-cases.json', REPO), 'utf8'))
   if (!isObject(table) || sortedKeys(table) !== 'cases,history,oracle,schema,version' || table.schema !== SCHEMA
-    || table.version !== 1 || table.oracle !== ORACLE || !Array.isArray(table.cases)
+    || table.version !== 3 || table.oracle !== ORACLE || !Array.isArray(table.cases)
     || !Array.isArray(table.history) || !table.history.every(line => typeof line === 'string')) {
-    throw new Error('plain-log-file-cases.json does not match its version-1 schema')
+    throw new Error('plain-log-file-cases.json does not match its version-3 schema')
   }
   return table.cases.map((entry: unknown): FileCase => {
     if (!isObject(entry) || typeof entry.id !== 'string' || !Array.isArray(entry.steps) || !Array.isArray(entry.seed)) {
@@ -189,15 +208,15 @@ function loadTable(): FileCase[] {
       throw new Error(`${id}: invalid platforms`)
     }
     const steps = entry.steps.map(step => parseStep(step, id))
-    let open = false
+    const open = new Set<Handle>()
     for (const step of steps) {
       if (step.step === 'create' || step.step === 'open') {
-        if (open) throw new Error(`${id}: one handle at a time`)
-        open = step.ts.outcome === 'ok'
-      } else if (!open) {
-        throw new Error(`${id}: ${step.step} needs a handle`)
+        if (open.has(step.handle)) throw new Error(`${id}: one open value per handle`)
+        if (step.ts.outcome === 'ok') open.add(step.handle)
+      } else if (!open.has(step.handle)) {
+        throw new Error(`${id}: ${step.step} needs an open handle`)
       } else if (step.step === 'close') {
-        open = false
+        open.delete(step.handle)
       }
     }
     return {
@@ -229,9 +248,16 @@ async function outcome(run: () => Promise<void>): Promise<Outcome> {
   }
 }
 
-function expectOutcome(actual: Outcome, expected: Outcome, context: string): void {
+/**
+ * Compare a step's outcome, rendering `{src}` in the expected message as the
+ * backend's resolved root joined with `src`.
+ */
+function expectOutcome(actual: Outcome, expected: Outcome, root: string, src: string | undefined, context: string): void {
   if (expected.outcome === 'thrown' && expected.message === undefined) {
     expect(actual.outcome === 'thrown' ? actual.class : actual, context).toBe(expected.class)
+  } else if (expected.outcome === 'thrown' && src !== undefined) {
+    const source = resolve(root, ...src.split('/'))
+    expect(actual, context).toStrictEqual({ ...expected, message: expected.message?.replaceAll('{src}', source) })
   } else {
     expect(actual, context).toStrictEqual(expected)
   }
@@ -252,7 +278,8 @@ async function seedRoot(root: string, seeds: readonly Seed[]): Promise<void> {
 }
 
 /**
- * Every file beneath `root` but `session.lock`, by `/`-joined relative path.
+ * Every file beneath `root`, by `/`-joined relative path; a `session.lock`
+ * file is listed as empty when its size is 0 and otherwise by its size.
  * Listing by bytes reaches a directory whose name is not UTF-8.
  */
 async function readTree(root: string): Promise<Tree> {
@@ -263,7 +290,10 @@ async function readTree(root: string): Promise<Tree> {
       const relative = prefix + entry.name.toString('utf8')
       if (entry.isDirectory()) {
         await walk(path, `${relative}/`)
-      } else if (entry.name.toString('utf8') !== LEASE_FILE) {
+      } else if (entry.name.toString('utf8') === LEASE_FILE) {
+        const { size } = await stat(path)
+        files[relative] = size === 0 ? '' : `<${size} bytes>`
+      } else {
         files[relative] = await readFile(path, 'utf8')
       }
     }
@@ -287,8 +317,9 @@ describe('shared plain-log file cases', () => {
   it('pin the table and name every limit and class', () => {
     expect(cases).toHaveLength(CASE_COUNT)
     expect(new Set(cases.map(entry => entry.id)).size).toBe(CASE_COUNT)
-    expect(new Set(cases.flatMap(entry => entry.steps.flatMap(step => 'rust' in step && step.rust !== undefined ? [step.rust] : []))))
-      .toEqual(new Set(LIMITS))
+    const overrides = cases.flatMap(entry => entry.steps.flatMap(step => 'rust' in step && step.rust !== undefined ? [step.rust] : []))
+    expect(new Set(overrides.filter(rust => rust !== OUTSIDE_DOMAIN))).toEqual(new Set(LIMITS))
+    expect(overrides.filter(rust => rust === OUTSIDE_DOMAIN)).toHaveLength(1)
     const thrown = cases.flatMap(entry => entry.steps.flatMap(step => step.ts.outcome === 'thrown' ? [step.ts.class] : []))
     expect(new Set(thrown)).toEqual(new Set(CLASSES.keys()))
   })
@@ -301,18 +332,27 @@ describe('shared plain-log file cases', () => {
       .toThrow('needs a rust limit')
     expect(() => parseSeed({ dir: '', rawNameHex: 'f' }, 'malformed')).toThrow('invalid seed')
     expect(() => parseRust({ outcome: 'native-subset', limit: 'other' }, 'malformed')).toThrow('invalid rust override')
+    expect(() => parseStep({ step: 'flush', handle: 'c', ts: { outcome: 'ok' }, tree: {} }, 'malformed')).toThrow('invalid handle')
+    expect(() => parseStep({ step: 'open', id: 'x', ts: { outcome: 'thrown', class: 'Error', message: '{src}' }, tree: {} }, 'malformed'))
+      .toThrow('invalid open')
   })
 
   for (const entry of cases) {
     it.runIf(applies(entry))(entry.id, async () => {
       const caseRoot = await mkdtemp(join(root, 'case-'))
-      const ctx = new Context()
-      let handle: SessionHandle | undefined
+      // One backend instance per handle, so their in-process write claims
+      // are separate and only the kernel lock arbitrates between them.
+      const contexts = new Map(HANDLES.map(label => [label, new Context()]))
+      const handles = new Map<Handle, SessionHandle>()
       try {
         await seedRoot(caseRoot, entry.seed)
-        await ctx.plugin(JsonlSessionPersistence, { root: caseRoot, compression: 'none' })
+        for (const ctx of contexts.values()) {
+          await ctx.plugin(JsonlSessionPersistence, { root: caseRoot, compression: 'none' })
+        }
         for (const [index, step] of entry.steps.entries()) {
-          const context = `step ${index} ${step.step}`
+          const context = `step ${index} ${step.handle} ${step.step}`
+          const ctx = contexts.get(step.handle) as Context
+          const handle = handles.get(step.handle)
           let actual: Outcome
           switch (step.step) {
             case 'create': {
@@ -320,13 +360,13 @@ describe('shared plain-log file cases', () => {
                 ? undefined
                 : { inheritedEventCount: step.inheritedEventCount as SessionLogOffset }
               actual = await outcome(async () => {
-                handle = await ctx.sessionPersistence.create(step.header as SessionHeader, options)
+                handles.set(step.handle, await ctx.sessionPersistence.create(step.header as SessionHeader, options))
               })
               break
             }
             case 'open':
               actual = await outcome(async () => {
-                handle = await ctx.sessionPersistence.open(SessionId(step.id), 'write')
+                handles.set(step.handle, await ctx.sessionPersistence.open(SessionId(step.id), 'write'))
               })
               break
             case 'append':
@@ -337,15 +377,15 @@ describe('shared plain-log file cases', () => {
               break
             case 'close':
               actual = await outcome(() => (handle as SessionHandle).close())
-              handle = undefined
+              handles.delete(step.handle)
               break
           }
-          expectOutcome(actual, step.ts, context)
+          expectOutcome(actual, step.ts, caseRoot, step.step === 'open' ? step.src : undefined, context)
           expect(await readTree(caseRoot), context).toStrictEqual(step.tree)
         }
       } finally {
-        await handle?.close()
-        await ctx.fiber.dispose()
+        for (const handle of handles.values()) await handle.close()
+        for (const ctx of contexts.values()) await ctx.fiber.dispose()
       }
     })
   }

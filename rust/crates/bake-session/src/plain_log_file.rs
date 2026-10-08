@@ -11,41 +11,96 @@
 //!   `findLog` resolves it. Nothing is written.
 //! - [`PlainLogFile::open`] is a write `open`: the root check, then `findLog`,
 //!   which must find exactly one project directory holding a canonical
-//!   generation, which must be the current one; its bytes are opened as
-//!   [`PlainAppendLog::open`] opens them, and the selected path must be the
-//!   one the header's id and `cwd` name.
+//!   generation, then the Session directory's write lock, taken before the
+//!   generation is read; every later refusal releases the lock and keeps its
+//!   file. The generation must not be newer than the current one. A current
+//!   generation's bytes are opened as [`PlainAppendLog::open`] opens them,
+//!   and the selected path must be the one the header's id and `cwd` name.
+//!   An older generation, format v0, v1, or v2, is migrated as the backend
+//!   prepares and publishes it: its header and rows are parsed, its header
+//!   identity is checked against the requested id and the selected path, its
+//!   rows are decoded by the released codec in recoverable mode and read
+//!   through every format edge to v3, and the result is encoded, written to
+//!   a temporary file beside the source, and published by hard link as a
+//!   new `session.v3.jsonl`, as TypeScript publishes it on POSIX, so a
+//!   failed write, or a process killed before the link, never leaves that
+//!   file. The source is never changed.
+//!   The handle then holds those bytes, opened as a current log.
 //! - [`PlainLogFile::append`] and [`PlainLogFile::flush`] run the model's
 //!   operation, then bring the file to the model's bytes, refused operations
 //!   included: a first write creates the Session directory and a new file
 //!   holding every byte, and a later one truncates the file to the bytes it
-//!   shares with the model and writes the rest.
+//!   shares with the model and writes the rest. A created handle first takes
+//!   the write lock, creating the Session directory, at its first flush or
+//!   its first batch that is neither empty nor refused for -0, before the
+//!   batch's contiguity check, as TypeScript's `ensureLease` does. The
+//!   opposite-encoding check TypeScript repeats before that lock is not
+//!   repeated: a Zstd log written after `create`, by a process outside this
+//!   model, is outside the domain.
 //!
-//! Dropping the value is the handle's `close`. The refusals TypeScript's
-//! `SessionAlreadyExistsError`, `SessionPersistenceNotFoundError`, and
-//! duplicate-id `Error` carry are returned with their exact messages.
+//! The write lock is an exclusive kernel lock on the `session.lock` file in
+//! the Session directory, which is created and never removed, as
+//! TypeScript's `SessionWriteLease` takes it; a lock another handle holds is
+//! refused with `SessionAlreadyOwnedError`'s exact message, and a refused
+//! lock leaves a handle usable. Each value stands for a handle of its own
+//! backend instance, so two values of one Session are arbitrated by that
+//! lock alone. Dropping the value is the handle's `close`, which releases
+//! the lock. The refusals TypeScript's `SessionAlreadyExistsError`,
+//! `SessionPersistenceNotFoundError`, and duplicate-id `Error` carry are
+//! returned with their exact messages, as are the
+//! `SessionPersistenceCorruptionError` and `SessionFormatUnsupportedError` a
+//! migration reports, which name the source path.
 //!
-//! The write lease and its `session.lock` file, fsync and directory sync,
-//! the temporary file and `link` publication, rollback after a failed write,
-//! file modes, Zstd compression, migration of an older generation, and the
-//! `validateStoredEvents` check of an opened log are not modelled. Opening a
-//! log TypeScript's validation refuses is outside this model's domain, as is
-//! a path the filesystem refuses, such as one longer than a file or path
-//! name may be, a symlink, a root another process changes, or a second handle
-//! of the same Session open at once, which TypeScript refuses in-process.
-//! Every listing is visited in byte order of its UTF-8 names. After an I/O
-//! error the file may hold a partial write, and every later operation on the
-//! value fails.
+//! A migration's streaming order is recovered from batch stages: a refusal
+//! the codec raises at a row is reported only when reading the rows before
+//! it through every edge raises no header or event refusal, which TypeScript
+//! would have reported first, and a parse that ends at a later row, on a
+//! `turn/end` after an unparsable row or at a limit, is reported only when
+//! no codec or edge refusal precedes it.
+//!
+//! Paths are spelled from `root` as given, and TypeScript spells them from
+//! `path.resolve(root)`, so the messages are exact only for an absolute root
+//! that `path.resolve` leaves unchanged, with no `.` or `..` component and
+//! no trailing or repeated separator.
+//!
+//! A TypeScript backend instance's in-process write claims and pending
+//! creates, which refuse a second handle of one Session within that
+//! instance, are not modelled, and exclusion between a Rust value and a
+//! TypeScript handle is not tested. Fsync and directory sync, the
+//! publication's verifier, rollback after a failed write, file modes, Zstd
+//! compression, and the `validateStoredEvents` check of an opened log are
+//! not modelled. Opening a log TypeScript's validation refuses is
+//! outside this model's domain. So is migrating a log whose v3
+//! result the catalog's final check (`restoreReleasedV3Artifact`), the
+//! publication's verifier, or `validateStoredEvents` refuses: Rust writes the
+//! migrated file where TypeScript refuses and writes nothing. So is a path
+//! the filesystem refuses, such as one longer than a file or path name may
+//! be, a symlink, or a root another process changes, a lock file removed or
+//! replaced included. Every listing is visited in byte order of its UTF-8
+//! names. A migration's
+//! temporary file is removed after a failed write or link, and a failed
+//! removal is reported with that failure; one a killed process leaves is
+//! not a generation. After an I/O error in `append` or `flush` the file may
+//! hold a partial write, and every later operation on the value fails.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, ErrorKind, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::Value;
 
-use crate::log_layout::{canonical_generation, encode_segment, log_path};
+use crate::fork::holds_negative_zero;
+use crate::log_layout::{CURRENT_LOG_FILENAME, canonical_generation, encode_segment, log_path};
+use crate::released_rows::{ParseStop, parse_released_header, parse_released_rows};
+use crate::write_lease::{LeaseRefusal, WriteLease};
 use crate::{
-    AppendRefusal, CURRENT_SESSION_FORMAT_VERSION, CreateRefusal, PathPlatform, PlainAppendLog,
-    ScanRefusal, first_record, read_header_record,
+    AppendRefusal, CURRENT_SESSION_FORMAT_VERSION, CreateRefusal, GenerationHeaderRefusal,
+    HistoryLocation, HistoryRefusal, MigratedV2, PathPlatform, PlainAppendLog, ScanRefusal,
+    SubsetLimit, V1CodecLocation, V1CodecRecovery, V1CodecRefusal, V1CodecVersion, V2ToV3Layer,
+    V2ToV3Location, V2ToV3Refusal, decode_v0_v1_items, encode_event_line, encode_header_line,
+    first_record, migrate_released_history, migrate_v2_rows, read_generation_header_record,
+    read_header_record,
 };
 
 /// One write handle of a plain current-format Session log under a root.
@@ -53,12 +108,20 @@ use crate::{
 pub struct PlainLogFile {
     path: PathBuf,
     log: PlainAppendLog,
+    /// The Session directory's write lock, held from a write `open` or from
+    /// a created handle's first write on.
+    lease: Option<WriteLease>,
     failed: bool,
 }
 
 /// Why an operation of [`PlainLogFile`] was refused.
 #[derive(Debug)]
 pub enum LogFileRefusal {
+    /// Another handle holds the Session directory's write lock; TypeScript
+    /// throws `SessionAlreadyOwnedError` with this exact message. The log
+    /// was neither read nor written; only the lock file and its directory
+    /// may have been created.
+    AlreadyOwned { message: String },
     /// `create` found a canonical generation of the id in exactly one project
     /// directory; TypeScript throws `SessionAlreadyExistsError` with this
     /// exact message.
@@ -69,6 +132,14 @@ pub enum LogFileRefusal {
     /// Two or more project directories hold a canonical generation of the id;
     /// TypeScript's `findLog` throws a plain `Error` with this exact message.
     Duplicate { message: String },
+    /// Migrating an older generation found it corrupt; TypeScript throws
+    /// `SessionPersistenceCorruptionError` with this exact message, which
+    /// names the source path. No file was written.
+    Corrupt { message: String },
+    /// A format edge refused to migrate an older generation; TypeScript
+    /// throws `SessionFormatUnsupportedError` with this exact message, which
+    /// names the source path. No file was written.
+    Unsupported { message: String },
     /// [`PlainAppendLog::create`] refused the header. Nothing was read.
     Create(CreateRefusal),
     /// [`PlainAppendLog::append`] refused the batch; the file holds what the
@@ -86,9 +157,12 @@ impl LogFileRefusal {
     /// TypeScript's exact message, or `None` where none is claimed.
     pub fn message(&self) -> Option<&str> {
         match self {
-            Self::AlreadyExists { message }
+            Self::AlreadyOwned { message }
+            | Self::AlreadyExists { message }
             | Self::NotFound { message }
-            | Self::Duplicate { message } => Some(message),
+            | Self::Duplicate { message }
+            | Self::Corrupt { message }
+            | Self::Unsupported { message } => Some(message),
             Self::Append(refusal) => refusal.message(),
             Self::Create(_) | Self::NativeSubset(_) | Self::Io(_) => None,
         }
@@ -122,19 +196,42 @@ pub enum LogFileLimit {
     /// The root or a project directory lists a name that is not UTF-8, which
     /// Node lists with replacement characters and then opens by that spelling.
     NonUtf8Name,
-    /// The id's highest canonical generation is older than the current one;
-    /// TypeScript migrates it.
-    OlderGeneration,
     /// The id's highest canonical generation is newer than the current one;
     /// TypeScript reads its header and refuses it.
     NewerGeneration,
-    /// The selected log's header id differs from the requested one, or its
-    /// id and `cwd` name another path than the selected one. TypeScript
-    /// refuses unless `realpath` resolves both paths to one file.
+    /// The selected current log's header id differs from the requested one,
+    /// or a selected log's header id and `cwd` name another path than the
+    /// selected one. TypeScript refuses unless `realpath` resolves both paths
+    /// to one file.
     Identity,
     /// [`PlainAppendLog::open`] refused the stored bytes, which TypeScript
     /// reports with the path of the log in its message.
     Scan(ScanRefusal),
+    /// Migrating an older generation reached input whose TypeScript outcome
+    /// this crate does not decide. Nothing was written. The name is one of:
+    ///
+    /// - `header/<name>` or `row/<name>`: the header or a row is not UTF-8
+    ///   (`invalid-utf8`), serde_json refuses what `JSON.parse` may admit
+    ///   (`json-parser`), or a number has more integer digits than
+    ///   serde_json rounds as `JSON.parse` does (`number-lexeme`), as
+    ///   [`crate::ScanLimit`] describes them; or the header's version or a
+    ///   count is held as a float (`float-lexeme`) or its identity check
+    ///   reports `version-diagnostic`.
+    /// - `codec/<name>`, `history/<name>`, or `v2-to-v3/<name>`: a limit of
+    ///   [`decode_v0_v1_items`], [`migrate_released_history`], or
+    ///   [`migrate_v2_rows`], under its name there.
+    /// - `finish-order`: the v0 or v1 codec's `finish` refuses rows that the
+    ///   later stages, or an earlier stop, must see first.
+    /// - `v2-codec-recovery`: the v2 codec refuses a `turn/end` or
+    ///   `session/end-seed` row, or a row before a later `turn/end`, whose
+    ///   recoverable outcome depends on which check refused it.
+    /// - `decode-invariant`: a rerun over a prefix disagrees with the first
+    ///   run.
+    /// - `encode` or `scan`: the migrated log reaches a native limit of this
+    ///   crate's encoder, such as a number with a fraction that TypeScript
+    ///   writes, or its encoded bytes do not open as [`PlainAppendLog::open`]
+    ///   opens a current log. TypeScript may migrate such a log.
+    Migration(String),
 }
 
 /// A canonical plain generation found for an id.
@@ -169,6 +266,7 @@ impl PlainLogFile {
         Ok(Self {
             path: log_path(root, cwd, &encoded),
             log,
+            lease: None,
             failed: false,
         })
     }
@@ -190,8 +288,15 @@ impl PlainLogFile {
                 message: format!("session \"{id}\" not found"),
             });
         };
+        // The lock is taken before the selected log is read, and a refusal
+        // from here on releases it and keeps its file.
+        let dir = selected
+            .path
+            .parent()
+            .ok_or_else(|| io::Error::other("a Session log path has a directory"))?;
+        let lease = acquire_lease(dir, id)?;
         if selected.version < CURRENT_SESSION_FORMAT_VERSION {
-            return Err(LogFileRefusal::NativeSubset(LogFileLimit::OlderGeneration));
+            return Self::migrate(root, id, &encoded, &selected, lease, source_budget);
         }
         if selected.version > CURRENT_SESSION_FORMAT_VERSION {
             return Err(LogFileRefusal::NativeSubset(LogFileLimit::NewerGeneration));
@@ -213,6 +318,87 @@ impl PlainLogFile {
         Ok(Self {
             path: selected.path,
             log,
+            lease: Some(lease),
+            failed: false,
+        })
+    }
+
+    /// The write `open` of an older generation: `prepareStoredMigration`,
+    /// then `publishStoredMigration`, which writes the encoded v3 log beside
+    /// the unchanged source before the handle holds it.
+    fn migrate(
+        root: &Path,
+        id: &str,
+        encoded: &str,
+        selected: &Generation,
+        lease: WriteLease,
+        source_budget: usize,
+    ) -> Result<Self, LogFileRefusal> {
+        let bytes = fs::read(&selected.path)?;
+        let platform = PathPlatform::host();
+        let refusal = |refused: Refused| refused.into_refusal(id, selected);
+        let Some(record) = first_record(&bytes) else {
+            return Err(refusal(Refused::Corrupt(
+                "Error: empty or header-less session log".to_owned(),
+            )));
+        };
+        let header = parse_released_header(record, selected.version)
+            .map_err(|stop| refusal(Refused::from(stop)))?;
+        // `validateSourceIdentity` checks a header its codec reads, before any row.
+        match read_generation_header_record(record, selected.version, platform) {
+            Ok(Some(stored)) => {
+                if stored.id != id {
+                    let path = selected.path.display();
+                    return Err(refusal(Refused::Corrupt(format!(
+                        "Error: corrupt session log \"{path}\": requested id \"{id}\" \
+                         does not match header id \"{}\"",
+                        stored.id
+                    ))));
+                }
+                let current = selected.path.with_file_name(CURRENT_LOG_FILENAME);
+                if log_path(root, stored.cwd.as_deref(), encoded) != current {
+                    return Err(LogFileRefusal::NativeSubset(LogFileLimit::Identity));
+                }
+            }
+            // The codec refuses a header with retired fields.
+            Ok(None) | Err(GenerationHeaderRefusal::Rejected(_)) => {}
+            Err(GenerationHeaderRefusal::Unsupported(_)) => {
+                return Err(refusal(Refused::Limit("decode-invariant".to_owned())));
+            }
+            Err(GenerationHeaderRefusal::NativeSubset(limit)) => {
+                return Err(refusal(Refused::Limit(header_limit(limit).to_owned())));
+            }
+        }
+        let parsed = parse_released_rows(&bytes[record.len()..]);
+        let stop = parsed.stop.map(Refused::from);
+        let migrated = if selected.version == 2 {
+            migrate_v2(&header, &parsed.rows, stop, source_budget)
+        } else {
+            let version = if selected.version == 0 {
+                V1CodecVersion::V0
+            } else {
+                V1CodecVersion::V1
+            };
+            migrate_v0_v1(&header, &parsed.rows, stop, version, source_budget)
+        }
+        .map_err(refusal)?;
+        let encode = || Refused::Limit("encode".to_owned());
+        let mut text = encode_header_line(&migrated.header, Some(migrated.inherited_event_count))
+            .map_err(|_| refusal(encode()))?;
+        text.push('\n');
+        for event in &migrated.events {
+            text.push_str(&encode_event_line(event).map_err(|_| refusal(encode()))?);
+            text.push('\n');
+        }
+        let bytes = text.into_bytes();
+        let log = PlainAppendLog::open(&bytes, platform, source_budget)
+            .map_err(|_| refusal(Refused::Limit("scan".to_owned())))?;
+        let path = selected.path.with_file_name(CURRENT_LOG_FILENAME);
+        publish_new_file(&path, &bytes)?;
+        Ok(Self {
+            path,
+            log,
+            lease: Some(lease),
             failed: false,
         })
     }
@@ -229,22 +415,44 @@ impl PlainLogFile {
 
     /// The handle's `append`, as [`PlainAppendLog::append`] runs it, with the
     /// file then brought to the model's bytes, even when the batch is refused
-    /// after a torn tail was truncated.
+    /// after a torn tail was truncated. A created handle takes the write lock
+    /// at its first batch that is neither empty nor refused for -0, before
+    /// the contiguity check, as TypeScript's `ensureLease` does.
     pub fn append(&mut self, events: &[Value]) -> Result<(), LogFileRefusal> {
         self.check_usable()?;
+        if !events.is_empty() && !events.iter().any(holds_negative_zero) {
+            self.ensure_lease()?;
+        }
         let before = self.log.bytes().map(<[u8]>::to_vec);
         let outcome = self.log.append(events);
         self.sync(before.as_deref())?;
         outcome.map_err(LogFileRefusal::Append)
     }
 
-    /// The handle's `flush`: an unwritten log's file is created holding the
-    /// header line alone; a written one is left as it is.
+    /// The handle's `flush`: an unwritten log takes the write lock, then its
+    /// file is created holding the header line alone; a written one is left
+    /// as it is.
     pub fn flush(&mut self) -> Result<(), LogFileRefusal> {
         self.check_usable()?;
+        if self.log.bytes().is_none() {
+            self.ensure_lease()?;
+        }
         let before = self.log.bytes().map(<[u8]>::to_vec);
         self.log.flush();
         self.sync(before.as_deref())
+    }
+
+    /// Take the Session directory's write lock unless it is held. A refusal
+    /// leaves the handle usable, so a later operation tries again.
+    fn ensure_lease(&mut self) -> Result<(), LogFileRefusal> {
+        if self.lease.is_none() {
+            let dir = self
+                .path
+                .parent()
+                .ok_or_else(|| io::Error::other("a Session log path has a directory"))?;
+            self.lease = Some(acquire_lease(dir, self.log.id())?);
+        }
+        Ok(())
     }
 
     fn check_usable(&self) -> Result<(), LogFileRefusal> {
@@ -271,6 +479,284 @@ impl PlainLogFile {
             LogFileRefusal::Io(error)
         })
     }
+}
+
+/// A migration's refusal before the source path and the requested id are
+/// put in its message.
+enum Refused {
+    /// `SessionPersistenceCorruptionError`, with `String(error)` of the cause.
+    Corrupt(String),
+    /// `SessionFormatUnsupportedError`, with the format edge's message.
+    Unsupported(String),
+    /// [`LogFileLimit::Migration`], with its name.
+    Limit(String),
+}
+
+impl Refused {
+    /// The backend's `generationFailure` translation.
+    fn into_refusal(self, id: &str, selected: &Generation) -> LogFileRefusal {
+        let source = selected.path.display();
+        match self {
+            Self::Corrupt(cause) => LogFileRefusal::Corrupt {
+                message: format!(
+                    "session \"{id}\": stored log is corrupt: {cause} (raw log: {source})"
+                ),
+            },
+            Self::Unsupported(reason) => LogFileRefusal::Unsupported {
+                message: format!(
+                    "{reason}; source v{} artifact remains unchanged (raw log: {source})",
+                    selected.version
+                ),
+            },
+            Self::Limit(name) => LogFileRefusal::NativeSubset(LogFileLimit::Migration(name)),
+        }
+    }
+
+    /// A refusal of the released v0 or v1 codec, a `SessionFormatError`.
+    fn codec(refusal: V1CodecRefusal) -> Self {
+        match refusal {
+            V1CodecRefusal::Rejected { message, .. } => {
+                Self::Corrupt(format!("SessionFormatError: {message}"))
+            }
+            V1CodecRefusal::NativeSubset { limit, .. } => {
+                Self::Limit(format!("codec/{}", limit.name()))
+            }
+        }
+    }
+
+    /// A refusal of the format chain, always unsupported.
+    fn history(refusal: HistoryRefusal) -> Self {
+        match refusal {
+            HistoryRefusal::Rejected { message, .. } => Self::Unsupported(message),
+            HistoryRefusal::NativeSubset { limit, .. } => {
+                Self::Limit(format!("history/{}", limit.name()))
+            }
+        }
+    }
+
+    /// A refusal of the released v2 codec or the v2→v3 edge.
+    fn v2(refusal: V2ToV3Refusal) -> Self {
+        match refusal {
+            V2ToV3Refusal::Rejected {
+                layer: V2ToV3Layer::Codec,
+                message,
+                ..
+            } => Self::Corrupt(format!("SessionFormatError: {message}")),
+            V2ToV3Refusal::Rejected { message, .. } => Self::Unsupported(message),
+            V2ToV3Refusal::NativeSubset { limit, .. } => Self::Limit(format!("v2-to-v3/{limit}")),
+        }
+    }
+}
+
+impl From<ParseStop> for Refused {
+    fn from(stop: ParseStop) -> Self {
+        match stop {
+            ParseStop::Corrupt(message) => Self::Corrupt(format!("Error: {message}")),
+            ParseStop::Limit(name) => Self::Limit(name.to_owned()),
+        }
+    }
+}
+
+const fn header_limit(limit: SubsetLimit) -> &'static str {
+    match limit {
+        SubsetLimit::InvalidUtf8 => "header/invalid-utf8",
+        SubsetLimit::JsonParser => "header/json-parser",
+        SubsetLimit::FloatLexeme => "header/float-lexeme",
+        SubsetLimit::VersionDiagnostic => "header/version-diagnostic",
+    }
+}
+
+/// A v0 or v1 log's parsed `rows` through the recoverable codec and every
+/// format edge, then `stop`, in TypeScript's streaming order.
+fn migrate_v0_v1(
+    header: &Value,
+    rows: &[Value],
+    stop: Option<Refused>,
+    version: V1CodecVersion,
+    source_budget: usize,
+) -> Result<MigratedV2, Refused> {
+    let decode = |rows: &[Value]| {
+        decode_v0_v1_items(
+            header,
+            rows,
+            version,
+            V1CodecRecovery::Recoverable,
+            PathPlatform::host(),
+            source_budget,
+        )
+    };
+    let refusal = match decode(rows) {
+        Ok(items) => {
+            return match (migrate_released_history(&items), stop) {
+                (Err(refused), _) if !at_finish(&refused) => Err(Refused::history(refused)),
+                // Every row streamed before the stop, and `finish` runs after it.
+                (_, Some(stop)) => Err(stop),
+                (outcome, None) => outcome.map_err(Refused::history),
+            };
+        }
+        Err(refusal) => refusal,
+    };
+    let location = match &refusal {
+        V1CodecRefusal::Rejected { location, .. }
+        | V1CodecRefusal::NativeSubset { location, .. } => *location,
+    };
+    let row = match location {
+        V1CodecLocation::Header => return Err(Refused::codec(refusal)),
+        // The rows the decoder emitted before `finish` are not returned.
+        V1CodecLocation::Finish => return Err(Refused::Limit("finish-order".to_owned())),
+        V1CodecLocation::Row(row) => row,
+    };
+    // The items before the refused row streamed through every edge first.
+    let prefix = match decode(rows.get(..row).unwrap_or_default()) {
+        Ok(prefix) => prefix,
+        Err(V1CodecRefusal::Rejected {
+            location: V1CodecLocation::Finish,
+            ..
+        }) => return Err(Refused::Limit("finish-order".to_owned())),
+        Err(_) => return Err(invariant()),
+    };
+    match migrate_released_history(&prefix) {
+        Err(refused) if !at_finish(&refused) => Err(Refused::history(refused)),
+        _ => Err(Refused::codec(refusal)),
+    }
+}
+
+fn at_finish(refusal: &HistoryRefusal) -> bool {
+    matches!(
+        refusal,
+        HistoryRefusal::Rejected {
+            location: HistoryLocation::Finish,
+            ..
+        } | HistoryRefusal::NativeSubset {
+            location: HistoryLocation::Finish,
+            ..
+        }
+    )
+}
+
+fn invariant() -> Refused {
+    Refused::Limit("decode-invariant".to_owned())
+}
+
+/// A v2 log's parsed `rows` through the released v2 codec in recoverable
+/// mode and the v2→v3 edge, then `stop`, in TypeScript's streaming order.
+/// [`migrate_v2_rows`] decodes strictly; where its codec refuses a row, the
+/// recoverable codec drops that row and every later one unless one of them
+/// throws, which only a `turn/end` row or a `session/end-seed` row can do.
+fn migrate_v2(
+    header: &Value,
+    rows: &[Value],
+    stop: Option<Refused>,
+    source_budget: usize,
+) -> Result<MigratedV2, Refused> {
+    let migrate =
+        |rows: &[Value]| migrate_v2_rows(header, rows, PathPlatform::host(), source_budget);
+    let streamed = match migrate(rows) {
+        Err(V2ToV3Refusal::Rejected {
+            location: V2ToV3Location::Row(row),
+            layer: V2ToV3Layer::Codec,
+            ..
+        }) => {
+            let has_type =
+                |row: &Value, kind: &str| row.get("type").is_some_and(|value| value == kind);
+            let throws = rows.get(row).is_none_or(|refused| {
+                has_type(refused, "turn/end") || has_type(refused, "session/end-seed")
+            }) || rows
+                .iter()
+                .skip(row.saturating_add(1))
+                .any(|later| has_type(later, "turn/end"));
+            if throws {
+                return Err(Refused::Limit("v2-codec-recovery".to_owned()));
+            }
+            match migrate(rows.get(..row).unwrap_or_default()) {
+                Err(
+                    V2ToV3Refusal::Rejected {
+                        location: V2ToV3Location::Row(_),
+                        ..
+                    }
+                    | V2ToV3Refusal::NativeSubset {
+                        location: V2ToV3Location::Row(_),
+                        ..
+                    },
+                ) => return Err(invariant()),
+                outcome => outcome,
+            }
+        }
+        outcome => outcome,
+    };
+    let before_stop = matches!(
+        streamed,
+        Err(V2ToV3Refusal::Rejected {
+            location: V2ToV3Location::Header | V2ToV3Location::Row(_),
+            ..
+        } | V2ToV3Refusal::NativeSubset {
+            location: V2ToV3Location::Header | V2ToV3Location::Row(_),
+            ..
+        })
+    );
+    match stop {
+        // Every row streamed before the stop, and `finish` runs after it.
+        Some(stop) if !before_stop => Err(stop),
+        _ => streamed.map_err(Refused::v2),
+    }
+}
+
+/// Publish `bytes` as a new file at `path`, whose directory exists: write
+/// them to a new `session.migration.<token>.tmp` beside it, which is never a
+/// canonical generation, then hard-link that file to `path`, which fails if
+/// `path` exists, and remove it. A write or link failure removes the
+/// temporary file and never leaves a file at `path`; a failed removal is
+/// reported with the failure that made the file disposable.
+fn publish_new_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    static NEXT_TOKEN: AtomicU64 = AtomicU64::new(0);
+    let dir = path
+        .parent()
+        .ok_or_else(|| io::Error::other("a Session log path has a directory"))?;
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let (staged, mut file) = loop {
+        let token = NEXT_TOKEN.fetch_add(1, Ordering::Relaxed);
+        let staged = dir.join(format!(
+            "session.migration.{}-{token}.tmp",
+            std::process::id()
+        ));
+        match options.open(&staged) {
+            Ok(file) => break (staged, file),
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error),
+        }
+    };
+    let written = file.write_all(bytes);
+    // Windows removes and links only a file no handle holds open.
+    drop(file);
+    if let Err(error) = written.and_then(|()| fs::hard_link(&staged, path)) {
+        return Err(match fs::remove_file(&staged) {
+            Ok(()) => error,
+            Err(cleanup) => io::Error::new(
+                error.kind(),
+                format!(
+                    "{error}; failed to remove migration temporary \"{}\": {cleanup}",
+                    staged.display()
+                ),
+            ),
+        });
+    }
+    // `path` holds the bytes; a leftover temporary is never a generation.
+    let _ = fs::remove_file(&staged);
+    Ok(())
+}
+
+/// The write lock of the Session directory `dir`, or TypeScript's
+/// `SessionAlreadyOwnedError` refusal for `id`.
+fn acquire_lease(dir: &Path, id: &str) -> Result<WriteLease, LogFileRefusal> {
+    WriteLease::acquire(dir).map_err(|refusal| match refusal {
+        LeaseRefusal::AlreadyOwned => LogFileRefusal::AlreadyOwned {
+            message: format!("session \"{id}\" is already owned by an active write handle"),
+        },
+        LeaseRefusal::Io(error) => LogFileRefusal::Io(error),
+    })
 }
 
 /// The id's path segment, or the [`LogFileLimit::WindowsName`] limit.
