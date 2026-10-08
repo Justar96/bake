@@ -63,7 +63,10 @@
 //! step boundaries and its latest title.
 //! [`subagent_identity`] and [`subagent_timing`] fold a [`RestoredLog`]'s
 //! subagent descriptors and turn times into its identity and active-turn
-//! timing.
+//! timing. [`subagent_catalog`] folds a [`RestoredLog`]'s own
+//! `subagent/catalog` facts into its direct-child catalog in event order,
+//! skipping inherited ones before validation and refusing at the first own
+//! fact that fails the payload schema.
 //! [`encode_header_line`] and [`encode_event_line`] produce the exact text
 //! TypeScript writes for a current header record and one current event row,
 //! without the LF, or refuse with `Unadmitted` where TypeScript throws, or
@@ -89,6 +92,7 @@ mod row_encode;
 mod scan;
 mod source_event_seqs;
 mod subagent;
+mod subagent_catalog;
 mod usage;
 mod v0_to_v1;
 mod v1_codec;
@@ -136,6 +140,9 @@ pub use source_event_seqs::{
 pub use subagent::{
     SubagentActiveInterval, SubagentIdentity, SubagentTimingState, subagent_identity,
     subagent_timing,
+};
+pub use subagent_catalog::{
+    SubagentCatalogEntry, SubagentCatalogMode, SubagentCatalogRefusal, subagent_catalog,
 };
 pub use usage::{
     LastTokenUsage, TokenUsageBuckets, TokenUsageState, UsageLimit, UsageRefusal, token_usage,
