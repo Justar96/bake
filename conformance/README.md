@@ -40,6 +40,7 @@ Compare TypeScript and Rust using controlled fixtures and independently checked 
 - [V1 to V2 decoded-stage cases](#v1-to-v2-decoded-stage-cases)
 - [Plain log file cases](#plain-log-file-cases)
 - [Migrated restoration cases](#migrated-restoration-cases)
+- [Prefix restoration cases](#prefix-restoration-cases)
 - [Released relationship cases](#released-relationship-cases)
 - [Cross-runtime write lease](#cross-runtime-write-lease)
 - [Runner contract](#runner-contract)
@@ -995,6 +996,26 @@ Without a probe the spec skips itself, so the ordinary runtime suite needs no Ca
 Every refused write `open` leaves the log's bytes unchanged, every takeover follows a refusal observed against the same holder, and the final log reads back through TypeScript with seqs 0, 1, and 2. On POSIX a holder of either runtime stopped with `SIGSTOP`, which `ps` reports as stopped, still refuses the other runtime until it is killed and reaped, after which the other runtime takes over. Windows skips only those two cases, so a stopped holder's exclusion is not shown there; its live idle holders still cover both lock ranges, the whole file Rust locks and the first byte TypeScript locks.
 
 The check covers process-level exclusion only. A TypeScript backend instance's in-process write claims, Zstd logs, fsync and directory sync, rollback after a failed write, a migration's publication under contention, the catalog's final check, and `validateStoredEvents` at open are not exercised, nor are older TypeScript releases. Two Rust processes contend in the probe's own Cargo tests. This evidence closes no roadmap scope.
+
+## Prefix restoration cases
+
+[`session/prefix-restore-cases.json`](session/prefix-restore-cases.json) holds one case for every row prefix of the three [runtime captures](#runtime-request-reconstruction), from the header alone to the whole log: 17 prefixes of `tool-call-turn`, 39 of `dynamic-tools`, and 15 of `retry-attempt`, 71 in all. Each prefix is a point a writer can stop at between two committed rows. The [TypeScript spec](../packages/session/session-persistence-jsonl/tests/prefix-restore-conformance.spec.ts) restores each prefix with the same `restorePlainLog` composition as the [plain log restoration](#plain-log-restoration-cases): `scanLog`, `validateStoredEvents`, `interruptedTurnClosers`, then `Session.fromRestore` with the current message projections. The [Rust test](../rust/crates/bake-session/tests/prefix_restore_cases.rs) passes the same bytes to `restore_plain_log`.
+
+```sh
+bun run test:runtime packages/session/session-persistence-jsonl/tests/prefix-restore-conformance.spec.ts
+(cd rust && cargo test --locked -p bake-session --test prefix_restore_cases)
+```
+
+A case names its capture and row count. Its `ts` is the restored state, written by hand from the TypeScript sources and the committed captures before either harness ran: the stored event count, the full closers, whether an end seed is appended, `deriveMessages`, the canonical request header, the tool-history snapshot, and the latest `request/context`. `{"$log": pointer}` names a value in the prefix's own rows, so a reference past the prefix fails, and `{"$closer": pointer}` names a value in the closers. The closers reuse the last row's time through such a reference. The header and inherited count are stated once per capture. The committed bytes are the prefix's own byte length. The prefixes cover a turn left open before and after its first step, an unstarted and a started tool call, a settled call in an open step, a step closed in an open turn, a changed header waiting for its tool update, and each balanced turn end. Both harnesses also tear the next row of every prefix but the whole log after 1 byte, half its length, and all but its last byte, 204 logs in all. Each must restore exactly as its prefix does, with the prefix's committed bytes; Rust also requires `torn()` to name that offset and the stored row count.
+
+Both harnesses check the captures, pin the case count and distinct ids, and require each capture's prefixes once, in order. The table names no native limit and no refusal: every prefix restores identically in both arms. These negative controls were observed:
+
+- dropping the closers, in Rust's restoration or in the TypeScript helper, fails `tool-call-turn/2`;
+- counting the torn tail as committed fails the torn variants of `tool-call-turn/0` in Rust's scan and in TypeScript's `scanLog`;
+- forgetting a recorded `tool/call` fails `tool-call-turn/10` in Rust;
+- naming row 8's time for the first closer of `dynamic-tools/10` fails that case in both arms.
+
+No capture has two calls pending at once, so call order among closers is checked only by the [plain log restoration](#plain-log-restoration-cases). Seeded and Zstd logs, request derivation, and Agent resume are not covered. These cases close no roadmap scope.
 
 ## Runner contract
 
