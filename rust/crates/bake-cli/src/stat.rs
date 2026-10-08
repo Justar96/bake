@@ -36,7 +36,7 @@ use bake_session::{
 use serde_json::{Value, json};
 
 use crate::inspect::{Encoding, Kind, LookupArgs, Refusal, header_limit, open_read_only};
-use crate::lookup::{Refused, Step, Stop, check_identity, refused, resolve, select};
+use crate::lookup::{Refused, Selected, Step, Stop, check_identity, refused, resolve, select};
 
 /// The parsed operands of `session stat`.
 #[derive(Debug, PartialEq, Eq)]
@@ -52,38 +52,46 @@ enum Observed {
     Absent,
 }
 
+/// What `readGenerationHeader` makes of one selected generation.
+pub(crate) enum Header {
+    /// The header, migrated to current metadata, with its stored identity
+    /// checked against the selected file.
+    Found(SessionHeader),
+    /// TypeScript's `undefined`: a missing file, a header without its
+    /// complete record, or a malformed header.
+    Absent,
+    /// A refusal TypeScript throws as `SessionFormatUnsupportedError` or
+    /// `SessionPersistenceCorruptionError`: a corrupt first Zstd frame or an
+    /// unsupported format. `stat` reports it; discovery skips the artifact.
+    Isolated(Stop),
+}
+
 /// Run `session stat`, returning its record and exit status, or a
 /// diagnostic for exit status 1.
 pub fn run(args: &StatArgs) -> Result<(Value, u8), String> {
     let lookup = &args.lookup;
-    let root = resolve(lookup)?;
+    let root = resolve(&lookup.root)?;
     let mut selected_at = None;
     let outcome = select(&root, lookup).and_then(|selected| {
         let Some(selected) = selected else {
             return Ok(Observed::Absent);
         };
-        let relative = selected.relative(&lookup.id);
-        selected_at = Some((relative.clone(), selected.version));
-        let path = selected.path(&root, &lookup.id);
-        let Some(record) = read_header(&path, lookup.encoding, args.max_header_bytes, &relative)?
-        else {
-            return Ok(Observed::Absent);
+        selected_at = Some((selected.relative(), selected.version));
+        let header = match read_selected(
+            &root,
+            &selected,
+            lookup.encoding,
+            args.max_header_bytes,
+            Some(&lookup.id),
+        )? {
+            Header::Found(header) => header,
+            Header::Absent => return Ok(Observed::Absent),
+            Header::Isolated(stop) => return Err(stop),
         };
-        let header =
-            match read_generation_header_record(&record, selected.version, PathPlatform::host()) {
-                Ok(Some(header)) => header,
-                Ok(None) => return Ok(Observed::Absent),
-                Err(refusal) => return Err(header_refusal(refusal, selected.version, &relative)),
-            };
-        check_identity(&root, &path, &selected, lookup, &header, &relative)?;
-        match std::fs::metadata(&path) {
-            Ok(metadata) => Ok(Observed::Found {
-                header,
-                size: metadata.len(),
-            }),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Observed::Absent),
-            Err(error) => Err(Stop::Failure(format!("cannot stat {path:?}: {error}"))),
-        }
+        Ok(match size(&selected.path(&root))? {
+            Some(size) => Observed::Found { header, size },
+            None => Observed::Absent,
+        })
     });
     let (path, stored_version) = selected_at.unzip();
     let mut record = json!({
@@ -114,24 +122,75 @@ pub fn run(args: &StatArgs) -> Result<(Value, u8), String> {
     Ok((record, status.1))
 }
 
+/// `readGenerationHeader` for the `selected` generation under the resolved
+/// `root`: read its first record within `max_header_bytes`, decode and
+/// migrate it, and check its stored identity, against the `expected` id when
+/// one was requested. Refusals name the `header` or `identity` stage; a
+/// budget or native limit always refuses, since its TypeScript outcome is
+/// unknown.
+pub(crate) fn read_selected(
+    root: &Path,
+    selected: &Selected,
+    encoding: Encoding,
+    max_header_bytes: u64,
+    expected: Option<&str>,
+) -> Step<Header> {
+    let relative = selected.relative();
+    let path = selected.path(root);
+    let record = match read_header(&path, encoding, max_header_bytes, &relative)? {
+        Record::Complete(record) => record,
+        Record::Absent => return Ok(Header::Absent),
+        Record::Corrupt(stop) => return Ok(Header::Isolated(stop)),
+    };
+    let header =
+        match read_generation_header_record(&record, selected.version, PathPlatform::host()) {
+            Ok(Some(header)) => header,
+            Ok(None) => return Ok(Header::Absent),
+            Err(refusal @ GenerationHeaderRefusal::Unsupported(_)) => {
+                return Ok(Header::Isolated(header_refusal(
+                    refusal,
+                    selected.version,
+                    &relative,
+                )));
+            }
+            Err(refusal) => return Err(header_refusal(refusal, selected.version, &relative)),
+        };
+    check_identity(root, &path, selected, expected, &header, &relative)?;
+    Ok(Header::Found(header))
+}
+
+/// The artifact's size from a metadata read that follows links, or `None`
+/// when it no longer exists.
+pub(crate) fn size(path: &Path) -> Step<Option<u64>> {
+    match std::fs::metadata(path) {
+        Ok(metadata) => Ok(Some(metadata.len())),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(Stop::Failure(format!("cannot stat {path:?}: {error}"))),
+    }
+}
+
 /// The physical read size; TypeScript's header readers also read 8 KiB.
 const CHUNK: usize = 8192;
 
-/// The selected generation's first record, or `None` when the file is
-/// missing or ends before the record is complete.
-fn read_header(
-    path: &Path,
-    encoding: Encoding,
-    max_bytes: u64,
-    relative: &str,
-) -> Step<Option<Vec<u8>>> {
+/// What the physical header read found.
+enum Record {
+    /// The first record, LF included.
+    Complete(Vec<u8>),
+    /// The file is missing or ends before the record is complete.
+    Absent,
+    /// The first Zstd frame failed to decode or holds other than one line.
+    Corrupt(Stop),
+}
+
+/// The selected generation's first record.
+fn read_header(path: &Path, encoding: Encoding, max_bytes: u64, relative: &str) -> Step<Record> {
     let failure = |action: &str, error: io::Error| {
         Stop::Failure(format!("cannot {action} {path:?}: {error}"))
     };
     let file = match open_read_only(path) {
         Ok(file) => file,
         // A dangling link or a file removed after the listing.
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Record::Absent),
         Err(error) => return Err(failure("open", error)),
     };
     if !file
@@ -153,15 +212,15 @@ fn read_header(
     };
     // A first frame cut off by the read so far is `None` here.
     let probe = |prefix: &[u8]| match zstd_header_record(prefix, budget) {
-        Ok(record) => Ok(record),
+        Ok(record) => Ok(record.map(Record::Complete)),
         Err(RestoreRefusal::NativePlaintextBudget { .. }) => Err(over_budget()),
-        Err(RestoreRefusal::Zstd(zstd)) => Err(refused(
+        Err(RestoreRefusal::Zstd(zstd)) => Ok(Some(Record::Corrupt(refused(
             "header",
             "corrupt-header-frame",
             Kind::Invalid,
             zstd.message(),
             Some(relative.to_owned()),
-        )),
+        )))),
         Err(_) => unreachable!("the header frame read refuses only Zstd or budget"),
     };
     let mut prefix = Vec::new();
@@ -177,7 +236,7 @@ fn read_header(
             let count =
                 read_some(&file, &mut chunk[..1]).map_err(|error| failure("read", error))?;
             return if count == 0 {
-                Ok(None)
+                Ok(Record::Absent)
             } else {
                 Err(over_budget())
             };
@@ -186,8 +245,8 @@ fn read_header(
             .map_err(|error| failure("read", error))?;
         if count == 0 {
             return match encoding {
-                Encoding::None => Ok(None),
-                Encoding::Zstd => probe(&prefix),
+                Encoding::None => Ok(Record::Absent),
+                Encoding::Zstd => Ok(probe(&prefix)?.unwrap_or(Record::Absent)),
             };
         }
         let start = prefix.len();
@@ -196,13 +255,13 @@ fn read_header(
             Encoding::None => {
                 if let Some(at) = chunk[..count].iter().position(|byte| *byte == b'\n') {
                     prefix.truncate(start + at + 1);
-                    return Ok(Some(prefix));
+                    return Ok(Record::Complete(prefix));
                 }
             }
             Encoding::Zstd if prefix.len() >= next_probe || prefix.len() == budget => {
                 next_probe = prefix.len().saturating_mul(2);
                 if let Some(record) = probe(&prefix)? {
-                    return Ok(Some(record));
+                    return Ok(record);
                 }
             }
             Encoding::Zstd => {}
@@ -251,7 +310,7 @@ fn header_refusal(refusal: GenerationHeaderRefusal, version: u64, relative: &str
 }
 
 /// The current logical header, with `null` for each absent optional field.
-fn header_json(header: &SessionHeader) -> Value {
+pub(crate) fn header_json(header: &SessionHeader) -> Value {
     json!({
         "version": CURRENT_SESSION_FORMAT_VERSION,
         "id": header.id,

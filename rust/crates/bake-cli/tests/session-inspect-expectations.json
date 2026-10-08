@@ -94,7 +94,7 @@
     "stderr": "bake-rs: {message}\n\nRun 'bake-rs session inspect --help' for usage.\n",
     "cases": [
       [["session"], "missing a command after 'session'"],
-      [["session", "list"], "unknown command 'list' for 'session'"],
+      [["session", "ls"], "unknown command 'ls' for 'session'"],
       [["session", "inspect"], "missing required option '--max-bytes'"],
       [["session", "inspect", "--max-bytes", "1", "f/session.v3.jsonl"], "missing required option '--max-source-seqs'"],
       [["session", "inspect", "--max-bytes", "1", "--max-source-seqs", "1"], "missing the Session log path"],

@@ -20,6 +20,7 @@ Compare TypeScript and Rust using controlled fixtures and independently checked 
 - [Zstd log restoration cases](#zstd-log-restoration-cases)
 - [Session lookup cases](#session-lookup-cases)
 - [Session metadata cases](#session-metadata-cases)
+- [Session listing cases](#session-listing-cases)
 - [V2 to V3 migration cases](#v2-to-v3-migration-cases)
 - [Token usage cases](#token-usage-cases)
 - [Pending inbox and consumed-work cases](#pending-inbox-and-consumed-work-cases)
@@ -415,6 +416,19 @@ bun run test:runtime packages/session/session-persistence-jsonl/tests/generation
 Expected outcomes were authored from the TypeScript source before either implementation ran. Both suites use the production `stat` path; they do not migrate event rows or open a Session for writing. The disk-layout tests compare input bytes, modification times, and link targets after execution, and the native command's private home must remain empty. The generation-header cases separately check unchanged file bytes. The native CI job runs these TypeScript comparisons alongside the Rust tests on each operating system.
 
 Header translation does not qualify historical event migration, Session resume, pending in-process Sessions, writer leases, or atomic observation during concurrent changes. TypeScript has no corresponding read-budget limit. JavaScript representations outside the native reader's supported subset remain named limits, and skipped platform cases remain missing evidence. These comparisons close no roadmap scope.
+
+## Session listing cases
+
+[`session/list-cases.json`](session/list-cases.json) compares the built [`session list` command](../rust/README.md#list-stored-sessions) with the TypeScript JSONL backend's public `list()`. The [native test](../rust/crates/bake-cli/tests/session_list.rs) and [TypeScript spec](../packages/session/session-persistence-jsonl/tests/list-conformance.spec.ts) build each layout in their own temporary roots. They compare admitted headers, selected generations, and refusals, checking physical sizes against the fixture files. The TypeScript spec uses the backend's read-only helpers to identify paths and failure stages that `list()` does not return; the public call determines success or failure.
+
+```sh
+bun run test:runtime packages/session/session-persistence-jsonl/tests/list-conformance.spec.ts
+(cd rust && cargo test --locked -p bake-cli --test session_list)
+```
+
+The cases cover plain and Zstd roots, v0–v3 header translation, highest-generation selection without fallback, mixed valid and skipped artifacts, duplicates, identity checks, layout precedence, file and directory links, and both native budgets. Expected outcomes are authored from the TypeScript sources. A `rust` override records a native limit without changing the TypeScript expectation. Results are sorted by path for comparison because the backend promises no order; a separate native test pins traversal order. Each platform restriction states its reason.
+
+Both harnesses check storage bytes, modification times, and link targets after the read. The native harness also checks an empty private home, bounds and reaps every child, and covers a FIFO generation and an unsupported directory name without blocking. These comparisons cover materialized metadata discovery, not process-local pending Sessions, cancellation, event restoration, revisions, or an atomic view under concurrent writes. They close no roadmap scope.
 
 ## V2 to V3 migration cases
 

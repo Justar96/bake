@@ -1,6 +1,7 @@
 //! `bake-rs`: entry point for Bake's native terminal preview.
 
 mod inspect;
+mod list;
 mod lookup;
 mod stat;
 
@@ -10,6 +11,8 @@ use std::process::ExitCode;
 
 use bake_tui::PreviewExit;
 use inspect::{Encoding, InspectArgs, LookupArgs, MAX_BUDGET, Outcome, Target, parse_count};
+use list::ListArgs;
+use serde_json::Value;
 use stat::StatArgs;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -27,6 +30,9 @@ Usage:
   bake-rs session stat --root <dir> --id <id> --max-header-bytes <N>
       --max-entries <N> [--compression none|zstd]
                        Report one Session's header as JSON, read-only
+  bake-rs session list --root <dir> --max-header-bytes <N> --max-entries <N>
+      [--compression none|zstd]
+                       Discover Session headers in a root as JSON, read-only
   bake-rs --help       Show this help
   bake-rs --version    Show the version
 
@@ -112,6 +118,44 @@ Exit status: 0 found or absent, 3 refused (a JSON record on standard
 output), 1 unreadable file or directory, 2 usage error.
 ";
 
+const LIST_HELP: &str = "\
+bake-rs session list: list stored Session metadata (Rust preview)
+
+Usage:
+  bake-rs session list --root <dir> --max-header-bytes <N> --max-entries <N>
+      [--compression none|zstd]
+
+Options:
+  --root <dir>              Session root to list
+  --max-header-bytes <N>    Most bytes read for each header, plus one byte
+                            to detect the end of the file, and largest
+                            decoded header record
+  --max-entries <N>         Most directory entries read in all
+  --compression <mode>      none or zstd, the root's encoding (default zstd)
+  -h, --help                Show this help
+
+Budgets are required positive integers no greater than 9007199254740991.
+
+The command checks the root's layout as 'session stat' does, then lists it
+again and reads the header of the newest generation in each Session
+directory, as 'session stat' reads one, without following directory links.
+It reports each header with its root-relative path, stored format version,
+and size, in byte order of directory names. Only materialized Sessions are
+listed. It never decodes events or reads the Bake home, configuration, or
+credentials. Nothing is written, locked, or
+migrated, and the record is an observation, not an atomic snapshot.
+
+A missing root lists nothing. A missing file, an incomplete or malformed
+header, a corrupt first Zstd frame, or a newer format is skipped. Retired
+header fields, a header version other than the file name's, a stored
+identity other than the selected file, one id in two Session directories,
+a native limit, and the root and layout refusals of 'session stat' refuse the
+whole listing, which then reports no sessions.
+
+Exit status: 0 listed, 3 refused (a JSON record on standard output),
+1 unreadable file or directory, 2 usage error.
+";
+
 const KNOWN: &[&str] = &["-h", "--help", "help", "-V", "--version", "preview"];
 
 #[derive(Debug, PartialEq, Eq)]
@@ -123,6 +167,8 @@ enum Command {
     Inspect(InspectArgs),
     StatHelp,
     Stat(StatArgs),
+    ListHelp,
+    List(ListArgs),
 }
 
 /// A usage error, and the help command it points to.
@@ -135,10 +181,10 @@ struct Usage {
 fn parse(args: &[OsString]) -> Result<Command, Usage> {
     // `session` operands are parsed as OS strings: a path need not be UTF-8.
     if args.first().is_some_and(|first| first == "session") {
-        let help = if args.get(1).is_some_and(|command| command == "stat") {
-            "bake-rs session stat --help"
-        } else {
-            "bake-rs session inspect --help"
+        let help = match args.get(1).and_then(|command| command.to_str()) {
+            Some("stat") => "bake-rs session stat --help",
+            Some("list") => "bake-rs session list --help",
+            _ => "bake-rs session inspect --help",
         };
         return parse_session(&args[1..]).map_err(|message| Usage { message, help });
     }
@@ -188,6 +234,9 @@ fn parse_session(args: &[OsString]) -> Result<Command, String> {
     }
     if command == "stat" {
         return parse_stat(rest);
+    }
+    if command == "list" {
+        return parse_list(rest);
     }
     if command != "inspect" {
         return Err(format!("unknown command {} for 'session'", quoted(command)));
@@ -289,11 +338,26 @@ fn parse_session(args: &[OsString]) -> Result<Command, String> {
     }))
 }
 
-/// Parse the operands of `session stat`, which takes options only.
-fn parse_stat(args: &[OsString]) -> Result<Command, String> {
+/// The options of an option-only `session` command.
+#[derive(Default)]
+struct Options {
+    max_header_bytes: Option<u64>,
+    max_entries: Option<u64>,
+    root: Option<OsString>,
+    id: Option<String>,
+    compression: Option<Encoding>,
+}
+
+/// Parse the operands of `session <command>`, which takes only the
+/// `accepted` options, or `None` for a lone help flag.
+fn parse_options(
+    command: &str,
+    accepted: &[&str],
+    args: &[OsString],
+) -> Result<Option<Options>, String> {
     if let Some((flag, extra)) = args.split_first().filter(|(flag, _)| is_help(flag)) {
         return match extra.first() {
-            None => Ok(Command::StatHelp),
+            None => Ok(None),
             Some(extra) => Err(format!(
                 "unexpected argument {} after '{}'",
                 quoted(extra),
@@ -301,29 +365,25 @@ fn parse_stat(args: &[OsString]) -> Result<Command, String> {
             )),
         };
     }
-    let mut max_header_bytes = None;
-    let mut max_entries = None;
-    let mut root = None;
-    let mut id = None;
-    let mut compression = None;
+    let mut options = Options::default();
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
         let option = match arg.to_str() {
-            Some(
-                option @ ("--max-header-bytes" | "--max-entries" | "--root" | "--id"
-                | "--compression"),
-            ) => option,
+            Some(option) if accepted.contains(&option) => option,
             Some(flag @ ("-h" | "--help")) => {
                 return Err(format!(
-                    "option '{flag}' must be the only operand of 'session stat'"
+                    "option '{flag}' must be the only operand of 'session {command}'"
                 ));
             }
             _ if arg.as_encoded_bytes().starts_with(b"-") => {
-                return Err(format!("unknown option {} for 'session stat'", quoted(arg)));
+                return Err(format!(
+                    "unknown option {} for 'session {command}'",
+                    quoted(arg)
+                ));
             }
             _ => {
                 return Err(format!(
-                    "unexpected argument {} for 'session stat'",
+                    "unexpected argument {} for 'session {command}'",
                     quoted(arg)
                 ));
             }
@@ -332,24 +392,69 @@ fn parse_stat(args: &[OsString]) -> Result<Command, String> {
             .next()
             .ok_or_else(|| format!("option '{option}' needs a value"))?;
         let given = match option {
-            "--max-header-bytes" => set_count(&mut max_header_bytes, option, value)?,
-            "--max-entries" => set_count(&mut max_entries, option, value)?,
-            "--root" => root.replace(parse_root(value)?).is_some(),
-            "--id" => id.replace(parse_id(value)?).is_some(),
-            _ => compression.replace(parse_compression(value)?).is_some(),
+            "--max-header-bytes" => set_count(&mut options.max_header_bytes, option, value)?,
+            "--max-entries" => set_count(&mut options.max_entries, option, value)?,
+            "--root" => options.root.replace(parse_root(value)?).is_some(),
+            "--id" => options.id.replace(parse_id(value)?).is_some(),
+            _ => options
+                .compression
+                .replace(parse_compression(value)?)
+                .is_some(),
         };
         if given {
             return Err(format!("option '{option}' was given more than once"));
         }
     }
+    Ok(Some(options))
+}
+
+/// Parse the operands of `session stat`, which takes options only.
+fn parse_stat(args: &[OsString]) -> Result<Command, String> {
+    let accepted = [
+        "--max-header-bytes",
+        "--max-entries",
+        "--root",
+        "--id",
+        "--compression",
+    ];
+    let Some(options) = parse_options("stat", &accepted, args)? else {
+        return Ok(Command::StatHelp);
+    };
     Ok(Command::Stat(StatArgs {
         lookup: LookupArgs {
-            root: root.ok_or("missing required option '--root'")?,
-            id: id.ok_or("missing required option '--id'")?,
-            encoding: compression.unwrap_or(Encoding::Zstd),
-            max_entries: max_entries.ok_or("missing required option '--max-entries'")?,
+            root: options.root.ok_or("missing required option '--root'")?,
+            id: options.id.ok_or("missing required option '--id'")?,
+            encoding: options.compression.unwrap_or(Encoding::Zstd),
+            max_entries: options
+                .max_entries
+                .ok_or("missing required option '--max-entries'")?,
         },
-        max_header_bytes: max_header_bytes.ok_or("missing required option '--max-header-bytes'")?,
+        max_header_bytes: options
+            .max_header_bytes
+            .ok_or("missing required option '--max-header-bytes'")?,
+    }))
+}
+
+/// Parse the operands of `session list`, which takes options only.
+fn parse_list(args: &[OsString]) -> Result<Command, String> {
+    let accepted = [
+        "--max-header-bytes",
+        "--max-entries",
+        "--root",
+        "--compression",
+    ];
+    let Some(options) = parse_options("list", &accepted, args)? else {
+        return Ok(Command::ListHelp);
+    };
+    Ok(Command::List(ListArgs {
+        root: options.root.ok_or("missing required option '--root'")?,
+        encoding: options.compression.unwrap_or(Encoding::Zstd),
+        max_entries: options
+            .max_entries
+            .ok_or("missing required option '--max-entries'")?,
+        max_header_bytes: options
+            .max_header_bytes
+            .ok_or("missing required option '--max-header-bytes'")?,
     }))
 }
 
@@ -436,17 +541,24 @@ fn main() -> ExitCode {
         Ok(Command::InspectHelp) => print(INSPECT_HELP),
         Ok(Command::Inspect(args)) => report(inspect::inspect(&args)),
         Ok(Command::StatHelp) => print(STAT_HELP),
-        Ok(Command::Stat(args)) => report(match stat::run(&args) {
-            Ok((record, status)) => Outcome::Record {
-                json: record.to_string(),
-                status,
-            },
-            Err(message) => Outcome::Failure(message),
-        }),
+        Ok(Command::Stat(args)) => report(record(stat::run(&args))),
+        Ok(Command::ListHelp) => print(LIST_HELP),
+        Ok(Command::List(args)) => report(record(list::run(&args))),
         Err(Usage { message, help }) => {
             eprintln!("bake-rs: {message}\n\nRun '{help}' for usage.");
             ExitCode::from(2)
         }
+    }
+}
+
+/// A JSON record and its exit status, or a diagnostic for exit status 1.
+fn record(result: Result<(Value, u8), String>) -> Outcome {
+    match result {
+        Ok((record, status)) => Outcome::Record {
+            json: record.to_string(),
+            status,
+        },
+        Err(message) => Outcome::Failure(message),
     }
 }
 
@@ -846,6 +958,96 @@ mod tests {
         }
         let usage = parse(&[OsString::from("session"), OsString::from("stat")]).unwrap_err();
         assert_eq!(usage.help, "bake-rs session stat --help");
+    }
+
+    #[test]
+    fn list_takes_a_root_and_two_budgets_but_no_id() {
+        let list = |encoding| {
+            Ok(Command::List(ListArgs {
+                root: "r".into(),
+                encoding,
+                max_entries: 5,
+                max_header_bytes: 7,
+            }))
+        };
+        let base = [
+            "session",
+            "list",
+            "--max-header-bytes",
+            "7",
+            "--root",
+            "r",
+            "--max-entries",
+            "5",
+        ];
+        assert_eq!(parse_strs(&base), list(Encoding::Zstd));
+        for (mode, encoding) in [("none", Encoding::None), ("zstd", Encoding::Zstd)] {
+            let args: Vec<&str> = base
+                .iter()
+                .copied()
+                .chain(["--compression", mode])
+                .collect();
+            assert_eq!(parse_strs(&args), list(encoding));
+        }
+        for help in [
+            &["session", "list", "-h"][..],
+            &["session", "list", "--help"],
+        ] {
+            assert_eq!(parse_strs(help), Ok(Command::ListHelp));
+        }
+        let without = |option: &str| -> Vec<&str> {
+            let at = base.iter().position(|arg| *arg == option).unwrap();
+            let mut args = base.to_vec();
+            args.drain(at..at + 2);
+            args
+        };
+        let with = |extra: &[&'static str]| -> Vec<&str> {
+            base.iter().copied().chain(extra.iter().copied()).collect()
+        };
+        for (args, error) in [
+            (without("--root"), "missing required option '--root'"),
+            (
+                without("--max-entries"),
+                "missing required option '--max-entries'",
+            ),
+            (
+                without("--max-header-bytes"),
+                "missing required option '--max-header-bytes'",
+            ),
+            (
+                with(&["--id", "a1"]),
+                "unknown option '--id' for 'session list'",
+            ),
+            (with(&["f"]), "unexpected argument 'f' for 'session list'"),
+            (
+                with(&["--root", "s"]),
+                "option '--root' was given more than once",
+            ),
+            (
+                with(&["-h"]),
+                "option '-h' must be the only operand of 'session list'",
+            ),
+            (
+                with(&["--compression", "zst"]),
+                "option '--compression' needs none or zstd, not 'zst'",
+            ),
+            (
+                without("--max-entries")
+                    .into_iter()
+                    .chain(["--max-entries", "0"])
+                    .collect(),
+                "option '--max-entries' needs a positive decimal integer no greater than 9007199254740991, not '0'",
+            ),
+            (
+                vec!["session", "list", "--help", "x"],
+                "unexpected argument 'x' after '--help'",
+            ),
+        ] {
+            assert_eq!(parse_strs(&args), Err(error.into()), "{args:?}");
+        }
+        let usage = parse(&[OsString::from("session"), OsString::from("list")]).unwrap_err();
+        assert_eq!(usage.help, "bake-rs session list --help");
+        assert_eq!(usage.message, "missing required option '--root'");
     }
 
     #[test]
