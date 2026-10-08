@@ -10,8 +10,14 @@
 //! owned, as TypeScript does. On Windows the file is opened for reading and
 //! writing, created if absent, without share-delete so it cannot be replaced
 //! while held, then locked with `LockFileEx`. std locks the whole file where
-//! TypeScript locks its first byte; the ranges overlap, but exclusion between
-//! a Rust and a TypeScript holder is not tested.
+//! TypeScript locks its first byte; the ranges overlap.
+//!
+//! Exclusion between a Rust and a TypeScript holder is tested across real
+//! processes by `bun run test:rust:lease`, which drives the development-only
+//! `bake-session-lease-probe` against the TypeScript JSONL backend: a live
+//! holder of either runtime refuses the other's write `open`, and a released
+//! or killed holder lets the other take over and append. A stopped (not
+//! killed) holder's exclusion is tested on Unix only.
 
 use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io;

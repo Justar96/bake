@@ -47,7 +47,7 @@ describe('preflight', () => {
   })
 
   it('checks the Rust workspace before its PTY and comparison scenarios and excludes them from --fast', () => {
-    expect(selected(['--only', 'native'])).toEqual(['rust', 'rust-pty', 'rust-conformance', 'rust-eval'])
+    expect(selected(['--only', 'native'])).toEqual(['rust', 'rust-pty', 'rust-conformance', 'rust-eval', 'rust-lease'])
     expect(selected(['--fast', '--only', 'native'])).toEqual([])
     expect(STEPS.find(step => step.name === 'rust')?.command?.(parseOptions([]), scope([])))
       .toEqual(['bun', 'run', 'check:rust'])
@@ -57,6 +57,8 @@ describe('preflight', () => {
       .toEqual(['bun', 'run', 'test:rust:conformance'])
     expect(STEPS.find(step => step.name === 'rust-eval')?.command?.(parseOptions([]), scope([])))
       .toEqual(['bun', 'run', 'test:rust:eval'])
+    expect(STEPS.find(step => step.name === 'rust-lease')?.command?.(parseOptions([]), scope([])))
+      .toEqual(['bun', 'run', 'test:rust:lease'])
   })
 
   it('blocks artifact checks after their own build fails, without blocking the other workspace', () => {
@@ -67,6 +69,20 @@ describe('preflight', () => {
       expect(failedBuild(step, new Map([[owner, { outcome: 'pass' }], [other, { outcome: 'fail' }]]))).toBeUndefined()
       expect(failedBuild(step, new Map())).toBeUndefined()
     }
+  })
+
+  it('runs the cross-runtime lease check only when both the Rust and the Node builds pass', () => {
+    const step = STEPS.find(entry => entry.name === 'rust-lease')
+    expect(step).toBeDefined()
+    if (step === undefined) return
+    expect(step.needsBuild).toBe(true)
+    expect(selected(['--fast'])).not.toContain('rust-lease')
+    const results = (rust: 'pass' | 'fail', build: 'pass' | 'fail') => new Map([['rust', { outcome: rust }], ['build', { outcome: build }]])
+    expect(failedBuild(step, results('fail', 'pass'))).toBe('rust')
+    expect(failedBuild(step, results('pass', 'fail'))).toBe('build')
+    expect(failedBuild(step, results('fail', 'fail'))).toBeDefined()
+    expect(failedBuild(step, results('pass', 'pass'))).toBeUndefined()
+    expect(failedBuild(step, new Map())).toBeUndefined()
   })
 
   it('runs the runtime tests the change reaches, all of them when the change can move any, or none', () => {

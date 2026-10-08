@@ -65,8 +65,9 @@
 //!
 //! A TypeScript backend instance's in-process write claims and pending
 //! creates, which refuse a second handle of one Session within that
-//! instance, are not modelled, and exclusion between a Rust value and a
-//! TypeScript handle is not tested. Fsync and directory sync, the
+//! instance, are not modelled; exclusion between a Rust value and a
+//! TypeScript handle is tested between processes only, with uncompressed
+//! logs, as the `write_lease` module describes. Fsync and directory sync, the
 //! publication's verifier, rollback after a failed write, file modes, Zstd
 //! compression, and the `validateStoredEvents` check of an opened log are
 //! not modelled. Opening a log TypeScript's validation refuses is
