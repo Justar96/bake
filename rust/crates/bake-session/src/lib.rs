@@ -46,6 +46,13 @@
 //! transformed stage over a decoded v1 Session, grouping its Assistant chunks,
 //! packed rows expanded, into attempts; it is the stage a chain runs after
 //! v0→v1, not production's read of a v1 file.
+//! [`decode_v0_v1_items`] keeps each packed Assistant chunk row as a
+//! [`ReleasedChunkRun`], and [`migrate_v1_to_v2_transformed_items`] sends
+//! each run through the stage's `transformRun`, merging it into the
+//! attempt's stream, as a chain reading the file does.
+//! [`migrate_v1_to_v2_decoded`] runs the decoded stage production reads a v1
+//! file with: each payload checked at version 1, then the transformed stage;
+//! Assistant chunks are a native limit.
 //! [`migrate_released_v0_history`] reads a decoded v0 Session through all
 //! three edges to format v3, reporting the refusal TypeScript's streaming
 //! chain reports first; Assistant chunks and a decoded v1 Session are native
@@ -71,6 +78,11 @@
 //! TypeScript writes for a current header record and one current event row,
 //! without the LF, or refuse with `Unadmitted` where TypeScript throws, or
 //! with a native limit.
+//! [`PlainAppendLog`] models the bytes TypeScript's JSONL backend writes for
+//! one plain log handle: it creates or opens a log, appends contiguous batches
+//! after truncating a torn tail, and flushes a header-only log, refusing with
+//! the contiguity or lossless-snapshot message, `Unadmitted` where encoding
+//! throws, or a native limit.
 //! None reads or writes a file. The crate is
 //! unstable and unshipped; the preview's `session inspect` and `session stat` use it.
 
@@ -83,6 +95,7 @@ mod goal;
 mod history;
 mod inbox;
 mod offload;
+mod plain_append;
 mod pressure;
 mod repair;
 mod replay;
@@ -97,6 +110,7 @@ mod usage;
 mod v0_to_v1;
 mod v1_codec;
 mod v1_to_v2;
+mod v1_to_v2_decoded;
 mod v2_to_v3;
 mod v3_row;
 mod zstd;
@@ -121,6 +135,7 @@ pub use inbox::{
     consumed_work, restored_inbox,
 };
 pub use offload::OffloadRejection;
+pub use plain_append::{AppendLimit, AppendRefusal, CreateLimit, CreateRefusal, PlainAppendLog};
 pub use pressure::{
     ContextPressureState, ContextPressureView, PressureLimit, PressureRefusal, RequestRoute,
     context_pressure,
@@ -149,11 +164,15 @@ pub use usage::{
 };
 pub use v0_to_v1::{MigratedV1, V0ToV1Location, V0ToV1Refusal, migrate_v0_to_v1};
 pub use v1_codec::{
-    DecodedV1Rows, V1CodecLimit, V1CodecLocation, V1CodecRecovery, V1CodecRefusal, V1CodecVersion,
-    decode_v0_v1_rows,
+    DecodedV1Items, DecodedV1Rows, ReleasedChunkRun, V1CodecLimit, V1CodecLocation,
+    V1CodecRecovery, V1CodecRefusal, V1CodecVersion, V1Item, decode_v0_v1_items, decode_v0_v1_rows,
 };
 pub use v1_to_v2::{
     MigratedV1ToV2, V1ToV2Limit, V1ToV2Location, V1ToV2Refusal, migrate_v1_to_v2_transformed,
+    migrate_v1_to_v2_transformed_items,
+};
+pub use v1_to_v2_decoded::{
+    V1ToV2DecodedClass, V1ToV2DecodedLimit, V1ToV2DecodedRefusal, migrate_v1_to_v2_decoded,
 };
 pub use v2_to_v3::{MigratedV2, V2ToV3Layer, V2ToV3Location, V2ToV3Refusal, migrate_v2_rows};
 pub use v3_row::{

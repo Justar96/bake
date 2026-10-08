@@ -207,7 +207,7 @@ fn turn_label(data: &Value) -> Option<String> {
 /// Whether `value` holds a number JavaScript reads as -0, which
 /// `snapshotJsonValue` refuses. serde_json parses every such spelling to a
 /// negative-zero float.
-fn holds_negative_zero(value: &Value) -> bool {
+pub(crate) fn holds_negative_zero(value: &Value) -> bool {
     match value {
         Value::Number(number) => number
             .as_f64()
