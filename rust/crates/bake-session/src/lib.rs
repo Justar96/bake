@@ -97,7 +97,9 @@
 //! model's bytes after each append or flush. It holds the Session
 //! directory's `session.lock` kernel write lock from a write `open`, or from
 //! a created handle's first write, until it is dropped, refusing a lock
-//! another handle holds with TypeScript's already-owned message. A write
+//! another handle holds with TypeScript's already-owned message; that lock
+//! excludes and is excluded by a TypeScript writer in another process, which
+//! `bun run test:rust:lease` checks. A write
 //! `open` of a plain v0, v1, or v2 log migrates it as the backend does,
 //! through the recoverable released codec and every format edge, writing the
 //! encoded v3 log beside the unchanged source, or refuses with TypeScript's

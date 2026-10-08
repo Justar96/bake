@@ -4,6 +4,7 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 ## [Unreleased]
 
+- Development: `bun run test:rust:lease` checks that the Rust Session library and the TypeScript JSONL backend exclude each other's writers through `session.lock` across real processes on Linux, macOS, and Windows, and that either runtime takes over after the other's holder releases or is killed. A stopped holder is checked on POSIX only. The native preflight group and CI run it after the Rust and Node builds; Bake's behavior is unchanged.
 - Development: the Rust Session library restores a parent's direct-child catalog in event order, excluding inherited entries and rejecting the first invalid own entry. Shared TypeScript cases check its catalog view.
 - Development: the Rust Session library derives a restored subagent's mode, label, and turn timing, including inherited descriptor resets and interrupted-turn closers. Shared TypeScript cases check these pure projections.
 - Development: `bake-rs session list --root <dir>` discovers stored Session metadata in the opt-in Rust preview, including historical headers. It skips malformed, unsupported, and corrupt compressed headers while preserving layout, identity, duplicate, and read-budget refusals. It leaves stored files unchanged.

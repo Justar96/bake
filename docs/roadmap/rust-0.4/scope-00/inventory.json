@@ -285,6 +285,9 @@
     "scripts:cordis": {
       "reason": "Cordis composition, configuration, and package-invariant gates over TypeScript packages; native composition needs its own validation."
     },
+    "scripts:lease-interop": {
+      "reason": "Requires complete cross-runtime Session writer-lease evidence, with only the platform-specific stopped-holder skips."
+    },
     "scripts:migration": {
       "reason": "Scope-00 migration bookkeeping; retired with the TypeScript oracle in scope 17."
     },
@@ -1102,6 +1105,7 @@
     {"path":"packages/session/session-persistence-jsonl/tests/generation.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-persistence-jsonl","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
     {"path":"packages/session/session-persistence-jsonl/tests/header-conformance.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-persistence-jsonl","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
     {"path":"packages/session/session-persistence-jsonl/tests/jsonl.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-persistence-jsonl","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
+    {"path":"packages/session/session-persistence-jsonl/tests/lease.cross-runtime.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-persistence-jsonl","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
     {"path":"packages/session/session-persistence-jsonl/tests/lease.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-persistence-jsonl","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
     {"path":"packages/session/session-persistence-jsonl/tests/lease.two-process.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-persistence-jsonl","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
     {"path":"packages/session/session-persistence-jsonl/tests/list-conformance.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-persistence-jsonl","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
@@ -1360,6 +1364,7 @@
     {"path":"scripts/rust-conformance/driver.test.ts","lane":"bun-scripts","owner":"scripts:conformance","scopes":["01"],"disposition":"reuse-oracle","basis":"scripts:conformance"},
     {"path":"scripts/rust-conformance/fixture.test.ts","lane":"bun-scripts","owner":"scripts:conformance","scopes":["01"],"disposition":"reuse-oracle","basis":"scripts:conformance"},
     {"path":"scripts/rust-conformance/runner.test.ts","lane":"bun-scripts","owner":"scripts:conformance","scopes":["01"],"disposition":"reuse-oracle","basis":"scripts:conformance"},
+    {"path":"scripts/rust-lease-interop.test.ts","lane":"bun-scripts","owner":"scripts:lease-interop","scopes":["03"],"disposition":"reuse-oracle","basis":"scripts:lease-interop"},
     {"path":"scripts/rust-migration-baseline.test.ts","lane":"bun-scripts","owner":"scripts:migration","scopes":["00"],"disposition":"replace-tooling","basis":"scripts:migration"},
     {"path":"scripts/rust-migration-inventory.test.ts","lane":"bun-scripts","owner":"scripts:migration","scopes":["00"],"disposition":"replace-tooling","basis":"scripts:migration"},
     {"path":"scripts/rust-migration-ledger.test.ts","lane":"bun-scripts","owner":"scripts:qualification-ledger","scopes":["01","17"],"disposition":"reuse-oracle","basis":"scripts:qualification-ledger"},

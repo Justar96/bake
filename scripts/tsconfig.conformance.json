@@ -11,6 +11,8 @@
   },
   "include": [
     "rust-conformance/**/*.ts",
+    "rust-lease-interop.ts",
+    "rust-lease-interop.test.ts",
     "../packages/core/agent-loop/tests/runtime-fixture.ts",
     "../packages/core/agent-loop/tests/request-reconstruction.fixture.spec.ts",
     "../packages/core/agent-loop/tests/request-derivation-conformance.spec.ts",
@@ -18,6 +20,7 @@
     "../packages/session/session-persistence-jsonl/tests/log-scan-conformance.spec.ts",
     "../packages/session/session-persistence-jsonl/tests/restore-conformance.spec.ts",
     "../packages/session/session-persistence-jsonl/tests/lookup-conformance.spec.ts",
+    "../packages/session/session-persistence-jsonl/tests/lease.cross-runtime.spec.ts",
     "../packages/session/session-persistence-jsonl/tests/generation-header-conformance.spec.ts",
     "../packages/session/session-persistence-jsonl/tests/stat-conformance.spec.ts",
     "../packages/session/session-persistence-jsonl/tests/list-conformance.spec.ts",
