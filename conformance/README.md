@@ -31,6 +31,7 @@ Compare TypeScript and Rust using controlled fixtures and independently checked 
 - [V1 to V2 transformed-stage cases](#v1-to-v2-transformed-stage-cases)
 - [V0 to V1 migration cases](#v0-to-v1-migration-cases)
 - [Turn boundary and title cases](#turn-boundary-and-title-cases)
+- [Subagent identity and timing cases](#subagent-identity-and-timing-cases)
 - [Runner contract](#runner-contract)
 - [Ownership and limits](#ownership-and-limits)
 
@@ -637,6 +638,21 @@ The cases cover:
 - turns and titles copied as strings, objects, `null`, negative and largest safe integers, and an empty string, and a title set, retitled, or followed by an interrupted turn.
 
 A `rust` override names a native limit and the seq Rust refuses; TypeScript still asserts its own outcome. `undefined-member` marks a final `lastTurn` or title read from data that is not an object holding the member, which JavaScript reads as `undefined`; `null-data` marks `null` `session/title` data, whose read throws a `TypeError` and ends the fold; and `number` marks a final copy holding a number written with a fraction or an exponent, as -0, or beyond the safe-integer range. Restoration already refuses `null` `turn/start` data. A limited copy that a later event overwrites is not refused. Of the 52 cases, 38 fold identically and 14 are limits, 3 of them TypeScript throws. Both harnesses pin the case count and require every limit and both folds to be witnessed. Two negative controls were observed in both arms: clearing `lastStepStartSeq` on `step/end` fails `capture-tool-call-turn`, and ignoring the closers fails `interrupted-open-turn`. In Rust, refusing a limited `lastTurn` when it is copied instead of at the end fails `fraction-turn-overwritten`. The folds do not cover the inbox, the title service, or Agent resume.
+
+## Subagent identity and timing cases
+
+[`session/subagent-cases.json`](session/subagent-cases.json) holds 84 cases comparing a restored subagent's identity and timing with the TypeScript [projection definitions](../packages/subagent/subagent/src/projection.ts). The [TypeScript spec](../packages/subagent/subagent/tests/projection-conformance.spec.ts) folds their initial states over parsed rows and `interruptedTurnClosers`, and requires `Session.fromRestore` to admit the same events. The [Rust test](../rust/crates/bake-session/tests/subagent_cases.rs) restores the same bytes with `restore_plain_log` and checks `subagent_identity` and `subagent_timing`. Both compare against independently specified expectations, including optional-field omission, the full timing state, and its wire view.
+
+```sh
+bun run test:runtime packages/subagent/subagent/tests/projection-conformance.spec.ts
+(cd rust && cargo test --locked -p bake-session --test subagent_cases)
+```
+
+Identity is the last descriptor's mode, label, and seq. An invalid or unsupported descriptor clears any earlier identity; validation includes continuation fields and tool restrictions even though the identity view omits them. Timing accumulates completed turns after a descriptor, tracks an active interval, and preserves a pending pre-descriptor turn start. Every descriptor resets accumulated time, including an invalid descriptor. Non-boundary events advance an active interval's latest time, and reversed boundaries add zero elapsed time. Both folds include inherited events and repair closers. They stop before Session construction appends a resume `session/end-seed` stamped with the current clock. That marker could advance a still-open interval's `through`; a stored end-seed is folded normally.
+
+All 84 identity and timing outcomes match. The cases include every truncation of a descriptor-and-turn sequence, descriptor validation and clearing, inherited resets, stored end-seeds, negative and reversed times, repair closers, and exact and overflowing safe-integer totals. Both harnesses pin the case count and require every case to restore and match.
+
+Envelope times are safe integers. Native timing uses the same floating-point subtraction, zero clamp, and addition as JavaScript, preserving rounded totals beyond the safe-integer range. The cases check exact limits, rounded accumulation, arithmetic in a closer, and a later descriptor resetting a large total. The pure folds perform no child discovery, execution, or resume.
 
 ## Runner contract
 

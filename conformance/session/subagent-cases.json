@@ -1,0 +1,2318 @@
+{
+  "schema": "bake/session-conformance/subagent-cases",
+  "version": 1,
+  "oracle": "subagentIdentityProjectionDefinition and subagentTimingProjectionDefinition in packages/subagent/subagent/src/projection.ts, folded from init over each case's parsed rows and their interruptedTurnClosers",
+  "history": [
+    "Version 1: 84 cases, written from the TypeScript sources before either harness ran."
+  ],
+  "logs": {
+    "tool-call-turn": "conformance/runtime/request-reconstruction/tool-call-turn/session.jsonl"
+  },
+  "cases": [
+    {
+      "id": "capture-without-descriptor",
+      "log": "tool-call-turn",
+      "edits": [],
+      "ts": {
+        "identity": null,
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": false
+        },
+        "view": {
+          "settledMs": 0
+        }
+      },
+      "note": "The capture's turn opens and closes before any descriptor, so it never counts."
+    },
+    {
+      "id": "empty-log",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 0
+        }
+      ],
+      "ts": {
+        "identity": null,
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": false
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "pending-turn-start-open",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 0
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":0,\"time\":100,\"data\":{\"turn\":null}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":1,\"time\":150,\"data\":{\"turn\":null}}"
+        }
+      ],
+      "ts": {
+        "identity": null,
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": false,
+          "pendingTurnStart": 150
+        },
+        "view": {
+          "settledMs": 0
+        }
+      },
+      "note": "A null turn gets no closer; the later restart replaces the pending start."
+    },
+    {
+      "id": "pending-start-closed-by-closer",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 2
+        }
+      ],
+      "ts": {
+        "identity": null,
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": false
+        },
+        "view": {
+          "settledMs": 0
+        }
+      },
+      "note": "The turn/end closer at seq 2 drops the pending start."
+    },
+    {
+      "id": "sequence-truncated-0",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 0
+        }
+      ],
+      "ts": {
+        "identity": null,
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": false
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "sequence-truncated-1",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 0
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":0,\"time\":1000,\"data\":{\"turn\":1}}"
+        }
+      ],
+      "ts": {
+        "identity": null,
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": false
+        },
+        "view": {
+          "settledMs": 0
+        }
+      },
+      "note": "Closer turn/end 1 drops the pending start."
+    },
+    {
+      "id": "sequence-truncated-2",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 0
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":0,\"time\":1000,\"data\":{\"turn\":1}}"
+        },
+        {
+          "append": "{\"type\":\"step/start\",\"seq\":1,\"time\":1010,\"data\":{\"turn\":1,\"step\":1}}"
+        }
+      ],
+      "ts": {
+        "identity": null,
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": false
+        },
+        "view": {
+          "settledMs": 0
+        }
+      },
+      "note": "Closers step/end 2 and turn/end 3; no descriptor yet."
+    },
+    {
+      "id": "sequence-truncated-3",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 0
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":0,\"time\":1000,\"data\":{\"turn\":1}}"
+        },
+        {
+          "append": "{\"type\":\"step/start\",\"seq\":1,\"time\":1010,\"data\":{\"turn\":1,\"step\":1}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":2,\"time\":1020,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"R\"}}"
+        }
+      ],
+      "ts": {
+        "identity": {
+          "mode": "continuable",
+          "label": "R",
+          "seq": 2
+        },
+        "timing": {
+          "settledMs": 20,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 20
+        }
+      },
+      "note": "The descriptor promotes the pending start 1000; closers at 1020 settle it."
+    },
+    {
+      "id": "sequence-truncated-4",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 0
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":0,\"time\":1000,\"data\":{\"turn\":1}}"
+        },
+        {
+          "append": "{\"type\":\"step/start\",\"seq\":1,\"time\":1010,\"data\":{\"turn\":1,\"step\":1}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":2,\"time\":1020,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"R\"}}"
+        },
+        {
+          "append": "{\"type\":\"step/end\",\"seq\":3,\"time\":1030,\"data\":{\"turn\":1,\"step\":1}}"
+        }
+      ],
+      "ts": {
+        "identity": {
+          "mode": "continuable",
+          "label": "R",
+          "seq": 2
+        },
+        "timing": {
+          "settledMs": 30,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 30
+        }
+      },
+      "note": "The turn/end closer at 1030 settles 1030 - 1000."
+    },
+    {
+      "id": "sequence-truncated-5",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 0
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":0,\"time\":1000,\"data\":{\"turn\":1}}"
+        },
+        {
+          "append": "{\"type\":\"step/start\",\"seq\":1,\"time\":1010,\"data\":{\"turn\":1,\"step\":1}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":2,\"time\":1020,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"R\"}}"
+        },
+        {
+          "append": "{\"type\":\"step/end\",\"seq\":3,\"time\":1030,\"data\":{\"turn\":1,\"step\":1}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":4,\"time\":1100,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}"
+        }
+      ],
+      "ts": {
+        "identity": {
+          "mode": "continuable",
+          "label": "R",
+          "seq": 2
+        },
+        "timing": {
+          "settledMs": 100,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 100
+        }
+      }
+    },
+    {
+      "id": "sequence-truncated-6",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 0
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":0,\"time\":1000,\"data\":{\"turn\":1}}"
+        },
+        {
+          "append": "{\"type\":\"step/start\",\"seq\":1,\"time\":1010,\"data\":{\"turn\":1,\"step\":1}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":2,\"time\":1020,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"R\"}}"
+        },
+        {
+          "append": "{\"type\":\"step/end\",\"seq\":3,\"time\":1030,\"data\":{\"turn\":1,\"step\":1}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":4,\"time\":1100,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":5,\"time\":1200,\"data\":{\"turn\":2}}"
+        }
+      ],
+      "ts": {
+        "identity": {
+          "mode": "continuable",
+          "label": "R",
+          "seq": 2
+        },
+        "timing": {
+          "settledMs": 100,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 100
+        }
+      },
+      "note": "The turn/end closer at 1200 adds zero."
+    },
+    {
+      "id": "sequence-truncated-7",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 0
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":0,\"time\":1000,\"data\":{\"turn\":1}}"
+        },
+        {
+          "append": "{\"type\":\"step/start\",\"seq\":1,\"time\":1010,\"data\":{\"turn\":1,\"step\":1}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":2,\"time\":1020,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"R\"}}"
+        },
+        {
+          "append": "{\"type\":\"step/end\",\"seq\":3,\"time\":1030,\"data\":{\"turn\":1,\"step\":1}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":4,\"time\":1100,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":5,\"time\":1200,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"step/start\",\"seq\":6,\"time\":1250,\"data\":{\"turn\":2,\"step\":1}}"
+        }
+      ],
+      "ts": {
+        "identity": {
+          "mode": "continuable",
+          "label": "R",
+          "seq": 2
+        },
+        "timing": {
+          "settledMs": 150,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 150
+        }
+      },
+      "note": "Closers step/end 7 and turn/end 8 at 1250."
+    },
+    {
+      "id": "sequence-truncated-8",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 0
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":0,\"time\":1000,\"data\":{\"turn\":1}}"
+        },
+        {
+          "append": "{\"type\":\"step/start\",\"seq\":1,\"time\":1010,\"data\":{\"turn\":1,\"step\":1}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":2,\"time\":1020,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"R\"}}"
+        },
+        {
+          "append": "{\"type\":\"step/end\",\"seq\":3,\"time\":1030,\"data\":{\"turn\":1,\"step\":1}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":4,\"time\":1100,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":5,\"time\":1200,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"step/start\",\"seq\":6,\"time\":1250,\"data\":{\"turn\":2,\"step\":1}}"
+        },
+        {
+          "append": "{\"type\":\"step/end\",\"seq\":7,\"time\":1300,\"data\":{\"turn\":2,\"step\":1}}"
+        }
+      ],
+      "ts": {
+        "identity": {
+          "mode": "continuable",
+          "label": "R",
+          "seq": 2
+        },
+        "timing": {
+          "settledMs": 200,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 200
+        }
+      }
+    },
+    {
+      "id": "sequence-truncated-9",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 0
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":0,\"time\":1000,\"data\":{\"turn\":1}}"
+        },
+        {
+          "append": "{\"type\":\"step/start\",\"seq\":1,\"time\":1010,\"data\":{\"turn\":1,\"step\":1}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":2,\"time\":1020,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"R\"}}"
+        },
+        {
+          "append": "{\"type\":\"step/end\",\"seq\":3,\"time\":1030,\"data\":{\"turn\":1,\"step\":1}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":4,\"time\":1100,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":5,\"time\":1200,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"step/start\",\"seq\":6,\"time\":1250,\"data\":{\"turn\":2,\"step\":1}}"
+        },
+        {
+          "append": "{\"type\":\"step/end\",\"seq\":7,\"time\":1300,\"data\":{\"turn\":2,\"step\":1}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":8,\"time\":1400,\"data\":{\"turn\":2,\"reason\":{\"kind\":\"completed\"}}}"
+        }
+      ],
+      "ts": {
+        "identity": {
+          "mode": "continuable",
+          "label": "R",
+          "seq": 2
+        },
+        "timing": {
+          "settledMs": 300,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 300
+        }
+      }
+    },
+    {
+      "id": "one-shot-in-initial-turn",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 3
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":3,\"time\":1791337579865,\"data\":{\"version\":3,\"mode\":\"one-shot\",\"provider\":\"task\",\"label\":\"Find bug\"}}"
+        },
+        {
+          "append": "{\"type\":\"step/start\",\"seq\":4,\"time\":1791337579866,\"data\":{\"turn\":1,\"step\":1}}"
+        },
+        {
+          "append": "{\"type\":\"step/end\",\"seq\":5,\"time\":1791337579868,\"data\":{\"turn\":1,\"step\":1}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":6,\"time\":1791337579875,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}"
+        }
+      ],
+      "ts": {
+        "identity": {
+          "mode": "one-shot",
+          "label": "Find bug",
+          "seq": 3
+        },
+        "timing": {
+          "settledMs": 11,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 11
+        }
+      },
+      "note": "The descriptor promotes the turn start 864; the turn ends at 875."
+    },
+    {
+      "id": "one-shot-without-label-open-interval",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 0
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":0,\"time\":50,\"data\":{\"version\":3,\"mode\":\"one-shot\",\"provider\":\"task\"}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":1,\"time\":60,\"data\":{\"turn\":null}}"
+        },
+        {
+          "append": "{\"type\":\"step/start\",\"seq\":2,\"time\":70,\"data\":{\"turn\":null,\"step\":1}}"
+        }
+      ],
+      "ts": {
+        "identity": {
+          "mode": "one-shot",
+          "seq": 0
+        },
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true,
+          "active": {
+            "since": 60,
+            "through": 70
+          }
+        },
+        "view": {
+          "settledMs": 0,
+          "active": {
+            "since": 60,
+            "through": 70
+          }
+        }
+      },
+      "note": "A null turn gets no closer, so the interval stays open."
+    },
+    {
+      "id": "one-shot-empty-label",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"one-shot\",\"provider\":\"task\",\"label\":\"\"}}"
+        }
+      ],
+      "ts": {
+        "identity": {
+          "mode": "one-shot",
+          "label": "",
+          "seq": 16
+        },
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "continuable-minimal",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"Review\"}}"
+        }
+      ],
+      "ts": {
+        "identity": {
+          "mode": "continuable",
+          "label": "Review",
+          "seq": 16
+        },
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "continuable-all-fields",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"Audit\",\"agentProvider\":\"mock\",\"agentModel\":\"m1\",\"agentReasoningEffort\":\"high\",\"persona\":\"terse\",\"toolFilter\":{\"allow\":[\"read\"],\"deny\":[\"bash\"]}}}"
+        }
+      ],
+      "ts": {
+        "identity": {
+          "mode": "continuable",
+          "label": "Audit",
+          "seq": 16
+        },
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "continuable-unchecked-effort-empty-deny",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"Review\",\"agentReasoningEffort\":\"not-an-effort\",\"toolFilter\":{\"deny\":[]}}}"
+        }
+      ],
+      "ts": {
+        "identity": {
+          "mode": "continuable",
+          "label": "Review",
+          "seq": 16
+        },
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      },
+      "note": "The effort is only a string; an empty deny list declares deny."
+    },
+    {
+      "id": "continuable-empty-allow-unicode-label",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"Überprüfung ☃\",\"toolFilter\":{\"allow\":[]}}}"
+        }
+      ],
+      "ts": {
+        "identity": {
+          "mode": "continuable",
+          "label": "Überprüfung ☃",
+          "seq": 16
+        },
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "version-3-point-0",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3.0,\"mode\":\"one-shot\",\"provider\":\"task\"}}"
+        }
+      ],
+      "ts": {
+        "identity": {
+          "mode": "one-shot",
+          "seq": 16
+        },
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "version-exponent",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":30e-1,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"E\"}}"
+        }
+      ],
+      "ts": {
+        "identity": {
+          "mode": "continuable",
+          "label": "E",
+          "seq": 16
+        },
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "version-rounds-to-3",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3.0000000000000001,\"mode\":\"one-shot\",\"provider\":\"task\",\"label\":\"x\"}}"
+        }
+      ],
+      "ts": {
+        "identity": {
+          "mode": "one-shot",
+          "label": "x",
+          "seq": 16
+        },
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      },
+      "note": "JSON.parse rounds the version to exactly 3."
+    },
+    {
+      "id": "duplicate-version-last-wins",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":2,\"mode\":\"one-shot\",\"provider\":\"task\",\"version\":3}}"
+        }
+      ],
+      "ts": {
+        "identity": {
+          "mode": "one-shot",
+          "seq": 16
+        },
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "rejects-data-null",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"Before\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":17,\"time\":1791337580010,\"data\":null}"
+        }
+      ],
+      "ts": {
+        "identity": null,
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "rejects-data-string",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"Before\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":17,\"time\":1791337580010,\"data\":\"descriptor\"}"
+        }
+      ],
+      "ts": {
+        "identity": null,
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "rejects-data-array",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"Before\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":17,\"time\":1791337580010,\"data\":[{\"version\":3,\"mode\":\"one-shot\",\"provider\":\"task\"}]}"
+        }
+      ],
+      "ts": {
+        "identity": null,
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "rejects-version-missing",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"Before\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":17,\"time\":1791337580010,\"data\":{\"mode\":\"one-shot\",\"provider\":\"task\"}}"
+        }
+      ],
+      "ts": {
+        "identity": null,
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "rejects-version-string",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"Before\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":17,\"time\":1791337580010,\"data\":{\"version\":\"3\",\"mode\":\"one-shot\",\"provider\":\"task\"}}"
+        }
+      ],
+      "ts": {
+        "identity": null,
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "rejects-version-null",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"Before\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":17,\"time\":1791337580010,\"data\":{\"version\":null,\"mode\":\"one-shot\",\"provider\":\"task\"}}"
+        }
+      ],
+      "ts": {
+        "identity": null,
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "rejects-version-older",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"Before\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":17,\"time\":1791337580010,\"data\":{\"version\":2,\"mode\":\"one-shot\",\"provider\":\"task\"}}"
+        }
+      ],
+      "ts": {
+        "identity": null,
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "rejects-version-newer-ignores-fields",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"Before\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":17,\"time\":1791337580010,\"data\":{\"version\":4,\"mode\":\"later\",\"extra\":true}}"
+        }
+      ],
+      "ts": {
+        "identity": null,
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "rejects-version-fraction",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"Before\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":17,\"time\":1791337580010,\"data\":{\"version\":3.5,\"mode\":\"one-shot\",\"provider\":\"task\"}}"
+        }
+      ],
+      "ts": {
+        "identity": null,
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "rejects-version-negative-zero",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"Before\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":17,\"time\":1791337580010,\"data\":{\"version\":-0,\"mode\":\"one-shot\",\"provider\":\"task\"}}"
+        }
+      ],
+      "ts": {
+        "identity": null,
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "rejects-mode-missing",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"Before\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":17,\"time\":1791337580010,\"data\":{\"version\":3,\"provider\":\"task\"}}"
+        }
+      ],
+      "ts": {
+        "identity": null,
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "rejects-mode-unknown",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"Before\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":17,\"time\":1791337580010,\"data\":{\"version\":3,\"mode\":\"oneshot\",\"provider\":\"task\"}}"
+        }
+      ],
+      "ts": {
+        "identity": null,
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "rejects-one-shot-continuable-field",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"Before\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":17,\"time\":1791337580010,\"data\":{\"version\":3,\"mode\":\"one-shot\",\"provider\":\"task\",\"persona\":\"p\"}}"
+        }
+      ],
+      "ts": {
+        "identity": null,
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "rejects-one-shot-tool-filter",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"Before\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":17,\"time\":1791337580010,\"data\":{\"version\":3,\"mode\":\"one-shot\",\"provider\":\"task\",\"toolFilter\":{\"allow\":[\"a\"]}}}"
+        }
+      ],
+      "ts": {
+        "identity": null,
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "rejects-continuable-unknown-field",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"Before\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":17,\"time\":1791337580010,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"L\",\"maxTokens\":5}}"
+        }
+      ],
+      "ts": {
+        "identity": null,
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "rejects-proto-key",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"Before\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":17,\"time\":1791337580010,\"data\":{\"version\":3,\"mode\":\"one-shot\",\"provider\":\"task\",\"__proto__\":{}}}"
+        }
+      ],
+      "ts": {
+        "identity": null,
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "rejects-provider-missing",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"Before\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":17,\"time\":1791337580010,\"data\":{\"version\":3,\"mode\":\"one-shot\"}}"
+        }
+      ],
+      "ts": {
+        "identity": null,
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "rejects-provider-number",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"Before\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":17,\"time\":1791337580010,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":7,\"label\":\"L\"}}"
+        }
+      ],
+      "ts": {
+        "identity": null,
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "rejects-one-shot-label-number",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"Before\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":17,\"time\":1791337580010,\"data\":{\"version\":3,\"mode\":\"one-shot\",\"provider\":\"task\",\"label\":1}}"
+        }
+      ],
+      "ts": {
+        "identity": null,
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "rejects-one-shot-label-null",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"Before\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":17,\"time\":1791337580010,\"data\":{\"version\":3,\"mode\":\"one-shot\",\"provider\":\"task\",\"label\":null}}"
+        }
+      ],
+      "ts": {
+        "identity": null,
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "rejects-continuable-label-missing",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"Before\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":17,\"time\":1791337580010,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\"}}"
+        }
+      ],
+      "ts": {
+        "identity": null,
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "rejects-continuable-label-null",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"Before\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":17,\"time\":1791337580010,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":null}}"
+        }
+      ],
+      "ts": {
+        "identity": null,
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "rejects-agent-provider-bool",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"Before\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":17,\"time\":1791337580010,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"L\",\"agentProvider\":true}}"
+        }
+      ],
+      "ts": {
+        "identity": null,
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "rejects-agent-model-number",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"Before\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":17,\"time\":1791337580010,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"L\",\"agentModel\":5}}"
+        }
+      ],
+      "ts": {
+        "identity": null,
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "rejects-effort-object",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"Before\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":17,\"time\":1791337580010,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"L\",\"agentReasoningEffort\":{}}}"
+        }
+      ],
+      "ts": {
+        "identity": null,
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "rejects-persona-null",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"Before\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":17,\"time\":1791337580010,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"L\",\"persona\":null}}"
+        }
+      ],
+      "ts": {
+        "identity": null,
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "rejects-tool-filter-null",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"Before\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":17,\"time\":1791337580010,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"L\",\"toolFilter\":null}}"
+        }
+      ],
+      "ts": {
+        "identity": null,
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "rejects-tool-filter-array",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"Before\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":17,\"time\":1791337580010,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"L\",\"toolFilter\":[\"read\"]}}"
+        }
+      ],
+      "ts": {
+        "identity": null,
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "rejects-tool-filter-empty",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"Before\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":17,\"time\":1791337580010,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"L\",\"toolFilter\":{}}}"
+        }
+      ],
+      "ts": {
+        "identity": null,
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "rejects-tool-filter-unknown-key",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"Before\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":17,\"time\":1791337580010,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"L\",\"toolFilter\":{\"allow\":[],\"block\":[]}}}"
+        }
+      ],
+      "ts": {
+        "identity": null,
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "rejects-tool-filter-allow-string",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"Before\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":17,\"time\":1791337580010,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"L\",\"toolFilter\":{\"allow\":\"read\"}}}"
+        }
+      ],
+      "ts": {
+        "identity": null,
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "rejects-tool-filter-allow-null",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"Before\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":17,\"time\":1791337580010,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"L\",\"toolFilter\":{\"allow\":null,\"deny\":[\"a\"]}}}"
+        }
+      ],
+      "ts": {
+        "identity": null,
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "rejects-tool-filter-deny-number-item",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"Before\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":17,\"time\":1791337580010,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"L\",\"toolFilter\":{\"allow\":[\"a\"],\"deny\":[\"b\",1]}}}"
+        }
+      ],
+      "ts": {
+        "identity": null,
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "last-valid-descriptor-wins",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"First\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":17,\"time\":1791337580010,\"data\":{\"version\":3,\"mode\":\"one-shot\",\"provider\":\"task\",\"label\":\"Second\"}}"
+        }
+      ],
+      "ts": {
+        "identity": {
+          "mode": "one-shot",
+          "label": "Second",
+          "seq": 17
+        },
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "valid-after-invalid",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":17,\"time\":1791337580010,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"Later\"}}"
+        }
+      ],
+      "ts": {
+        "identity": {
+          "mode": "continuable",
+          "label": "Later",
+          "seq": 17
+        },
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "inherited-descriptor-only",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "header": "{\"type\":\"session\",\"version\":3,\"id\":\"a1\",\"createdAt\":1791337579861,\"isSeeded\":true,\"delegationDepth\":0}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"Parent\"}}"
+        },
+        {
+          "append": "{\"type\":\"session/end-seed\",\"seq\":17,\"time\":1791337580010,\"data\":{\"inherited\":true}}"
+        }
+      ],
+      "ts": {
+        "identity": {
+          "mode": "continuable",
+          "label": "Parent",
+          "seq": 16
+        },
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      },
+      "note": "The inherited prefix's descriptor still counts."
+    },
+    {
+      "id": "inherited-then-own-descriptor",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "header": "{\"type\":\"session\",\"version\":3,\"id\":\"a1\",\"createdAt\":1791337579861,\"isSeeded\":true,\"delegationDepth\":0}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"Parent\"}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":1791337581000,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":18,\"time\":1791337581500,\"data\":{\"turn\":2,\"reason\":{\"kind\":\"completed\"}}}"
+        },
+        {
+          "append": "{\"type\":\"session/end-seed\",\"seq\":19,\"time\":1791337581600,\"data\":{\"inherited\":true}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":20,\"time\":1791337582000,\"data\":{\"turn\":3}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":21,\"time\":1791337582005,\"data\":{\"version\":3,\"mode\":\"one-shot\",\"provider\":\"task\",\"label\":\"Child\"}}"
+        },
+        {
+          "append": "{\"type\":\"step/start\",\"seq\":22,\"time\":1791337582010,\"data\":{\"turn\":3,\"step\":1}}"
+        }
+      ],
+      "ts": {
+        "identity": {
+          "mode": "one-shot",
+          "label": "Child",
+          "seq": 21
+        },
+        "timing": {
+          "settledMs": 10,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 10
+        }
+      },
+      "note": "The own descriptor drops the inherited 500 and keeps the open turn's start; closers at +2010 settle it."
+    },
+    {
+      "id": "inherited-then-own-unsupported",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "header": "{\"type\":\"session\",\"version\":3,\"id\":\"a1\",\"createdAt\":1791337579861,\"isSeeded\":true,\"delegationDepth\":0}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"Parent\"}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":1791337581000,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":18,\"time\":1791337581500,\"data\":{\"turn\":2,\"reason\":{\"kind\":\"completed\"}}}"
+        },
+        {
+          "append": "{\"type\":\"session/end-seed\",\"seq\":19,\"time\":1791337581600,\"data\":{\"inherited\":true}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":20,\"time\":1791337582000,\"data\":{\"turn\":3}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":21,\"time\":1791337582005,\"data\":{\"version\":4,\"mode\":\"continuable\"}}"
+        }
+      ],
+      "ts": {
+        "identity": null,
+        "timing": {
+          "settledMs": 5,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 5
+        }
+      },
+      "note": "An unsupported own descriptor clears the inherited identity and still resets timing."
+    },
+    {
+      "id": "inherited-open-interval-crosses-end-seed",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "header": "{\"type\":\"session\",\"version\":3,\"id\":\"a1\",\"createdAt\":1791337579861,\"isSeeded\":true,\"delegationDepth\":0}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"one-shot\",\"provider\":\"task\"}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":1791337580100,\"data\":{\"turn\":null}}"
+        },
+        {
+          "append": "{\"type\":\"session/end-seed\",\"seq\":18,\"time\":1791337580200,\"data\":{\"inherited\":true}}"
+        }
+      ],
+      "ts": {
+        "identity": {
+          "mode": "one-shot",
+          "seq": 16
+        },
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true,
+          "active": {
+            "since": 1791337580100,
+            "through": 1791337580200
+          }
+        },
+        "view": {
+          "settledMs": 0,
+          "active": {
+            "since": 1791337580100,
+            "through": 1791337580200
+          }
+        }
+      },
+      "note": "The stored end seed advances the open interval."
+    },
+    {
+      "id": "turns-after-descriptor-accumulate",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"one-shot\",\"provider\":\"task\"}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":1791337580100,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":18,\"time\":1791337580150,\"data\":{\"turn\":2,\"reason\":{\"kind\":\"completed\"}}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":19,\"time\":1791337580200,\"data\":{\"turn\":3}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":20,\"time\":1791337580270,\"data\":{\"turn\":3,\"reason\":{\"kind\":\"completed\"}}}"
+        }
+      ],
+      "ts": {
+        "identity": {
+          "mode": "one-shot",
+          "seq": 16
+        },
+        "timing": {
+          "settledMs": 120,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 120
+        }
+      }
+    },
+    {
+      "id": "restarted-turn-start-replaces-active",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"one-shot\",\"provider\":\"task\"}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":1791337580100,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":18,\"time\":1791337580150,\"data\":{\"turn\":3}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":19,\"time\":1791337580200,\"data\":{\"turn\":3,\"reason\":{\"kind\":\"completed\"}}}"
+        }
+      ],
+      "ts": {
+        "identity": {
+          "mode": "one-shot",
+          "seq": 16
+        },
+        "timing": {
+          "settledMs": 50,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 50
+        }
+      }
+    },
+    {
+      "id": "restarted-pending-start-promoted",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 0
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":0,\"time\":100,\"data\":{\"turn\":1}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":1,\"time\":200,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":2,\"time\":250,\"data\":{\"version\":3,\"mode\":\"one-shot\",\"provider\":\"task\"}}"
+        }
+      ],
+      "ts": {
+        "identity": {
+          "mode": "one-shot",
+          "seq": 2
+        },
+        "timing": {
+          "settledMs": 50,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 50
+        }
+      },
+      "note": "The latest pending start 200 is promoted; the closer at 250 settles it."
+    },
+    {
+      "id": "turn-end-without-start-ignored",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"one-shot\",\"provider\":\"task\"}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":17,\"time\":1791337580100,\"data\":{\"turn\":9,\"reason\":{\"kind\":\"completed\"}}}"
+        }
+      ],
+      "ts": {
+        "identity": {
+          "mode": "one-shot",
+          "seq": 16
+        },
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "invalid-descriptor-resets-timing",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"one-shot\",\"provider\":\"task\"}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":1791337580100,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":18,\"time\":1791337580300,\"data\":{\"turn\":2,\"reason\":{\"kind\":\"completed\"}}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":19,\"time\":1791337580400,\"data\":{\"turn\":3}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":20,\"time\":1791337580450,\"data\":null}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":21,\"time\":1791337580500,\"data\":{\"turn\":3,\"reason\":{\"kind\":\"completed\"}}}"
+        }
+      ],
+      "ts": {
+        "identity": null,
+        "timing": {
+          "settledMs": 100,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 100
+        }
+      },
+      "note": "The null descriptor drops the 200 settled and restarts from the open turn's start."
+    },
+    {
+      "id": "descriptor-before-active-since",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":16,\"time\":1791337581000,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":17,\"time\":1791337580500,\"data\":{\"version\":3,\"mode\":\"one-shot\",\"provider\":\"task\"}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":18,\"time\":1791337581200,\"data\":{\"turn\":2,\"reason\":{\"kind\":\"completed\"}}}"
+        }
+      ],
+      "ts": {
+        "identity": {
+          "mode": "one-shot",
+          "seq": 17
+        },
+        "timing": {
+          "settledMs": 200,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 200
+        }
+      },
+      "note": "The reversed interval is kept; turn/end measures from the start."
+    },
+    {
+      "id": "reversed-turn-clamps-to-zero",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"one-shot\",\"provider\":\"task\"}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":1791337581000,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":18,\"time\":1791337580900,\"data\":{\"turn\":2,\"reason\":{\"kind\":\"completed\"}}}"
+        }
+      ],
+      "ts": {
+        "identity": {
+          "mode": "one-shot",
+          "seq": 16
+        },
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "reversed-open-interval",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"one-shot\",\"provider\":\"task\"}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":1791337581000,\"data\":{\"turn\":null}}"
+        },
+        {
+          "append": "{\"type\":\"session/title\",\"seq\":18,\"time\":1791337580400,\"data\":{\"title\":\"t\",\"messageSeqs\":[5],\"source\":{\"kind\":\"fallback\"}}}"
+        }
+      ],
+      "ts": {
+        "identity": {
+          "mode": "one-shot",
+          "seq": 16
+        },
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true,
+          "active": {
+            "since": 1791337581000,
+            "through": 1791337580400
+          }
+        },
+        "view": {
+          "settledMs": 0,
+          "active": {
+            "since": 1791337581000,
+            "through": 1791337580400
+          }
+        }
+      }
+    },
+    {
+      "id": "negative-times",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 0
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":0,\"time\":-1000,\"data\":{\"version\":3,\"mode\":\"one-shot\",\"provider\":\"task\"}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":1,\"time\":-500,\"data\":{\"turn\":1}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":2,\"time\":250,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":3,\"time\":-20,\"data\":{\"turn\":null}}"
+        }
+      ],
+      "ts": {
+        "identity": {
+          "mode": "one-shot",
+          "seq": 0
+        },
+        "timing": {
+          "settledMs": 750,
+          "descriptorSeen": true,
+          "active": {
+            "since": -20,
+            "through": -20
+          }
+        },
+        "view": {
+          "settledMs": 750,
+          "active": {
+            "since": -20,
+            "through": -20
+          }
+        }
+      }
+    },
+    {
+      "id": "non-turn-events-advance-through",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"one-shot\",\"provider\":\"task\"}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":1791337580100,\"data\":{\"turn\":null}}"
+        },
+        {
+          "append": "{\"type\":\"step/start\",\"seq\":18,\"time\":1791337580110,\"data\":{\"turn\":null,\"step\":1}}"
+        },
+        {
+          "append": "{\"type\":\"session/title\",\"seq\":19,\"time\":1791337580120,\"data\":{\"title\":\"t\",\"messageSeqs\":[5],\"source\":{\"kind\":\"fallback\"}}}"
+        },
+        {
+          "append": "{\"type\":\"x/opaque\",\"seq\":20,\"time\":1791337580130,\"data\":{\"n\":1},\"ignorable\":true}"
+        },
+        {
+          "append": "{\"type\":\"step/end\",\"seq\":21,\"time\":1791337580140,\"data\":{\"turn\":null,\"step\":1}}"
+        }
+      ],
+      "ts": {
+        "identity": {
+          "mode": "one-shot",
+          "seq": 16
+        },
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true,
+          "active": {
+            "since": 1791337580100,
+            "through": 1791337580140
+          }
+        },
+        "view": {
+          "settledMs": 0,
+          "active": {
+            "since": 1791337580100,
+            "through": 1791337580140
+          }
+        }
+      },
+      "note": "Every event other than turn/start, turn/end, and descriptors moves through, ignorable unknown types included."
+    },
+    {
+      "id": "closers-close-pending-tool-call",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 2
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":2,\"time\":1791337579864,\"data\":{\"version\":3,\"mode\":\"one-shot\",\"provider\":\"task\",\"label\":\"Tool\"}}"
+        },
+        {
+          "append": "{\"type\":\"step/start\",\"seq\":3,\"time\":1791337579865,\"data\":{\"turn\":1,\"step\":1}}"
+        },
+        {
+          "append": "{\"type\":\"assistant/message\",\"seq\":4,\"time\":1791337579866,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool-call\",\"id\":\"c1\",\"name\":\"echo\",\"arguments\":\"{}\"}],\"source\":{\"kind\":\"model\",\"provider\":\"mock\",\"model\":\"mock\"},\"id\":\"m1\"},\"stream\":[]},\"surfaceOp\":\"append\"}"
+        },
+        {
+          "append": "{\"type\":\"tool/call\",\"seq\":5,\"time\":1791337579867,\"data\":{\"turn\":1,\"step\":1,\"callId\":\"c1\",\"name\":\"echo\",\"arguments\":\"{}\"}}"
+        }
+      ],
+      "ts": {
+        "identity": {
+          "mode": "one-shot",
+          "label": "Tool",
+          "seq": 2
+        },
+        "timing": {
+          "settledMs": 3,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 3
+        }
+      },
+      "note": "Closers tool/result 6, step/end 7, and turn/end 8 at 867 settle 867 - 864."
+    },
+    {
+      "id": "max-safe-length",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"one-shot\",\"provider\":\"task\"}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":0,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":18,\"time\":9007199254740991,\"data\":{\"turn\":2,\"reason\":{\"kind\":\"completed\"}}}"
+        }
+      ],
+      "ts": {
+        "identity": {
+          "mode": "one-shot",
+          "seq": 16
+        },
+        "timing": {
+          "settledMs": 9007199254740991,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 9007199254740991
+        }
+      }
+    },
+    {
+      "id": "max-safe-total",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"one-shot\",\"provider\":\"task\"}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":0,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":18,\"time\":9007199254740981,\"data\":{\"turn\":2,\"reason\":{\"kind\":\"completed\"}}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":19,\"time\":-5,\"data\":{\"turn\":3}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":20,\"time\":5,\"data\":{\"turn\":3,\"reason\":{\"kind\":\"completed\"}}}"
+        }
+      ],
+      "ts": {
+        "identity": {
+          "mode": "one-shot",
+          "seq": 16
+        },
+        "timing": {
+          "settledMs": 9007199254740991,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 9007199254740991
+        }
+      }
+    },
+    {
+      "id": "length-over-max-safe",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"one-shot\",\"provider\":\"task\"}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":-1,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":18,\"time\":9007199254740991,\"data\":{\"turn\":2,\"reason\":{\"kind\":\"completed\"}}}"
+        }
+      ],
+      "ts": {
+        "identity": {
+          "mode": "one-shot",
+          "seq": 16
+        },
+        "timing": {
+          "settledMs": 9007199254740992,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 9007199254740992
+        }
+      },
+      "note": "The length 2^53 is above MAX_SAFE_INTEGER but exact."
+    },
+    {
+      "id": "promoted-pending-full-span",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 0
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":0,\"time\":-9007199254740991,\"data\":{\"turn\":1}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":1,\"time\":0,\"data\":{\"version\":3,\"mode\":\"one-shot\",\"provider\":\"task\"}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":2,\"time\":9007199254740991,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}"
+        }
+      ],
+      "ts": {
+        "identity": {
+          "mode": "one-shot",
+          "seq": 1
+        },
+        "timing": {
+          "settledMs": 18014398509481982,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 18014398509481982
+        }
+      },
+      "note": "2^54 - 2 is exact in JavaScript."
+    },
+    {
+      "id": "total-over-max-safe-rounds",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"one-shot\",\"provider\":\"task\"}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":0,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":18,\"time\":9007199254740991,\"data\":{\"turn\":2,\"reason\":{\"kind\":\"completed\"}}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":19,\"time\":0,\"data\":{\"turn\":3}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":20,\"time\":2,\"data\":{\"turn\":3,\"reason\":{\"kind\":\"completed\"}}}"
+        }
+      ],
+      "ts": {
+        "identity": {
+          "mode": "one-shot",
+          "seq": 16
+        },
+        "timing": {
+          "settledMs": 9007199254740992,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 9007199254740992
+        }
+      },
+      "note": "MAX_SAFE_INTEGER + 2 rounds to 2^53 in JavaScript."
+    },
+    {
+      "id": "overflow-then-descriptor-reset",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"one-shot\",\"provider\":\"task\"}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":-9007199254740991,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":18,\"time\":9007199254740991,\"data\":{\"turn\":2,\"reason\":{\"kind\":\"completed\"}}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":19,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"continuable\",\"provider\":\"task\",\"label\":\"After\"}}"
+        }
+      ],
+      "ts": {
+        "identity": {
+          "mode": "continuable",
+          "label": "After",
+          "seq": 19
+        },
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      },
+      "note": "A later descriptor resets the unsafe total."
+    },
+    {
+      "id": "overflow-in-closer",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"one-shot\",\"provider\":\"task\"}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":-9007199254740991,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"session/title\",\"seq\":18,\"time\":9007199254740991,\"data\":{\"title\":\"t\",\"messageSeqs\":[5],\"source\":{\"kind\":\"fallback\"}}}"
+        }
+      ],
+      "ts": {
+        "identity": {
+          "mode": "one-shot",
+          "seq": 16
+        },
+        "timing": {
+          "settledMs": 18014398509481982,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 18014398509481982
+        }
+      },
+      "note": "The turn/end closer at seq 19 measures the 2^54 - 2 length."
+    },
+    {
+      "id": "reversed-full-span-clamps",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"one-shot\",\"provider\":\"task\"}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":9007199254740991,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":18,\"time\":-9007199254740991,\"data\":{\"turn\":2,\"reason\":{\"kind\":\"completed\"}}}"
+        }
+      ],
+      "ts": {
+        "identity": {
+          "mode": "one-shot",
+          "seq": 16
+        },
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    },
+    {
+      "id": "full-span-before-descriptor-unmeasured",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":16,\"time\":-9007199254740991,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":17,\"time\":9007199254740991,\"data\":{\"turn\":2,\"reason\":{\"kind\":\"completed\"}}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":18,\"time\":1791337580000,\"data\":{\"version\":3,\"mode\":\"one-shot\",\"provider\":\"task\"}}"
+        }
+      ],
+      "ts": {
+        "identity": {
+          "mode": "one-shot",
+          "seq": 18
+        },
+        "timing": {
+          "settledMs": 0,
+          "descriptorSeen": true
+        },
+        "view": {
+          "settledMs": 0
+        }
+      }
+    }
+  ]
+}
