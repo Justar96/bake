@@ -1,33 +1,35 @@
-//! Runs every shared case in `conformance/session/v1-to-v2-cases.json`
+//! Runs every shared case in `conformance/session/history-cases.json`
 //! through `decode_v0_v1_rows`, which must decode it strictly, and then
-//! `migrate_v1_to_v2_transformed`, on both path platforms. A case's expected
+//! `migrate_released_v0_history`, on both path platforms. A case's expected
 //! outcome is its `rust` native-subset marker when present, otherwise
-//! `expect`: what the released v1→v2 migration's header check and
-//! transformed stage, fed every decoded event and finished, return in
-//! TypeScript. The expectations were written from the TypeScript sources;
-//! nothing here reads TypeScript output.
+//! `expect`: what TypeScript's chain of the v0→v1, v1→v2, and v2→v3
+//! migrations, fed every decoded event and finished, returns. The
+//! expectations were written from the TypeScript sources; nothing here reads
+//! TypeScript output.
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use bake_session::{
-    MigratedV1ToV2, PathPlatform, V1CodecRecovery, V1CodecVersion, V1ToV2Limit, V1ToV2Location,
-    V1ToV2Refusal, decode_v0_v1_rows, migrate_v1_to_v2_transformed,
+    HistoryLocation, HistoryRefusal, MigratedV2, PathPlatform, V1CodecRecovery, V1CodecVersion,
+    decode_v0_v1_rows, migrate_released_v0_history,
 };
 use serde_json::{Map, Value};
 
-const SCHEMA: &str = "bake/session-format-conformance/v1-to-v2-cases";
-const ORACLE: &str = "sessionFormatV1ToV2.migrateHeader and assertReleasedV2Header over a strict releasedV0SessionFormatCodec or releasedV1SessionFormatCodec decode, then createStage({ sourceKind: 'transformed' }), transformEvent for each decoded event into a SessionFormatEventCollector, then finish";
+const SCHEMA: &str = "bake/session-format-conformance/history-cases";
+const ORACLE: &str = "releasedV0SessionFormatCodec.createDecoder(header, 'strict') or releasedV1SessionFormatCodec feeding createSessionFormatChain({currentVersion: 3, migrations: [sessionFormatV0ToV1, sessionFormatV1ToV2, sessionFormatV2ToV3]}).createStream; decoder.finish, then stream.finish";
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 180;
+const CASE_COUNT: usize = 45;
 /// The decoder's source budget; no case comes near it.
 const SOURCE_BUDGET: usize = 10_000;
-const LIMITS: [V1ToV2Limit; 5] = [
-    V1ToV2Limit::ChunkShape,
-    V1ToV2Limit::NonStringType,
-    V1ToV2Limit::UncheckedShape,
-    V1ToV2Limit::FloatLexeme,
-    V1ToV2Limit::UndefinedMember,
+/// The limit names the table may use, each witnessed. Other stage limits
+/// pass through under their stage's prefix and are witnessed by that stage's table.
+const LIMITS: [&str; 5] = [
+    "v1-decoded-stage",
+    "assistant-chunk",
+    "untimed-event",
+    "interleaved-emission",
+    "v0-to-v1/legacy-goal-message",
 ];
 
 /// What a run must return.
@@ -39,12 +41,12 @@ enum Expected {
         inherited_event_count: u64,
     },
     Refused {
-        location: V1ToV2Location,
+        location: HistoryLocation,
         message: String,
     },
     Limit {
-        location: V1ToV2Location,
-        limit: V1ToV2Limit,
+        location: HistoryLocation,
+        limit: String,
     },
 }
 
@@ -80,11 +82,11 @@ fn parse_text(value: &Value, context: &str) -> Value {
     serde_json::from_str(text).unwrap_or_else(|error| panic!("{context}: {error}"))
 }
 
-fn location(value: &Value, context: &str) -> V1ToV2Location {
+fn location(value: &Value, context: &str) -> HistoryLocation {
     match value {
-        Value::String(at) if at == "header" => V1ToV2Location::Header,
-        Value::String(at) if at == "finish" => V1ToV2Location::Finish,
-        Value::Number(at) => V1ToV2Location::Event(
+        Value::String(at) if at == "header" => HistoryLocation::Header,
+        Value::String(at) if at == "finish" => HistoryLocation::Finish,
+        Value::Number(at) => HistoryLocation::Event(
             at.as_u64()
                 .and_then(|index| usize::try_from(index).ok())
                 .unwrap_or_else(|| panic!("{context}: invalid event index {at}")),
@@ -125,23 +127,16 @@ fn outcome(value: &Value, context: &str) -> Expected {
 }
 
 fn load() -> Vec<Case> {
-    let text = std::fs::read_to_string(repo_path("conformance/session/v1-to-v2-cases.json"))
-        .expect("read v1-to-v2-cases.json");
-    let table: Value = serde_json::from_str(&text).expect("parse v1-to-v2-cases.json");
+    let text = std::fs::read_to_string(repo_path("conformance/session/history-cases.json"))
+        .expect("read history-cases.json");
+    let table: Value = serde_json::from_str(&text).expect("parse history-cases.json");
     let fields = object(&table, "table");
     assert_eq!(
         keys(fields),
-        BTreeSet::from([
-            "schema",
-            "version",
-            "oracle",
-            "history",
-            "vocabulary",
-            "cases"
-        ])
+        BTreeSet::from(["schema", "version", "oracle", "history", "cases"])
     );
     assert_eq!(table["schema"], SCHEMA);
-    assert_eq!(table["version"], 2);
+    assert_eq!(table["version"], 1);
     assert_eq!(table["oracle"], ORACLE);
     assert!(
         table["history"]
@@ -179,13 +174,10 @@ fn load() -> Vec<Case> {
                 let marker = object(rust, &id);
                 assert_eq!(keys(marker), BTreeSet::from(["limit", "at"]), "{id}");
                 let name = rust["limit"].as_str().unwrap_or_default();
-                let limit = LIMITS
-                    .into_iter()
-                    .find(|limit| limit.name() == name)
-                    .unwrap_or_else(|| panic!("{id}: unlisted limit {name}"));
+                assert!(LIMITS.contains(&name), "{id}: unlisted limit {name}");
                 Expected::Limit {
                     location: location(&rust["at"], &id),
-                    limit,
+                    limit: name.to_owned(),
                 }
             });
             Case {
@@ -244,7 +236,7 @@ fn difference(actual: &Value, expected: &Value, path: &str) -> Option<String> {
 
 fn check(
     id: &str,
-    actual: Result<MigratedV1ToV2, V1ToV2Refusal>,
+    actual: Result<MigratedV2, HistoryRefusal>,
     expected: &Expected,
 ) -> Option<String> {
     match (actual, expected) {
@@ -273,19 +265,19 @@ fn check(
                 .map(|difference| format!("{id}: {difference}"))
         }
         (
-            Err(V1ToV2Refusal::Rejected { location, message }),
+            Err(HistoryRefusal::Rejected { location, message }),
             Expected::Refused {
                 location: expected_location,
                 message: expected_message,
             },
         ) if location == *expected_location && message == *expected_message => None,
         (
-            Err(V1ToV2Refusal::NativeSubset { location, limit }),
+            Err(HistoryRefusal::NativeSubset { location, limit }),
             Expected::Limit {
                 location: expected_location,
                 limit: expected_limit,
             },
-        ) if location == *expected_location && limit == *expected_limit => None,
+        ) if location == *expected_location && limit.name() == *expected_limit => None,
         (actual, expected) => Some(format!("{id}: got {actual:?}, expected {expected:?}")),
     }
 }
@@ -297,11 +289,11 @@ fn table_pins_its_size_and_limits() {
     let witnessed: BTreeSet<&str> = cases
         .iter()
         .filter_map(|entry| match &entry.limit {
-            Some(Expected::Limit { limit, .. }) => Some(limit.name()),
+            Some(Expected::Limit { limit, .. }) => Some(limit.as_str()),
             _ => None,
         })
         .collect();
-    let all: BTreeSet<&str> = LIMITS.iter().map(|limit| limit.name()).collect();
+    let all: BTreeSet<&str> = LIMITS.into_iter().collect();
     assert_eq!(witnessed, all, "every limit is witnessed");
 }
 
@@ -328,7 +320,7 @@ fn shared_cases_match_on_both_platforms() {
                     continue;
                 }
             };
-            let actual = migrate_v1_to_v2_transformed(&decoded);
+            let actual = migrate_released_v0_history(&decoded);
             if let Some(failure) = check(&entry.id, actual, expected) {
                 failures.push(format!("{platform:?} {failure}"));
             }

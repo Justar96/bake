@@ -31,6 +31,8 @@ Compare TypeScript and Rust using controlled fixtures and independently checked 
 - [V1 to V2 transformed-stage cases](#v1-to-v2-transformed-stage-cases)
 - [V0 to V1 migration cases](#v0-to-v1-migration-cases)
 - [Turn boundary and title cases](#turn-boundary-and-title-cases)
+- [Current-format row encoding cases](#current-format-row-encoding-cases)
+- [V0 history read cases](#v0-history-read-cases)
 - [Runner contract](#runner-contract)
 - [Ownership and limits](#ownership-and-limits)
 
@@ -559,7 +561,7 @@ A `rust` override names a native limit and the seq Rust refuses; TypeScript stil
 
 ## V1 to V2 transformed-stage cases
 
-[`session/v1-to-v2-cases.json`](session/v1-to-v2-cases.json) holds 107 synthetic Sessions: 106 released v1 Sessions and one v0 Session, which the header check refuses. Each is a physical header and rows as JSON text. The [TypeScript spec](../packages/session/session-format-v1-to-v2/tests/migration-conformance.spec.ts) first decodes each case strictly with the released codec, and that decode must succeed. It then calls `sessionFormatV1ToV2.migrateHeader` and `assertReleasedV2Header` from [`migration.ts`](../packages/session/session-format-v1-to-v2/src/migration.ts), builds the stage with `sourceKind: 'transformed'`, passes each decoded event to `transformEvent` with a `SessionFormatEventCollector`, and calls `finish`. The [Rust test](../rust/crates/bake-session/tests/v1_to_v2_cases.rs) decodes the same parsed rows with `decode_v0_v1_rows` under both path platforms, requires the decode to succeed, and passes the result to [`migrate_v1_to_v2_transformed`](../rust/crates/bake-session/src/v1_to_v2.rs). Both harnesses also check the table's copy of the released v0 type names and the `Object.prototype` names: the spec against the real exports, a Rust unit test against the port's private lists.
+[`session/v1-to-v2-cases.json`](session/v1-to-v2-cases.json) holds 180 synthetic Sessions: 179 released v1 Sessions and one v0 Session, which the header check refuses. Each is a physical header and rows as JSON text. The [TypeScript spec](../packages/session/session-format-v1-to-v2/tests/migration-conformance.spec.ts) first decodes each case strictly with the released codec, and that decode must succeed. It then calls `sessionFormatV1ToV2.migrateHeader` and `assertReleasedV2Header` from [`migration.ts`](../packages/session/session-format-v1-to-v2/src/migration.ts), builds the stage with `sourceKind: 'transformed'`, passes each decoded event to `transformEvent` with a `SessionFormatEventCollector`, and calls `finish`. The [Rust test](../rust/crates/bake-session/tests/v1_to_v2_cases.rs) decodes the same parsed rows with `decode_v0_v1_rows` under both path platforms, requires the decode to succeed, and passes the result to [`migrate_v1_to_v2_transformed`](../rust/crates/bake-session/src/v1_to_v2.rs). Both harnesses also check the table's copy of the released v0 type names and the `Object.prototype` names: the spec against the real exports, a Rust unit test against the port's private lists.
 
 ```sh
 bun run test:runtime packages/session/session-format-v1-to-v2/tests/migration-conformance.spec.ts
@@ -568,32 +570,43 @@ bun run test:runtime packages/session/session-format-v1-to-v2/tests/migration-co
 
 This is the stage a migration chain runs after v0→v1, not the one production runs on a v1 file. Production's decoded stage first checks each payload with `assertReleasedEventPayload`, and that check is not ported. Because the transformed stage trusts its input, these cases feed it unvalidated codec output.
 
+Both arms pass `assistant/chunk` events to `transformEvent`, including the events the codec expands from packed chunk rows. Rust ports the stage's attempt grouping and its `AssistantStreamAccumulator` from [`assistant-stream.ts`](../packages/llm/llm/src/assistant-stream.ts) in [`assistant_stream.rs`](../rust/crates/bake-session/src/assistant_stream.rs). A chain reading a file sends a packed row through `transformRun` instead, which merges records with `appendStreamRecord`. Neither arm runs that path, and its equivalence with the expanded path is not shown.
+
 A migrated outcome compares the v2 header, the transformed events, and the inherited cut. Numbers compare as JavaScript doubles, and object members compare in JavaScript key order. A refusal compares the header, decoded-event index, or finish location and the exact message. Because packed rows expand, an event index can differ from the row index. The cases cover:
 
 - the vocabulary check, including inherited `Object.prototype` names;
 - a `turn/start` that does not close the prior turn;
 - the `turn/end` synthesized after a next-turn splice, and each condition that prevents it;
 - splitting a legacy goal message into a `goal/change` and a plugin-sourced message;
-- `assistant/message` events with absent, empty, or non-empty chunk references;
+- text, reasoning, and tool-call deltas merged into one record, and split on a type, index, id, or name change, a raw chunk between them, or a gap that is not a safe integer;
+- tool-call deltas with an empty id or name kept as raw chunks, and block, usage, and finish chunks;
+- a `finish` chunk ending its attempt, and a chunk for another turn or step starting a new one;
+- `assistant/attempt` events at the last chunk's seq and time, emitted when `turn/end`, `step/end`, `llm/retry`, `llm/retry-started`, an interrupted turn, or the stage's finish closes the attempt;
+- events after the last chunk held back and emitted behind the attempt, or before the next chunk of the same attempt, and a legacy goal split that is not held back;
+- `assistant/message` events with absent, empty, or non-empty chunk references, including one citing its whole attempt across held-back events, and wrong orders, counts, turns, and steps;
 - remapping `sourceEventSeqs`, `surfaceOp`, `command/done`, compaction ranges and seqs, and title `messageSeqs`, including forward references;
 - the delivery-marker Session check and its inherited exemption;
-- seeded cuts: an end-seed at the cut rewritten as inherited, one synthesized before the first later event, and one synthesized at finish.
+- seeded cuts: an end-seed at the cut rewritten as inherited, one synthesized before the first later event or attempt, and one synthesized at finish, and an attempt that the cut splits.
 
-A `rust` marker names a native limit and its location, and Rust claims nothing there. Each such case still asserts TypeScript's outcome, including the engine's `TypeError` text. The spec accepts a `TypeError` only in a case marked `unchecked-shape`. The limits are:
+A `rust` marker names a native limit and its location, and Rust claims nothing there. Each such case still asserts TypeScript's outcome, including the engine's `TypeError` text and the `assertNever` text for an unknown chunk type. The spec accepts such an error only in a case marked `chunk-shape`, `unchecked-shape`, or `float-lexeme`. The limits are:
 
-- `assistant-chunk`: an `assistant/chunk` event that passes its envelope check. The subset is chunk-free, so no attempt is ever pending, and attempt grouping and stream compaction are not ported.
+- `chunk-shape`: a chunk the accumulator refuses, where TypeScript throws: a `time` or `index` that is not a safe integer, a chunk that is absent or holds -0, a member of the wrong kind, or an unknown chunk type.
 - `non-string-type`: an event `type` that the vocabulary lookup converts to a key.
-- `unchecked-shape`: a value the stage casts without checking and then dereferences, spreads, maps, or adds to.
-- `float-lexeme`: a fraction or exponent spelling that the stage compares, looks up, or prints.
-- `undefined-member`: an emitted `undefined` member, which JSON cannot express.
+- `unchecked-shape`: a value the stage casts without checking and then dereferences, spreads, maps, or adds to, and an attempt's `turn` or `step` that is an object or array, which `!==` compares by reference.
+- `float-lexeme`: a fraction or exponent spelling that the stage compares, looks up, or prints, or that the accumulator reads as a chunk's `time` or `index`.
+- `undefined-member`: an emitted `undefined` member, which JSON cannot express, including an attempt whose first chunk has no `turn` or `step`.
 
-Of the 107 cases, 45 migrate and 33 are refusals in both arms. The remaining 29 are limits: 11 TypeScript `TypeError`s, 8 that TypeScript migrates, and 10 other TypeScript refusals. Both harnesses pin the case count and require every limit to be witnessed. The expectations were written from the TypeScript sources before either harness ran. Three negative controls were observed:
+Of the 180 cases, 87 migrate and 46 are refusals in both arms. The remaining 47 are limits: 25 TypeScript `TypeError`s, 2 `assertNever` errors, 10 that TypeScript migrates, and 10 other TypeScript refusals. Both harnesses pin the case count and require every limit to be witnessed. The 107 version-1 expectations were written from the TypeScript sources before either harness ran, and so were the 73 version-2 cases. Version 2 removed the `rust` markers from the three version-1 chunk cases without changing their TypeScript outcomes. Six negative controls were observed against the version-2 table:
 
-- mapping references by source seq instead of target seq fails `goal-split-shifts-references` and six other cases in both arms;
-- skipping the synthesized end-seed fails `seeded-cut-synthesizes-end-seed` and five other cases in both arms;
-- removing the `rust` marker from `turn-start-null-data` fails that case in both arms.
+- mapping references by source seq instead of target seq fails `goal-split-shifts-references` and seven other cases in both arms;
+- skipping the synthesized end-seed fails `seeded-cut-synthesizes-end-seed` and six other cases in both arms, and `seeded-cut-event-without-time` in Rust;
+- removing the `rust` marker from `turn-start-null-data` fails that case in both arms;
+- merging text deltas across an index change fails `text-index-change-splits` in both arms;
+- emitting held-back events before their attempt fails `step-end-closes-after-buffer` and seven other cases in both arms;
+- removing the `rust` marker from `chunk-null` fails that case in both arms.
 
-The result is stage output: the `restoreReleasedV2Artifact` check of the complete artifact is not run. Recoverable decoding, packed runs kept as runs, the decoded stage's payload checks, and the v0→v1 edge remain separate work. These cases close no roadmap scope.
+The result is stage output: the `restoreReleasedV2Artifact` check of the complete artifact is not run. Recoverable decoding, packed runs kept as runs through `transformRun`, the decoded stage's payload checks, `expandAssistantStream` and its validation, and the v0→v1 edge remain separate work. These cases close no roadmap scope.
+
 ## V0 to V1 migration cases
 
 [`session/v0-to-v1-cases.json`](session/v0-to-v1-cases.json) holds 95 synthetic released v0 Sessions, each a physical header and rows as JSON text with a recovery mode, and the table of released-v0 payload dispositions. The [TypeScript spec](../packages/session/session-format-v0-to-v1/tests/migration-conformance.spec.ts) feeds `releasedV0SessionFormatCodec.createDecoder(header, recovery)` into the stream of a `createSessionFormatChain` holding only `sessionFormatV0ToV1` from [`migration.ts`](../packages/session/session-format-v0-to-v1/src/migration.ts), then finishes the decoder and the stream. It also requires the shared disposition table to equal `RELEASED_V0_EVENT_DISPOSITIONS`. The [Rust test](../rust/crates/bake-session/tests/v0_to_v1_cases.rs) decodes the same parsed header and rows with `decode_v0_v1_rows` and passes the result to [`migrate_v0_to_v1`](../rust/crates/bake-session/src/v0_to_v1/mod.rs).
@@ -637,6 +650,67 @@ The cases cover:
 - turns and titles copied as strings, objects, `null`, negative and largest safe integers, and an empty string, and a title set, retitled, or followed by an interrupted turn.
 
 A `rust` override names a native limit and the seq Rust refuses; TypeScript still asserts its own outcome. `undefined-member` marks a final `lastTurn` or title read from data that is not an object holding the member, which JavaScript reads as `undefined`; `null-data` marks `null` `session/title` data, whose read throws a `TypeError` and ends the fold; and `number` marks a final copy holding a number written with a fraction or an exponent, as -0, or beyond the safe-integer range. Restoration already refuses `null` `turn/start` data. A limited copy that a later event overwrites is not refused. Of the 52 cases, 38 fold identically and 14 are limits, 3 of them TypeScript throws. Both harnesses pin the case count and require every limit and both folds to be witnessed. Two negative controls were observed in both arms: clearing `lastStepStartSeq` on `step/end` fails `capture-tool-call-turn`, and ignoring the closers fails `interrupted-open-turn`. In Rust, refusing a limited `lastTurn` when it is copied instead of at the end fails `fraction-turn-overwritten`. The folds do not cover the inbox, the title service, or Agent resume.
+
+## Current-format row encoding cases
+
+[`session/row-encode-cases.json`](session/row-encode-cases.json) holds 95 cases: 32 logical Session headers, each with an optional inherited event count, 61 logical events, and 2 logs, each a header and events. The [TypeScript spec](../packages/session/session-persistence-jsonl/tests/row-encode-conformance.spec.ts) writes each header with `JSON.stringify(toHeaderLine(header, inheritedEventCount))` and each event with `eventLine(event)` from [`format.ts`](../packages/session/session-persistence-jsonl/src/format.ts). The [Rust test](../rust/crates/bake-session/tests/row_encode_cases.rs) passes the same parsed values to [`encode_header_line` and `encode_event_line`](../rust/crates/bake-session/src/row_encode.rs). A log case joins its lines, each followed by LF, and both arms read the text back, TypeScript with `scanLog` and Rust with `scan_log`, requiring the same logical events, inherited cut, and committed bytes.
+
+```sh
+bun run test:runtime packages/session/session-persistence-jsonl/tests/row-encode-conformance.spec.ts
+(cd rust && cargo test --locked -p bake-session --test row_encode_cases)
+```
+
+`ts` is the exact line, without its LF, or the thrown class with its exact message; an engine `TypeError` carries no message. Rust compares a line byte for byte, and every line it writes must read back through `read_header_record` or `decode_v3_row`. Where TypeScript throws, Rust returns `Unadmitted`, which claims no class or message, unless a `rust` override names a limit. The header encoder ports the checks of `toHeaderLine`, `encodeCurrentHeader`, and the released v3 and v2 `encodeHeader`, and writes the codec's fixed member order. The event encoder ports `encodeSeqRanges`, then admits the row with the strict V3 decoder at the row's own seq, which runs every check of `assertV3EventAdmission` and `assertV3Event` on the same values or refuses with its own `codec` limit, and writes members in JavaScript's own-key order. The cases cover:
+
+- headers with every optional member, a reversed member order, an absent or `null` `delegationDepth` written as 0, seeded and unseeded counts, and each member check, including a `type` member and a retired policy field;
+- source lists as single seqs, pairs, runs of three or more, mixed runs, and unsorted lists copied as-is, and the surface, known-type, and unknown-type source rules;
+- `append` and `replace` surface operations, unknown and ignorable obsolete types, `Object.prototype` type names, and the codec's `request/header`, `tool/result`, and `system/message` checks;
+- string escapes, including controls, DEL, U+2028, and astral characters, array-index keys, and zeros written as `0`;
+- an unseeded and a seeded log scanned back.
+
+A `rust` override names a native limit, and Rust claims nothing there; TypeScript still asserts its own outcome. The limits are:
+
+- `float-number`: a number serde_json holds as neither a safe integer nor a zero. JavaScript admits an integral one as a count and writes its own spelling of any of them.
+- `type-error`: a `null` header or event, whose property read throws a `TypeError`.
+- `source-coercion`: an unknown type's `sourceEventSeqs` that is not an array of numbers, which `encodeSeqRanges` coerces or calls a missing method on.
+- `unreadable-row`: a row TypeScript writes but its strict decoder refuses, such as an unknown type's source list with a negative or later seq, or `session/end-seed` data that is not an object.
+- `codec`: a native limit of the strict V3 decoder while admitting the row.
+
+Of the 95 cases, 32 encode identically, 46 are refused in both arms, 2 are logs read back, and 15 are limits: TypeScript writes 11 of them and throws for 4. Both harnesses pin the case count and require every limit to be witnessed. The expectations were written from the TypeScript sources before either harness ran. Three negative controls were observed: writing a run of two seqs as a range fails `sources-pair` in Rust and `sources-pair` and `sources-mixed-runs` in TypeScript; writing members in serde_json's insertion order fails `integer-like-keys` in Rust; and removing the `rust` marker from `time-integral-float` fails that case in Rust. Lone surrogates are outside the input domain, because serde_json cannot hold them. The encoders write rows, not files: framing, compression, and appending to a log are not covered, and these cases close no roadmap scope.
+
+## V0 history read cases
+
+[`session/history-cases.json`](session/history-cases.json) holds 45 synthetic Sessions: 44 released v0 Sessions and one v1 Session, each a physical header and rows as JSON text. The [TypeScript spec](../packages/session/session-format-v2-to-v3/tests/history-conformance.spec.ts) feeds `releasedV0SessionFormatCodec.createDecoder(header, 'strict')`, or the v1 codec, into the stream of a `createSessionFormatChain` holding `sessionFormatV0ToV1`, `sessionFormatV1ToV2`, and `sessionFormatV2ToV3`, then finishes the decoder and the stream. The [Rust test](../rust/crates/bake-session/tests/history_cases.rs) decodes the same parsed header and rows with `decode_v0_v1_rows` under both path platforms, requires the decode to succeed, and passes the result to [`migrate_released_v0_history`](../rust/crates/bake-session/src/history.rs).
+
+```sh
+bun run test:runtime packages/session/session-format-v2-to-v3/tests/history-conformance.spec.ts
+(cd rust && cargo test --locked -p bake-session --test history_cases)
+```
+
+The chain streams each decoded event through every stage before the next one starts, so TypeScript reports the refusal at the earliest source event, and within one event the refusal of the earliest stage. The Rust stages run over a whole log, so Rust reruns each later stage over the events before the earliest refusal found so far and maps a v2→v3 refusal back to the source event whose output it checked. A migrated outcome compares the v3 header, the events in order with object members in JavaScript key order, and the inherited cut. A refusal compares the header, decoded-event index, or finish location and the exact message: each stage's unsupported errors pass through the chain, and its other errors are wrapped as `<migration> refuses this format vN Session: <detail>`. The cases cover:
+
+- clean histories through all three edges: the empty Assistant stream v1→v2 adds, the system heads v2→v3 inserts, unchanged and changed prompts, legacy messages that v0→v1 gives ids, references remapped by both later edges, and `code` renamed `ptc` in the header and an `agent-preset/selected` event;
+- seeded histories with an end-seed at the cut, one synthesized there, one emitted at finish, and an inherited delivery marker;
+- a legacy interrupted turn after a next-turn splice, with a system prompt and a title whose message seq both later edges shift;
+- each stage refusing alone, and a v2→v3 refusal located across events that v1→v2 inserted;
+- precedence: an earlier refusal beats a later one from every other stage, and within one event the earlier stage wins;
+- Assistant chunks before and after a refusal, and a packed run.
+
+A `rust` marker names a native limit and its location, and Rust claims nothing there. Each such case still asserts TypeScript's outcome. The limits are:
+
+- `v1-decoded-stage`: a v1 Session, which a chain reads with the v1→v2 decoded stage and its payload checks, which are not ported.
+- `assistant-chunk`: an `assistant/chunk` event that v0→v1 admitted. TypeScript starts an Assistant attempt and then buffers later events, and a packed run takes `transformRun` rather than its expanded events.
+- `untimed-event`: an event without `time`, which v1→v2 can copy into an event it synthesizes.
+- `interleaved-emission`: a v1→v2 refusal of an event for which v1→v2 may already have emitted an end-seed, an interrupted `turn/end`, or a `goal/change` into v2→v3. Rust applies the rule to every refusal of an event at the cut of a seeded log other than a `session/end-seed` there, which v1→v2 does not precede with a synthesized one, of a `turn/start` right after an inbox splice, and of a goal `user/message` carrying its change, including one raised before any emission. v0→v1 already refuses such a goal message as its own `legacy-goal-message` limit, so its arm is not reached.
+- A stage's own limit, named with that stage's prefix, such as `v0-to-v1/legacy-goal-message`; that stage's table witnesses the others.
+
+Of the 45 cases, 13 migrate and 24 are refusals both arms report exactly. The remaining 8 are limits: 7 TypeScript refusals and 1 that TypeScript migrates. Both harnesses pin the case count and require every listed limit to be witnessed. The expectations were written from the TypeScript sources before either harness ran. Three negative controls were observed:
+
+- returning the v0→v1 refusal without rerunning the later stages over the earlier events fails `v2-to-v3-before-later-v0-to-v1` and four other cases in Rust;
+- keeping the end-seed that v1→v2 `finish` adds to a seeded prefix fails `seeded-refusal-before-cut` in Rust;
+- expecting the later v0→v1 refusal in `v2-to-v3-before-later-v0-to-v1` fails that case in both arms.
+
+The result is stage output: the catalog's final check of the v3 artifact is not run. Recoverable decoding, Assistant attempts, and the decoded v1→v2 stage remain separate work. These cases close no roadmap scope.
 
 ## Runner contract
 
