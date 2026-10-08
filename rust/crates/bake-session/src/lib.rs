@@ -58,6 +58,11 @@
 //! runs kept, through every edge to format v3, reporting the refusal
 //! TypeScript's streaming chain reports first; a v1 Session takes the decoded
 //! v1→v2 stage.
+//! [`restore_migrated`] restores a v0, v1, or v2 Session that
+//! [`migrate_v2_rows`] or [`migrate_released_history`] migrated, as the
+//! production read path restores its historical file, by encoding the
+//! migration's output and restoring those bytes as [`restore_plain_log`]
+//! does; a Session the catalog's final check refuses is outside its domain.
 //! [`token_usage`] folds a [`RestoredLog`]'s provider-reported token usage,
 //! and [`context_pressure`] its context occupancy with the surface's
 //! heuristic token total.
@@ -111,6 +116,7 @@ mod goal;
 mod history;
 mod inbox;
 mod log_layout;
+mod migrated_restore;
 mod offload;
 mod plain_append;
 mod plain_log_file;
@@ -155,6 +161,7 @@ pub use inbox::{
     consumed_work, restored_inbox,
 };
 pub use log_layout::{encode_segment, project_key, session_log_path};
+pub use migrated_restore::{MigratedRestoreLimit, MigratedRestoreRefusal, restore_migrated};
 pub use offload::OffloadRejection;
 pub use plain_append::{AppendLimit, AppendRefusal, CreateLimit, CreateRefusal, PlainAppendLog};
 pub use plain_log_file::{LogFileLimit, LogFileRefusal, PlainLogFile};
