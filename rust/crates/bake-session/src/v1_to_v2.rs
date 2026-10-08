@@ -12,25 +12,33 @@
 //! casts and refuses with a [`V1ToV2Limit`] wherever TypeScript would throw a
 //! `TypeError` or coerce a value.
 //!
-//! Every `assistant/chunk` event, including those expanded from packed rows,
-//! goes through `transformChunk` and the stage's `AssistantStreamAccumulator`,
-//! ported in [`crate::assistant_stream`]. TypeScript would send a packed row
-//! through `transformRun` instead, which this port does not include, so a
-//! log with packed rows matches TypeScript's `transformEvent` over its
-//! expanded events, not a chain reading the file.
+//! [`migrate_v1_to_v2_transformed`] feeds every decoded event, packed rows
+//! expanded, to `transformEvent`, so a log with packed rows matches
+//! TypeScript's `transformEvent` over its expanded events.
+//! [`migrate_v1_to_v2_transformed_items`] feeds each packed row to
+//! `transformRun` instead, as a chain reading the file does. That path skips
+//! the event checks, forgets the previous event, takes the run's last time,
+//! and checks the cut only across the run's own seqs, so its result can
+//! differ from the expanded one.
 //!
-//! The stage flushes the accumulator into an empty stream once per attempt,
-//! when it emits the attempt or its message, so `appendStreamRecord` never
-//! merges two records: the accumulator already splits wherever that merge
-//! would, on a type, index, id, or name change or an unsafe gap.
+//! An attempt's stream is a list of records with their last times. Each
+//! `assistant/chunk` event goes through the attempt's
+//! `AssistantStreamAccumulator`, ported in [`crate::assistant_stream`], which
+//! is flushed into the list before a run's record is appended and when the
+//! attempt or its message is emitted. `appendStreamRecord` merges a record
+//! into the list's last one on the same type, index, tool id, and tool name,
+//! across a safe gap. A run's record never carries `-0`: the codec refuses it
+//! in `time0` and `dt`, and every other number in it is a count.
 
 use std::collections::HashMap;
 
 use serde_json::{Map, Value};
 
 use crate::MAX_SAFE_INTEGER;
-use crate::assistant_stream::{AssistantStreamAccumulator, StreamPushError};
-use crate::v1_codec::DecodedV1Rows;
+use crate::assistant_stream::{AssistantStreamAccumulator, StreamPushError, safe_gap};
+use crate::v1_codec::{
+    DecodedV1Items, DecodedV1Rows, PackedKind, PackedStreamRecord, ReleasedChunkRun, V1Item,
+};
 use crate::v2_to_v3::integer_string;
 
 /// `CHUNK_EVENT_REQUIRED` and `CHUNK_EVENT_OPTIONAL`.
@@ -127,7 +135,9 @@ pub struct MigratedV1ToV2 {
 pub enum V1ToV2Location {
     /// `migrateHeader`, before any event.
     Header,
-    /// `transformEvent` for the decoded event at this index.
+    /// `transformEvent` for the decoded event at this index, or, from
+    /// [`migrate_v1_to_v2_transformed_items`], `transformEvent` or
+    /// `transformRun` for the item at this index.
     Event(usize),
     /// The stage's `finish`, after every event.
     Finish,
@@ -209,7 +219,39 @@ type Checked<T> = Result<T, Failure>;
 pub fn migrate_v1_to_v2_transformed(
     decoded: &DecodedV1Rows,
 ) -> Result<MigratedV1ToV2, V1ToV2Refusal> {
-    let header = match &decoded.header {
+    let items = decoded.events.iter().map(Source::Event);
+    migrate(&decoded.header, decoded.inherited_event_count, items)
+}
+
+/// Migrate a decoded v1 Session to v2 as the released transformed stage does
+/// when a chain reads the file: `transformEvent` for each event item and
+/// `transformRun` for each packed row.
+///
+/// `decoded` must be [`decode_v0_v1_items`](crate::decode_v0_v1_items)
+/// output, with the same guarantees as for
+/// [`migrate_v1_to_v2_transformed`].
+pub fn migrate_v1_to_v2_transformed_items(
+    decoded: &DecodedV1Items,
+) -> Result<MigratedV1ToV2, V1ToV2Refusal> {
+    let items = decoded.items.iter().map(|item| match item {
+        V1Item::Event(event) => Source::Event(event),
+        V1Item::AssistantChunkRun(run) => Source::Run(run),
+    });
+    migrate(&decoded.header, decoded.inherited_event_count, items)
+}
+
+/// One input to the stage.
+enum Source<'a> {
+    Event(&'a Value),
+    Run(&'a ReleasedChunkRun),
+}
+
+fn migrate<'a>(
+    header: &'a Value,
+    inherited_event_count: u64,
+    items: impl Iterator<Item = Source<'a>>,
+) -> Result<MigratedV1ToV2, V1ToV2Refusal> {
+    let header = match header {
         Value::Object(fields) if fields.get("version").and_then(Value::as_u64) == Some(1) => fields,
         _ => {
             return Err(V1ToV2Refusal::Rejected {
@@ -220,11 +262,23 @@ pub fn migrate_v1_to_v2_transformed(
     };
     let mut target_header = header.clone();
     target_header.insert("version".to_owned(), Value::from(2));
-    let mut stage = Stage::new(header, decoded.inherited_event_count, &decoded.events);
-    for (index, event) in decoded.events.iter().enumerate() {
-        stage
-            .transform(index, event)
-            .map_err(|failure| refusal(V1ToV2Location::Event(index), failure))?;
+    let mut stage = Stage::new(header, inherited_event_count);
+    // The decoded seq of the next event: the codec checked that each event's
+    // `seq` and each run's `firstSeq` is the count of events before it.
+    let mut seq: u64 = 0;
+    for (index, item) in items.enumerate() {
+        match item {
+            Source::Event(event) => {
+                let result = stage.transform(seq, event);
+                seq = seq.saturating_add(1);
+                result
+            }
+            Source::Run(run) => {
+                seq = seq.saturating_add(run.event_count());
+                stage.transform_run(run)
+            }
+        }
+        .map_err(|failure| refusal(V1ToV2Location::Event(index), failure))?;
     }
     let inherited_event_count = stage
         .finish()
@@ -259,10 +313,14 @@ struct PendingAttempt {
     step: Option<Value>,
     /// `spans` as `(firstSeq, eventCount)`.
     spans: Vec<(u64, u64)>,
-    accumulator: AssistantStreamAccumulator,
+    /// `stream`: the records flushed so far.
+    stream: Vec<StreamEntry>,
+    /// The accumulator for chunk events since the last flush.
+    accumulator: Option<AssistantStreamAccumulator>,
     chunk_count: u64,
     last_chunk_seq: u64,
-    /// The last chunk's `time`, a safe integer the accumulator admitted.
+    /// The last chunk's `time`, a safe integer the accumulator admitted or
+    /// a run's `lastTime`.
     last_chunk_time: Value,
     terminal: bool,
     /// `afterLastChunk`: each buffered event's index and members.
@@ -270,6 +328,22 @@ struct PendingAttempt {
 }
 
 impl PendingAttempt {
+    /// `attemptGroup(turn, step)` with no chunk yet.
+    fn new(turn: Option<Value>, step: Option<Value>, seq: u64) -> Self {
+        Self {
+            turn,
+            step,
+            spans: Vec::new(),
+            stream: Vec::new(),
+            accumulator: None,
+            chunk_count: 0,
+            last_chunk_seq: seq,
+            last_chunk_time: Value::Null,
+            terminal: false,
+            after_last_chunk: Vec::new(),
+        }
+    }
+
     /// `assertAttemptCut`: an attempt's chunks and its message must all
     /// precede the source cut or all follow it.
     fn assert_cut(&self, source_cut: u64, member: u64) -> Checked<()> {
@@ -282,15 +356,37 @@ impl PendingAttempt {
         Ok(())
     }
 
-    /// `recordChunkSpan` for one chunk event.
-    fn record_chunk(&mut self, seq: u64, time: Value) {
+    /// `recordChunkSpan`: `event_count` chunks from `first_seq`, the last at
+    /// `time`.
+    fn record_span(&mut self, first_seq: u64, event_count: u64, time: Value) {
         match self.spans.last_mut() {
-            Some((first, count)) if first.checked_add(*count) == Some(seq) => *count += 1,
-            _ => self.spans.push((seq, 1)),
+            Some((first, count)) if first.checked_add(*count) == Some(first_seq) => {
+                *count = count.saturating_add(event_count);
+            }
+            _ => self.spans.push((first_seq, event_count)),
         }
-        self.chunk_count += 1;
-        self.last_chunk_seq = seq;
+        self.chunk_count = self.chunk_count.saturating_add(event_count);
+        self.last_chunk_seq = first_seq.saturating_add(event_count).saturating_sub(1);
         self.last_chunk_time = time;
+    }
+
+    /// `flushAccumulator`: append the accumulator's records to the stream.
+    fn flush_accumulator(&mut self) {
+        let Some(accumulator) = self.accumulator.take() else {
+            return;
+        };
+        for record in accumulator.snapshot() {
+            append_stream_record(&mut self.stream, StreamEntry::from_snapshot(record));
+        }
+    }
+
+    /// `streamOf`: flush, then the stream's records.
+    fn take_stream(&mut self) -> Vec<Value> {
+        self.flush_accumulator();
+        std::mem::take(&mut self.stream)
+            .into_iter()
+            .map(StreamEntry::into_value)
+            .collect()
     }
 
     /// `matchesChunkSources`: the message cites exactly this attempt's
@@ -307,17 +403,14 @@ impl PendingAttempt {
     }
 
     /// `attemptEvent`: the `assistant/attempt` at the last chunk's seq and time.
-    fn attempt_event(&self) -> Checked<Map<String, Value>> {
-        let (Some(turn), Some(step)) = (&self.turn, &self.step) else {
+    fn attempt_event(&mut self) -> Checked<Map<String, Value>> {
+        let (Some(turn), Some(step)) = (self.turn.clone(), self.step.clone()) else {
             return Err(Failure::Limit(V1ToV2Limit::UndefinedMember));
         };
         let mut data = Map::new();
-        data.insert("turn".to_owned(), turn.clone());
-        data.insert("step".to_owned(), step.clone());
-        data.insert(
-            "stream".to_owned(),
-            Value::Array(self.accumulator.snapshot()),
-        );
+        data.insert("turn".to_owned(), turn);
+        data.insert("step".to_owned(), step);
+        data.insert("stream".to_owned(), Value::Array(self.take_stream()));
         generated(
             "assistant/attempt",
             self.last_chunk_seq,
@@ -327,18 +420,131 @@ impl PendingAttempt {
     }
 }
 
+/// One stream record and its last time, as `AttemptGroup.stream` holds it.
+enum StreamEntry {
+    /// A text, reasoning, or tool-call record, which a later one can merge into.
+    Packed {
+        record: PackedStreamRecord,
+        last_time: i64,
+    },
+    /// A raw `chunk` record, which never merges.
+    Chunk(Value),
+}
+
+impl StreamEntry {
+    /// An accumulator snapshot record with `recordLastTime`. Anything that
+    /// is not a packed record is the accumulator's raw `chunk` record.
+    fn from_snapshot(record: Value) -> Self {
+        let Value::Object(fields) = &record else {
+            return Self::Chunk(record);
+        };
+        let kind = match fields.get("type").and_then(Value::as_str) {
+            Some("text-chunks") => PackedKind::Text,
+            Some("reasoning-chunks") => PackedKind::Reasoning,
+            Some("tool-call-chunks") => PackedKind::ToolCall,
+            _ => return Self::Chunk(record),
+        };
+        let strings = |key: &str| -> Option<Vec<String>> {
+            fields
+                .get(key)?
+                .as_array()?
+                .iter()
+                .map(|item| item.as_str().map(str::to_owned))
+                .collect()
+        };
+        let integers = |key: &str| -> Option<Vec<i64>> {
+            fields
+                .get(key)?
+                .as_array()?
+                .iter()
+                .map(Value::as_i64)
+                .collect()
+        };
+        let packed = (|| {
+            let time0 = fields.get("time0")?.as_i64()?;
+            let dt = integers("dt")?;
+            let last_time = dt
+                .iter()
+                .try_fold(time0, |time, gap| time.checked_add(*gap))?;
+            let (id, members) = if kind == PackedKind::ToolCall {
+                (
+                    Some(fields.get("id")?.as_str()?.to_owned()),
+                    strings("args")?,
+                )
+            } else {
+                (None, strings("texts")?)
+            };
+            let name = match fields.get("name") {
+                None => None,
+                Some(name) => Some(name.as_str()?.to_owned()),
+            };
+            let record = PackedStreamRecord {
+                kind,
+                time0,
+                index: fields.get("index")?.as_u64()?,
+                dt,
+                id,
+                name,
+                members,
+            };
+            Some(Self::Packed { record, last_time })
+        })();
+        packed.unwrap_or(Self::Chunk(record))
+    }
+
+    fn into_value(self) -> Value {
+        match self {
+            Self::Packed { record, .. } => record.to_value(),
+            Self::Chunk(record) => record,
+        }
+    }
+}
+
+/// `appendStreamRecord`: merge `source` into the stream's last record when
+/// both are packed records of one type, index, tool id, and tool name, and
+/// the gap between them is a safe integer; otherwise push it.
+fn append_stream_record(stream: &mut Vec<StreamEntry>, source: StreamEntry) {
+    let StreamEntry::Packed {
+        record: source,
+        last_time,
+    } = source
+    else {
+        stream.push(source);
+        return;
+    };
+    if let Some(StreamEntry::Packed {
+        record: target,
+        last_time: target_last_time,
+    }) = stream.last_mut()
+        && target.kind == source.kind
+        && target.index == source.index
+        && let Some(gap) = safe_gap(*target_last_time, source.time0)
+        && target.id == source.id
+        && target.name == source.name
+    {
+        target.dt.push(gap);
+        target.dt.extend(source.dt);
+        target.members.extend(source.members);
+        *target_last_time = last_time;
+        return;
+    }
+    stream.push(StreamEntry::Packed {
+        record: source,
+        last_time,
+    });
+}
+
 /// `ReleasedV1ToV2State`.
 struct Stage<'a> {
     header: &'a Map<String, Value>,
-    events: &'a [Value],
     is_seeded: bool,
     source_cut: u64,
     mapping: HashMap<u64, u64>,
     open_turn: OpenTurn,
     /// Whether `openStep` is not `null`.
     open_step: bool,
-    /// The index of the last observed event.
-    previous: Option<usize>,
+    /// `legacyTurns.previous`: the last observed event, forgotten by a run.
+    previous: Option<&'a Value>,
     target_seq: u64,
     target_cut: Option<u64>,
     /// `lastTime`, `None` when an event had no `time`.
@@ -348,11 +554,10 @@ struct Stage<'a> {
 }
 
 impl<'a> Stage<'a> {
-    fn new(header: &'a Map<String, Value>, source_cut: u64, events: &'a [Value]) -> Self {
+    fn new(header: &'a Map<String, Value>, source_cut: u64) -> Self {
         let is_seeded = header.get("isSeeded") == Some(&Value::Bool(true));
         Self {
             header,
-            events,
             is_seeded,
             source_cut,
             mapping: HashMap::new(),
@@ -368,9 +573,8 @@ impl<'a> Stage<'a> {
     }
 
     /// `transformReleasedEvent`.
-    fn transform(&mut self, index: usize, event: &Value) -> Checked<()> {
+    fn transform(&mut self, seq: u64, event: &'a Value) -> Checked<()> {
         let fields = record(Some(event))?;
-        let seq = index as u64;
         let raw_type = fields.get("type");
         if raw_type == Some(&Value::from("assistant/chunk")) {
             assert_chunk_envelope(fields, seq)?;
@@ -399,7 +603,7 @@ impl<'a> Stage<'a> {
             )));
         }
         self.assert_source_delivery_marker(event_type, fields, seq)?;
-        self.observe_legacy_turn(event_type, fields, index)?;
+        self.observe_legacy_turn(event_type, fields, event)?;
         self.last_time = fields.get("time").cloned();
         if let Some(interrupted) = interrupted {
             self.finish_attempt()?;
@@ -445,21 +649,14 @@ impl<'a> Stage<'a> {
             }
         }
         let source_cut = self.source_cut;
-        let pending = self.pending.get_or_insert_with(|| PendingAttempt {
-            turn: turn.cloned(),
-            step: step.cloned(),
-            spans: Vec::new(),
-            accumulator: AssistantStreamAccumulator::default(),
-            chunk_count: 0,
-            last_chunk_seq: seq,
-            last_chunk_time: Value::Null,
-            terminal: false,
-            after_last_chunk: Vec::new(),
-        });
+        let pending = self
+            .pending
+            .get_or_insert_with(|| PendingAttempt::new(turn.cloned(), step.cloned(), seq));
         pending.assert_cut(source_cut, seq)?;
         let chunk = data.get("chunk");
         pending
             .accumulator
+            .get_or_insert_default()
             .push(fields.get("time"), chunk)
             .map_err(|error| {
                 Failure::Limit(match error {
@@ -468,17 +665,56 @@ impl<'a> Stage<'a> {
                 })
             })?;
         // `push` admitted the time, so it is present.
-        pending.record_chunk(seq, fields.get("time").cloned().unwrap_or(Value::Null));
+        pending.record_span(seq, 1, fields.get("time").cloned().unwrap_or(Value::Null));
         if chunk.and_then(|chunk| chunk.get("type")) == Some(&Value::from("finish")) {
             pending.terminal = true;
         }
         Ok(())
     }
 
+    /// `transformReleasedRun` for a packed Assistant chunk row.
+    fn transform_run(&mut self, run: &ReleasedChunkRun) -> Checked<()> {
+        self.previous = None;
+        self.last_time = Some(Value::from(run.last_time()));
+        let turn = Value::from(run.turn());
+        let step = Value::from(run.step());
+        if let Some(pending) = &self.pending {
+            let continues = !pending.terminal
+                && same_coordinate(pending.turn.as_ref(), Some(&turn))?
+                && same_coordinate(pending.step.as_ref(), Some(&step))?;
+            if continues {
+                self.flush_buffered()?;
+            } else {
+                self.finish_attempt()?;
+            }
+        }
+        let first_seq = run.first_seq();
+        let pending = self
+            .pending
+            .get_or_insert_with(|| PendingAttempt::new(Some(turn), Some(step), first_seq));
+        // `assertAttemptRange`: only the run's own seqs are checked.
+        if (first_seq < self.source_cut) != (run.last_seq() < self.source_cut) {
+            return Err(Failure::Unsupported(format!(
+                "inherited Session cut {} splits one Assistant attempt",
+                self.source_cut
+            )));
+        }
+        pending.flush_accumulator();
+        append_stream_record(
+            &mut pending.stream,
+            StreamEntry::Packed {
+                record: run.record.clone(),
+                last_time: run.last_time(),
+            },
+        );
+        pending.record_span(first_seq, run.event_count(), Value::from(run.last_time()));
+        Ok(())
+    }
+
     /// `finishAttempt`: emit the pending attempt, then the events buffered
     /// after its last chunk.
     fn finish_attempt(&mut self) -> Checked<()> {
-        let Some(pending) = self.pending.take() else {
+        let Some(mut pending) = self.pending.take() else {
             return Ok(());
         };
         let attempt = pending.attempt_event()?;
@@ -536,8 +772,7 @@ impl<'a> Stage<'a> {
             // `!==` with a number is true for every other value.
             _ => false,
         };
-        let previous = self.previous.and_then(|index| self.events.get(index));
-        let Some(previous) = previous.and_then(Value::as_object) else {
+        let Some(previous) = self.previous.and_then(Value::as_object) else {
             return Ok(None);
         };
         if !matches || previous.get("type") != Some(&Value::from("agent/inbox/spliced")) {
@@ -596,7 +831,7 @@ impl<'a> Stage<'a> {
         &mut self,
         event_type: &str,
         fields: &Map<String, Value>,
-        index: usize,
+        event: &'a Value,
     ) -> Checked<()> {
         match event_type {
             "turn/start" => {
@@ -616,7 +851,7 @@ impl<'a> Stage<'a> {
             "step/end" => self.open_step = false,
             _ => {}
         }
-        self.previous = Some(index);
+        self.previous = Some(event);
         Ok(())
     }
 
@@ -646,7 +881,7 @@ impl<'a> Stage<'a> {
             self.finish_attempt()?;
             return self.emit_source(seq, message_event(fields, data, Vec::new()), time);
         }
-        let Some(pending) = self
+        let Some(mut pending) = self
             .pending
             .take_if(|pending| pending.matches_sources(sources))
         else {
@@ -655,7 +890,7 @@ impl<'a> Stage<'a> {
             )));
         };
         pending.assert_cut(self.source_cut, seq)?;
-        let stream = pending.accumulator.snapshot();
+        let stream = pending.take_stream();
         self.emit_buffered(pending.after_last_chunk)?;
         self.emit_source(seq, message_event(fields, data, stream), time)
     }

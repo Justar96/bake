@@ -4,11 +4,12 @@
 //! rows: `createDecoder(header, recovery)`, `decodeRow` for each row, then
 //! `finish`.
 //!
-//! The output is the codec's: the logical header, the inherited cut, and the
-//! emitted events, with each packed Assistant chunk row expanded to its
-//! `assistant/chunk` events as `run.expand()` yields them. No migration runs,
-//! so the events are neither v1 nor v2 events and nothing has checked their
-//! vocabulary, payloads, or relationships.
+//! [`decode_v0_v1_items`] returns what the codec emits: the logical header,
+//! the inherited cut, and each row's event or, for a packed Assistant chunk
+//! row, its `ReleasedAssistantChunkRun`. [`decode_v0_v1_rows`] expands each
+//! run to its `assistant/chunk` events as `run.expand()` yields them. No
+//! migration runs, so the events are neither v1 nor v2 events and nothing has
+//! checked their vocabulary, payloads, or relationships.
 
 use serde_json::{Map, Value};
 
@@ -64,6 +65,188 @@ pub struct DecodedV1Rows {
     /// member order, with `sourceEventSeqs` expanded in place, and packed
     /// rows expanded to `assistant/chunk` events.
     pub events: Vec<Value>,
+}
+
+/// A decoded released v0 or v1 Session with its packed rows kept as runs.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DecodedV1Items {
+    /// As [`DecodedV1Rows::header`].
+    pub header: Value,
+    /// As [`DecodedV1Rows::inherited_event_count`].
+    pub inherited_event_count: u64,
+    /// One item per row, in row order: `context.emitEvent` or
+    /// `context.emitRun` as the decoder calls it.
+    pub items: Vec<V1Item>,
+}
+
+/// One emitted row.
+#[derive(Debug, Clone, PartialEq)]
+pub enum V1Item {
+    /// An ordinary row, as [`DecodedV1Rows::events`] holds it.
+    Event(Value),
+    /// A packed Assistant chunk row.
+    AssistantChunkRun(ReleasedChunkRun),
+}
+
+/// `ReleasedAssistantChunkRun`: a packed row's compact stream record and the
+/// coordinates of the events it stands for. Only the codec builds one, so
+/// its members are always the checked values.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReleasedChunkRun {
+    first_seq: u64,
+    turn: u64,
+    step: u64,
+    last_time: i64,
+    pub(crate) record: PackedStreamRecord,
+}
+
+impl ReleasedChunkRun {
+    /// `firstSeq`, the row's `seq0`.
+    pub fn first_seq(&self) -> u64 {
+        self.first_seq
+    }
+
+    /// `eventCount`, the payload's length.
+    pub fn event_count(&self) -> u64 {
+        self.record.members.len() as u64
+    }
+
+    /// `turn`.
+    pub fn turn(&self) -> u64 {
+        self.turn
+    }
+
+    /// `step`.
+    pub fn step(&self) -> u64 {
+        self.step
+    }
+
+    /// `lastSeq`, the seq of the last event.
+    pub fn last_seq(&self) -> u64 {
+        // The codec checked that this is a safe integer.
+        self.first_seq
+            .saturating_add(self.event_count())
+            .saturating_sub(1)
+    }
+
+    /// `lastTime`, the time of the last event.
+    pub fn last_time(&self) -> i64 {
+        self.last_time
+    }
+
+    /// `stream`: the row as one durable stream record, in TypeScript's
+    /// member order.
+    pub fn stream(&self) -> Value {
+        self.record.to_value()
+    }
+
+    /// `run.expand()`: the run's `assistant/chunk` events.
+    pub fn expand(&self) -> Vec<Value> {
+        let record = &self.record;
+        let mut time = record.time0;
+        record
+            .members
+            .iter()
+            .enumerate()
+            .map(|(offset, member)| {
+                if offset > 0 {
+                    // The codec checked that every member time is a safe integer.
+                    let gap = record.dt.get(offset - 1).copied().unwrap_or_default();
+                    time = time.saturating_add(gap);
+                }
+                let mut chunk = Map::new();
+                chunk.insert("type".to_owned(), Value::from(record.kind.delta_type()));
+                chunk.insert("index".to_owned(), Value::from(record.index));
+                if let Some(id) = &record.id {
+                    chunk.insert("id".to_owned(), Value::from(id.as_str()));
+                    if let Some(name) = &record.name {
+                        chunk.insert("name".to_owned(), Value::from(name.as_str()));
+                    }
+                    chunk.insert("argumentsDelta".to_owned(), Value::from(member.as_str()));
+                } else {
+                    chunk.insert("text".to_owned(), Value::from(member.as_str()));
+                }
+                let mut data = Map::new();
+                data.insert("turn".to_owned(), Value::from(self.turn));
+                data.insert("step".to_owned(), Value::from(self.step));
+                data.insert("chunk".to_owned(), Value::Object(chunk));
+                let mut event = Map::new();
+                event.insert("type".to_owned(), Value::from("assistant/chunk"));
+                event.insert(
+                    "seq".to_owned(),
+                    Value::from(self.first_seq.saturating_add(offset as u64)),
+                );
+                event.insert("time".to_owned(), Value::from(time));
+                event.insert("data".to_owned(), Value::Object(data));
+                Value::Object(event)
+            })
+            .collect()
+    }
+}
+
+/// Which delta a packed stream record holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PackedKind {
+    Text,
+    Reasoning,
+    ToolCall,
+}
+
+impl PackedKind {
+    /// The packed row's and stream record's `type`.
+    pub(crate) const fn record_type(self) -> &'static str {
+        match self {
+            Self::Text => "text-chunks",
+            Self::Reasoning => "reasoning-chunks",
+            Self::ToolCall => "tool-call-chunks",
+        }
+    }
+
+    const fn delta_type(self) -> &'static str {
+        match self {
+            Self::Text => "text-delta",
+            Self::Reasoning => "reasoning-delta",
+            Self::ToolCall => "tool-call-delta",
+        }
+    }
+}
+
+/// A `text-chunks`, `reasoning-chunks`, or `tool-call-chunks` stream record.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PackedStreamRecord {
+    pub(crate) kind: PackedKind,
+    pub(crate) time0: i64,
+    pub(crate) index: u64,
+    pub(crate) dt: Vec<i64>,
+    /// `id`, present exactly for a tool call.
+    pub(crate) id: Option<String>,
+    /// A tool call's optional `name`.
+    pub(crate) name: Option<String>,
+    /// `texts`, or a tool call's `args`.
+    pub(crate) members: Vec<String>,
+}
+
+impl PackedStreamRecord {
+    /// The record in TypeScript's member order:
+    /// `type, time0, index, dt, [id, name], texts | args`.
+    pub(crate) fn to_value(&self) -> Value {
+        let mut record = Map::new();
+        record.insert("type".to_owned(), Value::from(self.kind.record_type()));
+        record.insert("time0".to_owned(), Value::from(self.time0));
+        record.insert("index".to_owned(), Value::from(self.index));
+        record.insert("dt".to_owned(), Value::from(self.dt.clone()));
+        let members = Value::from(self.members.clone());
+        if let Some(id) = &self.id {
+            record.insert("id".to_owned(), Value::from(id.as_str()));
+            if let Some(name) = &self.name {
+                record.insert("name".to_owned(), Value::from(name.as_str()));
+            }
+            record.insert("args".to_owned(), members);
+        } else {
+            record.insert("texts".to_owned(), members);
+        }
+        Value::Object(record)
+    }
 }
 
 /// Where a refusal was raised.
@@ -141,9 +324,30 @@ enum Failure {
     Limit(V1CodecLimit),
 }
 
-enum Item {
-    Event(Value),
-    Run { first_seq: u64, events: Vec<Value> },
+/// Decode a released v0 or v1 Session's parsed physical `header` and `rows`,
+/// expanding each packed row: [`decode_v0_v1_items`], then
+/// [`ReleasedChunkRun::expand`] for each run.
+pub fn decode_v0_v1_rows(
+    header: &Value,
+    rows: &[Value],
+    version: V1CodecVersion,
+    recovery: V1CodecRecovery,
+    platform: PathPlatform,
+    source_budget: usize,
+) -> Result<DecodedV1Rows, V1CodecRefusal> {
+    let decoded = decode_v0_v1_items(header, rows, version, recovery, platform, source_budget)?;
+    let mut events = Vec::new();
+    for item in decoded.items {
+        match item {
+            V1Item::Event(event) => events.push(event),
+            V1Item::AssistantChunkRun(run) => events.extend(run.expand()),
+        }
+    }
+    Ok(DecodedV1Rows {
+        header: decoded.header,
+        inherited_event_count: decoded.inherited_event_count,
+        events,
+    })
 }
 
 /// Decode a released v0 or v1 Session's parsed physical `header` and `rows`.
@@ -154,18 +358,18 @@ enum Item {
 /// the member order of every emitted event. `platform` decides whether the
 /// header's `cwd` is absolute, and `source_budget` caps each row's expanded
 /// `sourceEventSeqs` list, which TypeScript does not.
-pub fn decode_v0_v1_rows(
+pub fn decode_v0_v1_items(
     header: &Value,
     rows: &[Value],
     version: V1CodecVersion,
     recovery: V1CodecRecovery,
     platform: PathPlatform,
     source_budget: usize,
-) -> Result<DecodedV1Rows, V1CodecRefusal> {
+) -> Result<DecodedV1Items, V1CodecRefusal> {
     let (header, inherited_event_count) = decode_header(header, version.number(), platform)
         .map_err(|failure| refusal(V1CodecLocation::Header, failure))?;
     let recoverable = recovery == V1CodecRecovery::Recoverable;
-    let mut events = Vec::new();
+    let mut items = Vec::new();
     let mut event_count: u64 = 0;
     let mut issue: Option<String> = None;
     for (index, row) in rows.iter().enumerate() {
@@ -195,11 +399,11 @@ pub fn decode_v0_v1_rows(
             Err(Failure::Invalid(message)) => return Err(rejected(message)),
         };
         let (got, is_turn_end) = match &item {
-            Item::Run { first_seq, .. } => (
-                (*first_seq != event_count).then(|| first_seq.to_string()),
+            V1Item::AssistantChunkRun(run) => (
+                (run.first_seq != event_count).then(|| run.first_seq.to_string()),
                 false,
             ),
-            Item::Event(event) => (
+            V1Item::Event(event) => (
                 seq_gap(event.get("seq"), event_count).map_err(native)?,
                 event["type"] == "turn/end",
             ),
@@ -214,21 +418,16 @@ pub fn decode_v0_v1_rows(
             issue = Some(gap);
             continue;
         }
-        match item {
-            Item::Run {
-                events: expanded, ..
-            } => {
-                event_count += expanded.len() as u64;
-                events.extend(expanded);
-            }
-            Item::Event(event) => {
-                if contains_unsafe_integer(&event) {
+        match &item {
+            V1Item::AssistantChunkRun(run) => event_count += run.event_count(),
+            V1Item::Event(event) => {
+                if contains_unsafe_integer(event) {
                     return Err(native(V1CodecLimit::UnsafeJsonInteger));
                 }
                 event_count += 1;
-                events.push(event);
             }
         }
+        items.push(item);
     }
     if inherited_event_count > event_count {
         return Err(V1CodecRefusal::Rejected {
@@ -236,10 +435,10 @@ pub fn decode_v0_v1_rows(
             message: "Session inheritedEventCount exceeds its event count".to_owned(),
         });
     }
-    Ok(DecodedV1Rows {
+    Ok(DecodedV1Items {
         header,
         inherited_event_count,
-        events,
+        items,
     })
 }
 
@@ -452,7 +651,7 @@ fn seq_gap(seq: Option<&Value>, expected: u64) -> Result<Option<String>, V1Codec
     Ok(Some(got))
 }
 
-fn decode_item(row: Value, index: usize, budget: usize) -> Result<Item, Failure> {
+fn decode_item(row: Value, index: usize, budget: usize) -> Result<V1Item, Failure> {
     let Value::Object(fields) = &row else {
         return Err(Failure::Invalid(format!(
             "released Session row {index} must be a JSON object"
@@ -462,7 +661,7 @@ fn decode_item(row: Value, index: usize, budget: usize) -> Result<Item, Failure>
         Some(Value::String(tag)) if PACKED_TAGS.contains(&tag.as_str()) => {
             decode_packed_run(fields, tag, index)
         }
-        _ => decode_event(row, index, budget).map(Item::Event),
+        _ => decode_event(row, index, budget).map(V1Item::Event),
     }
 }
 
@@ -531,12 +730,12 @@ fn decode_seq_ranges(value: &Value, max_entries: u64, budget: usize) -> Result<V
     Ok(output)
 }
 
-/// `decodePackedRun` and the run's `expand`, in the codec's check order.
+/// `decodePackedRun`, in the codec's check order.
 fn decode_packed_run(
     fields: &Map<String, Value>,
     tag: &str,
     index: usize,
-) -> Result<Item, Failure> {
+) -> Result<V1Item, Failure> {
     let label = format!("released {tag} row {index}");
     let limit = V1CodecLimit::PackedFloatLexeme;
     exact_keys(fields, &["type", "seq0", "time0", "data"], &[], &label)?;
@@ -586,18 +785,19 @@ fn decode_packed_run(
             )));
         }
     };
-    let mut times = vec![time0];
+    let mut dt = Vec::with_capacity(gaps.len());
+    let mut last_time = time0;
     for gap in gaps {
         let gap = safe_integer(Some(gap), &format!("{label} dt member"), limit)?;
-        let last = times[times.len() - 1];
         // Both are safe, so the double sum is unsafe exactly when the exact one is.
-        let time = last + gap;
+        let time = last_time + gap;
         if time.unsigned_abs() > MAX_SAFE_INTEGER {
             return Err(Failure::Invalid(format!(
                 "{label} member time must be a safe integer"
             )));
         }
-        times.push(time);
+        dt.push(gap);
+        last_time = time;
     }
     let turn = count(data.get("turn"), &format!("{label} turn"), limit)?;
     let step = count(data.get("step"), &format!("{label} step"), limit)?;
@@ -618,42 +818,29 @@ fn decode_packed_run(
             "{label} final seq must be a non-negative safe integer"
         )));
     }
-    let events = members
-        .iter()
-        .zip(times)
-        .enumerate()
-        .map(|(offset, (member, time))| {
-            let mut chunk = Map::new();
-            let delta = match tag {
-                "text-chunks" => "text-delta",
-                "reasoning-chunks" => "reasoning-delta",
-                _ => "tool-call-delta",
-            };
-            chunk.insert("type".to_owned(), Value::from(delta));
-            chunk.insert("index".to_owned(), Value::from(chunk_index));
-            if is_tool {
-                chunk.insert("id".to_owned(), data["id"].clone());
-                if let Some(name) = name {
-                    chunk.insert("name".to_owned(), name.clone());
-                }
-                chunk.insert("argumentsDelta".to_owned(), Value::from(*member));
-            } else {
-                chunk.insert("text".to_owned(), Value::from(*member));
-            }
-            let mut event_data = Map::new();
-            event_data.insert("turn".to_owned(), Value::from(turn));
-            event_data.insert("step".to_owned(), Value::from(step));
-            event_data.insert("chunk".to_owned(), Value::Object(chunk));
-            let mut event = Map::new();
-            event.insert("type".to_owned(), Value::from("assistant/chunk"));
-            event.insert("seq".to_owned(), Value::from(seq0 + offset as u64));
-            event.insert("time".to_owned(), Value::from(time));
-            event.insert("data".to_owned(), Value::Object(event_data));
-            Value::Object(event)
-        })
-        .collect();
-    Ok(Item::Run {
+    let kind = match tag {
+        "text-chunks" => PackedKind::Text,
+        "reasoning-chunks" => PackedKind::Reasoning,
+        _ => PackedKind::ToolCall,
+    };
+    let record = PackedStreamRecord {
+        kind,
+        time0,
+        index: chunk_index,
+        dt,
+        id: data
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|_| is_tool)
+            .map(str::to_owned),
+        name: name.and_then(Value::as_str).map(str::to_owned),
+        members: members.iter().map(|member| (*member).to_owned()).collect(),
+    };
+    Ok(V1Item::AssistantChunkRun(ReleasedChunkRun {
         first_seq: seq0,
-        events,
-    })
+        turn,
+        step,
+        last_time,
+        record,
+    }))
 }

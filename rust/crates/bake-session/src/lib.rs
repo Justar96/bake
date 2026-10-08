@@ -46,6 +46,10 @@
 //! transformed stage over a decoded v1 Session, grouping its Assistant chunks,
 //! packed rows expanded, into attempts; it is the stage a chain runs after
 //! v0→v1, not production's read of a v1 file.
+//! [`decode_v0_v1_items`] keeps each packed Assistant chunk row as a
+//! [`ReleasedChunkRun`], and [`migrate_v1_to_v2_transformed_items`] sends
+//! each run through the stage's `transformRun`, merging it into the
+//! attempt's stream, as a chain reading the file does.
 //! [`migrate_released_v0_history`] reads a decoded v0 Session through all
 //! three edges to format v3, reporting the refusal TypeScript's streaming
 //! chain reports first; Assistant chunks and a decoded v1 Session are native
@@ -149,11 +153,12 @@ pub use usage::{
 };
 pub use v0_to_v1::{MigratedV1, V0ToV1Location, V0ToV1Refusal, migrate_v0_to_v1};
 pub use v1_codec::{
-    DecodedV1Rows, V1CodecLimit, V1CodecLocation, V1CodecRecovery, V1CodecRefusal, V1CodecVersion,
-    decode_v0_v1_rows,
+    DecodedV1Items, DecodedV1Rows, ReleasedChunkRun, V1CodecLimit, V1CodecLocation,
+    V1CodecRecovery, V1CodecRefusal, V1CodecVersion, V1Item, decode_v0_v1_items, decode_v0_v1_rows,
 };
 pub use v1_to_v2::{
     MigratedV1ToV2, V1ToV2Limit, V1ToV2Location, V1ToV2Refusal, migrate_v1_to_v2_transformed,
+    migrate_v1_to_v2_transformed_items,
 };
 pub use v2_to_v3::{MigratedV2, V2ToV3Layer, V2ToV3Location, V2ToV3Refusal, migrate_v2_rows};
 pub use v3_row::{

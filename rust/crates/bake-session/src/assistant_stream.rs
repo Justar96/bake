@@ -293,7 +293,7 @@ fn safe_index(value: Option<&Value>) -> Result<u64, StreamPushError> {
 
 /// `safeGap`: for two safe integers the double difference is safe, and adds
 /// back exactly, when the exact difference is safe.
-fn safe_gap(previous: i64, next: i64) -> Option<i64> {
+pub(crate) fn safe_gap(previous: i64, next: i64) -> Option<i64> {
     let gap = i128::from(next) - i128::from(previous);
     if gap.unsigned_abs() <= u128::from(MAX_SAFE_INTEGER) {
         i64::try_from(gap).ok()
