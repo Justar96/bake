@@ -1,9 +1,9 @@
 //! Runs every shared case in `conformance/session/history-cases.json`
-//! through `decode_v0_v1_rows`, which must decode it strictly, and then
-//! `migrate_released_v0_history`, on both path platforms. A case's expected
+//! through `decode_v0_v1_items`, which must decode it strictly, and then
+//! `migrate_released_history`, on both path platforms. A case's expected
 //! outcome is its `rust` native-subset marker when present, otherwise
-//! `expect`: what TypeScript's chain of the v0→v1, v1→v2, and v2→v3
-//! migrations, fed every decoded event and finished, returns. The
+//! `expect`: what TypeScript's chain from the Session's version to v3, fed
+//! every decoded event and packed run and finished, returns. The
 //! expectations were written from the TypeScript sources; nothing here reads
 //! TypeScript output.
 
@@ -12,21 +12,19 @@ use std::path::PathBuf;
 
 use bake_session::{
     HistoryLocation, HistoryRefusal, MigratedV2, PathPlatform, V1CodecRecovery, V1CodecVersion,
-    decode_v0_v1_rows, migrate_released_v0_history,
+    decode_v0_v1_items, migrate_released_history,
 };
 use serde_json::{Map, Value};
 
 const SCHEMA: &str = "bake/session-format-conformance/history-cases";
 const ORACLE: &str = "releasedV0SessionFormatCodec.createDecoder(header, 'strict') or releasedV1SessionFormatCodec feeding createSessionFormatChain({currentVersion: 3, migrations: [sessionFormatV0ToV1, sessionFormatV1ToV2, sessionFormatV2ToV3]}).createStream; decoder.finish, then stream.finish";
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 45;
+const CASE_COUNT: usize = 59;
 /// The decoder's source budget; no case comes near it.
 const SOURCE_BUDGET: usize = 10_000;
 /// The limit names the table may use, each witnessed. Other stage limits
 /// pass through under their stage's prefix and are witnessed by that stage's table.
-const LIMITS: [&str; 5] = [
-    "v1-decoded-stage",
-    "assistant-chunk",
+const LIMITS: [&str; 3] = [
     "untimed-event",
     "interleaved-emission",
     "v0-to-v1/legacy-goal-message",
@@ -136,7 +134,7 @@ fn load() -> Vec<Case> {
         BTreeSet::from(["schema", "version", "oracle", "history", "cases"])
     );
     assert_eq!(table["schema"], SCHEMA);
-    assert_eq!(table["version"], 1);
+    assert_eq!(table["version"], 2);
     assert_eq!(table["oracle"], ORACLE);
     assert!(
         table["history"]
@@ -303,7 +301,7 @@ fn shared_cases_match_on_both_platforms() {
     for entry in load() {
         let expected = entry.limit.as_ref().unwrap_or(&entry.expect);
         for platform in [PathPlatform::Posix, PathPlatform::Win32] {
-            let decoded = match decode_v0_v1_rows(
+            let decoded = match decode_v0_v1_items(
                 &entry.header,
                 &entry.rows,
                 entry.version,
@@ -320,7 +318,7 @@ fn shared_cases_match_on_both_platforms() {
                     continue;
                 }
             };
-            let actual = migrate_released_v0_history(&decoded);
+            let actual = migrate_released_history(&decoded);
             if let Some(failure) = check(&entry.id, actual, expected) {
                 failures.push(format!("{platform:?} {failure}"));
             }

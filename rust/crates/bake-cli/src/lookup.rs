@@ -43,6 +43,8 @@ use std::fs::{self, DirEntry};
 use std::io;
 use std::path::{Path, PathBuf};
 
+pub use bake_session::{encode_segment, project_key};
+
 use bake_session::{
     CURRENT_SESSION_FORMAT_VERSION, HeaderRefusal, PathPlatform, Rejection, RestoreRefusal,
     SessionHeader, SubsetLimit, first_record, read_header_record, zstd_header_record,
@@ -56,56 +58,6 @@ use crate::inspect::{
     parse_log_name, plaintext_budget, read_bounded, read_bounded_or_missing, restored_fields,
     stage,
 };
-
-/// Encode one string as one safe path segment, as TypeScript's
-/// `encodeSegment` does over UTF-16 code units: ASCII letters, digits, `.`,
-/// `_`, and `-` stay literal, every other unit becomes `~XXXX`, and the whole
-/// segments `.` and `..` are escaped.
-pub fn encode_segment(raw: &str) -> String {
-    match raw {
-        "." => return "~002E".into(),
-        ".." => return "~002E~002E".into(),
-        _ => {}
-    }
-    let mut out = String::with_capacity(raw.len());
-    for unit in raw.encode_utf16() {
-        push_unit(&mut out, unit);
-    }
-    out
-}
-
-/// The project directory name for a `cwd`, as TypeScript's `projectKey`
-/// builds it: runs of `/`, `\`, and `:` become one `-`, other units are kept
-/// or escaped as in [`encode_segment`], leading `-` are removed, an empty
-/// result is `root`, and the key keeps its first 251 units between `--` and
-/// `--`. Escapes are ASCII, so the cut can split one.
-pub fn project_key(cwd: &str) -> String {
-    let mut readable = String::with_capacity(cwd.len());
-    let mut separator_run = false;
-    for unit in cwd.encode_utf16() {
-        if matches!(unit, 0x2F | 0x5C | 0x3A) {
-            if !separator_run {
-                readable.push('-');
-            }
-            separator_run = true;
-        } else {
-            push_unit(&mut readable, unit);
-            separator_run = false;
-        }
-    }
-    let slug = readable.trim_start_matches('-');
-    let slug = if slug.is_empty() { "root" } else { slug };
-    format!("--{}--", &slug[..slug.len().min(251)])
-}
-
-fn push_unit(out: &mut String, unit: u16) {
-    match u8::try_from(unit) {
-        Ok(byte) if byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-') => {
-            out.push(char::from(byte));
-        }
-        _ => out.push_str(&format!("~{unit:04X}")),
-    }
-}
 
 /// Make the root absolute as Node's `path.resolve` does on POSIX: join a
 /// relative root to the working directory, then drop `.` and apply `..`

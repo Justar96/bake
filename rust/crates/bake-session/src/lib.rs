@@ -51,12 +51,13 @@
 //! each run through the stage's `transformRun`, merging it into the
 //! attempt's stream, as a chain reading the file does.
 //! [`migrate_v1_to_v2_decoded`] runs the decoded stage production reads a v1
-//! file with: each payload checked at version 1, then the transformed stage;
-//! Assistant chunks are a native limit.
-//! [`migrate_released_v0_history`] reads a decoded v0 Session through all
-//! three edges to format v3, reporting the refusal TypeScript's streaming
-//! chain reports first; Assistant chunks and a decoded v1 Session are native
-//! limits.
+//! file with over [`decode_v0_v1_items`] output: each event's payload checked
+//! at version 1, then the transformed stage, with each packed run sent
+//! through `transformRun` unchecked.
+//! [`migrate_released_history`] reads a decoded v0 or v1 Session, packed
+//! runs kept, through every edge to format v3, reporting the refusal
+//! TypeScript's streaming chain reports first; a v1 Session takes the decoded
+//! v1→v2 stage.
 //! [`token_usage`] folds a [`RestoredLog`]'s provider-reported token usage,
 //! and [`context_pressure`] its context occupancy with the surface's
 //! heuristic token total.
@@ -83,7 +84,13 @@
 //! after truncating a torn tail, and flushes a header-only log, refusing with
 //! the contiguity or lossless-snapshot message, `Unadmitted` where encoding
 //! throws, or a native limit.
-//! None reads or writes a file. The crate is
+//! [`PlainLogFile`] keeps such a log on disk beneath a Session root, at the
+//! path [`session_log_path`] spells from [`encode_segment`] and
+//! [`project_key`]: it creates, or finds and opens, a Session's current plain
+//! log as the backend's `create` and write `open` do, refusing an existing,
+//! missing, or duplicated id with TypeScript's message, and writes the
+//! model's bytes after each append or flush. It is the only part that reads
+//! or writes a file. The crate is
 //! unstable and unshipped; the preview's `session inspect` and `session stat` use it.
 
 mod assistant_stream;
@@ -94,8 +101,10 @@ mod generation_header;
 mod goal;
 mod history;
 mod inbox;
+mod log_layout;
 mod offload;
 mod plain_append;
+mod plain_log_file;
 mod pressure;
 mod repair;
 mod replay;
@@ -129,13 +138,15 @@ pub use goal::{
     GoalBlockReason, GoalLimit, GoalPhase, GoalProjection, GoalProjectionState, GoalRefusal,
     GoalSnapshot, goal_projection,
 };
-pub use history::{HistoryLimit, HistoryLocation, HistoryRefusal, migrate_released_v0_history};
+pub use history::{HistoryLimit, HistoryLocation, HistoryRefusal, migrate_released_history};
 pub use inbox::{
     ConsumedWork, ConsumedWorkCoercion, ConsumedWorkLimit, InboxLimit, InboxRefusal, PendingInbox,
     consumed_work, restored_inbox,
 };
+pub use log_layout::{encode_segment, project_key, session_log_path};
 pub use offload::OffloadRejection;
 pub use plain_append::{AppendLimit, AppendRefusal, CreateLimit, CreateRefusal, PlainAppendLog};
+pub use plain_log_file::{LogFileLimit, LogFileRefusal, PlainLogFile};
 pub use pressure::{
     ContextPressureState, ContextPressureView, PressureLimit, PressureRefusal, RequestRoute,
     context_pressure,

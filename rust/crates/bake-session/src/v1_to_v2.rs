@@ -20,7 +20,10 @@
 //! `transformRun` instead, as a chain reading the file does. That path skips
 //! the event checks, forgets the previous event, takes the run's last time,
 //! and checks the cut only across the run's own seqs, so its result can
-//! differ from the expanded one.
+//! differ from the expanded one. A chain feeds the stage's output to v2→v3
+//! as it is emitted, so the crate-private `stream_v1_to_v2_items` also
+//! keeps the output emitted before `finish` and whether an attempt was still
+//! pending then.
 //!
 //! An attempt's stream is a list of records with their last times. Each
 //! `assistant/chunk` event goes through the attempt's
@@ -234,11 +237,47 @@ pub fn migrate_v1_to_v2_transformed(
 pub fn migrate_v1_to_v2_transformed_items(
     decoded: &DecodedV1Items,
 ) -> Result<MigratedV1ToV2, V1ToV2Refusal> {
+    let streamed = stream_v1_to_v2_items(decoded)?;
+    let inherited_event_count = streamed.finished?;
+    Ok(MigratedV1ToV2 {
+        header: streamed.header,
+        events: streamed.events,
+        inherited_event_count,
+    })
+}
+
+/// [`migrate_v1_to_v2_transformed_items`] with what it streamed before
+/// `finish`, for a caller that feeds the output to a later stage as
+/// TypeScript's chain does.
+pub(crate) struct StreamedV1ToV2 {
+    /// The logical v2 header.
+    pub(crate) header: Value,
+    /// Every event the stage emitted: the first `streamed_len` before
+    /// `finish`, then what `finish` emitted, up to a refusal there.
+    pub(crate) events: Vec<Value>,
+    /// The number of events emitted before `finish`.
+    pub(crate) streamed_len: usize,
+    /// Whether an Assistant attempt, with any events buffered after its last
+    /// chunk, was still pending after the last item: the next item or
+    /// `finish` may emit it before refusing.
+    pub(crate) pending: bool,
+    /// `finish`: the inherited cut, or its refusal at
+    /// [`V1ToV2Location::Finish`].
+    pub(crate) finished: Result<u64, V1ToV2Refusal>,
+}
+
+/// The transformed stage over `decoded`'s items, as
+/// [`migrate_v1_to_v2_transformed_items`] runs it, keeping what was streamed
+/// before `finish` and whether `finish` refused. A header or item refusal is
+/// returned as is.
+pub(crate) fn stream_v1_to_v2_items(
+    decoded: &DecodedV1Items,
+) -> Result<StreamedV1ToV2, V1ToV2Refusal> {
     let items = decoded.items.iter().map(|item| match item {
         V1Item::Event(event) => Source::Event(event),
         V1Item::AssistantChunkRun(run) => Source::Run(run),
     });
-    migrate(&decoded.header, decoded.inherited_event_count, items)
+    stream(&decoded.header, decoded.inherited_event_count, items)
 }
 
 /// One input to the stage.
@@ -252,6 +291,20 @@ fn migrate<'a>(
     inherited_event_count: u64,
     items: impl Iterator<Item = Source<'a>>,
 ) -> Result<MigratedV1ToV2, V1ToV2Refusal> {
+    let streamed = stream(header, inherited_event_count, items)?;
+    let inherited_event_count = streamed.finished?;
+    Ok(MigratedV1ToV2 {
+        header: streamed.header,
+        events: streamed.events,
+        inherited_event_count,
+    })
+}
+
+fn stream<'a>(
+    header: &'a Value,
+    inherited_event_count: u64,
+    items: impl Iterator<Item = Source<'a>>,
+) -> Result<StreamedV1ToV2, V1ToV2Refusal> {
     let header = match header {
         Value::Object(fields) if fields.get("version").and_then(Value::as_u64) == Some(1) => fields,
         _ => {
@@ -281,13 +334,17 @@ fn migrate<'a>(
         }
         .map_err(|failure| refusal(V1ToV2Location::Event(index), failure))?;
     }
-    let inherited_event_count = stage
+    let streamed_len = stage.output.len();
+    let pending = stage.pending.is_some();
+    let finished = stage
         .finish()
-        .map_err(|failure| refusal(V1ToV2Location::Finish, failure))?;
-    Ok(MigratedV1ToV2 {
+        .map_err(|failure| refusal(V1ToV2Location::Finish, failure));
+    Ok(StreamedV1ToV2 {
         header: Value::Object(target_header),
         events: stage.output,
-        inherited_event_count,
+        streamed_len,
+        pending,
+        finished,
     })
 }
 
