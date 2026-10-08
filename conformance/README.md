@@ -43,6 +43,9 @@ Compare TypeScript and Rust using controlled fixtures and independently checked 
 - [Prefix restoration cases](#prefix-restoration-cases)
 - [Released relationship cases](#released-relationship-cases)
 - [Cross-runtime write lease](#cross-runtime-write-lease)
+- [Restored request derivation cases](#restored-request-derivation-cases)
+- [Prompt admission cases](#prompt-admission-cases)
+- [Unfinished-work cases](#unfinished-work-cases)
 - [Runner contract](#runner-contract)
 - [Ownership and limits](#ownership-and-limits)
 
@@ -492,7 +495,7 @@ The cases cover:
 - cancellations with and without `inserted`, a replacement that inserts, and a claim outside a turn;
 - claimed-but-unstepped turns ending with each built-in reason and an unknown one, a stepped end without a reason, a claim that survives a stepped end, and turns whose value is a string, `null`, an object, or absent.
 
-A `rust` override names a native limit and the seq it applies to, and claims nothing for that fold. Inbox limits are a non-string `target`, which JavaScript coerces to a property key; a count spelled with a fraction or exponent; a string `inserted`, which the spread splits into characters; and a numeric message id that is not a safe integer lexeme. Consumed-work limits are `null` data, an absent or `null` `inserted` read for a cancellation, and an absent or `null` reason for a claimed turn, each a `TypeError`, and an object `inserted`, whose `length` this port does not read. A further limit covers a turn number that is not a safe integer lexeme. Both harnesses pin the case count, reject unknown keys, and require every limit to be witnessed. The expectations were written from the two TypeScript sources before either harness ran. Open compactions and open children have no pure TypeScript fold, so this table does not cover them.
+A `rust` override names a native limit and the seq it applies to, and claims nothing for that fold. Inbox limits are a non-string `target`, which JavaScript coerces to a property key; a count spelled with a fraction or exponent; a string `inserted`, which the spread splits into characters; and a numeric message id that is not a safe integer lexeme. Consumed-work limits are `null` data, an absent or `null` `inserted` read for a cancellation, and an absent or `null` reason for a claimed turn, each a `TypeError`, and an object `inserted`, whose `length` this port does not read. A further limit covers a turn number that is not a safe integer lexeme. Both harnesses pin the case count, reject unknown keys, and require every limit to be witnessed. The expectations were written from the two TypeScript sources before either harness ran. This table does not cover open compactions or children; the [unfinished-work cases](#unfinished-work-cases) do.
 
 ## Fork seed cases
 
@@ -1016,6 +1019,108 @@ Both harnesses check the captures, pin the case count and distinct ids, and requ
 - naming row 8's time for the first closer of `dynamic-tools/10` fails that case in both arms.
 
 No capture has two calls pending at once, so call order among closers is checked only by the [plain log restoration](#plain-log-restoration-cases). Seeded and Zstd logs, request derivation, and Agent resume are not covered. These cases close no roadmap scope.
+
+## Restored request derivation cases
+
+[`runtime/restored-request-derivation-cases.json`](runtime/restored-request-derivation-cases.json) holds 32 Sessions, 28 of them edits of the three [runtime captures](#runtime-request-reconstruction) and 4 released v0, v1, or v2 files, and the requests derived from each restored Session. The [request derivation](#request-derivation-cases) helper `replayRequests` refuses a seeded log and constructs its Session without message projections, so the [TypeScript spec](../packages/core/agent-loop/tests/restored-request-derivation-conformance.spec.ts) composes its own oracle from production pieces. It restores a plain case with `scanLog`, `validateStoredEvents`, `interruptedTurnClosers`, and `Session.fromRestore`, as the [plain log restoration](#plain-log-restoration-cases) does, or writes a migrated case as `session.v<N>.jsonl` in an owned temporary root and reads it through the JSONL backend and `readColdSessionLog`, as the [migrated restoration](#migrated-restoration-cases) does. For each cut it then passes the events before it to `Session.fromRestore` with the inherited cut, `'detached'`, and the catalog's message projections, and assembles the request from `deriveMessages`, `toolHistory`, and `foldRequestHeader` exactly as `replayRequests` does. The [Rust test](../rust/crates/bake-session/tests/restored_replay_cases.rs) restores the same bytes with `restore_plain_log`, or migrates the same rows and restores them with `restore_migrated` under both path platforms, and calls [`replay_restored_requests`](../rust/crates/bake-session/src/restored_replay.rs).
+
+```sh
+bun run test:runtime packages/core/agent-loop/tests/restored-request-derivation-conformance.spec.ts
+(cd rust && cargo test --locked -p bake-session --test restored_replay_cases)
+```
+
+Cuts follow the `replayRequests` rule: each `step/start` in log order yields one request per Assistant settlement with its coordinate, and a step whose first settlement is missing or earlier refuses the log with `step <turn>.<step> has no later Assistant settlement`, even when that step is inherited. A cut below the inherited event count yields no request and is not checked for a header: `Session.fromRestore` refuses an inherited count beyond its seed, so the oracle cannot restore such an ancestor cut, and those prefixes are outside the domain. Every other cut is the Session's own dispatch and carries its own id; one without a header refuses with `step <turn>.<step> has no request header`. The inherited cut is the last tagged `session/end-seed`, the resume marker is an ordinary event, closers hold no settlement, and restoration takes no lossless snapshot, so a -0 in a payload no request carries refuses nothing. `ts` is the inherited cut and the requests, with `{"$log": pointer}` naming a value in the case's rows, or the rejection's exact message; Rust reports a rejection with the same message and names its cause. The cases cover:
+
+- the three unedited captures, a torn tail, an interrupted tail with closers, a resumed unseeded log, and a -0 in an ignorable unknown row;
+- fork children with no own settlement, an own turn, a changed header, an interrupted own turn, an own step without a settlement, a retried step, a resume after the cut, and a grandchild whose prefix holds an ancestor marker;
+- a `dynamic-tools` child forked after its second turn, whose own tool update joins the inherited tool history;
+- an `image/offload` decision in the inherited prefix and one projected into a later request only;
+- missing headers below and above the cut, an inherited step without a settlement, and a missing header that precedes a later missing settlement;
+- migrated v0 and v2 clean turns, a v1 packed run without a header, and a v2 seeded child whose step started before the cut and settles after it.
+
+A `rust` override names a native limit, which claims nothing: `coordinate` for a `step/start` or settlement coordinate that is not a non-negative safe integer written as an integer, which JavaScript compares with `===`; `repeated-coordinate` for two `step/start` rows with one coordinate; and `restore/number`, a [plain log restoration](#plain-log-restoration-cases) limit that refuses before derivation runs. Its case is a fractional `temperature`, which a released writer can produce, so [D21](../docs/roadmap/rust-0.4/scope-00/support.md#decision-register) requires a port there, not this limit. Of the 32 cases, 21 derive identically, 7 are rejections both arms report with the same message, and 4 are limits, 2 of them on logs TypeScript derives. Both harnesses pin the case count and require every limit and both rejection causes to be witnessed; Rust also requires `replay_requests` to refuse every seeded case as seeded. The expectations were written from the TypeScript sources before either harness ran, and both arms passed unchanged. These negative controls were observed:
+
+- emitting ancestor cuts fails the fork cases in Rust, and dropping the inherited filter fails 13 cases in TypeScript, where `Session.fromRestore` throws;
+- checking every step's settlement before any header fails `missing-header-precedes-later-missing-settlement` in Rust;
+- offloading the first image instead of the second in `image-offload-projected-into-later-request` fails it in both arms;
+- dropping a case fails the count pin in both arms, and folding without the `image/offload` projection fails the Rust table.
+
+Zstd input, Agent resume writes, and the header, `request/context`, and tool-update decisions the agent loop makes while dispatching are not covered. These cases close no roadmap scope.
+
+## Prompt admission cases
+
+[`session/prompt-admission-cases.json`](session/prompt-admission-cases.json) holds 34 logs, each one of the three [runtime captures](#runtime-request-reconstruction) with text edits, and the prompt admission inputs a step would read from each restored Session. The [TypeScript spec](../packages/core/agent-loop/tests/prompt-admission-conformance.spec.ts) restores each log as the [plain log restoration](#plain-log-restoration-cases) does, with the catalog's message projections, then runs `SystemPromptProjection.project` from [`runtime-context.ts`](../packages/core/agent-loop/src/runtime-context.ts) for each prompt query, reads `session.surface.contentGeneration`, and repeats the agent's private `toolsChanged` body over the exported `headerEquals` and `canonicalHeader`. The [Rust test](../rust/crates/bake-session/tests/prompt_admission_cases.rs) restores the same bytes with `restore_plain_log`, requires each case without a `rust` marker to restore with no torn tail, and runs [`system_prompt_commits`, `content_generation`, `tools_changed`, and `starts_request_series`](../rust/crates/bake-session/src/prompt_admission.rs).
+
+```sh
+bun run test:runtime packages/core/agent-loop/tests/prompt-admission-conformance.spec.ts
+(cd rust && cargo test --locked -p bake-session --test prompt_admission_cases)
+```
+
+A case's `ts` states the content generation and lists of prompt, tool, and series queries. A prompt query gives the rendered prompt, `inHistory`, and `startsSeries`, and expects the ordered commits as text and an intent, `append` or `{replace: seq}`; the spec also checks each commit's message and surface intent exactly, apart from its minted id. A tool query gives candidate tools and whether they changed; `{"$log": pointer}` names a value in the case's own rows. A series query adds a declared series, the generation at the last request, and whether the route has native tool updates. `ReactLoopAgent` decides a series inline, so the spec composes that disjunction from the production pieces; that composition is the spec's, not production code. The expectations were written from the TypeScript sources before either harness ran. The cases cover:
+
+- no system node, where even an empty prompt is appended;
+- the three captures as recorded, including the dynamic-tools header changes and tool updates, which replace nothing;
+- an incapable route, a new series, and an empty rendering, which empty each later non-empty node in surface order and then rewrite the head only when its text differs, even when the effective text is unchanged;
+- a continuing capable series, which commits nothing for unchanged text and appends changed text;
+- dormant empty tails, a single empty text block, which reads as empty, and multiblock or reasoning nodes, which are active content that is not text;
+- a head that is not the first surface node, a replaced or cleared head, and a tail replaced by an empty node or shadowed by a summary;
+- a seeded child with its own prompt and with a replacement in its inherited prefix, a resumed open turn, and an interrupted tool call whose closer appends a result;
+- the generation after replacements, `image/offload` decisions, one of them with two targets, which counts once, and a prune of a projected node. No case has an `image/offload` that restores without projecting: `planSurfaceEvent` in [`surface.ts`](../packages/core/session/src/surface.ts) plans every event with a supplied projection as a projection, and the catalog's projection rejects an empty target list, an already offloaded image, and a missing index, so every accepted decision changes a message;
+- tool lists reordered, shortened, or with a changed member, member order, or number spelling, where `1.0` and `1e0` equal `1` and -0 equals 0 as their `JSON.stringify` text does, array-index keys enumerated first, a header without tools, and a config that the candidate header spreads and so never differs.
+
+Restoration's native limits bound the restored side. One is an open gap under [D21](../docs/roadmap/rust-0.4/scope-00/support.md#decision-register), not a permitted limit: restoration refuses a header or tool schema holding a fraction with `RestoreLimit::Number`, though Bake writes such values, for example a fractional `temperature` or a schema's `"minimum": 0.5`, so the limit must be ported. Case `limit-fractional-temperature` witnesses it with a `rust` marker naming the limit and the header's seq: TypeScript restores the log and answers `toolsChanged` as for any header, and Rust refuses the log, so it gives no prompt admission answer there. Every other case restores in both arms. Both harnesses pin the case count and distinct ids and require the limit to be witnessed. These negative controls were observed:
+
+- dropping the last case fails the count pin, and changing the table's oracle fails the schema check, in both arms;
+- expecting the wrong replacement seq in `appended-prompt` fails it in both arms;
+- comparing numbers as serde_json values fails `tools-numbers-compare-as-javascript-text`, and comparing members in insertion order fails `tools-array-index-keys-enumerate-first`, in Rust;
+- rewriting the head before emptying the tails fails `appended-prompt`, and reading a single empty text block as active fails `empty-text-block-is-dormant`, in Rust;
+- leaving `image/offload` out of the generation fails `generation-offload` in Rust, and restoring without the catalog's message projections fails the four offload cases in TypeScript;
+- ignoring the route's native tool updates in the series composition fails `capture-dynamic-tools` in TypeScript.
+
+The header reason, `request/context`, and `request/tool-update` decisions are private to request building and are not covered, nor are user admission order and the runtime-context snapshot. The generation at the last request is agent state no log records, so a caller supplies it. These cases close no roadmap scope.
+
+## Unfinished-work cases
+
+[`session/unfinished-work-cases.json`](session/unfinished-work-cases.json) states, for 224 row prefixes, the unfinished work a restored Session holds: its open turn and step, its pending tool calls, its open compaction, its catalog children, and its pending inbox. No single TypeScript function computes all five; their production functions live in four packages that do not export them to each other. Four TypeScript specs therefore read the one table, and each checks its own fields with its owning package's functions:
+
+- the [turn spec](../packages/core/session/tests/unfinished-turn-conformance.spec.ts) reads `turn` and `tools` from `interruptedTurnClosers`: the turn and step its closers end, and each synthetic `tool/result` in closer order, with its code and the `tool/call` seq it cites;
+- the [compaction spec](../packages/compaction/compaction-basic/tests/unfinished-compaction-conformance.spec.ts) runs the lock check `assertNoActiveCompaction` over a test-only Session view of the stored events and closers, and reports the last `compaction/start` when it throws `busy`;
+- the [children spec](../packages/subagent/subagent/tests/unfinished-children-conformance.spec.ts) folds `subagentCatalogProjectionDefinition` from the restored inherited cut and pairs each view entry with its event's seq;
+- the [inbox spec](../packages/core/agent-loop/tests/unfinished-inbox-conformance.spec.ts) folds `inboxProjectionDefinition.apply` from `init()`.
+
+The [Rust test](../rust/crates/bake-session/tests/unfinished_work_cases.rs) restores the same prefix bytes with `restore_plain_log` and checks all five fields against [`unfinished_work`](../rust/crates/bake-session/src/unfinished.rs). It reads the turn, step, and pending calls from the closers `restore_plain_log` builds, scans the stored events and closers backward for the open compaction as the lock check does, pairs `subagent_catalog`'s entries with the seqs of the own catalog events it admits, and folds `restored_inbox`.
+
+```sh
+bun run test:runtime packages/core/session/tests/unfinished-turn-conformance.spec.ts packages/compaction/compaction-basic/tests/unfinished-compaction-conformance.spec.ts packages/subagent/subagent/tests/unfinished-children-conformance.spec.ts packages/core/agent-loop/tests/unfinished-inbox-conformance.spec.ts
+(cd rust && cargo test --locked -p bake-session --test unfinished_work_cases)
+```
+
+Each spec restores a case as the [subagent catalog spec](#subagent-catalog-cases) does: it parses the rows with `JSON.parse`, adds their closers, and requires `Session.fromRestore` to admit them with the inherited cut on a seeded log's last inherited end seed. Unfinished work is read before the end seed that construction appends. That seed would make every open compaction stale, so resume never finds the lock held; the compaction spec also checks that each restored Session is not busy. An open compaction is the latest `compaction/start` or `compaction/end` when it is a start and no later `session/end-seed` is stored; `compaction/summary` does not close one. 0.3 logs no subagent start or end event: `subagent/start` and `subagent/end` are in-process Cordis events, `subagent/not-resumable` is a control notice for the `NOT_RESUMABLE` error, and a child read from storage lists as inactive. The catalog view from the inherited cut onward is therefore 0.3's whole durable record of a parent's children. Repeated ids stay listed, and a child's own unfinished work lives in that child's log.
+
+A case names a log and a row count; its id is `<log>/<rows>`. Logs are the three [runtime captures](#runtime-request-reconstruction), which the TypeScript specs check by SHA-256 and the Rust test by size, or logs committed in the table as lines, each with its derivation. Logs marked `sweep` have every prefix once, from the header alone to the whole log: the three captures; `dynamic-tools` with a failed bracket inserted between turns; `tool-call-turn` with a numbered bracket after its recorded call, which holds an open turn, a started call, and an open compaction at once; and two logs materialized from `snapshots/`, a successful bracket with its summary and checkpoint and a `subagent` call that catalogs a continuable child. Materialization sets seq and time to the row index, removes the header `cwd` and each request header's templated `tools`, and replaces `{{system}}` with `system` and each `{{kind:n}}` with `kind-n`. The turn spec rebuilds both logs from the unchanged snapshots by that rule. Nineteen further prefixes of smaller logs cover a stale start before a stored end seed and an open one after it; a seeded log whose inherited prefix holds a catalog fact and an unmatched start; a -0 creation time, a repeated id, and an invalid catalog fact; an inbox refusal and the four inbox limits; all five kinds open at once; a `tool/call` no Assistant block requested; and calls left in a closed step or turn. Both `closed-turn-pending-call` cases are synthetic: their `turn/end` arrives while step 1 is open, which the session invariant companion rejects, so no checked writer produces them.
+
+`ts.turn` is `null` or `{"turn", "step"}`, and `step` may be `null`. `ts.tools` lists `callId`, `closerSeq`, `step`, `code`, and `callSeq`, which is `null` for `TOOL_NOT_STARTED`. `ts.compaction` is `null` or `{"startSeq", "data"}`. `ts.children` lists `seq`, `id`, `createdAt`, `mode`, and an optional `label`, or is `{"refusal": {"seq"}}`. `ts.inbox` is `{"nextTurn", "nextStep"}` or `{"refusal"}` with the exact seq-tagged message. Turn, step, and compaction values are `{"$log": pointer}` references into the prefix's own rows, so no value is interpreted. The table spells a -0 `createdAt` as `-0.0`, and the children spec and the Rust test compare its sign, the Rust test bit for bit. A `rust` override names an inbox native limit and its seq, as the [inbox cases](#pending-inbox-and-consumed-work-cases) do. The four limit cases are copied from that table, and the inbox spec and the Rust test require each limit to be witnessed. No other native limit applies: `Session.fromRestore` and `restore_plain_log` admit every case with no torn tail, the turn, step, and tool fields are read from closers Rust built, and the compaction scan compares only event types and seqs. The TypeScript specs run neither the invariant companions nor the storage restore path. The expectations were written from the TypeScript sources, by a scratch script that encodes their rules, before any spec ran; the Rust arm was written later against the unchanged table and passed on its first run. All five harnesses pin the case count, check every sweep, and reject unknown case keys, and the TypeScript specs also reject malformed outcomes; the Rust test also pins the nine open compactions, the three stale ones, and the coverage the cases witness. These negative controls were observed in the TypeScript specs:
+
+- folding the appended end seed into the compaction view fails all nine open-compaction cases;
+- ignoring a stored end seed in the lock check fails `stale-then-open-compaction/18`, `seeded-inherited-work/19`, and `seeded-inherited-work/20`, and every open-compaction case, whose restored Session then stays busy;
+- treating `compaction/summary` as a close fails `compaction-recovery/21` and `compaction-recovery/22`;
+- folding the catalog from cut 0 fails the three `seeded-inherited-work` cases;
+- keeping pending calls across turn boundaries fails `closed-turn-pending-call/12`, and keeping them across `step/end` fails `closed-step-pending-call/11`;
+- citing the Assistant seq for an unstarted call fails `tool-call-turn/9` and eight other prefixes;
+- naming the next seq in the inbox refusal fails `inbox-refusal/18`.
+
+These were observed in the Rust arm, each restored byte for byte:
+
+- treating the appended end seed as a stored one fails `dynamic-tools-failed-compaction/19`, the first open compaction;
+- ignoring a stored end seed fails `stale-then-open-compaction/18`;
+- treating `compaction/summary` as a close fails `compaction-recovery/21`;
+- pairing children with catalog seqs from cut 0 fails `seeded-inherited-work/20`;
+- keeping pending calls across `step/end` in the closers fails `closed-step-pending-call/11`, and across `turn/start` and `turn/end` fails `closed-turn-pending-call/12`;
+- citing the closer's own seq as the `tool/call` seq fails `tool-call-turn/10`;
+- reading the step from a closer other than `step/end` fails `tool-call-turn/4`;
+- normalizing a -0 `createdAt` to 0 in the catalog fold fails `catalog-variants/19`.
+
+Children's own logs, migrated and Zstd logs, and Agent resume are not covered. These cases close no roadmap scope.
 
 ## Runner contract
 

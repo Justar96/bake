@@ -1,0 +1,2252 @@
+{
+  "schema": "bake/session-conformance/prompt-admission-cases",
+  "version": 1,
+  "oracle": "SystemPromptProjection.project, session.surface.contentGeneration, and headerEquals(baseline, canonicalHeader({...baseline, tools})) over the Session restorePlainLog(log) restores in packages/core/agent-loop/tests/prompt-admission-conformance.spec.ts; series is that spec's composition of the startsSeries disjunction in agent.ts, not production code",
+  "history": [
+    "Version 1: 34 cases, written from the TypeScript sources before either harness ran; one, a fractional temperature, witnesses the inherited restore Number limit."
+  ],
+  "logs": {
+    "tool-call-turn": "conformance/runtime/request-reconstruction/tool-call-turn/session.jsonl",
+    "dynamic-tools": "conformance/runtime/request-reconstruction/dynamic-tools/session.jsonl",
+    "retry-attempt": "conformance/runtime/request-reconstruction/retry-attempt/session.jsonl"
+  },
+  "cases": [
+    {
+      "id": "no-system-node-open-turn",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 4
+        }
+      ],
+      "ts": {
+        "contentGeneration": 0,
+        "prompts": [
+          {
+            "rendered": "stable base",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "stable base",
+                "intent": "append"
+              }
+            ]
+          },
+          {
+            "rendered": "",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "",
+                "intent": "append"
+              }
+            ]
+          },
+          {
+            "rendered": "",
+            "inHistory": false,
+            "startsSeries": true,
+            "commits": [
+              {
+                "text": "",
+                "intent": "append"
+              }
+            ]
+          },
+          {
+            "rendered": "x",
+            "inHistory": false,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "x",
+                "intent": "append"
+              }
+            ]
+          }
+        ],
+        "toolsChanged": [
+          {
+            "tools": [
+              {
+                "name": "echo"
+              }
+            ],
+            "changed": false
+          },
+          {
+            "tools": [],
+            "changed": false
+          }
+        ],
+        "series": [
+          {
+            "declared": false,
+            "generationAtLastRequest": 0,
+            "toolUpdateRoute": false,
+            "tools": [
+              {
+                "name": "echo"
+              }
+            ],
+            "startsSeries": false
+          }
+        ]
+      },
+      "note": "The turn is open before its prompt, so the closers end the step and turn; no header means no tool change."
+    },
+    {
+      "id": "no-system-node-after-user",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 4
+        },
+        {
+          "append": "{\"type\":\"user/message\",\"seq\":4,\"time\":1791337579866,\"data\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"source\":{\"kind\":\"user\"},\"role\":\"user\",\"id\":\"user-4\"},\"surfaceOp\":\"append\"}"
+        }
+      ],
+      "ts": {
+        "contentGeneration": 0,
+        "prompts": [
+          {
+            "rendered": "",
+            "inHistory": true,
+            "startsSeries": true,
+            "commits": [
+              {
+                "text": "",
+                "intent": "append"
+              }
+            ]
+          },
+          {
+            "rendered": "p",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "p",
+                "intent": "append"
+              }
+            ]
+          }
+        ],
+        "toolsChanged": [],
+        "series": []
+      }
+    },
+    {
+      "id": "capture-tool-call-turn",
+      "log": "tool-call-turn",
+      "edits": [],
+      "ts": {
+        "contentGeneration": 0,
+        "prompts": [
+          {
+            "rendered": "stable base",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": []
+          },
+          {
+            "rendered": "stable base",
+            "inHistory": false,
+            "startsSeries": false,
+            "commits": []
+          },
+          {
+            "rendered": "stable base",
+            "inHistory": true,
+            "startsSeries": true,
+            "commits": []
+          },
+          {
+            "rendered": "changed",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "changed",
+                "intent": "append"
+              }
+            ]
+          },
+          {
+            "rendered": "changed",
+            "inHistory": false,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "changed",
+                "intent": {
+                  "replace": 4
+                }
+              }
+            ]
+          },
+          {
+            "rendered": "changed",
+            "inHistory": true,
+            "startsSeries": true,
+            "commits": [
+              {
+                "text": "changed",
+                "intent": {
+                  "replace": 4
+                }
+              }
+            ]
+          },
+          {
+            "rendered": "",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "",
+                "intent": {
+                  "replace": 4
+                }
+              }
+            ]
+          },
+          {
+            "rendered": "",
+            "inHistory": false,
+            "startsSeries": true,
+            "commits": [
+              {
+                "text": "",
+                "intent": {
+                  "replace": 4
+                }
+              }
+            ]
+          }
+        ],
+        "toolsChanged": [
+          {
+            "tools": [
+              {
+                "$log": "/6/data/header/tools/0"
+              }
+            ],
+            "changed": false
+          },
+          {
+            "tools": [],
+            "changed": true
+          },
+          {
+            "tools": [
+              {
+                "$log": "/6/data/header/tools/0"
+              },
+              {
+                "$log": "/6/data/header/tools/0"
+              }
+            ],
+            "changed": true
+          },
+          {
+            "tools": [
+              {
+                "name": "echo",
+                "description": "echo back",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            ],
+            "changed": false
+          }
+        ],
+        "series": [
+          {
+            "declared": true,
+            "generationAtLastRequest": 0,
+            "toolUpdateRoute": false,
+            "tools": [
+              {
+                "$log": "/6/data/header/tools/0"
+              }
+            ],
+            "startsSeries": true
+          },
+          {
+            "declared": false,
+            "generationAtLastRequest": 0,
+            "toolUpdateRoute": false,
+            "tools": [
+              {
+                "$log": "/6/data/header/tools/0"
+              }
+            ],
+            "startsSeries": false
+          },
+          {
+            "declared": false,
+            "generationAtLastRequest": 1,
+            "toolUpdateRoute": false,
+            "tools": [
+              {
+                "$log": "/6/data/header/tools/0"
+              }
+            ],
+            "startsSeries": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "capture-dynamic-tools",
+      "log": "dynamic-tools",
+      "edits": [],
+      "ts": {
+        "contentGeneration": 0,
+        "prompts": [
+          {
+            "rendered": "stable base",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": []
+          },
+          {
+            "rendered": "next",
+            "inHistory": false,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "next",
+                "intent": {
+                  "replace": 4
+                }
+              }
+            ]
+          }
+        ],
+        "toolsChanged": [
+          {
+            "tools": [
+              {
+                "$log": "/33/data/header/tools/0"
+              },
+              {
+                "$log": "/33/data/header/tools/1"
+              }
+            ],
+            "changed": false
+          },
+          {
+            "tools": [
+              {
+                "$log": "/33/data/header/tools/1"
+              },
+              {
+                "$log": "/33/data/header/tools/0"
+              }
+            ],
+            "changed": true
+          },
+          {
+            "tools": [
+              {
+                "$log": "/6/data/header/tools/0"
+              }
+            ],
+            "changed": true
+          },
+          {
+            "tools": [],
+            "changed": true
+          },
+          {
+            "tools": [
+              {
+                "description": "fetch a url",
+                "name": "fetch",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              {
+                "$log": "/33/data/header/tools/1"
+              }
+            ],
+            "changed": true
+          },
+          {
+            "tools": [
+              {
+                "name": "fetch",
+                "description": "fetch a URL",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              {
+                "$log": "/33/data/header/tools/1"
+              }
+            ],
+            "changed": true
+          },
+          {
+            "tools": [
+              {
+                "name": "fetch",
+                "description": "fetch a url",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              {
+                "$log": "/33/data/header/tools/1"
+              }
+            ],
+            "changed": false
+          },
+          {
+            "tools": [
+              {
+                "$log": "/33/data/header/tools/0"
+              },
+              {
+                "$log": "/33/data/header/tools/1"
+              },
+              {
+                "$log": "/33/data/header/tools/0"
+              }
+            ],
+            "changed": true
+          }
+        ],
+        "series": [
+          {
+            "declared": false,
+            "generationAtLastRequest": 0,
+            "toolUpdateRoute": false,
+            "tools": [
+              {
+                "$log": "/33/data/header/tools/1"
+              },
+              {
+                "$log": "/33/data/header/tools/0"
+              }
+            ],
+            "startsSeries": true
+          },
+          {
+            "declared": false,
+            "generationAtLastRequest": 0,
+            "toolUpdateRoute": true,
+            "tools": [
+              {
+                "$log": "/33/data/header/tools/1"
+              },
+              {
+                "$log": "/33/data/header/tools/0"
+              }
+            ],
+            "startsSeries": false
+          },
+          {
+            "declared": false,
+            "generationAtLastRequest": 0,
+            "toolUpdateRoute": true,
+            "tools": [
+              {
+                "$log": "/33/data/header/tools/0"
+              },
+              {
+                "$log": "/33/data/header/tools/1"
+              }
+            ],
+            "startsSeries": false
+          },
+          {
+            "declared": true,
+            "generationAtLastRequest": 0,
+            "toolUpdateRoute": true,
+            "tools": [
+              {
+                "$log": "/33/data/header/tools/0"
+              },
+              {
+                "$log": "/33/data/header/tools/1"
+              }
+            ],
+            "startsSeries": true
+          }
+        ]
+      },
+      "note": "The latest header is seq 33; the tool updates and header changes replace nothing."
+    },
+    {
+      "id": "capture-retry-attempt",
+      "log": "retry-attempt",
+      "edits": [],
+      "ts": {
+        "contentGeneration": 0,
+        "prompts": [
+          {
+            "rendered": "stable base",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": []
+          },
+          {
+            "rendered": "",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "",
+                "intent": {
+                  "replace": 4
+                }
+              }
+            ]
+          }
+        ],
+        "toolsChanged": [
+          {
+            "tools": [
+              {
+                "$log": "/9/data/header/tools/0"
+              }
+            ],
+            "changed": false
+          },
+          {
+            "tools": [
+              {
+                "$log": "/6/data/header/tools/0"
+              }
+            ],
+            "changed": false
+          }
+        ],
+        "series": []
+      }
+    },
+    {
+      "id": "appended-prompt",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"system/message\",\"seq\":16,\"time\":1791337579870,\"data\":{\"turn\":1,\"step\":2,\"message\":{\"role\":\"system\",\"content\":[{\"type\":\"text\",\"text\":\"next\"}],\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"id\":\"sys-16\"}},\"surfaceOp\":\"append\"}"
+        }
+      ],
+      "ts": {
+        "contentGeneration": 0,
+        "prompts": [
+          {
+            "rendered": "next",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": []
+          },
+          {
+            "rendered": "stable base",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "stable base",
+                "intent": "append"
+              }
+            ]
+          },
+          {
+            "rendered": "other",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "other",
+                "intent": "append"
+              }
+            ]
+          },
+          {
+            "rendered": "next",
+            "inHistory": true,
+            "startsSeries": true,
+            "commits": [
+              {
+                "text": "",
+                "intent": {
+                  "replace": 16
+                }
+              },
+              {
+                "text": "next",
+                "intent": {
+                  "replace": 4
+                }
+              }
+            ]
+          },
+          {
+            "rendered": "next",
+            "inHistory": false,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "",
+                "intent": {
+                  "replace": 16
+                }
+              },
+              {
+                "text": "next",
+                "intent": {
+                  "replace": 4
+                }
+              }
+            ]
+          },
+          {
+            "rendered": "stable base",
+            "inHistory": false,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "",
+                "intent": {
+                  "replace": 16
+                }
+              }
+            ]
+          },
+          {
+            "rendered": "stable base",
+            "inHistory": true,
+            "startsSeries": true,
+            "commits": [
+              {
+                "text": "",
+                "intent": {
+                  "replace": 16
+                }
+              }
+            ]
+          },
+          {
+            "rendered": "",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "",
+                "intent": {
+                  "replace": 16
+                }
+              },
+              {
+                "text": "",
+                "intent": {
+                  "replace": 4
+                }
+              }
+            ]
+          }
+        ],
+        "toolsChanged": [],
+        "series": []
+      }
+    },
+    {
+      "id": "dormant-empty-tail",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"system/message\",\"seq\":16,\"time\":1791337579870,\"data\":{\"turn\":1,\"step\":2,\"message\":{\"role\":\"system\",\"content\":[],\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"id\":\"sys-16\"}},\"surfaceOp\":\"append\"}"
+        }
+      ],
+      "ts": {
+        "contentGeneration": 0,
+        "prompts": [
+          {
+            "rendered": "stable base",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": []
+          },
+          {
+            "rendered": "x",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "x",
+                "intent": "append"
+              }
+            ]
+          },
+          {
+            "rendered": "x",
+            "inHistory": false,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "x",
+                "intent": {
+                  "replace": 4
+                }
+              }
+            ]
+          },
+          {
+            "rendered": "stable base",
+            "inHistory": false,
+            "startsSeries": false,
+            "commits": []
+          },
+          {
+            "rendered": "stable base",
+            "inHistory": true,
+            "startsSeries": true,
+            "commits": []
+          },
+          {
+            "rendered": "",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "",
+                "intent": {
+                  "replace": 4
+                }
+              }
+            ]
+          }
+        ],
+        "toolsChanged": [],
+        "series": []
+      }
+    },
+    {
+      "id": "empty-text-block-is-dormant",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"system/message\",\"seq\":16,\"time\":1791337579870,\"data\":{\"turn\":1,\"step\":2,\"message\":{\"role\":\"system\",\"content\":[{\"type\":\"text\",\"text\":\"\"}],\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"id\":\"sys-16\"}},\"surfaceOp\":\"append\"}"
+        }
+      ],
+      "ts": {
+        "contentGeneration": 0,
+        "prompts": [
+          {
+            "rendered": "stable base",
+            "inHistory": false,
+            "startsSeries": false,
+            "commits": []
+          },
+          {
+            "rendered": "x",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "x",
+                "intent": "append"
+              }
+            ]
+          },
+          {
+            "rendered": "",
+            "inHistory": true,
+            "startsSeries": true,
+            "commits": [
+              {
+                "text": "",
+                "intent": {
+                  "replace": 4
+                }
+              }
+            ]
+          }
+        ],
+        "toolsChanged": [],
+        "series": []
+      },
+      "note": "One text block holding the empty string reads as empty text, like empty content."
+    },
+    {
+      "id": "tail-cleared-by-replacement",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"system/message\",\"seq\":16,\"time\":1791337579870,\"data\":{\"turn\":1,\"step\":2,\"message\":{\"role\":\"system\",\"content\":[{\"type\":\"text\",\"text\":\"next\"}],\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"id\":\"sys-16\"}},\"surfaceOp\":\"append\"}"
+        },
+        {
+          "append": "{\"type\":\"system/message\",\"seq\":17,\"time\":1791337579870,\"data\":{\"turn\":1,\"step\":2,\"message\":{\"role\":\"system\",\"content\":[],\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"id\":\"sys-17\"}},\"sourceEventSeqs\":[16],\"surfaceOp\":{\"op\":\"replace\",\"startSeq\":16,\"endSeq\":16}}"
+        }
+      ],
+      "ts": {
+        "contentGeneration": 1,
+        "prompts": [
+          {
+            "rendered": "stable base",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": []
+          },
+          {
+            "rendered": "next",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "next",
+                "intent": "append"
+              }
+            ]
+          },
+          {
+            "rendered": "next",
+            "inHistory": true,
+            "startsSeries": true,
+            "commits": [
+              {
+                "text": "next",
+                "intent": {
+                  "replace": 4
+                }
+              }
+            ]
+          },
+          {
+            "rendered": "stable base",
+            "inHistory": false,
+            "startsSeries": false,
+            "commits": []
+          }
+        ],
+        "toolsChanged": [],
+        "series": []
+      }
+    },
+    {
+      "id": "head-replaced",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"system/message\",\"seq\":16,\"time\":1791337579870,\"data\":{\"turn\":1,\"step\":2,\"message\":{\"role\":\"system\",\"content\":[{\"type\":\"text\",\"text\":\"new base\"}],\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"id\":\"sys-16\"}},\"sourceEventSeqs\":[4],\"surfaceOp\":{\"op\":\"replace\",\"startSeq\":4,\"endSeq\":4}}"
+        }
+      ],
+      "ts": {
+        "contentGeneration": 1,
+        "prompts": [
+          {
+            "rendered": "new base",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": []
+          },
+          {
+            "rendered": "new base",
+            "inHistory": false,
+            "startsSeries": false,
+            "commits": []
+          },
+          {
+            "rendered": "stable base",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "stable base",
+                "intent": "append"
+              }
+            ]
+          },
+          {
+            "rendered": "x",
+            "inHistory": false,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "x",
+                "intent": {
+                  "replace": 16
+                }
+              }
+            ]
+          },
+          {
+            "rendered": "",
+            "inHistory": true,
+            "startsSeries": true,
+            "commits": [
+              {
+                "text": "",
+                "intent": {
+                  "replace": 16
+                }
+              }
+            ]
+          }
+        ],
+        "toolsChanged": [],
+        "series": []
+      }
+    },
+    {
+      "id": "head-cleared",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"system/message\",\"seq\":16,\"time\":1791337579870,\"data\":{\"turn\":1,\"step\":2,\"message\":{\"role\":\"system\",\"content\":[],\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"id\":\"sys-16\"}},\"sourceEventSeqs\":[4],\"surfaceOp\":{\"op\":\"replace\",\"startSeq\":4,\"endSeq\":4}}"
+        }
+      ],
+      "ts": {
+        "contentGeneration": 1,
+        "prompts": [
+          {
+            "rendered": "",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": []
+          },
+          {
+            "rendered": "",
+            "inHistory": false,
+            "startsSeries": true,
+            "commits": []
+          },
+          {
+            "rendered": "x",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "x",
+                "intent": "append"
+              }
+            ]
+          },
+          {
+            "rendered": "x",
+            "inHistory": false,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "x",
+                "intent": {
+                  "replace": 16
+                }
+              }
+            ]
+          },
+          {
+            "rendered": "x",
+            "inHistory": true,
+            "startsSeries": true,
+            "commits": [
+              {
+                "text": "x",
+                "intent": {
+                  "replace": 16
+                }
+              }
+            ]
+          }
+        ],
+        "toolsChanged": [],
+        "series": []
+      }
+    },
+    {
+      "id": "head-cleared-then-appended",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"system/message\",\"seq\":16,\"time\":1791337579870,\"data\":{\"turn\":1,\"step\":2,\"message\":{\"role\":\"system\",\"content\":[],\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"id\":\"sys-16\"}},\"sourceEventSeqs\":[4],\"surfaceOp\":{\"op\":\"replace\",\"startSeq\":4,\"endSeq\":4}}"
+        },
+        {
+          "append": "{\"type\":\"system/message\",\"seq\":17,\"time\":1791337579870,\"data\":{\"turn\":1,\"step\":2,\"message\":{\"role\":\"system\",\"content\":[{\"type\":\"text\",\"text\":\"later\"}],\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"id\":\"sys-17\"}},\"surfaceOp\":\"append\"}"
+        }
+      ],
+      "ts": {
+        "contentGeneration": 1,
+        "prompts": [
+          {
+            "rendered": "later",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": []
+          },
+          {
+            "rendered": "later",
+            "inHistory": false,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "",
+                "intent": {
+                  "replace": 17
+                }
+              },
+              {
+                "text": "later",
+                "intent": {
+                  "replace": 16
+                }
+              }
+            ]
+          },
+          {
+            "rendered": "",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "",
+                "intent": {
+                  "replace": 17
+                }
+              }
+            ]
+          },
+          {
+            "rendered": "other",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "other",
+                "intent": "append"
+              }
+            ]
+          }
+        ],
+        "toolsChanged": [],
+        "series": []
+      }
+    },
+    {
+      "id": "multiblock-head-active",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 4,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"stable base\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"stable \"},{\"type\":\"text\",\"text\":\"base\"}]"
+        }
+      ],
+      "ts": {
+        "contentGeneration": 0,
+        "prompts": [
+          {
+            "rendered": "stable base",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "stable base",
+                "intent": "append"
+              }
+            ]
+          },
+          {
+            "rendered": "stable base",
+            "inHistory": false,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "stable base",
+                "intent": {
+                  "replace": 4
+                }
+              }
+            ]
+          },
+          {
+            "rendered": "stable base",
+            "inHistory": true,
+            "startsSeries": true,
+            "commits": [
+              {
+                "text": "stable base",
+                "intent": {
+                  "replace": 4
+                }
+              }
+            ]
+          },
+          {
+            "rendered": "",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "",
+                "intent": {
+                  "replace": 4
+                }
+              }
+            ]
+          }
+        ],
+        "toolsChanged": [],
+        "series": []
+      },
+      "note": "Two text blocks are active content that is not text, so no rendering equals them."
+    },
+    {
+      "id": "reasoning-head-active",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 4,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"stable base\"}]",
+          "replace": "\"content\":[{\"type\":\"reasoning\",\"text\":\"stable base\"}]"
+        }
+      ],
+      "ts": {
+        "contentGeneration": 0,
+        "prompts": [
+          {
+            "rendered": "stable base",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "stable base",
+                "intent": "append"
+              }
+            ]
+          },
+          {
+            "rendered": "",
+            "inHistory": true,
+            "startsSeries": true,
+            "commits": [
+              {
+                "text": "",
+                "intent": {
+                  "replace": 4
+                }
+              }
+            ]
+          }
+        ],
+        "toolsChanged": [],
+        "series": []
+      }
+    },
+    {
+      "id": "reasoning-tail-active",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"system/message\",\"seq\":16,\"time\":1791337579870,\"data\":{\"turn\":1,\"step\":2,\"message\":{\"role\":\"system\",\"content\":[{\"type\":\"reasoning\",\"text\":\"stable base\"}],\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"id\":\"sys-16\"}},\"surfaceOp\":\"append\"}"
+        }
+      ],
+      "ts": {
+        "contentGeneration": 0,
+        "prompts": [
+          {
+            "rendered": "stable base",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "stable base",
+                "intent": "append"
+              }
+            ]
+          },
+          {
+            "rendered": "stable base",
+            "inHistory": false,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "",
+                "intent": {
+                  "replace": 16
+                }
+              }
+            ]
+          },
+          {
+            "rendered": "",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "",
+                "intent": {
+                  "replace": 16
+                }
+              },
+              {
+                "text": "",
+                "intent": {
+                  "replace": 4
+                }
+              }
+            ]
+          }
+        ],
+        "toolsChanged": [],
+        "series": []
+      }
+    },
+    {
+      "id": "several-tails-in-surface-order",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"system/message\",\"seq\":16,\"time\":1791337579870,\"data\":{\"turn\":1,\"step\":2,\"message\":{\"role\":\"system\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"id\":\"sys-16\"}},\"surfaceOp\":\"append\"}"
+        },
+        {
+          "append": "{\"type\":\"user/message\",\"seq\":17,\"time\":1791337579870,\"data\":{\"content\":[{\"type\":\"text\",\"text\":\"more\"}],\"source\":{\"kind\":\"user\"},\"role\":\"user\",\"id\":\"user-17\"},\"surfaceOp\":\"append\"}"
+        },
+        {
+          "append": "{\"type\":\"system/message\",\"seq\":18,\"time\":1791337579870,\"data\":{\"turn\":1,\"step\":2,\"message\":{\"role\":\"system\",\"content\":[],\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"id\":\"sys-18\"}},\"surfaceOp\":\"append\"}"
+        },
+        {
+          "append": "{\"type\":\"system/message\",\"seq\":19,\"time\":1791337579870,\"data\":{\"turn\":1,\"step\":2,\"message\":{\"role\":\"system\",\"content\":[{\"type\":\"text\",\"text\":\"b\"}],\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"id\":\"sys-19\"}},\"surfaceOp\":\"append\"}"
+        }
+      ],
+      "ts": {
+        "contentGeneration": 0,
+        "prompts": [
+          {
+            "rendered": "b",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": []
+          },
+          {
+            "rendered": "a",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "a",
+                "intent": "append"
+              }
+            ]
+          },
+          {
+            "rendered": "b",
+            "inHistory": true,
+            "startsSeries": true,
+            "commits": [
+              {
+                "text": "",
+                "intent": {
+                  "replace": 16
+                }
+              },
+              {
+                "text": "",
+                "intent": {
+                  "replace": 19
+                }
+              },
+              {
+                "text": "b",
+                "intent": {
+                  "replace": 4
+                }
+              }
+            ]
+          },
+          {
+            "rendered": "stable base",
+            "inHistory": false,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "",
+                "intent": {
+                  "replace": 16
+                }
+              },
+              {
+                "text": "",
+                "intent": {
+                  "replace": 19
+                }
+              }
+            ]
+          },
+          {
+            "rendered": "",
+            "inHistory": false,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "",
+                "intent": {
+                  "replace": 16
+                }
+              },
+              {
+                "text": "",
+                "intent": {
+                  "replace": 19
+                }
+              },
+              {
+                "text": "",
+                "intent": {
+                  "replace": 4
+                }
+              }
+            ]
+          }
+        ],
+        "toolsChanged": [],
+        "series": []
+      }
+    },
+    {
+      "id": "compacted-tail",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"system/message\",\"seq\":16,\"time\":1791337579870,\"data\":{\"turn\":1,\"step\":2,\"message\":{\"role\":\"system\",\"content\":[{\"type\":\"text\",\"text\":\"next\"}],\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"id\":\"sys-16\"}},\"surfaceOp\":\"append\"}"
+        },
+        {
+          "append": "{\"type\":\"user/message\",\"seq\":17,\"time\":1791337579870,\"data\":{\"content\":[{\"type\":\"text\",\"text\":\"summary\"}],\"source\":{\"kind\":\"user\"},\"role\":\"user\",\"id\":\"user-17\"},\"sourceEventSeqs\":[13,16],\"surfaceOp\":{\"op\":\"replace\",\"startSeq\":13,\"endSeq\":16}}"
+        }
+      ],
+      "ts": {
+        "contentGeneration": 1,
+        "prompts": [
+          {
+            "rendered": "stable base",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": []
+          },
+          {
+            "rendered": "next",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "next",
+                "intent": "append"
+              }
+            ]
+          },
+          {
+            "rendered": "next",
+            "inHistory": true,
+            "startsSeries": true,
+            "commits": [
+              {
+                "text": "next",
+                "intent": {
+                  "replace": 4
+                }
+              }
+            ]
+          }
+        ],
+        "toolsChanged": [],
+        "series": []
+      },
+      "note": "A summary shadows the Assistant message and the appended prompt, so only the head is current."
+    },
+    {
+      "id": "head-not-first-surface-node",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 4
+        },
+        {
+          "append": "{\"type\":\"user/message\",\"seq\":4,\"time\":1791337579866,\"data\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"source\":{\"kind\":\"user\"},\"role\":\"user\",\"id\":\"user-4\"},\"surfaceOp\":\"append\"}"
+        },
+        {
+          "append": "{\"type\":\"system/message\",\"seq\":5,\"time\":1791337579866,\"data\":{\"turn\":1,\"step\":2,\"message\":{\"role\":\"system\",\"content\":[{\"type\":\"text\",\"text\":\"p\"}],\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"id\":\"sys-5\"}},\"surfaceOp\":\"append\"}"
+        }
+      ],
+      "ts": {
+        "contentGeneration": 0,
+        "prompts": [
+          {
+            "rendered": "p",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": []
+          },
+          {
+            "rendered": "q",
+            "inHistory": false,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "q",
+                "intent": {
+                  "replace": 5
+                }
+              }
+            ]
+          },
+          {
+            "rendered": "q",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "q",
+                "intent": "append"
+              }
+            ]
+          }
+        ],
+        "toolsChanged": [],
+        "series": []
+      },
+      "note": "The first system node is the head wherever it sits on the surface."
+    },
+    {
+      "id": "seeded-child",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "header": "{\"type\":\"session\",\"version\":3,\"id\":\"a1\",\"createdAt\":1791337579861,\"isSeeded\":true,\"delegationDepth\":0}"
+        },
+        {
+          "append": "{\"type\":\"session/end-seed\",\"seq\":16,\"time\":1791337579870,\"data\":{\"inherited\":true}}"
+        }
+      ],
+      "ts": {
+        "contentGeneration": 0,
+        "prompts": [
+          {
+            "rendered": "stable base",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": []
+          },
+          {
+            "rendered": "x",
+            "inHistory": true,
+            "startsSeries": true,
+            "commits": [
+              {
+                "text": "x",
+                "intent": {
+                  "replace": 4
+                }
+              }
+            ]
+          }
+        ],
+        "toolsChanged": [
+          {
+            "tools": [
+              {
+                "$log": "/6/data/header/tools/0"
+              }
+            ],
+            "changed": false
+          }
+        ],
+        "series": []
+      }
+    },
+    {
+      "id": "seeded-child-own-prompt",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "header": "{\"type\":\"session\",\"version\":3,\"id\":\"a1\",\"createdAt\":1791337579861,\"isSeeded\":true,\"delegationDepth\":0}"
+        },
+        {
+          "append": "{\"type\":\"session/end-seed\",\"seq\":16,\"time\":1791337579870,\"data\":{\"inherited\":true}}"
+        },
+        {
+          "append": "{\"type\":\"system/message\",\"seq\":17,\"time\":1791337579870,\"data\":{\"turn\":1,\"step\":2,\"message\":{\"role\":\"system\",\"content\":[{\"type\":\"text\",\"text\":\"child\"}],\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"id\":\"sys-17\"}},\"surfaceOp\":\"append\"}"
+        }
+      ],
+      "ts": {
+        "contentGeneration": 0,
+        "prompts": [
+          {
+            "rendered": "child",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": []
+          },
+          {
+            "rendered": "child",
+            "inHistory": false,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "",
+                "intent": {
+                  "replace": 17
+                }
+              },
+              {
+                "text": "child",
+                "intent": {
+                  "replace": 4
+                }
+              }
+            ]
+          }
+        ],
+        "toolsChanged": [],
+        "series": []
+      }
+    },
+    {
+      "id": "seeded-inherited-replacement",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "header": "{\"type\":\"session\",\"version\":3,\"id\":\"a1\",\"createdAt\":1791337579861,\"isSeeded\":true,\"delegationDepth\":0}"
+        },
+        {
+          "append": "{\"type\":\"system/message\",\"seq\":16,\"time\":1791337579870,\"data\":{\"turn\":1,\"step\":2,\"message\":{\"role\":\"system\",\"content\":[{\"type\":\"text\",\"text\":\"parent\"}],\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"id\":\"sys-16\"}},\"sourceEventSeqs\":[4],\"surfaceOp\":{\"op\":\"replace\",\"startSeq\":4,\"endSeq\":4}}"
+        },
+        {
+          "append": "{\"type\":\"session/end-seed\",\"seq\":17,\"time\":1791337579870,\"data\":{\"inherited\":true}}"
+        }
+      ],
+      "ts": {
+        "contentGeneration": 1,
+        "prompts": [
+          {
+            "rendered": "parent",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": []
+          },
+          {
+            "rendered": "stable base",
+            "inHistory": false,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "stable base",
+                "intent": {
+                  "replace": 16
+                }
+              }
+            ]
+          }
+        ],
+        "toolsChanged": [],
+        "series": [
+          {
+            "declared": false,
+            "generationAtLastRequest": 1,
+            "toolUpdateRoute": false,
+            "tools": [
+              {
+                "$log": "/6/data/header/tools/0"
+              }
+            ],
+            "startsSeries": false
+          },
+          {
+            "declared": false,
+            "generationAtLastRequest": 0,
+            "toolUpdateRoute": false,
+            "tools": [
+              {
+                "$log": "/6/data/header/tools/0"
+              }
+            ],
+            "startsSeries": true
+          }
+        ]
+      },
+      "note": "The inherited prefix's replacement counts toward the restored generation."
+    },
+    {
+      "id": "resumed-open-turn",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"session/end-seed\",\"seq\":16,\"time\":1791337579870,\"data\":{}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":1791337579870,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"step/start\",\"seq\":18,\"time\":1791337579870,\"data\":{\"turn\":2,\"step\":1}}"
+        }
+      ],
+      "ts": {
+        "contentGeneration": 0,
+        "prompts": [
+          {
+            "rendered": "stable base",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": []
+          },
+          {
+            "rendered": "x",
+            "inHistory": false,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "x",
+                "intent": {
+                  "replace": 4
+                }
+              }
+            ]
+          }
+        ],
+        "toolsChanged": [],
+        "series": []
+      }
+    },
+    {
+      "id": "interrupted-tool-call",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 10
+        }
+      ],
+      "ts": {
+        "contentGeneration": 0,
+        "prompts": [
+          {
+            "rendered": "stable base",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": []
+          },
+          {
+            "rendered": "x",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "x",
+                "intent": "append"
+              }
+            ]
+          }
+        ],
+        "toolsChanged": [
+          {
+            "tools": [
+              {
+                "$log": "/6/data/header/tools/0"
+              }
+            ],
+            "changed": false
+          }
+        ],
+        "series": []
+      },
+      "note": "The closers append an interrupted tool result, which is not a replacement."
+    },
+    {
+      "id": "generation-tool-result-prune",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"tool/result\",\"seq\":16,\"time\":1791337579870,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"source\":{\"kind\":\"tool\",\"callId\":\"c1\"},\"content\":[{\"type\":\"tool-result\",\"toolCallId\":\"c1\",\"content\":[{\"type\":\"text\",\"text\":\"[pruned]\"}],\"isError\":false}],\"role\":\"user\",\"id\":\"df2fbed1-1421-4a96-8237-079e67740391\"}},\"sourceEventSeqs\":[10],\"surfaceOp\":{\"op\":\"replace\",\"startSeq\":10,\"endSeq\":10}}"
+        }
+      ],
+      "ts": {
+        "contentGeneration": 1,
+        "prompts": [
+          {
+            "rendered": "stable base",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": []
+          }
+        ],
+        "toolsChanged": [],
+        "series": [
+          {
+            "declared": false,
+            "generationAtLastRequest": 0,
+            "toolUpdateRoute": false,
+            "tools": [
+              {
+                "$log": "/6/data/header/tools/0"
+              }
+            ],
+            "startsSeries": true
+          },
+          {
+            "declared": false,
+            "generationAtLastRequest": 1,
+            "toolUpdateRoute": false,
+            "tools": [
+              {
+                "$log": "/6/data/header/tools/0"
+              }
+            ],
+            "startsSeries": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "generation-offload",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":5,\"imageIndexes\":[1]}]}}"
+        }
+      ],
+      "ts": {
+        "contentGeneration": 1,
+        "prompts": [
+          {
+            "rendered": "stable base",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": []
+          }
+        ],
+        "toolsChanged": [],
+        "series": []
+      }
+    },
+    {
+      "id": "generation-offload-two-targets-one-event",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "row": 10,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"echo: one\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"echo: one\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":5,\"imageIndexes\":[0]},{\"seq\":10,\"imageIndexes\":[0]}]}}"
+        }
+      ],
+      "ts": {
+        "contentGeneration": 1,
+        "prompts": [],
+        "toolsChanged": [],
+        "series": []
+      },
+      "note": "One decision counts once, however many targets it projects."
+    },
+    {
+      "id": "generation-successive-offloads",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"go\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"go\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":5,\"imageIndexes\":[0]}]}}"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":17,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":5,\"imageIndexes\":[1]}]}}"
+        }
+      ],
+      "ts": {
+        "contentGeneration": 2,
+        "prompts": [],
+        "toolsChanged": [],
+        "series": []
+      }
+    },
+    {
+      "id": "generation-offload-then-prune",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 10,
+          "find": "\"content\":[{\"type\":\"text\",\"text\":\"echo: one\"}]",
+          "replace": "\"content\":[{\"type\":\"text\",\"text\":\"echo: one\"},{\"type\":\"image\",\"attachment\":{\"attachmentId\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mediaType\":\"image/png\",\"bytes\":1024,\"width\":2,\"height\":2}}]"
+        },
+        {
+          "append": "{\"type\":\"image/offload\",\"seq\":16,\"time\":1791337579870,\"data\":{\"targets\":[{\"seq\":10,\"imageIndexes\":[0]}]}}"
+        },
+        {
+          "append": "{\"type\":\"tool/result\",\"seq\":17,\"time\":1791337579870,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"source\":{\"kind\":\"tool\",\"callId\":\"c1\"},\"content\":[{\"type\":\"tool-result\",\"toolCallId\":\"c1\",\"content\":[{\"type\":\"text\",\"text\":\"[pruned]\"}],\"isError\":false}],\"role\":\"user\",\"id\":\"df2fbed1-1421-4a96-8237-079e67740391\"}},\"sourceEventSeqs\":[10],\"surfaceOp\":{\"op\":\"replace\",\"startSeq\":10,\"endSeq\":10}}"
+        }
+      ],
+      "ts": {
+        "contentGeneration": 2,
+        "prompts": [],
+        "toolsChanged": [],
+        "series": []
+      },
+      "note": "The pruned result replaces the projected node; both events count."
+    },
+    {
+      "id": "generation-prune-then-head-replaced",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"tool/result\",\"seq\":16,\"time\":1791337579870,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"source\":{\"kind\":\"tool\",\"callId\":\"c1\"},\"content\":[{\"type\":\"tool-result\",\"toolCallId\":\"c1\",\"content\":[{\"type\":\"text\",\"text\":\"[pruned]\"}],\"isError\":false}],\"role\":\"user\",\"id\":\"df2fbed1-1421-4a96-8237-079e67740391\"}},\"sourceEventSeqs\":[10],\"surfaceOp\":{\"op\":\"replace\",\"startSeq\":10,\"endSeq\":10}}"
+        },
+        {
+          "append": "{\"type\":\"system/message\",\"seq\":17,\"time\":1791337579870,\"data\":{\"turn\":1,\"step\":2,\"message\":{\"role\":\"system\",\"content\":[{\"type\":\"text\",\"text\":\"new\"}],\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"id\":\"sys-17\"}},\"sourceEventSeqs\":[4],\"surfaceOp\":{\"op\":\"replace\",\"startSeq\":4,\"endSeq\":4}}"
+        }
+      ],
+      "ts": {
+        "contentGeneration": 2,
+        "prompts": [
+          {
+            "rendered": "new",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": []
+          },
+          {
+            "rendered": "stable base",
+            "inHistory": true,
+            "startsSeries": false,
+            "commits": [
+              {
+                "text": "stable base",
+                "intent": "append"
+              }
+            ]
+          }
+        ],
+        "toolsChanged": [],
+        "series": []
+      }
+    },
+    {
+      "id": "tools-numbers-compare-as-javascript-text",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 6,
+          "find": "\"properties\":{\"text\":{\"type\":\"string\"}}",
+          "replace": "\"properties\":{\"text\":{\"type\":\"string\",\"maxLength\":1,\"minLength\":0}}"
+        }
+      ],
+      "ts": {
+        "contentGeneration": 0,
+        "prompts": [],
+        "toolsChanged": [
+          {
+            "tools": [
+              {
+                "$log": "/6/data/header/tools/0"
+              }
+            ],
+            "changed": false
+          },
+          {
+            "tools": [
+              {
+                "name": "echo",
+                "description": "echo back",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string",
+                      "maxLength": 1.0,
+                      "minLength": 0
+                    }
+                  }
+                }
+              }
+            ],
+            "changed": false
+          },
+          {
+            "tools": [
+              {
+                "name": "echo",
+                "description": "echo back",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string",
+                      "maxLength": 1e0,
+                      "minLength": -0
+                    }
+                  }
+                }
+              }
+            ],
+            "changed": false
+          },
+          {
+            "tools": [
+              {
+                "name": "echo",
+                "description": "echo back",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string",
+                      "maxLength": 1.5,
+                      "minLength": 0
+                    }
+                  }
+                }
+              }
+            ],
+            "changed": true
+          },
+          {
+            "tools": [
+              {
+                "name": "echo",
+                "description": "echo back",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string",
+                      "maxLength": "1",
+                      "minLength": 0
+                    }
+                  }
+                }
+              }
+            ],
+            "changed": true
+          },
+          {
+            "tools": [
+              {
+                "name": "echo",
+                "description": "echo back",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string",
+                      "maxLength": 2,
+                      "minLength": 0
+                    }
+                  }
+                }
+              }
+            ],
+            "changed": true
+          },
+          {
+            "tools": [
+              {
+                "name": "echo",
+                "description": "echo back",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string",
+                      "minLength": 0,
+                      "maxLength": 1
+                    }
+                  }
+                }
+              }
+            ],
+            "changed": true
+          }
+        ],
+        "series": []
+      },
+      "note": "JSON.stringify writes 1.0 and 1e0 as 1 and -0 as 0; member order still counts."
+    },
+    {
+      "id": "tools-array-index-keys-enumerate-first",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 6,
+          "find": "\"parameters\":{\"type\":\"object\",\"properties\":{\"text\":{\"type\":\"string\"}}}}]",
+          "replace": "\"parameters\":{\"type\":\"object\",\"properties\":{\"text\":{\"type\":\"string\"}}},\"1\":0}]"
+        }
+      ],
+      "ts": {
+        "contentGeneration": 0,
+        "prompts": [],
+        "toolsChanged": [
+          {
+            "tools": [
+              {
+                "$log": "/6/data/header/tools/0"
+              }
+            ],
+            "changed": false
+          },
+          {
+            "tools": [
+              {
+                "1": 0,
+                "name": "echo",
+                "description": "echo back",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            ],
+            "changed": false
+          },
+          {
+            "tools": [
+              {
+                "name": "echo",
+                "description": "echo back",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "1": 0
+              }
+            ],
+            "changed": false
+          },
+          {
+            "tools": [
+              {
+                "description": "echo back",
+                "name": "echo",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "1": 0
+              }
+            ],
+            "changed": true
+          },
+          {
+            "tools": [
+              {
+                "name": "echo",
+                "description": "echo back",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "2": 0
+              }
+            ],
+            "changed": true
+          },
+          {
+            "tools": [
+              {
+                "name": "echo",
+                "description": "echo back",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            ],
+            "changed": true
+          }
+        ],
+        "series": []
+      },
+      "note": "JavaScript enumerates array-index keys first, so where \"1\" was written does not change the text."
+    },
+    {
+      "id": "tools-baseline-without-tools",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 6,
+          "text": "{\"type\":\"request/header\",\"seq\":6,\"time\":1791337579866,\"data\":{\"header\":{\"config\":{\"provider\":\"mock\",\"model\":\"mock\"}},\"reason\":\"initial\"}}"
+        }
+      ],
+      "ts": {
+        "contentGeneration": 0,
+        "prompts": [],
+        "toolsChanged": [
+          {
+            "tools": [],
+            "changed": false
+          },
+          {
+            "tools": [
+              {
+                "name": "echo",
+                "description": "echo back",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            ],
+            "changed": true
+          }
+        ],
+        "series": [
+          {
+            "declared": false,
+            "generationAtLastRequest": 0,
+            "toolUpdateRoute": false,
+            "tools": [
+              {
+                "name": "echo",
+                "description": "echo back",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            ],
+            "startsSeries": true
+          },
+          {
+            "declared": false,
+            "generationAtLastRequest": 0,
+            "toolUpdateRoute": false,
+            "tools": [],
+            "startsSeries": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "tools-config-compares-to-itself",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 6,
+          "find": "\"config\":{\"provider\":\"mock\",\"model\":\"mock\"}",
+          "replace": "\"config\":{\"provider\":\"mock\",\"model\":\"mock\",\"reasoningEffort\":\"high\",\"temperature\":1,\"maxTokens\":8,\"stop\":[\"x\"]},\"adapterDefaults\":{\"maxTokens\":true}"
+        }
+      ],
+      "ts": {
+        "contentGeneration": 0,
+        "prompts": [],
+        "toolsChanged": [
+          {
+            "tools": [
+              {
+                "$log": "/6/data/header/tools/0"
+              }
+            ],
+            "changed": false
+          },
+          {
+            "tools": [],
+            "changed": true
+          }
+        ],
+        "series": []
+      },
+      "note": "The candidate header spreads the baseline, so only its tools can differ."
+    },
+    {
+      "id": "limit-fractional-temperature",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 6,
+          "find": "\"config\":{\"provider\":\"mock\",\"model\":\"mock\"}",
+          "replace": "\"config\":{\"provider\":\"mock\",\"model\":\"mock\",\"temperature\":0.7}"
+        }
+      ],
+      "ts": {
+        "contentGeneration": 0,
+        "prompts": [],
+        "toolsChanged": [
+          {
+            "tools": [
+              {
+                "$log": "/6/data/header/tools/0"
+              }
+            ],
+            "changed": false
+          },
+          {
+            "tools": [],
+            "changed": true
+          }
+        ],
+        "series": []
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "number",
+        "seq": 6
+      },
+      "note": "Bake writes a fractional temperature, so this inherited restore limit is an open writer-reachable gap under D21 that must be ported, not a permitted limit."
+    }
+  ]
+}

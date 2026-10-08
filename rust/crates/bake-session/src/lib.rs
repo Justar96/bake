@@ -28,7 +28,10 @@
 //! interrupted turn, and folds the Session's messages, with the catalog's
 //! `image/offload` projection applied, request header, tool history, and
 //! request context into an immutable [`RestoredLog`]. It is not
-//! Agent resume. [`restore_zstd_log`] restores default-format compressed bytes
+//! Agent resume. [`replay_restored_requests`] rebuilds the requests of a
+//! [`RestoredLog`]'s own dispatches, seeded, resumed, or migrated, with the
+//! `image/offload` projection applied, skipping cuts inside the inherited
+//! prefix. [`restore_zstd_log`] restores default-format compressed bytes
 //! with a caller-supplied plaintext budget and physical torn-tail metadata.
 //! [`stage_plain_log`] and [`stage_zstd_log`] stop after the scan, so a caller
 //! can check the stored identity before [`StagedLog::restore`] runs the rest,
@@ -81,6 +84,10 @@
 //! [`RestoredLog`] into a child, or refuses as `SessionForkError` does.
 //! [`goal_projection`] folds a [`RestoredLog`]'s goal changes and goal rounds
 //! into its durable goal state, keeping the first replay failure.
+//! [`system_prompt_commits`] decides the system-prompt commits a step would
+//! admit over a [`RestoredLog`], and [`content_generation`],
+//! [`tools_changed`], and [`starts_request_series`] report the inputs of its
+//! request-series decision.
 //! [`turn_boundary`] and [`session_title`] fold a [`RestoredLog`]'s turn and
 //! step boundaries and its latest title.
 //! [`subagent_identity`] and [`subagent_timing`] fold a [`RestoredLog`]'s
@@ -89,6 +96,10 @@
 //! `subagent/catalog` facts into its direct-child catalog in event order,
 //! skipping inherited ones before validation and refusing at the first own
 //! fact that fails the payload schema.
+//! [`unfinished_work`] projects a [`RestoredLog`]'s unfinished work before
+//! the end seed Session construction appends: its open turn and step, its
+//! pending tool calls, its open compaction, its catalog children with their
+//! event seqs, and its pending inbox.
 //! [`encode_header_line`] and [`encode_event_line`] produce the exact text
 //! TypeScript writes for a current header record and one current event row,
 //! without the LF, or refuse with `Unadmitted` where TypeScript throws, or
@@ -133,17 +144,20 @@ mod offload;
 mod plain_append;
 mod plain_log_file;
 mod pressure;
+mod prompt_admission;
 mod relationships;
 mod released_rows;
 mod repair;
 mod replay;
 mod request;
 mod restore;
+mod restored_replay;
 mod row_encode;
 mod scan;
 mod source_event_seqs;
 mod subagent;
 mod subagent_catalog;
+mod unfinished;
 mod usage;
 mod v0_to_v1;
 mod v1_codec;
@@ -183,6 +197,10 @@ pub use pressure::{
     ContextPressureState, ContextPressureView, PressureLimit, PressureRefusal, RequestRoute,
     context_pressure,
 };
+pub use prompt_admission::{
+    PromptDecision, PromptIntent, SystemPromptCommit, content_generation, starts_request_series,
+    system_prompt_commits, tools_changed,
+};
 pub use relationships::{
     RelationshipExtensions, RelationshipLimit, RelationshipRefusal, check_released_relationships,
 };
@@ -192,6 +210,7 @@ pub use restore::{
     RestoreLimit, RestoreRefusal, RestoredLog, StagedLog, TornTail, Unsupported, restore_plain_log,
     stage_plain_log,
 };
+pub use restored_replay::{RestoredReplayLimit, RestoredReplayRefusal, replay_restored_requests};
 pub use row_encode::{EncodeLimit, EncodeRefusal, encode_event_line, encode_header_line};
 pub use scan::{FinishRejection, ScanIssue, ScanLimit, ScanRefusal, ScannedLog, scan_log};
 pub use source_event_seqs::{
@@ -205,6 +224,7 @@ pub use subagent::{
 pub use subagent_catalog::{
     SubagentCatalogEntry, SubagentCatalogMode, SubagentCatalogRefusal, subagent_catalog,
 };
+pub use unfinished::{OpenCompaction, OpenTurn, PendingToolCall, UnfinishedWork, unfinished_work};
 pub use usage::{
     LastTokenUsage, TokenUsageBuckets, TokenUsageState, UsageLimit, UsageRefusal, token_usage,
 };

@@ -118,6 +118,12 @@ impl RestoredLog {
         self.fold.tool_history_json()
     }
 
+    /// The restored request fold, for crate-internal projections of the
+    /// current surface.
+    pub(crate) const fn fold(&self) -> &RequestFold {
+        &self.fold
+    }
+
     /// `requestContext`: the latest `request/context` data, or `None` before
     /// the first.
     pub const fn request_context(&self) -> Option<&Map<String, Value>> {

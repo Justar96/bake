@@ -261,6 +261,9 @@ pub(crate) struct RequestFold {
     /// Projected messages keyed by their original seq, including those of
     /// nodes a replacement has since shadowed.
     projected: BTreeMap<u64, Map<String, Value>>,
+    /// `contentGeneration`: committed replacements plus committed projection
+    /// events, one per event however many targets it projects.
+    content_generation: u64,
 }
 
 impl RequestFold {
@@ -277,6 +280,7 @@ impl RequestFold {
             history: ToolHistory::default(),
             projects_images: false,
             projected: BTreeMap::new(),
+            content_generation: 0,
         }
     }
 
@@ -308,6 +312,7 @@ impl RequestFold {
                     } => {
                         let range = self.plan_replacement(&node, start, end, &sources)?;
                         self.nodes.splice(range, [node]);
+                        self.content_generation = self.content_generation.saturating_add(1);
                     }
                 }
             }
@@ -355,6 +360,7 @@ impl RequestFold {
                 }
                 let messages = self.project(&decision)?;
                 self.projected.extend(messages);
+                self.content_generation = self.content_generation.saturating_add(1);
             }
             Fact::LogOnly => {}
         }
@@ -604,6 +610,22 @@ impl RequestFold {
         })
     }
 
+    /// Each current surface node's seq, kind, and logged message, in surface
+    /// order. A projection never changes the logged message.
+    pub(crate) fn current_nodes(
+        &self,
+    ) -> impl Iterator<Item = (u64, SurfaceKind, &Map<String, Value>)> {
+        self.nodes
+            .iter()
+            .map(|node| (node.seq, node.kind, node.message()))
+    }
+
+    /// `session.surface.contentGeneration`: the count of committed
+    /// replacements and committed message-projection events.
+    pub(crate) const fn content_generation(&self) -> u64 {
+        self.content_generation
+    }
+
     /// `deriveMessages`: each current node's derived message, in order.
     pub(crate) fn messages(&self) -> impl Iterator<Item = &Map<String, Value>> {
         self.nodes.iter().filter_map(|node| self.derived(node))
@@ -683,7 +705,7 @@ fn same_js_text(a: &Value, b: &Value) -> bool {
 }
 
 /// An object's members in JavaScript enumeration order.
-fn js_members(fields: &Map<String, Value>) -> Vec<(&String, &Value)> {
+pub(crate) fn js_members(fields: &Map<String, Value>) -> Vec<(&String, &Value)> {
     let mut indices: Vec<(u32, (&String, &Value))> = Vec::new();
     let mut others = Vec::new();
     for member in fields {

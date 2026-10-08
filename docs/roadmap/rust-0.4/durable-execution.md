@@ -37,7 +37,7 @@ Bake 0.3 is closer to durable execution than a typical session harness. The Rust
 | Interrupted turns | Synthetic closers end the open step and turn with `interrupted` | Recovery runs on load; an interrupted run does not continue unless the user resubmits |
 | Partial model output | `assistant/attempt` records stream records of an attempt | Scope 06 must state how much of a cut-off stream reaches the log and when |
 | Compaction | `compaction/start`, `compaction/summary`, `compaction/summary-error`, and `compaction/end` are logged | The summary is produced on the agent's critical path |
-| Child agents | `subagent/start`, `subagent/end`, and routing events are logged; `subagent/not-resumable` exists | Scope 11 must inventory which child state survives a restart |
+| Child agents | `subagent/catalog`, `subagent/descriptor`, and routing decisions are logged; `subagent/start` and `subagent/end` are in-process events, and `subagent/not-resumable` is a control notice | Scope 11 must inventory which child state survives a restart |
 | Background jobs | [`jobs-local`](../../../packages/jobs/README.md) runs and stores jobs in this process | Jobs do not survive the process |
 | UI state | The terminal renders authoritative projections ([analysis](analysis.md#execution-and-ownership)) | None in kind; the native transport should make the projection the only thing a client attaches to |
 
@@ -49,7 +49,7 @@ These rules change internal structure, not the model surface or the Session form
 
 Model the runtime's work as typed tasks with explicit states: *pending* (admitted but not started), *running*, *waiting* (on named child tasks, with an all-settled or fail-fast policy), *completing* (outcome decided, owned work still draining), and *terminal* (completed, failed, or aborted). In Rust these are values held by the agent's single owner task, not free-floating futures; each running task has one `JoinHandle` and one cancellation token derived from its owner.
 
-The durable footprint of a task is the Session events Bake already writes. A task's recovered status must be derivable from the log alone: `tool/call` without `tool/result` is a started tool task, an open `compaction/start` is an unfinished compaction, and so on. Scope 02 defines this derivation as a pure projection beside request reconstruction; the projection, not process memory, answers "what was unfinished".
+The durable footprint of a task is the Session events Bake already writes. A task's recovered status must be derivable from the log alone: a tool call the open step requested without a `tool/result` is a pending tool task, started if its `tool/call` is recorded; an open `compaction/start` is an unfinished compaction; and so on. Scope 02 defines this derivation as a pure projection beside request reconstruction; the projection, not process memory, answers "what was unfinished".
 
 ### 2. Record intent before effect, and classify replay
 
@@ -112,7 +112,7 @@ These additions extend the scope specifications in the [roadmap](README.md#scope
 
 | Scope | Addition | Proof |
 |---|---|---|
-| 02 | Pure *unfinished-work* projection: started-without-result tools, open compactions, open children, pending inbox | Matches 0.3 repair on every historical fixture; property cases over truncated logs at every row |
+| 02 | Pure *unfinished-work* projection: tool calls pending without a result, open compactions, open children (the parent's `subagent/catalog` entries), pending inbox | Matches 0.3 repair on every historical fixture; property cases over truncated logs at every row |
 | 03 | Group append and crash-after-every-row recovery | Kill the writer after each row of each group; every resulting log loads, repairs deterministically, and reconstructs a provider-valid request |
 | 05 | Ownership tree and the foreground/background boundary as the lifecycle primitive | Cancel and dispose at each node; no owned task, process, or timer outlives its owner |
 | 06 | Defined persistence point for partial streams | A crash mid-stream yields the same `assistant/attempt` content in both runtimes |
