@@ -7,8 +7,8 @@
  * stage with `sourceKind: 'decoded'`, and decodes the rows again into a
  * context that passes each event to `transformEvent` and each packed run to
  * `transformRun`, as production does, before finishing the stage. A refusal is
- * located at the header, at the index of the decoded event being migrated, or
- * at finish, and records whether the stage threw a `SessionFormatError`, a
+ * located at the header, at the first expanded seq of the decoded event or
+ * packed run being migrated, or at finish, and records whether the stage threw a `SessionFormatError`, a
  * `SessionFormatUnsupportedMigrationError`, or an engine error. The
  * development Rust `migrate_v1_to_v2_decoded` in `rust/crates/bake-session`
  * checks the same table. A `rust` native-subset marker names a case Rust
@@ -38,20 +38,20 @@ const REPO = new URL('../../../../', import.meta.url)
 const SCHEMA = 'bake/session-format-conformance/v1-to-v2-decoded-cases'
 const ORACLE = "sessionFormatV1ToV2.migrateHeader and assertReleasedV2Header over a strict releasedV0SessionFormatCodec or releasedV1SessionFormatCodec decoder, then createStage({ sourceKind: 'decoded' }); the decoder emits each event to transformEvent and each packed run to transformRun, then the stage finishes"
 /** Both harnesses pin the table size, so a dropped case fails. */
-const CASE_COUNT = 50
+const CASE_COUNT = 63
 /**
- * Native limits: an Assistant chunk, whose packed run the expanded Rust input cannot distinguish; a
- * non-string type, which the disposition lookup coerces; and the payload-check and transformed-stage
- * limits this table witnesses under their step's prefix.
+ * Native limits: a non-string type, which the disposition lookup coerces, and the payload-check and
+ * transformed-stage limits this table witnesses under their step's prefix.
  */
 const LIMITS = [
-  'assistant-chunk',
   'non-string-type',
   'payload/object-prototype-type',
   'payload/payload-float-lexeme',
   'payload/legacy-goal-message',
   'transformed/unchecked-shape',
   'transformed/undefined-member',
+  'transformed/float-lexeme',
+  'transformed/chunk-shape',
 ]
 
 type At = 'header' | 'finish' | number
@@ -131,9 +131,9 @@ function parseCase(value: unknown): DecodedCase {
 function loadTable(): DecodedCase[] {
   const table: unknown = JSON.parse(readFileSync(new URL('conformance/session/v1-to-v2-decoded-cases.json', REPO), 'utf8'))
   if (!isObject(table) || sortedKeys(table) !== 'cases,history,oracle,schema,version'
-    || table.schema !== SCHEMA || table.version !== 1 || table.oracle !== ORACLE || !Array.isArray(table.cases)
+    || table.schema !== SCHEMA || table.version !== 2 || table.oracle !== ORACLE || !Array.isArray(table.cases)
     || !Array.isArray(table.history) || !table.history.every(entry => typeof entry === 'string')) {
-    throw new Error('v1-to-v2-decoded-cases.json does not match its version-1 schema')
+    throw new Error('v1-to-v2-decoded-cases.json does not match its version-2 schema')
   }
   const cases = table.cases.map(parseCase)
   if (new Set(cases.map(entry => entry.id)).size !== cases.length) throw new Error('case ids must be unique')

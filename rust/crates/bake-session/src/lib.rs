@@ -51,8 +51,9 @@
 //! each run through the stage's `transformRun`, merging it into the
 //! attempt's stream, as a chain reading the file does.
 //! [`migrate_v1_to_v2_decoded`] runs the decoded stage production reads a v1
-//! file with: each payload checked at version 1, then the transformed stage;
-//! Assistant chunks are a native limit.
+//! file with over [`decode_v0_v1_items`] output: each event's payload checked
+//! at version 1, then the transformed stage, with each packed run sent
+//! through `transformRun` unchecked.
 //! [`migrate_released_v0_history`] reads a decoded v0 Session through all
 //! three edges to format v3, reporting the refusal TypeScript's streaming
 //! chain reports first; Assistant chunks and a decoded v1 Session are native

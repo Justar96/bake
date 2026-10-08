@@ -1,5 +1,5 @@
 //! Runs every shared case in `conformance/session/v1-to-v2-decoded-cases.json`
-//! through `decode_v0_v1_rows`, which must decode it strictly, and then
+//! through `decode_v0_v1_items`, which must decode it strictly, and then
 //! `migrate_v1_to_v2_decoded`, on both path platforms. A case's expected
 //! outcome is its `rust` native-subset marker when present, otherwise
 //! `expect`: what the released v1→v2 migration's header check and decoded
@@ -12,27 +12,28 @@ use std::path::PathBuf;
 
 use bake_session::{
     MigratedV1ToV2, PathPlatform, V1CodecRecovery, V1CodecVersion, V1ToV2DecodedClass,
-    V1ToV2DecodedRefusal, V1ToV2Location, decode_v0_v1_rows, migrate_v1_to_v2_decoded,
+    V1ToV2DecodedRefusal, V1ToV2Location, decode_v0_v1_items, migrate_v1_to_v2_decoded,
 };
 use serde_json::{Map, Value};
 
 const SCHEMA: &str = "bake/session-format-conformance/v1-to-v2-decoded-cases";
 const ORACLE: &str = "sessionFormatV1ToV2.migrateHeader and assertReleasedV2Header over a strict releasedV0SessionFormatCodec or releasedV1SessionFormatCodec decoder, then createStage({ sourceKind: 'decoded' }); the decoder emits each event to transformEvent and each packed run to transformRun, then the stage finishes";
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 50;
+const CASE_COUNT: usize = 63;
 /// The decoder's source budget; no case comes near it.
 const SOURCE_BUDGET: usize = 10_000;
 /// The decoded stage's own limits, and the payload-check and transformed-stage
 /// limits this table witnesses; the v0-to-v1 and v1-to-v2 tables witness the
 /// others.
-const LIMITS: [&str; 7] = [
-    "assistant-chunk",
+const LIMITS: [&str; 8] = [
     "non-string-type",
     "payload/object-prototype-type",
     "payload/payload-float-lexeme",
     "payload/legacy-goal-message",
     "transformed/unchecked-shape",
     "transformed/undefined-member",
+    "transformed/float-lexeme",
+    "transformed/chunk-shape",
 ];
 
 /// What a run must return.
@@ -154,7 +155,7 @@ fn load() -> Vec<Case> {
         BTreeSet::from(["schema", "version", "oracle", "history", "cases"])
     );
     assert_eq!(table["schema"], SCHEMA);
-    assert_eq!(table["version"], 1);
+    assert_eq!(table["version"], 2);
     assert_eq!(table["oracle"], ORACLE);
     assert!(
         table["history"]
@@ -339,7 +340,7 @@ fn shared_cases_match_on_both_platforms() {
     for entry in load() {
         let expected = entry.limit.as_ref().unwrap_or(&entry.expect);
         for platform in [PathPlatform::Posix, PathPlatform::Win32] {
-            let decoded = match decode_v0_v1_rows(
+            let decoded = match decode_v0_v1_items(
                 &entry.header,
                 &entry.rows,
                 entry.version,
