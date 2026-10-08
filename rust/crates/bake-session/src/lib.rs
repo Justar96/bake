@@ -89,11 +89,14 @@
 //! [`project_key`]: it creates, or finds and opens, a Session's current plain
 //! log as the backend's `create` and write `open` do, refusing an existing,
 //! missing, or duplicated id with TypeScript's message, and writes the
-//! model's bytes after each append or flush. A write `open` of a plain v0,
-//! v1, or v2 log migrates it as the backend does, through the recoverable
-//! released codec and every format edge, writing the encoded v3 log beside
-//! the unchanged source, or refuses with TypeScript's corruption or
-//! unsupported-migration message. The catalog's final check of the migrated
+//! model's bytes after each append or flush. It holds the Session
+//! directory's `session.lock` kernel write lock from a write `open`, or from
+//! a created handle's first write, until it is dropped, refusing a lock
+//! another handle holds with TypeScript's already-owned message. A write
+//! `open` of a plain v0, v1, or v2 log migrates it as the backend does,
+//! through the recoverable released codec and every format edge, writing the
+//! encoded v3 log beside the unchanged source, or refuses with TypeScript's
+//! corruption or unsupported-migration message. The catalog's final check of the migrated
 //! log, the publication's verifier, and `validateStoredEvents` are not run,
 //! so a log one of them refuses is outside that model's domain. It is the
 //! only part that reads or writes a file. The crate is
@@ -129,6 +132,7 @@ mod v1_to_v2;
 mod v1_to_v2_decoded;
 mod v2_to_v3;
 mod v3_row;
+mod write_lease;
 mod zstd;
 
 pub use boundary::{

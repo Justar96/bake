@@ -2,12 +2,13 @@
 //! that applies to this host through `PlainLogFile`, each in a directory this
 //! test owns and removes. A case seeds files and directories beneath its
 //! root, then runs its steps in order: `create` and `open` start a handle,
-//! `append` and `flush` use it, and `close` drops it. After each step every
-//! file beneath the root, `session.lock` excepted, must have the hand-written
-//! text, and no other file may exist. A thrown outcome maps to the refusal
-//! Rust claims: the exact already-exists, not-found, duplicate-id,
-//! contiguity, lossless-snapshot, corruption, or unsupported-migration
-//! message, with `{src}` rendered as the root joined with the step's `src`
+//! `append` and `flush` use it, and `close` drops it. A step names its
+//! handle, `a` unless `handle` says `b`. After each step every file beneath
+//! the root must have the hand-written text, a `session.lock` file read only
+//! by its size, since Windows refuses to read a locked range, and no other
+//! file may exist. A thrown outcome maps to the refusal Rust claims: the
+//! exact already-owned, already-exists, not-found, duplicate-id, contiguity,
+//! lossless-snapshot, corruption, or unsupported-migration message, with `{src}` rendered as the root joined with the step's `src`
 //! path, or `Unadmitted` for any other throw of a create or append. A `rust`
 //! override names a native limit, or marks the step outside the model's
 //! domain, which Rust does not run; either ends the case. Every limit must
@@ -25,9 +26,9 @@ use bake_session::{
 use serde_json::{Map, Value};
 
 const SCHEMA: &str = "bake/session-conformance/plain-log-file-cases";
-const ORACLE: &str = "in an owned temporary root holding the seeded entries, run each step through the JSONL backend with compression none: create, a write open, or the open handle's append, flush, or close; after each step list every file beneath the root except session.lock with its text";
+const ORACLE: &str = "in an owned temporary root holding the seeded entries, run each step through the JSONL backend with compression none on the step's handle, a or b, each its own backend instance over the root: create, a write open, or the open handle's append, flush, or close; after each step list every file beneath the root with its text, an empty session.lock by its size";
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 55;
+const CASE_COUNT: usize = 61;
 const SOURCE_BUDGET: usize = 64;
 const LIMITS: [&str; 12] = [
     "empty-id",
@@ -43,17 +44,19 @@ const LIMITS: [&str; 12] = [
     "migration/v2-codec-recovery",
     "migration/row/json-parser",
 ];
-const CLASSES: [&str; 7] = [
+const CLASSES: [&str; 8] = [
     "Error",
     "TypeError",
     "SessionFormatError",
     "SessionAlreadyExistsError",
+    "SessionAlreadyOwnedError",
     "SessionPersistenceNotFoundError",
     "SessionPersistenceCorruptionError",
     "SessionFormatUnsupportedError",
 ];
 const NOT_LOSSLESS: &str = "session event batch is not losslessly JSON-serializable because it contains non-JSON-serializable data";
 const LEASE_FILE: &str = "session.lock";
+const HANDLES: [&str; 2] = ["a", "b"];
 
 fn repo_path(relative: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -111,7 +114,7 @@ fn load() -> Vec<Map<String, Value>> {
         BTreeSet::from(["cases", "history", "oracle", "schema", "version"])
     );
     assert_eq!(table["schema"], SCHEMA);
-    assert_eq!(table["version"], 2);
+    assert_eq!(table["version"], 3);
     assert_eq!(table["oracle"], ORACLE);
     assert!(
         table["history"]
@@ -188,7 +191,8 @@ fn seed(root: &Path, entry: &Value, id: &str) {
     panic!("{id}: raw names {raw:?} need a Unix host");
 }
 
-/// Every file beneath `root` but `session.lock`, by `/`-joined relative path.
+/// Every file beneath `root`, by `/`-joined relative path; a `session.lock`
+/// file is listed as empty when its size is 0 and otherwise by its size.
 fn tree(root: &Path) -> BTreeMap<String, String> {
     fn walk(dir: &Path, prefix: &str, files: &mut BTreeMap<String, String>) {
         for entry in std::fs::read_dir(dir).expect("list") {
@@ -197,7 +201,15 @@ fn tree(root: &Path) -> BTreeMap<String, String> {
             let relative = format!("{prefix}{name}");
             if entry.file_type().expect("file type").is_dir() {
                 walk(&entry.path(), &format!("{relative}/"), files);
-            } else if name != LEASE_FILE {
+            } else if name == LEASE_FILE {
+                let size = entry.metadata().expect("lock metadata").len();
+                let text = if size == 0 {
+                    String::new()
+                } else {
+                    format!("<{size} bytes>")
+                };
+                files.insert(relative, text);
+            } else {
                 let text = std::fs::read_to_string(entry.path()).expect("UTF-8 file");
                 files.insert(relative, text);
             }
@@ -271,6 +283,7 @@ fn limit_matches(name: &str, refusal: &LogFileRefusal) -> bool {
 /// The kind of refusal Rust claims for a TypeScript throw of `step`.
 fn expected_kind(step: &str, class: &str, message: &str) -> &'static str {
     match (step, class) {
+        (_, "SessionAlreadyOwnedError") => "already-owned",
         (_, "SessionAlreadyExistsError") => "already-exists",
         (_, "SessionPersistenceNotFoundError") => "not-found",
         (_, "Error") if message.starts_with("duplicate JSONL session id ") => "duplicate",
@@ -286,6 +299,7 @@ fn expected_kind(step: &str, class: &str, message: &str) -> &'static str {
 
 fn kind(refusal: &LogFileRefusal) -> &'static str {
     match refusal {
+        LogFileRefusal::AlreadyOwned { .. } => "already-owned",
         LogFileRefusal::AlreadyExists { .. } => "already-exists",
         LogFileRefusal::NotFound { .. } => "not-found",
         LogFileRefusal::Duplicate { .. } => "duplicate",
@@ -350,16 +364,17 @@ fn named_limits(entry: &Map<String, Value>, id: &str) -> Vec<String> {
         .collect()
 }
 
-/// Run one step; `Some(handle)` replaces the handle on a create or open.
+/// Run one step on its handle, which a create or open fills.
 fn run_step(
     root: &Path,
     step: &Map<String, Value>,
-    handle: &mut Option<PlainLogFile>,
+    handles: &mut BTreeMap<&'static str, Option<PlainLogFile>>,
     context: &str,
 ) -> Result<(), LogFileRefusal> {
     let name = text(&step["step"], context);
     let allowed: &[&str] = match name {
         "create" => &[
+            "handle",
             "header",
             "inheritedEventCount",
             "rust",
@@ -367,19 +382,25 @@ fn run_step(
             "tree",
             "ts",
         ],
-        "open" => &["id", "rust", "src", "step", "tree", "ts"],
-        "append" => &["events", "rust", "step", "tree", "ts"],
-        "flush" => &["rust", "step", "tree", "ts"],
-        "close" => &["step", "tree", "ts"],
+        "open" => &["handle", "id", "rust", "src", "step", "tree", "ts"],
+        "append" => &["events", "handle", "rust", "step", "tree", "ts"],
+        "flush" => &["handle", "rust", "step", "tree", "ts"],
+        "close" => &["handle", "step", "tree", "ts"],
         other => panic!("{context}: unknown step {other}"),
     };
     assert!(
         keys(step).is_subset(&allowed.iter().copied().collect()),
         "{context}: keys"
     );
+    let label = step.get("handle").map_or("a", |label| text(label, context));
+    let label = *HANDLES
+        .iter()
+        .find(|known| **known == label)
+        .unwrap_or_else(|| panic!("{context}: unknown handle {label}"));
+    let handle = handles.entry(label).or_default();
     match name {
         "create" | "open" => {
-            assert!(handle.is_none(), "{context}: one handle at a time");
+            assert!(handle.is_none(), "{context}: one open value per handle");
             let opened = if name == "create" {
                 let count = step
                     .get("inheritedEventCount")
@@ -460,7 +481,10 @@ fn shared_cases_lay_out_and_write_like_the_typescript_backend() {
         for seeded in entry["seed"].as_array().expect("seed") {
             seed(root, seeded, id);
         }
-        let mut handle = None;
+        // Declared after the scratch directory, so the handles, and the
+        // locks Windows would not let the directory be removed under, drop
+        // first, on a panic too.
+        let mut handles = BTreeMap::new();
         for (index, step) in entry["steps"].as_array().expect("steps").iter().enumerate() {
             let context = format!("{id} step {index}");
             let step = object(step, &context);
@@ -473,7 +497,7 @@ fn shared_cases_lay_out_and_write_like_the_typescript_backend() {
                 outside_domain += 1;
                 break;
             }
-            let actual = run_step(root, step, &mut handle, &context);
+            let actual = run_step(root, step, &mut handles, &context);
             if let Some(rust) = step.get("rust") {
                 let limit = override_limit(rust, &context).expect("a limit");
                 let refusal = actual.expect_err(&format!("{context}: a limit refuses"));
@@ -514,6 +538,7 @@ fn shared_cases_lay_out_and_write_like_the_typescript_backend() {
         refusals,
         BTreeSet::from([
             "already-exists",
+            "already-owned",
             "append-unadmitted",
             "corrupt",
             "duplicate",

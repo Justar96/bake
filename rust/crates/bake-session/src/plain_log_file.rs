@@ -11,7 +11,9 @@
 //!   `findLog` resolves it. Nothing is written.
 //! - [`PlainLogFile::open`] is a write `open`: the root check, then `findLog`,
 //!   which must find exactly one project directory holding a canonical
-//!   generation, which must not be newer than the current one. A current
+//!   generation, then the Session directory's write lock, taken before the
+//!   generation is read; every later refusal releases the lock and keeps its
+//!   file. The generation must not be newer than the current one. A current
 //!   generation's bytes are opened as [`PlainAppendLog::open`] opens them,
 //!   and the selected path must be the one the header's id and `cwd` name.
 //!   An older generation, format v0, v1, or v2, is migrated as the backend
@@ -28,13 +30,26 @@
 //!   operation, then bring the file to the model's bytes, refused operations
 //!   included: a first write creates the Session directory and a new file
 //!   holding every byte, and a later one truncates the file to the bytes it
-//!   shares with the model and writes the rest.
+//!   shares with the model and writes the rest. A created handle first takes
+//!   the write lock, creating the Session directory, at its first flush or
+//!   its first batch that is neither empty nor refused for -0, before the
+//!   batch's contiguity check, as TypeScript's `ensureLease` does. The
+//!   opposite-encoding check TypeScript repeats before that lock is not
+//!   repeated: a Zstd log written after `create`, by a process outside this
+//!   model, is outside the domain.
 //!
-//! Dropping the value is the handle's `close`. The refusals TypeScript's
-//! `SessionAlreadyExistsError`, `SessionPersistenceNotFoundError`, and
-//! duplicate-id `Error` carry are returned with their exact messages, as are
-//! the `SessionPersistenceCorruptionError` and `SessionFormatUnsupportedError`
-//! a migration reports, which name the source path.
+//! The write lock is an exclusive kernel lock on the `session.lock` file in
+//! the Session directory, which is created and never removed, as
+//! TypeScript's `SessionWriteLease` takes it; a lock another handle holds is
+//! refused with `SessionAlreadyOwnedError`'s exact message, and a refused
+//! lock leaves a handle usable. Each value stands for a handle of its own
+//! backend instance, so two values of one Session are arbitrated by that
+//! lock alone. Dropping the value is the handle's `close`, which releases
+//! the lock. The refusals TypeScript's `SessionAlreadyExistsError`,
+//! `SessionPersistenceNotFoundError`, and duplicate-id `Error` carry are
+//! returned with their exact messages, as are the
+//! `SessionPersistenceCorruptionError` and `SessionFormatUnsupportedError` a
+//! migration reports, which name the source path.
 //!
 //! A migration's streaming order is recovered from batch stages: a refusal
 //! the codec raises at a row is reported only when reading the rows before
@@ -48,18 +63,21 @@
 //! that `path.resolve` leaves unchanged, with no `.` or `..` component and
 //! no trailing or repeated separator.
 //!
-//! The write lease and its `session.lock` file, fsync and directory sync,
-//! the publication's verifier, rollback after a failed write, file modes,
-//! Zstd compression, and the `validateStoredEvents` check of an opened log
-//! are not modelled. Opening a log TypeScript's validation refuses is
+//! A TypeScript backend instance's in-process write claims and pending
+//! creates, which refuse a second handle of one Session within that
+//! instance, are not modelled, and exclusion between a Rust value and a
+//! TypeScript handle is not tested. Fsync and directory sync, the
+//! publication's verifier, rollback after a failed write, file modes, Zstd
+//! compression, and the `validateStoredEvents` check of an opened log are
+//! not modelled. Opening a log TypeScript's validation refuses is
 //! outside this model's domain. So is migrating a log whose v3
 //! result the catalog's final check (`restoreReleasedV3Artifact`), the
 //! publication's verifier, or `validateStoredEvents` refuses: Rust writes the
 //! migrated file where TypeScript refuses and writes nothing. So is a path
 //! the filesystem refuses, such as one longer than a file or path name may
-//! be, a symlink, a root another process changes, or a second handle of the
-//! same Session open at once, which TypeScript refuses in-process. Every
-//! listing is visited in byte order of its UTF-8 names. A migration's
+//! be, a symlink, or a root another process changes, a lock file removed or
+//! replaced included. Every listing is visited in byte order of its UTF-8
+//! names. A migration's
 //! temporary file is removed after a failed write or link, and a failed
 //! removal is reported with that failure; one a killed process leaves is
 //! not a generation. After an I/O error in `append` or `flush` the file may
@@ -72,8 +90,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::Value;
 
+use crate::fork::holds_negative_zero;
 use crate::log_layout::{CURRENT_LOG_FILENAME, canonical_generation, encode_segment, log_path};
 use crate::released_rows::{ParseStop, parse_released_header, parse_released_rows};
+use crate::write_lease::{LeaseRefusal, WriteLease};
 use crate::{
     AppendRefusal, CURRENT_SESSION_FORMAT_VERSION, CreateRefusal, GenerationHeaderRefusal,
     HistoryLocation, HistoryRefusal, MigratedV2, PathPlatform, PlainAppendLog, ScanRefusal,
@@ -88,12 +108,20 @@ use crate::{
 pub struct PlainLogFile {
     path: PathBuf,
     log: PlainAppendLog,
+    /// The Session directory's write lock, held from a write `open` or from
+    /// a created handle's first write on.
+    lease: Option<WriteLease>,
     failed: bool,
 }
 
 /// Why an operation of [`PlainLogFile`] was refused.
 #[derive(Debug)]
 pub enum LogFileRefusal {
+    /// Another handle holds the Session directory's write lock; TypeScript
+    /// throws `SessionAlreadyOwnedError` with this exact message. The log
+    /// was neither read nor written; only the lock file and its directory
+    /// may have been created.
+    AlreadyOwned { message: String },
     /// `create` found a canonical generation of the id in exactly one project
     /// directory; TypeScript throws `SessionAlreadyExistsError` with this
     /// exact message.
@@ -129,7 +157,8 @@ impl LogFileRefusal {
     /// TypeScript's exact message, or `None` where none is claimed.
     pub fn message(&self) -> Option<&str> {
         match self {
-            Self::AlreadyExists { message }
+            Self::AlreadyOwned { message }
+            | Self::AlreadyExists { message }
             | Self::NotFound { message }
             | Self::Duplicate { message }
             | Self::Corrupt { message }
@@ -237,6 +266,7 @@ impl PlainLogFile {
         Ok(Self {
             path: log_path(root, cwd, &encoded),
             log,
+            lease: None,
             failed: false,
         })
     }
@@ -258,8 +288,15 @@ impl PlainLogFile {
                 message: format!("session \"{id}\" not found"),
             });
         };
+        // The lock is taken before the selected log is read, and a refusal
+        // from here on releases it and keeps its file.
+        let dir = selected
+            .path
+            .parent()
+            .ok_or_else(|| io::Error::other("a Session log path has a directory"))?;
+        let lease = acquire_lease(dir, id)?;
         if selected.version < CURRENT_SESSION_FORMAT_VERSION {
-            return Self::migrate(root, id, &encoded, &selected, source_budget);
+            return Self::migrate(root, id, &encoded, &selected, lease, source_budget);
         }
         if selected.version > CURRENT_SESSION_FORMAT_VERSION {
             return Err(LogFileRefusal::NativeSubset(LogFileLimit::NewerGeneration));
@@ -281,6 +318,7 @@ impl PlainLogFile {
         Ok(Self {
             path: selected.path,
             log,
+            lease: Some(lease),
             failed: false,
         })
     }
@@ -293,6 +331,7 @@ impl PlainLogFile {
         id: &str,
         encoded: &str,
         selected: &Generation,
+        lease: WriteLease,
         source_budget: usize,
     ) -> Result<Self, LogFileRefusal> {
         let bytes = fs::read(&selected.path)?;
@@ -359,6 +398,7 @@ impl PlainLogFile {
         Ok(Self {
             path,
             log,
+            lease: Some(lease),
             failed: false,
         })
     }
@@ -375,22 +415,44 @@ impl PlainLogFile {
 
     /// The handle's `append`, as [`PlainAppendLog::append`] runs it, with the
     /// file then brought to the model's bytes, even when the batch is refused
-    /// after a torn tail was truncated.
+    /// after a torn tail was truncated. A created handle takes the write lock
+    /// at its first batch that is neither empty nor refused for -0, before
+    /// the contiguity check, as TypeScript's `ensureLease` does.
     pub fn append(&mut self, events: &[Value]) -> Result<(), LogFileRefusal> {
         self.check_usable()?;
+        if !events.is_empty() && !events.iter().any(holds_negative_zero) {
+            self.ensure_lease()?;
+        }
         let before = self.log.bytes().map(<[u8]>::to_vec);
         let outcome = self.log.append(events);
         self.sync(before.as_deref())?;
         outcome.map_err(LogFileRefusal::Append)
     }
 
-    /// The handle's `flush`: an unwritten log's file is created holding the
-    /// header line alone; a written one is left as it is.
+    /// The handle's `flush`: an unwritten log takes the write lock, then its
+    /// file is created holding the header line alone; a written one is left
+    /// as it is.
     pub fn flush(&mut self) -> Result<(), LogFileRefusal> {
         self.check_usable()?;
+        if self.log.bytes().is_none() {
+            self.ensure_lease()?;
+        }
         let before = self.log.bytes().map(<[u8]>::to_vec);
         self.log.flush();
         self.sync(before.as_deref())
+    }
+
+    /// Take the Session directory's write lock unless it is held. A refusal
+    /// leaves the handle usable, so a later operation tries again.
+    fn ensure_lease(&mut self) -> Result<(), LogFileRefusal> {
+        if self.lease.is_none() {
+            let dir = self
+                .path
+                .parent()
+                .ok_or_else(|| io::Error::other("a Session log path has a directory"))?;
+            self.lease = Some(acquire_lease(dir, self.log.id())?);
+        }
+        Ok(())
     }
 
     fn check_usable(&self) -> Result<(), LogFileRefusal> {
@@ -684,6 +746,17 @@ fn publish_new_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
     // `path` holds the bytes; a leftover temporary is never a generation.
     let _ = fs::remove_file(&staged);
     Ok(())
+}
+
+/// The write lock of the Session directory `dir`, or TypeScript's
+/// `SessionAlreadyOwnedError` refusal for `id`.
+fn acquire_lease(dir: &Path, id: &str) -> Result<WriteLease, LogFileRefusal> {
+    WriteLease::acquire(dir).map_err(|refusal| match refusal {
+        LeaseRefusal::AlreadyOwned => LogFileRefusal::AlreadyOwned {
+            message: format!("session \"{id}\" is already owned by an active write handle"),
+        },
+        LeaseRefusal::Io(error) => LogFileRefusal::Io(error),
+    })
 }
 
 /// The id's path segment, or the [`LogFileLimit::WindowsName`] limit.
