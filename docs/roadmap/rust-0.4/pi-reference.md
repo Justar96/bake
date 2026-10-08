@@ -2,7 +2,7 @@
 
 ## Summary
 
-Use the latest official Pi agent codebase to inform Bake's Rust ownership, agent-loop, and integration design. This implements [D20](scope-00/support.md#decision-register). The references below are pinned source observations, not runtime qualification or permission to change Bake's retained contracts. Custom JavaScript/Cordis profiles and their migration are excluded by [D5](scope-00/support.md#decision-register); the native plugin API remains required by D6.
+Port the Rust harness primarily from the latest official Pi agent codebase ([D22](scope-00/support.md#decision-register)); Bake's TypeScript runtime is a selective reference. This page pins the Pi revisions inspected and maps their owners to Bake scopes. The revisions below were inspected under the earlier reference-only role ([D20](scope-00/support.md#decision-register)); refresh them before porting each scope. Custom JavaScript/Cordis profiles stay excluded by D5, and the native plugin API remains required by D6.
 
 ## Table of Contents
 
@@ -66,9 +66,9 @@ These are recommended candidates within their existing scope dependencies; they 
 
 ## Compatibility and adoption
 
-Bake's accepted support matrix, Session format 3, request reconstruction, tool contracts, and native conformance evidence remain authoritative. Pi's session format, experimental durable storage, TypeScript extension loader, package manager, and terminal implementation are not compatibility targets. Pi Durable's execution model informs the native runtime's internal structure through the separate [durable execution direction](durable-execution.md), which records its own Pi revision. Ratatui/Crossterm and the Bake-owned composer remain the [terminal direction](terminal.md). Review DeepSeek Harness selectively as the existing repository rules require.
+Under [D22](scope-00/support.md#decision-register), Pi's behavior is the default for the native harness. Bake's TypeScript runtime is ported only where it meets Bake's design, and the CLIProxyAPI provider route is a retained Bake contract. Whether 0.4 reads existing Bake sessions, and in which format it writes new ones, are [D23](scope-00/support.md#decision-register) and the reopened [D4](scope-00/support.md#decision-register). Pi's TypeScript extension loader and package manager stay excluded by [D5](scope-00/support.md#decision-register). Pi Durable's execution model informs the native runtime through the [durable execution direction](durable-execution.md), which records its own Pi revision.
 
-For each adopted behavior, record the exact Pi revision and source, explain the Bake requirement it serves, and verify it through the owning native scope. Changes to model-visible behavior require Bake's paired eval procedure. Retain the [MIT license and attribution](https://github.com/earendil-works/pi/blob/503c605528f9af993c0e37ede468cf884fb0ff5b/LICENSE) whenever code is copied or adapted. This reference adds no runtime dependency and closes no roadmap scope.
+For each adopted behavior, record the exact Pi revision and source and verify it through the owning native scope. Changes to model-visible behavior require Bake's paired eval procedure. Retain the [MIT license and attribution](https://github.com/earendil-works/pi/blob/503c605528f9af993c0e37ede468cf884fb0ff5b/LICENSE) whenever code is copied or adapted. This page adds no runtime dependency and closes no roadmap scope.
 
 ## Dev Note
 
