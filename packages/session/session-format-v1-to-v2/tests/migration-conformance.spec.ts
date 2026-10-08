@@ -11,9 +11,12 @@
  *
  * This is the stage a chain runs after v0→v1. Production reads a v1 file with
  * the decoded stage instead, which first checks each payload; that stage is not
- * compared here. A `rust` native-subset marker names a case Rust deliberately
- * does not decide; TypeScript still asserts its own outcome, including the
- * engine's `TypeError` text where the stage's unchecked casts throw.
+ * compared here. Packed chunk rows reach the stage as the decoder's expanded
+ * `assistant/chunk` events, not through `transformRun`. A `rust` native-subset
+ * marker names a case Rust deliberately does not decide; TypeScript still
+ * asserts its own outcome, including the engine's `TypeError` text where the
+ * stage's unchecked casts or the stream accumulator throw, and the `assertNever`
+ * text for an unknown chunk type.
  */
 
 import { readFileSync } from 'node:fs'
@@ -28,12 +31,18 @@ const REPO = new URL('../../../../', import.meta.url)
 const SCHEMA = 'bake/session-format-conformance/v1-to-v2-cases'
 const ORACLE = "sessionFormatV1ToV2.migrateHeader and assertReleasedV2Header over a strict releasedV0SessionFormatCodec or releasedV1SessionFormatCodec decode, then createStage({ sourceKind: 'transformed' }), transformEvent for each decoded event into a SessionFormatEventCollector, then finish"
 /** Both harnesses pin the table size, so a dropped case fails. */
-const CASE_COUNT = 107
+const CASE_COUNT = 180
 /**
- * Native limits: an Assistant chunk, a non-string event type, a value the stage casts without
- * checking, a fraction or exponent spelling the stage compares, and an emitted `undefined` member.
+ * Native limits: a chunk the stream accumulator refuses, a non-string event type, a value the stage
+ * casts without checking, a fraction or exponent spelling the stage compares or the accumulator
+ * reads, and an emitted `undefined` member.
  */
-const LIMITS = ['assistant-chunk', 'non-string-type', 'unchecked-shape', 'float-lexeme', 'undefined-member']
+const LIMITS = ['chunk-shape', 'non-string-type', 'unchecked-shape', 'float-lexeme', 'undefined-member']
+/**
+ * Limits whose cases may end in an engine error rather than a SessionFormatError: the stage's
+ * unchecked casts, and the accumulator's checks, which also read a fractional chunk time.
+ */
+const ENGINE_ERROR_LIMITS = ['chunk-shape', 'unchecked-shape', 'float-lexeme']
 
 type At = 'header' | 'finish' | number
 type Outcome =
@@ -111,10 +120,10 @@ interface Table {
 function loadTable(): Table {
   const table: unknown = JSON.parse(readFileSync(new URL('conformance/session/v1-to-v2-cases.json', REPO), 'utf8'))
   if (!isObject(table) || sortedKeys(table) !== 'cases,history,oracle,schema,version,vocabulary'
-    || table.schema !== SCHEMA || table.version !== 1 || table.oracle !== ORACLE || !Array.isArray(table.cases)
+    || table.schema !== SCHEMA || table.version !== 2 || table.oracle !== ORACLE || !Array.isArray(table.cases)
     || !Array.isArray(table.history) || !table.history.every(entry => typeof entry === 'string')
     || !isObject(table.vocabulary) || sortedKeys(table.vocabulary) !== 'objectPrototypeNames,releasedV0EventTypes') {
-    throw new Error('v1-to-v2-cases.json does not match its version-1 schema')
+    throw new Error('v1-to-v2-cases.json does not match its version-2 schema')
   }
   const cases = table.cases.map(parseCase)
   if (new Set(cases.map(entry => entry.id)).size !== cases.length) throw new Error('case ids must be unique')
@@ -139,13 +148,15 @@ function decode(entry: MigrationCase, header: unknown, rows: readonly unknown[])
 
 interface Observed {
   outcome: Outcome
-  /** The stage threw an engine error rather than a SessionFormatError. */
+  /** The stage threw a `TypeError` or an `assertNever` error rather than a SessionFormatError. */
   engineError: boolean
 }
 
 function refused(at: At, error: unknown): Observed {
   if (error instanceof SessionFormatError) return { outcome: { outcome: 'refused', at, message: error.message }, engineError: false }
-  if (error instanceof TypeError) return { outcome: { outcome: 'refused', at, message: error.message }, engineError: true }
+  if (error instanceof TypeError || error instanceof Error && error.message.startsWith('unreachable variant in ')) {
+    return { outcome: { outcome: 'refused', at, message: error.message }, engineError: true }
+  }
   throw error
 }
 
@@ -234,7 +245,7 @@ describe('shared v1 to v2 transformed-stage cases', () => {
       const actual = migrate(decoded)
       expect(ordered(actual.outcome), entry.id).toEqual(ordered(entry.expect))
       // Engine error text is pinned only where Rust names a limit.
-      if (actual.engineError) expect(entry.limit?.limit, `${entry.id} engine error`).toBe('unchecked-shape')
+      if (actual.engineError) expect(ENGINE_ERROR_LIMITS, `${entry.id} engine error`).toContain(entry.limit?.limit)
       expect(ordered([header, rows]), `${entry.id} inputs`).toEqual(before)
       expect(ordered(decoded.events), `${entry.id} decoded events`).toEqual(decodedBefore)
     })

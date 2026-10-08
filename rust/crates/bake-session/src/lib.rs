@@ -43,8 +43,9 @@
 //! [`migrate_v0_to_v1`] runs the v0→v1 migration over a decoded v0 Session;
 //! its output is the edge's, not an opened Session.
 //! [`migrate_v1_to_v2_transformed`] runs the released v1→v2 migration's
-//! transformed stage over a decoded v1 Session, without Assistant chunks; it
-//! is the stage a chain runs after v0→v1, not production's read of a v1 file.
+//! transformed stage over a decoded v1 Session, grouping its Assistant chunks,
+//! packed rows expanded, into attempts; it is the stage a chain runs after
+//! v0→v1, not production's read of a v1 file.
 //! [`token_usage`] folds a [`RestoredLog`]'s provider-reported token usage,
 //! and [`context_pressure`] its context occupancy with the surface's
 //! heuristic token total.
@@ -59,6 +60,7 @@
 //! None reads or writes a file or encodes a log. The crate is
 //! unstable and unshipped; the preview's `session inspect` and `session stat` use it.
 
+mod assistant_stream;
 mod boundary;
 mod envelope;
 mod fork;

@@ -19,11 +19,11 @@ use serde_json::{Map, Value};
 const SCHEMA: &str = "bake/session-format-conformance/v1-to-v2-cases";
 const ORACLE: &str = "sessionFormatV1ToV2.migrateHeader and assertReleasedV2Header over a strict releasedV0SessionFormatCodec or releasedV1SessionFormatCodec decode, then createStage({ sourceKind: 'transformed' }), transformEvent for each decoded event into a SessionFormatEventCollector, then finish";
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 107;
+const CASE_COUNT: usize = 180;
 /// The decoder's source budget; no case comes near it.
 const SOURCE_BUDGET: usize = 10_000;
 const LIMITS: [V1ToV2Limit; 5] = [
-    V1ToV2Limit::AssistantChunk,
+    V1ToV2Limit::ChunkShape,
     V1ToV2Limit::NonStringType,
     V1ToV2Limit::UncheckedShape,
     V1ToV2Limit::FloatLexeme,
@@ -141,7 +141,7 @@ fn load() -> Vec<Case> {
         ])
     );
     assert_eq!(table["schema"], SCHEMA);
-    assert_eq!(table["version"], 1);
+    assert_eq!(table["version"], 2);
     assert_eq!(table["oracle"], ORACLE);
     assert!(
         table["history"]
