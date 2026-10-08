@@ -984,6 +984,7 @@
     {"path":"packages/llm/token-meter/tests/token-meter.spec.ts","lane":"vitest-runtime","owner":"packages/llm/token-meter","scopes":["06","07"],"disposition":"reuse-oracle","basis":"packages/llm"},
     {"path":"packages/llm/token-meter/tests/token-usage-projection.spec.ts","lane":"vitest-runtime","owner":"packages/llm/token-meter","scopes":["06","07"],"disposition":"reuse-oracle","basis":"packages/llm"},
     {"path":"packages/llm/token-meter/tests/turn-usage.spec.ts","lane":"vitest-runtime","owner":"packages/llm/token-meter","scopes":["06","07"],"disposition":"reuse-oracle","basis":"packages/llm"},
+    {"path":"packages/llm/token-meter/tests/usage-conformance.spec.ts","lane":"vitest-runtime","owner":"packages/llm/token-meter","scopes":["06","07"],"disposition":"reuse-oracle","basis":"packages/llm"},
     {"path":"packages/mcp/mcp-client/tests/apply.spec.ts","lane":"vitest-runtime","owner":"packages/mcp/mcp-client","scopes":["12"],"disposition":"reuse-oracle","basis":"packages/mcp"},
     {"path":"packages/mcp/mcp-client/tests/egress.spec.ts","lane":"vitest-runtime","owner":"packages/mcp/mcp-client","scopes":["12"],"disposition":"reuse-oracle","basis":"packages/mcp"},
     {"path":"packages/mcp/mcp-client/tests/load-path.spec.ts","lane":"vitest-runtime","owner":"packages/mcp/mcp-client","scopes":["12"],"disposition":"reuse-oracle","basis":"packages/mcp"},

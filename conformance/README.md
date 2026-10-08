@@ -19,6 +19,7 @@ Compare TypeScript and Rust using controlled fixtures and independently checked 
 - [Plain log restoration cases](#plain-log-restoration-cases)
 - [Zstd log restoration cases](#zstd-log-restoration-cases)
 - [Session lookup cases](#session-lookup-cases)
+- [Token usage cases](#token-usage-cases)
 - [Runner contract](#runner-contract)
 - [Ownership and limits](#ownership-and-limits)
 
@@ -391,6 +392,19 @@ Every platform-limited case states its `platformReason`; symlink cases run on Li
 Directory order is unspecified: Rust visits entries in byte order and TypeScript in the operating system's. Each case holds one fault per stage, or faults whose order the source fixes, such as a legacy file before a mismatched generation in the same project, or a whole-root fault before a duplicate id. With faults in different directories, even the reported reason or the choice between refusal and failure can differ. Rust lists each directory once per stage where TypeScript lists the root twice. Neither harness takes an atomic snapshot of the root, and these cases claim no race behavior. Rust resolves a relative root lexically, as Node's POSIX `path.resolve` does, and `x/../root` and `./root/.` run on every platform. On Windows it uses `GetFullPathNameW` for relative and drive-absolute roots and refuses other spellings as native limits, which a Rust-only test checks there; no other Win32 spelling is compared with Node. Ids and roots are UTF-8, so lone surrogates are not covered; a Linux-only Rust test refuses a relative root under a working directory that is not UTF-8.
 
 The expectations were written from the TypeScript sources before either harness ran. The first TypeScript run showed one authoring mistake: the frozen v0 fixture had been expected to migrate, but the backend refuses it as unsupported, as `jsonl.spec.ts` also pins. The table's `amendments` records the corrected expectation and the added v2 case that migrates. Table version 2 added the 25 cases listed in `reviewAdditions` after a review of the first Rust candidate; their expectations were written from the TypeScript sources before their first run, and no earlier expectation changed. Restored counts reuse the expectations the [restoration](#plain-log-restoration-cases) and Zstd tables already authored.
+
+## Token usage cases
+
+[`session/usage-cases.json`](session/usage-cases.json) holds 34 edited runtime captures and the token-usage state token-meter folds from each. The [TypeScript spec](../packages/llm/token-meter/tests/usage-conformance.spec.ts) folds `tokenUsageProjectionDefinition.init` and `apply` from [`usage-projection.ts`](../packages/llm/token-meter/src/usage-projection.ts) over each case's `JSON.parse`d rows and their `interruptedTurnClosers`, and requires `Session.fromRestore`, without message projections, to admit the same events. The [Rust test](../rust/crates/bake-session/tests/usage_cases.rs) restores the same bytes with `restore_plain_log`, requires every case to restore with no torn tail, and folds the result with [`token_usage`](../rust/crates/bake-session/src/usage.rs).
+
+```sh
+bun run test:runtime packages/llm/token-meter/tests/usage-conformance.spec.ts
+(cd rust && cargo test --locked -p bake-session --test usage_cases)
+```
+
+Each Assistant settlement contributes one sample: an `assistant/message`'s own `usage` member when present, even `null`, otherwise the stream's last raw `usage` chunk, found as `lastAssistantStreamChunk` finds it, scanning backwards and stopping at the first hit, even one without a `usage` member. A sample for the coordinate the slot holds replaces it in the totals, an equal one changes nothing, and `llm/retry-started` with a strictly equal `turn` and `step` empties the slot, so the retried request adds. Missing or `null` cache counts are 0. `ts` is the folded `{totals, last}` state, or a `TypeError` and the seq of the event that throws it, written from the TypeScript sources and the committed captures before either harness ran. Each case edits one of the three [runtime captures](#runtime-request-reconstruction) as the [restoration table](#plain-log-restoration-cases) does, without header or tail edits.
+
+A `rust` override names a native limit and the refused seq, which must equal a TypeScript throw's: `number` for a sampled count not spelled as a safe integer (a fraction, an exponent, or out of range), which only an unqualified `assistant/attempt` stream can hold, or a running total past the safe-integer range; `usage` for a sample that is not an object or whose counts JavaScript would coerce; `stream` for a `null` record, or a `chunk` record whose `chunk` is absent or `null`, reached before a `usage` chunk; and `retry` for `llm/retry-started` data that is `null`, or lacks `turn` while the slot is empty. Of the 34 cases, 22 fold identically, 8 are TypeScript throws, and 4 are limits on input TypeScript folds through coercion or rounding. Both harnesses pin the case count and require every limit to be witnessed. Two negative controls were observed: dropping the `llm/retry-started` reset, or taking the first usage chunk instead of the last, fails `retry-started-closes-slot` in both arms. The fold does not cover `contextPressure`, turn usage, or pricing.
 
 ## Runner contract
 

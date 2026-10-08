@@ -33,6 +33,7 @@
 //! [`stage_plain_log`] and [`stage_zstd_log`] stop after the scan, so a caller
 //! can check the stored identity before [`StagedLog::restore`] runs the rest,
 //! and [`zstd_header_record`] decodes only a compressed log's header frame.
+//! [`token_usage`] folds a [`RestoredLog`]'s provider-reported token usage.
 //! None reads or writes a file or encodes a log. The crate is
 //! unstable and unshipped; only the preview's `session inspect` uses it.
 
@@ -44,6 +45,7 @@ mod request;
 mod restore;
 mod scan;
 mod source_event_seqs;
+mod usage;
 mod v3_row;
 mod zstd;
 
@@ -62,6 +64,9 @@ pub use scan::{FinishRejection, ScanIssue, ScanLimit, ScanRefusal, ScannedLog, s
 pub use source_event_seqs::{
     SourceEventSeqsLimit, SourceEventSeqsRefusal, SourceEventSeqsRejection,
     decode_source_event_seqs,
+};
+pub use usage::{
+    LastTokenUsage, TokenUsageBuckets, TokenUsageState, UsageLimit, UsageRefusal, token_usage,
 };
 pub use v3_row::{
     Coordinate, Endpoint, EventRejection, StructuralRejection, SystemRecord, V3CodecEvent, V3Limit,
