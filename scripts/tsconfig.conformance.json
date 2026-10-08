@@ -22,7 +22,8 @@
     "../packages/session/session-persistence-jsonl/tests/stat-conformance.spec.ts",
     "../packages/session/session-format-v2-to-v3/tests/source-event-seqs-conformance.spec.ts",
     "../packages/session/session-format-v2-to-v3/tests/event-envelope-conformance.spec.ts",
-    "../packages/session/session-format-v2-to-v3/tests/v3-row-conformance.spec.ts"
+    "../packages/session/session-format-v2-to-v3/tests/v3-row-conformance.spec.ts",
+    "../packages/session/session-format-v2-to-v3/tests/v2-to-v3-migration-conformance.spec.ts"
   ],
   "references": [
     { "path": "../vendor/cordis" },

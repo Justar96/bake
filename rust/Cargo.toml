@@ -29,3 +29,4 @@ unicode-segmentation = "=1.13.3"
 unicode-width = "=0.2.2"
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = { version = "=1.0.151", features = ["float_roundtrip", "preserve_order"] }
+sha2 = { version = "=0.10.9", default-features = false }

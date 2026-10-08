@@ -35,6 +35,9 @@
 //! and [`zstd_header_record`] decodes only a compressed log's header frame.
 //! [`read_generation_header_record`] reads any format's header record as
 //! `stat` does, migrated to current metadata or absent.
+//! [`migrate_v2_rows`] strictly decodes a released v2 Session's parsed header
+//! and rows and runs the v2→v3 migration over them; its output is not an
+//! opened Session, since the final check of the transformed log is not run.
 //! None reads or writes a file or encodes a log. The crate is
 //! unstable and unshipped; the preview's `session inspect` and `session stat` use it.
 
@@ -47,6 +50,7 @@ mod request;
 mod restore;
 mod scan;
 mod source_event_seqs;
+mod v2_to_v3;
 mod v3_row;
 mod zstd;
 
@@ -67,6 +71,7 @@ pub use source_event_seqs::{
     SourceEventSeqsLimit, SourceEventSeqsRefusal, SourceEventSeqsRejection,
     decode_source_event_seqs,
 };
+pub use v2_to_v3::{MigratedV2, V2ToV3Layer, V2ToV3Location, V2ToV3Refusal, migrate_v2_rows};
 pub use v3_row::{
     Coordinate, Endpoint, EventRejection, StructuralRejection, SystemRecord, V3CodecEvent, V3Limit,
     V3NumberField, V3Rejection, V3RowRefusal, V3Unsupported, decode_v3_row,
