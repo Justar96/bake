@@ -1127,6 +1127,7 @@
     {"path":"packages/session/session-title-first-prompt-llm/tests/provider.e2e.ts","lane":"vitest-integration","owner":"packages/session/session-title-first-prompt-llm","scopes":["09"],"disposition":"reuse-oracle","basis":"packages/session"},
     {"path":"packages/session/session-title-first-prompt-llm/tests/provider.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-title-first-prompt-llm","scopes":["09"],"disposition":"reuse-oracle","basis":"packages/session"},
     {"path":"packages/session/session-title-llm/tests/llm.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-title-llm","scopes":["09"],"disposition":"reuse-oracle","basis":"packages/session"},
+    {"path":"packages/session/session-title/tests/boundary-conformance.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-title","scopes":["09"],"disposition":"reuse-oracle","basis":"packages/session"},
     {"path":"packages/session/session-title/tests/invariant.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-title","scopes":["09"],"disposition":"reuse-oracle","basis":"packages/session"},
     {"path":"packages/session/session-title/tests/persistence.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-title","scopes":["09"],"disposition":"reuse-oracle","basis":"packages/session"},
     {"path":"packages/session/session-title/tests/projection.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-title","scopes":["09"],"disposition":"reuse-oracle","basis":"packages/session"},

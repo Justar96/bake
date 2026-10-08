@@ -27,6 +27,7 @@ Compare TypeScript and Rust using controlled fixtures and independently checked 
 - [Context pressure cases](#context-pressure-cases)
 - [Released v0 and v1 codec cases](#released-v0-and-v1-codec-cases)
 - [Goal projection cases](#goal-projection-cases)
+- [Turn boundary and title cases](#turn-boundary-and-title-cases)
 - [Runner contract](#runner-contract)
 - [Ownership and limits](#ownership-and-limits)
 
@@ -539,6 +540,28 @@ The cases cover:
 - unsupported versions, formatted with `String`, and non-goal payloads, which fail with `has an invalid kind`.
 
 A `rust` override names a native limit and the seq Rust refuses; TypeScript still asserts its own state. `number` marks a `goal/change` count spelled with a fraction or exponent, written as -0, or beyond `u64`, which Rust refuses rather than decides whether JavaScript reads it as a safe integer; `version-diagnostic` marks an unsupported `version` that JavaScript would format with `String` from a number other than a safe integer written without a fraction or exponent, or from an object or array, which Rust refuses rather than formats. Restoration already refuses such numbers in a `user/message`, so a goal source never reaches a limit. Of the 112 cases, 106 fold identically, 90 of them to a failure, and 6 are limits. Both harnesses pin the case count and require every limit to be witnessed. Three negative controls were observed: accepting any revision not below the current one fails `failure-freezes-state` in both arms (and `edit-same-revision` in TypeScript), folding after a failure fails `failure-freezes-state` in both, and trimming with Rust's `str::trim` fails `block-message-byte-order-mark`. The fold does not cover goal activation or the round driver.
+
+## Turn boundary and title cases
+
+[`session/boundary-cases.json`](session/boundary-cases.json) holds 52 logs, each the [tool-call-turn or dynamic-tools capture](#runtime-request-reconstruction) truncated, given a seeded header, or with rows appended, and the outcome of one fold over each: the turn-boundary projection or the title projection. The [TypeScript spec](../packages/session/session-title/tests/boundary-conformance.spec.ts) folds `init` and `apply` of `turnBoundaryProjectionDefinition` from [`agent-loop/src/index.ts`](../packages/core/agent-loop/src/index.ts), or of `titleProjectionDefinition` from [`session-title/src/index.ts`](../packages/session/session-title/src/index.ts) followed by its identity `wire.view`, over each case's `JSON.parse`d rows and their `interruptedTurnClosers`, and requires `Session.fromRestore`, without message projections, to admit the same events. The [Rust test](../rust/crates/bake-session/tests/boundary_cases.rs) restores the same bytes with `restore_plain_log`, requires every case to restore with no torn tail, and folds the result with [`turn_boundary` or `session_title`](../rust/crates/bake-session/src/boundary.rs).
+
+```sh
+bun run test:runtime packages/session/session-title/tests/boundary-conformance.spec.ts
+(cd rust && cargo test --locked -p bake-session --test boundary_cases)
+```
+
+A `turn/start` sets the open turn's seq and copies its `data.turn` into `lastTurn`, a `turn/end` clears the open turn, a `step/start` sets `lastStepStartSeq` and a `start` boundary, and a `step/end` sets only an `end` boundary. The title fold copies each `session/title`'s `data.title`. Neither fold validates what it copies. Restoration refuses `null` `turn/start` and `step/start` data and an open tail turn or step that is not a safe count, so the table cannot cover such a tail; it checks no other part of either payload. `ts` is the `{openTurnStartSeq, lastStepStartSeq, lastStepBoundary, lastTurn}` state or `{title}`; an absent `lastTurn` or `title` stands for JavaScript's `undefined`, and `{"threw": "TypeError"}` for a fold that throws. The expectations were written from the TypeScript sources before either harness ran.
+
+The cases cover:
+
+- the unedited captures, an empty log, and several closed turns, where `lastTurn` and the step seqs track the last;
+- interrupted tails, where the closers' `step/end` and `turn/end` move the boundary, including pending tool calls and a new turn that keeps the previous step seqs;
+- a `null` turn, which `interruptedTurnClosers` does not close, so the turn stays open;
+- a `step/end` without an open step, a `step/start` after the turn ended or with unread string data, and a `turn/end` without a turn;
+- seeded logs whose inherited prefix and end seed precede a further closed or interrupted turn, and a title inside the inherited prefix, then renamed;
+- turns and titles copied as strings, objects, `null`, negative and largest safe integers, and an empty string, and a title set, retitled, or followed by an interrupted turn.
+
+A `rust` override names a native limit and the seq Rust refuses; TypeScript still asserts its own outcome. `undefined-member` marks a final `lastTurn` or title read from data that is not an object holding the member, which JavaScript reads as `undefined`; `null-data` marks `null` `session/title` data, whose read throws a `TypeError` and ends the fold; and `number` marks a final copy holding a number written with a fraction or an exponent, as -0, or beyond the safe-integer range. Restoration already refuses `null` `turn/start` data. A limited copy that a later event overwrites is not refused. Of the 52 cases, 38 fold identically and 14 are limits, 3 of them TypeScript throws. Both harnesses pin the case count and require every limit and both folds to be witnessed. Two negative controls were observed in both arms: clearing `lastStepStartSeq` on `step/end` fails `capture-tool-call-turn`, and ignoring the closers fails `interrupted-open-turn`. In Rust, refusing a limited `lastTurn` when it is copied instead of at the end fails `fraction-turn-overwritten`. The folds do not cover the inbox, the title service, or Agent resume.
 
 ## Runner contract
 

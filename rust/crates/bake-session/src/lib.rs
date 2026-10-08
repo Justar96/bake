@@ -49,9 +49,12 @@
 //! [`RestoredLog`] into a child, or refuses as `SessionForkError` does.
 //! [`goal_projection`] folds a [`RestoredLog`]'s goal changes and goal rounds
 //! into its durable goal state, keeping the first replay failure.
+//! [`turn_boundary`] and [`session_title`] fold a [`RestoredLog`]'s turn and
+//! step boundaries and its latest title.
 //! None reads or writes a file or encodes a log. The crate is
 //! unstable and unshipped; the preview's `session inspect` and `session stat` use it.
 
+mod boundary;
 mod envelope;
 mod fork;
 mod generation_header;
@@ -71,6 +74,10 @@ mod v2_to_v3;
 mod v3_row;
 mod zstd;
 
+pub use boundary::{
+    BoundaryLimit, BoundaryRefusal, StepBoundary, StepBoundaryKind, TurnBoundaryState,
+    session_title, turn_boundary,
+};
 pub use envelope::{
     EnvelopeLimit, EnvelopeRefusal, EnvelopeRejection, NumberField, RequiredField,
     UnadmittedEnvelope, decode_row_envelope,
