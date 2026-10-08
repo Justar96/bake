@@ -28,7 +28,10 @@
 //! interrupted turn, and folds the Session's messages, with the catalog's
 //! `image/offload` projection applied, request header, tool history, and
 //! request context into an immutable [`RestoredLog`]. It is not
-//! Agent resume. [`restore_zstd_log`] restores default-format compressed bytes
+//! Agent resume. [`replay_restored_requests`] rebuilds the requests of a
+//! [`RestoredLog`]'s own dispatches, seeded, resumed, or migrated, with the
+//! `image/offload` projection applied, skipping cuts inside the inherited
+//! prefix. [`restore_zstd_log`] restores default-format compressed bytes
 //! with a caller-supplied plaintext budget and physical torn-tail metadata.
 //! [`stage_plain_log`] and [`stage_zstd_log`] stop after the scan, so a caller
 //! can check the stored identity before [`StagedLog::restore`] runs the rest,
@@ -148,6 +151,7 @@ mod repair;
 mod replay;
 mod request;
 mod restore;
+mod restored_replay;
 mod row_encode;
 mod scan;
 mod source_event_seqs;
@@ -206,6 +210,7 @@ pub use restore::{
     RestoreLimit, RestoreRefusal, RestoredLog, StagedLog, TornTail, Unsupported, restore_plain_log,
     stage_plain_log,
 };
+pub use restored_replay::{RestoredReplayLimit, RestoredReplayRefusal, replay_restored_requests};
 pub use row_encode::{EncodeLimit, EncodeRefusal, encode_event_line, encode_header_line};
 pub use scan::{FinishRejection, ScanIssue, ScanLimit, ScanRefusal, ScannedLog, scan_log};
 pub use source_event_seqs::{

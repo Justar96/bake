@@ -363,7 +363,7 @@ pub enum ReplayLimit {
 }
 
 /// One `(turn, step)` pair.
-type Coordinate = (u64, u64);
+pub(crate) type Coordinate = (u64, u64);
 
 /// Rebuild the request each dispatch sent, as `replayRequests` does.
 ///
@@ -518,7 +518,7 @@ fn safe_count(value: Option<&Value>) -> Option<u64> {
         .filter(|count| *count <= MAX_SAFE_INTEGER)
 }
 
-fn coordinate(data: &Value) -> Option<Coordinate> {
+pub(crate) fn coordinate(data: &Value) -> Option<Coordinate> {
     Some((safe_count(data.get("turn"))?, safe_count(data.get("step"))?))
 }
 

@@ -1004,6 +1004,7 @@
         "bake-session-persistence": "workspace:^",
         "bake-session-persistence-jsonl": "workspace:^",
         "bake-session-projection": "workspace:^",
+        "bake-session-query": "workspace:^",
         "bake-settings": "workspace:^",
         "bake-system-prompt": "workspace:^",
         "bake-tools": "workspace:^",

@@ -43,6 +43,7 @@ Compare TypeScript and Rust using controlled fixtures and independently checked 
 - [Prefix restoration cases](#prefix-restoration-cases)
 - [Released relationship cases](#released-relationship-cases)
 - [Cross-runtime write lease](#cross-runtime-write-lease)
+- [Restored request derivation cases](#restored-request-derivation-cases)
 - [Prompt admission cases](#prompt-admission-cases)
 - [Unfinished-work cases](#unfinished-work-cases)
 - [Runner contract](#runner-contract)
@@ -1018,6 +1019,33 @@ Both harnesses check the captures, pin the case count and distinct ids, and requ
 - naming row 8's time for the first closer of `dynamic-tools/10` fails that case in both arms.
 
 No capture has two calls pending at once, so call order among closers is checked only by the [plain log restoration](#plain-log-restoration-cases). Seeded and Zstd logs, request derivation, and Agent resume are not covered. These cases close no roadmap scope.
+
+## Restored request derivation cases
+
+[`runtime/restored-request-derivation-cases.json`](runtime/restored-request-derivation-cases.json) holds 32 Sessions, 28 of them edits of the three [runtime captures](#runtime-request-reconstruction) and 4 released v0, v1, or v2 files, and the requests derived from each restored Session. The [request derivation](#request-derivation-cases) helper `replayRequests` refuses a seeded log and constructs its Session without message projections, so the [TypeScript spec](../packages/core/agent-loop/tests/restored-request-derivation-conformance.spec.ts) composes its own oracle from production pieces. It restores a plain case with `scanLog`, `validateStoredEvents`, `interruptedTurnClosers`, and `Session.fromRestore`, as the [plain log restoration](#plain-log-restoration-cases) does, or writes a migrated case as `session.v<N>.jsonl` in an owned temporary root and reads it through the JSONL backend and `readColdSessionLog`, as the [migrated restoration](#migrated-restoration-cases) does. For each cut it then passes the events before it to `Session.fromRestore` with the inherited cut, `'detached'`, and the catalog's message projections, and assembles the request from `deriveMessages`, `toolHistory`, and `foldRequestHeader` exactly as `replayRequests` does. The [Rust test](../rust/crates/bake-session/tests/restored_replay_cases.rs) restores the same bytes with `restore_plain_log`, or migrates the same rows and restores them with `restore_migrated` under both path platforms, and calls [`replay_restored_requests`](../rust/crates/bake-session/src/restored_replay.rs).
+
+```sh
+bun run test:runtime packages/core/agent-loop/tests/restored-request-derivation-conformance.spec.ts
+(cd rust && cargo test --locked -p bake-session --test restored_replay_cases)
+```
+
+Cuts follow the `replayRequests` rule: each `step/start` in log order yields one request per Assistant settlement with its coordinate, and a step whose first settlement is missing or earlier refuses the log with `step <turn>.<step> has no later Assistant settlement`, even when that step is inherited. A cut below the inherited event count yields no request and is not checked for a header: `Session.fromRestore` refuses an inherited count beyond its seed, so the oracle cannot restore such an ancestor cut, and those prefixes are outside the domain. Every other cut is the Session's own dispatch and carries its own id; one without a header refuses with `step <turn>.<step> has no request header`. The inherited cut is the last tagged `session/end-seed`, the resume marker is an ordinary event, closers hold no settlement, and restoration takes no lossless snapshot, so a -0 in a payload no request carries refuses nothing. `ts` is the inherited cut and the requests, with `{"$log": pointer}` naming a value in the case's rows, or the rejection's exact message; Rust reports a rejection with the same message and names its cause. The cases cover:
+
+- the three unedited captures, a torn tail, an interrupted tail with closers, a resumed unseeded log, and a -0 in an ignorable unknown row;
+- fork children with no own settlement, an own turn, a changed header, an interrupted own turn, an own step without a settlement, a retried step, a resume after the cut, and a grandchild whose prefix holds an ancestor marker;
+- a `dynamic-tools` child forked after its second turn, whose own tool update joins the inherited tool history;
+- an `image/offload` decision in the inherited prefix and one projected into a later request only;
+- missing headers below and above the cut, an inherited step without a settlement, and a missing header that precedes a later missing settlement;
+- migrated v0 and v2 clean turns, a v1 packed run without a header, and a v2 seeded child whose step started before the cut and settles after it.
+
+A `rust` override names a native limit, which claims nothing: `coordinate` for a `step/start` or settlement coordinate that is not a non-negative safe integer written as an integer, which JavaScript compares with `===`; `repeated-coordinate` for two `step/start` rows with one coordinate; and `restore/number`, a [plain log restoration](#plain-log-restoration-cases) limit that refuses before derivation runs. Its case is a fractional `temperature`, which a released writer can produce, so [D21](../docs/roadmap/rust-0.4/scope-00/support.md#decision-register) requires a port there, not this limit. Of the 32 cases, 21 derive identically, 7 are rejections both arms report with the same message, and 4 are limits, 2 of them on logs TypeScript derives. Both harnesses pin the case count and require every limit and both rejection causes to be witnessed; Rust also requires `replay_requests` to refuse every seeded case as seeded. The expectations were written from the TypeScript sources before either harness ran, and both arms passed unchanged. These negative controls were observed:
+
+- emitting ancestor cuts fails the fork cases in Rust, and dropping the inherited filter fails 13 cases in TypeScript, where `Session.fromRestore` throws;
+- checking every step's settlement before any header fails `missing-header-precedes-later-missing-settlement` in Rust;
+- offloading the first image instead of the second in `image-offload-projected-into-later-request` fails it in both arms;
+- dropping a case fails the count pin in both arms, and folding without the `image/offload` projection fails the Rust table.
+
+Zstd input, Agent resume writes, and the header, `request/context`, and tool-update decisions the agent loop makes while dispatching are not covered. These cases close no roadmap scope.
 
 ## Prompt admission cases
 
