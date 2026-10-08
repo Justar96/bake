@@ -196,22 +196,39 @@ const fn unsupported_root(_: &Path) -> Option<&'static str> {
 
 /// Why a lookup ended before restoration: a refusal record (exit status 3)
 /// or an I/O failure (exit status 1).
-enum Stop {
+pub(crate) enum Stop {
     Refused(Box<Refused>),
     Failure(String),
 }
 
-struct Refused {
-    stage: &'static str,
-    reason: Option<&'static str>,
-    refusal: Refusal,
+pub(crate) struct Refused {
+    pub(crate) stage: &'static str,
+    pub(crate) reason: Option<&'static str>,
+    pub(crate) refusal: Refusal,
     /// The root-relative artifact the refusal names.
-    path: Option<String>,
+    pub(crate) path: Option<String>,
 }
 
-type Step<T> = Result<T, Stop>;
+impl Refused {
+    /// The record's `refusal` object.
+    pub(crate) fn to_json(&self) -> Value {
+        let refusal = &self.refusal;
+        json!({
+            "stage": self.stage,
+            "reason": self.reason,
+            "kind": refusal.kind.label(),
+            "message": refusal.message,
+            "path": self.path,
+            "line": refusal.line,
+            "seq": refusal.seq,
+            "offset": refusal.offset,
+        })
+    }
+}
 
-fn refused(
+pub(crate) type Step<T> = Result<T, Stop>;
+
+pub(crate) fn refused(
     stage: &'static str,
     reason: &'static str,
     kind: Kind,
@@ -227,17 +244,45 @@ fn refused(
 }
 
 /// The selected generation.
-struct Selected {
+pub(crate) struct Selected {
     /// Project directory name, a listed UTF-8 entry.
     project: String,
     name: String,
-    version: u64,
+    pub(crate) version: u64,
 }
 
 impl Selected {
-    fn relative(&self, id: &str) -> String {
+    pub(crate) fn relative(&self, id: &str) -> String {
         format!("{}/{}/{}", self.project, encode_segment(id), self.name)
     }
+
+    pub(crate) fn path(&self, root: &Path, id: &str) -> PathBuf {
+        root.join(&self.project)
+            .join(encode_segment(id))
+            .join(&self.name)
+    }
+}
+
+/// The root made absolute as TypeScript's backend resolves it.
+pub(crate) fn resolve(lookup: &LookupArgs) -> Result<PathBuf, String> {
+    resolve_root(&lookup.root)
+        .map_err(|error| format!("cannot resolve the root {:?}: {error}", lookup.root))
+}
+
+/// The root and id checks, `ensureRootEncoding`, and `findLog` for the
+/// resolved `root`: the selected generation, or `None` when no project holds
+/// the id.
+pub(crate) fn select(root: &Path, lookup: &LookupArgs) -> Step<Option<Selected>> {
+    check_root(&lookup.root, root)?;
+    check_name("lookup", &encode_segment(&lookup.id))?;
+    Scan {
+        root,
+        encoding: lookup.encoding,
+        max_entries: lookup.max_entries,
+        entries: 0,
+        stage: "layout",
+    }
+    .find(&lookup.id)
 }
 
 /// The directory listings of one lookup, bounded by `--max-entries`.
@@ -327,7 +372,7 @@ impl Scan<'_> {
     }
 
     /// `ensureRootEncoding`, then `findLog`.
-    fn find(&mut self, id: &str) -> Step<Selected> {
+    fn find(&mut self, id: &str) -> Step<Option<Selected>> {
         let projects = self.layout()?;
         self.stage = "lookup";
         let encoded = encode_segment(id);
@@ -382,15 +427,7 @@ impl Scan<'_> {
                 None,
             ));
         }
-        matches.pop().ok_or_else(|| {
-            refused(
-                "lookup",
-                "not-found",
-                Kind::NotFound,
-                format!("no Session {id:?} in the root"),
-                None,
-            )
-        })
+        Ok(matches.pop())
     }
 
     /// `ensureRootEncoding`: the real project directories, after refusing a
@@ -555,27 +592,25 @@ fn unsupported_windows_name(name: &str) -> bool {
 /// Run the lookup form, returning its record and exit status, or a
 /// diagnostic for exit status 1.
 pub fn run(args: &InspectArgs, lookup: &LookupArgs) -> Result<(Value, u8), String> {
-    let root = resolve_root(&lookup.root)
-        .map_err(|error| format!("cannot resolve the root {:?}: {error}", lookup.root))?;
-    let mut scan = Scan {
-        root: &root,
-        encoding: lookup.encoding,
-        max_entries: lookup.max_entries,
-        entries: 0,
-        stage: "layout",
-    };
+    let root = resolve(lookup)?;
     let mut file_bytes = None;
     let mut selected_path = None;
-    let outcome = check_root(&lookup.root, &root)
-        .and_then(|()| check_name("lookup", &encode_segment(&lookup.id)))
-        .and_then(|()| scan.find(&lookup.id))
+    let outcome = select(&root, lookup)
+        .and_then(|selected| {
+            selected.ok_or_else(|| {
+                refused(
+                    "lookup",
+                    "not-found",
+                    Kind::NotFound,
+                    format!("no Session {:?} in the root", lookup.id),
+                    None,
+                )
+            })
+        })
         .and_then(|selected| {
             let relative = selected.relative(&lookup.id);
             selected_path = Some(relative.clone());
-            let path = root
-                .join(&selected.project)
-                .join(encode_segment(&lookup.id))
-                .join(&selected.name);
+            let path = selected.path(&root, &lookup.id);
             if selected.version < CURRENT_SESSION_FORMAT_VERSION {
                 return Err(refused(
                     "generation",
@@ -632,20 +667,7 @@ pub fn run(args: &InspectArgs, lookup: &LookupArgs) -> Result<(Value, u8), Strin
         }
         Err(Stop::Failure(message)) => Err(message),
         Err(Stop::Refused(refused)) => {
-            let refusal = &refused.refusal;
-            record.insert(
-                "refusal".into(),
-                json!({
-                    "stage": refused.stage,
-                    "reason": refused.reason,
-                    "kind": refusal.kind.label(),
-                    "message": refusal.message,
-                    "path": refused.path,
-                    "line": refusal.line,
-                    "seq": refusal.seq,
-                    "offset": refusal.offset,
-                }),
-            );
+            record.insert("refusal".into(), refused.to_json());
             Ok((Value::Object(record), 3))
         }
     }
@@ -667,7 +689,7 @@ fn restore_stage(
 
 /// `assertStoredIdentity`: the header names the requested id, and its id and
 /// `cwd` name the selected file, by spelling or else by `realpath`.
-fn check_identity(
+pub(crate) fn check_identity(
     root: &Path,
     path: &Path,
     selected: &Selected,
