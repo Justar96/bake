@@ -89,6 +89,10 @@
 //! `subagent/catalog` facts into its direct-child catalog in event order,
 //! skipping inherited ones before validation and refusing at the first own
 //! fact that fails the payload schema.
+//! [`unfinished_work`] projects a [`RestoredLog`]'s unfinished work before
+//! the end seed Session construction appends: its open turn and step, its
+//! pending tool calls, its open compaction, its catalog children with their
+//! event seqs, and its pending inbox.
 //! [`encode_header_line`] and [`encode_event_line`] produce the exact text
 //! TypeScript writes for a current header record and one current event row,
 //! without the LF, or refuse with `Unadmitted` where TypeScript throws, or
@@ -144,6 +148,7 @@ mod scan;
 mod source_event_seqs;
 mod subagent;
 mod subagent_catalog;
+mod unfinished;
 mod usage;
 mod v0_to_v1;
 mod v1_codec;
@@ -205,6 +210,7 @@ pub use subagent::{
 pub use subagent_catalog::{
     SubagentCatalogEntry, SubagentCatalogMode, SubagentCatalogRefusal, subagent_catalog,
 };
+pub use unfinished::{OpenCompaction, OpenTurn, PendingToolCall, UnfinishedWork, unfinished_work};
 pub use usage::{
     LastTokenUsage, TokenUsageBuckets, TokenUsageState, UsageLimit, UsageRefusal, token_usage,
 };

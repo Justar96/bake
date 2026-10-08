@@ -8,7 +8,8 @@
     "inbox": "inboxProjectionDefinition.apply in packages/core/agent-loop/src/inbox.ts, folded from init() over each prefix's parsed rows and their interruptedTurnClosers"
   },
   "history": [
-    "Version 1: 224 cases, written from the TypeScript sources before any spec ran; no Rust arm reads it yet."
+    "Version 1: 224 cases, written from the TypeScript sources before any spec ran; no Rust arm reads it yet.",
+    "The Rust arm, rust/crates/bake-session/tests/unfinished_work_cases.rs, was added over the unchanged 224 cases and passed on its first run without any expectation change."
   ],
   "logs": {
     "tool-call-turn": {

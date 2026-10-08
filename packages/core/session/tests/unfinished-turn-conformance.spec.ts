@@ -8,7 +8,8 @@
  * end; each synthetic `tool/result` is one pending call, in closer order,
  * with its code and the recorded `tool/call` seq it cites. Three sibling
  * specs check the table's other fields with their own production functions,
- * and no Rust arm reads the table yet. This spec also rebuilds the two
+ * and `rust/crates/bake-session/tests/unfinished_work_cases.rs` checks all
+ * five fields against `unfinished_work`. This spec also rebuilds the two
  * logs materialized from `snapshots/` by their stated rule.
  */
 

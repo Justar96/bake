@@ -8,8 +8,8 @@
  * stored events and closers. A plain `Error` from `apply` is the refusal,
  * kept with its exact seq-tagged message. A `rust` override names an inbox
  * native limit and its seq; TypeScript still asserts its own outcome.
- * Sibling specs check the table's other fields; no Rust arm reads the
- * table yet.
+ * Sibling specs check the table's other fields, and the Rust arm checks all
+ * five fields.
  */
 
 import { createHash } from 'node:crypto'

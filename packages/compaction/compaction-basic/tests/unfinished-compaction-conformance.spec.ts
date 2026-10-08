@@ -11,7 +11,7 @@
  * throws `busy`, the open compaction is the last `compaction/start`; the
  * check's own backward scan stops at that start. The restored Session itself
  * must never be busy, since resume releases the lock. Sibling specs check
- * the table's other fields; no Rust arm reads the table yet.
+ * the table's other fields, and the Rust arm checks all five fields.
  */
 
 import { createHash } from 'node:crypto'

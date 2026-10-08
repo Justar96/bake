@@ -10,8 +10,8 @@
  * with the seq of the own catalog event it came from, in event order, with
  * repeated ids kept. A `ZodError` from `apply` is a refusal named by its
  * event's seq. `createdAt` keeps the sign of -0, which the table spells
- * `-0.0`. Sibling specs check the table's other fields; no Rust arm reads
- * the table yet.
+ * `-0.0`. Sibling specs check the table's other fields, and the Rust arm
+ * checks all five fields.
  */
 
 import { createHash } from 'node:crypto'
