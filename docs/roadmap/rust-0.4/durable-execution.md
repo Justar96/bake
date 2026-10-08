@@ -4,7 +4,7 @@
 
 Shape the native runtime so that every unit of agent work (a model request, a tool call, a compaction, a child agent, a background job) is an owned, typed task whose start, progress, and outcome are recoverable from the Session log. This page takes the task-and-scheduler model of Pi Durable as a design reference and applies it inside Bake's retained contracts: Session format 3 ([D4](scope-00/support.md#decision-register)), one serialized owner per agent, and reconstructable model requests. It adds internal structure and crash-recovery proofs to scopes 03 and 05–13. Changes the model or a released reader could observe are listed separately as post-0.4.0 candidates, each needing its own decision and paired eval.
 
-**Status: proposed direction, 2026-10-08.** Nothing here is implemented or qualified, and it changes no support decision. It was written against the 0.3 contracts; since [D22](scope-00/support.md#decision-register) made Pi the primary port source, its Session format 3 constraints hold only as far as [D23](scope-00/support.md#decision-register) and the reopened D4 keep them. Pi Durable's storage, API, and entry kinds are not adopted by this page.
+**Status: proposed direction, 2026-10-08.** Nothing here is implemented or qualified, and it changes no support decision. [D22](scope-00/support.md#decision-register) made Pi the primary port source while keeping Session format 3 and the model-visible surface, so the constraints below still hold. Pi Durable's storage, API, and entry kinds are not adopted by this page.
 
 ## Table of Contents
 
