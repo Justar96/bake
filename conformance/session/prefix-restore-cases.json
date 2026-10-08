@@ -1,0 +1,4228 @@
+{
+  "schema": "bake/session-conformance/prefix-restore-cases",
+  "version": 1,
+  "oracle": "restorePlainLog(prefix) in packages/session/session-persistence-jsonl/tests/prefix-restore-conformance.spec.ts: scanLog, validateStoredEvents, interruptedTurnClosers, then Session.fromRestore(..., \"detached\", currentSessionMessageProjections)",
+  "history": [
+    "Version 1: 71 cases, every row prefix of the three runtime captures, written from the TypeScript sources before either harness ran."
+  ],
+  "logs": {
+    "tool-call-turn": {
+      "path": "conformance/runtime/request-reconstruction/tool-call-turn/session.jsonl",
+      "header": {
+        "version": 3,
+        "id": "a1",
+        "createdAt": 1791337579861,
+        "isSeeded": false,
+        "delegationDepth": 0
+      },
+      "inheritedEventCount": 0
+    },
+    "dynamic-tools": {
+      "path": "conformance/runtime/request-reconstruction/dynamic-tools/session.jsonl",
+      "header": {
+        "version": 3,
+        "id": "dynamic-tools",
+        "createdAt": 1791376787048,
+        "isSeeded": false,
+        "delegationDepth": 0
+      },
+      "inheritedEventCount": 0
+    },
+    "retry-attempt": {
+      "path": "conformance/runtime/request-reconstruction/retry-attempt/session.jsonl",
+      "header": {
+        "version": 3,
+        "id": "retry-attempt",
+        "createdAt": 1791378812486,
+        "isSeeded": false,
+        "delegationDepth": 0
+      },
+      "inheritedEventCount": 0
+    }
+  },
+  "cases": [
+    {
+      "id": "tool-call-turn/0",
+      "log": "tool-call-turn",
+      "rows": 0,
+      "ts": {
+        "storedEventCount": 0,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [],
+        "requestHeader": null,
+        "toolHistory": {
+          "tools": [],
+          "updates": []
+        },
+        "requestContext": null
+      }
+    },
+    {
+      "id": "tool-call-turn/1",
+      "log": "tool-call-turn",
+      "rows": 1,
+      "ts": {
+        "storedEventCount": 1,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [],
+        "requestHeader": null,
+        "toolHistory": {
+          "tools": [],
+          "updates": []
+        },
+        "requestContext": null
+      }
+    },
+    {
+      "id": "tool-call-turn/2",
+      "log": "tool-call-turn",
+      "rows": 2,
+      "ts": {
+        "storedEventCount": 2,
+        "closers": [
+          {
+            "type": "turn/end",
+            "seq": 2,
+            "time": {
+              "$log": "/1/time"
+            },
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [],
+        "requestHeader": null,
+        "toolHistory": {
+          "tools": [],
+          "updates": []
+        },
+        "requestContext": null
+      }
+    },
+    {
+      "id": "tool-call-turn/3",
+      "log": "tool-call-turn",
+      "rows": 3,
+      "ts": {
+        "storedEventCount": 3,
+        "closers": [
+          {
+            "type": "turn/end",
+            "seq": 3,
+            "time": {
+              "$log": "/2/time"
+            },
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [],
+        "requestHeader": null,
+        "toolHistory": {
+          "tools": [],
+          "updates": []
+        },
+        "requestContext": null
+      }
+    },
+    {
+      "id": "tool-call-turn/4",
+      "log": "tool-call-turn",
+      "rows": 4,
+      "ts": {
+        "storedEventCount": 4,
+        "closers": [
+          {
+            "type": "step/end",
+            "seq": 4,
+            "time": {
+              "$log": "/3/time"
+            },
+            "data": {
+              "turn": 1,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 5,
+            "time": {
+              "$log": "/3/time"
+            },
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [],
+        "requestHeader": null,
+        "toolHistory": {
+          "tools": [],
+          "updates": []
+        },
+        "requestContext": null
+      }
+    },
+    {
+      "id": "tool-call-turn/5",
+      "log": "tool-call-turn",
+      "rows": 5,
+      "ts": {
+        "storedEventCount": 5,
+        "closers": [
+          {
+            "type": "step/end",
+            "seq": 5,
+            "time": {
+              "$log": "/4/time"
+            },
+            "data": {
+              "turn": 1,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 6,
+            "time": {
+              "$log": "/4/time"
+            },
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          }
+        ],
+        "requestHeader": null,
+        "toolHistory": {
+          "tools": [],
+          "updates": []
+        },
+        "requestContext": null
+      }
+    },
+    {
+      "id": "tool-call-turn/6",
+      "log": "tool-call-turn",
+      "rows": 6,
+      "ts": {
+        "storedEventCount": 6,
+        "closers": [
+          {
+            "type": "step/end",
+            "seq": 6,
+            "time": {
+              "$log": "/5/time"
+            },
+            "data": {
+              "turn": 1,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 7,
+            "time": {
+              "$log": "/5/time"
+            },
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          }
+        ],
+        "requestHeader": null,
+        "toolHistory": {
+          "tools": [],
+          "updates": []
+        },
+        "requestContext": null
+      }
+    },
+    {
+      "id": "tool-call-turn/7",
+      "log": "tool-call-turn",
+      "rows": 7,
+      "ts": {
+        "storedEventCount": 7,
+        "closers": [
+          {
+            "type": "step/end",
+            "seq": 7,
+            "time": {
+              "$log": "/6/time"
+            },
+            "data": {
+              "turn": 1,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 8,
+            "time": {
+              "$log": "/6/time"
+            },
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/6/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": null
+      }
+    },
+    {
+      "id": "tool-call-turn/8",
+      "log": "tool-call-turn",
+      "rows": 8,
+      "ts": {
+        "storedEventCount": 8,
+        "closers": [
+          {
+            "type": "step/end",
+            "seq": 8,
+            "time": {
+              "$log": "/7/time"
+            },
+            "data": {
+              "turn": 1,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 9,
+            "time": {
+              "$log": "/7/time"
+            },
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/6/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "tool-call-turn/9",
+      "log": "tool-call-turn",
+      "rows": 9,
+      "ts": {
+        "storedEventCount": 9,
+        "closers": [
+          {
+            "type": "tool/result",
+            "seq": 9,
+            "time": {
+              "$log": "/8/time"
+            },
+            "data": {
+              "turn": 1,
+              "step": 1,
+              "message": {
+                "id": "interrupted-tool-result-c1-9",
+                "role": "user",
+                "source": {
+                  "kind": "tool",
+                  "callId": "c1"
+                },
+                "content": [
+                  {
+                    "type": "tool-result",
+                    "toolCallId": "c1",
+                    "isError": true,
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "The tool call was interrupted before the Harness recorded it as started. Retry it if it is still needed."
+                      }
+                    ]
+                  }
+                ]
+              },
+              "error": {
+                "name": "ToolNotStartedError",
+                "code": "TOOL_NOT_STARTED"
+              }
+            },
+            "surfaceOp": "append"
+          },
+          {
+            "type": "step/end",
+            "seq": 10,
+            "time": {
+              "$log": "/8/time"
+            },
+            "data": {
+              "turn": 1,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 11,
+            "time": {
+              "$log": "/8/time"
+            },
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$closer": "/0/data/message"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/6/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "tool-call-turn/10",
+      "log": "tool-call-turn",
+      "rows": 10,
+      "ts": {
+        "storedEventCount": 10,
+        "closers": [
+          {
+            "type": "tool/result",
+            "seq": 10,
+            "time": {
+              "$log": "/9/time"
+            },
+            "data": {
+              "turn": 1,
+              "step": 1,
+              "message": {
+                "id": "interrupted-tool-result-c1-10",
+                "role": "user",
+                "source": {
+                  "kind": "tool",
+                  "callId": "c1"
+                },
+                "content": [
+                  {
+                    "type": "tool-result",
+                    "toolCallId": "c1",
+                    "isError": true,
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "The tool call was interrupted after it was recorded, but no result was durably recorded. Its outcome is unknown. Decide whether to retry from the tool semantics: retry only if the operation is read-only or idempotent; if it may have side effects, first verify external state or ask the user. Do not retry blindly."
+                      }
+                    ]
+                  }
+                ]
+              },
+              "error": {
+                "name": "ToolOutcomeUnknownError",
+                "code": "TOOL_OUTCOME_UNKNOWN"
+              }
+            },
+            "surfaceOp": "append",
+            "sourceEventSeqs": [
+              9
+            ]
+          },
+          {
+            "type": "step/end",
+            "seq": 11,
+            "time": {
+              "$log": "/9/time"
+            },
+            "data": {
+              "turn": 1,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 12,
+            "time": {
+              "$log": "/9/time"
+            },
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$closer": "/0/data/message"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/6/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "tool-call-turn/11",
+      "log": "tool-call-turn",
+      "rows": 11,
+      "ts": {
+        "storedEventCount": 11,
+        "closers": [
+          {
+            "type": "step/end",
+            "seq": 11,
+            "time": {
+              "$log": "/10/time"
+            },
+            "data": {
+              "turn": 1,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 12,
+            "time": {
+              "$log": "/10/time"
+            },
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/6/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "tool-call-turn/12",
+      "log": "tool-call-turn",
+      "rows": 12,
+      "ts": {
+        "storedEventCount": 12,
+        "closers": [
+          {
+            "type": "turn/end",
+            "seq": 12,
+            "time": {
+              "$log": "/11/time"
+            },
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/6/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "tool-call-turn/13",
+      "log": "tool-call-turn",
+      "rows": 13,
+      "ts": {
+        "storedEventCount": 13,
+        "closers": [
+          {
+            "type": "step/end",
+            "seq": 13,
+            "time": {
+              "$log": "/12/time"
+            },
+            "data": {
+              "turn": 1,
+              "step": 2
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 14,
+            "time": {
+              "$log": "/12/time"
+            },
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/6/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "tool-call-turn/14",
+      "log": "tool-call-turn",
+      "rows": 14,
+      "ts": {
+        "storedEventCount": 14,
+        "closers": [
+          {
+            "type": "step/end",
+            "seq": 14,
+            "time": {
+              "$log": "/13/time"
+            },
+            "data": {
+              "turn": 1,
+              "step": 2
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 15,
+            "time": {
+              "$log": "/13/time"
+            },
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/6/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "tool-call-turn/15",
+      "log": "tool-call-turn",
+      "rows": 15,
+      "ts": {
+        "storedEventCount": 15,
+        "closers": [
+          {
+            "type": "turn/end",
+            "seq": 15,
+            "time": {
+              "$log": "/14/time"
+            },
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/6/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "tool-call-turn/16",
+      "log": "tool-call-turn",
+      "rows": 16,
+      "ts": {
+        "storedEventCount": 16,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/6/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "dynamic-tools/0",
+      "log": "dynamic-tools",
+      "rows": 0,
+      "ts": {
+        "storedEventCount": 0,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [],
+        "requestHeader": null,
+        "toolHistory": {
+          "tools": [],
+          "updates": []
+        },
+        "requestContext": null
+      }
+    },
+    {
+      "id": "dynamic-tools/1",
+      "log": "dynamic-tools",
+      "rows": 1,
+      "ts": {
+        "storedEventCount": 1,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [],
+        "requestHeader": null,
+        "toolHistory": {
+          "tools": [],
+          "updates": []
+        },
+        "requestContext": null
+      }
+    },
+    {
+      "id": "dynamic-tools/2",
+      "log": "dynamic-tools",
+      "rows": 2,
+      "ts": {
+        "storedEventCount": 2,
+        "closers": [
+          {
+            "type": "turn/end",
+            "seq": 2,
+            "time": {
+              "$log": "/1/time"
+            },
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [],
+        "requestHeader": null,
+        "toolHistory": {
+          "tools": [],
+          "updates": []
+        },
+        "requestContext": null
+      }
+    },
+    {
+      "id": "dynamic-tools/3",
+      "log": "dynamic-tools",
+      "rows": 3,
+      "ts": {
+        "storedEventCount": 3,
+        "closers": [
+          {
+            "type": "turn/end",
+            "seq": 3,
+            "time": {
+              "$log": "/2/time"
+            },
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [],
+        "requestHeader": null,
+        "toolHistory": {
+          "tools": [],
+          "updates": []
+        },
+        "requestContext": null
+      }
+    },
+    {
+      "id": "dynamic-tools/4",
+      "log": "dynamic-tools",
+      "rows": 4,
+      "ts": {
+        "storedEventCount": 4,
+        "closers": [
+          {
+            "type": "step/end",
+            "seq": 4,
+            "time": {
+              "$log": "/3/time"
+            },
+            "data": {
+              "turn": 1,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 5,
+            "time": {
+              "$log": "/3/time"
+            },
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [],
+        "requestHeader": null,
+        "toolHistory": {
+          "tools": [],
+          "updates": []
+        },
+        "requestContext": null
+      }
+    },
+    {
+      "id": "dynamic-tools/5",
+      "log": "dynamic-tools",
+      "rows": 5,
+      "ts": {
+        "storedEventCount": 5,
+        "closers": [
+          {
+            "type": "step/end",
+            "seq": 5,
+            "time": {
+              "$log": "/4/time"
+            },
+            "data": {
+              "turn": 1,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 6,
+            "time": {
+              "$log": "/4/time"
+            },
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          }
+        ],
+        "requestHeader": null,
+        "toolHistory": {
+          "tools": [],
+          "updates": []
+        },
+        "requestContext": null
+      }
+    },
+    {
+      "id": "dynamic-tools/6",
+      "log": "dynamic-tools",
+      "rows": 6,
+      "ts": {
+        "storedEventCount": 6,
+        "closers": [
+          {
+            "type": "step/end",
+            "seq": 6,
+            "time": {
+              "$log": "/5/time"
+            },
+            "data": {
+              "turn": 1,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 7,
+            "time": {
+              "$log": "/5/time"
+            },
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          }
+        ],
+        "requestHeader": null,
+        "toolHistory": {
+          "tools": [],
+          "updates": []
+        },
+        "requestContext": null
+      }
+    },
+    {
+      "id": "dynamic-tools/7",
+      "log": "dynamic-tools",
+      "rows": 7,
+      "ts": {
+        "storedEventCount": 7,
+        "closers": [
+          {
+            "type": "step/end",
+            "seq": 7,
+            "time": {
+              "$log": "/6/time"
+            },
+            "data": {
+              "turn": 1,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 8,
+            "time": {
+              "$log": "/6/time"
+            },
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/6/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": null
+      }
+    },
+    {
+      "id": "dynamic-tools/8",
+      "log": "dynamic-tools",
+      "rows": 8,
+      "ts": {
+        "storedEventCount": 8,
+        "closers": [
+          {
+            "type": "step/end",
+            "seq": 8,
+            "time": {
+              "$log": "/7/time"
+            },
+            "data": {
+              "turn": 1,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 9,
+            "time": {
+              "$log": "/7/time"
+            },
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/6/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "dynamic-tools/9",
+      "log": "dynamic-tools",
+      "rows": 9,
+      "ts": {
+        "storedEventCount": 9,
+        "closers": [
+          {
+            "type": "tool/result",
+            "seq": 9,
+            "time": {
+              "$log": "/8/time"
+            },
+            "data": {
+              "turn": 1,
+              "step": 1,
+              "message": {
+                "id": "interrupted-tool-result-c1-9",
+                "role": "user",
+                "source": {
+                  "kind": "tool",
+                  "callId": "c1"
+                },
+                "content": [
+                  {
+                    "type": "tool-result",
+                    "toolCallId": "c1",
+                    "isError": true,
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "The tool call was interrupted before the Harness recorded it as started. Retry it if it is still needed."
+                      }
+                    ]
+                  }
+                ]
+              },
+              "error": {
+                "name": "ToolNotStartedError",
+                "code": "TOOL_NOT_STARTED"
+              }
+            },
+            "surfaceOp": "append"
+          },
+          {
+            "type": "step/end",
+            "seq": 10,
+            "time": {
+              "$log": "/8/time"
+            },
+            "data": {
+              "turn": 1,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 11,
+            "time": {
+              "$log": "/8/time"
+            },
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$closer": "/0/data/message"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/6/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "dynamic-tools/10",
+      "log": "dynamic-tools",
+      "rows": 10,
+      "ts": {
+        "storedEventCount": 10,
+        "closers": [
+          {
+            "type": "tool/result",
+            "seq": 10,
+            "time": {
+              "$log": "/9/time"
+            },
+            "data": {
+              "turn": 1,
+              "step": 1,
+              "message": {
+                "id": "interrupted-tool-result-c1-10",
+                "role": "user",
+                "source": {
+                  "kind": "tool",
+                  "callId": "c1"
+                },
+                "content": [
+                  {
+                    "type": "tool-result",
+                    "toolCallId": "c1",
+                    "isError": true,
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "The tool call was interrupted after it was recorded, but no result was durably recorded. Its outcome is unknown. Decide whether to retry from the tool semantics: retry only if the operation is read-only or idempotent; if it may have side effects, first verify external state or ask the user. Do not retry blindly."
+                      }
+                    ]
+                  }
+                ]
+              },
+              "error": {
+                "name": "ToolOutcomeUnknownError",
+                "code": "TOOL_OUTCOME_UNKNOWN"
+              }
+            },
+            "surfaceOp": "append",
+            "sourceEventSeqs": [
+              9
+            ]
+          },
+          {
+            "type": "step/end",
+            "seq": 11,
+            "time": {
+              "$log": "/9/time"
+            },
+            "data": {
+              "turn": 1,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 12,
+            "time": {
+              "$log": "/9/time"
+            },
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$closer": "/0/data/message"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/6/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "dynamic-tools/11",
+      "log": "dynamic-tools",
+      "rows": 11,
+      "ts": {
+        "storedEventCount": 11,
+        "closers": [
+          {
+            "type": "step/end",
+            "seq": 11,
+            "time": {
+              "$log": "/10/time"
+            },
+            "data": {
+              "turn": 1,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 12,
+            "time": {
+              "$log": "/10/time"
+            },
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/6/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "dynamic-tools/12",
+      "log": "dynamic-tools",
+      "rows": 12,
+      "ts": {
+        "storedEventCount": 12,
+        "closers": [
+          {
+            "type": "turn/end",
+            "seq": 12,
+            "time": {
+              "$log": "/11/time"
+            },
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/6/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "dynamic-tools/13",
+      "log": "dynamic-tools",
+      "rows": 13,
+      "ts": {
+        "storedEventCount": 13,
+        "closers": [
+          {
+            "type": "step/end",
+            "seq": 13,
+            "time": {
+              "$log": "/12/time"
+            },
+            "data": {
+              "turn": 1,
+              "step": 2
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 14,
+            "time": {
+              "$log": "/12/time"
+            },
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/6/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "dynamic-tools/14",
+      "log": "dynamic-tools",
+      "rows": 14,
+      "ts": {
+        "storedEventCount": 14,
+        "closers": [
+          {
+            "type": "step/end",
+            "seq": 14,
+            "time": {
+              "$log": "/13/time"
+            },
+            "data": {
+              "turn": 1,
+              "step": 2
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 15,
+            "time": {
+              "$log": "/13/time"
+            },
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/13/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/13/data/header/tools/0"
+            },
+            {
+              "$log": "/13/data/header/tools/1"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "dynamic-tools/15",
+      "log": "dynamic-tools",
+      "rows": 15,
+      "ts": {
+        "storedEventCount": 15,
+        "closers": [
+          {
+            "type": "step/end",
+            "seq": 15,
+            "time": {
+              "$log": "/14/time"
+            },
+            "data": {
+              "turn": 1,
+              "step": 2
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 16,
+            "time": {
+              "$log": "/14/time"
+            },
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/13/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": [
+            {
+              "afterMessageId": "5491e94a-9b9d-48cb-a0f8-7e0cd7e9c916",
+              "additions": [
+                {
+                  "$log": "/13/data/header/tools/0"
+                }
+              ],
+              "removals": []
+            }
+          ]
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "dynamic-tools/16",
+      "log": "dynamic-tools",
+      "rows": 16,
+      "ts": {
+        "storedEventCount": 16,
+        "closers": [
+          {
+            "type": "step/end",
+            "seq": 16,
+            "time": {
+              "$log": "/15/time"
+            },
+            "data": {
+              "turn": 1,
+              "step": 2
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 17,
+            "time": {
+              "$log": "/15/time"
+            },
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/15/data/message"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/13/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": [
+            {
+              "afterMessageId": "5491e94a-9b9d-48cb-a0f8-7e0cd7e9c916",
+              "additions": [
+                {
+                  "$log": "/13/data/header/tools/0"
+                }
+              ],
+              "removals": []
+            }
+          ]
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "dynamic-tools/17",
+      "log": "dynamic-tools",
+      "rows": 17,
+      "ts": {
+        "storedEventCount": 17,
+        "closers": [
+          {
+            "type": "turn/end",
+            "seq": 17,
+            "time": {
+              "$log": "/16/time"
+            },
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/15/data/message"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/13/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": [
+            {
+              "afterMessageId": "5491e94a-9b9d-48cb-a0f8-7e0cd7e9c916",
+              "additions": [
+                {
+                  "$log": "/13/data/header/tools/0"
+                }
+              ],
+              "removals": []
+            }
+          ]
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "dynamic-tools/18",
+      "log": "dynamic-tools",
+      "rows": 18,
+      "ts": {
+        "storedEventCount": 18,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/15/data/message"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/13/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": [
+            {
+              "afterMessageId": "5491e94a-9b9d-48cb-a0f8-7e0cd7e9c916",
+              "additions": [
+                {
+                  "$log": "/13/data/header/tools/0"
+                }
+              ],
+              "removals": []
+            }
+          ]
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "dynamic-tools/19",
+      "log": "dynamic-tools",
+      "rows": 19,
+      "ts": {
+        "storedEventCount": 19,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/15/data/message"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/13/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": [
+            {
+              "afterMessageId": "5491e94a-9b9d-48cb-a0f8-7e0cd7e9c916",
+              "additions": [
+                {
+                  "$log": "/13/data/header/tools/0"
+                }
+              ],
+              "removals": []
+            }
+          ]
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "dynamic-tools/20",
+      "log": "dynamic-tools",
+      "rows": 20,
+      "ts": {
+        "storedEventCount": 20,
+        "closers": [
+          {
+            "type": "turn/end",
+            "seq": 20,
+            "time": {
+              "$log": "/19/time"
+            },
+            "data": {
+              "turn": 2,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/15/data/message"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/13/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": [
+            {
+              "afterMessageId": "5491e94a-9b9d-48cb-a0f8-7e0cd7e9c916",
+              "additions": [
+                {
+                  "$log": "/13/data/header/tools/0"
+                }
+              ],
+              "removals": []
+            }
+          ]
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "dynamic-tools/21",
+      "log": "dynamic-tools",
+      "rows": 21,
+      "ts": {
+        "storedEventCount": 21,
+        "closers": [
+          {
+            "type": "turn/end",
+            "seq": 21,
+            "time": {
+              "$log": "/20/time"
+            },
+            "data": {
+              "turn": 2,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/15/data/message"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/13/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": [
+            {
+              "afterMessageId": "5491e94a-9b9d-48cb-a0f8-7e0cd7e9c916",
+              "additions": [
+                {
+                  "$log": "/13/data/header/tools/0"
+                }
+              ],
+              "removals": []
+            }
+          ]
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "dynamic-tools/22",
+      "log": "dynamic-tools",
+      "rows": 22,
+      "ts": {
+        "storedEventCount": 22,
+        "closers": [
+          {
+            "type": "step/end",
+            "seq": 22,
+            "time": {
+              "$log": "/21/time"
+            },
+            "data": {
+              "turn": 2,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 23,
+            "time": {
+              "$log": "/21/time"
+            },
+            "data": {
+              "turn": 2,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/15/data/message"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/13/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": [
+            {
+              "afterMessageId": "5491e94a-9b9d-48cb-a0f8-7e0cd7e9c916",
+              "additions": [
+                {
+                  "$log": "/13/data/header/tools/0"
+                }
+              ],
+              "removals": []
+            }
+          ]
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "dynamic-tools/23",
+      "log": "dynamic-tools",
+      "rows": 23,
+      "ts": {
+        "storedEventCount": 23,
+        "closers": [
+          {
+            "type": "step/end",
+            "seq": 23,
+            "time": {
+              "$log": "/22/time"
+            },
+            "data": {
+              "turn": 2,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 24,
+            "time": {
+              "$log": "/22/time"
+            },
+            "data": {
+              "turn": 2,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/15/data/message"
+          },
+          {
+            "$log": "/22/data"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/13/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": [
+            {
+              "afterMessageId": "5491e94a-9b9d-48cb-a0f8-7e0cd7e9c916",
+              "additions": [
+                {
+                  "$log": "/13/data/header/tools/0"
+                }
+              ],
+              "removals": []
+            }
+          ]
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "dynamic-tools/24",
+      "log": "dynamic-tools",
+      "rows": 24,
+      "ts": {
+        "storedEventCount": 24,
+        "closers": [
+          {
+            "type": "step/end",
+            "seq": 24,
+            "time": {
+              "$log": "/23/time"
+            },
+            "data": {
+              "turn": 2,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 25,
+            "time": {
+              "$log": "/23/time"
+            },
+            "data": {
+              "turn": 2,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/15/data/message"
+          },
+          {
+            "$log": "/22/data"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/23/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/23/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "dynamic-tools/25",
+      "log": "dynamic-tools",
+      "rows": 25,
+      "ts": {
+        "storedEventCount": 25,
+        "closers": [
+          {
+            "type": "step/end",
+            "seq": 25,
+            "time": {
+              "$log": "/24/time"
+            },
+            "data": {
+              "turn": 2,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 26,
+            "time": {
+              "$log": "/24/time"
+            },
+            "data": {
+              "turn": 2,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/15/data/message"
+          },
+          {
+            "$log": "/22/data"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/23/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": [
+            {
+              "afterMessageId": "5491e94a-9b9d-48cb-a0f8-7e0cd7e9c916",
+              "additions": [
+                {
+                  "$log": "/13/data/header/tools/0"
+                }
+              ],
+              "removals": []
+            },
+            {
+              "afterMessageId": "a51892aa-8df9-4751-8654-f0b9606000ac",
+              "additions": [],
+              "removals": [
+                "fetch"
+              ]
+            }
+          ]
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "dynamic-tools/26",
+      "log": "dynamic-tools",
+      "rows": 26,
+      "ts": {
+        "storedEventCount": 26,
+        "closers": [
+          {
+            "type": "step/end",
+            "seq": 26,
+            "time": {
+              "$log": "/25/time"
+            },
+            "data": {
+              "turn": 2,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 27,
+            "time": {
+              "$log": "/25/time"
+            },
+            "data": {
+              "turn": 2,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/15/data/message"
+          },
+          {
+            "$log": "/22/data"
+          },
+          {
+            "$log": "/25/data/message"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/23/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": [
+            {
+              "afterMessageId": "5491e94a-9b9d-48cb-a0f8-7e0cd7e9c916",
+              "additions": [
+                {
+                  "$log": "/13/data/header/tools/0"
+                }
+              ],
+              "removals": []
+            },
+            {
+              "afterMessageId": "a51892aa-8df9-4751-8654-f0b9606000ac",
+              "additions": [],
+              "removals": [
+                "fetch"
+              ]
+            }
+          ]
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "dynamic-tools/27",
+      "log": "dynamic-tools",
+      "rows": 27,
+      "ts": {
+        "storedEventCount": 27,
+        "closers": [
+          {
+            "type": "turn/end",
+            "seq": 27,
+            "time": {
+              "$log": "/26/time"
+            },
+            "data": {
+              "turn": 2,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/15/data/message"
+          },
+          {
+            "$log": "/22/data"
+          },
+          {
+            "$log": "/25/data/message"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/23/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": [
+            {
+              "afterMessageId": "5491e94a-9b9d-48cb-a0f8-7e0cd7e9c916",
+              "additions": [
+                {
+                  "$log": "/13/data/header/tools/0"
+                }
+              ],
+              "removals": []
+            },
+            {
+              "afterMessageId": "a51892aa-8df9-4751-8654-f0b9606000ac",
+              "additions": [],
+              "removals": [
+                "fetch"
+              ]
+            }
+          ]
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "dynamic-tools/28",
+      "log": "dynamic-tools",
+      "rows": 28,
+      "ts": {
+        "storedEventCount": 28,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/15/data/message"
+          },
+          {
+            "$log": "/22/data"
+          },
+          {
+            "$log": "/25/data/message"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/23/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": [
+            {
+              "afterMessageId": "5491e94a-9b9d-48cb-a0f8-7e0cd7e9c916",
+              "additions": [
+                {
+                  "$log": "/13/data/header/tools/0"
+                }
+              ],
+              "removals": []
+            },
+            {
+              "afterMessageId": "a51892aa-8df9-4751-8654-f0b9606000ac",
+              "additions": [],
+              "removals": [
+                "fetch"
+              ]
+            }
+          ]
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "dynamic-tools/29",
+      "log": "dynamic-tools",
+      "rows": 29,
+      "ts": {
+        "storedEventCount": 29,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/15/data/message"
+          },
+          {
+            "$log": "/22/data"
+          },
+          {
+            "$log": "/25/data/message"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/23/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": [
+            {
+              "afterMessageId": "5491e94a-9b9d-48cb-a0f8-7e0cd7e9c916",
+              "additions": [
+                {
+                  "$log": "/13/data/header/tools/0"
+                }
+              ],
+              "removals": []
+            },
+            {
+              "afterMessageId": "a51892aa-8df9-4751-8654-f0b9606000ac",
+              "additions": [],
+              "removals": [
+                "fetch"
+              ]
+            }
+          ]
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "dynamic-tools/30",
+      "log": "dynamic-tools",
+      "rows": 30,
+      "ts": {
+        "storedEventCount": 30,
+        "closers": [
+          {
+            "type": "turn/end",
+            "seq": 30,
+            "time": {
+              "$log": "/29/time"
+            },
+            "data": {
+              "turn": 3,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/15/data/message"
+          },
+          {
+            "$log": "/22/data"
+          },
+          {
+            "$log": "/25/data/message"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/23/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": [
+            {
+              "afterMessageId": "5491e94a-9b9d-48cb-a0f8-7e0cd7e9c916",
+              "additions": [
+                {
+                  "$log": "/13/data/header/tools/0"
+                }
+              ],
+              "removals": []
+            },
+            {
+              "afterMessageId": "a51892aa-8df9-4751-8654-f0b9606000ac",
+              "additions": [],
+              "removals": [
+                "fetch"
+              ]
+            }
+          ]
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "dynamic-tools/31",
+      "log": "dynamic-tools",
+      "rows": 31,
+      "ts": {
+        "storedEventCount": 31,
+        "closers": [
+          {
+            "type": "turn/end",
+            "seq": 31,
+            "time": {
+              "$log": "/30/time"
+            },
+            "data": {
+              "turn": 3,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/15/data/message"
+          },
+          {
+            "$log": "/22/data"
+          },
+          {
+            "$log": "/25/data/message"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/23/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": [
+            {
+              "afterMessageId": "5491e94a-9b9d-48cb-a0f8-7e0cd7e9c916",
+              "additions": [
+                {
+                  "$log": "/13/data/header/tools/0"
+                }
+              ],
+              "removals": []
+            },
+            {
+              "afterMessageId": "a51892aa-8df9-4751-8654-f0b9606000ac",
+              "additions": [],
+              "removals": [
+                "fetch"
+              ]
+            }
+          ]
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "dynamic-tools/32",
+      "log": "dynamic-tools",
+      "rows": 32,
+      "ts": {
+        "storedEventCount": 32,
+        "closers": [
+          {
+            "type": "step/end",
+            "seq": 32,
+            "time": {
+              "$log": "/31/time"
+            },
+            "data": {
+              "turn": 3,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 33,
+            "time": {
+              "$log": "/31/time"
+            },
+            "data": {
+              "turn": 3,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/15/data/message"
+          },
+          {
+            "$log": "/22/data"
+          },
+          {
+            "$log": "/25/data/message"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/23/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": [
+            {
+              "afterMessageId": "5491e94a-9b9d-48cb-a0f8-7e0cd7e9c916",
+              "additions": [
+                {
+                  "$log": "/13/data/header/tools/0"
+                }
+              ],
+              "removals": []
+            },
+            {
+              "afterMessageId": "a51892aa-8df9-4751-8654-f0b9606000ac",
+              "additions": [],
+              "removals": [
+                "fetch"
+              ]
+            }
+          ]
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "dynamic-tools/33",
+      "log": "dynamic-tools",
+      "rows": 33,
+      "ts": {
+        "storedEventCount": 33,
+        "closers": [
+          {
+            "type": "step/end",
+            "seq": 33,
+            "time": {
+              "$log": "/32/time"
+            },
+            "data": {
+              "turn": 3,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 34,
+            "time": {
+              "$log": "/32/time"
+            },
+            "data": {
+              "turn": 3,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/15/data/message"
+          },
+          {
+            "$log": "/22/data"
+          },
+          {
+            "$log": "/25/data/message"
+          },
+          {
+            "$log": "/32/data"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/23/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": [
+            {
+              "afterMessageId": "5491e94a-9b9d-48cb-a0f8-7e0cd7e9c916",
+              "additions": [
+                {
+                  "$log": "/13/data/header/tools/0"
+                }
+              ],
+              "removals": []
+            },
+            {
+              "afterMessageId": "a51892aa-8df9-4751-8654-f0b9606000ac",
+              "additions": [],
+              "removals": [
+                "fetch"
+              ]
+            }
+          ]
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "dynamic-tools/34",
+      "log": "dynamic-tools",
+      "rows": 34,
+      "ts": {
+        "storedEventCount": 34,
+        "closers": [
+          {
+            "type": "step/end",
+            "seq": 34,
+            "time": {
+              "$log": "/33/time"
+            },
+            "data": {
+              "turn": 3,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 35,
+            "time": {
+              "$log": "/33/time"
+            },
+            "data": {
+              "turn": 3,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/15/data/message"
+          },
+          {
+            "$log": "/22/data"
+          },
+          {
+            "$log": "/25/data/message"
+          },
+          {
+            "$log": "/32/data"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/33/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/33/data/header/tools/0"
+            },
+            {
+              "$log": "/33/data/header/tools/1"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "dynamic-tools/35",
+      "log": "dynamic-tools",
+      "rows": 35,
+      "ts": {
+        "storedEventCount": 35,
+        "closers": [
+          {
+            "type": "step/end",
+            "seq": 35,
+            "time": {
+              "$log": "/34/time"
+            },
+            "data": {
+              "turn": 3,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 36,
+            "time": {
+              "$log": "/34/time"
+            },
+            "data": {
+              "turn": 3,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/15/data/message"
+          },
+          {
+            "$log": "/22/data"
+          },
+          {
+            "$log": "/25/data/message"
+          },
+          {
+            "$log": "/32/data"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/33/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": [
+            {
+              "afterMessageId": "5491e94a-9b9d-48cb-a0f8-7e0cd7e9c916",
+              "additions": [
+                {
+                  "$log": "/13/data/header/tools/0"
+                }
+              ],
+              "removals": []
+            },
+            {
+              "afterMessageId": "a51892aa-8df9-4751-8654-f0b9606000ac",
+              "additions": [],
+              "removals": [
+                "fetch"
+              ]
+            },
+            {
+              "afterMessageId": "53b71392-013c-4f89-a9ff-4638c35dfe62",
+              "additions": [
+                {
+                  "$log": "/33/data/header/tools/0"
+                }
+              ],
+              "removals": []
+            }
+          ]
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "dynamic-tools/36",
+      "log": "dynamic-tools",
+      "rows": 36,
+      "ts": {
+        "storedEventCount": 36,
+        "closers": [
+          {
+            "type": "step/end",
+            "seq": 36,
+            "time": {
+              "$log": "/35/time"
+            },
+            "data": {
+              "turn": 3,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 37,
+            "time": {
+              "$log": "/35/time"
+            },
+            "data": {
+              "turn": 3,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/15/data/message"
+          },
+          {
+            "$log": "/22/data"
+          },
+          {
+            "$log": "/25/data/message"
+          },
+          {
+            "$log": "/32/data"
+          },
+          {
+            "$log": "/35/data/message"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/33/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": [
+            {
+              "afterMessageId": "5491e94a-9b9d-48cb-a0f8-7e0cd7e9c916",
+              "additions": [
+                {
+                  "$log": "/13/data/header/tools/0"
+                }
+              ],
+              "removals": []
+            },
+            {
+              "afterMessageId": "a51892aa-8df9-4751-8654-f0b9606000ac",
+              "additions": [],
+              "removals": [
+                "fetch"
+              ]
+            },
+            {
+              "afterMessageId": "53b71392-013c-4f89-a9ff-4638c35dfe62",
+              "additions": [
+                {
+                  "$log": "/33/data/header/tools/0"
+                }
+              ],
+              "removals": []
+            }
+          ]
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "dynamic-tools/37",
+      "log": "dynamic-tools",
+      "rows": 37,
+      "ts": {
+        "storedEventCount": 37,
+        "closers": [
+          {
+            "type": "turn/end",
+            "seq": 37,
+            "time": {
+              "$log": "/36/time"
+            },
+            "data": {
+              "turn": 3,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/15/data/message"
+          },
+          {
+            "$log": "/22/data"
+          },
+          {
+            "$log": "/25/data/message"
+          },
+          {
+            "$log": "/32/data"
+          },
+          {
+            "$log": "/35/data/message"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/33/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": [
+            {
+              "afterMessageId": "5491e94a-9b9d-48cb-a0f8-7e0cd7e9c916",
+              "additions": [
+                {
+                  "$log": "/13/data/header/tools/0"
+                }
+              ],
+              "removals": []
+            },
+            {
+              "afterMessageId": "a51892aa-8df9-4751-8654-f0b9606000ac",
+              "additions": [],
+              "removals": [
+                "fetch"
+              ]
+            },
+            {
+              "afterMessageId": "53b71392-013c-4f89-a9ff-4638c35dfe62",
+              "additions": [
+                {
+                  "$log": "/33/data/header/tools/0"
+                }
+              ],
+              "removals": []
+            }
+          ]
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "dynamic-tools/38",
+      "log": "dynamic-tools",
+      "rows": 38,
+      "ts": {
+        "storedEventCount": 38,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/15/data/message"
+          },
+          {
+            "$log": "/22/data"
+          },
+          {
+            "$log": "/25/data/message"
+          },
+          {
+            "$log": "/32/data"
+          },
+          {
+            "$log": "/35/data/message"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/33/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": [
+            {
+              "afterMessageId": "5491e94a-9b9d-48cb-a0f8-7e0cd7e9c916",
+              "additions": [
+                {
+                  "$log": "/13/data/header/tools/0"
+                }
+              ],
+              "removals": []
+            },
+            {
+              "afterMessageId": "a51892aa-8df9-4751-8654-f0b9606000ac",
+              "additions": [],
+              "removals": [
+                "fetch"
+              ]
+            },
+            {
+              "afterMessageId": "53b71392-013c-4f89-a9ff-4638c35dfe62",
+              "additions": [
+                {
+                  "$log": "/33/data/header/tools/0"
+                }
+              ],
+              "removals": []
+            }
+          ]
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "retry-attempt/0",
+      "log": "retry-attempt",
+      "rows": 0,
+      "ts": {
+        "storedEventCount": 0,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [],
+        "requestHeader": null,
+        "toolHistory": {
+          "tools": [],
+          "updates": []
+        },
+        "requestContext": null
+      }
+    },
+    {
+      "id": "retry-attempt/1",
+      "log": "retry-attempt",
+      "rows": 1,
+      "ts": {
+        "storedEventCount": 1,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [],
+        "requestHeader": null,
+        "toolHistory": {
+          "tools": [],
+          "updates": []
+        },
+        "requestContext": null
+      }
+    },
+    {
+      "id": "retry-attempt/2",
+      "log": "retry-attempt",
+      "rows": 2,
+      "ts": {
+        "storedEventCount": 2,
+        "closers": [
+          {
+            "type": "turn/end",
+            "seq": 2,
+            "time": {
+              "$log": "/1/time"
+            },
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [],
+        "requestHeader": null,
+        "toolHistory": {
+          "tools": [],
+          "updates": []
+        },
+        "requestContext": null
+      }
+    },
+    {
+      "id": "retry-attempt/3",
+      "log": "retry-attempt",
+      "rows": 3,
+      "ts": {
+        "storedEventCount": 3,
+        "closers": [
+          {
+            "type": "turn/end",
+            "seq": 3,
+            "time": {
+              "$log": "/2/time"
+            },
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [],
+        "requestHeader": null,
+        "toolHistory": {
+          "tools": [],
+          "updates": []
+        },
+        "requestContext": null
+      }
+    },
+    {
+      "id": "retry-attempt/4",
+      "log": "retry-attempt",
+      "rows": 4,
+      "ts": {
+        "storedEventCount": 4,
+        "closers": [
+          {
+            "type": "step/end",
+            "seq": 4,
+            "time": {
+              "$log": "/3/time"
+            },
+            "data": {
+              "turn": 1,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 5,
+            "time": {
+              "$log": "/3/time"
+            },
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [],
+        "requestHeader": null,
+        "toolHistory": {
+          "tools": [],
+          "updates": []
+        },
+        "requestContext": null
+      }
+    },
+    {
+      "id": "retry-attempt/5",
+      "log": "retry-attempt",
+      "rows": 5,
+      "ts": {
+        "storedEventCount": 5,
+        "closers": [
+          {
+            "type": "step/end",
+            "seq": 5,
+            "time": {
+              "$log": "/4/time"
+            },
+            "data": {
+              "turn": 1,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 6,
+            "time": {
+              "$log": "/4/time"
+            },
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          }
+        ],
+        "requestHeader": null,
+        "toolHistory": {
+          "tools": [],
+          "updates": []
+        },
+        "requestContext": null
+      }
+    },
+    {
+      "id": "retry-attempt/6",
+      "log": "retry-attempt",
+      "rows": 6,
+      "ts": {
+        "storedEventCount": 6,
+        "closers": [
+          {
+            "type": "step/end",
+            "seq": 6,
+            "time": {
+              "$log": "/5/time"
+            },
+            "data": {
+              "turn": 1,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 7,
+            "time": {
+              "$log": "/5/time"
+            },
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          }
+        ],
+        "requestHeader": null,
+        "toolHistory": {
+          "tools": [],
+          "updates": []
+        },
+        "requestContext": null
+      }
+    },
+    {
+      "id": "retry-attempt/7",
+      "log": "retry-attempt",
+      "rows": 7,
+      "ts": {
+        "storedEventCount": 7,
+        "closers": [
+          {
+            "type": "step/end",
+            "seq": 7,
+            "time": {
+              "$log": "/6/time"
+            },
+            "data": {
+              "turn": 1,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 8,
+            "time": {
+              "$log": "/6/time"
+            },
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/6/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": null
+      }
+    },
+    {
+      "id": "retry-attempt/8",
+      "log": "retry-attempt",
+      "rows": 8,
+      "ts": {
+        "storedEventCount": 8,
+        "closers": [
+          {
+            "type": "step/end",
+            "seq": 8,
+            "time": {
+              "$log": "/7/time"
+            },
+            "data": {
+              "turn": 1,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 9,
+            "time": {
+              "$log": "/7/time"
+            },
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/6/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "retry-attempt/9",
+      "log": "retry-attempt",
+      "rows": 9,
+      "ts": {
+        "storedEventCount": 9,
+        "closers": [
+          {
+            "type": "step/end",
+            "seq": 9,
+            "time": {
+              "$log": "/8/time"
+            },
+            "data": {
+              "turn": 1,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 10,
+            "time": {
+              "$log": "/8/time"
+            },
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/6/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "retry-attempt/10",
+      "log": "retry-attempt",
+      "rows": 10,
+      "ts": {
+        "storedEventCount": 10,
+        "closers": [
+          {
+            "type": "step/end",
+            "seq": 10,
+            "time": {
+              "$log": "/9/time"
+            },
+            "data": {
+              "turn": 1,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 11,
+            "time": {
+              "$log": "/9/time"
+            },
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/9/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "$log": "/7/data"
+        }
+      }
+    },
+    {
+      "id": "retry-attempt/11",
+      "log": "retry-attempt",
+      "rows": 11,
+      "ts": {
+        "storedEventCount": 11,
+        "closers": [
+          {
+            "type": "step/end",
+            "seq": 11,
+            "time": {
+              "$log": "/10/time"
+            },
+            "data": {
+              "turn": 1,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 12,
+            "time": {
+              "$log": "/10/time"
+            },
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/9/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "$log": "/10/data"
+        }
+      }
+    },
+    {
+      "id": "retry-attempt/12",
+      "log": "retry-attempt",
+      "rows": 12,
+      "ts": {
+        "storedEventCount": 12,
+        "closers": [
+          {
+            "type": "step/end",
+            "seq": 12,
+            "time": {
+              "$log": "/11/time"
+            },
+            "data": {
+              "turn": 1,
+              "step": 1
+            }
+          },
+          {
+            "type": "turn/end",
+            "seq": 13,
+            "time": {
+              "$log": "/11/time"
+            },
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/11/data/message"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/9/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "$log": "/10/data"
+        }
+      }
+    },
+    {
+      "id": "retry-attempt/13",
+      "log": "retry-attempt",
+      "rows": 13,
+      "ts": {
+        "storedEventCount": 13,
+        "closers": [
+          {
+            "type": "turn/end",
+            "seq": 13,
+            "time": {
+              "$log": "/12/time"
+            },
+            "data": {
+              "turn": 1,
+              "reason": {
+                "kind": "interrupted"
+              }
+            }
+          }
+        ],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/11/data/message"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/9/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "$log": "/10/data"
+        }
+      }
+    },
+    {
+      "id": "retry-attempt/14",
+      "log": "retry-attempt",
+      "rows": 14,
+      "ts": {
+        "storedEventCount": 14,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/11/data/message"
+          }
+        ],
+        "requestHeader": {
+          "$log": "/9/data/header"
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "$log": "/10/data"
+        }
+      }
+    }
+  ]
+}

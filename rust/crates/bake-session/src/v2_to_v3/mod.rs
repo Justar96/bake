@@ -29,10 +29,11 @@ use crate::envelope::{
     EnvelopeLimit, EnvelopeRefusal, EnvelopeRejection, NumberField, decode_row_envelope,
 };
 use crate::source_event_seqs::SourceEventSeqsLimit;
-pub(crate) use admission::OBJECT_PROTOTYPE_NAMES;
+pub(crate) use admission::{Lookup, OBJECT_PROTOTYPE_NAMES, is_repair_identity, lookup};
+pub(crate) use canonical::{assert_v3_event, safe_integer as v3_safe_integer};
 use header::SourceHeader;
 pub(crate) use header::contains_negative_zero;
-pub(crate) use js::{integer_string, js_order};
+pub(crate) use js::{exact_keys, integer_string, js_order, record as js_record};
 pub(crate) use payload_semantics::{
     Checked, assert_released_payload_semantics, count, invalid, quote, released_keys,
     released_record, stringify,

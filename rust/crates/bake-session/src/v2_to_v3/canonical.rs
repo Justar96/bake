@@ -3,6 +3,7 @@
 
 use serde_json::{Map, Value};
 
+use super::admission::{Lookup, lookup};
 use super::js::{MAX_SAFE_INTEGER, count, exact_keys, record};
 use super::{SURFACE_TYPES, StageError};
 
@@ -61,7 +62,7 @@ pub(super) fn canonicalize(mut event: Map<String, Value>) -> Result<Value, Stage
             event.insert("data".to_owned(), Value::Object(data));
         }
     }
-    assert_v3_event(&event)?;
+    assert_v3_event(&event, &[])?;
     Ok(Value::Object(event))
 }
 
@@ -74,11 +75,19 @@ fn replace_op(start: u64, end: u64) -> Value {
     Value::Object(operation)
 }
 
-/// `assertV3Event` without installed types. Every transformed event passed
-/// source admission and the PTC renames, so its type is known: in the
-/// released v2 inventory, a feedback event, a PTC dispatch, or a generated
-/// `system/message`. None is opaque.
-fn assert_v3_event(event: &Map<String, Value>) -> Result<(), StageError> {
+/// `assertV3Event(event, installed)`, where `installed` lists the
+/// `knownEventTypes` beyond the audited ones; canonicalization passes none.
+/// A type outside both is opaque, so it may carry surface metadata.
+///
+/// The event must be a JavaScript-ordered object with a string `type` and a
+/// `seq` that is a count, so the subject spells it as TypeScript does. Every
+/// transformed event passed source admission and the PTC renames, so its
+/// type is audited: in the released v2 inventory, a feedback event, a PTC
+/// dispatch, or a generated `system/message`.
+pub(crate) fn assert_v3_event(
+    event: &Map<String, Value>,
+    installed: &[&str],
+) -> Result<(), StageError> {
     let Some(Value::String(event_type)) = event.get("type") else {
         return Err(StageError::Invalid(
             "format v3 event type must be a string".to_owned(),
@@ -87,7 +96,22 @@ fn assert_v3_event(event: &Map<String, Value>) -> Result<(), StageError> {
     let seq = event.get("seq").and_then(Value::as_u64).unwrap_or_default();
     let subject = format!("format v3 {event_type} at seq {seq}");
     let surface = SURFACE_TYPES.contains(&event_type.as_str());
-    let optional: &[&str] = if surface {
+    let obsolete = matches!(
+        event_type.as_str(),
+        "tool/code-dispatch-start" | "tool/code-dispatch"
+    );
+    let known = !obsolete
+        && (surface
+            || lookup(event_type) != Lookup::Absent
+            || matches!(
+                event_type.as_str(),
+                "tool/ptc-dispatch-start"
+                    | "tool/ptc-dispatch"
+                    | "feedback/message-put"
+                    | "feedback/message-delete"
+            )
+            || installed.contains(&event_type.as_str()));
+    let optional: &[&str] = if surface || !known {
         &["ignorable", "surfaceOp", "sourceEventSeqs"]
     } else {
         &["ignorable"]
@@ -284,7 +308,7 @@ fn canonical_payload(
 }
 
 /// `sessionFormatSafeInteger`, with -0 refused and other `f64` values deferred.
-fn safe_integer(value: Option<&Value>, label: &str) -> Result<i64, StageError> {
+pub(crate) fn safe_integer(value: Option<&Value>, label: &str) -> Result<i64, StageError> {
     let invalid = || StageError::Invalid(format!("{label} must be a safe integer"));
     let Some(Value::Number(number)) = value else {
         return Err(invalid());

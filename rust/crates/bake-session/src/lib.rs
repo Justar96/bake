@@ -37,7 +37,8 @@
 //! `stat` does, migrated to current metadata or absent.
 //! [`migrate_v2_rows`] strictly decodes a released v2 Session's parsed header
 //! and rows and runs the v2→v3 migration over them; its output is not an
-//! opened Session, since the final check of the transformed log is not run.
+//! opened Session, and [`check_transformed_artifact`] runs the catalog's
+//! final check of it.
 //! [`decode_v0_v1_rows`] decodes a released v0 or v1 Session's parsed header
 //! and rows as the released physical codec does, without migrating them, and
 //! [`migrate_v0_to_v1`] runs the v0→v1 migration over a decoded v0 Session;
@@ -58,11 +59,19 @@
 //! runs kept, through every edge to format v3, reporting the refusal
 //! TypeScript's streaming chain reports first; a v1 Session takes the decoded
 //! v1→v2 stage.
+//! [`check_released_relationships`] runs the released cross-event checks
+//! `assertReleasedArtifactRelationships` runs over a Session whose events
+//! already passed their payload checks: turn, step, tool, retry, PTC, title,
+//! command, delivery-marker, compaction, and surface relationships.
+//! [`check_transformed_artifact`] runs the catalog's final check over a
+//! migration's output, as `restoreReleasedV3Artifact` does: the protected
+//! system head, a private relationship view of the events, the released v2
+//! envelope checks, and these relationships; it decides only acceptance.
 //! [`restore_migrated`] restores a v0, v1, or v2 Session that
 //! [`migrate_v2_rows`] or [`migrate_released_history`] migrated, as the
-//! production read path restores its historical file, by encoding the
-//! migration's output and restoring those bytes as [`restore_plain_log`]
-//! does; a Session the catalog's final check refuses is outside its domain.
+//! production read path restores its historical file, by running the final
+//! check, then encoding the migration's output and restoring those bytes as
+//! [`restore_plain_log`] does.
 //! [`token_usage`] folds a [`RestoredLog`]'s provider-reported token usage,
 //! and [`context_pressure`] its context occupancy with the surface's
 //! heuristic token total.
@@ -103,15 +112,16 @@
 //! `open` of a plain v0, v1, or v2 log migrates it as the backend does,
 //! through the recoverable released codec and every format edge, writing the
 //! encoded v3 log beside the unchanged source, or refuses with TypeScript's
-//! corruption or unsupported-migration message. The catalog's final check of the migrated
-//! log, the publication's verifier, and `validateStoredEvents` are not run,
-//! so a log one of them refuses is outside that model's domain. It is the
+//! corruption or unsupported-migration message, the final check's refusals
+//! included. The publication's verifier and `validateStoredEvents` are not
+//! run, so a log one of them refuses is outside that model's domain. It is the
 //! only part that reads or writes a file. The crate is
 //! unstable and unshipped; the preview's `session inspect` and `session stat` use it.
 
 mod assistant_stream;
 mod boundary;
 mod envelope;
+mod final_check;
 mod fork;
 mod generation_header;
 mod goal;
@@ -123,6 +133,7 @@ mod offload;
 mod plain_append;
 mod plain_log_file;
 mod pressure;
+mod relationships;
 mod released_rows;
 mod repair;
 mod replay;
@@ -151,6 +162,7 @@ pub use envelope::{
     EnvelopeLimit, EnvelopeRefusal, EnvelopeRejection, NumberField, RequiredField,
     UnadmittedEnvelope, decode_row_envelope,
 };
+pub use final_check::{FinalCheckRefusal, check_transformed_artifact};
 pub use fork::{ForkLimit, ForkRefusal, ForkSeed, fork_seed};
 pub use generation_header::{GenerationHeaderRefusal, read_generation_header_record};
 pub use goal::{
@@ -170,6 +182,9 @@ pub use plain_log_file::{LogFileLimit, LogFileRefusal, PlainLogFile};
 pub use pressure::{
     ContextPressureState, ContextPressureView, PressureLimit, PressureRefusal, RequestRoute,
     context_pressure,
+};
+pub use relationships::{
+    RelationshipExtensions, RelationshipLimit, RelationshipRefusal, check_released_relationships,
 };
 pub use replay::{ReplayLimit, ReplayRefusal, SeedRejection, replay_requests};
 pub use request::Request;
@@ -498,7 +513,7 @@ fn header_line(
 /// Node's `path.posix.isAbsolute` or `path.win32.isAbsolute`, not
 /// `std::path::Path::is_absolute`. The Win32 drive form is ASCII-only, so
 /// testing UTF-8 bytes matches Node's test of UTF-16 code units.
-fn is_absolute(path: &str, platform: PathPlatform) -> bool {
+pub(crate) fn is_absolute(path: &str, platform: PathPlatform) -> bool {
     let bytes = path.as_bytes();
     match platform {
         PathPlatform::Posix => bytes.first() == Some(&b'/'),

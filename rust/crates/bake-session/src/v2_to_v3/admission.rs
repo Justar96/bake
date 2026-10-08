@@ -21,8 +21,7 @@ use super::payload_semantics::{
     quote, released_keys, released_record, safe_integer, stringify,
 };
 use crate::MAX_SAFE_INTEGER;
-use dispositions::Lookup;
-pub(crate) use dispositions::OBJECT_PROTOTYPE_NAMES;
+pub(crate) use dispositions::{Lookup, OBJECT_PROTOTYPE_NAMES, lookup};
 
 type Record = Map<String, Value>;
 
@@ -265,7 +264,7 @@ fn assert_surface_metadata(event: &Record, seq: u64, event_type: &str) -> Checke
 
 /// `isRepairIdentity`: `interrupted-tool-result-<callId>-<n>` where `n` is a
 /// canonical decimal that `Number` reads as a safe integer.
-fn is_repair_identity(id: Option<&Value>, call_id: Option<&Value>) -> bool {
+pub(crate) fn is_repair_identity(id: Option<&Value>, call_id: Option<&Value>) -> bool {
     let (Some(Value::String(id)), Some(Value::String(call_id))) = (id, call_id) else {
         return false;
     };

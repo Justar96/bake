@@ -1,12 +1,13 @@
 {
   "schema": "bake/session-conformance/plain-log-file-cases",
-  "version": 3,
+  "version": 4,
   "oracle": "in an owned temporary root holding the seeded entries, run each step through the JSONL backend with compression none on the step's handle, a or b, each its own backend instance over the root: create, a write open, or the open handle's append, flush, or close; after each step list every file beneath the root with its text, an empty session.lock by its size",
   "history": [
     "Version 1: 33 cases, written from the TypeScript sources before either harness ran; both arms passed on their first run.",
     "A Rust negative control that skipped the truncation still passed open-torn-tail-truncated-by-first-append, whose torn tail was a prefix of the row appended after it. Its tail became a longer torn ext/note row, and no outcome changed.",
     "Version 2: 55 cases. Rust migrates an older generation at a write open, so the older-generation limit is removed and limit-older-generation became migrate-header-less, with TypeScript's exact message. An open step's message may hold a {src} placeholder for the source path its src field names, and an open step may be marked outside-domain. The 22 added cases and the changed one were written from the TypeScript sources before either harness ran; both arms passed on their first run.",
-    "Version 3: 61 cases. Rust takes the write lease as TypeScript does, so trees list session.lock, which both harnesses read only by its size, and a step may name a handle, a or b, each its own backend instance over the root. The 6 added cases and the session.lock entries of the existing trees were written from the TypeScript sources before either harness ran. Both arms passed on their first run."
+    "Version 3: 61 cases. Rust takes the write lease as TypeScript does, so trees list session.lock, which both harnesses read only by its size, and a step may name a handle, a or b, each its own backend instance over the root. The 6 added cases and the session.lock entries of the existing trees were written from the TypeScript sources before either harness ran. Both arms passed on their first run.",
+    "Version 4: 63 cases. Rust runs the catalog's final check of a migrated log, so outside-domain-final-check became migrate-final-check-turn-order with TypeScript's exact message and no rust override, and 2 cases were added: a final-check refusal of a v0 source and a v2 TOOL_NOT_STARTED repair the final check admits. The changed and added expectations were written from the TypeScript sources before either harness ran. Both arms passed without any expectation change."
   ],
   "cases": [
     {
@@ -2379,7 +2380,7 @@
       "note": "JSON.parse admits the lone surrogate and ignores the row; serde_json refuses it."
     },
     {
-      "id": "outside-domain-final-check",
+      "id": "migrate-final-check-turn-order",
       "seed": [
         {
           "file": "_no-cwd/o1/session.v2.jsonl",
@@ -2396,16 +2397,63 @@
             "class": "SessionFormatUnsupportedError",
             "message": "Session migration from v2 to v3 refuses the transformed artifact: turn/start 2 does not open expected turn 1; source v2 artifact remains unchanged (raw log: {src})"
           },
-          "rust": {
-            "outcome": "outside-domain"
-          },
           "tree": {
             "_no-cwd/o1/session.lock": "",
             "_no-cwd/o1/session.v2.jsonl": "{\"type\":\"session\",\"version\":2,\"id\":\"o1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":2}}\n"
           }
         }
       ],
-      "note": "Every stage admits the turn number; only the catalog final check, which Rust does not run, refuses it."
+      "note": "Every stage admits the turn number; the catalog's final check refuses it, and only the lock file is added."
+    },
+    {
+      "id": "migrate-v0-final-check-duplicate-tool-call",
+      "seed": [
+        {
+          "file": "_no-cwd/dup/session.jsonl",
+          "text": "{\"type\":\"session\",\"version\":0,\"id\":\"dup\",\"createdAt\":1000,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"request/header\",\"seq\":2,\"time\":1003,\"data\":{\"header\":{\"config\":{\"provider\":\"p\",\"model\":\"m\"}},\"reason\":\"initial\"}}\n{\"type\":\"user/message\",\"seq\":3,\"time\":1004,\"data\":{\"role\":\"user\",\"id\":\"u1\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"assistant/message\",\"seq\":4,\"time\":1005,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"a1\",\"role\":\"assistant\",\"content\":[{\"type\":\"tool-call\",\"id\":\"c1\",\"name\":\"echo\",\"arguments\":\"{}\"},{\"type\":\"tool-call\",\"id\":\"c1\",\"name\":\"echo\",\"arguments\":\"{}\"}],\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"}}},\"surfaceOp\":\"append\"}\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "dup",
+          "src": "_no-cwd/dup/session.jsonl",
+          "ts": {
+            "outcome": "thrown",
+            "class": "SessionFormatUnsupportedError",
+            "message": "Session migration from v0 to v3 refuses the transformed artifact: assistant/message repeats advertised tool call c1; source v0 artifact remains unchanged (raw log: {src})"
+          },
+          "tree": {
+            "_no-cwd/dup/session.jsonl": "{\"type\":\"session\",\"version\":0,\"id\":\"dup\",\"createdAt\":1000,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"request/header\",\"seq\":2,\"time\":1003,\"data\":{\"header\":{\"config\":{\"provider\":\"p\",\"model\":\"m\"}},\"reason\":\"initial\"}}\n{\"type\":\"user/message\",\"seq\":3,\"time\":1004,\"data\":{\"role\":\"user\",\"id\":\"u1\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"assistant/message\",\"seq\":4,\"time\":1005,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"a1\",\"role\":\"assistant\",\"content\":[{\"type\":\"tool-call\",\"id\":\"c1\",\"name\":\"echo\",\"arguments\":\"{}\"},{\"type\":\"tool-call\",\"id\":\"c1\",\"name\":\"echo\",\"arguments\":\"{}\"}],\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"}}},\"surfaceOp\":\"append\"}\n",
+            "_no-cwd/dup/session.lock": ""
+          }
+        }
+      ],
+      "note": "No format edge compares tool-call ids; the final check refuses, the source stays, and only the lock file is added."
+    },
+    {
+      "id": "migrate-v2-tool-not-started-repair",
+      "seed": [
+        {
+          "file": "_no-cwd/rep/session.v2.jsonl",
+          "text": "{\"type\":\"session\",\"version\":2,\"id\":\"rep\",\"createdAt\":1000,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"request/header\",\"seq\":2,\"time\":1003,\"data\":{\"header\":{\"config\":{\"provider\":\"p\",\"model\":\"m\"}},\"reason\":\"initial\"}}\n{\"type\":\"assistant/message\",\"seq\":3,\"time\":1004,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"a1\",\"role\":\"assistant\",\"content\":[{\"type\":\"tool-call\",\"id\":\"c1\",\"name\":\"echo\",\"arguments\":\"{}\"}],\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"}},\"stream\":[]},\"surfaceOp\":\"append\"}\n{\"type\":\"tool/result\",\"seq\":4,\"time\":1005,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"interrupted-tool-result-c1-4\",\"role\":\"user\",\"content\":[{\"type\":\"tool-result\",\"toolCallId\":\"c1\",\"content\":[{\"type\":\"text\",\"text\":\"The tool call was interrupted before the Harness recorded it as started. Retry it if it is still needed.\"}],\"isError\":true}],\"source\":{\"kind\":\"tool\",\"callId\":\"c1\"}},\"error\":{\"name\":\"ToolNotStartedError\",\"code\":\"TOOL_NOT_STARTED\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"step/end\",\"seq\":5,\"time\":1006,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":6,\"time\":1007,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "rep",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/rep/session.lock": "",
+            "_no-cwd/rep/session.v2.jsonl": "{\"type\":\"session\",\"version\":2,\"id\":\"rep\",\"createdAt\":1000,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"request/header\",\"seq\":2,\"time\":1003,\"data\":{\"header\":{\"config\":{\"provider\":\"p\",\"model\":\"m\"}},\"reason\":\"initial\"}}\n{\"type\":\"assistant/message\",\"seq\":3,\"time\":1004,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"a1\",\"role\":\"assistant\",\"content\":[{\"type\":\"tool-call\",\"id\":\"c1\",\"name\":\"echo\",\"arguments\":\"{}\"}],\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"}},\"stream\":[]},\"surfaceOp\":\"append\"}\n{\"type\":\"tool/result\",\"seq\":4,\"time\":1005,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"interrupted-tool-result-c1-4\",\"role\":\"user\",\"content\":[{\"type\":\"tool-result\",\"toolCallId\":\"c1\",\"content\":[{\"type\":\"text\",\"text\":\"The tool call was interrupted before the Harness recorded it as started. Retry it if it is still needed.\"}],\"isError\":true}],\"source\":{\"kind\":\"tool\",\"callId\":\"c1\"}},\"error\":{\"name\":\"ToolNotStartedError\",\"code\":\"TOOL_NOT_STARTED\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"step/end\",\"seq\":5,\"time\":1006,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":6,\"time\":1007,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n",
+            "_no-cwd/rep/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"rep\",\"createdAt\":1000,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"system/message\",\"seq\":2,\"time\":1002,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"v2-to-v3-system-4441c119f4ff269f81623a68beb1d72012c6f3770e41068cca03ecdd0043dc07\",\"role\":\"system\",\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"content\":[]}},\"surfaceOp\":\"append\"}\n{\"type\":\"request/header\",\"seq\":3,\"time\":1003,\"data\":{\"header\":{\"config\":{\"provider\":\"p\",\"model\":\"m\"}},\"reason\":\"initial\"}}\n{\"type\":\"assistant/message\",\"seq\":4,\"time\":1004,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"a1\",\"role\":\"assistant\",\"content\":[{\"type\":\"tool-call\",\"id\":\"c1\",\"name\":\"echo\",\"arguments\":\"{}\"}],\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"}},\"stream\":[]},\"surfaceOp\":\"append\"}\n{\"type\":\"tool/result\",\"seq\":5,\"time\":1005,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"interrupted-tool-result-c1-4\",\"role\":\"user\",\"content\":[{\"type\":\"tool-result\",\"toolCallId\":\"c1\",\"content\":[{\"type\":\"text\",\"text\":\"The tool call was interrupted before the Harness recorded it as started. Retry it if it is still needed.\"}],\"isError\":true}],\"source\":{\"kind\":\"tool\",\"callId\":\"c1\"}},\"error\":{\"name\":\"ToolNotStartedError\",\"code\":\"TOOL_NOT_STARTED\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"step/end\",\"seq\":6,\"time\":1006,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":7,\"time\":1007,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n"
+          }
+        }
+      ],
+      "note": "The repair's message id keeps its source seq 4 after the system head moves it to seq 5; the final check compares the id with the event's own seq only in its private view, so the open succeeds and the published id is unchanged."
     },
     {
       "id": "lease-second-open-refused-then-admitted",

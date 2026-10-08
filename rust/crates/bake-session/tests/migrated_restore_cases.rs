@@ -4,7 +4,9 @@
 //! v1 one, which must succeed, and then `restore_migrated`, on both path
 //! platforms. A case's expected outcome is its `rust` override when present,
 //! otherwise the hand-written restored state, with messages also compared as
-//! serialized text, since `Value` equality ignores member order. The
+//! serialized text, since `Value` equality ignores member order, or the
+//! final check's refusal, whose catalog message, followed by the read's
+//! source suffix with `{src}` for the path, must be TypeScript's. The
 //! expectations were written from the TypeScript sources; nothing here reads
 //! TypeScript output.
 
@@ -21,7 +23,7 @@ use serde_json::{Map, Value, json};
 const SCHEMA: &str = "bake/session-conformance/migrated-restore-cases";
 const ORACLE: &str = "JsonlSessionPersistence({compression: 'none'}) with session.v<N>.jsonl in its Session directory, readColdSessionLog, then Session.fromRestore(..., currentSessionMessageProjections)";
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 15;
+const CASE_COUNT: usize = 18;
 /// The migration's source budget, and the scan's unless a case sets one.
 const SOURCE_BUDGET: usize = 10_000;
 /// The limit names the table may use, each witnessed. A restoration limit
@@ -71,7 +73,8 @@ enum Expected {
     Restored(Value),
     Limit(String),
     Refused(String),
-    OutsideDomain,
+    /// The final check's refusal with this exact read message.
+    FinalCheck(String),
 }
 
 struct Case {
@@ -95,7 +98,7 @@ fn load() -> Vec<Case> {
         BTreeSet::from(["schema", "version", "oracle", "history", "cases"])
     );
     assert_eq!(table["schema"], SCHEMA);
-    assert_eq!(table["version"], 1);
+    assert_eq!(table["version"], 2);
     assert_eq!(table["oracle"], ORACLE);
     assert!(
         table["history"]
@@ -160,9 +163,14 @@ fn load() -> Vec<Case> {
                 other => panic!("{id}: invalid ts outcome {other}"),
             };
             let expect = match entry.get("rust") {
+                None if restored => Expected::Restored(entry["ts"].clone()),
                 None => {
-                    assert!(restored, "{id}: a rejection names its Rust outcome");
-                    Expected::Restored(entry["ts"].clone())
+                    assert_eq!(
+                        text(&ts["class"], &id),
+                        "SessionFormatUnsupportedError",
+                        "{id}: only the final check's refusal needs no override"
+                    );
+                    Expected::FinalCheck(text(&ts["message"], &id).to_owned())
                 }
                 Some(rust) => {
                     let rust = object(rust, &id);
@@ -177,11 +185,6 @@ fn load() -> Vec<Case> {
                             assert_eq!(keys(rust), BTreeSet::from(["outcome", "cause"]), "{id}");
                             assert!(!restored, "{id}: a Rust refusal claims a TypeScript one");
                             Expected::Refused(text(&rust["cause"], &id).to_owned())
-                        }
-                        "outside-domain" => {
-                            assert_eq!(keys(rust), BTreeSet::from(["outcome"]), "{id}");
-                            assert!(!restored, "{id}: only a TypeScript refusal is outside");
-                            Expected::OutsideDomain
                         }
                         other => panic!("{id}: invalid rust outcome {other}"),
                     }
@@ -347,11 +350,22 @@ fn check(case: &Case, platform: PathPlatform) -> Option<String> {
         {
             None
         }
-        // Nothing is claimed; the case only has to run.
-        (Expected::OutsideDomain, _) => None,
+        (Expected::FinalCheck(message), Err(MigratedRestoreRefusal::FinalCheck(refusal))) => {
+            let actual = refusal.catalog_message(case.version).map(|catalog| {
+                format!(
+                    "{catalog}; source v{} artifact remains unchanged (raw log: {{src}})",
+                    case.version
+                )
+            });
+            (actual.as_deref() != Some(message.as_str()))
+                .then(|| format!("{id}: final check message {actual:?}, expected {message}"))
+        }
         (Expected::Restored(_), actual) => Some(format!("{id}: expected restored, got {actual:?}")),
         (Expected::Limit(name), actual) => Some(format!("{id}: expected {name}, got {actual:?}")),
         (Expected::Refused(name), actual) => Some(format!("{id}: expected {name}, got {actual:?}")),
+        (Expected::FinalCheck(message), actual) => {
+            Some(format!("{id}: expected {message}, got {actual:?}"))
+        }
     }
 }
 
@@ -376,14 +390,8 @@ fn table_pins_its_size_and_limits() {
     assert!(
         cases
             .iter()
-            .any(|case| matches!(case.expect, Expected::Refused(_))),
-        "a Rust refusal is witnessed"
-    );
-    assert!(
-        cases
-            .iter()
-            .any(|case| matches!(case.expect, Expected::OutsideDomain)),
-        "an outside-domain case is witnessed"
+            .any(|case| matches!(case.expect, Expected::FinalCheck(_))),
+        "a final-check refusal is witnessed"
     );
 }
 

@@ -7,14 +7,14 @@
 
 /// Exact top-level `data` members of one released-v2 event type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct Disposition {
+pub(crate) struct Disposition {
     pub(super) required: &'static [&'static str],
     pub(super) optional: &'static [&'static str],
 }
 
 /// How the frozen object literal answers `RELEASED_V2_EVENT_DISPOSITIONS[type]`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Lookup {
+pub(crate) enum Lookup {
     Own(Disposition),
     /// An `Object.prototype` member the literal inherits: defined, but with no
     /// `required` list.
@@ -42,7 +42,7 @@ const fn own(required: &'static [&'static str], optional: &'static [&'static str
     Lookup::Own(Disposition { required, optional })
 }
 
-pub(super) fn lookup(event_type: &str) -> Lookup {
+pub(crate) fn lookup(event_type: &str) -> Lookup {
     match event_type {
         "agent-preset/selected" => own(&["agentPreset"], &[]),
         "agent/inbox/spliced" => own(

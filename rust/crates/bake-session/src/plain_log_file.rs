@@ -20,7 +20,8 @@
 //!   prepares and publishes it: its header and rows are parsed, its header
 //!   identity is checked against the requested id and the selected path, its
 //!   rows are decoded by the released codec in recoverable mode and read
-//!   through every format edge to v3, and the result is encoded, written to
+//!   through every format edge to v3, the result passes the catalog's final
+//!   check ([`check_transformed_artifact`]), and it is encoded, written to
 //!   a temporary file beside the source, and published by hard link as a
 //!   new `session.v3.jsonl`, as TypeScript publishes it on POSIX, so a
 //!   failed write, or a process killed before the link, never leaves that
@@ -72,10 +73,9 @@
 //! compression, and the `validateStoredEvents` check of an opened log are
 //! not modelled. Opening a log TypeScript's validation refuses is
 //! outside this model's domain. So is migrating a log whose v3
-//! result the catalog's final check (`restoreReleasedV3Artifact`), the
-//! publication's verifier, or `validateStoredEvents` refuses: Rust writes the
-//! migrated file where TypeScript refuses and writes nothing. So is a path
-//! the filesystem refuses, such as one longer than a file or path name may
+//! result the publication's verifier or `validateStoredEvents` refuses: Rust
+//! writes the migrated file where TypeScript refuses and writes nothing. So
+//! is a path the filesystem refuses, such as one longer than a file or path name may
 //! be, a symlink, or a root another process changes, a lock file removed or
 //! replaced included. Every listing is visited in byte order of its UTF-8
 //! names. A migration's
@@ -96,12 +96,12 @@ use crate::log_layout::{CURRENT_LOG_FILENAME, canonical_generation, encode_segme
 use crate::released_rows::{ParseStop, parse_released_header, parse_released_rows};
 use crate::write_lease::{LeaseRefusal, WriteLease};
 use crate::{
-    AppendRefusal, CURRENT_SESSION_FORMAT_VERSION, CreateRefusal, GenerationHeaderRefusal,
-    HistoryLocation, HistoryRefusal, MigratedV2, PathPlatform, PlainAppendLog, ScanRefusal,
-    SubsetLimit, V1CodecLocation, V1CodecRecovery, V1CodecRefusal, V1CodecVersion, V2ToV3Layer,
-    V2ToV3Location, V2ToV3Refusal, decode_v0_v1_items, encode_event_line, encode_header_line,
-    first_record, migrate_released_history, migrate_v2_rows, read_generation_header_record,
-    read_header_record,
+    AppendRefusal, CURRENT_SESSION_FORMAT_VERSION, CreateRefusal, FinalCheckRefusal,
+    GenerationHeaderRefusal, HistoryLocation, HistoryRefusal, MigratedV2, PathPlatform,
+    PlainAppendLog, ScanRefusal, SubsetLimit, V1CodecLocation, V1CodecRecovery, V1CodecRefusal,
+    V1CodecVersion, V2ToV3Layer, V2ToV3Location, V2ToV3Refusal, check_transformed_artifact,
+    decode_v0_v1_items, encode_event_line, encode_header_line, first_record,
+    migrate_released_history, migrate_v2_rows, read_generation_header_record, read_header_record,
 };
 
 /// One write handle of a plain current-format Session log under a root.
@@ -137,9 +137,10 @@ pub enum LogFileRefusal {
     /// `SessionPersistenceCorruptionError` with this exact message, which
     /// names the source path. No file was written.
     Corrupt { message: String },
-    /// A format edge refused to migrate an older generation; TypeScript
-    /// throws `SessionFormatUnsupportedError` with this exact message, which
-    /// names the source path. No file was written.
+    /// A format edge, or the catalog's final check of the migrated log,
+    /// refused to migrate an older generation; TypeScript throws
+    /// `SessionFormatUnsupportedError` with this exact message, which names
+    /// the source path. No file was written.
     Unsupported { message: String },
     /// [`PlainAppendLog::create`] refused the header. Nothing was read.
     Create(CreateRefusal),
@@ -218,9 +219,10 @@ pub enum LogFileLimit {
     ///   [`crate::ScanLimit`] describes them; or the header's version or a
     ///   count is held as a float (`float-lexeme`) or its identity check
     ///   reports `version-diagnostic`.
-    /// - `codec/<name>`, `history/<name>`, or `v2-to-v3/<name>`: a limit of
-    ///   [`decode_v0_v1_items`], [`migrate_released_history`], or
-    ///   [`migrate_v2_rows`], under its name there.
+    /// - `codec/<name>`, `history/<name>`, `v2-to-v3/<name>`, or
+    ///   `final-check/<name>`: a limit of [`decode_v0_v1_items`],
+    ///   [`migrate_released_history`], [`migrate_v2_rows`], or
+    ///   [`check_transformed_artifact`], under its name there.
     /// - `finish-order`: the v0 or v1 codec's `finish` refuses rows that the
     ///   later stages, or an earlier stop, must see first.
     /// - `v2-codec-recovery`: the v2 codec refuses a `turn/end` or
@@ -383,6 +385,19 @@ impl PlainLogFile {
             migrate_v0_v1(&header, &parsed.rows, stop, version, source_budget)
         }
         .map_err(refusal)?;
+        // The catalog checks the transformed artifact when the chain finishes.
+        if let Err(checked) = check_transformed_artifact(&migrated, platform) {
+            return Err(refusal(match checked {
+                FinalCheckRefusal::NativeSubset(name) => {
+                    Refused::Limit(format!("final-check/{name}"))
+                }
+                checked => Refused::Unsupported(
+                    checked
+                        .catalog_message(selected.version)
+                        .unwrap_or_default(),
+                ),
+            }));
+        }
         let encode = || Refused::Limit("encode".to_owned());
         let mut text = encode_header_line(&migrated.header, Some(migrated.inherited_event_count))
             .map_err(|_| refusal(encode()))?;
@@ -487,7 +502,8 @@ impl PlainLogFile {
 enum Refused {
     /// `SessionPersistenceCorruptionError`, with `String(error)` of the cause.
     Corrupt(String),
-    /// `SessionFormatUnsupportedError`, with the format edge's message.
+    /// `SessionFormatUnsupportedError`, with the format edge's or the
+    /// catalog's message.
     Unsupported(String),
     /// [`LogFileLimit::Migration`], with its name.
     Limit(String),
