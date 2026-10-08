@@ -43,6 +43,7 @@ Compare TypeScript and Rust using controlled fixtures and independently checked 
 - [Prefix restoration cases](#prefix-restoration-cases)
 - [Released relationship cases](#released-relationship-cases)
 - [Cross-runtime write lease](#cross-runtime-write-lease)
+- [Unfinished-work cases](#unfinished-work-cases)
 - [Runner contract](#runner-contract)
 - [Ownership and limits](#ownership-and-limits)
 
@@ -492,7 +493,7 @@ The cases cover:
 - cancellations with and without `inserted`, a replacement that inserts, and a claim outside a turn;
 - claimed-but-unstepped turns ending with each built-in reason and an unknown one, a stepped end without a reason, a claim that survives a stepped end, and turns whose value is a string, `null`, an object, or absent.
 
-A `rust` override names a native limit and the seq it applies to, and claims nothing for that fold. Inbox limits are a non-string `target`, which JavaScript coerces to a property key; a count spelled with a fraction or exponent; a string `inserted`, which the spread splits into characters; and a numeric message id that is not a safe integer lexeme. Consumed-work limits are `null` data, an absent or `null` `inserted` read for a cancellation, and an absent or `null` reason for a claimed turn, each a `TypeError`, and an object `inserted`, whose `length` this port does not read. A further limit covers a turn number that is not a safe integer lexeme. Both harnesses pin the case count, reject unknown keys, and require every limit to be witnessed. The expectations were written from the two TypeScript sources before either harness ran. Open compactions and open children have no pure TypeScript fold, so this table does not cover them.
+A `rust` override names a native limit and the seq it applies to, and claims nothing for that fold. Inbox limits are a non-string `target`, which JavaScript coerces to a property key; a count spelled with a fraction or exponent; a string `inserted`, which the spread splits into characters; and a numeric message id that is not a safe integer lexeme. Consumed-work limits are `null` data, an absent or `null` `inserted` read for a cancellation, and an absent or `null` reason for a claimed turn, each a `TypeError`, and an object `inserted`, whose `length` this port does not read. A further limit covers a turn number that is not a safe integer lexeme. Both harnesses pin the case count, reject unknown keys, and require every limit to be witnessed. The expectations were written from the two TypeScript sources before either harness ran. This table does not cover open compactions or children; the [unfinished-work cases](#unfinished-work-cases) do.
 
 ## Fork seed cases
 
@@ -1016,6 +1017,35 @@ Both harnesses check the captures, pin the case count and distinct ids, and requ
 - naming row 8's time for the first closer of `dynamic-tools/10` fails that case in both arms.
 
 No capture has two calls pending at once, so call order among closers is checked only by the [plain log restoration](#plain-log-restoration-cases). Seeded and Zstd logs, request derivation, and Agent resume are not covered. These cases close no roadmap scope.
+
+## Unfinished-work cases
+
+[`session/unfinished-work-cases.json`](session/unfinished-work-cases.json) states, for 224 row prefixes, the unfinished work a restored Session holds: its open turn and step, its pending tool calls, its open compaction, its catalog children, and its pending inbox. No single TypeScript function computes all five; their production functions live in four packages that do not export them to each other. Four TypeScript specs therefore read the one table, and each checks its own fields with its owning package's functions:
+
+- the [turn spec](../packages/core/session/tests/unfinished-turn-conformance.spec.ts) reads `turn` and `tools` from `interruptedTurnClosers`: the turn and step its closers end, and each synthetic `tool/result` in closer order, with its code and the `tool/call` seq it cites;
+- the [compaction spec](../packages/compaction/compaction-basic/tests/unfinished-compaction-conformance.spec.ts) runs the lock check `assertNoActiveCompaction` over a test-only Session view of the stored events and closers, and reports the last `compaction/start` when it throws `busy`;
+- the [children spec](../packages/subagent/subagent/tests/unfinished-children-conformance.spec.ts) folds `subagentCatalogProjectionDefinition` from the restored inherited cut and pairs each view entry with its event's seq;
+- the [inbox spec](../packages/core/agent-loop/tests/unfinished-inbox-conformance.spec.ts) folds `inboxProjectionDefinition.apply` from `init()`.
+
+```sh
+bun run test:runtime packages/core/session/tests/unfinished-turn-conformance.spec.ts packages/compaction/compaction-basic/tests/unfinished-compaction-conformance.spec.ts packages/subagent/subagent/tests/unfinished-children-conformance.spec.ts packages/core/agent-loop/tests/unfinished-inbox-conformance.spec.ts
+```
+
+Each spec restores a case as the [subagent catalog spec](#subagent-catalog-cases) does: it parses the rows with `JSON.parse`, adds their closers, and requires `Session.fromRestore` to admit them with the inherited cut on a seeded log's last inherited end seed. Unfinished work is read before the end seed that construction appends. That seed would make every open compaction stale, so resume never finds the lock held; the compaction spec also checks that each restored Session is not busy. An open compaction is the latest `compaction/start` or `compaction/end` when it is a start and no later `session/end-seed` is stored; `compaction/summary` does not close one. 0.3 logs no subagent start or end event: `subagent/start` and `subagent/end` are in-process Cordis events, `subagent/not-resumable` is a control notice for the `NOT_RESUMABLE` error, and a child read from storage lists as inactive. The catalog view from the inherited cut onward is therefore 0.3's whole durable record of a parent's children. Repeated ids stay listed, and a child's own unfinished work lives in that child's log.
+
+A case names a log and a row count; its id is `<log>/<rows>`. Logs are the three [runtime captures](#runtime-request-reconstruction), checked by SHA-256, or logs committed in the table as lines, each with its derivation. Logs marked `sweep` have every prefix once, from the header alone to the whole log: the three captures; `dynamic-tools` with a failed bracket inserted between turns; `tool-call-turn` with a numbered bracket after its recorded call, which holds an open turn, a started call, and an open compaction at once; and two logs materialized from `snapshots/`, a successful bracket with its summary and checkpoint and a `subagent` call that catalogs a continuable child. Materialization sets seq and time to the row index, removes the header `cwd` and each request header's templated `tools`, and replaces `{{system}}` with `system` and each `{{kind:n}}` with `kind-n`. The turn spec rebuilds both logs from the unchanged snapshots by that rule. Nineteen further prefixes of smaller logs cover a stale start before a stored end seed and an open one after it; a seeded log whose inherited prefix holds a catalog fact and an unmatched start; a -0 creation time, a repeated id, and an invalid catalog fact; an inbox refusal and the four inbox limits; all five kinds open at once; a `tool/call` no Assistant block requested; and calls left in a closed step or turn. Both `closed-turn-pending-call` cases are synthetic: their `turn/end` arrives while step 1 is open, which the session invariant companion rejects, so no checked writer produces them.
+
+`ts.turn` is `null` or `{"turn", "step"}`, and `step` may be `null`. `ts.tools` lists `callId`, `closerSeq`, `step`, `code`, and `callSeq`, which is `null` for `TOOL_NOT_STARTED`. `ts.compaction` is `null` or `{"startSeq", "data"}`. `ts.children` lists `seq`, `id`, `createdAt`, `mode`, and an optional `label`, or is `{"refusal": {"seq"}}`. `ts.inbox` is `{"nextTurn", "nextStep"}` or `{"refusal"}` with the exact seq-tagged message. Turn, step, and compaction values are `{"$log": pointer}` references into the prefix's own rows, so no value is interpreted. The table spells a -0 `createdAt` as `-0.0`, and the children spec compares its sign. A `rust` override names an inbox native limit and its seq, as the [inbox cases](#pending-inbox-and-consumed-work-cases) do. The four limit cases are copied from that table, and the inbox spec requires each limit to be witnessed. No other native limit applies, and `Session.fromRestore` admits every case; the specs run neither the invariant companions nor the storage restore path. The expectations were written from the TypeScript sources, by a scratch script that encodes their rules, before any spec ran. All four specs pin the case count, check every sweep, and reject unknown keys and malformed outcomes. No Rust arm reads the table yet. These negative controls were observed:
+
+- folding the appended end seed into the compaction view fails all nine open-compaction cases;
+- ignoring a stored end seed in the lock check fails `stale-then-open-compaction/18`, `seeded-inherited-work/19`, and `seeded-inherited-work/20`, and every open-compaction case, whose restored Session then stays busy;
+- treating `compaction/summary` as a close fails `compaction-recovery/21` and `compaction-recovery/22`;
+- folding the catalog from cut 0 fails the three `seeded-inherited-work` cases;
+- keeping pending calls across turn boundaries fails `closed-turn-pending-call/12`, and keeping them across `step/end` fails `closed-step-pending-call/11`;
+- citing the Assistant seq for an unstarted call fails `tool-call-turn/9` and eight other prefixes;
+- naming the next seq in the inbox refusal fails `inbox-refusal/18`.
+
+Children's own logs, migrated and Zstd logs, and Agent resume are not covered. These cases close no roadmap scope.
 
 ## Runner contract
 
