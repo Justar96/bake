@@ -378,7 +378,7 @@ const MAX_INTEGER_DIGITS: usize = 768;
 /// Whether `text`, which serde_json parsed, holds a number whose integer part
 /// has more than [`MAX_INTEGER_DIGITS`] digits. Digits inside strings, and
 /// fraction and exponent digits, do not count.
-fn long_integer_part(text: &str) -> bool {
+pub(crate) fn long_integer_part(text: &str) -> bool {
     let bytes = text.as_bytes();
     if bytes.len() <= MAX_INTEGER_DIGITS {
         return false;

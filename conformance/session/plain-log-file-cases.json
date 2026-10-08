@@ -1,10 +1,11 @@
 {
   "schema": "bake/session-conformance/plain-log-file-cases",
-  "version": 1,
+  "version": 2,
   "oracle": "in an owned temporary root holding the seeded entries, run each step through the JSONL backend with compression none: create, a write open, or the open handle's append, flush, or close; after each step list every file beneath the root except session.lock with its text",
   "history": [
     "Version 1: 33 cases, written from the TypeScript sources before either harness ran; both arms passed on their first run.",
-    "A Rust negative control that skipped the truncation still passed open-torn-tail-truncated-by-first-append, whose torn tail was a prefix of the row appended after it. Its tail became a longer torn ext/note row, and no outcome changed."
+    "A Rust negative control that skipped the truncation still passed open-torn-tail-truncated-by-first-append, whose torn tail was a prefix of the row appended after it. Its tail became a longer torn ext/note row, and no outcome changed.",
+    "Version 2: 55 cases. Rust migrates an older generation at a write open, so the older-generation limit is removed and limit-older-generation became migrate-header-less, with TypeScript's exact message. An open step's message may hold a {src} placeholder for the source path its src field names, and an open step may be marked outside-domain. The 22 added cases and the changed one were written from the TypeScript sources before either harness ran; both arms passed on their first run."
   ],
   "cases": [
     {
@@ -1365,6 +1366,505 @@
       "note": "The current generation outranks session.jsonl, which is never read."
     },
     {
+      "id": "migrate-v0-append-then-reopen-current",
+      "seed": [
+        {
+          "file": "_no-cwd/hist/session.jsonl",
+          "text": "{\"type\":\"session\",\"version\":0,\"id\":\"hist\",\"createdAt\":1000,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"request/header\",\"seq\":2,\"time\":1003,\"data\":{\"header\":{\"config\":{\"provider\":\"p\",\"model\":\"m\"},\"system\":\"sys\"},\"reason\":\"initial\"}}\n{\"type\":\"user/message\",\"seq\":3,\"time\":1004,\"data\":{\"role\":\"user\",\"id\":\"u1\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"assistant/message\",\"seq\":4,\"time\":1005,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"a1\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}],\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"}}},\"surfaceOp\":\"append\"}\n{\"type\":\"step/end\",\"seq\":5,\"time\":1006,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":6,\"time\":1007,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "hist",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/hist/session.jsonl": "{\"type\":\"session\",\"version\":0,\"id\":\"hist\",\"createdAt\":1000,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"request/header\",\"seq\":2,\"time\":1003,\"data\":{\"header\":{\"config\":{\"provider\":\"p\",\"model\":\"m\"},\"system\":\"sys\"},\"reason\":\"initial\"}}\n{\"type\":\"user/message\",\"seq\":3,\"time\":1004,\"data\":{\"role\":\"user\",\"id\":\"u1\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"assistant/message\",\"seq\":4,\"time\":1005,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"a1\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}],\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"}}},\"surfaceOp\":\"append\"}\n{\"type\":\"step/end\",\"seq\":5,\"time\":1006,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":6,\"time\":1007,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n",
+            "_no-cwd/hist/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"hist\",\"createdAt\":1000,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"system/message\",\"seq\":2,\"time\":1002,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"v2-to-v3-system-c8533130c0b834dd67107ab41f08523b525f40d898d85819e0bbd6ae438bafdc\",\"role\":\"system\",\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"content\":[]}},\"surfaceOp\":\"append\"}\n{\"type\":\"system/message\",\"seq\":3,\"time\":1003,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"v2-to-v3-system-ba7597b207261e75d69c69e8ad51adfb046f4ca08cf24010d42efcf5dc4284fe\",\"role\":\"system\",\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"content\":[{\"type\":\"text\",\"text\":\"sys\"}]}},\"surfaceOp\":{\"op\":\"replace\",\"startSeq\":2,\"endSeq\":2},\"sourceEventSeqs\":[2]}\n{\"type\":\"request/header\",\"seq\":4,\"time\":1003,\"data\":{\"header\":{\"config\":{\"provider\":\"p\",\"model\":\"m\"}},\"reason\":\"initial\"}}\n{\"type\":\"user/message\",\"seq\":5,\"time\":1004,\"data\":{\"role\":\"user\",\"id\":\"u1\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"assistant/message\",\"seq\":6,\"time\":1005,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"a1\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}],\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"}},\"stream\":[]},\"surfaceOp\":\"append\"}\n{\"type\":\"step/end\",\"seq\":7,\"time\":1006,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":8,\"time\":1007,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n"
+          }
+        },
+        {
+          "step": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": 9,
+              "time": 1008,
+              "data": {
+                "turn": 2
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/hist/session.jsonl": "{\"type\":\"session\",\"version\":0,\"id\":\"hist\",\"createdAt\":1000,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"request/header\",\"seq\":2,\"time\":1003,\"data\":{\"header\":{\"config\":{\"provider\":\"p\",\"model\":\"m\"},\"system\":\"sys\"},\"reason\":\"initial\"}}\n{\"type\":\"user/message\",\"seq\":3,\"time\":1004,\"data\":{\"role\":\"user\",\"id\":\"u1\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"assistant/message\",\"seq\":4,\"time\":1005,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"a1\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}],\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"}}},\"surfaceOp\":\"append\"}\n{\"type\":\"step/end\",\"seq\":5,\"time\":1006,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":6,\"time\":1007,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n",
+            "_no-cwd/hist/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"hist\",\"createdAt\":1000,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"system/message\",\"seq\":2,\"time\":1002,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"v2-to-v3-system-c8533130c0b834dd67107ab41f08523b525f40d898d85819e0bbd6ae438bafdc\",\"role\":\"system\",\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"content\":[]}},\"surfaceOp\":\"append\"}\n{\"type\":\"system/message\",\"seq\":3,\"time\":1003,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"v2-to-v3-system-ba7597b207261e75d69c69e8ad51adfb046f4ca08cf24010d42efcf5dc4284fe\",\"role\":\"system\",\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"content\":[{\"type\":\"text\",\"text\":\"sys\"}]}},\"surfaceOp\":{\"op\":\"replace\",\"startSeq\":2,\"endSeq\":2},\"sourceEventSeqs\":[2]}\n{\"type\":\"request/header\",\"seq\":4,\"time\":1003,\"data\":{\"header\":{\"config\":{\"provider\":\"p\",\"model\":\"m\"}},\"reason\":\"initial\"}}\n{\"type\":\"user/message\",\"seq\":5,\"time\":1004,\"data\":{\"role\":\"user\",\"id\":\"u1\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"assistant/message\",\"seq\":6,\"time\":1005,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"a1\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}],\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"}},\"stream\":[]},\"surfaceOp\":\"append\"}\n{\"type\":\"step/end\",\"seq\":7,\"time\":1006,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":8,\"time\":1007,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n{\"type\":\"turn/start\",\"seq\":9,\"time\":1008,\"data\":{\"turn\":2}}\n"
+          }
+        },
+        {
+          "step": "close",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/hist/session.jsonl": "{\"type\":\"session\",\"version\":0,\"id\":\"hist\",\"createdAt\":1000,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"request/header\",\"seq\":2,\"time\":1003,\"data\":{\"header\":{\"config\":{\"provider\":\"p\",\"model\":\"m\"},\"system\":\"sys\"},\"reason\":\"initial\"}}\n{\"type\":\"user/message\",\"seq\":3,\"time\":1004,\"data\":{\"role\":\"user\",\"id\":\"u1\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"assistant/message\",\"seq\":4,\"time\":1005,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"a1\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}],\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"}}},\"surfaceOp\":\"append\"}\n{\"type\":\"step/end\",\"seq\":5,\"time\":1006,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":6,\"time\":1007,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n",
+            "_no-cwd/hist/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"hist\",\"createdAt\":1000,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"system/message\",\"seq\":2,\"time\":1002,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"v2-to-v3-system-c8533130c0b834dd67107ab41f08523b525f40d898d85819e0bbd6ae438bafdc\",\"role\":\"system\",\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"content\":[]}},\"surfaceOp\":\"append\"}\n{\"type\":\"system/message\",\"seq\":3,\"time\":1003,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"v2-to-v3-system-ba7597b207261e75d69c69e8ad51adfb046f4ca08cf24010d42efcf5dc4284fe\",\"role\":\"system\",\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"content\":[{\"type\":\"text\",\"text\":\"sys\"}]}},\"surfaceOp\":{\"op\":\"replace\",\"startSeq\":2,\"endSeq\":2},\"sourceEventSeqs\":[2]}\n{\"type\":\"request/header\",\"seq\":4,\"time\":1003,\"data\":{\"header\":{\"config\":{\"provider\":\"p\",\"model\":\"m\"}},\"reason\":\"initial\"}}\n{\"type\":\"user/message\",\"seq\":5,\"time\":1004,\"data\":{\"role\":\"user\",\"id\":\"u1\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"assistant/message\",\"seq\":6,\"time\":1005,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"a1\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}],\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"}},\"stream\":[]},\"surfaceOp\":\"append\"}\n{\"type\":\"step/end\",\"seq\":7,\"time\":1006,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":8,\"time\":1007,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n{\"type\":\"turn/start\",\"seq\":9,\"time\":1008,\"data\":{\"turn\":2}}\n"
+          }
+        },
+        {
+          "step": "open",
+          "id": "hist",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/hist/session.jsonl": "{\"type\":\"session\",\"version\":0,\"id\":\"hist\",\"createdAt\":1000,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"request/header\",\"seq\":2,\"time\":1003,\"data\":{\"header\":{\"config\":{\"provider\":\"p\",\"model\":\"m\"},\"system\":\"sys\"},\"reason\":\"initial\"}}\n{\"type\":\"user/message\",\"seq\":3,\"time\":1004,\"data\":{\"role\":\"user\",\"id\":\"u1\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"assistant/message\",\"seq\":4,\"time\":1005,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"a1\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}],\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"}}},\"surfaceOp\":\"append\"}\n{\"type\":\"step/end\",\"seq\":5,\"time\":1006,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":6,\"time\":1007,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n",
+            "_no-cwd/hist/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"hist\",\"createdAt\":1000,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"system/message\",\"seq\":2,\"time\":1002,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"v2-to-v3-system-c8533130c0b834dd67107ab41f08523b525f40d898d85819e0bbd6ae438bafdc\",\"role\":\"system\",\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"content\":[]}},\"surfaceOp\":\"append\"}\n{\"type\":\"system/message\",\"seq\":3,\"time\":1003,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"v2-to-v3-system-ba7597b207261e75d69c69e8ad51adfb046f4ca08cf24010d42efcf5dc4284fe\",\"role\":\"system\",\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"content\":[{\"type\":\"text\",\"text\":\"sys\"}]}},\"surfaceOp\":{\"op\":\"replace\",\"startSeq\":2,\"endSeq\":2},\"sourceEventSeqs\":[2]}\n{\"type\":\"request/header\",\"seq\":4,\"time\":1003,\"data\":{\"header\":{\"config\":{\"provider\":\"p\",\"model\":\"m\"}},\"reason\":\"initial\"}}\n{\"type\":\"user/message\",\"seq\":5,\"time\":1004,\"data\":{\"role\":\"user\",\"id\":\"u1\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"assistant/message\",\"seq\":6,\"time\":1005,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"a1\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}],\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"}},\"stream\":[]},\"surfaceOp\":\"append\"}\n{\"type\":\"step/end\",\"seq\":7,\"time\":1006,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":8,\"time\":1007,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n{\"type\":\"turn/start\",\"seq\":9,\"time\":1008,\"data\":{\"turn\":2}}\n"
+          }
+        },
+        {
+          "step": "close",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/hist/session.jsonl": "{\"type\":\"session\",\"version\":0,\"id\":\"hist\",\"createdAt\":1000,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"request/header\",\"seq\":2,\"time\":1003,\"data\":{\"header\":{\"config\":{\"provider\":\"p\",\"model\":\"m\"},\"system\":\"sys\"},\"reason\":\"initial\"}}\n{\"type\":\"user/message\",\"seq\":3,\"time\":1004,\"data\":{\"role\":\"user\",\"id\":\"u1\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"assistant/message\",\"seq\":4,\"time\":1005,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"a1\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}],\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"}}},\"surfaceOp\":\"append\"}\n{\"type\":\"step/end\",\"seq\":5,\"time\":1006,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":6,\"time\":1007,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n",
+            "_no-cwd/hist/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"hist\",\"createdAt\":1000,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"system/message\",\"seq\":2,\"time\":1002,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"v2-to-v3-system-c8533130c0b834dd67107ab41f08523b525f40d898d85819e0bbd6ae438bafdc\",\"role\":\"system\",\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"content\":[]}},\"surfaceOp\":\"append\"}\n{\"type\":\"system/message\",\"seq\":3,\"time\":1003,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"v2-to-v3-system-ba7597b207261e75d69c69e8ad51adfb046f4ca08cf24010d42efcf5dc4284fe\",\"role\":\"system\",\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"content\":[{\"type\":\"text\",\"text\":\"sys\"}]}},\"surfaceOp\":{\"op\":\"replace\",\"startSeq\":2,\"endSeq\":2},\"sourceEventSeqs\":[2]}\n{\"type\":\"request/header\",\"seq\":4,\"time\":1003,\"data\":{\"header\":{\"config\":{\"provider\":\"p\",\"model\":\"m\"}},\"reason\":\"initial\"}}\n{\"type\":\"user/message\",\"seq\":5,\"time\":1004,\"data\":{\"role\":\"user\",\"id\":\"u1\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"assistant/message\",\"seq\":6,\"time\":1005,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"a1\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}],\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"}},\"stream\":[]},\"surfaceOp\":\"append\"}\n{\"type\":\"step/end\",\"seq\":7,\"time\":1006,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":8,\"time\":1007,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n{\"type\":\"turn/start\",\"seq\":9,\"time\":1008,\"data\":{\"turn\":2}}\n"
+          }
+        }
+      ],
+      "note": "The v0 source, session.jsonl, stays unchanged beside the published v3 file, which the append extends and the second open reads directly."
+    },
+    {
+      "id": "migrate-v0-empty-with-cwd",
+      "seed": [
+        {
+          "file": "--w--/hist/session.jsonl",
+          "text": "{\"type\":\"session\",\"version\":0,\"id\":\"hist\",\"createdAt\":1000,\"cwd\":\"/w\",\"delegationDepth\":0}\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "hist",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "--w--/hist/session.jsonl": "{\"type\":\"session\",\"version\":0,\"id\":\"hist\",\"createdAt\":1000,\"cwd\":\"/w\",\"delegationDepth\":0}\n",
+            "--w--/hist/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"hist\",\"createdAt\":1000,\"cwd\":\"/w\",\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        }
+      ],
+      "note": "The catalog encodes the migrated header directly, with cwd in its codec position."
+    },
+    {
+      "id": "migrate-v0-seeded-cut",
+      "seed": [
+        {
+          "file": "_no-cwd/hist/session.jsonl",
+          "text": "{\"type\":\"session\",\"version\":0,\"id\":\"hist\",\"createdAt\":1000,\"parentSession\":\"parent\",\"seedLength\":2,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"session/end-seed\",\"seq\":2,\"time\":1003,\"data\":{}}\n{\"type\":\"user/message\",\"seq\":3,\"time\":1004,\"data\":{\"role\":\"user\",\"id\":\"u1\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"step/end\",\"seq\":4,\"time\":1005,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":5,\"time\":1006,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "hist",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/hist/session.jsonl": "{\"type\":\"session\",\"version\":0,\"id\":\"hist\",\"createdAt\":1000,\"parentSession\":\"parent\",\"seedLength\":2,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"session/end-seed\",\"seq\":2,\"time\":1003,\"data\":{}}\n{\"type\":\"user/message\",\"seq\":3,\"time\":1004,\"data\":{\"role\":\"user\",\"id\":\"u1\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"step/end\",\"seq\":4,\"time\":1005,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":5,\"time\":1006,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n",
+            "_no-cwd/hist/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"hist\",\"createdAt\":1000,\"parentSession\":\"parent\",\"isSeeded\":true,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"system/message\",\"seq\":2,\"time\":1002,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"v2-to-v3-system-c8533130c0b834dd67107ab41f08523b525f40d898d85819e0bbd6ae438bafdc\",\"role\":\"system\",\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"content\":[]}},\"surfaceOp\":\"append\"}\n{\"type\":\"session/end-seed\",\"seq\":3,\"time\":1003,\"data\":{\"inherited\":true}}\n{\"type\":\"user/message\",\"seq\":4,\"time\":1004,\"data\":{\"role\":\"user\",\"id\":\"u1\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"step/end\",\"seq\":5,\"time\":1005,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":6,\"time\":1006,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n"
+          }
+        }
+      ],
+      "note": "The published header keeps isSeeded, and the end-seed v1->v2 marks inherited records the cut 3."
+    },
+    {
+      "id": "migrate-v0-packed-run",
+      "seed": [
+        {
+          "file": "_no-cwd/hist/session.jsonl",
+          "text": "{\"type\":\"session\",\"version\":0,\"id\":\"hist\",\"createdAt\":1000,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"text-chunks\",\"seq0\":2,\"time0\":1003,\"data\":{\"turn\":1,\"step\":1,\"index\":0,\"dt\":[1],\"texts\":[\"he\",\"llo\"]}}\n{\"type\":\"step/end\",\"seq\":4,\"time\":1005,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":5,\"time\":1006,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "hist",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/hist/session.jsonl": "{\"type\":\"session\",\"version\":0,\"id\":\"hist\",\"createdAt\":1000,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"text-chunks\",\"seq0\":2,\"time0\":1003,\"data\":{\"turn\":1,\"step\":1,\"index\":0,\"dt\":[1],\"texts\":[\"he\",\"llo\"]}}\n{\"type\":\"step/end\",\"seq\":4,\"time\":1005,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":5,\"time\":1006,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n",
+            "_no-cwd/hist/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"hist\",\"createdAt\":1000,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"system/message\",\"seq\":2,\"time\":1002,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"v2-to-v3-system-c8533130c0b834dd67107ab41f08523b525f40d898d85819e0bbd6ae438bafdc\",\"role\":\"system\",\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"content\":[]}},\"surfaceOp\":\"append\"}\n{\"type\":\"assistant/attempt\",\"seq\":3,\"time\":1004,\"data\":{\"turn\":1,\"step\":1,\"stream\":[{\"type\":\"text-chunks\",\"time0\":1003,\"index\":0,\"dt\":[1],\"texts\":[\"he\",\"llo\"]}]}}\n{\"type\":\"step/end\",\"seq\":4,\"time\":1005,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":5,\"time\":1006,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "migrate-v1-packed-run",
+      "seed": [
+        {
+          "file": "_no-cwd/hist/session.v1.jsonl",
+          "text": "{\"type\":\"session\",\"version\":1,\"id\":\"hist\",\"createdAt\":1000,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"text-chunks\",\"seq0\":2,\"time0\":1003,\"data\":{\"turn\":1,\"step\":1,\"index\":0,\"dt\":[1],\"texts\":[\"a\",\"b\"]}}\n{\"type\":\"assistant/message\",\"seq\":4,\"time\":1005,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"a1\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ab\"}],\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"}}},\"sourceEventSeqs\":[[2,3]],\"surfaceOp\":\"append\"}\n{\"type\":\"step/end\",\"seq\":5,\"time\":1006,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":6,\"time\":1007,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "hist",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/hist/session.v1.jsonl": "{\"type\":\"session\",\"version\":1,\"id\":\"hist\",\"createdAt\":1000,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"text-chunks\",\"seq0\":2,\"time0\":1003,\"data\":{\"turn\":1,\"step\":1,\"index\":0,\"dt\":[1],\"texts\":[\"a\",\"b\"]}}\n{\"type\":\"assistant/message\",\"seq\":4,\"time\":1005,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"a1\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ab\"}],\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"}}},\"sourceEventSeqs\":[[2,3]],\"surfaceOp\":\"append\"}\n{\"type\":\"step/end\",\"seq\":5,\"time\":1006,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":6,\"time\":1007,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n",
+            "_no-cwd/hist/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"hist\",\"createdAt\":1000,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"system/message\",\"seq\":2,\"time\":1002,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"v2-to-v3-system-c8533130c0b834dd67107ab41f08523b525f40d898d85819e0bbd6ae438bafdc\",\"role\":\"system\",\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"content\":[]}},\"surfaceOp\":\"append\"}\n{\"type\":\"assistant/message\",\"seq\":3,\"time\":1005,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"a1\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ab\"}],\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"}},\"stream\":[{\"type\":\"text-chunks\",\"time0\":1003,\"index\":0,\"dt\":[1],\"texts\":[\"a\",\"b\"]}]},\"surfaceOp\":\"append\"}\n{\"type\":\"step/end\",\"seq\":4,\"time\":1006,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":5,\"time\":1007,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "migrate-v2",
+      "seed": [
+        {
+          "file": "_no-cwd/v2v3/session.v2.jsonl",
+          "text": "{\"type\":\"session\",\"version\":2,\"id\":\"v2v3\",\"createdAt\":1700000000000,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1000,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1001,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"user/message\",\"seq\":2,\"time\":1002,\"data\":{\"role\":\"user\",\"id\":\"user-1\",\"content\":[{\"type\":\"text\",\"text\":\"user-1\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"request/header\",\"seq\":3,\"time\":1003,\"data\":{\"header\":{\"config\":{\"provider\":\"mock\",\"model\":\"mock-1\"}},\"reason\":\"initial\"}}\n{\"type\":\"step/end\",\"seq\":4,\"time\":1004,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"step/start\",\"seq\":5,\"time\":1005,\"data\":{\"turn\":1,\"step\":2}}\n{\"type\":\"request/header\",\"seq\":6,\"time\":1006,\"data\":{\"header\":{\"config\":{\"provider\":\"mock\",\"model\":\"mock-1\"},\"system\":\"\"},\"reason\":\"initial\"}}\n{\"type\":\"step/end\",\"seq\":7,\"time\":1007,\"data\":{\"turn\":1,\"step\":2}}\n{\"type\":\"turn/end\",\"seq\":8,\"time\":1008,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "v2v3",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/v2v3/session.v2.jsonl": "{\"type\":\"session\",\"version\":2,\"id\":\"v2v3\",\"createdAt\":1700000000000,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1000,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1001,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"user/message\",\"seq\":2,\"time\":1002,\"data\":{\"role\":\"user\",\"id\":\"user-1\",\"content\":[{\"type\":\"text\",\"text\":\"user-1\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"request/header\",\"seq\":3,\"time\":1003,\"data\":{\"header\":{\"config\":{\"provider\":\"mock\",\"model\":\"mock-1\"}},\"reason\":\"initial\"}}\n{\"type\":\"step/end\",\"seq\":4,\"time\":1004,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"step/start\",\"seq\":5,\"time\":1005,\"data\":{\"turn\":1,\"step\":2}}\n{\"type\":\"request/header\",\"seq\":6,\"time\":1006,\"data\":{\"header\":{\"config\":{\"provider\":\"mock\",\"model\":\"mock-1\"},\"system\":\"\"},\"reason\":\"initial\"}}\n{\"type\":\"step/end\",\"seq\":7,\"time\":1007,\"data\":{\"turn\":1,\"step\":2}}\n{\"type\":\"turn/end\",\"seq\":8,\"time\":1008,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n",
+            "_no-cwd/v2v3/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"v2v3\",\"createdAt\":1700000000000,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1000,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1001,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"system/message\",\"seq\":2,\"time\":1001,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"v2-to-v3-system-e333fdcdd1b3f099510c1ec58e412f2952cdca2124fc1f78e194b6d0a4c8766d\",\"role\":\"system\",\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"content\":[]}},\"surfaceOp\":\"append\"}\n{\"type\":\"user/message\",\"seq\":3,\"time\":1002,\"data\":{\"role\":\"user\",\"id\":\"user-1\",\"content\":[{\"type\":\"text\",\"text\":\"user-1\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"request/header\",\"seq\":4,\"time\":1003,\"data\":{\"header\":{\"config\":{\"provider\":\"mock\",\"model\":\"mock-1\"}},\"reason\":\"initial\"}}\n{\"type\":\"step/end\",\"seq\":5,\"time\":1004,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"step/start\",\"seq\":6,\"time\":1005,\"data\":{\"turn\":1,\"step\":2}}\n{\"type\":\"request/header\",\"seq\":7,\"time\":1006,\"data\":{\"header\":{\"config\":{\"provider\":\"mock\",\"model\":\"mock-1\"}},\"reason\":\"initial\"}}\n{\"type\":\"step/end\",\"seq\":8,\"time\":1007,\"data\":{\"turn\":1,\"step\":2}}\n{\"type\":\"turn/end\",\"seq\":9,\"time\":1008,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "migrate-v2-seeded",
+      "seed": [
+        {
+          "file": "_no-cwd/v2v3/session.v2.jsonl",
+          "text": "{\"type\":\"session\",\"version\":2,\"id\":\"v2v3\",\"createdAt\":1700000000000,\"isSeeded\":true,\"delegationDepth\":0,\"parentSession\":\"parent\"}\n{\"type\":\"session/end-seed\",\"seq\":0,\"time\":1000,\"data\":{\"inherited\":true}}\n{\"type\":\"turn/start\",\"seq\":1,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":2,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "v2v3",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/v2v3/session.v2.jsonl": "{\"type\":\"session\",\"version\":2,\"id\":\"v2v3\",\"createdAt\":1700000000000,\"isSeeded\":true,\"delegationDepth\":0,\"parentSession\":\"parent\"}\n{\"type\":\"session/end-seed\",\"seq\":0,\"time\":1000,\"data\":{\"inherited\":true}}\n{\"type\":\"turn/start\",\"seq\":1,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":2,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n",
+            "_no-cwd/v2v3/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"v2v3\",\"createdAt\":1700000000000,\"parentSession\":\"parent\",\"isSeeded\":true,\"delegationDepth\":0}\n{\"type\":\"session/end-seed\",\"seq\":0,\"time\":1000,\"data\":{\"inherited\":true}}\n{\"type\":\"turn/start\",\"seq\":1,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":2,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"system/message\",\"seq\":3,\"time\":1002,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"v2-to-v3-system-e12c67eac0ceb4f8c38adb1b85eab50b81369336240a868e62caaccf738872f7\",\"role\":\"system\",\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"content\":[]}},\"surfaceOp\":\"append\"}\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "migrate-torn-source-tail-dropped",
+      "seed": [
+        {
+          "file": "_no-cwd/hist/session.jsonl",
+          "text": "{\"type\":\"session\",\"version\":0,\"id\":\"hist\",\"createdAt\":1000,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"request/header\",\"seq\":2,\"time\":1003,\"data\":{\"header\":{\"config\":{\"provider\":\"p\",\"model\":\"m\"},\"system\":\"sys\"},\"reason\":\"initial\"}}\n{\"type\":\"user/message\",\"seq\":3,\"time\":1004,\"data\":{\"role\":\"user\",\"id\":\"u1\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"assistant/message\",\"seq\":4,\"time\":1005,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"a1\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}],\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"}}},\"surfaceOp\":\"append\"}\n{\"type\":\"step/end\",\"seq\":5,\"time\":1006,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":6,\"time\":1007,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n{\"type\":\"mode/set\",\"seq\":7,\"time\":1008,\"data\":{\"mode\":\"plan\"}}"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "hist",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/hist/session.jsonl": "{\"type\":\"session\",\"version\":0,\"id\":\"hist\",\"createdAt\":1000,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"request/header\",\"seq\":2,\"time\":1003,\"data\":{\"header\":{\"config\":{\"provider\":\"p\",\"model\":\"m\"},\"system\":\"sys\"},\"reason\":\"initial\"}}\n{\"type\":\"user/message\",\"seq\":3,\"time\":1004,\"data\":{\"role\":\"user\",\"id\":\"u1\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"assistant/message\",\"seq\":4,\"time\":1005,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"a1\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}],\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"}}},\"surfaceOp\":\"append\"}\n{\"type\":\"step/end\",\"seq\":5,\"time\":1006,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":6,\"time\":1007,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n{\"type\":\"mode/set\",\"seq\":7,\"time\":1008,\"data\":{\"mode\":\"plan\"}}",
+            "_no-cwd/hist/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"hist\",\"createdAt\":1000,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"system/message\",\"seq\":2,\"time\":1002,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"v2-to-v3-system-c8533130c0b834dd67107ab41f08523b525f40d898d85819e0bbd6ae438bafdc\",\"role\":\"system\",\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"content\":[]}},\"surfaceOp\":\"append\"}\n{\"type\":\"system/message\",\"seq\":3,\"time\":1003,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"v2-to-v3-system-ba7597b207261e75d69c69e8ad51adfb046f4ca08cf24010d42efcf5dc4284fe\",\"role\":\"system\",\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"content\":[{\"type\":\"text\",\"text\":\"sys\"}]}},\"surfaceOp\":{\"op\":\"replace\",\"startSeq\":2,\"endSeq\":2},\"sourceEventSeqs\":[2]}\n{\"type\":\"request/header\",\"seq\":4,\"time\":1003,\"data\":{\"header\":{\"config\":{\"provider\":\"p\",\"model\":\"m\"}},\"reason\":\"initial\"}}\n{\"type\":\"user/message\",\"seq\":5,\"time\":1004,\"data\":{\"role\":\"user\",\"id\":\"u1\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"assistant/message\",\"seq\":6,\"time\":1005,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"a1\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}],\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"}},\"stream\":[]},\"surfaceOp\":\"append\"}\n{\"type\":\"step/end\",\"seq\":7,\"time\":1006,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":8,\"time\":1007,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n"
+          }
+        }
+      ],
+      "note": "The tail after the last LF is a complete row v0->v1 would refuse, but it is never parsed."
+    },
+    {
+      "id": "migrate-unparsable-row-ends-rows",
+      "seed": [
+        {
+          "file": "_no-cwd/hist/session.jsonl",
+          "text": "{\"type\":\"session\",\"version\":0,\"id\":\"hist\",\"createdAt\":1000,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"request/header\",\"seq\":2,\"time\":1003,\"data\":{\"header\":{\"config\":{\"provider\":\"p\",\"model\":\"m\"},\"system\":\"sys\"},\"reason\":\"initial\"}}\n{\"type\":\"user/message\",\"seq\":3,\"time\":1004,\"data\":{\"role\":\"user\",\"id\":\"u1\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"assistant/message\",\"seq\":4,\"time\":1005,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"a1\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}],\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"}}},\"surfaceOp\":\"append\"}\n{\"type\":\"step/end\",\"seq\":5,\"time\":1006,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":6,\"time\":1007,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\nnot json\n{\"type\":\"mode/set\",\"seq\":8,\"time\":1009,\"data\":{\"mode\":\"plan\"}}\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "hist",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/hist/session.jsonl": "{\"type\":\"session\",\"version\":0,\"id\":\"hist\",\"createdAt\":1000,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"request/header\",\"seq\":2,\"time\":1003,\"data\":{\"header\":{\"config\":{\"provider\":\"p\",\"model\":\"m\"},\"system\":\"sys\"},\"reason\":\"initial\"}}\n{\"type\":\"user/message\",\"seq\":3,\"time\":1004,\"data\":{\"role\":\"user\",\"id\":\"u1\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"assistant/message\",\"seq\":4,\"time\":1005,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"a1\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}],\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"}}},\"surfaceOp\":\"append\"}\n{\"type\":\"step/end\",\"seq\":5,\"time\":1006,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":6,\"time\":1007,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\nnot json\n{\"type\":\"mode/set\",\"seq\":8,\"time\":1009,\"data\":{\"mode\":\"plan\"}}\n",
+            "_no-cwd/hist/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"hist\",\"createdAt\":1000,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"system/message\",\"seq\":2,\"time\":1002,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"v2-to-v3-system-c8533130c0b834dd67107ab41f08523b525f40d898d85819e0bbd6ae438bafdc\",\"role\":\"system\",\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"content\":[]}},\"surfaceOp\":\"append\"}\n{\"type\":\"system/message\",\"seq\":3,\"time\":1003,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"v2-to-v3-system-ba7597b207261e75d69c69e8ad51adfb046f4ca08cf24010d42efcf5dc4284fe\",\"role\":\"system\",\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"content\":[{\"type\":\"text\",\"text\":\"sys\"}]}},\"surfaceOp\":{\"op\":\"replace\",\"startSeq\":2,\"endSeq\":2},\"sourceEventSeqs\":[2]}\n{\"type\":\"request/header\",\"seq\":4,\"time\":1003,\"data\":{\"header\":{\"config\":{\"provider\":\"p\",\"model\":\"m\"}},\"reason\":\"initial\"}}\n{\"type\":\"user/message\",\"seq\":5,\"time\":1004,\"data\":{\"role\":\"user\",\"id\":\"u1\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"assistant/message\",\"seq\":6,\"time\":1005,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"a1\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}],\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"}},\"stream\":[]},\"surfaceOp\":\"append\"}\n{\"type\":\"step/end\",\"seq\":7,\"time\":1006,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":8,\"time\":1007,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n"
+          }
+        }
+      ],
+      "note": "No row after the unparsable one reaches the codec, so the mode/set row v0->v1 would refuse is ignored."
+    },
+    {
+      "id": "migrate-unparsable-row-then-turn-end",
+      "seed": [
+        {
+          "file": "_no-cwd/hist/session.jsonl",
+          "text": "{\"type\":\"session\",\"version\":0,\"id\":\"hist\",\"createdAt\":1000,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"request/header\",\"seq\":2,\"time\":1003,\"data\":{\"header\":{\"config\":{\"provider\":\"p\",\"model\":\"m\"},\"system\":\"sys\"},\"reason\":\"initial\"}}\n{\"type\":\"user/message\",\"seq\":3,\"time\":1004,\"data\":{\"role\":\"user\",\"id\":\"u1\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"assistant/message\",\"seq\":4,\"time\":1005,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"a1\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}],\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"}}},\"surfaceOp\":\"append\"}\n{\"type\":\"step/end\",\"seq\":5,\"time\":1006,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":6,\"time\":1007,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\nnot json\n{\"type\":\"turn/end\",\"seq\":8,\"time\":1009,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "hist",
+          "src": "_no-cwd/hist/session.jsonl",
+          "ts": {
+            "outcome": "thrown",
+            "class": "SessionPersistenceCorruptionError",
+            "message": "session \"hist\": stored log is corrupt: Error: corrupt session log: row 8 is not valid JSON (raw log: {src})"
+          },
+          "tree": {
+            "_no-cwd/hist/session.jsonl": "{\"type\":\"session\",\"version\":0,\"id\":\"hist\",\"createdAt\":1000,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"request/header\",\"seq\":2,\"time\":1003,\"data\":{\"header\":{\"config\":{\"provider\":\"p\",\"model\":\"m\"},\"system\":\"sys\"},\"reason\":\"initial\"}}\n{\"type\":\"user/message\",\"seq\":3,\"time\":1004,\"data\":{\"role\":\"user\",\"id\":\"u1\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"assistant/message\",\"seq\":4,\"time\":1005,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"a1\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}],\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"}}},\"surfaceOp\":\"append\"}\n{\"type\":\"step/end\",\"seq\":5,\"time\":1006,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":6,\"time\":1007,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\nnot json\n{\"type\":\"turn/end\",\"seq\":8,\"time\":1009,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "migrate-header-version-disagrees",
+      "seed": [
+        {
+          "file": "_no-cwd/hist/session.v1.jsonl",
+          "text": "{\"type\":\"session\",\"version\":0,\"id\":\"hist\",\"createdAt\":1000,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"request/header\",\"seq\":2,\"time\":1003,\"data\":{\"header\":{\"config\":{\"provider\":\"p\",\"model\":\"m\"},\"system\":\"sys\"},\"reason\":\"initial\"}}\n{\"type\":\"user/message\",\"seq\":3,\"time\":1004,\"data\":{\"role\":\"user\",\"id\":\"u1\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"assistant/message\",\"seq\":4,\"time\":1005,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"a1\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}],\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"}}},\"surfaceOp\":\"append\"}\n{\"type\":\"step/end\",\"seq\":5,\"time\":1006,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":6,\"time\":1007,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "hist",
+          "src": "_no-cwd/hist/session.v1.jsonl",
+          "ts": {
+            "outcome": "thrown",
+            "class": "SessionPersistenceCorruptionError",
+            "message": "session \"hist\": stored log is corrupt: Error: resolved JSONL source filename identifies v1, but its header identifies v0 (raw log: {src})"
+          },
+          "tree": {
+            "_no-cwd/hist/session.v1.jsonl": "{\"type\":\"session\",\"version\":0,\"id\":\"hist\",\"createdAt\":1000,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"request/header\",\"seq\":2,\"time\":1003,\"data\":{\"header\":{\"config\":{\"provider\":\"p\",\"model\":\"m\"},\"system\":\"sys\"},\"reason\":\"initial\"}}\n{\"type\":\"user/message\",\"seq\":3,\"time\":1004,\"data\":{\"role\":\"user\",\"id\":\"u1\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"assistant/message\",\"seq\":4,\"time\":1005,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"a1\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}],\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"}}},\"surfaceOp\":\"append\"}\n{\"type\":\"step/end\",\"seq\":5,\"time\":1006,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":6,\"time\":1007,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "migrate-header-not-json",
+      "seed": [
+        {
+          "file": "_no-cwd/v2v3/session.v2.jsonl",
+          "text": "{\"type\":\"session\",\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "v2v3",
+          "src": "_no-cwd/v2v3/session.v2.jsonl",
+          "ts": {
+            "outcome": "thrown",
+            "class": "SessionPersistenceCorruptionError",
+            "message": "session \"v2v3\": stored log is corrupt: Error: corrupt session log: header line is not valid JSON (raw log: {src})"
+          },
+          "tree": {
+            "_no-cwd/v2v3/session.v2.jsonl": "{\"type\":\"session\",\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "migrate-requested-id-mismatch",
+      "seed": [
+        {
+          "file": "_no-cwd/q1/session.jsonl",
+          "text": "{\"type\":\"session\",\"version\":0,\"id\":\"q2\",\"createdAt\":1000,\"delegationDepth\":0}\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "q1",
+          "src": "_no-cwd/q1/session.jsonl",
+          "ts": {
+            "outcome": "thrown",
+            "class": "SessionPersistenceCorruptionError",
+            "message": "session \"q1\": stored log is corrupt: Error: corrupt session log \"{src}\": requested id \"q1\" does not match header id \"q2\" (raw log: {src})"
+          },
+          "tree": {
+            "_no-cwd/q1/session.jsonl": "{\"type\":\"session\",\"version\":0,\"id\":\"q2\",\"createdAt\":1000,\"delegationDepth\":0}\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "migrate-identity-path",
+      "seed": [
+        {
+          "file": "--w--/hist/session.jsonl",
+          "text": "{\"type\":\"session\",\"version\":0,\"id\":\"hist\",\"createdAt\":1000,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"request/header\",\"seq\":2,\"time\":1003,\"data\":{\"header\":{\"config\":{\"provider\":\"p\",\"model\":\"m\"},\"system\":\"sys\"},\"reason\":\"initial\"}}\n{\"type\":\"user/message\",\"seq\":3,\"time\":1004,\"data\":{\"role\":\"user\",\"id\":\"u1\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"assistant/message\",\"seq\":4,\"time\":1005,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"a1\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}],\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"}}},\"surfaceOp\":\"append\"}\n{\"type\":\"step/end\",\"seq\":5,\"time\":1006,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":6,\"time\":1007,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "hist",
+          "ts": {
+            "outcome": "thrown",
+            "class": "SessionPersistenceCorruptionError"
+          },
+          "rust": {
+            "outcome": "native-subset",
+            "limit": "identity"
+          },
+          "tree": {
+            "--w--/hist/session.jsonl": "{\"type\":\"session\",\"version\":0,\"id\":\"hist\",\"createdAt\":1000,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"request/header\",\"seq\":2,\"time\":1003,\"data\":{\"header\":{\"config\":{\"provider\":\"p\",\"model\":\"m\"},\"system\":\"sys\"},\"reason\":\"initial\"}}\n{\"type\":\"user/message\",\"seq\":3,\"time\":1004,\"data\":{\"role\":\"user\",\"id\":\"u1\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"assistant/message\",\"seq\":4,\"time\":1005,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"a1\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}],\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"}}},\"surfaceOp\":\"append\"}\n{\"type\":\"step/end\",\"seq\":5,\"time\":1006,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":6,\"time\":1007,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n"
+          }
+        }
+      ],
+      "note": "The header has no cwd, so it names the _no-cwd project, and TypeScript compares the paths with realpath."
+    },
+    {
+      "id": "migrate-history-refusal",
+      "seed": [
+        {
+          "file": "_no-cwd/hist/session.jsonl",
+          "text": "{\"type\":\"session\",\"version\":0,\"id\":\"hist\",\"createdAt\":1000,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"session-log-deepseek/delivery-accepted\",\"seq\":1,\"time\":1002,\"data\":{\"sessionId\":\"other\",\"throughSeq\":0}}\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "hist",
+          "src": "_no-cwd/hist/session.jsonl",
+          "ts": {
+            "outcome": "thrown",
+            "class": "SessionFormatUnsupportedError",
+            "message": "bake-session-format-v0-to-v1 refuses this format v0 Session: current-generation delivery marker names the wrong Session; source v0 artifact remains unchanged (raw log: {src})"
+          },
+          "tree": {
+            "_no-cwd/hist/session.jsonl": "{\"type\":\"session\",\"version\":0,\"id\":\"hist\",\"createdAt\":1000,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"session-log-deepseek/delivery-accepted\",\"seq\":1,\"time\":1002,\"data\":{\"sessionId\":\"other\",\"throughSeq\":0}}\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "migrate-history-refusal-before-codec-refusal",
+      "seed": [
+        {
+          "file": "_no-cwd/hist/session.jsonl",
+          "text": "{\"type\":\"session\",\"version\":0,\"id\":\"hist\",\"createdAt\":1000,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"mode/set\",\"seq\":1,\"time\":1002,\"data\":{\"mode\":\"plan\"}}\n{\"type\":\"turn/end\",\"seq\":5,\"time\":1003,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "hist",
+          "src": "_no-cwd/hist/session.jsonl",
+          "ts": {
+            "outcome": "thrown",
+            "class": "SessionFormatUnsupportedError",
+            "message": "session \"hist\" contains unsupported legacy mode/set event at seq 1; source v0 artifact remains unchanged (raw log: {src})"
+          },
+          "tree": {
+            "_no-cwd/hist/session.jsonl": "{\"type\":\"session\",\"version\":0,\"id\":\"hist\",\"createdAt\":1000,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"mode/set\",\"seq\":1,\"time\":1002,\"data\":{\"mode\":\"plan\"}}\n{\"type\":\"turn/end\",\"seq\":5,\"time\":1003,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n"
+          }
+        }
+      ],
+      "note": "v0->v1 refuses row 1 while it streams, before the recoverable codec rethrows the seq gap at the turn/end row 2."
+    },
+    {
+      "id": "migrate-codec-refusal-after-clean-prefix",
+      "seed": [
+        {
+          "file": "_no-cwd/hist/session.jsonl",
+          "text": "{\"type\":\"session\",\"version\":0,\"id\":\"hist\",\"createdAt\":1000,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"turn/end\",\"seq\":5,\"time\":1003,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "hist",
+          "src": "_no-cwd/hist/session.jsonl",
+          "ts": {
+            "outcome": "thrown",
+            "class": "SessionPersistenceCorruptionError",
+            "message": "session \"hist\": stored log is corrupt: SessionFormatError: released Session row 1 has seq gap (expected 1, got 5) (raw log: {src})"
+          },
+          "tree": {
+            "_no-cwd/hist/session.jsonl": "{\"type\":\"session\",\"version\":0,\"id\":\"hist\",\"createdAt\":1000,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"turn/end\",\"seq\":5,\"time\":1003,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n"
+          }
+        }
+      ],
+      "note": "The open turn would only be refused at finish, which the codec refusal at row 1 precedes."
+    },
+    {
+      "id": "migrate-codec-header-refusal",
+      "seed": [
+        {
+          "file": "_no-cwd/hist/session.v1.jsonl",
+          "text": "{\"type\":\"session\",\"version\":1,\"id\":\"hist\",\"createdAt\":1000,\"cwd\":\"rel\",\"delegationDepth\":0}\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "hist",
+          "src": "_no-cwd/hist/session.v1.jsonl",
+          "ts": {
+            "outcome": "thrown",
+            "class": "SessionPersistenceCorruptionError",
+            "message": "session \"hist\": stored log is corrupt: SessionFormatError: format v1 header cwd must be absolute (raw log: {src})"
+          },
+          "tree": {
+            "_no-cwd/hist/session.v1.jsonl": "{\"type\":\"session\",\"version\":1,\"id\":\"hist\",\"createdAt\":1000,\"cwd\":\"rel\",\"delegationDepth\":0}\n"
+          }
+        }
+      ],
+      "note": "The identity check skips a header its codec refuses."
+    },
+    {
+      "id": "migrate-v2-codec-issue-dropped",
+      "seed": [
+        {
+          "file": "_no-cwd/v2v3/session.v2.jsonl",
+          "text": "{\"type\":\"session\",\"version\":2,\"id\":\"v2v3\",\"createdAt\":1700000000000,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1000,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1001,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"user/message\",\"seq\":2,\"time\":1002,\"data\":{\"role\":\"user\",\"id\":\"user-1\",\"content\":[{\"type\":\"text\",\"text\":\"user-1\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"request/header\",\"seq\":3,\"time\":1003,\"data\":{\"header\":{\"config\":{\"provider\":\"mock\",\"model\":\"mock-1\"}},\"reason\":\"initial\"}}\n{\"type\":\"step/end\",\"seq\":4,\"time\":1004,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"step/start\",\"seq\":5,\"time\":1005,\"data\":{\"turn\":1,\"step\":2}}\n{\"type\":\"request/header\",\"seq\":6,\"time\":1006,\"data\":{\"header\":{\"config\":{\"provider\":\"mock\",\"model\":\"mock-1\"},\"system\":\"\"},\"reason\":\"initial\"}}\n{\"type\":\"step/end\",\"seq\":7,\"time\":1007,\"data\":{\"turn\":1,\"step\":2}}\n{\"type\":\"turn/end\",\"seq\":8,\"time\":1008,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n{\"type\":\"step/start\",\"seq\":99,\"time\":1009,\"data\":{\"turn\":1,\"step\":3}}\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "v2v3",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/v2v3/session.v2.jsonl": "{\"type\":\"session\",\"version\":2,\"id\":\"v2v3\",\"createdAt\":1700000000000,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1000,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1001,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"user/message\",\"seq\":2,\"time\":1002,\"data\":{\"role\":\"user\",\"id\":\"user-1\",\"content\":[{\"type\":\"text\",\"text\":\"user-1\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"request/header\",\"seq\":3,\"time\":1003,\"data\":{\"header\":{\"config\":{\"provider\":\"mock\",\"model\":\"mock-1\"}},\"reason\":\"initial\"}}\n{\"type\":\"step/end\",\"seq\":4,\"time\":1004,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"step/start\",\"seq\":5,\"time\":1005,\"data\":{\"turn\":1,\"step\":2}}\n{\"type\":\"request/header\",\"seq\":6,\"time\":1006,\"data\":{\"header\":{\"config\":{\"provider\":\"mock\",\"model\":\"mock-1\"},\"system\":\"\"},\"reason\":\"initial\"}}\n{\"type\":\"step/end\",\"seq\":7,\"time\":1007,\"data\":{\"turn\":1,\"step\":2}}\n{\"type\":\"turn/end\",\"seq\":8,\"time\":1008,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n{\"type\":\"step/start\",\"seq\":99,\"time\":1009,\"data\":{\"turn\":1,\"step\":3}}\n",
+            "_no-cwd/v2v3/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"v2v3\",\"createdAt\":1700000000000,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1000,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1001,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"system/message\",\"seq\":2,\"time\":1001,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"v2-to-v3-system-e333fdcdd1b3f099510c1ec58e412f2952cdca2124fc1f78e194b6d0a4c8766d\",\"role\":\"system\",\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"content\":[]}},\"surfaceOp\":\"append\"}\n{\"type\":\"user/message\",\"seq\":3,\"time\":1002,\"data\":{\"role\":\"user\",\"id\":\"user-1\",\"content\":[{\"type\":\"text\",\"text\":\"user-1\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"request/header\",\"seq\":4,\"time\":1003,\"data\":{\"header\":{\"config\":{\"provider\":\"mock\",\"model\":\"mock-1\"}},\"reason\":\"initial\"}}\n{\"type\":\"step/end\",\"seq\":5,\"time\":1004,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"step/start\",\"seq\":6,\"time\":1005,\"data\":{\"turn\":1,\"step\":2}}\n{\"type\":\"request/header\",\"seq\":7,\"time\":1006,\"data\":{\"header\":{\"config\":{\"provider\":\"mock\",\"model\":\"mock-1\"}},\"reason\":\"initial\"}}\n{\"type\":\"step/end\",\"seq\":8,\"time\":1007,\"data\":{\"turn\":1,\"step\":2}}\n{\"type\":\"turn/end\",\"seq\":9,\"time\":1008,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n"
+          }
+        }
+      ],
+      "note": "The recoverable v2 codec keeps the seq gap at row 9 as its issue and drops the row."
+    },
+    {
       "id": "limit-empty-id",
       "seed": [],
       "steps": [
@@ -1620,7 +2120,7 @@
       "note": "Rust refuses a device name on every host; the POSIX backend writes it as any other id."
     },
     {
-      "id": "limit-older-generation",
+      "id": "migrate-header-less",
       "seed": [
         {
           "file": "_no-cwd/g1/session.v2.jsonl",
@@ -1631,13 +2131,11 @@
         {
           "step": "open",
           "id": "g1",
+          "src": "_no-cwd/g1/session.v2.jsonl",
           "ts": {
             "outcome": "thrown",
-            "class": "SessionPersistenceCorruptionError"
-          },
-          "rust": {
-            "outcome": "native-subset",
-            "limit": "older-generation"
+            "class": "SessionPersistenceCorruptionError",
+            "message": "session \"g1\": stored log is corrupt: Error: empty or header-less session log (raw log: {src})"
           },
           "tree": {
             "_no-cwd/g1/session.v2.jsonl": "x"
@@ -1726,6 +2224,90 @@
         }
       ],
       "note": "The scan refuses the header line; TypeScript wraps the refusal with the path."
+    },
+    {
+      "id": "limit-v2-codec-recovery",
+      "seed": [
+        {
+          "file": "_no-cwd/v2v3/session.v2.jsonl",
+          "text": "{\"type\":\"session\",\"version\":2,\"id\":\"v2v3\",\"createdAt\":1700000000000,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1000,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":5,\"time\":1001,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":2,\"time\":1002,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "v2v3",
+          "src": "_no-cwd/v2v3/session.v2.jsonl",
+          "ts": {
+            "outcome": "thrown",
+            "class": "SessionPersistenceCorruptionError",
+            "message": "session \"v2v3\": stored log is corrupt: SessionFormatError: released v2 row 1 has seq gap (expected 1, got 5) (raw log: {src})"
+          },
+          "rust": {
+            "outcome": "native-subset",
+            "limit": "migration/v2-codec-recovery"
+          },
+          "tree": {
+            "_no-cwd/v2v3/session.v2.jsonl": "{\"type\":\"session\",\"version\":2,\"id\":\"v2v3\",\"createdAt\":1700000000000,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1000,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":5,\"time\":1001,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":2,\"time\":1002,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n"
+          }
+        }
+      ],
+      "note": "The turn/end row rethrows the issue."
+    },
+    {
+      "id": "limit-row-json-parser",
+      "seed": [
+        {
+          "file": "_no-cwd/hist/session.jsonl",
+          "text": "{\"type\":\"session\",\"version\":0,\"id\":\"hist\",\"createdAt\":1000,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"request/header\",\"seq\":2,\"time\":1003,\"data\":{\"header\":{\"config\":{\"provider\":\"p\",\"model\":\"m\"},\"system\":\"sys\"},\"reason\":\"initial\"}}\n{\"type\":\"user/message\",\"seq\":3,\"time\":1004,\"data\":{\"role\":\"user\",\"id\":\"u1\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"assistant/message\",\"seq\":4,\"time\":1005,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"a1\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}],\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"}}},\"surfaceOp\":\"append\"}\n{\"type\":\"step/end\",\"seq\":5,\"time\":1006,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":6,\"time\":1007,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\nnot json\n{\"type\":\"x\",\"s\":\"\\ud800\"}\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "hist",
+          "ts": {
+            "outcome": "ok"
+          },
+          "rust": {
+            "outcome": "native-subset",
+            "limit": "migration/row/json-parser"
+          },
+          "tree": {
+            "_no-cwd/hist/session.jsonl": "{\"type\":\"session\",\"version\":0,\"id\":\"hist\",\"createdAt\":1000,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"request/header\",\"seq\":2,\"time\":1003,\"data\":{\"header\":{\"config\":{\"provider\":\"p\",\"model\":\"m\"},\"system\":\"sys\"},\"reason\":\"initial\"}}\n{\"type\":\"user/message\",\"seq\":3,\"time\":1004,\"data\":{\"role\":\"user\",\"id\":\"u1\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"assistant/message\",\"seq\":4,\"time\":1005,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"a1\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}],\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"}}},\"surfaceOp\":\"append\"}\n{\"type\":\"step/end\",\"seq\":5,\"time\":1006,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":6,\"time\":1007,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\nnot json\n{\"type\":\"x\",\"s\":\"\\ud800\"}\n",
+            "_no-cwd/hist/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"hist\",\"createdAt\":1000,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"system/message\",\"seq\":2,\"time\":1002,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"v2-to-v3-system-c8533130c0b834dd67107ab41f08523b525f40d898d85819e0bbd6ae438bafdc\",\"role\":\"system\",\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"content\":[]}},\"surfaceOp\":\"append\"}\n{\"type\":\"system/message\",\"seq\":3,\"time\":1003,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"v2-to-v3-system-ba7597b207261e75d69c69e8ad51adfb046f4ca08cf24010d42efcf5dc4284fe\",\"role\":\"system\",\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"content\":[{\"type\":\"text\",\"text\":\"sys\"}]}},\"surfaceOp\":{\"op\":\"replace\",\"startSeq\":2,\"endSeq\":2},\"sourceEventSeqs\":[2]}\n{\"type\":\"request/header\",\"seq\":4,\"time\":1003,\"data\":{\"header\":{\"config\":{\"provider\":\"p\",\"model\":\"m\"}},\"reason\":\"initial\"}}\n{\"type\":\"user/message\",\"seq\":5,\"time\":1004,\"data\":{\"role\":\"user\",\"id\":\"u1\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"assistant/message\",\"seq\":6,\"time\":1005,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"a1\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}],\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"}},\"stream\":[]},\"surfaceOp\":\"append\"}\n{\"type\":\"step/end\",\"seq\":7,\"time\":1006,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":8,\"time\":1007,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n"
+          }
+        }
+      ],
+      "note": "JSON.parse admits the lone surrogate and ignores the row; serde_json refuses it."
+    },
+    {
+      "id": "outside-domain-final-check",
+      "seed": [
+        {
+          "file": "_no-cwd/o1/session.v2.jsonl",
+          "text": "{\"type\":\"session\",\"version\":2,\"id\":\"o1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":2}}\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "o1",
+          "src": "_no-cwd/o1/session.v2.jsonl",
+          "ts": {
+            "outcome": "thrown",
+            "class": "SessionFormatUnsupportedError",
+            "message": "Session migration from v2 to v3 refuses the transformed artifact: turn/start 2 does not open expected turn 1; source v2 artifact remains unchanged (raw log: {src})"
+          },
+          "rust": {
+            "outcome": "outside-domain"
+          },
+          "tree": {
+            "_no-cwd/o1/session.v2.jsonl": "{\"type\":\"session\",\"version\":2,\"id\":\"o1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":2}}\n"
+          }
+        }
+      ],
+      "note": "Every stage admits the turn number; only the catalog final check, which Rust does not run, refuses it."
     }
   ]
 }

@@ -6,11 +6,13 @@
 //! file beneath the root, `session.lock` excepted, must have the hand-written
 //! text, and no other file may exist. A thrown outcome maps to the refusal
 //! Rust claims: the exact already-exists, not-found, duplicate-id,
-//! contiguity, or lossless-snapshot message, or `Unadmitted` for any other
-//! throw of a create or append. A `rust` override names a native limit and
-//! ends the case. Every limit must be named by some case of the table, and
-//! every case that applies here must witness the limit it names. Nothing
-//! here reads TypeScript output.
+//! contiguity, lossless-snapshot, corruption, or unsupported-migration
+//! message, with `{src}` rendered as the root joined with the step's `src`
+//! path, or `Unadmitted` for any other throw of a create or append. A `rust`
+//! override names a native limit, or marks the step outside the model's
+//! domain, which Rust does not run; either ends the case. Every limit must
+//! be named by some case of the table, and every case that applies here must
+//! witness the limit it names. Nothing here reads TypeScript output.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -25,9 +27,9 @@ use serde_json::{Map, Value};
 const SCHEMA: &str = "bake/session-conformance/plain-log-file-cases";
 const ORACLE: &str = "in an owned temporary root holding the seeded entries, run each step through the JSONL backend with compression none: create, a write open, or the open handle's append, flush, or close; after each step list every file beneath the root except session.lock with its text";
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 33;
+const CASE_COUNT: usize = 55;
 const SOURCE_BUDGET: usize = 64;
-const LIMITS: [&str; 11] = [
+const LIMITS: [&str; 12] = [
     "empty-id",
     "encode",
     "seq-value",
@@ -35,10 +37,11 @@ const LIMITS: [&str; 11] = [
     "legacy-layout",
     "opposite-encoding",
     "non-utf8-name",
-    "older-generation",
     "newer-generation",
     "identity",
     "scan",
+    "migration/v2-codec-recovery",
+    "migration/row/json-parser",
 ];
 const CLASSES: [&str; 7] = [
     "Error",
@@ -108,7 +111,7 @@ fn load() -> Vec<Map<String, Value>> {
         BTreeSet::from(["cases", "history", "oracle", "schema", "version"])
     );
     assert_eq!(table["schema"], SCHEMA);
-    assert_eq!(table["version"], 1);
+    assert_eq!(table["version"], 2);
     assert_eq!(table["oracle"], ORACLE);
     assert!(
         table["history"]
@@ -212,9 +215,14 @@ fn expected_tree(step: &Map<String, Value>, context: &str) -> BTreeMap<String, S
         .collect()
 }
 
-/// A `rust` override's limit name, checked against the schema.
-fn override_limit<'a>(rust: &'a Value, context: &str) -> &'a str {
+/// A `rust` override's limit name, or `None` for a step outside the
+/// model's domain, checked against the schema.
+fn override_limit<'a>(rust: &'a Value, context: &str) -> Option<&'a str> {
     let rust = object(rust, context);
+    if rust["outcome"] == "outside-domain" {
+        assert_eq!(keys(rust), BTreeSet::from(["outcome"]), "{context}");
+        return None;
+    }
     assert_eq!(
         keys(rust),
         BTreeSet::from(["limit", "outcome"]),
@@ -223,11 +231,14 @@ fn override_limit<'a>(rust: &'a Value, context: &str) -> &'a str {
     assert_eq!(rust["outcome"], "native-subset", "{context}");
     let name = text(&rust["limit"], context);
     assert!(LIMITS.contains(&name), "{context}: unknown limit {name}");
-    name
+    Some(name)
 }
 
 fn limit_matches(name: &str, refusal: &LogFileRefusal) -> bool {
     use LogFileRefusal::{Append, Create, NativeSubset};
+    if let Some(migration) = name.strip_prefix("migration/") {
+        return matches!(refusal, NativeSubset(LogFileLimit::Migration(limit)) if limit == migration);
+    }
     matches!(
         (name, refusal),
         (
@@ -249,10 +260,6 @@ fn limit_matches(name: &str, refusal: &LogFileRefusal) -> bool {
             )
             | ("non-utf8-name", NativeSubset(LogFileLimit::NonUtf8Name))
             | (
-                "older-generation",
-                NativeSubset(LogFileLimit::OlderGeneration)
-            )
-            | (
                 "newer-generation",
                 NativeSubset(LogFileLimit::NewerGeneration)
             )
@@ -269,6 +276,8 @@ fn expected_kind(step: &str, class: &str, message: &str) -> &'static str {
         (_, "Error") if message.starts_with("duplicate JSONL session id ") => "duplicate",
         ("append", "Error") if message.starts_with("append seq mismatch for ") => "seq-mismatch",
         ("append", "TypeError") if message == NOT_LOSSLESS => "not-lossless",
+        ("open", "SessionPersistenceCorruptionError") => "corrupt",
+        ("open", "SessionFormatUnsupportedError") => "unsupported",
         ("append", _) => "append-unadmitted",
         ("create", _) => "create-unadmitted",
         _ => panic!("{step}: a {class} throw needs a rust limit"),
@@ -280,6 +289,8 @@ fn kind(refusal: &LogFileRefusal) -> &'static str {
         LogFileRefusal::AlreadyExists { .. } => "already-exists",
         LogFileRefusal::NotFound { .. } => "not-found",
         LogFileRefusal::Duplicate { .. } => "duplicate",
+        LogFileRefusal::Corrupt { .. } => "corrupt",
+        LogFileRefusal::Unsupported { .. } => "unsupported",
         LogFileRefusal::Append(AppendRefusal::SeqMismatch { .. }) => "seq-mismatch",
         LogFileRefusal::Append(AppendRefusal::NotLossless) => "not-lossless",
         LogFileRefusal::Append(AppendRefusal::Unadmitted) => "append-unadmitted",
@@ -308,6 +319,26 @@ fn outcome<'a>(step: &'a Map<String, Value>, context: &str) -> Option<(&'a str, 
     }
 }
 
+/// The step's `src` path joined to `root`, which a `{src}` placeholder in
+/// its message renders; a message holds the placeholder exactly when the
+/// step names `src`.
+fn rendered_source(
+    root: &Path,
+    step: &Map<String, Value>,
+    expected: Option<(&str, Option<&str>)>,
+    context: &str,
+) -> Option<String> {
+    let placeholder = expected
+        .and_then(|(_, message)| message)
+        .is_some_and(|message| message.contains("{src}"));
+    assert_eq!(placeholder, step.contains_key("src"), "{context}: src");
+    let source = text(step.get("src")?, context);
+    let path = source
+        .split('/')
+        .fold(root.to_path_buf(), |path, segment| path.join(segment));
+    Some(path.display().to_string())
+}
+
 /// Every limit a `rust` override of the case names.
 fn named_limits(entry: &Map<String, Value>, id: &str) -> Vec<String> {
     entry["steps"]
@@ -315,7 +346,7 @@ fn named_limits(entry: &Map<String, Value>, id: &str) -> Vec<String> {
         .expect("steps")
         .iter()
         .filter_map(|step| step.get("rust"))
-        .map(|rust| override_limit(rust, id).to_owned())
+        .filter_map(|rust| override_limit(rust, id).map(str::to_owned))
         .collect()
 }
 
@@ -336,7 +367,7 @@ fn run_step(
             "tree",
             "ts",
         ],
-        "open" => &["id", "rust", "step", "tree", "ts"],
+        "open" => &["id", "rust", "src", "step", "tree", "ts"],
         "append" => &["events", "rust", "step", "tree", "ts"],
         "flush" => &["rust", "step", "tree", "ts"],
         "close" => &["step", "tree", "ts"],
@@ -402,6 +433,7 @@ fn shared_cases_lay_out_and_write_like_the_typescript_backend() {
     let mut witnessed = BTreeSet::new();
     let mut refusals = BTreeSet::new();
     let mut ran = 0;
+    let mut outside_domain = 0;
     for entry in &cases {
         let id = text(&entry["id"], "case id");
         assert!(
@@ -434,9 +466,16 @@ fn shared_cases_lay_out_and_write_like_the_typescript_backend() {
             let step = object(step, &context);
             let name = text(&step["step"], &context);
             let expected = outcome(step, &context);
+            let source = rendered_source(root, step, expected, &context);
+            if let Some(rust) = step.get("rust")
+                && override_limit(rust, &context).is_none()
+            {
+                outside_domain += 1;
+                break;
+            }
             let actual = run_step(root, step, &mut handle, &context);
             if let Some(rust) = step.get("rust") {
-                let limit = override_limit(rust, &context);
+                let limit = override_limit(rust, &context).expect("a limit");
                 let refusal = actual.expect_err(&format!("{context}: a limit refuses"));
                 assert!(limit_matches(limit, &refusal), "{context}: {refusal:?}");
                 witnessed.insert(limit.to_owned());
@@ -450,7 +489,11 @@ fn shared_cases_lay_out_and_write_like_the_typescript_backend() {
                     let expected_kind = expected_kind(name, class, message);
                     assert_eq!(kind(&refusal), expected_kind, "{context}: {refusal:?}");
                     if !expected_kind.ends_with("unadmitted") {
-                        assert_eq!(refusal.message(), Some(message), "{context}");
+                        let message = source.as_deref().map_or_else(
+                            || message.to_owned(),
+                            |source| message.replace("{src}", source),
+                        );
+                        assert_eq!(refusal.message(), Some(message.as_str()), "{context}");
                     }
                     refusals.insert(expected_kind);
                 }
@@ -460,6 +503,7 @@ fn shared_cases_lay_out_and_write_like_the_typescript_backend() {
         }
     }
     assert!(ran > 0);
+    assert_eq!(outside_domain, 1, "one step is outside the model's domain");
     let applicable: BTreeSet<String> = cases
         .iter()
         .filter(|entry| applies(entry, text(&entry["id"], "case id")))
@@ -471,10 +515,12 @@ fn shared_cases_lay_out_and_write_like_the_typescript_backend() {
         BTreeSet::from([
             "already-exists",
             "append-unadmitted",
+            "corrupt",
             "duplicate",
             "not-found",
             "not-lossless",
-            "seq-mismatch"
+            "seq-mismatch",
+            "unsupported"
         ]),
         "every claimed refusal is witnessed"
     );

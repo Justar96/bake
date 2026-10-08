@@ -89,8 +89,14 @@
 //! [`project_key`]: it creates, or finds and opens, a Session's current plain
 //! log as the backend's `create` and write `open` do, refusing an existing,
 //! missing, or duplicated id with TypeScript's message, and writes the
-//! model's bytes after each append or flush. It is the only part that reads
-//! or writes a file. The crate is
+//! model's bytes after each append or flush. A write `open` of a plain v0,
+//! v1, or v2 log migrates it as the backend does, through the recoverable
+//! released codec and every format edge, writing the encoded v3 log beside
+//! the unchanged source, or refuses with TypeScript's corruption or
+//! unsupported-migration message. The catalog's final check of the migrated
+//! log, the publication's verifier, and `validateStoredEvents` are not run,
+//! so a log one of them refuses is outside that model's domain. It is the
+//! only part that reads or writes a file. The crate is
 //! unstable and unshipped; the preview's `session inspect` and `session stat` use it.
 
 mod assistant_stream;
@@ -106,6 +112,7 @@ mod offload;
 mod plain_append;
 mod plain_log_file;
 mod pressure;
+mod released_rows;
 mod repair;
 mod replay;
 mod request;
