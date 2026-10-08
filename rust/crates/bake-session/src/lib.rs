@@ -40,7 +40,9 @@
 //! opened Session, since the final check of the transformed log is not run.
 //! [`decode_v0_v1_rows`] decodes a released v0 or v1 Session's parsed header
 //! and rows as the released physical codec does, without migrating them.
-//! [`token_usage`] folds a [`RestoredLog`]'s provider-reported token usage.
+//! [`token_usage`] folds a [`RestoredLog`]'s provider-reported token usage,
+//! and [`context_pressure`] its context occupancy with the surface's
+//! heuristic token total.
 //! [`restored_inbox`] and [`consumed_work`] fold a [`RestoredLog`]'s events
 //! into its pending inbox and its account of consumed work.
 //! [`fork_seed`] selects the events `SessionStore.fork` copies from a
@@ -56,6 +58,7 @@ mod generation_header;
 mod goal;
 mod inbox;
 mod offload;
+mod pressure;
 mod repair;
 mod replay;
 mod request;
@@ -83,6 +86,10 @@ pub use inbox::{
     consumed_work, restored_inbox,
 };
 pub use offload::OffloadRejection;
+pub use pressure::{
+    ContextPressureState, ContextPressureView, PressureLimit, PressureRefusal, RequestRoute,
+    context_pressure,
+};
 pub use replay::{ReplayLimit, ReplayRefusal, SeedRejection, replay_requests};
 pub use request::Request;
 pub use restore::{

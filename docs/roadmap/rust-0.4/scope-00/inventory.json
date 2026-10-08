@@ -983,6 +983,7 @@
     {"path":"packages/llm/llm/tests/tool-updates.spec.ts","lane":"vitest-runtime","owner":"packages/llm/llm","scopes":["06","07"],"disposition":"reuse-oracle","basis":"packages/llm"},
     {"path":"packages/llm/llm/tests/topology.spec.ts","lane":"vitest-runtime","owner":"packages/llm/llm","scopes":["06","07"],"disposition":"reuse-oracle","basis":"packages/llm"},
     {"path":"packages/llm/token-meter/tests/context-breakdown-projection.spec.ts","lane":"vitest-runtime","owner":"packages/llm/token-meter","scopes":["06","07"],"disposition":"reuse-oracle","basis":"packages/llm"},
+    {"path":"packages/llm/token-meter/tests/pressure-conformance.spec.ts","lane":"vitest-runtime","owner":"packages/llm/token-meter","scopes":["06","07"],"disposition":"reuse-oracle","basis":"packages/llm"},
     {"path":"packages/llm/token-meter/tests/route-pricing.spec.ts","lane":"vitest-runtime","owner":"packages/llm/token-meter","scopes":["06","07"],"disposition":"reuse-oracle","basis":"packages/llm"},
     {"path":"packages/llm/token-meter/tests/token-meter.spec.ts","lane":"vitest-runtime","owner":"packages/llm/token-meter","scopes":["06","07"],"disposition":"reuse-oracle","basis":"packages/llm"},
     {"path":"packages/llm/token-meter/tests/token-usage-projection.spec.ts","lane":"vitest-runtime","owner":"packages/llm/token-meter","scopes":["06","07"],"disposition":"reuse-oracle","basis":"packages/llm"},

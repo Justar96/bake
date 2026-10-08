@@ -169,7 +169,10 @@ fn apply(state: &mut TokenUsageState, event_type: &str, data: &Value) -> Result<
 }
 
 /// `usageOf`: the settlement's sample, `None` when it reports none.
-fn sample<'a>(event_type: &str, data: &'a Value) -> Result<Option<&'a Value>, UsageLimit> {
+pub(crate) fn sample<'a>(
+    event_type: &str,
+    data: &'a Value,
+) -> Result<Option<&'a Value>, UsageLimit> {
     if event_type == "assistant/message"
         && let Some(usage) = data.get("usage")
     {
