@@ -1,12 +1,17 @@
-//! `assertReleasedPayloadSemantics(event, 2)` from
+//! `assertReleasedPayloadSemantics(event, version)` from
 //! `packages/session/session-format-v0-to-v1/src/payload-validation.ts`, the
-//! frozen nested payload rules that V2 migration admission reuses.
+//! frozen nested payload rules that V2 migration admission reuses at version
+//! 2 and the v0→v1 edge reuses at version 0.
 //!
-//! Only the version-2 path is ported: the legacy goal message form is
-//! version-0/1 only, and `assistant/chunk` with its stream chunk, finish, and
-//! replay helpers is not a released-v2 type. Checks run in TypeScript's order
-//! and the first failure wins, so a [`StageError::NativeLimit`] may hide a
-//! later TypeScript rejection but never an earlier one.
+//! The version decides only which `session-log-deepseek/delivery-accepted`
+//! markers carry checked coordinates, whether a session reference admits
+//! `capturedFormatVersion` and its upper bound, and whether a user message
+//! may take the legacy goal form, which this crate does not port: before
+//! version 2 such a message reports the `legacy-goal-message` limit.
+//! `assistant/chunk` with its stream chunk, finish, and replay helpers is not
+//! ported; neither caller validates it. Checks run in TypeScript's order and
+//! the first failure wins, so a [`StageError::NativeLimit`] may hide a later
+//! TypeScript rejection but never an earlier one.
 //!
 //! Numbers: serde_json with `float_roundtrip` holds the double `JSON.parse`
 //! produces, so threshold comparisons on finite numbers are exact. Integer
@@ -21,10 +26,10 @@ use serde_json::{Map, Value};
 use super::StageError;
 use crate::{Count, MAX_SAFE_INTEGER};
 
-pub(super) type Checked<T = ()> = Result<T, StageError>;
+pub(crate) type Checked<T = ()> = Result<T, StageError>;
 type Record = Map<String, Value>;
 
-pub(super) fn invalid<T>(message: String) -> Checked<T> {
+pub(crate) fn invalid<T>(message: String) -> Checked<T> {
     Err(StageError::Invalid(message))
 }
 
@@ -32,13 +37,16 @@ pub(super) fn invalid<T>(message: String) -> Checked<T> {
 const FLOAT_LEXEME: &str = "payload-float-lexeme";
 /// A diagnostic quotes a number whose JavaScript spelling may differ.
 const DIAGNOSTIC_NUMBER: &str = "content-kind-diagnostic";
+/// A pre-v2 user message with a goal source carrying `change`, whose check
+/// compares the content with a `JSON.stringify` rendering of the change.
+const LEGACY_GOAL_MESSAGE: &str = "legacy-goal-message";
 
 fn float_lexeme() -> StageError {
     StageError::NativeLimit(FLOAT_LEXEME.to_owned())
 }
 
 /// `sessionFormatCount`.
-pub(super) fn count(value: Option<&Value>, label: &str) -> Checked<u64> {
+pub(crate) fn count(value: Option<&Value>, label: &str) -> Checked<u64> {
     match value.and_then(crate::count) {
         Some(Count::Safe(number)) => Ok(number),
         Some(Count::Undecided) => Err(float_lexeme()),
@@ -98,13 +106,13 @@ fn array_index(key: &str) -> Option<u32> {
 }
 
 /// `JSON.stringify` of a string, which escapes exactly what serde_json does.
-pub(super) fn quote(text: &str) -> String {
+pub(crate) fn quote(text: &str) -> String {
     Value::from(text).to_string()
 }
 
 /// `JSON.stringify(value)` concatenated into a message, `undefined` when
 /// absent. A number reports a native limit unless both runtimes print it alike.
-pub(super) fn stringify(value: Option<&Value>) -> Checked<String> {
+pub(crate) fn stringify(value: Option<&Value>) -> Checked<String> {
     let Some(value) = value else {
         return Ok("undefined".to_owned());
     };
@@ -166,7 +174,7 @@ fn write_json(value: &Value, out: &mut String) -> Checked {
 }
 
 /// `releasedV0Record`.
-pub(super) fn released_record<'a>(value: Option<&'a Value>, label: &str) -> Checked<&'a Record> {
+pub(crate) fn released_record<'a>(value: Option<&'a Value>, label: &str) -> Checked<&'a Record> {
     match value {
         Some(Value::Object(fields)) => Ok(fields),
         _ => invalid(format!("{label} must be a JSON object")),
@@ -175,7 +183,7 @@ pub(super) fn released_record<'a>(value: Option<&'a Value>, label: &str) -> Chec
 
 /// `assertReleasedV0Keys`: the first unexpected member in JavaScript order,
 /// then the first missing required member.
-pub(super) fn released_keys(
+pub(crate) fn released_keys(
     record: &Record,
     required: &[&str],
     optional: &[&str],
@@ -343,12 +351,14 @@ fn seq_array(
     Ok(seqs)
 }
 
-/// Validate one released-v2 payload. The caller has checked the event's
-/// top-level data members against its released-v2 disposition.
-pub(super) fn assert_released_payload_semantics(
+/// Validate one released payload at payload generation `version`. The
+/// caller has checked the event's top-level data members against its
+/// disposition for that generation.
+pub(crate) fn assert_released_payload_semantics(
     event_type: &str,
     seq: u64,
     data: Option<&Value>,
+    version: u8,
 ) -> Checked {
     let label = format!("{event_type} {seq}");
     let label = label.as_str();
@@ -372,7 +382,7 @@ pub(super) fn assert_released_payload_semantics(
             }
             let message_label = at("inserted message");
             array_value(field("inserted"), &at("inserted"), |value, _| {
-                message_value(Some(value), &message_label, Some(Expected::User))
+                message_value(Some(value), &message_label, version, Some(Expected::User))
             })?;
             if let Some(outcome) = field("outcome") {
                 literal_value(Some(outcome), &[Text("canceled")], &at("outcome"))?;
@@ -401,7 +411,12 @@ pub(super) fn assert_released_payload_semantics(
         }
         "assistant/message" => {
             coordinate_pair(data, label)?;
-            message_value(field("message"), &at("message"), Some(Expected::Assistant))?;
+            message_value(
+                field("message"),
+                &at("message"),
+                version,
+                Some(Expected::Assistant),
+            )?;
             if let Some(usage) = field("usage") {
                 token_usage(Some(usage), &at("usage"))?;
             }
@@ -566,9 +581,9 @@ pub(super) fn assert_released_payload_semantics(
         "session-log-deepseek/delivery-accepted" => {
             let accepted = match field("sessionFormatVersion") {
                 None => 0,
-                Some(version) => count(Some(version), &at("sessionFormatVersion"))?,
+                Some(accepted) => count(Some(accepted), &at("sessionFormatVersion"))?,
             };
-            if accepted == 2 {
+            if accepted == u64::from(version) {
                 non_empty_string(field("sessionId"), &at("sessionId"))?;
                 earlier_seq(field("throughSeq"), seq, &at("throughSeq"))?;
             }
@@ -586,7 +601,7 @@ pub(super) fn assert_released_payload_semantics(
             string_value(field("system"), &at("system"))?;
             let message_label = at("message");
             array_value(field("messages"), &at("messages"), |value, _| {
-                message_value(Some(value), &message_label, None)
+                message_value(Some(value), &message_label, version, None)
             })?;
             positive_integer(field("maxTokens"), &at("maxTokens"))?;
         }
@@ -665,7 +680,12 @@ pub(super) fn assert_released_payload_semantics(
         // `meta` stays opaque JSON.
         "tool/result" => {
             coordinate_pair(data, label)?;
-            message_value(field("message"), &at("message"), Some(Expected::Tool))?;
+            message_value(
+                field("message"),
+                &at("message"),
+                version,
+                Some(Expected::Tool),
+            )?;
             if let Some(error) = field("error") {
                 let error = exact_record(Some(error), &at("error"), &["name", "code"], &[])?;
                 non_empty_string(error.get("name"), &at("error name"))?;
@@ -680,7 +700,7 @@ pub(super) fn assert_released_payload_semantics(
             count(field("turn"), &at("turn"))?;
         }
         "user/message" => {
-            message_value(raw, label, Some(Expected::User))?;
+            message_value(raw, label, version, Some(Expected::User))?;
         }
         "web/deepseek-search-llm-request" => {
             non_empty_string(field("endpoint"), &at("endpoint"))?;
@@ -825,7 +845,12 @@ enum Expected {
     Tool,
 }
 
-fn message_value(value: Option<&Value>, label: &str, expected: Option<Expected>) -> Checked {
+fn message_value(
+    value: Option<&Value>,
+    label: &str,
+    version: u8,
+    expected: Option<Expected>,
+) -> Checked {
     let message = exact_record(value, label, &["id", "role", "content", "source"], &[])?;
     non_empty_string(message.get("id"), &format!("{label} id"))?;
     let roles: &[Literal] = match expected {
@@ -836,7 +861,14 @@ fn message_value(value: Option<&Value>, label: &str, expected: Option<Expected>)
     literal_value(message.get("role"), roles, &format!("{label} role"))?;
     content_blocks(message.get("content"), &format!("{label} content"))?;
     let source = released_record(message.get("source"), &format!("{label} source"))?;
-    message_source(source, &format!("{label} source"), expected)?;
+    if version < 2
+        && expected == Some(Expected::User)
+        && source.get("kind") == Some(&Value::from("goal"))
+        && source.contains_key("change")
+    {
+        return Err(StageError::NativeLimit(LEGACY_GOAL_MESSAGE.to_owned()));
+    }
+    message_source(source, &format!("{label} source"), version, expected)?;
     if expected == Some(Expected::Tool) {
         // Content blocks were proven objects above.
         let block = match message.get("content") {
@@ -856,7 +888,12 @@ fn message_value(value: Option<&Value>, label: &str, expected: Option<Expected>)
     Ok(())
 }
 
-fn message_source(source: &Record, label: &str, expected: Option<Expected>) -> Checked {
+fn message_source(
+    source: &Record,
+    label: &str,
+    version: u8,
+    expected: Option<Expected>,
+) -> Checked {
     let kind = source.get("kind");
     if expected == Some(Expected::Assistant) && kind != Some(&Value::from("model")) {
         return invalid(format!("{label} must be model source"));
@@ -923,7 +960,7 @@ fn message_source(source: &Record, label: &str, expected: Option<Expected>) -> C
                 },
             )?;
         }
-        Some("session-reference") => session_reference_source(source, label)?,
+        Some("session-reference") => session_reference_source(source, label, version)?,
         Some("team-message") => {
             keys(
                 &["kind", "teamId", "messageId", "senderId", "senderName"],
@@ -1052,8 +1089,9 @@ fn plugin_source(source: &Record, label: &str) -> Checked {
     Ok(())
 }
 
-/// `sessionReferenceSourceValue` at version 2.
-fn session_reference_source(source: &Record, label: &str) -> Checked {
+/// `sessionReferenceSourceValue`: `capturedFormatVersion` is admitted from
+/// version 1 and bounded by the version.
+fn session_reference_source(source: &Record, label: &str, version: u8) -> Checked {
     released_keys(
         source,
         &["kind", "form", "version", "references"],
@@ -1091,7 +1129,11 @@ fn session_reference_source(source: &Record, label: &str) -> Checked {
                     "truncated",
                     "inputIndex",
                 ],
-                &["capturedFormatVersion"],
+                if version >= 1 {
+                    &["capturedFormatVersion"]
+                } else {
+                    &[]
+                },
             )?;
             let at = |key: &str| format!("{member_label} {key}");
             let session_id = non_empty_string(reference.get("sessionId"), &at("sessionId"))?;
@@ -1100,11 +1142,11 @@ fn session_reference_source(source: &Record, label: &str) -> Checked {
             if captured != Some(&Value::Null) {
                 count(captured, &at("capturedThroughSeq"))?;
             }
-            if let Some(version) = reference.get("capturedFormatVersion") {
-                let version = count(Some(version), &at("capturedFormatVersion"))?;
-                if !(1..=2).contains(&version) {
+            if let Some(captured) = reference.get("capturedFormatVersion") {
+                let captured_version = count(Some(captured), &at("capturedFormatVersion"))?;
+                if !(1..=u64::from(version)).contains(&captured_version) {
                     return invalid(format!(
-                        "{member_label} capturedFormatVersion must be between 1 and 2"
+                        "{member_label} capturedFormatVersion must be between 1 and {version}"
                     ));
                 }
             }

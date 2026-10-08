@@ -1,0 +1,1089 @@
+{
+  "schema": "bake/session-conformance/boundary-cases",
+  "version": 1,
+  "oracle": "turnBoundaryProjectionDefinition in packages/core/agent-loop/src/index.ts and titleProjectionDefinition in packages/session/session-title/src/index.ts, init and apply folded over each case's parsed rows and their interruptedTurnClosers",
+  "history": [
+    "Version 1: 52 cases, written from the TypeScript sources before either harness ran."
+  ],
+  "logs": {
+    "tool-call-turn": "conformance/runtime/request-reconstruction/tool-call-turn/session.jsonl",
+    "dynamic-tools": "conformance/runtime/request-reconstruction/dynamic-tools/session.jsonl"
+  },
+  "cases": [
+    {
+      "id": "capture-tool-call-turn",
+      "fold": "turnBoundary",
+      "log": "tool-call-turn",
+      "edits": [],
+      "ts": {
+        "openTurnStartSeq": null,
+        "lastStepStartSeq": 12,
+        "lastStepBoundary": {
+          "kind": "end",
+          "seq": 14
+        },
+        "lastTurn": 1
+      },
+      "note": "One closed turn with two steps."
+    },
+    {
+      "id": "capture-dynamic-tools",
+      "fold": "turnBoundary",
+      "log": "dynamic-tools",
+      "edits": [],
+      "ts": {
+        "openTurnStartSeq": null,
+        "lastStepStartSeq": 31,
+        "lastStepBoundary": {
+          "kind": "end",
+          "seq": 36
+        },
+        "lastTurn": 3
+      },
+      "note": "Three closed turns: lastTurn and the step seqs track the last."
+    },
+    {
+      "id": "empty-log",
+      "fold": "turnBoundary",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 0
+        }
+      ],
+      "ts": {
+        "openTurnStartSeq": null,
+        "lastStepStartSeq": null,
+        "lastStepBoundary": null,
+        "lastTurn": 0
+      },
+      "note": "No events: init."
+    },
+    {
+      "id": "interrupted-open-turn",
+      "fold": "turnBoundary",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 2
+        }
+      ],
+      "ts": {
+        "openTurnStartSeq": null,
+        "lastStepStartSeq": null,
+        "lastStepBoundary": null,
+        "lastTurn": 1
+      },
+      "note": "The turn/end closer at seq 2 closes the open turn."
+    },
+    {
+      "id": "interrupted-open-step",
+      "fold": "turnBoundary",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 4
+        }
+      ],
+      "ts": {
+        "openTurnStartSeq": null,
+        "lastStepStartSeq": 3,
+        "lastStepBoundary": {
+          "kind": "end",
+          "seq": 4
+        },
+        "lastTurn": 1
+      },
+      "note": "Closers step/end 4 and turn/end 5 move the boundary."
+    },
+    {
+      "id": "interrupted-pending-tool-call",
+      "fold": "turnBoundary",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 9
+        }
+      ],
+      "ts": {
+        "openTurnStartSeq": null,
+        "lastStepStartSeq": 3,
+        "lastStepBoundary": {
+          "kind": "end",
+          "seq": 10
+        },
+        "lastTurn": 1
+      },
+      "note": "Closers tool/result 9, step/end 10, turn/end 11."
+    },
+    {
+      "id": "interrupted-after-step-end",
+      "fold": "turnBoundary",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 12
+        }
+      ],
+      "ts": {
+        "openTurnStartSeq": null,
+        "lastStepStartSeq": 3,
+        "lastStepBoundary": {
+          "kind": "end",
+          "seq": 11
+        },
+        "lastTurn": 1
+      },
+      "note": "Only a turn/end closer at seq 12."
+    },
+    {
+      "id": "interrupted-second-step-open",
+      "fold": "turnBoundary",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 13
+        }
+      ],
+      "ts": {
+        "openTurnStartSeq": null,
+        "lastStepStartSeq": 12,
+        "lastStepBoundary": {
+          "kind": "end",
+          "seq": 13
+        },
+        "lastTurn": 1
+      },
+      "note": "Closers step/end 13 and turn/end 14."
+    },
+    {
+      "id": "next-turn-keeps-step-seqs",
+      "fold": "turnBoundary",
+      "log": "dynamic-tools",
+      "edits": [
+        {
+          "truncate": 20
+        }
+      ],
+      "ts": {
+        "openTurnStartSeq": null,
+        "lastStepStartSeq": 12,
+        "lastStepBoundary": {
+          "kind": "end",
+          "seq": 16
+        },
+        "lastTurn": 2
+      },
+      "note": "turn/start does not reset the step seqs; a turn/end closer at seq 20."
+    },
+    {
+      "id": "interrupted-third-turn",
+      "fold": "turnBoundary",
+      "log": "dynamic-tools",
+      "edits": [
+        {
+          "truncate": 32
+        }
+      ],
+      "ts": {
+        "openTurnStartSeq": null,
+        "lastStepStartSeq": 31,
+        "lastStepBoundary": {
+          "kind": "end",
+          "seq": 32
+        },
+        "lastTurn": 3
+      },
+      "note": "Closers step/end 32 and turn/end 33."
+    },
+    {
+      "id": "null-turn-stays-open",
+      "fold": "turnBoundary",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":16,\"time\":1791337579871,\"data\":{\"turn\":null}}"
+        }
+      ],
+      "ts": {
+        "openTurnStartSeq": 16,
+        "lastStepStartSeq": 12,
+        "lastStepBoundary": {
+          "kind": "end",
+          "seq": 14
+        },
+        "lastTurn": null
+      },
+      "note": "A null turn is no open turn to interruptedTurnClosers, so no closer ends it."
+    },
+    {
+      "id": "null-turn-then-step",
+      "fold": "turnBoundary",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":16,\"time\":1791337579871,\"data\":{\"turn\":null}}"
+        },
+        {
+          "append": "{\"type\":\"step/start\",\"seq\":17,\"time\":1791337579871,\"data\":{\"turn\":null,\"step\":1}}"
+        }
+      ],
+      "ts": {
+        "openTurnStartSeq": 16,
+        "lastStepStartSeq": 17,
+        "lastStepBoundary": {
+          "kind": "start",
+          "seq": 17
+        },
+        "lastTurn": null
+      }
+    },
+    {
+      "id": "step-end-without-open-step",
+      "fold": "turnBoundary",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"step/end\",\"seq\":16,\"time\":1791337579871,\"data\":{\"turn\":1,\"step\":3}}"
+        }
+      ],
+      "ts": {
+        "openTurnStartSeq": null,
+        "lastStepStartSeq": 12,
+        "lastStepBoundary": {
+          "kind": "end",
+          "seq": 16
+        },
+        "lastTurn": 1
+      },
+      "note": "step/end keeps lastStepStartSeq."
+    },
+    {
+      "id": "step-start-after-turn-end",
+      "fold": "turnBoundary",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"step/start\",\"seq\":16,\"time\":1791337579871,\"data\":{\"turn\":2,\"step\":1}}"
+        }
+      ],
+      "ts": {
+        "openTurnStartSeq": null,
+        "lastStepStartSeq": 16,
+        "lastStepBoundary": {
+          "kind": "start",
+          "seq": 16
+        },
+        "lastTurn": 1
+      },
+      "note": "No turn is open, so no closer follows."
+    },
+    {
+      "id": "step-start-data-unread",
+      "fold": "turnBoundary",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"step/start\",\"seq\":16,\"time\":1791337579871,\"data\":\"x\"}"
+        }
+      ],
+      "ts": {
+        "openTurnStartSeq": null,
+        "lastStepStartSeq": 16,
+        "lastStepBoundary": {
+          "kind": "start",
+          "seq": 16
+        },
+        "lastTurn": 1
+      }
+    },
+    {
+      "id": "turn-end-without-turn-start",
+      "fold": "turnBoundary",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":16,\"time\":1791337579871,\"data\":{\"turn\":9,\"reason\":{\"kind\":\"completed\"}}}"
+        }
+      ],
+      "ts": {
+        "openTurnStartSeq": null,
+        "lastStepStartSeq": 12,
+        "lastStepBoundary": {
+          "kind": "end",
+          "seq": 14
+        },
+        "lastTurn": 1
+      }
+    },
+    {
+      "id": "seeded-capture-inherited",
+      "fold": "turnBoundary",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "header": "{\"type\":\"session\",\"version\":3,\"id\":\"a1\",\"createdAt\":1791337579861,\"isSeeded\":true,\"delegationDepth\":0}"
+        },
+        {
+          "append": "{\"type\":\"session/end-seed\",\"seq\":16,\"time\":1791337579871,\"data\":{\"inherited\":true}}"
+        }
+      ],
+      "ts": {
+        "openTurnStartSeq": null,
+        "lastStepStartSeq": 12,
+        "lastStepBoundary": {
+          "kind": "end",
+          "seq": 14
+        },
+        "lastTurn": 1
+      },
+      "note": "The whole capture is the inherited prefix."
+    },
+    {
+      "id": "seeded-turn-after-cut",
+      "fold": "turnBoundary",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "header": "{\"type\":\"session\",\"version\":3,\"id\":\"a1\",\"createdAt\":1791337579861,\"isSeeded\":true,\"delegationDepth\":0}"
+        },
+        {
+          "append": "{\"type\":\"session/end-seed\",\"seq\":16,\"time\":1791337579871,\"data\":{\"inherited\":true}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":1791337579871,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"step/start\",\"seq\":18,\"time\":1791337579871,\"data\":{\"turn\":2,\"step\":1}}"
+        },
+        {
+          "append": "{\"type\":\"step/end\",\"seq\":19,\"time\":1791337579871,\"data\":{\"turn\":2,\"step\":1}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":20,\"time\":1791337579871,\"data\":{\"turn\":2,\"reason\":{\"kind\":\"completed\"}}}"
+        }
+      ],
+      "ts": {
+        "openTurnStartSeq": null,
+        "lastStepStartSeq": 18,
+        "lastStepBoundary": {
+          "kind": "end",
+          "seq": 19
+        },
+        "lastTurn": 2
+      }
+    },
+    {
+      "id": "seeded-interrupted-after-cut",
+      "fold": "turnBoundary",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "header": "{\"type\":\"session\",\"version\":3,\"id\":\"a1\",\"createdAt\":1791337579861,\"isSeeded\":true,\"delegationDepth\":0}"
+        },
+        {
+          "append": "{\"type\":\"session/end-seed\",\"seq\":16,\"time\":1791337579871,\"data\":{\"inherited\":true}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":1791337579871,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"step/start\",\"seq\":18,\"time\":1791337579871,\"data\":{\"turn\":2,\"step\":1}}"
+        }
+      ],
+      "ts": {
+        "openTurnStartSeq": null,
+        "lastStepStartSeq": 18,
+        "lastStepBoundary": {
+          "kind": "end",
+          "seq": 19
+        },
+        "lastTurn": 2
+      },
+      "note": "Closers step/end 19 and turn/end 20."
+    },
+    {
+      "id": "string-turn-copied",
+      "fold": "turnBoundary",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":16,\"time\":1791337579871,\"data\":{\"turn\":\"two\"}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":17,\"time\":1791337579871,\"data\":{\"reason\":{\"kind\":\"completed\"}}}"
+        }
+      ],
+      "ts": {
+        "openTurnStartSeq": null,
+        "lastStepStartSeq": 12,
+        "lastStepBoundary": {
+          "kind": "end",
+          "seq": 14
+        },
+        "lastTurn": "two"
+      }
+    },
+    {
+      "id": "object-turn-copied",
+      "fold": "turnBoundary",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":16,\"time\":1791337579871,\"data\":{\"turn\":{\"n\":[1,-2,true,null,\"x\"]}}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":17,\"time\":1791337579871,\"data\":{\"reason\":{\"kind\":\"completed\"}}}"
+        }
+      ],
+      "ts": {
+        "openTurnStartSeq": null,
+        "lastStepStartSeq": 12,
+        "lastStepBoundary": {
+          "kind": "end",
+          "seq": 14
+        },
+        "lastTurn": {
+          "n": [
+            1,
+            -2,
+            true,
+            null,
+            "x"
+          ]
+        }
+      }
+    },
+    {
+      "id": "largest-safe-turn",
+      "fold": "turnBoundary",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":16,\"time\":1791337579871,\"data\":{\"turn\":9007199254740991}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":17,\"time\":1791337579871,\"data\":{\"reason\":{\"kind\":\"completed\"}}}"
+        }
+      ],
+      "ts": {
+        "openTurnStartSeq": null,
+        "lastStepStartSeq": 12,
+        "lastStepBoundary": {
+          "kind": "end",
+          "seq": 14
+        },
+        "lastTurn": 9007199254740991
+      }
+    },
+    {
+      "id": "negative-turn-copied",
+      "fold": "turnBoundary",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":16,\"time\":1791337579871,\"data\":{\"turn\":-5}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":17,\"time\":1791337579871,\"data\":{\"reason\":{\"kind\":\"completed\"}}}"
+        }
+      ],
+      "ts": {
+        "openTurnStartSeq": null,
+        "lastStepStartSeq": 12,
+        "lastStepBoundary": {
+          "kind": "end",
+          "seq": 14
+        },
+        "lastTurn": -5
+      }
+    },
+    {
+      "id": "fraction-turn-limit",
+      "fold": "turnBoundary",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":16,\"time\":1791337579871,\"data\":{\"turn\":2.0}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":17,\"time\":1791337579871,\"data\":{\"reason\":{\"kind\":\"completed\"}}}"
+        }
+      ],
+      "ts": {
+        "openTurnStartSeq": null,
+        "lastStepStartSeq": 12,
+        "lastStepBoundary": {
+          "kind": "end",
+          "seq": 14
+        },
+        "lastTurn": 2
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "number",
+        "seq": 16
+      }
+    },
+    {
+      "id": "exponent-turn-limit",
+      "fold": "turnBoundary",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":16,\"time\":1791337579871,\"data\":{\"turn\":1e0}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":17,\"time\":1791337579871,\"data\":{\"reason\":{\"kind\":\"completed\"}}}"
+        }
+      ],
+      "ts": {
+        "openTurnStartSeq": null,
+        "lastStepStartSeq": 12,
+        "lastStepBoundary": {
+          "kind": "end",
+          "seq": 14
+        },
+        "lastTurn": 1
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "number",
+        "seq": 16
+      }
+    },
+    {
+      "id": "negative-zero-turn-limit",
+      "fold": "turnBoundary",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":16,\"time\":1791337579871,\"data\":{\"turn\":-0}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":17,\"time\":1791337579871,\"data\":{\"reason\":{\"kind\":\"completed\"}}}"
+        }
+      ],
+      "ts": {
+        "openTurnStartSeq": null,
+        "lastStepStartSeq": 12,
+        "lastStepBoundary": {
+          "kind": "end",
+          "seq": 14
+        },
+        "lastTurn": -0.0
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "number",
+        "seq": 16
+      }
+    },
+    {
+      "id": "unsafe-integer-turn-limit",
+      "fold": "turnBoundary",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":16,\"time\":1791337579871,\"data\":{\"turn\":9007199254740993}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":17,\"time\":1791337579871,\"data\":{\"reason\":{\"kind\":\"completed\"}}}"
+        }
+      ],
+      "ts": {
+        "openTurnStartSeq": null,
+        "lastStepStartSeq": 12,
+        "lastStepBoundary": {
+          "kind": "end",
+          "seq": 14
+        },
+        "lastTurn": 9007199254740992
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "number",
+        "seq": 16
+      },
+      "note": "JSON.parse rounds the turn to 2^53."
+    },
+    {
+      "id": "nested-fraction-turn-limit",
+      "fold": "turnBoundary",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":16,\"time\":1791337579871,\"data\":{\"turn\":{\"a\":[1.5]}}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":17,\"time\":1791337579871,\"data\":{\"reason\":{\"kind\":\"completed\"}}}"
+        }
+      ],
+      "ts": {
+        "openTurnStartSeq": null,
+        "lastStepStartSeq": 12,
+        "lastStepBoundary": {
+          "kind": "end",
+          "seq": 14
+        },
+        "lastTurn": {
+          "a": [
+            1.5
+          ]
+        }
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "number",
+        "seq": 16
+      }
+    },
+    {
+      "id": "fraction-turn-overwritten",
+      "fold": "turnBoundary",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":16,\"time\":1791337579871,\"data\":{\"turn\":1.5}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":17,\"time\":1791337579871,\"data\":{\"reason\":{\"kind\":\"completed\"}}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":18,\"time\":1791337579871,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":19,\"time\":1791337579871,\"data\":{\"turn\":2,\"reason\":{\"kind\":\"completed\"}}}"
+        }
+      ],
+      "ts": {
+        "openTurnStartSeq": null,
+        "lastStepStartSeq": 12,
+        "lastStepBoundary": {
+          "kind": "end",
+          "seq": 14
+        },
+        "lastTurn": 2
+      },
+      "note": "Only the final lastTurn is limited."
+    },
+    {
+      "id": "missing-turn-undefined",
+      "fold": "turnBoundary",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":16,\"time\":1791337579871,\"data\":{}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":17,\"time\":1791337579871,\"data\":{\"reason\":{\"kind\":\"completed\"}}}"
+        }
+      ],
+      "ts": {
+        "openTurnStartSeq": null,
+        "lastStepStartSeq": 12,
+        "lastStepBoundary": {
+          "kind": "end",
+          "seq": 14
+        }
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "undefined-member",
+        "seq": 16
+      },
+      "note": "lastTurn is undefined, written as an absent member."
+    },
+    {
+      "id": "string-data-turn-undefined",
+      "fold": "turnBoundary",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":16,\"time\":1791337579871,\"data\":\"go\"}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":17,\"time\":1791337579871,\"data\":\"done\"}"
+        }
+      ],
+      "ts": {
+        "openTurnStartSeq": null,
+        "lastStepStartSeq": 12,
+        "lastStepBoundary": {
+          "kind": "end",
+          "seq": 14
+        }
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "undefined-member",
+        "seq": 16
+      }
+    },
+    {
+      "id": "array-data-turn-undefined",
+      "fold": "turnBoundary",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":16,\"time\":1791337579871,\"data\":[1]}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":17,\"time\":1791337579871,\"data\":[]}"
+        }
+      ],
+      "ts": {
+        "openTurnStartSeq": null,
+        "lastStepStartSeq": 12,
+        "lastStepBoundary": {
+          "kind": "end",
+          "seq": 14
+        }
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "undefined-member",
+        "seq": 16
+      }
+    },
+    {
+      "id": "undefined-turn-overwritten",
+      "fold": "turnBoundary",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":16,\"time\":1791337579871,\"data\":{}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":17,\"time\":1791337579871,\"data\":{\"reason\":{\"kind\":\"completed\"}}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":18,\"time\":1791337579871,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":19,\"time\":1791337579871,\"data\":{\"turn\":2,\"reason\":{\"kind\":\"completed\"}}}"
+        }
+      ],
+      "ts": {
+        "openTurnStartSeq": null,
+        "lastStepStartSeq": 12,
+        "lastStepBoundary": {
+          "kind": "end",
+          "seq": 14
+        },
+        "lastTurn": 2
+      }
+    },
+    {
+      "id": "title-absent",
+      "fold": "title",
+      "log": "tool-call-turn",
+      "edits": [],
+      "ts": {
+        "title": null
+      },
+      "note": "The capture logs no title."
+    },
+    {
+      "id": "title-set",
+      "fold": "title",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"session/title\",\"seq\":16,\"time\":1791337579871,\"data\":{\"title\":\"Fix the build\",\"messageSeqs\":[5],\"source\":{\"kind\":\"fallback\"}}}"
+        }
+      ],
+      "ts": {
+        "title": "Fix the build"
+      }
+    },
+    {
+      "id": "title-retitled",
+      "fold": "title",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"session/title\",\"seq\":16,\"time\":1791337579871,\"data\":{\"title\":\"First\",\"messageSeqs\":[5],\"source\":{\"kind\":\"fallback\"}}}"
+        },
+        {
+          "append": "{\"type\":\"session/title\",\"seq\":17,\"time\":1791337579871,\"data\":{\"title\":\"Second\",\"messageSeqs\":[5],\"source\":{\"kind\":\"provider\",\"provider\":\"mock\"}}}"
+        }
+      ],
+      "ts": {
+        "title": "Second"
+      }
+    },
+    {
+      "id": "title-in-inherited-prefix",
+      "fold": "title",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "header": "{\"type\":\"session\",\"version\":3,\"id\":\"a1\",\"createdAt\":1791337579861,\"isSeeded\":true,\"delegationDepth\":0}"
+        },
+        {
+          "append": "{\"type\":\"session/title\",\"seq\":16,\"time\":1791337579871,\"data\":{\"title\":\"Inherited\",\"messageSeqs\":[5],\"source\":{\"kind\":\"fallback\"}}}"
+        },
+        {
+          "append": "{\"type\":\"session/end-seed\",\"seq\":17,\"time\":1791337579871,\"data\":{\"inherited\":true}}"
+        }
+      ],
+      "ts": {
+        "title": "Inherited"
+      }
+    },
+    {
+      "id": "title-renamed-after-cut",
+      "fold": "title",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "header": "{\"type\":\"session\",\"version\":3,\"id\":\"a1\",\"createdAt\":1791337579861,\"isSeeded\":true,\"delegationDepth\":0}"
+        },
+        {
+          "append": "{\"type\":\"session/title\",\"seq\":16,\"time\":1791337579871,\"data\":{\"title\":\"Inherited\",\"messageSeqs\":[5],\"source\":{\"kind\":\"fallback\"}}}"
+        },
+        {
+          "append": "{\"type\":\"session/end-seed\",\"seq\":17,\"time\":1791337579871,\"data\":{\"inherited\":true}}"
+        },
+        {
+          "append": "{\"type\":\"session/title\",\"seq\":18,\"time\":1791337579871,\"data\":{\"title\":\"Renamed\",\"messageSeqs\":[5],\"source\":{\"kind\":\"fallback\"}}}"
+        }
+      ],
+      "ts": {
+        "title": "Renamed"
+      }
+    },
+    {
+      "id": "title-after-turns",
+      "fold": "title",
+      "log": "dynamic-tools",
+      "edits": [
+        {
+          "append": "{\"type\":\"session/title\",\"seq\":38,\"time\":1791376787061,\"data\":{\"title\":\"Tools\",\"messageSeqs\":[5],\"source\":{\"kind\":\"fallback\"}}}"
+        }
+      ],
+      "ts": {
+        "title": "Tools"
+      }
+    },
+    {
+      "id": "title-before-interrupted-turn",
+      "fold": "title",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 4
+        },
+        {
+          "append": "{\"type\":\"session/title\",\"seq\":4,\"time\":1791337579865,\"data\":{\"title\":\"Partial\",\"messageSeqs\":[5],\"source\":{\"kind\":\"fallback\"}}}"
+        }
+      ],
+      "ts": {
+        "title": "Partial"
+      },
+      "note": "Closers step/end 5 and turn/end 6 follow the title."
+    },
+    {
+      "id": "title-null-copied",
+      "fold": "title",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"session/title\",\"seq\":16,\"time\":1791337579871,\"data\":{\"title\":null}}"
+        }
+      ],
+      "ts": {
+        "title": null
+      }
+    },
+    {
+      "id": "title-number-copied",
+      "fold": "title",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"session/title\",\"seq\":16,\"time\":1791337579871,\"data\":{\"title\":42}}"
+        }
+      ],
+      "ts": {
+        "title": 42
+      }
+    },
+    {
+      "id": "title-object-copied",
+      "fold": "title",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"session/title\",\"seq\":16,\"time\":1791337579871,\"data\":{\"title\":{\"text\":\"x\",\"n\":[0]}}}"
+        }
+      ],
+      "ts": {
+        "title": {
+          "text": "x",
+          "n": [
+            0
+          ]
+        }
+      }
+    },
+    {
+      "id": "title-empty-string-copied",
+      "fold": "title",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"session/title\",\"seq\":16,\"time\":1791337579871,\"data\":{\"title\":\"\"}}"
+        }
+      ],
+      "ts": {
+        "title": ""
+      }
+    },
+    {
+      "id": "title-fraction-limit",
+      "fold": "title",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"session/title\",\"seq\":16,\"time\":1791337579871,\"data\":{\"title\":1.0}}"
+        }
+      ],
+      "ts": {
+        "title": 1
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "number",
+        "seq": 16
+      }
+    },
+    {
+      "id": "title-missing-undefined",
+      "fold": "title",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"session/title\",\"seq\":16,\"time\":1791337579871,\"data\":{\"messageSeqs\":[]}}"
+        }
+      ],
+      "ts": {},
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "undefined-member",
+        "seq": 16
+      },
+      "note": "The title is undefined, written as an absent member."
+    },
+    {
+      "id": "title-string-data-undefined",
+      "fold": "title",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"session/title\",\"seq\":16,\"time\":1791337579871,\"data\":\"x\"}"
+        }
+      ],
+      "ts": {},
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "undefined-member",
+        "seq": 16
+      }
+    },
+    {
+      "id": "title-null-data-throws",
+      "fold": "title",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"session/title\",\"seq\":16,\"time\":1791337579871,\"data\":null}"
+        }
+      ],
+      "ts": {
+        "threw": "TypeError"
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "null-data",
+        "seq": 16
+      }
+    },
+    {
+      "id": "title-null-data-after-title",
+      "fold": "title",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"session/title\",\"seq\":16,\"time\":1791337579871,\"data\":{\"title\":\"A\",\"messageSeqs\":[5],\"source\":{\"kind\":\"fallback\"}}}"
+        },
+        {
+          "append": "{\"type\":\"session/title\",\"seq\":17,\"time\":1791337579871,\"data\":null}"
+        }
+      ],
+      "ts": {
+        "threw": "TypeError"
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "null-data",
+        "seq": 17
+      }
+    },
+    {
+      "id": "title-undefined-overwritten",
+      "fold": "title",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"session/title\",\"seq\":16,\"time\":1791337579871,\"data\":{}}"
+        },
+        {
+          "append": "{\"type\":\"session/title\",\"seq\":17,\"time\":1791337579871,\"data\":{\"title\":\"B\",\"messageSeqs\":[5],\"source\":{\"kind\":\"fallback\"}}}"
+        }
+      ],
+      "ts": {
+        "title": "B"
+      }
+    },
+    {
+      "id": "title-limit-overwritten",
+      "fold": "title",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"session/title\",\"seq\":16,\"time\":1791337579871,\"data\":{\"title\":1.0}}"
+        },
+        {
+          "append": "{\"type\":\"session/title\",\"seq\":17,\"time\":1791337579871,\"data\":{\"title\":\"C\",\"messageSeqs\":[5],\"source\":{\"kind\":\"fallback\"}}}"
+        }
+      ],
+      "ts": {
+        "title": "C"
+      }
+    },
+    {
+      "id": "title-throw-after-limit",
+      "fold": "title",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"session/title\",\"seq\":16,\"time\":1791337579871,\"data\":{\"title\":1.5}}"
+        },
+        {
+          "append": "{\"type\":\"session/title\",\"seq\":17,\"time\":1791337579871,\"data\":null}"
+        }
+      ],
+      "ts": {
+        "threw": "TypeError"
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "null-data",
+        "seq": 17
+      },
+      "note": "The TypeError ends the fold before the limited title would be read."
+    }
+  ]
+}

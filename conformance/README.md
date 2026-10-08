@@ -28,6 +28,9 @@ Compare TypeScript and Rust using controlled fixtures and independently checked 
 - [Context pressure cases](#context-pressure-cases)
 - [Released v0 and v1 codec cases](#released-v0-and-v1-codec-cases)
 - [Goal projection cases](#goal-projection-cases)
+- [V1 to V2 transformed-stage cases](#v1-to-v2-transformed-stage-cases)
+- [V0 to V1 migration cases](#v0-to-v1-migration-cases)
+- [Turn boundary and title cases](#turn-boundary-and-title-cases)
 - [Runner contract](#runner-contract)
 - [Ownership and limits](#ownership-and-limits)
 
@@ -553,6 +556,87 @@ The cases cover:
 - unsupported versions, formatted with `String`, and non-goal payloads, which fail with `has an invalid kind`.
 
 A `rust` override names a native limit and the seq Rust refuses; TypeScript still asserts its own state. `number` marks a `goal/change` count spelled with a fraction or exponent, written as -0, or beyond `u64`, which Rust refuses rather than decides whether JavaScript reads it as a safe integer; `version-diagnostic` marks an unsupported `version` that JavaScript would format with `String` from a number other than a safe integer written without a fraction or exponent, or from an object or array, which Rust refuses rather than formats. Restoration already refuses such numbers in a `user/message`, so a goal source never reaches a limit. Of the 112 cases, 106 fold identically, 90 of them to a failure, and 6 are limits. Both harnesses pin the case count and require every limit to be witnessed. Three negative controls were observed: accepting any revision not below the current one fails `failure-freezes-state` in both arms (and `edit-same-revision` in TypeScript), folding after a failure fails `failure-freezes-state` in both, and trimming with Rust's `str::trim` fails `block-message-byte-order-mark`. The fold does not cover goal activation or the round driver.
+
+## V1 to V2 transformed-stage cases
+
+[`session/v1-to-v2-cases.json`](session/v1-to-v2-cases.json) holds 107 synthetic Sessions: 106 released v1 Sessions and one v0 Session, which the header check refuses. Each is a physical header and rows as JSON text. The [TypeScript spec](../packages/session/session-format-v1-to-v2/tests/migration-conformance.spec.ts) first decodes each case strictly with the released codec, and that decode must succeed. It then calls `sessionFormatV1ToV2.migrateHeader` and `assertReleasedV2Header` from [`migration.ts`](../packages/session/session-format-v1-to-v2/src/migration.ts), builds the stage with `sourceKind: 'transformed'`, passes each decoded event to `transformEvent` with a `SessionFormatEventCollector`, and calls `finish`. The [Rust test](../rust/crates/bake-session/tests/v1_to_v2_cases.rs) decodes the same parsed rows with `decode_v0_v1_rows` under both path platforms, requires the decode to succeed, and passes the result to [`migrate_v1_to_v2_transformed`](../rust/crates/bake-session/src/v1_to_v2.rs). Both harnesses also check the table's copy of the released v0 type names and the `Object.prototype` names: the spec against the real exports, a Rust unit test against the port's private lists.
+
+```sh
+bun run test:runtime packages/session/session-format-v1-to-v2/tests/migration-conformance.spec.ts
+(cd rust && cargo test --locked -p bake-session --test v1_to_v2_cases)
+```
+
+This is the stage a migration chain runs after v0→v1, not the one production runs on a v1 file. Production's decoded stage first checks each payload with `assertReleasedEventPayload`, and that check is not ported. Because the transformed stage trusts its input, these cases feed it unvalidated codec output.
+
+A migrated outcome compares the v2 header, the transformed events, and the inherited cut. Numbers compare as JavaScript doubles, and object members compare in JavaScript key order. A refusal compares the header, decoded-event index, or finish location and the exact message. Because packed rows expand, an event index can differ from the row index. The cases cover:
+
+- the vocabulary check, including inherited `Object.prototype` names;
+- a `turn/start` that does not close the prior turn;
+- the `turn/end` synthesized after a next-turn splice, and each condition that prevents it;
+- splitting a legacy goal message into a `goal/change` and a plugin-sourced message;
+- `assistant/message` events with absent, empty, or non-empty chunk references;
+- remapping `sourceEventSeqs`, `surfaceOp`, `command/done`, compaction ranges and seqs, and title `messageSeqs`, including forward references;
+- the delivery-marker Session check and its inherited exemption;
+- seeded cuts: an end-seed at the cut rewritten as inherited, one synthesized before the first later event, and one synthesized at finish.
+
+A `rust` marker names a native limit and its location, and Rust claims nothing there. Each such case still asserts TypeScript's outcome, including the engine's `TypeError` text. The spec accepts a `TypeError` only in a case marked `unchecked-shape`. The limits are:
+
+- `assistant-chunk`: an `assistant/chunk` event that passes its envelope check. The subset is chunk-free, so no attempt is ever pending, and attempt grouping and stream compaction are not ported.
+- `non-string-type`: an event `type` that the vocabulary lookup converts to a key.
+- `unchecked-shape`: a value the stage casts without checking and then dereferences, spreads, maps, or adds to.
+- `float-lexeme`: a fraction or exponent spelling that the stage compares, looks up, or prints.
+- `undefined-member`: an emitted `undefined` member, which JSON cannot express.
+
+Of the 107 cases, 45 migrate and 33 are refusals in both arms. The remaining 29 are limits: 11 TypeScript `TypeError`s, 8 that TypeScript migrates, and 10 other TypeScript refusals. Both harnesses pin the case count and require every limit to be witnessed. The expectations were written from the TypeScript sources before either harness ran. Three negative controls were observed:
+
+- mapping references by source seq instead of target seq fails `goal-split-shifts-references` and six other cases in both arms;
+- skipping the synthesized end-seed fails `seeded-cut-synthesizes-end-seed` and five other cases in both arms;
+- removing the `rust` marker from `turn-start-null-data` fails that case in both arms.
+
+The result is stage output: the `restoreReleasedV2Artifact` check of the complete artifact is not run. Recoverable decoding, packed runs kept as runs, the decoded stage's payload checks, and the v0→v1 edge remain separate work. These cases close no roadmap scope.
+## V0 to V1 migration cases
+
+[`session/v0-to-v1-cases.json`](session/v0-to-v1-cases.json) holds 95 synthetic released v0 Sessions, each a physical header and rows as JSON text with a recovery mode, and the table of released-v0 payload dispositions. The [TypeScript spec](../packages/session/session-format-v0-to-v1/tests/migration-conformance.spec.ts) feeds `releasedV0SessionFormatCodec.createDecoder(header, recovery)` into the stream of a `createSessionFormatChain` holding only `sessionFormatV0ToV1` from [`migration.ts`](../packages/session/session-format-v0-to-v1/src/migration.ts), then finishes the decoder and the stream. It also requires the shared disposition table to equal `RELEASED_V0_EVENT_DISPOSITIONS`. The [Rust test](../rust/crates/bake-session/tests/v0_to_v1_cases.rs) decodes the same parsed header and rows with `decode_v0_v1_rows` and passes the result to [`migrate_v0_to_v1`](../rust/crates/bake-session/src/v0_to_v1/mod.rs).
+
+```sh
+bun run test:runtime packages/session/session-format-v0-to-v1/tests/migration-conformance.spec.ts
+(cd rust && cargo test --locked -p bake-session --test v0_to_v1_cases)
+```
+
+TypeScript migrates each row as the codec admits it, while Rust migrates a completed decode. Both harnesses therefore require every case to decode cleanly first, and codec refusals stay in the [codec cases](#released-v0-and-v1-codec-cases). A migrated outcome compares the v1 header, the events in order with object members in JavaScript key order, and the inherited cut. A refusal compares the index of the event being migrated and the exact message: the edge's unsupported errors pass through the chain, and its other errors are wrapped as `bake-session-format-v0-to-v1 refuses this format v0 Session: <detail>`. The cases cover:
+
+- `compact/*` renames, legacy compaction ids carried into summaries, ends, and compact plugin messages, and their reset at `compaction/end` and `session/end-seed`;
+- the unsupported `request/header-delta`, `mode/set`, and `fallback` request headers;
+- legacy `turn/start` triggers, every legacy `turn/end` reason, and `messagePrefix` removal;
+- both steering forms, legacy retry ids reused along one retry chain, and explicit ids, including `null`;
+- legacy user, Assistant, and tool result messages, replacement ids looked up by `surfaceOp.start`, and replacements without identity;
+- the delivery marker's Session check and its inherited exemption;
+- unknown types, payload member and semantic refusals in JavaScript key order, descriptor versions, version-0 session references, and opaque negative zero;
+- packed chunk rows passing through, and a recoverable tail.
+
+A `rust` marker names a native limit and its event index, and Rust claims nothing there; each such case still asserts TypeScript's outcome. `seq-float-lexeme`, `payload-float-lexeme`, and `reference-float-lexeme` mark a float spelling where TypeScript reads a seq, a count, or a replacement `Map` key; `type-coercion` marks a non-string `type`, which TypeScript coerces; `object-prototype-type` marks an inherited `Object.prototype` name, where V8 throws a `TypeError`; and `legacy-goal-message` marks a pre-v2 goal message carrying its change, whose check against a `JSON.stringify` rendering is not ported. Of the 95 cases, 36 migrate, 53 are refusals both arms report exactly, 6 of them unwrapped, and 6 are limits. Both harnesses pin the case count and require every limit to be witnessed. The expectations were written from the TypeScript sources before either harness ran; the first TypeScript run corrected only the V8 text of `object-prototype-type`, which Rust does not decide. Three negative controls were observed: dropping the retry chain's reuse fails `retry-legacy-ids-chain` and `retry-existing-id-seeds-chain` in both arms, minting a legacy id for an explicit `null` retry id fails `retry-explicit-null-id-kept` in both arms, and validating payloads at version 2 instead of 0 fails three cases in Rust. The whole-artifact checks in `relationships.ts` and the later edges do not run, so the output is not an opened Session.
+
+## Turn boundary and title cases
+
+[`session/boundary-cases.json`](session/boundary-cases.json) holds 52 logs, each the [tool-call-turn or dynamic-tools capture](#runtime-request-reconstruction) truncated, given a seeded header, or with rows appended, and the outcome of one fold over each: the turn-boundary projection or the title projection. The [TypeScript spec](../packages/session/session-title/tests/boundary-conformance.spec.ts) folds `init` and `apply` of `turnBoundaryProjectionDefinition` from [`agent-loop/src/index.ts`](../packages/core/agent-loop/src/index.ts), or of `titleProjectionDefinition` from [`session-title/src/index.ts`](../packages/session/session-title/src/index.ts) followed by its identity `wire.view`, over each case's `JSON.parse`d rows and their `interruptedTurnClosers`, and requires `Session.fromRestore`, without message projections, to admit the same events. The [Rust test](../rust/crates/bake-session/tests/boundary_cases.rs) restores the same bytes with `restore_plain_log`, requires every case to restore with no torn tail, and folds the result with [`turn_boundary` or `session_title`](../rust/crates/bake-session/src/boundary.rs).
+
+```sh
+bun run test:runtime packages/session/session-title/tests/boundary-conformance.spec.ts
+(cd rust && cargo test --locked -p bake-session --test boundary_cases)
+```
+
+A `turn/start` sets the open turn's seq and copies its `data.turn` into `lastTurn`, a `turn/end` clears the open turn, a `step/start` sets `lastStepStartSeq` and a `start` boundary, and a `step/end` sets only an `end` boundary. The title fold copies each `session/title`'s `data.title`. Neither fold validates what it copies. Restoration refuses `null` `turn/start` and `step/start` data and an open tail turn or step that is not a safe count, so the table cannot cover such a tail; it checks no other part of either payload. `ts` is the `{openTurnStartSeq, lastStepStartSeq, lastStepBoundary, lastTurn}` state or `{title}`; an absent `lastTurn` or `title` stands for JavaScript's `undefined`, and `{"threw": "TypeError"}` for a fold that throws. The expectations were written from the TypeScript sources before either harness ran.
+
+The cases cover:
+
+- the unedited captures, an empty log, and several closed turns, where `lastTurn` and the step seqs track the last;
+- interrupted tails, where the closers' `step/end` and `turn/end` move the boundary, including pending tool calls and a new turn that keeps the previous step seqs;
+- a `null` turn, which `interruptedTurnClosers` does not close, so the turn stays open;
+- a `step/end` without an open step, a `step/start` after the turn ended or with unread string data, and a `turn/end` without a turn;
+- seeded logs whose inherited prefix and end seed precede a further closed or interrupted turn, and a title inside the inherited prefix, then renamed;
+- turns and titles copied as strings, objects, `null`, negative and largest safe integers, and an empty string, and a title set, retitled, or followed by an interrupted turn.
+
+A `rust` override names a native limit and the seq Rust refuses; TypeScript still asserts its own outcome. `undefined-member` marks a final `lastTurn` or title read from data that is not an object holding the member, which JavaScript reads as `undefined`; `null-data` marks `null` `session/title` data, whose read throws a `TypeError` and ends the fold; and `number` marks a final copy holding a number written with a fraction or an exponent, as -0, or beyond the safe-integer range. Restoration already refuses `null` `turn/start` data. A limited copy that a later event overwrites is not refused. Of the 52 cases, 38 fold identically and 14 are limits, 3 of them TypeScript throws. Both harnesses pin the case count and require every limit and both folds to be witnessed. Two negative controls were observed in both arms: clearing `lastStepStartSeq` on `step/end` fails `capture-tool-call-turn`, and ignoring the closers fails `interrupted-open-turn`. In Rust, refusing a limited `lastTurn` when it is copied instead of at the end fails `fraction-turn-overwritten`. The folds do not cover the inbox, the title service, or Agent resume.
 
 ## Runner contract
 
