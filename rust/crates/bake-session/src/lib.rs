@@ -61,6 +61,9 @@
 //! into its durable goal state, keeping the first replay failure.
 //! [`turn_boundary`] and [`session_title`] fold a [`RestoredLog`]'s turn and
 //! step boundaries and its latest title.
+//! [`subagent_identity`] and [`subagent_timing`] fold a [`RestoredLog`]'s
+//! subagent descriptors and turn times into its identity and active-turn
+//! timing.
 //! [`encode_header_line`] and [`encode_event_line`] produce the exact text
 //! TypeScript writes for a current header record and one current event row,
 //! without the LF, or refuse with `Unadmitted` where TypeScript throws, or
@@ -85,6 +88,7 @@ mod restore;
 mod row_encode;
 mod scan;
 mod source_event_seqs;
+mod subagent;
 mod usage;
 mod v0_to_v1;
 mod v1_codec;
@@ -128,6 +132,10 @@ pub use scan::{FinishRejection, ScanIssue, ScanLimit, ScanRefusal, ScannedLog, s
 pub use source_event_seqs::{
     SourceEventSeqsLimit, SourceEventSeqsRefusal, SourceEventSeqsRejection,
     decode_source_event_seqs,
+};
+pub use subagent::{
+    SubagentActiveInterval, SubagentIdentity, SubagentTimingState, subagent_identity,
+    subagent_timing,
 };
 pub use usage::{
     LastTokenUsage, TokenUsageBuckets, TokenUsageState, UsageLimit, UsageRefusal, token_usage,

@@ -188,6 +188,8 @@ The Session reader pins `zstd-safe` 8.0.0 and `zstd-sys` 2.1.0 with vendored lib
 
 `migrate_v2_rows` accepts a parsed physical v2 header and rows, a path platform, and a per-row source-reference expansion budget. It returns a logical v3 header, transformed events, and inherited count, or a refusal with its layer and location. The caller owns parsing; retained integers outside JavaScript’s safe range are refused, while opaque floating-point values retain their parsed values. The helper does not run whole-artifact relationship validation, so success is not Session read admission. The [shared cases](../conformance/README.md#v2-to-v3-migration-cases) document its comparison and native limits. Deterministic system-message IDs use sha2 0.10.9 with default features disabled.
 
+`bake-session` also provides [`subagent_identity` and `subagent_timing`](../conformance/README.md#subagent-identity-and-timing-cases) over a restored log. Identity follows the last descriptor, including clearing an earlier identity when that descriptor is invalid. Timing resets at each descriptor and includes interrupted-turn closers, stopping before the clock-stamped resume marker Session construction appends. These pure projections provide no child discovery, execution, or resume.
+
 ## Checks
 
 ```sh

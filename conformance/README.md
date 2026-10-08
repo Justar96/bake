@@ -33,6 +33,7 @@ Compare TypeScript and Rust using controlled fixtures and independently checked 
 - [Turn boundary and title cases](#turn-boundary-and-title-cases)
 - [Current-format row encoding cases](#current-format-row-encoding-cases)
 - [V0 history read cases](#v0-history-read-cases)
+- [Subagent identity and timing cases](#subagent-identity-and-timing-cases)
 - [Runner contract](#runner-contract)
 - [Ownership and limits](#ownership-and-limits)
 
@@ -711,6 +712,21 @@ Of the 45 cases, 13 migrate and 24 are refusals both arms report exactly. The re
 - expecting the later v0→v1 refusal in `v2-to-v3-before-later-v0-to-v1` fails that case in both arms.
 
 The result is stage output: the catalog's final check of the v3 artifact is not run. Recoverable decoding, Assistant attempts, and the decoded v1→v2 stage remain separate work. These cases close no roadmap scope.
+
+## Subagent identity and timing cases
+
+[`session/subagent-cases.json`](session/subagent-cases.json) holds 84 cases comparing a restored subagent's identity and timing with the TypeScript [projection definitions](../packages/subagent/subagent/src/projection.ts). The [TypeScript spec](../packages/subagent/subagent/tests/projection-conformance.spec.ts) folds their initial states over parsed rows and `interruptedTurnClosers`, and requires `Session.fromRestore` to admit the same events. The [Rust test](../rust/crates/bake-session/tests/subagent_cases.rs) restores the same bytes with `restore_plain_log` and checks `subagent_identity` and `subagent_timing`. Both compare against independently specified expectations, including optional-field omission, the full timing state, and its wire view.
+
+```sh
+bun run test:runtime packages/subagent/subagent/tests/projection-conformance.spec.ts
+(cd rust && cargo test --locked -p bake-session --test subagent_cases)
+```
+
+Identity is the last descriptor's mode, label, and seq. An invalid or unsupported descriptor clears any earlier identity; validation includes continuation fields and tool restrictions even though the identity view omits them. Timing accumulates completed turns after a descriptor, tracks an active interval, and preserves a pending pre-descriptor turn start. Every descriptor resets accumulated time, including an invalid descriptor. Non-boundary events advance an active interval's latest time, and reversed boundaries add zero elapsed time. Both folds include inherited events and repair closers. They stop before Session construction appends a resume `session/end-seed` stamped with the current clock. That marker could advance a still-open interval's `through`; a stored end-seed is folded normally.
+
+All 84 identity and timing outcomes match. The cases include every truncation of a descriptor-and-turn sequence, descriptor validation and clearing, inherited resets, stored end-seeds, negative and reversed times, repair closers, and exact and overflowing safe-integer totals. Both harnesses pin the case count and require every case to restore and match.
+
+Envelope times are safe integers. Native timing uses the same floating-point subtraction, zero clamp, and addition as JavaScript, preserving rounded totals beyond the safe-integer range. The cases check exact limits, rounded accumulation, arithmetic in a closer, and a later descriptor resetting a large total. The pure folds perform no child discovery, execution, or resume.
 
 ## Runner contract
 
