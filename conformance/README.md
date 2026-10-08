@@ -31,6 +31,7 @@ Compare TypeScript and Rust using controlled fixtures and independently checked 
 - [V1 to V2 transformed-stage cases](#v1-to-v2-transformed-stage-cases)
 - [V0 to V1 migration cases](#v0-to-v1-migration-cases)
 - [Turn boundary and title cases](#turn-boundary-and-title-cases)
+- [Current-format row encoding cases](#current-format-row-encoding-cases)
 - [V0 history read cases](#v0-history-read-cases)
 - [Runner contract](#runner-contract)
 - [Ownership and limits](#ownership-and-limits)
@@ -649,6 +650,33 @@ The cases cover:
 - turns and titles copied as strings, objects, `null`, negative and largest safe integers, and an empty string, and a title set, retitled, or followed by an interrupted turn.
 
 A `rust` override names a native limit and the seq Rust refuses; TypeScript still asserts its own outcome. `undefined-member` marks a final `lastTurn` or title read from data that is not an object holding the member, which JavaScript reads as `undefined`; `null-data` marks `null` `session/title` data, whose read throws a `TypeError` and ends the fold; and `number` marks a final copy holding a number written with a fraction or an exponent, as -0, or beyond the safe-integer range. Restoration already refuses `null` `turn/start` data. A limited copy that a later event overwrites is not refused. Of the 52 cases, 38 fold identically and 14 are limits, 3 of them TypeScript throws. Both harnesses pin the case count and require every limit and both folds to be witnessed. Two negative controls were observed in both arms: clearing `lastStepStartSeq` on `step/end` fails `capture-tool-call-turn`, and ignoring the closers fails `interrupted-open-turn`. In Rust, refusing a limited `lastTurn` when it is copied instead of at the end fails `fraction-turn-overwritten`. The folds do not cover the inbox, the title service, or Agent resume.
+
+## Current-format row encoding cases
+
+[`session/row-encode-cases.json`](session/row-encode-cases.json) holds 95 cases: 32 logical Session headers, each with an optional inherited event count, 61 logical events, and 2 logs, each a header and events. The [TypeScript spec](../packages/session/session-persistence-jsonl/tests/row-encode-conformance.spec.ts) writes each header with `JSON.stringify(toHeaderLine(header, inheritedEventCount))` and each event with `eventLine(event)` from [`format.ts`](../packages/session/session-persistence-jsonl/src/format.ts). The [Rust test](../rust/crates/bake-session/tests/row_encode_cases.rs) passes the same parsed values to [`encode_header_line` and `encode_event_line`](../rust/crates/bake-session/src/row_encode.rs). A log case joins its lines, each followed by LF, and both arms read the text back, TypeScript with `scanLog` and Rust with `scan_log`, requiring the same logical events, inherited cut, and committed bytes.
+
+```sh
+bun run test:runtime packages/session/session-persistence-jsonl/tests/row-encode-conformance.spec.ts
+(cd rust && cargo test --locked -p bake-session --test row_encode_cases)
+```
+
+`ts` is the exact line, without its LF, or the thrown class with its exact message; an engine `TypeError` carries no message. Rust compares a line byte for byte, and every line it writes must read back through `read_header_record` or `decode_v3_row`. Where TypeScript throws, Rust returns `Unadmitted`, which claims no class or message, unless a `rust` override names a limit. The header encoder ports the checks of `toHeaderLine`, `encodeCurrentHeader`, and the released v3 and v2 `encodeHeader`, and writes the codec's fixed member order. The event encoder ports `encodeSeqRanges`, then admits the row with the strict V3 decoder at the row's own seq, which runs every check of `assertV3EventAdmission` and `assertV3Event` on the same values or refuses with its own `codec` limit, and writes members in JavaScript's own-key order. The cases cover:
+
+- headers with every optional member, a reversed member order, an absent or `null` `delegationDepth` written as 0, seeded and unseeded counts, and each member check, including a `type` member and a retired policy field;
+- source lists as single seqs, pairs, runs of three or more, mixed runs, and unsorted lists copied as-is, and the surface, known-type, and unknown-type source rules;
+- `append` and `replace` surface operations, unknown and ignorable obsolete types, `Object.prototype` type names, and the codec's `request/header`, `tool/result`, and `system/message` checks;
+- string escapes, including controls, DEL, U+2028, and astral characters, array-index keys, and zeros written as `0`;
+- an unseeded and a seeded log scanned back.
+
+A `rust` override names a native limit, and Rust claims nothing there; TypeScript still asserts its own outcome. The limits are:
+
+- `float-number`: a number serde_json holds as neither a safe integer nor a zero. JavaScript admits an integral one as a count and writes its own spelling of any of them.
+- `type-error`: a `null` header or event, whose property read throws a `TypeError`.
+- `source-coercion`: an unknown type's `sourceEventSeqs` that is not an array of numbers, which `encodeSeqRanges` coerces or calls a missing method on.
+- `unreadable-row`: a row TypeScript writes but its strict decoder refuses, such as an unknown type's source list with a negative or later seq, or `session/end-seed` data that is not an object.
+- `codec`: a native limit of the strict V3 decoder while admitting the row.
+
+Of the 95 cases, 32 encode identically, 46 are refused in both arms, 2 are logs read back, and 15 are limits: TypeScript writes 11 of them and throws for 4. Both harnesses pin the case count and require every limit to be witnessed. The expectations were written from the TypeScript sources before either harness ran. Three negative controls were observed: writing a run of two seqs as a range fails `sources-pair` in Rust and `sources-pair` and `sources-mixed-runs` in TypeScript; writing members in serde_json's insertion order fails `integer-like-keys` in Rust; and removing the `rust` marker from `time-integral-float` fails that case in Rust. Lone surrogates are outside the input domain, because serde_json cannot hold them. The encoders write rows, not files: framing, compression, and appending to a log are not covered, and these cases close no roadmap scope.
 
 ## V0 history read cases
 

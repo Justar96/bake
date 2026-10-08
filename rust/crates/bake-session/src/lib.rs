@@ -61,7 +61,11 @@
 //! into its durable goal state, keeping the first replay failure.
 //! [`turn_boundary`] and [`session_title`] fold a [`RestoredLog`]'s turn and
 //! step boundaries and its latest title.
-//! None reads or writes a file or encodes a log. The crate is
+//! [`encode_header_line`] and [`encode_event_line`] produce the exact text
+//! TypeScript writes for a current header record and one current event row,
+//! without the LF, or refuse with `Unadmitted` where TypeScript throws, or
+//! with a native limit.
+//! None reads or writes a file. The crate is
 //! unstable and unshipped; the preview's `session inspect` and `session stat` use it.
 
 mod assistant_stream;
@@ -78,6 +82,7 @@ mod repair;
 mod replay;
 mod request;
 mod restore;
+mod row_encode;
 mod scan;
 mod source_event_seqs;
 mod usage;
@@ -118,6 +123,7 @@ pub use restore::{
     RestoreLimit, RestoreRefusal, RestoredLog, StagedLog, TornTail, Unsupported, restore_plain_log,
     stage_plain_log,
 };
+pub use row_encode::{EncodeLimit, EncodeRefusal, encode_event_line, encode_header_line};
 pub use scan::{FinishRejection, ScanIssue, ScanLimit, ScanRefusal, ScannedLog, scan_log};
 pub use source_event_seqs::{
     SourceEventSeqsLimit, SourceEventSeqsRefusal, SourceEventSeqsRejection,
