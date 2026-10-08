@@ -33,10 +33,13 @@
 //! [`stage_plain_log`] and [`stage_zstd_log`] stop after the scan, so a caller
 //! can check the stored identity before [`StagedLog::restore`] runs the rest,
 //! and [`zstd_header_record`] decodes only a compressed log's header frame.
+//! [`read_generation_header_record`] reads any format's header record as
+//! `stat` does, migrated to current metadata or absent.
 //! None reads or writes a file or encodes a log. The crate is
-//! unstable and unshipped; only the preview's `session inspect` uses it.
+//! unstable and unshipped; the preview's `session inspect` and `session stat` use it.
 
 mod envelope;
+mod generation_header;
 mod offload;
 mod repair;
 mod replay;
@@ -51,6 +54,7 @@ pub use envelope::{
     EnvelopeLimit, EnvelopeRefusal, EnvelopeRejection, NumberField, RequiredField,
     UnadmittedEnvelope, decode_row_envelope,
 };
+pub use generation_header::{GenerationHeaderRefusal, read_generation_header_record};
 pub use offload::OffloadRejection;
 pub use replay::{ReplayLimit, ReplayRefusal, SeedRejection, replay_requests};
 pub use request::Request;

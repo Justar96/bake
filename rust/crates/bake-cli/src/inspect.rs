@@ -510,27 +510,9 @@ fn describe_scan(scan: &ScanRefusal, args: &InspectArgs) -> Refusal {
                 }
                 .into(),
             ),
-            HeaderRefusal::NativeSubset(limit) => Refusal::new(
-                NativeLimit,
-                match limit {
-                    SubsetLimit::InvalidUtf8 => {
-                        "this preview requires valid UTF-8 in the session header"
-                    }
-                    SubsetLimit::JsonParser => {
-                        "the session header uses JSON this preview does not read, such as a \
-                         lone surrogate escape, deep nesting, or an out-of-range number"
-                    }
-                    SubsetLimit::FloatLexeme => {
-                        "a session header count is written with a fraction or an exponent, or \
-                         does not fit in 64 bits, which this preview does not read"
-                    }
-                    SubsetLimit::VersionDiagnostic => {
-                        "this preview cannot report a header of another format version whose \
-                         id is an object or array"
-                    }
-                }
-                .into(),
-            ),
+            HeaderRefusal::NativeSubset(limit) => {
+                Refusal::new(NativeLimit, header_limit(*limit).into())
+            }
         },
         ScanRefusal::Structural { line, .. } => Refusal {
             line: Some(*line),
@@ -558,6 +540,25 @@ fn describe_scan(scan: &ScanRefusal, args: &InspectArgs) -> Refusal {
             line: Some(*line),
             ..Refusal::new(NativeLimit, scan_limit(*limit, args))
         },
+    }
+}
+
+/// Why this preview cannot decide a session header's outcome.
+pub(crate) const fn header_limit(limit: SubsetLimit) -> &'static str {
+    match limit {
+        SubsetLimit::InvalidUtf8 => "this preview requires valid UTF-8 in the session header",
+        SubsetLimit::JsonParser => {
+            "the session header uses JSON this preview does not read, such as a lone surrogate \
+             escape, deep nesting, or an out-of-range number"
+        }
+        SubsetLimit::FloatLexeme => {
+            "a session header count is written with a fraction or an exponent, or does not fit \
+             in 64 bits, which this preview does not read"
+        }
+        SubsetLimit::VersionDiagnostic => {
+            "this preview cannot report a header of another format version whose id is an \
+             object or array"
+        }
     }
 }
 
