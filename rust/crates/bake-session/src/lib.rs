@@ -58,6 +58,11 @@
 //! runs kept, through every edge to format v3, reporting the refusal
 //! TypeScript's streaming chain reports first; a v1 Session takes the decoded
 //! v1→v2 stage.
+//! [`check_released_relationships`] runs the released cross-event checks
+//! `assertReleasedArtifactRelationships` runs over a Session whose events
+//! already passed their payload checks: turn, step, tool, retry, PTC, title,
+//! command, delivery-marker, compaction, and surface relationships. It is
+//! not yet wired into a migration or an open.
 //! [`restore_migrated`] restores a v0, v1, or v2 Session that
 //! [`migrate_v2_rows`] or [`migrate_released_history`] migrated, as the
 //! production read path restores its historical file, by encoding the
@@ -123,6 +128,7 @@ mod offload;
 mod plain_append;
 mod plain_log_file;
 mod pressure;
+mod relationships;
 mod released_rows;
 mod repair;
 mod replay;
@@ -170,6 +176,9 @@ pub use plain_log_file::{LogFileLimit, LogFileRefusal, PlainLogFile};
 pub use pressure::{
     ContextPressureState, ContextPressureView, PressureLimit, PressureRefusal, RequestRoute,
     context_pressure,
+};
+pub use relationships::{
+    RelationshipExtensions, RelationshipLimit, RelationshipRefusal, check_released_relationships,
 };
 pub use replay::{ReplayLimit, ReplayRefusal, SeedRejection, replay_requests};
 pub use request::Request;

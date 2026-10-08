@@ -40,6 +40,7 @@ Compare TypeScript and Rust using controlled fixtures and independently checked 
 - [V1 to V2 decoded-stage cases](#v1-to-v2-decoded-stage-cases)
 - [Plain log file cases](#plain-log-file-cases)
 - [Migrated restoration cases](#migrated-restoration-cases)
+- [Released relationship cases](#released-relationship-cases)
 - [Cross-runtime write lease](#cross-runtime-write-lease)
 - [Runner contract](#runner-contract)
 - [Ownership and limits](#ownership-and-limits)
@@ -936,6 +937,39 @@ A restoration limit of the [plain log restoration](#plain-log-restoration-cases)
 - changing a closer's time fails `v2-interrupted-tool-calls-get-closers` in both arms.
 
 The catalog's final check, the stored identity check, publication of a current generation on a write open, the write lease, and Zstd compression are not modelled, so a Session the final check refuses is outside Rust's domain. These cases close no roadmap scope.
+
+## Released relationship cases
+
+[`session/relationships-cases.json`](session/relationships-cases.json) holds 182 synthetic Sessions, each a header and events as JSON text, an inherited cut, and the relationship extensions to apply. The [TypeScript spec](../packages/session/session-format-v0-to-v1/tests/relationships-conformance.spec.ts) passes each Session to `assertReleasedArtifactRelationships` from [`relationships.ts`](../packages/session/session-format-v0-to-v1/src/relationships.ts), with an event iterator that records the index of the event being checked when it throws. The [Rust test](../rust/crates/bake-session/tests/relationships_cases.rs) passes the same parsed values to [`check_released_relationships`](../rust/crates/bake-session/src/relationships.rs).
+
+```sh
+bun run test:runtime packages/session/session-format-v0-to-v1/tests/relationships-conformance.spec.ts
+(cd rust && cargo test --locked -p bake-session --test relationships_cases)
+```
+
+TypeScript runs this check only after the coordinates and payloads were validated, and it casts the members it reads. The Rust function therefore documents a precondition: every event is an object with a string `type` and a `seq` equal to its index, every event of an own released v0 type passes `assertReleasedEventPayload(event, 1)`, and every surface event's `surfaceOp`, when present, is `"append"` or an object. The spec checks that precondition before running each case, and it must hold except in the 4 cases marked `outsidePrecondition`, where the check must fail. An outcome is acceptance, a `SessionFormatError` with the index of the event being checked and its exact message, or a `TypeError`. The cases cover:
+
+- turn order, including the `legacyInterruptedTurnRestart` pattern and its near misses;
+- step order, extension step events, and an extension that takes over a released type;
+- tool lifecycles: repeated advertisement, a `tool/call` whose name or arguments differ, the first unresolved call in insertion order at `step/end` or `turn/end`, the exact `TOOL_NOT_STARTED` repair and each way to miss it, and a replacement outside a turn;
+- the request header's provider, kept across turns, and `request/context`;
+- `llm/retry` chains: turn and step, provider, retry number, retry id reuse, and interleaved chains; `llm/retry-started` pairing and repeats;
+- PTC trees: root, parent, start, and settle, with arguments compared by `deepEqualJson` regardless of member order and with `1` equal to `1.0`;
+- title sources, with and without `preservedSourceTitleRequestText`, including the exact framed text with escapes;
+- `command/run` and `command/done` with `sourceEventSeq`;
+- delivery markers: the Session format version, the inherited exemption, and the Session id;
+- compactions: overlap, owner, turn, summary repeats, an end without a summary, the compact checkpoint, prune and summary spans, and orphan compactions an end seed clears or makes stale;
+- surface appends and replacements, and two accepted whole logs.
+
+Numbers compare as doubles, so a coordinate written `1.0` matches `1`. A `rust` marker names a native limit and the index of the event where Rust stops; TypeScript still asserts its own outcome there. `precondition` marks input outside the precondition where TypeScript's outcome depends on a cast: a member of another kind that it coerces, prints, or dereferences, or two objects that `===` compares by reference. `prototype-member` marks a PTC argument comparison that `deepEqualJson` decides through the inherited `Object.prototype` that `in` finds for a `__proto__` member holding an empty object; any other inherited member is a function or a nonempty object, which `deepEqualJson` never equates with it, so Rust decides those. Of the 182 cases, 47 are accepted and 131 are refusals that both arms report at the same event with the same message, 1 of them outside the precondition, and 4 are limits: TypeScript accepts 1, refuses 2, and throws a `TypeError` for 1. Both harnesses pin the case count and require both limits to be witnessed. The expectations were written from the TypeScript sources before either harness ran. The first Rust run showed that one of them expected a compaction ended before an end seed to be stale; `inheritedOrphanCompactionStarts` counts only a compaction still open at the end seed, so that case was renamed `compaction-orphan-ended-before-end-seed-crosses` and corrected from that source before the TypeScript arm ran, and both arms then passed. These negative controls were observed:
+
+- an empty stale set fails `compaction-stale-orphan-crosses-turn` and `compaction-stale-orphan-summary-turn` in Rust;
+- comparing numbers as serde_json values fails `float-coordinates-equal-integers` and three other cases in Rust;
+- reporting the last unresolved call fails `tool-unresolved-at-step-end-reports-first` and `tool-unresolved-after-other-resolved` in Rust;
+- expecting `turn-start-while-open` to refuse at event 0 fails it in both arms;
+- removing the `rust` marker from `ptc-arguments-prototype-member` fails it in Rust, and removing `outsidePrecondition` from `delivery-null-version-is-zero` fails it in TypeScript.
+
+Lone surrogates are outside the input domain, because serde_json cannot hold them. The check is not yet part of a migration, an open, or the catalog's final check, and these cases close no roadmap scope.
 
 ## Cross-runtime write lease
 
