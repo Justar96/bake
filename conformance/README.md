@@ -33,6 +33,7 @@ Compare TypeScript and Rust using controlled fixtures and independently checked 
 - [Turn boundary and title cases](#turn-boundary-and-title-cases)
 - [Current-format row encoding cases](#current-format-row-encoding-cases)
 - [V0 history read cases](#v0-history-read-cases)
+- [Plain log append cases](#plain-log-append-cases)
 - [V1 to V2 packed-run cases](#v1-to-v2-packed-run-cases)
 - [Subagent identity and timing cases](#subagent-identity-and-timing-cases)
 - [Subagent catalog cases](#subagent-catalog-cases)
@@ -715,6 +716,34 @@ Of the 45 cases, 13 migrate and 24 are refusals both arms report exactly. The re
 - expecting the later v0→v1 refusal in `v2-to-v3-before-later-v0-to-v1` fails that case in both arms.
 
 The result is stage output: the catalog's final check of the v3 artifact is not run. Recoverable decoding, Assistant attempts, and the decoded v1→v2 stage remain separate work. These cases close no roadmap scope.
+
+## Plain log append cases
+
+[`session/plain-append-cases.json`](session/plain-append-cases.json) holds 45 cases: 32 start by creating a Session from a logical header, with an optional inherited event count, and 13 by opening the given log text, then apply `append` and `flush` operations in order. The [TypeScript spec](../packages/session/session-persistence-jsonl/tests/plain-append-conformance.spec.ts) runs each case through the real JSONL backend with `compression: 'none'` in its own temporary root: `create`, or a write `open` of the text written to the current log path, then the handle's `append` and `flush`, reading the log file after each operation. The [Rust test](../rust/crates/bake-session/tests/plain_append_cases.rs) passes the same parsed values to [`PlainAppendLog`](../rust/crates/bake-session/src/plain_append.rs), which models the same handle over in-memory bytes.
+
+```sh
+bun run test:runtime packages/session/session-persistence-jsonl/tests/plain-append-conformance.spec.ts
+(cd rust && cargo test --locked -p bake-session --test plain_append_cases)
+```
+
+Each operation's `ts` is `appended`, `flushed`, or the thrown class with its exact message; an engine `TypeError` carries no message. Its `log` is the file's exact text afterwards, or `null` while no file exists. Rust follows the handle's order: the lossless snapshot of the batch, the empty-batch return, `assertContiguous`, the torn-tail truncation, then the encode and the write. A created log is written as its header line and the batch's rows, each followed by LF, or as the header line alone by `flush`; later batches are appended. Rust returns the exact contiguity message and the snapshot's message for -0 for every id it admits, and `Unadmitted`, which claims no class or message, wherever encoding throws. A `scan` reads the final bytes back, TypeScript with `scanLog` and Rust with `scan_log`, requiring the same event count, committed bytes, and inherited cut; Rust also reopens them and requires the same cursor. The cases cover:
+
+- creation followed by a flush, one or several batches, an empty batch that writes nothing, and a flush before or after the first batch;
+- headers written in the codec's member order, an absent `delegationDepth`, seeded and unseeded counts, refused creates, and an empty id;
+- seq gaps, duplicates, and non-number seqs, refused before anything is written;
+- -0 in a batch, refused before the contiguity check;
+- a refused encode, which writes no row of its batch, before and after the log exists;
+- reopened clean and torn logs, including a complete but unparsable record after the committed prefix: an empty batch, a flush, a contiguity refusal, or -0 leaves the torn tail, and the first appended batch truncates it even when its encode is refused.
+
+A `rust` override names a native limit; it ends the case, and Rust compares nothing for that operation, or for any operation when it is on the create. TypeScript still asserts its own outcome and bytes, and where it cannot resolve a log path it requires that no log file exists beneath the root. The limits are:
+
+- `seq-value`: a batch event that is not an object, or a `seq` that is an array, an object, or a number serde_json holds as neither a safe integer nor -0. `assertContiguous` reads, compares, or renders it with JavaScript semantics.
+- `encode`: a native limit of `encode_event_line` for a batch row, or of `encode_header_line` for a created header.
+- `empty-id`: a created header whose `id` is empty. TypeScript's `create` admits it in a root with no project directory, then the first non-empty `append` or `flush` throws `cannot encode an empty path segment` while acquiring the write lease, before the contiguity check.
+
+Of the 60 operations, 53 are decided in both arms: 25 appends, 11 flushes, and 17 refusals, of which 10 are contiguity refusals, 3 are lossless-snapshot refusals, and 4 are refused encodes. Another 5 are append limits: TypeScript throws for 3 and writes 2. The last 2 follow the `empty-id` create limit, and TypeScript throws for both. All 4 refused creates are `Unadmitted` in Rust, and 26 cases read their final bytes back. Both harnesses pin the case count and require every limit to be witnessed. The expectations were written from the TypeScript sources before either harness ran, except `create-empty-id-limited`, which review added; Rust without its empty-id refusal fails it. Five negative controls were observed. In Rust, skipping the truncation fails `open-torn-append-truncates`; returning a refused encode before truncating fails `open-torn-encode-refusal-truncates`; truncating before the contiguity check fails `open-torn-seq-mismatch-keeps-tail`; and truncating on an empty batch fails `open-torn-empty-batch-keeps-tail`. In the table, expecting the torn bytes to survive a refused encode fails `open-torn-encode-refusal-truncates` in both arms.
+
+Only the log's bytes and the refusals are compared. Storage paths, the write lease, the root-encoding file, fsync ordering, rollback after a failed write, and Zstd compression are not modelled. An id or `cwd` whose path the filesystem refuses, such as an id whose encoded segment is longer than a file name may be, is outside the model's domain: Rust reports a write TypeScript fails. `open` runs only the scan, so a log TypeScript refuses to open, an empty id included, is outside these cases. These cases close no roadmap scope.
 
 ## V1 to V2 packed-run cases
 

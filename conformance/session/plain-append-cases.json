@@ -1,0 +1,1708 @@
+{
+  "schema": "bake/session-conformance/plain-append-cases",
+  "version": 1,
+  "oracle": "create or write-open a handle of the JSONL backend with compression none in an owned temporary root, apply append and flush in order, and read the log file's bytes after each operation; scanLog reads the final bytes back",
+  "history": [
+    "Version 1: 44 cases, written from the TypeScript sources before either harness ran. The first TypeScript run refused to open two logs whose user/message lacked a source, which validateStoredEvents requires; the source was added to that event, in its input and in every expected log that carries it, and no outcome changed.",
+    "Review added create-empty-id-limited and the create-level rust override, making 45 cases: an empty id had been modelled as an ordinary log, so Rust claimed a contiguity message and written bytes where TypeScript throws while resolving the session directory."
+  ],
+  "cases": [
+    {
+      "id": "create-flush-header-only",
+      "create": {
+        "header": {
+          "version": 3,
+          "id": "c1",
+          "createdAt": 1,
+          "isSeeded": false,
+          "delegationDepth": 0
+        }
+      },
+      "ops": [
+        {
+          "op": "flush",
+          "ts": {
+            "outcome": "flushed"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"c1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+        },
+        {
+          "op": "flush",
+          "ts": {
+            "outcome": "flushed"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"c1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+        }
+      ],
+      "scan": {
+        "events": 0,
+        "committedBytes": 92,
+        "inheritedEventCount": 0
+      },
+      "note": "The second flush finds the log materialized and writes nothing."
+    },
+    {
+      "id": "create-append-materializes",
+      "create": {
+        "header": {
+          "version": 3,
+          "id": "c2",
+          "createdAt": 1,
+          "isSeeded": false,
+          "delegationDepth": 0
+        }
+      },
+      "ops": [
+        {
+          "op": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": 0,
+              "time": 1,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "appended"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"c2\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n"
+        }
+      ],
+      "scan": {
+        "events": 1,
+        "committedBytes": 149,
+        "inheritedEventCount": 0
+      }
+    },
+    {
+      "id": "create-empty-batch-writes-nothing",
+      "create": {
+        "header": {
+          "version": 3,
+          "id": "c3",
+          "createdAt": 1,
+          "isSeeded": false,
+          "delegationDepth": 0
+        }
+      },
+      "ops": [
+        {
+          "op": "append",
+          "events": [],
+          "ts": {
+            "outcome": "appended"
+          },
+          "log": null
+        },
+        {
+          "op": "flush",
+          "ts": {
+            "outcome": "flushed"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"c3\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+        },
+        {
+          "op": "append",
+          "events": [],
+          "ts": {
+            "outcome": "appended"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"c3\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+        }
+      ],
+      "scan": {
+        "events": 0,
+        "committedBytes": 92,
+        "inheritedEventCount": 0
+      }
+    },
+    {
+      "id": "create-multiple-batches",
+      "create": {
+        "header": {
+          "version": 3,
+          "id": "c4",
+          "createdAt": 1,
+          "isSeeded": false,
+          "delegationDepth": 0
+        }
+      },
+      "ops": [
+        {
+          "op": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": 0,
+              "time": 1,
+              "data": {
+                "turn": 1
+              }
+            },
+            {
+              "type": "user/message",
+              "seq": 1,
+              "time": 2,
+              "surfaceOp": "append",
+              "data": {
+                "id": "u1",
+                "role": "user",
+                "source": {
+                  "kind": "user"
+                },
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "hi"
+                  }
+                ]
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "appended"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"c4\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"user/message\",\"seq\":1,\"time\":2,\"surfaceOp\":\"append\",\"data\":{\"id\":\"u1\",\"role\":\"user\",\"source\":{\"kind\":\"user\"},\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}\n"
+        },
+        {
+          "op": "append",
+          "events": [
+            {
+              "type": "step/start",
+              "seq": 2,
+              "time": 3,
+              "data": {
+                "turn": 1,
+                "step": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "appended"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"c4\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"user/message\",\"seq\":1,\"time\":2,\"surfaceOp\":\"append\",\"data\":{\"id\":\"u1\",\"role\":\"user\",\"source\":{\"kind\":\"user\"},\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}\n{\"type\":\"step/start\",\"seq\":2,\"time\":3,\"data\":{\"turn\":1,\"step\":1}}\n"
+        },
+        {
+          "op": "append",
+          "events": [
+            {
+              "type": "step/end",
+              "seq": 3,
+              "time": 4,
+              "data": {
+                "turn": 1,
+                "step": 1
+              }
+            },
+            {
+              "type": "turn/end",
+              "seq": 4,
+              "time": 5,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "appended"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"c4\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"user/message\",\"seq\":1,\"time\":2,\"surfaceOp\":\"append\",\"data\":{\"id\":\"u1\",\"role\":\"user\",\"source\":{\"kind\":\"user\"},\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}\n{\"type\":\"step/start\",\"seq\":2,\"time\":3,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"step/end\",\"seq\":3,\"time\":4,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":4,\"time\":5,\"data\":{\"turn\":1}}\n"
+        }
+      ],
+      "scan": {
+        "events": 5,
+        "committedBytes": 494,
+        "inheritedEventCount": 0
+      }
+    },
+    {
+      "id": "create-flush-then-append",
+      "create": {
+        "header": {
+          "version": 3,
+          "id": "c5",
+          "createdAt": 1,
+          "isSeeded": false,
+          "delegationDepth": 0
+        }
+      },
+      "ops": [
+        {
+          "op": "flush",
+          "ts": {
+            "outcome": "flushed"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"c5\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+        },
+        {
+          "op": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": 0,
+              "time": 1,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "appended"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"c5\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n"
+        }
+      ],
+      "scan": {
+        "events": 1,
+        "committedBytes": 149,
+        "inheritedEventCount": 0
+      },
+      "note": "After the header-only flush the batch is appended, not materialized again."
+    },
+    {
+      "id": "create-full-header-codec-order",
+      "create": {
+        "header": {
+          "agentPreset": "code",
+          "delegationDepth": 2,
+          "origin": "subagent",
+          "isSeeded": false,
+          "parentSession": "p0",
+          "cwd": "/w",
+          "createdAt": 7,
+          "id": "c6",
+          "version": 3
+        }
+      },
+      "ops": [
+        {
+          "op": "flush",
+          "ts": {
+            "outcome": "flushed"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"c6\",\"createdAt\":7,\"cwd\":\"/w\",\"parentSession\":\"p0\",\"isSeeded\":false,\"origin\":\"subagent\",\"delegationDepth\":2,\"agentPreset\":\"code\"}\n"
+        }
+      ],
+      "scan": {
+        "events": 0,
+        "committedBytes": 165,
+        "inheritedEventCount": 0
+      },
+      "note": "Members arrive in reverse order and are written in the codec's fixed order."
+    },
+    {
+      "id": "create-delegation-depth-absent",
+      "create": {
+        "header": {
+          "version": 3,
+          "id": "c7",
+          "createdAt": 1,
+          "isSeeded": false
+        }
+      },
+      "ops": [
+        {
+          "op": "flush",
+          "ts": {
+            "outcome": "flushed"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"c7\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+        }
+      ],
+      "scan": {
+        "events": 0,
+        "committedBytes": 92,
+        "inheritedEventCount": 0
+      }
+    },
+    {
+      "id": "create-seeded-with-cut",
+      "create": {
+        "header": {
+          "version": 3,
+          "id": "c8",
+          "createdAt": 1,
+          "parentSession": "p1",
+          "isSeeded": true,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 2
+      },
+      "ops": [
+        {
+          "op": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": 0,
+              "time": 1,
+              "data": {
+                "turn": 1
+              }
+            },
+            {
+              "type": "turn/end",
+              "seq": 1,
+              "time": 2,
+              "data": {
+                "turn": 1
+              }
+            },
+            {
+              "type": "session/end-seed",
+              "seq": 2,
+              "time": 3,
+              "data": {
+                "inherited": true
+              }
+            },
+            {
+              "type": "turn/start",
+              "seq": 3,
+              "time": 4,
+              "data": {
+                "turn": 2
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "appended"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"c8\",\"createdAt\":1,\"parentSession\":\"p1\",\"isSeeded\":true,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"turn/end\",\"seq\":1,\"time\":2,\"data\":{\"turn\":1}}\n{\"type\":\"session/end-seed\",\"seq\":2,\"time\":3,\"data\":{\"inherited\":true}}\n{\"type\":\"turn/start\",\"seq\":3,\"time\":4,\"data\":{\"turn\":2}}\n"
+        }
+      ],
+      "scan": {
+        "events": 4,
+        "committedBytes": 352,
+        "inheritedEventCount": 2
+      },
+      "note": "The count is checked, not written; the inherited end-seed carries the cut."
+    },
+    {
+      "id": "create-seeded-flush-header-only",
+      "create": {
+        "header": {
+          "version": 3,
+          "id": "c9",
+          "createdAt": 1,
+          "parentSession": "p1",
+          "isSeeded": true,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0
+      },
+      "ops": [
+        {
+          "op": "flush",
+          "ts": {
+            "outcome": "flushed"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"c9\",\"createdAt\":1,\"parentSession\":\"p1\",\"isSeeded\":true,\"delegationDepth\":0}\n"
+        }
+      ],
+      "note": "The writer flushes a seeded header with no inherited end-seed, which scanLog then refuses; no scan is compared."
+    },
+    {
+      "id": "create-unseeded-zero-cut",
+      "create": {
+        "header": {
+          "version": 3,
+          "id": "c10",
+          "createdAt": 1,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0
+      },
+      "ops": [
+        {
+          "op": "flush",
+          "ts": {
+            "outcome": "flushed"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"c10\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+        }
+      ],
+      "scan": {
+        "events": 0,
+        "committedBytes": 93,
+        "inheritedEventCount": 0
+      }
+    },
+    {
+      "id": "create-seeded-without-cut",
+      "create": {
+        "header": {
+          "version": 3,
+          "id": "c11",
+          "createdAt": 1,
+          "isSeeded": true,
+          "delegationDepth": 0
+        },
+        "ts": {
+          "outcome": "thrown",
+          "class": "Error",
+          "message": "seeded session header requires an inherited event count"
+        }
+      },
+      "ops": []
+    },
+    {
+      "id": "create-unseeded-nonzero-cut",
+      "create": {
+        "header": {
+          "version": 3,
+          "id": "c12",
+          "createdAt": 1,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 1,
+        "ts": {
+          "outcome": "thrown",
+          "class": "Error",
+          "message": "unseeded session header inherited event count must be 0"
+        }
+      },
+      "ops": []
+    },
+    {
+      "id": "create-relative-cwd",
+      "create": {
+        "header": {
+          "version": 3,
+          "id": "c13",
+          "createdAt": 1,
+          "cwd": "work/repo",
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "ts": {
+          "outcome": "thrown",
+          "class": "SessionFormatError",
+          "message": "format v2 header cwd must be absolute"
+        }
+      },
+      "ops": []
+    },
+    {
+      "id": "create-negative-zero-created-at",
+      "create": {
+        "header": {"version": 3, "id": "c31", "createdAt": -0, "isSeeded": false, "delegationDepth": 0},
+        "ts": {
+          "outcome": "thrown",
+          "class": "TypeError",
+          "message": "session metadata must be losslessly JSON-serializable"
+        }
+      },
+      "ops": [],
+      "note": "The create snapshot refuses -0 before the header encoder runs."
+    },
+    {
+      "id": "create-empty-id-limited",
+      "create": {
+        "header": {"version": 3, "id": "", "createdAt": 1, "isSeeded": false, "delegationDepth": 0},
+        "rust": {"outcome": "native-subset", "limit": "empty-id"}
+      },
+      "ops": [
+        {
+          "op": "append",
+          "events": [{"type": "turn/start", "seq": 1, "time": 1, "data": {"turn": 1}}],
+          "ts": {"outcome": "thrown", "class": "Error", "message": "cannot encode an empty path segment"},
+          "log": null
+        },
+        {
+          "op": "append",
+          "events": [{"type": "turn/start", "seq": 0, "time": 1, "data": {"turn": 1}}],
+          "ts": {"outcome": "thrown", "class": "Error", "message": "cannot encode an empty path segment"},
+          "log": null
+        }
+      ],
+      "note": "TypeScript's create admits an empty id in a root with no project directory; the write lease resolves the session directory before the contiguity check, so a gap and a contiguous batch throw alike and nothing is written. Rust ends the case at create."
+    },
+    {
+      "id": "create-seq-gap",
+      "create": {
+        "header": {
+          "version": 3,
+          "id": "c14",
+          "createdAt": 1,
+          "isSeeded": false,
+          "delegationDepth": 0
+        }
+      },
+      "ops": [
+        {
+          "op": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": 1,
+              "time": 1,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "thrown",
+            "class": "Error",
+            "message": "append seq mismatch for \"c14\": expected 0 at index 0, got 1"
+          },
+          "log": null
+        },
+        {
+          "op": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": 0,
+              "time": 1,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "appended"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"c14\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n"
+        }
+      ],
+      "scan": {
+        "events": 1,
+        "committedBytes": 150,
+        "inheritedEventCount": 0
+      }
+    },
+    {
+      "id": "create-seq-duplicate-in-batch",
+      "create": {
+        "header": {
+          "version": 3,
+          "id": "c15",
+          "createdAt": 1,
+          "isSeeded": false,
+          "delegationDepth": 0
+        }
+      },
+      "ops": [
+        {
+          "op": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": 0,
+              "time": 1,
+              "data": {
+                "turn": 1
+              }
+            },
+            {
+              "type": "turn/start",
+              "seq": 0,
+              "time": 1,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "thrown",
+            "class": "Error",
+            "message": "append seq mismatch for \"c15\": expected 1 at index 1, got 0"
+          },
+          "log": null
+        },
+        {
+          "op": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": 0,
+              "time": 1,
+              "data": {
+                "turn": 1
+              }
+            },
+            {
+              "type": "user/message",
+              "seq": 1,
+              "time": 2,
+              "surfaceOp": "append",
+              "data": {
+                "id": "u1",
+                "role": "user",
+                "source": {
+                  "kind": "user"
+                },
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "hi"
+                  }
+                ]
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "appended"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"c15\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"user/message\",\"seq\":1,\"time\":2,\"surfaceOp\":\"append\",\"data\":{\"id\":\"u1\",\"role\":\"user\",\"source\":{\"kind\":\"user\"},\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}\n"
+        }
+      ],
+      "scan": {
+        "events": 2,
+        "committedBytes": 310,
+        "inheritedEventCount": 0
+      },
+      "note": "The mismatch at index 1 refuses the whole batch."
+    },
+    {
+      "id": "seq-negative",
+      "create": {
+        "header": {
+          "version": 3,
+          "id": "c16",
+          "createdAt": 1,
+          "isSeeded": false,
+          "delegationDepth": 0
+        }
+      },
+      "ops": [
+        {
+          "op": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": -1,
+              "time": 1,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "thrown",
+            "class": "Error",
+            "message": "append seq mismatch for \"c16\": expected 0 at index 0, got -1"
+          },
+          "log": null
+        }
+      ]
+    },
+    {
+      "id": "seq-string",
+      "create": {
+        "header": {
+          "version": 3,
+          "id": "c17",
+          "createdAt": 1,
+          "isSeeded": false,
+          "delegationDepth": 0
+        }
+      },
+      "ops": [
+        {
+          "op": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": "0",
+              "time": 1,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "thrown",
+            "class": "Error",
+            "message": "append seq mismatch for \"c17\": expected 0 at index 0, got 0"
+          },
+          "log": null
+        }
+      ],
+      "note": "Strict inequality never equates the string with the cursor."
+    },
+    {
+      "id": "seq-missing",
+      "create": {
+        "header": {
+          "version": 3,
+          "id": "c18",
+          "createdAt": 1,
+          "isSeeded": false,
+          "delegationDepth": 0
+        }
+      },
+      "ops": [
+        {
+          "op": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "time": 1,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "thrown",
+            "class": "Error",
+            "message": "append seq mismatch for \"c18\": expected 0 at index 0, got undefined"
+          },
+          "log": null
+        }
+      ]
+    },
+    {
+      "id": "seq-null",
+      "create": {
+        "header": {
+          "version": 3,
+          "id": "c19",
+          "createdAt": 1,
+          "isSeeded": false,
+          "delegationDepth": 0
+        }
+      },
+      "ops": [
+        {
+          "op": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": null,
+              "time": 1,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "thrown",
+            "class": "Error",
+            "message": "append seq mismatch for \"c19\": expected 0 at index 0, got null"
+          },
+          "log": null
+        }
+      ]
+    },
+    {
+      "id": "seq-boolean",
+      "create": {
+        "header": {
+          "version": 3,
+          "id": "c20",
+          "createdAt": 1,
+          "isSeeded": false,
+          "delegationDepth": 0
+        }
+      },
+      "ops": [
+        {
+          "op": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": true,
+              "time": 1,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "thrown",
+            "class": "Error",
+            "message": "append seq mismatch for \"c20\": expected 0 at index 0, got true"
+          },
+          "log": null
+        }
+      ]
+    },
+    {
+      "id": "seq-float-after-matching-event",
+      "create": {
+        "header": {
+          "version": 3,
+          "id": "c21",
+          "createdAt": 1,
+          "isSeeded": false,
+          "delegationDepth": 0
+        }
+      },
+      "ops": [
+        {
+          "op": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": 0,
+              "time": 1,
+              "data": {
+                "turn": 1
+              }
+            },
+            {
+              "type": "turn/start",
+              "seq": 7,
+              "time": 1,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "thrown",
+            "class": "Error",
+            "message": "append seq mismatch for \"c21\": expected 1 at index 1, got 7"
+          },
+          "log": null
+        },
+        {
+          "op": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": 0,
+              "time": 1,
+              "data": {
+                "turn": 1
+              }
+            },
+            {
+              "type": "turn/start",
+              "seq": 1.5,
+              "time": 1,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "thrown",
+            "class": "Error",
+            "message": "append seq mismatch for \"c21\": expected 1 at index 1, got 1.5"
+          },
+          "log": null,
+          "rust": {
+            "outcome": "native-subset",
+            "limit": "seq-value"
+          }
+        }
+      ],
+      "note": "A float seq is a limit only once every earlier event matched."
+    },
+    {
+      "id": "event-null",
+      "create": {
+        "header": {
+          "version": 3,
+          "id": "c22",
+          "createdAt": 1,
+          "isSeeded": false,
+          "delegationDepth": 0
+        }
+      },
+      "ops": [
+        {
+          "op": "append",
+          "events": [
+            null
+          ],
+          "ts": {
+            "outcome": "thrown",
+            "class": "TypeError"
+          },
+          "log": null,
+          "rust": {
+            "outcome": "native-subset",
+            "limit": "seq-value"
+          }
+        }
+      ],
+      "note": "Reading seq of null throws an engine TypeError."
+    },
+    {
+      "id": "seq-integral-float",
+      "create": {
+        "header": {
+          "version": 3,
+          "id": "c23",
+          "createdAt": 1,
+          "isSeeded": false,
+          "delegationDepth": 0
+        }
+      },
+      "ops": [
+        {
+          "op": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": 0.0,
+              "time": 1,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "appended"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"c23\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n",
+          "rust": {
+            "outcome": "native-subset",
+            "limit": "seq-value"
+          }
+        }
+      ],
+      "note": "JavaScript reads 0.0 as 0, so the batch continues the cursor and is written with seq 0."
+    },
+    {
+      "id": "seq-object",
+      "create": {
+        "header": {
+          "version": 3,
+          "id": "c24",
+          "createdAt": 1,
+          "isSeeded": false,
+          "delegationDepth": 0
+        }
+      },
+      "ops": [
+        {
+          "op": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": {},
+              "time": 1,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "thrown",
+            "class": "Error",
+            "message": "append seq mismatch for \"c24\": expected 0 at index 0, got [object Object]"
+          },
+          "log": null,
+          "rust": {
+            "outcome": "native-subset",
+            "limit": "seq-value"
+          }
+        }
+      ]
+    },
+    {
+      "id": "not-lossless-time",
+      "create": {
+        "header": {
+          "version": 3,
+          "id": "c25",
+          "createdAt": 1,
+          "isSeeded": false,
+          "delegationDepth": 0
+        }
+      },
+      "ops": [
+        {
+          "op": "append",
+          "events": [
+            {"type": "turn/start", "seq": 0, "time": -0, "data": {"turn": 1}}
+          ],
+          "ts": {
+            "outcome": "thrown",
+            "class": "TypeError",
+            "message": "session event batch is not losslessly JSON-serializable because it contains non-JSON-serializable data"
+          },
+          "log": null
+        }
+      ]
+    },
+    {
+      "id": "not-lossless-before-seq-mismatch",
+      "create": {
+        "header": {
+          "version": 3,
+          "id": "c26",
+          "createdAt": 1,
+          "isSeeded": false,
+          "delegationDepth": 0
+        }
+      },
+      "ops": [
+        {
+          "op": "append",
+          "events": [
+            {"type": "ext/note", "seq": 5, "time": 1, "ignorable": true, "data": {"x": [-0.0]}}
+          ],
+          "ts": {
+            "outcome": "thrown",
+            "class": "TypeError",
+            "message": "session event batch is not losslessly JSON-serializable because it contains non-JSON-serializable data"
+          },
+          "log": null
+        }
+      ],
+      "note": "The snapshot runs before the contiguity check."
+    },
+    {
+      "id": "encode-refusal-unmaterialized",
+      "create": {
+        "header": {
+          "version": 3,
+          "id": "c27",
+          "createdAt": 1,
+          "isSeeded": false,
+          "delegationDepth": 0
+        }
+      },
+      "ops": [
+        {
+          "op": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": 0,
+              "time": 1,
+              "data": {
+                "turn": 1
+              },
+              "extra": 1
+            }
+          ],
+          "ts": {
+            "outcome": "thrown",
+            "class": "SessionFormatError",
+            "message": "format v3 turn/start at seq 0 has unexpected field extra"
+          },
+          "log": null
+        },
+        {
+          "op": "flush",
+          "ts": {
+            "outcome": "flushed"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"c27\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+        }
+      ],
+      "scan": {
+        "events": 0,
+        "committedBytes": 93,
+        "inheritedEventCount": 0
+      },
+      "note": "A refused first batch materializes nothing; the flush then writes the header alone."
+    },
+    {
+      "id": "encode-refusal-whole-batch",
+      "create": {
+        "header": {
+          "version": 3,
+          "id": "c28",
+          "createdAt": 1,
+          "isSeeded": false,
+          "delegationDepth": 0
+        }
+      },
+      "ops": [
+        {
+          "op": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": 0,
+              "time": 1,
+              "data": {
+                "turn": 1
+              }
+            },
+            {
+              "type": "turn/end",
+              "seq": 1,
+              "time": 2
+            }
+          ],
+          "ts": {
+            "outcome": "thrown",
+            "class": "SessionFormatError",
+            "message": "format v3 turn/end at seq 1 lacks required field data"
+          },
+          "log": null
+        },
+        {
+          "op": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": 0,
+              "time": 1,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "appended"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"c28\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n"
+        }
+      ],
+      "scan": {
+        "events": 1,
+        "committedBytes": 150,
+        "inheritedEventCount": 0
+      },
+      "note": "No row of a refused batch is written."
+    },
+    {
+      "id": "encode-limit-float",
+      "create": {
+        "header": {
+          "version": 3,
+          "id": "c29",
+          "createdAt": 1,
+          "isSeeded": false,
+          "delegationDepth": 0
+        }
+      },
+      "ops": [
+        {
+          "op": "append",
+          "events": [
+            {
+              "type": "ext/note",
+              "seq": 0,
+              "time": 1,
+              "ignorable": true,
+              "data": {
+                "x": 1.5
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "appended"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"c29\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"ext/note\",\"seq\":0,\"time\":1,\"ignorable\":true,\"data\":{\"x\":1.5}}\n",
+          "rust": {
+            "outcome": "native-subset",
+            "limit": "encode"
+          }
+        }
+      ],
+      "note": "JavaScript writes 1.5; Rust does not claim JavaScript's number spelling."
+    },
+    {
+      "id": "encode-type-number-after-materialized",
+      "create": {
+        "header": {
+          "version": 3,
+          "id": "c30",
+          "createdAt": 1,
+          "isSeeded": false,
+          "delegationDepth": 0
+        }
+      },
+      "ops": [
+        {
+          "op": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": 0,
+              "time": 1,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "appended"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"c30\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n"
+        },
+        {
+          "op": "append",
+          "events": [
+            {
+              "type": 7,
+              "seq": 1,
+              "time": 2,
+              "data": {}
+            }
+          ],
+          "ts": {
+            "outcome": "thrown",
+            "class": "SessionFormatError",
+            "message": "format v3 7 at seq 1 type must be a string"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"c30\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n"
+        },
+        {
+          "op": "append",
+          "events": [
+            {
+              "type": "turn/end",
+              "seq": 1,
+              "time": 2,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "appended"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"c30\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"turn/end\",\"seq\":1,\"time\":2,\"data\":{\"turn\":1}}\n"
+        }
+      ],
+      "scan": {
+        "events": 2,
+        "committedBytes": 205,
+        "inheritedEventCount": 0
+      }
+    },
+    {
+      "id": "open-clean-append",
+      "open": "{\"type\":\"session\",\"version\":3,\"id\":\"o1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"user/message\",\"seq\":1,\"time\":2,\"surfaceOp\":\"append\",\"data\":{\"id\":\"u1\",\"role\":\"user\",\"source\":{\"kind\":\"user\"},\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}\n",
+      "ops": [
+        {
+          "op": "append",
+          "events": [
+            {
+              "type": "step/start",
+              "seq": 2,
+              "time": 3,
+              "data": {
+                "turn": 1,
+                "step": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "appended"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"o1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"user/message\",\"seq\":1,\"time\":2,\"surfaceOp\":\"append\",\"data\":{\"id\":\"u1\",\"role\":\"user\",\"source\":{\"kind\":\"user\"},\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}\n{\"type\":\"step/start\",\"seq\":2,\"time\":3,\"data\":{\"turn\":1,\"step\":1}}\n"
+        }
+      ],
+      "scan": {
+        "events": 3,
+        "committedBytes": 375,
+        "inheritedEventCount": 0
+      }
+    },
+    {
+      "id": "open-clean-flush-writes-nothing",
+      "open": "{\"type\":\"session\",\"version\":3,\"id\":\"o2\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n",
+      "ops": [
+        {
+          "op": "flush",
+          "ts": {
+            "outcome": "flushed"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"o2\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n"
+        }
+      ],
+      "scan": {
+        "events": 1,
+        "committedBytes": 149,
+        "inheritedEventCount": 0
+      }
+    },
+    {
+      "id": "open-clean-seq-duplicate",
+      "open": "{\"type\":\"session\",\"version\":3,\"id\":\"o3\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"user/message\",\"seq\":1,\"time\":2,\"surfaceOp\":\"append\",\"data\":{\"id\":\"u1\",\"role\":\"user\",\"source\":{\"kind\":\"user\"},\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}\n",
+      "ops": [
+        {
+          "op": "append",
+          "events": [
+            {
+              "type": "user/message",
+              "seq": 1,
+              "time": 2,
+              "surfaceOp": "append",
+              "data": {
+                "id": "u1",
+                "role": "user",
+                "source": {
+                  "kind": "user"
+                },
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "hi"
+                  }
+                ]
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "thrown",
+            "class": "Error",
+            "message": "append seq mismatch for \"o3\": expected 2 at index 0, got 1"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"o3\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"user/message\",\"seq\":1,\"time\":2,\"surfaceOp\":\"append\",\"data\":{\"id\":\"u1\",\"role\":\"user\",\"source\":{\"kind\":\"user\"},\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}\n"
+        }
+      ],
+      "scan": {
+        "events": 2,
+        "committedBytes": 309,
+        "inheritedEventCount": 0
+      }
+    },
+    {
+      "id": "open-torn-append-truncates",
+      "open": "{\"type\":\"session\",\"version\":3,\"id\":\"o4\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"turn/end\",\"se",
+      "ops": [
+        {
+          "op": "append",
+          "events": [
+            {
+              "type": "turn/end",
+              "seq": 1,
+              "time": 2,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "appended"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"o4\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"turn/end\",\"seq\":1,\"time\":2,\"data\":{\"turn\":1}}\n"
+        }
+      ],
+      "scan": {
+        "events": 2,
+        "committedBytes": 204,
+        "inheritedEventCount": 0
+      }
+    },
+    {
+      "id": "open-torn-empty-batch-keeps-tail",
+      "open": "{\"type\":\"session\",\"version\":3,\"id\":\"o5\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"turn/end\",\"se",
+      "ops": [
+        {
+          "op": "append",
+          "events": [],
+          "ts": {
+            "outcome": "appended"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"o5\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"turn/end\",\"se"
+        },
+        {
+          "op": "append",
+          "events": [
+            {
+              "type": "turn/end",
+              "seq": 1,
+              "time": 2,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "appended"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"o5\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"turn/end\",\"seq\":1,\"time\":2,\"data\":{\"turn\":1}}\n"
+        }
+      ],
+      "scan": {
+        "events": 2,
+        "committedBytes": 204,
+        "inheritedEventCount": 0
+      },
+      "note": "An empty batch returns before the truncation."
+    },
+    {
+      "id": "open-torn-flush-keeps-tail",
+      "open": "{\"type\":\"session\",\"version\":3,\"id\":\"o6\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"turn/end\",\"se",
+      "ops": [
+        {
+          "op": "flush",
+          "ts": {
+            "outcome": "flushed"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"o6\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"turn/end\",\"se"
+        },
+        {
+          "op": "append",
+          "events": [
+            {
+              "type": "turn/end",
+              "seq": 1,
+              "time": 2,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "appended"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"o6\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"turn/end\",\"seq\":1,\"time\":2,\"data\":{\"turn\":1}}\n"
+        }
+      ],
+      "scan": {
+        "events": 2,
+        "committedBytes": 204,
+        "inheritedEventCount": 0
+      }
+    },
+    {
+      "id": "open-torn-seq-mismatch-keeps-tail",
+      "open": "{\"type\":\"session\",\"version\":3,\"id\":\"o7\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"turn/end\",\"se",
+      "ops": [
+        {
+          "op": "append",
+          "events": [
+            {
+              "type": "turn/end",
+              "seq": 5,
+              "time": 2,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "thrown",
+            "class": "Error",
+            "message": "append seq mismatch for \"o7\": expected 1 at index 0, got 5"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"o7\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"turn/end\",\"se"
+        },
+        {
+          "op": "append",
+          "events": [
+            {
+              "type": "turn/end",
+              "seq": 1,
+              "time": 2,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "appended"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"o7\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"turn/end\",\"seq\":1,\"time\":2,\"data\":{\"turn\":1}}\n"
+        }
+      ],
+      "scan": {
+        "events": 2,
+        "committedBytes": 204,
+        "inheritedEventCount": 0
+      },
+      "note": "The contiguity check runs before the truncation."
+    },
+    {
+      "id": "open-torn-encode-refusal-truncates",
+      "open": "{\"type\":\"session\",\"version\":3,\"id\":\"o8\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"turn/end\",\"se",
+      "ops": [
+        {
+          "op": "append",
+          "events": [
+            {
+              "type": "turn/end",
+              "seq": 1,
+              "time": 2,
+              "data": {
+                "turn": 1
+              },
+              "extra": 1
+            }
+          ],
+          "ts": {
+            "outcome": "thrown",
+            "class": "SessionFormatError",
+            "message": "format v3 turn/end at seq 1 has unexpected field extra"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"o8\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n"
+        },
+        {
+          "op": "append",
+          "events": [
+            {
+              "type": "turn/end",
+              "seq": 1,
+              "time": 2,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "appended"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"o8\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"turn/end\",\"seq\":1,\"time\":2,\"data\":{\"turn\":1}}\n"
+        }
+      ],
+      "scan": {
+        "events": 2,
+        "committedBytes": 204,
+        "inheritedEventCount": 0
+      },
+      "note": "The truncation lands before the batch is encoded, so the refused batch still removes the torn tail."
+    },
+    {
+      "id": "open-torn-not-lossless-keeps-tail",
+      "open": "{\"type\":\"session\",\"version\":3,\"id\":\"o9\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"turn/end\",\"se",
+      "ops": [
+        {
+          "op": "append",
+          "events": [
+            {"type": "turn/end", "seq": 1, "time": 2, "data": {"turn": 1, "x": -0}}
+          ],
+          "ts": {
+            "outcome": "thrown",
+            "class": "TypeError",
+            "message": "session event batch is not losslessly JSON-serializable because it contains non-JSON-serializable data"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"o9\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"turn/end\",\"se"
+        }
+      ]
+    },
+    {
+      "id": "open-header-only-torn",
+      "open": "{\"type\":\"session\",\"version\":3,\"id\":\"o10\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"ty",
+      "ops": [
+        {
+          "op": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": 0,
+              "time": 1,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "appended"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"o10\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n"
+        }
+      ],
+      "scan": {
+        "events": 1,
+        "committedBytes": 150,
+        "inheritedEventCount": 0
+      }
+    },
+    {
+      "id": "open-complete-corrupt-record-discarded",
+      "open": "{\"type\":\"session\",\"version\":3,\"id\":\"o11\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\nnot json\n{\"type\":\"ext/note\",\"seq\":1,\"time\":2,\"ignorable\":true,\"data\":{\"n\":1}}\n",
+      "ops": [
+        {
+          "op": "append",
+          "events": [
+            {
+              "type": "turn/end",
+              "seq": 1,
+              "time": 2,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "appended"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"o11\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"turn/end\",\"seq\":1,\"time\":2,\"data\":{\"turn\":1}}\n"
+        }
+      ],
+      "scan": {
+        "events": 2,
+        "committedBytes": 205,
+        "inheritedEventCount": 0
+      },
+      "note": "The scan stops at the unparsable record, so the cursor is 1 and the first append truncates both complete records after it."
+    },
+    {
+      "id": "open-seeded-append",
+      "open": "{\"type\":\"session\",\"version\":3,\"id\":\"o12\",\"createdAt\":1,\"parentSession\":\"p1\",\"isSeeded\":true,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"turn/end\",\"seq\":1,\"time\":2,\"data\":{\"turn\":1}}\n{\"type\":\"session/end-seed\",\"seq\":2,\"time\":3,\"data\":{\"inherited\":true}}\n",
+      "ops": [
+        {
+          "op": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": 3,
+              "time": 4,
+              "data": {
+                "turn": 2
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "appended"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"o12\",\"createdAt\":1,\"parentSession\":\"p1\",\"isSeeded\":true,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"turn/end\",\"seq\":1,\"time\":2,\"data\":{\"turn\":1}}\n{\"type\":\"session/end-seed\",\"seq\":2,\"time\":3,\"data\":{\"inherited\":true}}\n{\"type\":\"turn/start\",\"seq\":3,\"time\":4,\"data\":{\"turn\":2}}\n"
+        }
+      ],
+      "scan": {
+        "events": 4,
+        "committedBytes": 353,
+        "inheritedEventCount": 2
+      }
+    },
+    {
+      "id": "open-torn-two-batches",
+      "open": "{\"type\":\"session\",\"version\":3,\"id\":\"o13\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"turn/end\",\"se",
+      "ops": [
+        {
+          "op": "append",
+          "events": [
+            {
+              "type": "turn/end",
+              "seq": 1,
+              "time": 2,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "appended"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"o13\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"turn/end\",\"seq\":1,\"time\":2,\"data\":{\"turn\":1}}\n"
+        },
+        {
+          "op": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": 2,
+              "time": 3,
+              "data": {
+                "turn": 2
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "appended"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"o13\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"turn/end\",\"seq\":1,\"time\":2,\"data\":{\"turn\":1}}\n{\"type\":\"turn/start\",\"seq\":2,\"time\":3,\"data\":{\"turn\":2}}\n"
+        }
+      ],
+      "scan": {
+        "events": 3,
+        "committedBytes": 262,
+        "inheritedEventCount": 0
+      },
+      "note": "Only the first appended batch truncates."
+    }
+  ]
+}

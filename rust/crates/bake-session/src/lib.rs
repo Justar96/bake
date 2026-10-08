@@ -78,6 +78,11 @@
 //! TypeScript writes for a current header record and one current event row,
 //! without the LF, or refuse with `Unadmitted` where TypeScript throws, or
 //! with a native limit.
+//! [`PlainAppendLog`] models the bytes TypeScript's JSONL backend writes for
+//! one plain log handle: it creates or opens a log, appends contiguous batches
+//! after truncating a torn tail, and flushes a header-only log, refusing with
+//! the contiguity or lossless-snapshot message, `Unadmitted` where encoding
+//! throws, or a native limit.
 //! None reads or writes a file. The crate is
 //! unstable and unshipped; the preview's `session inspect` and `session stat` use it.
 
@@ -90,6 +95,7 @@ mod goal;
 mod history;
 mod inbox;
 mod offload;
+mod plain_append;
 mod pressure;
 mod repair;
 mod replay;
@@ -129,6 +135,7 @@ pub use inbox::{
     consumed_work, restored_inbox,
 };
 pub use offload::OffloadRejection;
+pub use plain_append::{AppendLimit, AppendRefusal, CreateLimit, CreateRefusal, PlainAppendLog};
 pub use pressure::{
     ContextPressureState, ContextPressureView, PressureLimit, PressureRefusal, RequestRoute,
     context_pressure,
