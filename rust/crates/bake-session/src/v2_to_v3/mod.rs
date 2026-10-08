@@ -29,8 +29,13 @@ use crate::envelope::{
     EnvelopeLimit, EnvelopeRefusal, EnvelopeRejection, NumberField, decode_row_envelope,
 };
 use crate::source_event_seqs::SourceEventSeqsLimit;
+pub(crate) use admission::OBJECT_PROTOTYPE_NAMES;
 pub(crate) use header::contains_negative_zero;
 pub(crate) use js::{integer_string, js_order};
+pub(crate) use payload_semantics::{
+    Checked, assert_released_payload_semantics, count, invalid, quote, released_keys,
+    released_record, stringify,
+};
 use stage::Stage;
 
 /// `SURFACE_TYPES` in `payload.ts`; every other admitted event is log-only.
@@ -118,7 +123,7 @@ pub enum V2ToV3Refusal {
 
 /// A stage failure before the chain classifies it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum StageError {
+pub(crate) enum StageError {
     /// TypeScript throws `SessionFormatError` with this message.
     Invalid(String),
     /// TypeScript throws `SessionFormatUnsupportedMigrationError` with this message.
