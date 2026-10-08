@@ -145,7 +145,7 @@ fn resolve_root(root: &OsStr) -> io::Result<PathBuf> {
 /// Refuse a root spelling whose resolution this preview does not share with
 /// Node: one that is not UTF-8 once resolved, and on Windows any form other
 /// than a relative path or a drive-absolute `X:\` path.
-fn check_root(spelled: &OsStr, resolved: &Path) -> Step<()> {
+pub(crate) fn check_root(spelled: &OsStr, resolved: &Path) -> Step<()> {
     let refuse =
         |reason, message: String| refused("root", reason, Kind::NativeLimit, message, None);
     if let Some(problem) = unsupported_root(Path::new(spelled)) {
@@ -243,30 +243,34 @@ pub(crate) fn refused(
     }))
 }
 
-/// The selected generation.
+/// The selected generation: the numerically highest canonical name of the
+/// configured compression in one Session directory, whatever its file type.
 pub(crate) struct Selected {
     /// Project directory name, a listed UTF-8 entry.
     project: String,
+    /// Session directory name: the encoded id for a lookup, a listed UTF-8
+    /// entry for discovery.
+    session: String,
     name: String,
     pub(crate) version: u64,
 }
 
 impl Selected {
-    pub(crate) fn relative(&self, id: &str) -> String {
-        format!("{}/{}/{}", self.project, encode_segment(id), self.name)
+    /// The root-relative path, with `/` separators.
+    pub(crate) fn relative(&self) -> String {
+        format!("{}/{}/{}", self.project, self.session, self.name)
     }
 
-    pub(crate) fn path(&self, root: &Path, id: &str) -> PathBuf {
+    pub(crate) fn path(&self, root: &Path) -> PathBuf {
         root.join(&self.project)
-            .join(encode_segment(id))
+            .join(&self.session)
             .join(&self.name)
     }
 }
 
 /// The root made absolute as TypeScript's backend resolves it.
-pub(crate) fn resolve(lookup: &LookupArgs) -> Result<PathBuf, String> {
-    resolve_root(&lookup.root)
-        .map_err(|error| format!("cannot resolve the root {:?}: {error}", lookup.root))
+pub(crate) fn resolve(root: &OsStr) -> Result<PathBuf, String> {
+    resolve_root(root).map_err(|error| format!("cannot resolve the root {root:?}: {error}"))
 }
 
 /// The root and id checks, `ensureRootEncoding`, and `findLog` for the
@@ -275,18 +279,12 @@ pub(crate) fn resolve(lookup: &LookupArgs) -> Result<PathBuf, String> {
 pub(crate) fn select(root: &Path, lookup: &LookupArgs) -> Step<Option<Selected>> {
     check_root(&lookup.root, root)?;
     check_name("lookup", &encode_segment(&lookup.id))?;
-    Scan {
-        root,
-        encoding: lookup.encoding,
-        max_entries: lookup.max_entries,
-        entries: 0,
-        stage: "layout",
-    }
-    .find(&lookup.id)
+    Scan::new(root, lookup.encoding, lookup.max_entries).find(&lookup.id)
 }
 
-/// The directory listings of one lookup, bounded by `--max-entries`.
-struct Scan<'a> {
+/// The directory listings of one lookup or listing, bounded together by
+/// `--max-entries`. Refusals name the current stage.
+pub(crate) struct Scan<'a> {
     root: &'a Path,
     encoding: Encoding,
     max_entries: u64,
@@ -294,7 +292,18 @@ struct Scan<'a> {
     stage: &'static str,
 }
 
-impl Scan<'_> {
+impl<'a> Scan<'a> {
+    /// A scan of the resolved `root` that starts at the `layout` stage.
+    pub(crate) const fn new(root: &'a Path, encoding: Encoding, max_entries: u64) -> Self {
+        Self {
+            root,
+            encoding,
+            max_entries,
+            entries: 0,
+            stage: "layout",
+        }
+    }
+
     /// One directory's entries in byte order of their names, or `None` when
     /// `missing_ok` and the directory does not exist.
     fn list(&mut self, dir: &Path, missing_ok: bool) -> Step<Option<Vec<DirEntry>>> {
@@ -313,7 +322,7 @@ impl Scan<'_> {
                     "entry-budget",
                     Kind::NativeLimit,
                     format!(
-                        "the lookup reads more than --max-entries {} directory entries",
+                        "more than --max-entries {} directory entries were read",
                         self.max_entries
                     ),
                     None,
@@ -392,28 +401,7 @@ impl Scan<'_> {
                     }
                 }
             }
-            let Some(entries) = self.list(&dir.join(&encoded), true)? else {
-                continue;
-            };
-            let mut latest: Option<(u64, String)> = None;
-            for entry in &entries {
-                let name = entry.file_name();
-                if Self::version(&name, self.opposite()).is_some() {
-                    return Err(self.mismatch(format!("{project}/{encoded}/{}", name.display())));
-                }
-                if let Some(version) = Self::version(&name, self.encoding)
-                    && latest.as_ref().is_none_or(|(best, _)| version > *best)
-                {
-                    latest = Some((version, name.to_string_lossy().into_owned()));
-                }
-            }
-            if let Some((version, name)) = latest {
-                matches.push(Selected {
-                    project: project.clone(),
-                    name,
-                    version,
-                });
-            }
+            matches.extend(self.generation(project, &encoded)?);
         }
         if matches.len() > 1 {
             return Err(refused(
@@ -430,50 +418,98 @@ impl Scan<'_> {
         Ok(matches.pop())
     }
 
-    /// `ensureRootEncoding`: the real project directories, after refusing a
-    /// flat legacy file or a generation of the other compression anywhere.
-    fn layout(&mut self) -> Step<Vec<String>> {
+    /// `resolveGenerationInDirectory` for `<project>/<session>`, following a
+    /// link: the first generation of the other compression is refused, and
+    /// the highest canonical name is selected without opening it.
+    fn generation(&mut self, project: &str, session: &str) -> Step<Option<Selected>> {
+        let Some(entries) = self.list(&self.root.join(project).join(session), true)? else {
+            return Ok(None);
+        };
+        let mut latest: Option<(u64, String)> = None;
+        for entry in &entries {
+            let name = entry.file_name();
+            if Self::version(&name, self.opposite()).is_some() {
+                return Err(self.mismatch(format!("{project}/{session}/{}", name.display())));
+            }
+            if let Some(version) = Self::version(&name, self.encoding)
+                && latest.as_ref().is_none_or(|(best, _)| version > *best)
+            {
+                latest = Some((version, name.to_string_lossy().into_owned()));
+            }
+        }
+        Ok(latest.map(|(version, name)| Selected {
+            project: project.to_owned(),
+            session: session.to_owned(),
+            name,
+            version,
+        }))
+    }
+
+    /// `listProjectDirs`: the root's real directories, with names not yet
+    /// checked, or none when the root does not exist.
+    fn projects(&mut self) -> Step<Vec<std::ffi::OsString>> {
         let Some(root_entries) = self.list(self.root, true)? else {
             return Ok(Vec::new());
         };
         let mut projects = Vec::new();
         for entry in root_entries {
-            let Some(kind) = file_type(&entry)? else {
+            if file_type(&entry)?.is_some_and(|kind| kind.is_dir()) {
+                projects.push(entry.file_name());
+            }
+        }
+        Ok(projects)
+    }
+
+    /// A listed project directory name this preview can traverse.
+    fn project_name(&self, name: &OsStr) -> Step<String> {
+        let Some(project) = name.to_str() else {
+            return Err(non_utf8(
+                self.stage,
+                &format!("project directory {}", name.display()),
+            ));
+        };
+        check_name(self.stage, project)?;
+        Ok(project.to_owned())
+    }
+
+    /// `listSessionDirs`: refuse a regular flat legacy file, then return the
+    /// project's real Session directories. The project must exist.
+    fn sessions(&mut self, project: &str) -> Step<Vec<String>> {
+        let entries = self
+            .list(&self.root.join(project), false)?
+            .unwrap_or_default();
+        let mut sessions = Vec::new();
+        for entry in &entries {
+            let Some(kind) = file_type(entry)? else {
                 continue;
             };
-            if !kind.is_dir() {
-                continue;
-            }
             let name = entry.file_name();
-            let Some(project) = name.to_str() else {
-                return Err(non_utf8(&format!("project directory {}", name.display())));
-            };
-            check_name("layout", project)?;
-            let dir = self.root.join(&name);
-            let entries = self.list(&dir, false)?.unwrap_or_default();
-            let mut sessions = Vec::new();
-            for entry in &entries {
-                let Some(kind) = file_type(entry)? else {
-                    continue;
-                };
-                let name = entry.file_name();
-                let bytes = name.as_encoded_bytes();
-                if kind.is_file() && (bytes.ends_with(b".jsonl") || bytes.ends_with(b".jsonl.zstd"))
-                {
-                    return Err(self.legacy(format!("{project}/{}", name.display())));
-                }
-                if kind.is_dir() {
-                    let Some(session) = name.to_str() else {
-                        return Err(non_utf8(&format!(
-                            "Session directory {project}/{}",
-                            name.display()
-                        )));
-                    };
-                    check_name("layout", session)?;
-                    sessions.push(session.to_owned());
-                }
+            let bytes = name.as_encoded_bytes();
+            if kind.is_file() && (bytes.ends_with(b".jsonl") || bytes.ends_with(b".jsonl.zstd")) {
+                return Err(self.legacy(format!("{project}/{}", name.display())));
             }
-            for session in sessions {
+            if kind.is_dir() {
+                let Some(session) = name.to_str() else {
+                    return Err(non_utf8(
+                        self.stage,
+                        &format!("Session directory {project}/{}", name.display()),
+                    ));
+                };
+                check_name(self.stage, session)?;
+                sessions.push(session.to_owned());
+            }
+        }
+        Ok(sessions)
+    }
+
+    /// `ensureRootEncoding`: the real project directories, after refusing a
+    /// flat legacy file or a generation of the other compression anywhere.
+    fn layout(&mut self) -> Step<Vec<String>> {
+        let mut projects = Vec::new();
+        for name in self.projects()? {
+            let project = self.project_name(&name)?;
+            let dir = self.root.join(&project);
+            for session in self.sessions(&project)? {
                 let Some(entries) = self.list(&dir.join(&session), true)? else {
                     continue;
                 };
@@ -488,18 +524,37 @@ impl Scan<'_> {
                     return Err(self.mismatch(format!("{project}/{session}/{}", name.display())));
                 }
             }
-            projects.push(project.to_owned());
+            projects.push(project);
         }
         Ok(projects)
+    }
+
+    /// `listArtifacts` up to its header reads: `ensureRootEncoding` at the
+    /// `layout` stage, then, at the `discovery` stage, the root and every
+    /// real project directory are listed again, and each real Session
+    /// directory's selected generation is passed to `visit` before the next
+    /// directory is listed. Directory links are not followed.
+    pub(crate) fn discover(&mut self, mut visit: impl FnMut(Selected) -> Step<()>) -> Step<()> {
+        self.layout()?;
+        self.stage = "discovery";
+        for name in self.projects()? {
+            let project = self.project_name(&name)?;
+            for session in self.sessions(&project)? {
+                if let Some(selected) = self.generation(&project, &session)? {
+                    visit(selected)?;
+                }
+            }
+        }
+        Ok(())
     }
 }
 
 /// Node lists a directory name that is not UTF-8 with replacement
 /// characters and then opens the path that spelling names, which can be
 /// absent or another entry; this preview reproduces neither.
-fn non_utf8(subject: &str) -> Stop {
+fn non_utf8(stage: &'static str, subject: &str) -> Stop {
     refused(
-        "layout",
+        stage,
         "non-utf8-name",
         Kind::NativeLimit,
         format!("{subject} is not named in UTF-8, which this preview does not read"),
@@ -592,7 +647,7 @@ fn unsupported_windows_name(name: &str) -> bool {
 /// Run the lookup form, returning its record and exit status, or a
 /// diagnostic for exit status 1.
 pub fn run(args: &InspectArgs, lookup: &LookupArgs) -> Result<(Value, u8), String> {
-    let root = resolve(lookup)?;
+    let root = resolve(&lookup.root)?;
     let mut file_bytes = None;
     let mut selected_path = None;
     let outcome = select(&root, lookup)
@@ -608,9 +663,9 @@ pub fn run(args: &InspectArgs, lookup: &LookupArgs) -> Result<(Value, u8), Strin
             })
         })
         .and_then(|selected| {
-            let relative = selected.relative(&lookup.id);
+            let relative = selected.relative();
             selected_path = Some(relative.clone());
-            let path = selected.path(&root, &lookup.id);
+            let path = selected.path(&root);
             if selected.version < CURRENT_SESSION_FORMAT_VERSION {
                 return Err(refused(
                     "generation",
@@ -639,7 +694,14 @@ pub fn run(args: &InspectArgs, lookup: &LookupArgs) -> Result<(Value, u8), Strin
             file_bytes = Some(bytes.len());
             let staged = stage(&bytes, lookup.encoding, args)
                 .map_err(|refusal| restore_stage("scan", &refusal, args, &relative))?;
-            check_identity(&root, &path, &selected, lookup, staged.header(), &relative)?;
+            check_identity(
+                &root,
+                &path,
+                &selected,
+                Some(&lookup.id),
+                staged.header(),
+                &relative,
+            )?;
             staged
                 .restore()
                 .map_err(|refusal| restore_stage("restore", &refusal, args, &relative))
@@ -687,25 +749,38 @@ fn restore_stage(
     }))
 }
 
-/// `assertStoredIdentity`: the header names the requested id, and its id and
-/// `cwd` name the selected file, by spelling or else by `realpath`.
+/// `assertStoredIdentity`: the header names the `expected` id when one was
+/// requested, and its id and `cwd` name the selected file, by spelling or
+/// else by `realpath`. An empty header id names no path, which TypeScript's
+/// `encodeSegment` refuses.
 pub(crate) fn check_identity(
     root: &Path,
     path: &Path,
     selected: &Selected,
-    lookup: &LookupArgs,
+    expected: Option<&str>,
     header: &SessionHeader,
     relative: &str,
 ) -> Step<()> {
-    if header.id != lookup.id {
+    if let Some(expected) = expected
+        && header.id != expected
+    {
         return Err(refused(
             "identity",
             "id-mismatch",
             Kind::Invalid,
             format!(
-                "{relative} has header id {:?}, not the requested {:?}",
-                header.id, lookup.id
+                "{relative} has header id {:?}, not the requested {expected:?}",
+                header.id
             ),
+            Some(relative.to_owned()),
+        ));
+    }
+    if header.id.is_empty() {
+        return Err(refused(
+            "identity",
+            "unencodable-id",
+            Kind::Invalid,
+            format!("{relative} has an empty header id, which cannot name a storage path"),
             Some(relative.to_owned()),
         ));
     }
