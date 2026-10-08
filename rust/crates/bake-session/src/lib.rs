@@ -84,7 +84,13 @@
 //! after truncating a torn tail, and flushes a header-only log, refusing with
 //! the contiguity or lossless-snapshot message, `Unadmitted` where encoding
 //! throws, or a native limit.
-//! None reads or writes a file. The crate is
+//! [`PlainLogFile`] keeps such a log on disk beneath a Session root, at the
+//! path [`session_log_path`] spells from [`encode_segment`] and
+//! [`project_key`]: it creates, or finds and opens, a Session's current plain
+//! log as the backend's `create` and write `open` do, refusing an existing,
+//! missing, or duplicated id with TypeScript's message, and writes the
+//! model's bytes after each append or flush. It is the only part that reads
+//! or writes a file. The crate is
 //! unstable and unshipped; the preview's `session inspect` and `session stat` use it.
 
 mod assistant_stream;
@@ -95,8 +101,10 @@ mod generation_header;
 mod goal;
 mod history;
 mod inbox;
+mod log_layout;
 mod offload;
 mod plain_append;
+mod plain_log_file;
 mod pressure;
 mod repair;
 mod replay;
@@ -135,8 +143,10 @@ pub use inbox::{
     ConsumedWork, ConsumedWorkCoercion, ConsumedWorkLimit, InboxLimit, InboxRefusal, PendingInbox,
     consumed_work, restored_inbox,
 };
+pub use log_layout::{encode_segment, project_key, session_log_path};
 pub use offload::OffloadRejection;
 pub use plain_append::{AppendLimit, AppendRefusal, CreateLimit, CreateRefusal, PlainAppendLog};
+pub use plain_log_file::{LogFileLimit, LogFileRefusal, PlainLogFile};
 pub use pressure::{
     ContextPressureState, ContextPressureView, PressureLimit, PressureRefusal, RequestRoute,
     context_pressure,

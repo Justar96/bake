@@ -38,6 +38,7 @@ Compare TypeScript and Rust using controlled fixtures and independently checked 
 - [Subagent identity and timing cases](#subagent-identity-and-timing-cases)
 - [Subagent catalog cases](#subagent-catalog-cases)
 - [V1 to V2 decoded-stage cases](#v1-to-v2-decoded-stage-cases)
+- [Plain log file cases](#plain-log-file-cases)
 - [Runner contract](#runner-contract)
 - [Ownership and limits](#ownership-and-limits)
 
@@ -748,7 +749,7 @@ A `rust` override names a native limit; it ends the case, and Rust compares noth
 
 Of the 60 operations, 53 are decided in both arms: 25 appends, 11 flushes, and 17 refusals, of which 10 are contiguity refusals, 3 are lossless-snapshot refusals, and 4 are refused encodes. Another 5 are append limits: TypeScript throws for 3 and writes 2. The last 2 follow the `empty-id` create limit, and TypeScript throws for both. All 4 refused creates are `Unadmitted` in Rust, and 26 cases read their final bytes back. Both harnesses pin the case count and require every limit to be witnessed. The expectations were written from the TypeScript sources before either harness ran, except `create-empty-id-limited`, which review added; Rust without its empty-id refusal fails it. Five negative controls were observed. In Rust, skipping the truncation fails `open-torn-append-truncates`; returning a refused encode before truncating fails `open-torn-encode-refusal-truncates`; truncating before the contiguity check fails `open-torn-seq-mismatch-keeps-tail`; and truncating on an empty batch fails `open-torn-empty-batch-keeps-tail`. In the table, expecting the torn bytes to survive a refused encode fails `open-torn-encode-refusal-truncates` in both arms.
 
-Only the log's bytes and the refusals are compared. Storage paths, the write lease, the root-encoding file, fsync ordering, rollback after a failed write, and Zstd compression are not modelled. An id or `cwd` whose path the filesystem refuses, such as an id whose encoded segment is longer than a file name may be, is outside the model's domain: Rust reports a write TypeScript fails. `open` runs only the scan, so a log TypeScript refuses to open, an empty id included, is outside these cases. These cases close no roadmap scope.
+Only the log's bytes and the refusals are compared. Storage paths are left to the [plain log file cases](#plain-log-file-cases); the write lease, the root-encoding file, fsync ordering, rollback after a failed write, and Zstd compression are not modelled. An id or `cwd` whose path the filesystem refuses, such as an id whose encoded segment is longer than a file name may be, is outside the model's domain: Rust reports a write TypeScript fails. `open` runs only the scan, so a log TypeScript refuses to open, an empty id included, is outside these cases. These cases close no roadmap scope.
 
 ## V1 to V2 packed-run cases
 
@@ -857,6 +858,39 @@ Of the 63 cases, 17 migrate and 37 are refusals in both arms. The remaining 9 ar
 - removing the `rust` marker from `float-turn-chunk-then-run` fails that case in Rust and the witness check in both arms.
 
 The result is stage output: the `restoreReleasedV2Artifact` check of the complete artifact is not run. Recoverable decoding remains separate work; the [history chain](#released-history-read-cases) reads a v1 Session through this stage to v3. These cases close no roadmap scope.
+
+## Plain log file cases
+
+[`session/plain-log-file-cases.json`](session/plain-log-file-cases.json) holds 33 Session roots, each seeded with files and directories, and a sequence of steps over them: `create` from a logical header with an optional inherited count, a write `open` by id, and the open handle's `append`, `flush`, and `close`. The [TypeScript spec](../packages/session/session-persistence-jsonl/tests/plain-log-file-conformance.spec.ts) runs each case through the real JSONL backend with `compression: 'none'` in its own temporary root. The [Rust test](../rust/crates/bake-session/tests/plain_log_file_cases.rs) runs the same steps through [`PlainLogFile`](../rust/crates/bake-session/src/plain_log_file.rs) in a directory it owns, where `close` drops the value.
+
+```sh
+bun run test:runtime packages/session/session-persistence-jsonl/tests/plain-log-file-conformance.spec.ts
+(cd rust && cargo test --locked -p bake-session --test plain_log_file_cases)
+```
+
+After every step, each harness lists every file beneath the root, except `session.lock`, with its text, and requires exactly the step's `tree`, keyed by `/`-joined relative path. Directories are not compared, because TypeScript's write lease creates the Session directory and its lock before the contiguity check and before encoding, where Rust creates a directory only with the log file in it. A step's `ts` is `ok`, or the thrown class with its exact message; a message that names a temporary path is left out. Rust claims the exact `session "<id>" already exists`, `session "<id>" not found`, and `duplicate JSONL session id "<id>" appears in multiple project directories` messages, and the [append model's](#plain-log-append-cases) contiguity, lossless-snapshot, and `Unadmitted` refusals. At most one handle is open at a time.
+
+The path of a log is `<project>/<id>/session.v3.jsonl` beneath the root, where `<project>` is `_no-cwd` or the `projectKey` of the header's `cwd`, and `<id>` is the id's `encodeSegment`; the encoders are `bake-session`'s `encode_segment` and `project_key`, which `bake-cli` re-exports. `create` checks the header, then the root as `ensureRootEncoding` does, then refuses an id that has a canonical generation in any project directory, whatever its version. `open` runs the same root check, then `findLog`: none is not found, two projects are a duplicate, and the highest canonical generation must be the current one. A first write creates the Session directory and a new file; later writes truncate the file to the bytes it shares with the model, then write the rest. The cases cover:
+
+- `_no-cwd`, the root `cwd`, runs of `/`, `\`, and `:`, escaped `~`, `.` and `..` as ids, Unicode ids and `cwd` values, and a project key cut at 251 units inside an escape;
+- create, flush, close, reopen, and append, an unflushed create that leaves no file, a seeded cut kept across a reopen, and refusals before the first write;
+- a torn tail kept by a flush and an empty batch, then truncated by the first appended batch, even when its encode is refused;
+- creating over a log in the same or another project directory, or over an older generation, opening a missing id, a duplicate id, noncanonical names, and a current generation beside `session.jsonl`.
+
+A `rust` override names a native limit and ends the case in Rust, which compares nothing for that step; TypeScript still asserts every step. The limits are:
+
+- `empty-id`, `encode`, and `seq-value`: the [append model's](#plain-log-append-cases) limits, with `empty-id` also an empty id given to `open`.
+- `windows-name`: an encoded id ending in `.` or naming a Windows device such as `CON`, refused on every host.
+- `legacy-layout`: any entry of a project directory whose name ends in `.jsonl` or `.jsonl.zstd`.
+- `opposite-encoding`: a Session directory holding a canonical `.zstd` generation.
+- `non-utf8-name`: a directory of the root, or any entry of a project directory, whose name is not UTF-8. Node lists such a name with replacement characters and then opens that spelling.
+- `older-generation` and `newer-generation`: a selected generation older or newer than the current one. TypeScript migrates the older one and refuses the newer one from its header.
+- `identity`: a selected log whose header id or `cwd` names another path, which TypeScript compares with `realpath`.
+- `scan`: stored bytes that `scan_log` refuses.
+
+Of the 98 steps, 84 are decided in both arms: 22 creates, 15 opens, 21 appends, 13 flushes, and 13 closes, of which 12 are refusals. There are 11 limited steps, and TypeScript alone asserts the 3 steps after them. `layout-key-cut-251` and `limit-windows-name` run on POSIX only, and `limit-non-utf8-name` on Linux only. Both harnesses pin the case count, require the table to name every limit, and require every limit of a case run on the host to be witnessed. The expectations were written from the TypeScript sources before either harness ran, and both arms passed on their first run. Six negative controls were observed. In Rust, not escaping `~` fails `layout-tilde-escaped`; writing the header at create fails `layout-no-cwd`; and both dropping the `set_len` truncation and appending in place of the positioned write fail `open-torn-tail-truncated-by-first-append`, once its torn tail was lengthened as the table's history records. In the table, expecting the unescaped path fails `layout-tilde-escaped` in both arms, and expecting `SessionFormatUnsupportedError` from `limit-older-generation` fails it in TypeScript.
+
+The write lease and `SessionAlreadyOwnedError`, fsync and directory sync, the temporary-file publication and rollback, file modes, Zstd compression, migration, legacy flat files, and the `validateStoredEvents` check are not modelled, so a seeded log TypeScript's validation refuses is outside these cases. A path the filesystem refuses, such as one longer than a name or path may be, is outside the model's domain. These cases close no roadmap scope.
 
 ## Runner contract
 

@@ -1,0 +1,1731 @@
+{
+  "schema": "bake/session-conformance/plain-log-file-cases",
+  "version": 1,
+  "oracle": "in an owned temporary root holding the seeded entries, run each step through the JSONL backend with compression none: create, a write open, or the open handle's append, flush, or close; after each step list every file beneath the root except session.lock with its text",
+  "history": [
+    "Version 1: 33 cases, written from the TypeScript sources before either harness ran; both arms passed on their first run.",
+    "A Rust negative control that skipped the truncation still passed open-torn-tail-truncated-by-first-append, whose torn tail was a prefix of the row appended after it. Its tail became a longer torn ext/note row, and no outcome changed."
+  ],
+  "cases": [
+    {
+      "id": "layout-no-cwd",
+      "seed": [],
+      "steps": [
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": "a1",
+            "createdAt": 1,
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {}
+        },
+        {
+          "step": "flush",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/a1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"a1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "close",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/a1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"a1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        }
+      ],
+      "note": "A Session without a cwd lives in _no-cwd; nothing exists until the flush."
+    },
+    {
+      "id": "layout-root-cwd",
+      "seed": [],
+      "steps": [
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": "a2",
+            "createdAt": 1,
+            "cwd": "/",
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {}
+        },
+        {
+          "step": "flush",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "--root--/a2/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"a2\",\"createdAt\":1,\"cwd\":\"/\",\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        }
+      ],
+      "note": "The cwd / reads as one separator, which is stripped, leaving the slug root."
+    },
+    {
+      "id": "layout-separator-runs",
+      "seed": [],
+      "steps": [
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": "a3",
+            "createdAt": 1,
+            "cwd": "/work//repo\\sub:x/",
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {}
+        },
+        {
+          "step": "flush",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "--work-repo-sub-x---/a3/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"a3\",\"createdAt\":1,\"cwd\":\"/work//repo\\\\sub:x/\",\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "close",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "--work-repo-sub-x---/a3/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"a3\",\"createdAt\":1,\"cwd\":\"/work//repo\\\\sub:x/\",\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "open",
+          "id": "a3",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "--work-repo-sub-x---/a3/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"a3\",\"createdAt\":1,\"cwd\":\"/work//repo\\\\sub:x/\",\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": 0,
+              "time": 1,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "--work-repo-sub-x---/a3/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"a3\",\"createdAt\":1,\"cwd\":\"/work//repo\\\\sub:x/\",\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n"
+          }
+        }
+      ],
+      "note": "Each run of /, \\, and : becomes one -, the leading one is stripped, and the trailing one stays before the closing --."
+    },
+    {
+      "id": "layout-tilde-escaped",
+      "seed": [],
+      "steps": [
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": "a~b",
+            "createdAt": 1,
+            "cwd": "/home/~u",
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {}
+        },
+        {
+          "step": "flush",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "--home-~007Eu--/a~007Eb/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"a~b\",\"createdAt\":1,\"cwd\":\"/home/~u\",\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        }
+      ],
+      "note": "~ is escaped in the project key and the id, so an escape cannot be forged."
+    },
+    {
+      "id": "layout-dot-ids",
+      "seed": [],
+      "steps": [
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": ".",
+            "createdAt": 1,
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {}
+        },
+        {
+          "step": "flush",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/~002E/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\".\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "close",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/~002E/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\".\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": "..",
+            "createdAt": 1,
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/~002E/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\".\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "flush",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/~002E/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\".\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n",
+            "_no-cwd/~002E~002E/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"..\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "close",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/~002E/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\".\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n",
+            "_no-cwd/~002E~002E/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"..\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "open",
+          "id": ".",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/~002E/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\".\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n",
+            "_no-cwd/~002E~002E/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"..\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": 0,
+              "time": 1,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/~002E/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\".\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n",
+            "_no-cwd/~002E~002E/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"..\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        }
+      ],
+      "note": "The whole segments . and .. are escaped, so neither names the project or root directory."
+    },
+    {
+      "id": "layout-non-ascii",
+      "seed": [],
+      "steps": [
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": "é😀",
+            "createdAt": 1,
+            "cwd": "/proj/naïve",
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {}
+        },
+        {
+          "step": "flush",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "--proj-na~00EFve--/~00E9~D83D~DE00/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"é😀\",\"createdAt\":1,\"cwd\":\"/proj/naïve\",\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "close",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "--proj-na~00EFve--/~00E9~D83D~DE00/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"é😀\",\"createdAt\":1,\"cwd\":\"/proj/naïve\",\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "open",
+          "id": "é😀",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "--proj-na~00EFve--/~00E9~D83D~DE00/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"é😀\",\"createdAt\":1,\"cwd\":\"/proj/naïve\",\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": 0,
+              "time": 1,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "--proj-na~00EFve--/~00E9~D83D~DE00/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"é😀\",\"createdAt\":1,\"cwd\":\"/proj/naïve\",\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n"
+          }
+        }
+      ],
+      "note": "Escapes are per UTF-16 code unit, so the astral character becomes its two surrogates; the log text keeps the characters."
+    },
+    {
+      "id": "layout-key-cut-251",
+      "platforms": [
+        "posix"
+      ],
+      "platformReason": "The 255-character project directory puts the log path past Windows' 260-character path limit.",
+      "seed": [],
+      "steps": [
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": "k1",
+            "createdAt": 1,
+            "cwd": "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa~",
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {}
+        },
+        {
+          "step": "flush",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "--aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa~0--/k1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"k1\",\"createdAt\":1,\"cwd\":\"/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa~\",\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        }
+      ],
+      "note": "The slug is 249 letters and ~007E; its first 251 units end inside the escape."
+    },
+    {
+      "id": "lifecycle-create-flush-reopen-append",
+      "seed": [],
+      "steps": [
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": "c1",
+            "createdAt": 1,
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {}
+        },
+        {
+          "step": "flush",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/c1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"c1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "close",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/c1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"c1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "open",
+          "id": "c1",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/c1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"c1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": 0,
+              "time": 1,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/c1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"c1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n"
+          }
+        },
+        {
+          "step": "close",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/c1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"c1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "lifecycle-create-append-reopen-append",
+      "seed": [],
+      "steps": [
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": "c2",
+            "createdAt": 1,
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {}
+        },
+        {
+          "step": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": 0,
+              "time": 1,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/c2/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"c2\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n"
+          }
+        },
+        {
+          "step": "close",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/c2/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"c2\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n"
+          }
+        },
+        {
+          "step": "open",
+          "id": "c2",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/c2/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"c2\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n"
+          }
+        },
+        {
+          "step": "append",
+          "events": [
+            {
+              "type": "turn/end",
+              "seq": 1,
+              "time": 2,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/c2/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"c2\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"turn/end\",\"seq\":1,\"time\":2,\"data\":{\"turn\":1}}\n"
+          }
+        },
+        {
+          "step": "close",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/c2/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"c2\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"turn/end\",\"seq\":1,\"time\":2,\"data\":{\"turn\":1}}\n"
+          }
+        }
+      ],
+      "note": "The reopened handle's cursor is the stored event count."
+    },
+    {
+      "id": "lifecycle-unflushed-create-leaves-no-file",
+      "seed": [],
+      "steps": [
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": "c3",
+            "createdAt": 1,
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {}
+        },
+        {
+          "step": "close",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {}
+        },
+        {
+          "step": "open",
+          "id": "c3",
+          "ts": {
+            "outcome": "thrown",
+            "class": "SessionPersistenceNotFoundError",
+            "message": "session \"c3\" not found"
+          },
+          "tree": {}
+        },
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": "c3",
+            "createdAt": 1,
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {}
+        },
+        {
+          "step": "append",
+          "events": [],
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {}
+        },
+        {
+          "step": "close",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {}
+        }
+      ],
+      "note": "A created Session has no file until its first non-empty append or flush, so closing it leaves nothing to open and the id can be created again."
+    },
+    {
+      "id": "lifecycle-seeded-cut-reopen",
+      "seed": [],
+      "steps": [
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": "c4",
+            "createdAt": 1,
+            "parentSession": "p1",
+            "isSeeded": true,
+            "delegationDepth": 0
+          },
+          "inheritedEventCount": 2,
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {}
+        },
+        {
+          "step": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": 0,
+              "time": 1,
+              "data": {
+                "turn": 1
+              }
+            },
+            {
+              "type": "turn/end",
+              "seq": 1,
+              "time": 2,
+              "data": {
+                "turn": 1
+              }
+            },
+            {
+              "type": "session/end-seed",
+              "seq": 2,
+              "time": 3,
+              "data": {
+                "inherited": true
+              }
+            },
+            {
+              "type": "turn/start",
+              "seq": 3,
+              "time": 4,
+              "data": {
+                "turn": 2
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/c4/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"c4\",\"createdAt\":1,\"parentSession\":\"p1\",\"isSeeded\":true,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"turn/end\",\"seq\":1,\"time\":2,\"data\":{\"turn\":1}}\n{\"type\":\"session/end-seed\",\"seq\":2,\"time\":3,\"data\":{\"inherited\":true}}\n{\"type\":\"turn/start\",\"seq\":3,\"time\":4,\"data\":{\"turn\":2}}\n"
+          }
+        },
+        {
+          "step": "close",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/c4/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"c4\",\"createdAt\":1,\"parentSession\":\"p1\",\"isSeeded\":true,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"turn/end\",\"seq\":1,\"time\":2,\"data\":{\"turn\":1}}\n{\"type\":\"session/end-seed\",\"seq\":2,\"time\":3,\"data\":{\"inherited\":true}}\n{\"type\":\"turn/start\",\"seq\":3,\"time\":4,\"data\":{\"turn\":2}}\n"
+          }
+        },
+        {
+          "step": "open",
+          "id": "c4",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/c4/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"c4\",\"createdAt\":1,\"parentSession\":\"p1\",\"isSeeded\":true,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"turn/end\",\"seq\":1,\"time\":2,\"data\":{\"turn\":1}}\n{\"type\":\"session/end-seed\",\"seq\":2,\"time\":3,\"data\":{\"inherited\":true}}\n{\"type\":\"turn/start\",\"seq\":3,\"time\":4,\"data\":{\"turn\":2}}\n"
+          }
+        },
+        {
+          "step": "append",
+          "events": [
+            {
+              "type": "turn/end",
+              "seq": 4,
+              "time": 5,
+              "data": {
+                "turn": 2
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/c4/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"c4\",\"createdAt\":1,\"parentSession\":\"p1\",\"isSeeded\":true,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"turn/end\",\"seq\":1,\"time\":2,\"data\":{\"turn\":1}}\n{\"type\":\"session/end-seed\",\"seq\":2,\"time\":3,\"data\":{\"inherited\":true}}\n{\"type\":\"turn/start\",\"seq\":3,\"time\":4,\"data\":{\"turn\":2}}\n{\"type\":\"turn/end\",\"seq\":4,\"time\":5,\"data\":{\"turn\":2}}\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "refusals-before-first-write-leave-no-file",
+      "seed": [],
+      "steps": [
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": "r1",
+            "createdAt": 1,
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {}
+        },
+        {
+          "step": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": 1,
+              "time": 1,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "thrown",
+            "class": "Error",
+            "message": "append seq mismatch for \"r1\": expected 0 at index 0, got 1"
+          },
+          "tree": {}
+        },
+        {
+          "step": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": 0,
+              "time": -0.0,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "thrown",
+            "class": "TypeError",
+            "message": "session event batch is not losslessly JSON-serializable because it contains non-JSON-serializable data"
+          },
+          "tree": {}
+        },
+        {
+          "step": "flush",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/r1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"r1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        }
+      ],
+      "note": "TypeScript takes the write lease, creating the Session directory and its lock, before the contiguity check; neither refusal writes a log file."
+    },
+    {
+      "id": "encode-refusal-first-batch",
+      "seed": [],
+      "steps": [
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": "r2",
+            "createdAt": 1,
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {}
+        },
+        {
+          "step": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": 0,
+              "time": 1,
+              "data": {
+                "turn": 1
+              },
+              "extra": 1
+            }
+          ],
+          "ts": {
+            "outcome": "thrown",
+            "class": "SessionFormatError",
+            "message": "format v3 turn/start at seq 0 has unexpected field extra"
+          },
+          "tree": {}
+        },
+        {
+          "step": "flush",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/r2/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"r2\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": 0,
+              "time": 1,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/r2/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"r2\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "open-torn-tail-truncated-by-first-append",
+      "seed": [
+        {
+          "file": "_no-cwd/t1/session.v3.jsonl",
+          "text": "{\"type\":\"session\",\"version\":3,\"id\":\"t1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"ext/note\",\"seq\":1,\"time\":2,\"ignorable\":true,\"data\":{\"text\":\"a torn row longer than the row that replaces it"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "t1",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/t1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"t1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"ext/note\",\"seq\":1,\"time\":2,\"ignorable\":true,\"data\":{\"text\":\"a torn row longer than the row that replaces it"
+          }
+        },
+        {
+          "step": "flush",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/t1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"t1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"ext/note\",\"seq\":1,\"time\":2,\"ignorable\":true,\"data\":{\"text\":\"a torn row longer than the row that replaces it"
+          }
+        },
+        {
+          "step": "append",
+          "events": [],
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/t1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"t1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"ext/note\",\"seq\":1,\"time\":2,\"ignorable\":true,\"data\":{\"text\":\"a torn row longer than the row that replaces it"
+          }
+        },
+        {
+          "step": "append",
+          "events": [
+            {
+              "type": "turn/end",
+              "seq": 1,
+              "time": 2,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/t1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"t1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"turn/end\",\"seq\":1,\"time\":2,\"data\":{\"turn\":1}}\n"
+          }
+        },
+        {
+          "step": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": 2,
+              "time": 3,
+              "data": {
+                "turn": 2
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/t1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"t1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"turn/end\",\"seq\":1,\"time\":2,\"data\":{\"turn\":1}}\n{\"type\":\"turn/start\",\"seq\":2,\"time\":3,\"data\":{\"turn\":2}}\n"
+          }
+        }
+      ],
+      "note": "The flush and the empty batch keep the torn tail; the first appended batch truncates it, and the second only appends. The torn row is longer than the appended one and not its prefix, so a write that skips the truncation leaves torn bytes in the file."
+    },
+    {
+      "id": "open-torn-encode-refusal-truncates",
+      "seed": [
+        {
+          "file": "_no-cwd/t2/session.v3.jsonl",
+          "text": "{\"type\":\"session\",\"version\":3,\"id\":\"t2\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"turn/end\",\"se"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "t2",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/t2/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"t2\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"turn/end\",\"se"
+          }
+        },
+        {
+          "step": "append",
+          "events": [
+            {
+              "type": "turn/end",
+              "seq": 1,
+              "time": 2,
+              "data": {
+                "turn": 1
+              },
+              "extra": 1
+            }
+          ],
+          "ts": {
+            "outcome": "thrown",
+            "class": "SessionFormatError",
+            "message": "format v3 turn/end at seq 1 has unexpected field extra"
+          },
+          "tree": {
+            "_no-cwd/t2/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"t2\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n"
+          }
+        },
+        {
+          "step": "append",
+          "events": [
+            {
+              "type": "turn/end",
+              "seq": 1,
+              "time": 2,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/t2/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"t2\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"turn/end\",\"seq\":1,\"time\":2,\"data\":{\"turn\":1}}\n"
+          }
+        }
+      ],
+      "note": "The truncation lands before the batch is encoded."
+    },
+    {
+      "id": "create-over-existing-log",
+      "seed": [
+        {
+          "file": "_no-cwd/e1/session.v3.jsonl",
+          "text": "{\"type\":\"session\",\"version\":3,\"id\":\"e1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": "e1",
+            "createdAt": 1,
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "ts": {
+            "outcome": "thrown",
+            "class": "SessionAlreadyExistsError",
+            "message": "session \"e1\" already exists"
+          },
+          "tree": {
+            "_no-cwd/e1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"e1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "open",
+          "id": "e1",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/e1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"e1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": 0,
+              "time": 1,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/e1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"e1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "create-over-log-in-other-project",
+      "seed": [
+        {
+          "file": "--w--/e2/session.v3.jsonl",
+          "text": "{\"type\":\"session\",\"version\":3,\"id\":\"e2\",\"createdAt\":1,\"cwd\":\"/w\",\"isSeeded\":false,\"delegationDepth\":0}\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": "e2",
+            "createdAt": 1,
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "ts": {
+            "outcome": "thrown",
+            "class": "SessionAlreadyExistsError",
+            "message": "session \"e2\" already exists"
+          },
+          "tree": {
+            "--w--/e2/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"e2\",\"createdAt\":1,\"cwd\":\"/w\",\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        }
+      ],
+      "note": "findLog searches every project directory, not only the one the new header names."
+    },
+    {
+      "id": "create-over-older-generation",
+      "seed": [
+        {
+          "file": "_no-cwd/e3/session.v2.jsonl",
+          "text": "x"
+        }
+      ],
+      "steps": [
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": "e3",
+            "createdAt": 1,
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "ts": {
+            "outcome": "thrown",
+            "class": "SessionAlreadyExistsError",
+            "message": "session \"e3\" already exists"
+          },
+          "tree": {
+            "_no-cwd/e3/session.v2.jsonl": "x"
+          }
+        }
+      ],
+      "note": "A generation is found by its name alone; the create reads nothing."
+    },
+    {
+      "id": "open-missing",
+      "seed": [
+        {
+          "file": "_no-cwd/m2/session.v3.jsonl",
+          "text": "{\"type\":\"session\",\"version\":3,\"id\":\"m2\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "m1",
+          "ts": {
+            "outcome": "thrown",
+            "class": "SessionPersistenceNotFoundError",
+            "message": "session \"m1\" not found"
+          },
+          "tree": {
+            "_no-cwd/m2/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"m2\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "duplicate-across-projects",
+      "seed": [
+        {
+          "file": "_no-cwd/d1/session.v3.jsonl",
+          "text": "{\"type\":\"session\",\"version\":3,\"id\":\"d1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+        },
+        {
+          "file": "--w--/d1/session.v3.jsonl",
+          "text": "{\"type\":\"session\",\"version\":3,\"id\":\"d1\",\"createdAt\":1,\"cwd\":\"/w\",\"isSeeded\":false,\"delegationDepth\":0}\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": "d1",
+            "createdAt": 1,
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "ts": {
+            "outcome": "thrown",
+            "class": "Error",
+            "message": "duplicate JSONL session id \"d1\" appears in multiple project directories"
+          },
+          "tree": {
+            "_no-cwd/d1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"d1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n",
+            "--w--/d1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"d1\",\"createdAt\":1,\"cwd\":\"/w\",\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "open",
+          "id": "d1",
+          "ts": {
+            "outcome": "thrown",
+            "class": "Error",
+            "message": "duplicate JSONL session id \"d1\" appears in multiple project directories"
+          },
+          "tree": {
+            "_no-cwd/d1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"d1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n",
+            "--w--/d1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"d1\",\"createdAt\":1,\"cwd\":\"/w\",\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "noncanonical-names-ignored",
+      "seed": [
+        {
+          "file": "_no-cwd/i1/session.v0.jsonl",
+          "text": "x"
+        },
+        {
+          "file": "_no-cwd/i1/session.v03.jsonl",
+          "text": "x"
+        },
+        {
+          "file": "_no-cwd/i1/session.v3.json",
+          "text": "x"
+        },
+        {
+          "file": "_no-cwd/i1/session.v3.jsonl.tmp",
+          "text": "x"
+        },
+        {
+          "file": "_no-cwd/i1/session.v3.jsonl.zst",
+          "text": "x"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "i1",
+          "ts": {
+            "outcome": "thrown",
+            "class": "SessionPersistenceNotFoundError",
+            "message": "session \"i1\" not found"
+          },
+          "tree": {
+            "_no-cwd/i1/session.v0.jsonl": "x",
+            "_no-cwd/i1/session.v03.jsonl": "x",
+            "_no-cwd/i1/session.v3.json": "x",
+            "_no-cwd/i1/session.v3.jsonl.tmp": "x",
+            "_no-cwd/i1/session.v3.jsonl.zst": "x"
+          }
+        },
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": "i1",
+            "createdAt": 1,
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/i1/session.v0.jsonl": "x",
+            "_no-cwd/i1/session.v03.jsonl": "x",
+            "_no-cwd/i1/session.v3.json": "x",
+            "_no-cwd/i1/session.v3.jsonl.tmp": "x",
+            "_no-cwd/i1/session.v3.jsonl.zst": "x"
+          }
+        },
+        {
+          "step": "flush",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/i1/session.v0.jsonl": "x",
+            "_no-cwd/i1/session.v03.jsonl": "x",
+            "_no-cwd/i1/session.v3.json": "x",
+            "_no-cwd/i1/session.v3.jsonl.tmp": "x",
+            "_no-cwd/i1/session.v3.jsonl.zst": "x",
+            "_no-cwd/i1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"i1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "close",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/i1/session.v0.jsonl": "x",
+            "_no-cwd/i1/session.v03.jsonl": "x",
+            "_no-cwd/i1/session.v3.json": "x",
+            "_no-cwd/i1/session.v3.jsonl.tmp": "x",
+            "_no-cwd/i1/session.v3.jsonl.zst": "x",
+            "_no-cwd/i1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"i1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "open",
+          "id": "i1",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/i1/session.v0.jsonl": "x",
+            "_no-cwd/i1/session.v03.jsonl": "x",
+            "_no-cwd/i1/session.v3.json": "x",
+            "_no-cwd/i1/session.v3.jsonl.tmp": "x",
+            "_no-cwd/i1/session.v3.jsonl.zst": "x",
+            "_no-cwd/i1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"i1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": 0,
+              "time": 1,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/i1/session.v0.jsonl": "x",
+            "_no-cwd/i1/session.v03.jsonl": "x",
+            "_no-cwd/i1/session.v3.json": "x",
+            "_no-cwd/i1/session.v3.jsonl.tmp": "x",
+            "_no-cwd/i1/session.v3.jsonl.zst": "x",
+            "_no-cwd/i1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"i1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n"
+          }
+        }
+      ],
+      "note": "v0, a leading zero, other suffixes, and a temporary name are not canonical generations."
+    },
+    {
+      "id": "open-highest-generation",
+      "seed": [
+        {
+          "file": "_no-cwd/h1/session.jsonl",
+          "text": "x"
+        },
+        {
+          "file": "_no-cwd/h1/session.v3.jsonl",
+          "text": "{\"type\":\"session\",\"version\":3,\"id\":\"h1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "h1",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/h1/session.jsonl": "x",
+            "_no-cwd/h1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"h1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n"
+          }
+        },
+        {
+          "step": "append",
+          "events": [
+            {
+              "type": "turn/end",
+              "seq": 1,
+              "time": 2,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/h1/session.jsonl": "x",
+            "_no-cwd/h1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"h1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"turn/end\",\"seq\":1,\"time\":2,\"data\":{\"turn\":1}}\n"
+          }
+        }
+      ],
+      "note": "The current generation outranks session.jsonl, which is never read."
+    },
+    {
+      "id": "limit-empty-id",
+      "seed": [],
+      "steps": [
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": "",
+            "createdAt": 1,
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "ts": {
+            "outcome": "ok"
+          },
+          "rust": {
+            "outcome": "native-subset",
+            "limit": "empty-id"
+          },
+          "tree": {}
+        },
+        {
+          "step": "flush",
+          "ts": {
+            "outcome": "thrown",
+            "class": "Error",
+            "message": "cannot encode an empty path segment"
+          },
+          "tree": {}
+        },
+        {
+          "step": "close",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {}
+        }
+      ],
+      "note": "TypeScript's create admits the empty id in a root without a project directory; the flush throws while the write lease resolves the Session directory."
+    },
+    {
+      "id": "limit-encode",
+      "seed": [],
+      "steps": [
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": "x1",
+            "createdAt": 1,
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {}
+        },
+        {
+          "step": "append",
+          "events": [
+            {
+              "type": "ext/note",
+              "seq": 0,
+              "time": 1,
+              "ignorable": true,
+              "data": {
+                "x": 1.5
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "ok"
+          },
+          "rust": {
+            "outcome": "native-subset",
+            "limit": "encode"
+          },
+          "tree": {
+            "_no-cwd/x1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"x1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"ext/note\",\"seq\":0,\"time\":1,\"ignorable\":true,\"data\":{\"x\":1.5}}\n"
+          }
+        }
+      ],
+      "note": "JavaScript writes 1.5; Rust does not claim JavaScript's number spelling."
+    },
+    {
+      "id": "limit-seq-value",
+      "seed": [],
+      "steps": [
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": "q1",
+            "createdAt": 1,
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {}
+        },
+        {
+          "step": "append",
+          "events": [
+            null
+          ],
+          "ts": {
+            "outcome": "thrown",
+            "class": "TypeError"
+          },
+          "rust": {
+            "outcome": "native-subset",
+            "limit": "seq-value"
+          },
+          "tree": {}
+        }
+      ],
+      "note": "Reading seq of null throws an engine TypeError."
+    },
+    {
+      "id": "limit-legacy-layout",
+      "seed": [
+        {
+          "file": "_no-cwd/l1.jsonl",
+          "text": "x\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": "l2",
+            "createdAt": 1,
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "ts": {
+            "outcome": "thrown",
+            "class": "Error"
+          },
+          "rust": {
+            "outcome": "native-subset",
+            "limit": "legacy-layout"
+          },
+          "tree": {
+            "_no-cwd/l1.jsonl": "x\n"
+          }
+        }
+      ],
+      "note": "The root check refuses the flat file whatever id is created; its message names the absolute path."
+    },
+    {
+      "id": "limit-opposite-encoding",
+      "seed": [
+        {
+          "file": "_no-cwd/z1/session.v3.jsonl.zstd",
+          "text": "x"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "z1",
+          "ts": {
+            "outcome": "thrown",
+            "class": "Error"
+          },
+          "rust": {
+            "outcome": "native-subset",
+            "limit": "opposite-encoding"
+          },
+          "tree": {
+            "_no-cwd/z1/session.v3.jsonl.zstd": "x"
+          }
+        }
+      ],
+      "note": "The message names the absolute path."
+    },
+    {
+      "id": "limit-non-utf8-name",
+      "platforms": [
+        "linux"
+      ],
+      "platformReason": "Only Linux file systems here accept names that are not UTF-8.",
+      "seed": [
+        {
+          "dir": "",
+          "rawNameHex": "66ff"
+        }
+      ],
+      "steps": [
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": "n1",
+            "createdAt": 1,
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "ts": {
+            "outcome": "thrown",
+            "class": "Error"
+          },
+          "rust": {
+            "outcome": "native-subset",
+            "limit": "non-utf8-name"
+          },
+          "tree": {}
+        }
+      ],
+      "note": "Node lists the project directory with a replacement character, and listing that spelling fails with ENOENT."
+    },
+    {
+      "id": "limit-windows-name",
+      "platforms": [
+        "posix"
+      ],
+      "platformReason": "Windows reserves the device name CON.",
+      "seed": [],
+      "steps": [
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": "CON",
+            "createdAt": 1,
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "ts": {
+            "outcome": "ok"
+          },
+          "rust": {
+            "outcome": "native-subset",
+            "limit": "windows-name"
+          },
+          "tree": {}
+        },
+        {
+          "step": "flush",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/CON/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"CON\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        }
+      ],
+      "note": "Rust refuses a device name on every host; the POSIX backend writes it as any other id."
+    },
+    {
+      "id": "limit-older-generation",
+      "seed": [
+        {
+          "file": "_no-cwd/g1/session.v2.jsonl",
+          "text": "x"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "g1",
+          "ts": {
+            "outcome": "thrown",
+            "class": "SessionPersistenceCorruptionError"
+          },
+          "rust": {
+            "outcome": "native-subset",
+            "limit": "older-generation"
+          },
+          "tree": {
+            "_no-cwd/g1/session.v2.jsonl": "x"
+          }
+        }
+      ],
+      "note": "TypeScript migrates a v2 log; this one has no header line, so the migration refuses it as corrupt, naming its path."
+    },
+    {
+      "id": "limit-newer-generation",
+      "seed": [
+        {
+          "file": "_no-cwd/g2/session.v4.jsonl",
+          "text": "{\"type\":\"session\",\"version\":4,\"id\":\"g2\"}\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "g2",
+          "ts": {
+            "outcome": "thrown",
+            "class": "SessionFormatUnsupportedError"
+          },
+          "rust": {
+            "outcome": "native-subset",
+            "limit": "newer-generation"
+          },
+          "tree": {
+            "_no-cwd/g2/session.v4.jsonl": "{\"type\":\"session\",\"version\":4,\"id\":\"g2\"}\n"
+          }
+        }
+      ],
+      "note": "TypeScript reads the newer header line alone and refuses it, naming the path."
+    },
+    {
+      "id": "limit-identity",
+      "seed": [
+        {
+          "file": "--other--/f1/session.v3.jsonl",
+          "text": "{\"type\":\"session\",\"version\":3,\"id\":\"f1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "f1",
+          "ts": {
+            "outcome": "thrown",
+            "class": "Error"
+          },
+          "rust": {
+            "outcome": "native-subset",
+            "limit": "identity"
+          },
+          "tree": {
+            "--other--/f1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"f1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        }
+      ],
+      "note": "The header names _no-cwd, not the project directory holding the log, and no file exists at the path it names; the message names both paths."
+    },
+    {
+      "id": "limit-scan",
+      "seed": [
+        {
+          "file": "_no-cwd/s1/session.v3.jsonl",
+          "text": "not json\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "s1",
+          "ts": {
+            "outcome": "thrown",
+            "class": "SessionPersistenceCorruptionError"
+          },
+          "rust": {
+            "outcome": "native-subset",
+            "limit": "scan"
+          },
+          "tree": {
+            "_no-cwd/s1/session.v3.jsonl": "not json\n"
+          }
+        }
+      ],
+      "note": "The scan refuses the header line; TypeScript wraps the refusal with the path."
+    }
+  ]
+}
