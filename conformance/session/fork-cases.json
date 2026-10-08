@@ -1,0 +1,753 @@
+{
+  "schema": "bake/session-conformance/fork-cases",
+  "version": 1,
+  "oracle": "SessionStore.fork(source, boundary) in packages/core/session/src/index.ts over a source restored as SessionStore.prepare does: the decoded rows and interruptedTurnClosers passed to Session.fromRestore(..., \"detached\") with no message projections",
+  "provenance": "Every expectation was written from the TypeScript sources of SessionStore.fork, _forkSeed, Session construction, snapshotJsonValue, and interruptedTurnClosers, and from the committed captures, before either harness ran.",
+  "logs": {
+    "tool-call-turn": "conformance/runtime/request-reconstruction/tool-call-turn/session.jsonl",
+    "dynamic-tools": "conformance/runtime/request-reconstruction/dynamic-tools/session.jsonl",
+    "retry-attempt": "conformance/runtime/request-reconstruction/retry-attempt/session.jsonl"
+  },
+  "cases": [
+    {
+      "id": "default-boundary-takes-end-seed",
+      "log": "tool-call-turn",
+      "edits": [],
+      "ts": {
+        "outcome": "forked",
+        "stored": 16,
+        "closers": 0,
+        "endSeed": true
+      },
+      "note": "the restored end seed carries the current time"
+    },
+    {
+      "id": "boundary-at-appended-end-seed",
+      "log": "tool-call-turn",
+      "edits": [],
+      "boundary": 16,
+      "ts": {
+        "outcome": "forked",
+        "stored": 16,
+        "closers": 0,
+        "endSeed": true
+      }
+    },
+    {
+      "id": "boundary-at-last-turn-end",
+      "log": "tool-call-turn",
+      "edits": [],
+      "boundary": 15,
+      "ts": {
+        "outcome": "forked",
+        "stored": 16,
+        "closers": 0,
+        "endSeed": false
+      }
+    },
+    {
+      "id": "boundary-before-first-turn",
+      "log": "tool-call-turn",
+      "edits": [],
+      "boundary": 0,
+      "ts": {
+        "outcome": "forked",
+        "stored": 1,
+        "closers": 0,
+        "endSeed": false
+      }
+    },
+    {
+      "id": "boundary-at-turn-start",
+      "log": "tool-call-turn",
+      "edits": [],
+      "boundary": 1,
+      "ts": {
+        "outcome": "rejected",
+        "class": "SessionForkError",
+        "code": "OPEN_TURN",
+        "message": "fork boundary 1 in session \"a1\" ends inside open turn 1"
+      }
+    },
+    {
+      "id": "boundary-one-before-turn-end",
+      "log": "tool-call-turn",
+      "edits": [],
+      "boundary": 14,
+      "ts": {
+        "outcome": "rejected",
+        "class": "SessionForkError",
+        "code": "OPEN_TURN",
+        "message": "fork boundary 14 in session \"a1\" ends inside open turn 1"
+      }
+    },
+    {
+      "id": "boundary-one-past-end",
+      "log": "tool-call-turn",
+      "edits": [],
+      "boundary": 17,
+      "ts": {
+        "outcome": "rejected",
+        "class": "SessionForkError",
+        "code": "INVALID_BOUNDARY",
+        "message": "fork boundary 17 does not exist in session \"a1\" (last seq: 16)"
+      }
+    },
+    {
+      "id": "boundary-max-safe",
+      "log": "tool-call-turn",
+      "edits": [],
+      "boundary": 9007199254740991,
+      "ts": {
+        "outcome": "rejected",
+        "class": "SessionForkError",
+        "code": "INVALID_BOUNDARY",
+        "message": "fork boundary 9007199254740991 does not exist in session \"a1\" (last seq: 16)"
+      }
+    },
+    {
+      "id": "boundary-unsafe",
+      "log": "tool-call-turn",
+      "edits": [],
+      "boundary": 9007199254740992,
+      "ts": {
+        "outcome": "rejected",
+        "class": "SessionForkError",
+        "code": "INVALID_BOUNDARY",
+        "message": "fork boundary for session \"a1\" must be a non-negative safe integer, got 9007199254740992"
+      }
+    },
+    {
+      "id": "boundary-u64-max",
+      "log": "tool-call-turn",
+      "edits": [],
+      "boundary": 18446744073709551615,
+      "ts": {
+        "outcome": "rejected",
+        "class": "SessionForkError",
+        "code": "INVALID_BOUNDARY",
+        "message": "fork boundary for session \"a1\" must be a non-negative safe integer, got 18446744073709552000"
+      },
+      "note": "JSON.parse rounds the boundary to 2^64; Rust formats the u64 as that double"
+    },
+    {
+      "id": "boundary-negative",
+      "log": "tool-call-turn",
+      "edits": [],
+      "boundary": -1,
+      "ts": {
+        "outcome": "rejected",
+        "class": "SessionForkError",
+        "code": "INVALID_BOUNDARY",
+        "message": "fork boundary for session \"a1\" must be a non-negative safe integer, got -1"
+      },
+      "rust": {
+        "outcome": "unrepresentable"
+      }
+    },
+    {
+      "id": "boundary-fractional",
+      "log": "tool-call-turn",
+      "edits": [],
+      "boundary": 0.5,
+      "ts": {
+        "outcome": "rejected",
+        "class": "SessionForkError",
+        "code": "INVALID_BOUNDARY",
+        "message": "fork boundary for session \"a1\" must be a non-negative safe integer, got 0.5"
+      },
+      "rust": {
+        "outcome": "unrepresentable"
+      }
+    },
+    {
+      "id": "boundary-integral-float",
+      "log": "tool-call-turn",
+      "edits": [],
+      "boundary": 15.0,
+      "ts": {
+        "outcome": "forked",
+        "stored": 16,
+        "closers": 0,
+        "endSeed": false
+      },
+      "rust": {
+        "outcome": "unrepresentable"
+      },
+      "note": "JSON.parse reads 15.0 as 15; serde_json keeps a float"
+    },
+    {
+      "id": "cut-default-includes-closers",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 10
+        }
+      ],
+      "ts": {
+        "outcome": "forked",
+        "stored": 10,
+        "closers": 3,
+        "endSeed": true
+      }
+    },
+    {
+      "id": "cut-boundary-at-closing-turn-end",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 10
+        }
+      ],
+      "boundary": 12,
+      "ts": {
+        "outcome": "forked",
+        "stored": 10,
+        "closers": 3,
+        "endSeed": false
+      }
+    },
+    {
+      "id": "cut-boundary-at-step-end-closer",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 10
+        }
+      ],
+      "boundary": 11,
+      "ts": {
+        "outcome": "rejected",
+        "class": "SessionForkError",
+        "code": "OPEN_TURN",
+        "message": "fork boundary 11 in session \"a1\" ends inside open turn 1"
+      }
+    },
+    {
+      "id": "cut-boundary-at-last-stored",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 10
+        }
+      ],
+      "boundary": 9,
+      "ts": {
+        "outcome": "rejected",
+        "class": "SessionForkError",
+        "code": "OPEN_TURN",
+        "message": "fork boundary 9 in session \"a1\" ends inside open turn 1"
+      }
+    },
+    {
+      "id": "cut-boundary-past-appended-end-seed",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 10
+        }
+      ],
+      "boundary": 14,
+      "ts": {
+        "outcome": "rejected",
+        "class": "SessionForkError",
+        "code": "INVALID_BOUNDARY",
+        "message": "fork boundary 14 does not exist in session \"a1\" (last seq: 13)"
+      }
+    },
+    {
+      "id": "header-only-default",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 0
+        }
+      ],
+      "ts": {
+        "outcome": "forked",
+        "stored": 0,
+        "closers": 0,
+        "endSeed": true
+      }
+    },
+    {
+      "id": "header-only-past-end",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 0
+        }
+      ],
+      "boundary": 1,
+      "ts": {
+        "outcome": "rejected",
+        "class": "SessionForkError",
+        "code": "INVALID_BOUNDARY",
+        "message": "fork boundary 1 does not exist in session \"a1\" (last seq: 0)"
+      }
+    },
+    {
+      "id": "stored-end-seed-last",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"session/end-seed\",\"seq\":16,\"time\":1791337579870,\"data\":{}}"
+        }
+      ],
+      "ts": {
+        "outcome": "forked",
+        "stored": 17,
+        "closers": 0,
+        "endSeed": false
+      }
+    },
+    {
+      "id": "stored-end-seed-inside-turn",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 10
+        },
+        {
+          "append": "{\"type\":\"session/end-seed\",\"seq\":10,\"time\":1791337579868,\"data\":{}}"
+        }
+      ],
+      "boundary": 10,
+      "ts": {
+        "outcome": "rejected",
+        "class": "SessionForkError",
+        "code": "OPEN_TURN",
+        "message": "fork boundary 10 in session \"a1\" ends inside open turn 1"
+      }
+    },
+    {
+      "id": "stored-end-seed-before-closers-default",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 10
+        },
+        {
+          "append": "{\"type\":\"session/end-seed\",\"seq\":10,\"time\":1791337579868,\"data\":{}}"
+        }
+      ],
+      "ts": {
+        "outcome": "forked",
+        "stored": 11,
+        "closers": 3,
+        "endSeed": true
+      }
+    },
+    {
+      "id": "seeded-default-keeps-ancestor-marker",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "header": "{\"type\":\"session\",\"version\":3,\"id\":\"a1\",\"createdAt\":1791337579861,\"isSeeded\":true,\"delegationDepth\":0}"
+        },
+        {
+          "append": "{\"type\":\"session/end-seed\",\"seq\":16,\"time\":1791337579870,\"data\":{\"inherited\":true}}"
+        }
+      ],
+      "ts": {
+        "outcome": "forked",
+        "stored": 17,
+        "closers": 0,
+        "endSeed": false
+      }
+    },
+    {
+      "id": "seeded-boundary-before-marker",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "header": "{\"type\":\"session\",\"version\":3,\"id\":\"a1\",\"createdAt\":1791337579861,\"isSeeded\":true,\"delegationDepth\":0}"
+        },
+        {
+          "append": "{\"type\":\"session/end-seed\",\"seq\":16,\"time\":1791337579870,\"data\":{\"inherited\":true}}"
+        }
+      ],
+      "boundary": 15,
+      "ts": {
+        "outcome": "forked",
+        "stored": 16,
+        "closers": 0,
+        "endSeed": false
+      }
+    },
+    {
+      "id": "seeded-open-turn-default",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "header": "{\"type\":\"session\",\"version\":3,\"id\":\"a1\",\"createdAt\":1791337579861,\"isSeeded\":true,\"delegationDepth\":0}"
+        },
+        {
+          "append": "{\"type\":\"session/end-seed\",\"seq\":16,\"time\":1791337579870,\"data\":{\"inherited\":true}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":1791337579871,\"data\":{\"turn\":2}}"
+        }
+      ],
+      "ts": {
+        "outcome": "forked",
+        "stored": 18,
+        "closers": 1,
+        "endSeed": true
+      }
+    },
+    {
+      "id": "seeded-open-turn-at-turn-start",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "header": "{\"type\":\"session\",\"version\":3,\"id\":\"a1\",\"createdAt\":1791337579861,\"isSeeded\":true,\"delegationDepth\":0}"
+        },
+        {
+          "append": "{\"type\":\"session/end-seed\",\"seq\":16,\"time\":1791337579870,\"data\":{\"inherited\":true}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":1791337579871,\"data\":{\"turn\":2}}"
+        }
+      ],
+      "boundary": 17,
+      "ts": {
+        "outcome": "rejected",
+        "class": "SessionForkError",
+        "code": "OPEN_TURN",
+        "message": "fork boundary 17 in session \"a1\" ends inside open turn 2"
+      }
+    },
+    {
+      "id": "dynamic-tools-default",
+      "log": "dynamic-tools",
+      "edits": [],
+      "ts": {
+        "outcome": "forked",
+        "stored": 38,
+        "closers": 0,
+        "endSeed": true
+      }
+    },
+    {
+      "id": "dynamic-tools-between-turns",
+      "log": "dynamic-tools",
+      "edits": [],
+      "boundary": 18,
+      "ts": {
+        "outcome": "forked",
+        "stored": 19,
+        "closers": 0,
+        "endSeed": false
+      }
+    },
+    {
+      "id": "dynamic-tools-second-turn-start",
+      "log": "dynamic-tools",
+      "edits": [],
+      "boundary": 19,
+      "ts": {
+        "outcome": "rejected",
+        "class": "SessionForkError",
+        "code": "OPEN_TURN",
+        "message": "fork boundary 19 in session \"dynamic-tools\" ends inside open turn 2"
+      }
+    },
+    {
+      "id": "dynamic-tools-third-turn-end",
+      "log": "dynamic-tools",
+      "edits": [],
+      "boundary": 37,
+      "ts": {
+        "outcome": "forked",
+        "stored": 38,
+        "closers": 0,
+        "endSeed": false
+      }
+    },
+    {
+      "id": "dynamic-tools-inside-third-turn",
+      "log": "dynamic-tools",
+      "edits": [],
+      "boundary": 36,
+      "ts": {
+        "outcome": "rejected",
+        "class": "SessionForkError",
+        "code": "OPEN_TURN",
+        "message": "fork boundary 36 in session \"dynamic-tools\" ends inside open turn 3"
+      }
+    },
+    {
+      "id": "retry-attempt-default",
+      "log": "retry-attempt",
+      "edits": [],
+      "ts": {
+        "outcome": "forked",
+        "stored": 14,
+        "closers": 0,
+        "endSeed": true
+      }
+    },
+    {
+      "id": "retry-attempt-inside-turn",
+      "log": "retry-attempt",
+      "edits": [],
+      "boundary": 12,
+      "ts": {
+        "outcome": "rejected",
+        "class": "SessionForkError",
+        "code": "OPEN_TURN",
+        "message": "fork boundary 12 in session \"retry-attempt\" ends inside open turn 1"
+      }
+    },
+    {
+      "id": "packed-source-references",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 10,
+          "find": "\"sourceEventSeqs\":[9]",
+          "replace": "\"sourceEventSeqs\":[[8,9]]"
+        }
+      ],
+      "boundary": 15,
+      "ts": {
+        "outcome": "forked",
+        "stored": 16,
+        "closers": 0,
+        "endSeed": false
+      },
+      "note": "the inherited tool result carries the expanded [8, 9]"
+    },
+    {
+      "id": "negative-zero-default",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 7,
+          "text": "{\"type\":\"hook/result\",\"seq\":7,\"time\":1791337579866,\"data\":{\"turn\":1,\"point\":\"PostToolUse\",\"handlerId\":\"h\",\"decision\":\"allow\",\"durationMs\":-0}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "seed event at index 7 is not losslessly JSON-serializable"
+      },
+      "note": "Session.fromRestore accepts -0; the child's lossless snapshot refuses it"
+    },
+    {
+      "id": "negative-zero-at-turn-end",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 7,
+          "text": "{\"type\":\"hook/result\",\"seq\":7,\"time\":1791337579866,\"data\":{\"turn\":1,\"point\":\"PostToolUse\",\"handlerId\":\"h\",\"decision\":\"allow\",\"durationMs\":-0}}"
+        }
+      ],
+      "boundary": 15,
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "seed event at index 7 is not losslessly JSON-serializable"
+      }
+    },
+    {
+      "id": "negative-zero-open-turn-first",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 7,
+          "text": "{\"type\":\"hook/result\",\"seq\":7,\"time\":1791337579866,\"data\":{\"turn\":1,\"point\":\"PostToolUse\",\"handlerId\":\"h\",\"decision\":\"allow\",\"durationMs\":-0}}"
+        }
+      ],
+      "boundary": 10,
+      "ts": {
+        "outcome": "rejected",
+        "class": "SessionForkError",
+        "code": "OPEN_TURN",
+        "message": "fork boundary 10 in session \"a1\" ends inside open turn 1"
+      }
+    },
+    {
+      "id": "negative-zero-after-boundary",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"hook/result\",\"seq\":16,\"time\":1791337579870,\"data\":{\"turn\":1,\"point\":\"PostToolUse\",\"handlerId\":\"h\",\"decision\":\"allow\",\"durationMs\":-0}}"
+        }
+      ],
+      "boundary": 15,
+      "ts": {
+        "outcome": "forked",
+        "stored": 16,
+        "closers": 0,
+        "endSeed": false
+      }
+    },
+    {
+      "id": "negative-zero-after-boundary-default",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"hook/result\",\"seq\":16,\"time\":1791337579870,\"data\":{\"turn\":1,\"point\":\"PostToolUse\",\"handlerId\":\"h\",\"decision\":\"allow\",\"durationMs\":-0}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "seed event at index 16 is not losslessly JSON-serializable"
+      }
+    },
+    {
+      "id": "unknown-ignorable-negative-zero",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 7,
+          "text": "{\"type\":\"x/unknown\",\"seq\":7,\"time\":1791337579866,\"data\":{\"k\":-0,\"f\":0.1},\"ignorable\":true,\"surfaceOp\":\"append\",\"sourceEventSeqs\":[5]}"
+        }
+      ],
+      "boundary": 15,
+      "ts": {
+        "outcome": "rejected",
+        "class": "Error",
+        "message": "seed event at index 7 is not losslessly JSON-serializable"
+      }
+    },
+    {
+      "id": "string-turn",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 1,
+          "text": "{\"type\":\"turn/start\",\"seq\":1,\"time\":1791337579864,\"data\":{\"turn\":\"one\"}}"
+        }
+      ],
+      "boundary": 5,
+      "ts": {
+        "outcome": "rejected",
+        "class": "SessionForkError",
+        "code": "OPEN_TURN",
+        "message": "fork boundary 5 in session \"a1\" ends inside open turn one"
+      }
+    },
+    {
+      "id": "null-turn-default",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 4
+        },
+        {
+          "row": 1,
+          "text": "{\"type\":\"turn/start\",\"seq\":1,\"time\":1791337579864,\"data\":{\"turn\":null}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "class": "SessionForkError",
+        "code": "OPEN_TURN",
+        "message": "fork boundary 4 in session \"a1\" ends inside open turn null"
+      },
+      "note": "interruptedTurnClosers treats a null turn as closed, so no closer is added; fork still finds the turn/start"
+    },
+    {
+      "id": "absent-turn",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 1,
+          "text": "{\"type\":\"turn/start\",\"seq\":1,\"time\":1791337579864,\"data\":{}}"
+        }
+      ],
+      "boundary": 5,
+      "ts": {
+        "outcome": "rejected",
+        "class": "SessionForkError",
+        "code": "OPEN_TURN",
+        "message": "fork boundary 5 in session \"a1\" ends inside open turn undefined"
+      }
+    },
+    {
+      "id": "fractional-turn",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 1,
+          "text": "{\"type\":\"turn/start\",\"seq\":1,\"time\":1791337579864,\"data\":{\"turn\":1.5}}"
+        }
+      ],
+      "boundary": 5,
+      "ts": {
+        "outcome": "rejected",
+        "class": "SessionForkError",
+        "code": "OPEN_TURN",
+        "message": "fork boundary 5 in session \"a1\" ends inside open turn 1.5"
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "turn-diagnostic"
+      }
+    },
+    {
+      "id": "float-spelled-turn",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 1,
+          "text": "{\"type\":\"turn/start\",\"seq\":1,\"time\":1791337579864,\"data\":{\"turn\":1.0}}"
+        }
+      ],
+      "boundary": 5,
+      "ts": {
+        "outcome": "rejected",
+        "class": "SessionForkError",
+        "code": "OPEN_TURN",
+        "message": "fork boundary 5 in session \"a1\" ends inside open turn 1"
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "turn-diagnostic"
+      }
+    },
+    {
+      "id": "object-turn",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 1,
+          "text": "{\"type\":\"turn/start\",\"seq\":1,\"time\":1791337579864,\"data\":{\"turn\":{\"n\":1}}}"
+        }
+      ],
+      "boundary": 5,
+      "ts": {
+        "outcome": "rejected",
+        "class": "SessionForkError",
+        "code": "OPEN_TURN",
+        "message": "fork boundary 5 in session \"a1\" ends inside open turn [object Object]"
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "turn-diagnostic"
+      }
+    },
+    {
+      "id": "fractional-turn-closed",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 1,
+          "text": "{\"type\":\"turn/start\",\"seq\":1,\"time\":1791337579864,\"data\":{\"turn\":1.5}}"
+        }
+      ],
+      "boundary": 15,
+      "ts": {
+        "outcome": "forked",
+        "stored": 16,
+        "closers": 0,
+        "endSeed": false
+      },
+      "note": "the limit applies only to the turn a refusal names"
+    }
+  ]
+}

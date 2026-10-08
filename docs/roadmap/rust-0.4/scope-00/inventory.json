@@ -824,6 +824,7 @@
     {"path":"packages/core/scope/tests/store.spec.ts","lane":"vitest-runtime","owner":"packages/core/scope","scopes":["02","05","06","07","08","09"],"disposition":"reuse-oracle","basis":"packages/core"},
     {"path":"packages/core/session/tests/canonical-envelopes.spec.ts","lane":"vitest-runtime","owner":"packages/core/session","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/core"},
     {"path":"packages/core/session/tests/derived-cache.spec.ts","lane":"vitest-runtime","owner":"packages/core/session","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/core"},
+    {"path":"packages/core/session/tests/fork-conformance.spec.ts","lane":"vitest-runtime","owner":"packages/core/session","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/core"},
     {"path":"packages/core/session/tests/fork.spec.ts","lane":"vitest-runtime","owner":"packages/core/session","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/core"},
     {"path":"packages/core/session/tests/gen-persistence-catalog.spec.ts","lane":"vitest-runtime","owner":"packages/core/session","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/core"},
     {"path":"packages/core/session/tests/invariant.spec.ts","lane":"vitest-runtime","owner":"packages/core/session","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/core"},

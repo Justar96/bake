@@ -21,6 +21,7 @@ Compare TypeScript and Rust using controlled fixtures and independently checked 
 - [Session lookup cases](#session-lookup-cases)
 - [Token usage cases](#token-usage-cases)
 - [Pending inbox and consumed-work cases](#pending-inbox-and-consumed-work-cases)
+- [Fork seed cases](#fork-seed-cases)
 - [Runner contract](#runner-contract)
 - [Ownership and limits](#ownership-and-limits)
 
@@ -427,6 +428,25 @@ The cases cover:
 - claimed-but-unstepped turns ending with each built-in reason and an unknown one, a stepped end without a reason, a claim that survives a stepped end, and turns whose value is a string, `null`, an object, or absent.
 
 A `rust` override names a native limit and the seq it applies to, and claims nothing for that fold. Inbox limits are a non-string `target`, which JavaScript coerces to a property key; a count spelled with a fraction or exponent; a string `inserted`, which the spread splits into characters; and a numeric message id that is not a safe integer lexeme. Consumed-work limits are `null` data, an absent or `null` `inserted` read for a cancellation, and an absent or `null` reason for a claimed turn, each a `TypeError`, and an object `inserted`, whose `length` this port does not read. A further limit covers a turn number that is not a safe integer lexeme. Both harnesses pin the case count, reject unknown keys, and require every limit to be witnessed. The expectations were written from the two TypeScript sources before either harness ran. Open compactions and open children have no pure TypeScript fold, so this table does not cover them.
+
+## Fork seed cases
+
+[`session/fork-cases.json`](session/fork-cases.json) holds 48 plain logs, each an edited [runtime capture](#runtime-request-reconstruction), with an optional inclusive fork boundary and the events a fork of the restored Session inherits. The [TypeScript spec](../packages/core/session/tests/fork-conformance.spec.ts) restores each source as `SessionStore.prepare` does, passing the parsed rows, with packed `sourceEventSeqs` ranges expanded, and `interruptedTurnClosers` to `Session.fromRestore` with `eventState: 'detached'`, enters it into a `SessionStore`, and calls `fork`. The [Rust test](../rust/crates/bake-session/tests/fork_cases.rs) restores the same bytes with `restore_plain_log` and calls [`fork_seed`](../rust/crates/bake-session/src/fork.rs).
+
+```sh
+bun run test:runtime packages/core/session/tests/fork-conformance.spec.ts
+(cd rust && cargo test --locked -p bake-session --test fork_cases)
+```
+
+The restored source is its stored events, then its closers, then the ordinary `session/end-seed` restoration appends unless the last event is one. An omitted boundary is the source's last event. The checks run in this order:
+
+1. The boundary must be a non-negative safe integer, then below the source's next seq (`SessionForkError` `INVALID_BOUNDARY`).
+2. The last `turn/start` or `turn/end` at or before the boundary must not be a `turn/start` (`OPEN_TURN`). A closer can therefore be inherited, but a boundary on a closer before the closing `turn/end` is inside the turn. A `turn/start` whose `turn` is `null` counts as open here, though `interruptedTurnClosers` treats it as closed.
+3. The child's Session construction takes a lossless JSON snapshot, which refuses the first selected event holding -0 with a plain `Error`. `Session.fromRestore` takes none, so a log-only row with -0 restores but cannot be inherited.
+
+`ts` gives the inherited stored-event and closer counts and whether the appended end seed is inherited, or the error class, code, and exact message. Both harnesses check the inherited events against the decoded rows and closers. The appended end seed carries the time Session construction read from the clock, so neither table nor Rust claims it: Rust reports only that it is inherited, and TypeScript checks its type, seq, and `{}` data, its time against clock readings taken around the source's construction, and the whole prefix against the source's own events. Every case's source restores in both harnesses; the message projections are not registered, so no case holds an `image/offload` row.
+
+A `rust` override replaces the outcome for Rust. `unrepresentable` marks a boundary `fork_seed`'s `u64` cannot carry: -1, 0.5, and `15.0`, which `JSON.parse` reads as 15. A boundary above 2^53 − 1 is refused with the message JavaScript formats from the rounded number, including 2^64 − 1. `native-subset` with `turn-diagnostic` marks an `OPEN_TURN` message whose `turn` is not a string, `null`, absent, or a non-negative safe integer written without a fraction or exponent, which JavaScript formats with `String`; Rust claims nothing there. Both harnesses pin the case count and require every limit, refusal class and code, an unrepresentable boundary, and an inherited end seed to be witnessed. The expectations were written from the TypeScript sources before either harness ran. The cases claim nothing about the live store's source and child-id checks or the child's own tagged end seed.
 
 ## Runner contract
 

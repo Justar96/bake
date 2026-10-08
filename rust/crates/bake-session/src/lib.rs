@@ -36,10 +36,13 @@
 //! [`token_usage`] folds a [`RestoredLog`]'s provider-reported token usage.
 //! [`restored_inbox`] and [`consumed_work`] fold a [`RestoredLog`]'s events
 //! into its pending inbox and its account of consumed work.
+//! [`fork_seed`] selects the events `SessionStore.fork` copies from a
+//! [`RestoredLog`] into a child, or refuses as `SessionForkError` does.
 //! None reads or writes a file or encodes a log. The crate is
 //! unstable and unshipped; only the preview's `session inspect` uses it.
 
 mod envelope;
+mod fork;
 mod inbox;
 mod offload;
 mod repair;
@@ -56,6 +59,7 @@ pub use envelope::{
     EnvelopeLimit, EnvelopeRefusal, EnvelopeRejection, NumberField, RequiredField,
     UnadmittedEnvelope, decode_row_envelope,
 };
+pub use fork::{ForkLimit, ForkRefusal, ForkSeed, fork_seed};
 pub use inbox::{
     ConsumedWork, ConsumedWorkCoercion, ConsumedWorkLimit, InboxLimit, InboxRefusal, PendingInbox,
     consumed_work, restored_inbox,
