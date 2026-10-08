@@ -4,6 +4,7 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 ## [Unreleased]
 
+- Development: the Rust Session library restores a parent's direct-child catalog in event order, excluding inherited entries and rejecting the first invalid own entry. Shared TypeScript cases check its catalog view.
 - Development: the Rust Session library derives a restored subagent's mode, label, and turn timing, including inherited descriptor resets and interrupted-turn closers. Shared TypeScript cases check these pure projections.
 - Development: `bake-rs session list --root <dir>` discovers stored Session metadata in the opt-in Rust preview, including historical headers. It skips malformed, unsupported, and corrupt compressed headers while preserving layout, identity, duplicate, and read-budget refusals. It leaves stored files unchanged.
 - Development: the Rust Session library translates strictly decoded v2 rows into v3 events in memory, preserving system-prompt chronology, remapped references, seeded history, and PTC attribution. Shared TypeScript comparisons cover the transformation and its refusals; complete historical Session restoration remains unimplemented.

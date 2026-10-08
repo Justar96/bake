@@ -1,0 +1,4464 @@
+{
+  "schema": "bake/session-conformance/subagent-catalog-cases",
+  "version": 1,
+  "oracle": "subagentCatalogProjectionDefinition in packages/subagent/subagent/src/catalog.ts, folded from init over each case's parsed rows and their interruptedTurnClosers with the restored inherited cut",
+  "history": [
+    "Version 1: 82 cases, written from the TypeScript sources before either harness ran."
+  ],
+  "logs": {
+    "tool-call-turn": "conformance/runtime/request-reconstruction/tool-call-turn/session.jsonl"
+  },
+  "cases": [
+    {
+      "id": "capture-without-catalog",
+      "log": "tool-call-turn",
+      "edits": [],
+      "ts": {
+        "outcome": "catalog",
+        "inheritedEventCount": 0,
+        "entries": []
+      },
+      "note": "The capture's sixteen rows hold no catalog fact."
+    },
+    {
+      "id": "empty-log",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 0
+        }
+      ],
+      "ts": {
+        "outcome": "catalog",
+        "inheritedEventCount": 0,
+        "entries": []
+      }
+    },
+    {
+      "id": "descriptor-with-catalog-shape-ignored",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/descriptor\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"c1\",\"childCreatedAt\":1,\"mode\":\"one-shot\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "catalog",
+        "inheritedEventCount": 0,
+        "entries": []
+      },
+      "note": "Only subagent/catalog rows reach the schema; another type with a catalog payload is skipped."
+    },
+    {
+      "id": "one-shot-without-label",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"c1\",\"childCreatedAt\":1791337580001,\"mode\":\"one-shot\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "catalog",
+        "inheritedEventCount": 0,
+        "entries": [
+          {
+            "id": "c1",
+            "createdAt": 1791337580001,
+            "mode": "one-shot"
+          }
+        ]
+      }
+    },
+    {
+      "id": "one-shot-with-label",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"c1\",\"childCreatedAt\":1791337580001,\"mode\":\"one-shot\",\"label\":\"Scout\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "catalog",
+        "inheritedEventCount": 0,
+        "entries": [
+          {
+            "id": "c1",
+            "createdAt": 1791337580001,
+            "mode": "one-shot",
+            "label": "Scout"
+          }
+        ]
+      }
+    },
+    {
+      "id": "continuable-with-label",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"c1\",\"childCreatedAt\":1791337580001,\"mode\":\"continuable\",\"label\":\"Worker\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "catalog",
+        "inheritedEventCount": 0,
+        "entries": [
+          {
+            "id": "c1",
+            "createdAt": 1791337580001,
+            "mode": "continuable",
+            "label": "Worker"
+          }
+        ]
+      }
+    },
+    {
+      "id": "empty-strings-admitted",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"\",\"childCreatedAt\":0,\"mode\":\"continuable\",\"label\":\"\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":17,\"time\":1791337580017,\"data\":{\"version\":0,\"childId\":\"\",\"childCreatedAt\":0,\"mode\":\"one-shot\",\"label\":\"\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "catalog",
+        "inheritedEventCount": 0,
+        "entries": [
+          {
+            "id": "",
+            "createdAt": 0,
+            "mode": "continuable",
+            "label": ""
+          },
+          {
+            "id": "",
+            "createdAt": 0,
+            "mode": "one-shot",
+            "label": ""
+          }
+        ]
+      },
+      "note": "Neither the id nor a label has a length check; an empty one-shot label stays present."
+    },
+    {
+      "id": "catalog-as-first-row",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 0
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":0,\"time\":1791337580000,\"data\":{\"version\":0,\"childId\":\"c0\",\"childCreatedAt\":5,\"mode\":\"one-shot\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "catalog",
+        "inheritedEventCount": 0,
+        "entries": [
+          {
+            "id": "c0",
+            "createdAt": 5,
+            "mode": "one-shot"
+          }
+        ]
+      }
+    },
+    {
+      "id": "ignorable-catalog-folds",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"c1\",\"childCreatedAt\":1,\"mode\":\"one-shot\"},\"ignorable\":true}"
+        }
+      ],
+      "ts": {
+        "outcome": "catalog",
+        "inheritedEventCount": 0,
+        "entries": [
+          {
+            "id": "c1",
+            "createdAt": 1,
+            "mode": "one-shot"
+          }
+        ]
+      },
+      "note": "Apply reads only the type and seq, so an ignorable known row still folds."
+    },
+    {
+      "id": "member-order-irrelevant",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"label\":\"L\",\"mode\":\"continuable\",\"childCreatedAt\":3,\"childId\":\"c1\",\"version\":0}}"
+        }
+      ],
+      "ts": {
+        "outcome": "catalog",
+        "inheritedEventCount": 0,
+        "entries": [
+          {
+            "id": "c1",
+            "createdAt": 3,
+            "mode": "continuable",
+            "label": "L"
+          }
+        ]
+      }
+    },
+    {
+      "id": "event-order-not-created-at-order",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"late\",\"childCreatedAt\":300,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":1791337580017,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":18,\"time\":1791337580018,\"data\":{\"version\":0,\"childId\":\"early\",\"childCreatedAt\":100,\"mode\":\"continuable\",\"label\":\"E\"}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":19,\"time\":1791337580019,\"data\":{\"turn\":2,\"reason\":{\"kind\":\"completed\"}}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":20,\"time\":1791337580020,\"data\":{\"version\":0,\"childId\":\"middle\",\"childCreatedAt\":200,\"mode\":\"one-shot\",\"label\":\"M\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "catalog",
+        "inheritedEventCount": 0,
+        "entries": [
+          {
+            "id": "late",
+            "createdAt": 300,
+            "mode": "one-shot"
+          },
+          {
+            "id": "early",
+            "createdAt": 100,
+            "mode": "continuable",
+            "label": "E"
+          },
+          {
+            "id": "middle",
+            "createdAt": 200,
+            "mode": "one-shot",
+            "label": "M"
+          }
+        ]
+      },
+      "note": "Entries follow event order; createdAt is never sorted."
+    },
+    {
+      "id": "duplicate-child-ids-kept",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"same\",\"childCreatedAt\":1,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":17,\"time\":1791337580017,\"data\":{\"version\":0,\"childId\":\"same\",\"childCreatedAt\":1,\"mode\":\"continuable\",\"label\":\"Again\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":18,\"time\":1791337580018,\"data\":{\"version\":0,\"childId\":\"same\",\"childCreatedAt\":1,\"mode\":\"one-shot\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "catalog",
+        "inheritedEventCount": 0,
+        "entries": [
+          {
+            "id": "same",
+            "createdAt": 1,
+            "mode": "one-shot"
+          },
+          {
+            "id": "same",
+            "createdAt": 1,
+            "mode": "continuable",
+            "label": "Again"
+          },
+          {
+            "id": "same",
+            "createdAt": 1,
+            "mode": "one-shot"
+          }
+        ]
+      },
+      "note": "Repeated ids are neither merged nor dropped."
+    },
+    {
+      "id": "duplicate-mode-last-wins",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"c1\",\"childCreatedAt\":1,\"mode\":\"continuable\",\"mode\":\"one-shot\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "catalog",
+        "inheritedEventCount": 0,
+        "entries": [
+          {
+            "id": "c1",
+            "createdAt": 1,
+            "mode": "one-shot"
+          }
+        ]
+      }
+    },
+    {
+      "id": "duplicate-mode-last-needs-label",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"c1\",\"childCreatedAt\":1,\"mode\":\"one-shot\",\"mode\":\"continuable\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 16,
+        "class": "ZodError"
+      },
+      "note": "The last mode is continuable, which requires a label."
+    },
+    {
+      "id": "duplicate-label-last-wins",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"c1\",\"childCreatedAt\":1,\"mode\":\"continuable\",\"label\":\"first\",\"label\":\"second\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "catalog",
+        "inheritedEventCount": 0,
+        "entries": [
+          {
+            "id": "c1",
+            "createdAt": 1,
+            "mode": "continuable",
+            "label": "second"
+          }
+        ]
+      }
+    },
+    {
+      "id": "duplicate-created-at-first-invalid",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"c1\",\"childCreatedAt\":1.5,\"childCreatedAt\":7,\"mode\":\"one-shot\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "catalog",
+        "inheritedEventCount": 0,
+        "entries": [
+          {
+            "id": "c1",
+            "createdAt": 7,
+            "mode": "one-shot"
+          }
+        ]
+      }
+    },
+    {
+      "id": "duplicate-created-at-last-invalid",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"c1\",\"childCreatedAt\":7,\"childCreatedAt\":\"7\",\"mode\":\"one-shot\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 16,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "created-at-integral-lexemes",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"zero\",\"childCreatedAt\":0,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":17,\"time\":1791337580017,\"data\":{\"version\":0,\"childId\":\"point-zero\",\"childCreatedAt\":1.0,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":18,\"time\":1791337580018,\"data\":{\"version\":0,\"childId\":\"exponent\",\"childCreatedAt\":1e3,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":19,\"time\":1791337580019,\"data\":{\"version\":0,\"childId\":\"signed-exponent\",\"childCreatedAt\":1E+3,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":20,\"time\":1791337580020,\"data\":{\"version\":0,\"childId\":\"fraction-exponent\",\"childCreatedAt\":12.5e1,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":21,\"time\":1791337580021,\"data\":{\"version\":0,\"childId\":\"negative-exponent\",\"childCreatedAt\":1250e-1,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":22,\"time\":1791337580022,\"data\":{\"version\":0,\"childId\":\"max-safe\",\"childCreatedAt\":9007199254740991,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":23,\"time\":1791337580023,\"data\":{\"version\":0,\"childId\":\"max-safe-exponent\",\"childCreatedAt\":9.007199254740991e15,\"mode\":\"one-shot\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "catalog",
+        "inheritedEventCount": 0,
+        "entries": [
+          {
+            "id": "zero",
+            "createdAt": 0,
+            "mode": "one-shot"
+          },
+          {
+            "id": "point-zero",
+            "createdAt": 1,
+            "mode": "one-shot"
+          },
+          {
+            "id": "exponent",
+            "createdAt": 1000,
+            "mode": "one-shot"
+          },
+          {
+            "id": "signed-exponent",
+            "createdAt": 1000,
+            "mode": "one-shot"
+          },
+          {
+            "id": "fraction-exponent",
+            "createdAt": 125,
+            "mode": "one-shot"
+          },
+          {
+            "id": "negative-exponent",
+            "createdAt": 125,
+            "mode": "one-shot"
+          },
+          {
+            "id": "max-safe",
+            "createdAt": 9007199254740991,
+            "mode": "one-shot"
+          },
+          {
+            "id": "max-safe-exponent",
+            "createdAt": 9007199254740991,
+            "mode": "one-shot"
+          }
+        ]
+      }
+    },
+    {
+      "id": "created-at-rounded-lexemes",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"rounds-to-one\",\"childCreatedAt\":0.99999999999999999999,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":17,\"time\":1791337580017,\"data\":{\"version\":0,\"childId\":\"rounds-to-four\",\"childCreatedAt\":4.0000000000000001,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":18,\"time\":1791337580018,\"data\":{\"version\":0,\"childId\":\"rounds-to-max-safe\",\"childCreatedAt\":9007199254740991.4,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":19,\"time\":1791337580019,\"data\":{\"version\":0,\"childId\":\"underflow\",\"childCreatedAt\":1e-400,\"mode\":\"one-shot\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "catalog",
+        "inheritedEventCount": 0,
+        "entries": [
+          {
+            "id": "rounds-to-one",
+            "createdAt": 1,
+            "mode": "one-shot"
+          },
+          {
+            "id": "rounds-to-four",
+            "createdAt": 4,
+            "mode": "one-shot"
+          },
+          {
+            "id": "rounds-to-max-safe",
+            "createdAt": 9007199254740991,
+            "mode": "one-shot"
+          },
+          {
+            "id": "underflow",
+            "createdAt": 0,
+            "mode": "one-shot"
+          }
+        ]
+      },
+      "note": "Each lexeme rounds to an integral double before Zod sees it."
+    },
+    {
+      "id": "created-at-negative-zero",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"minus-zero\",\"childCreatedAt\":-0,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":17,\"time\":1791337580017,\"data\":{\"version\":0,\"childId\":\"minus-zero-fraction\",\"childCreatedAt\":-0.0,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":18,\"time\":1791337580018,\"data\":{\"version\":0,\"childId\":\"minus-zero-exponent\",\"childCreatedAt\":-0e7,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":19,\"time\":1791337580019,\"data\":{\"version\":0,\"childId\":\"negative-underflow\",\"childCreatedAt\":-1e-400,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":20,\"time\":1791337580020,\"data\":{\"version\":0,\"childId\":\"positive-zero\",\"childCreatedAt\":0.0,\"mode\":\"one-shot\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "catalog",
+        "inheritedEventCount": 0,
+        "entries": [
+          {
+            "id": "minus-zero",
+            "createdAt": -0.0,
+            "mode": "one-shot"
+          },
+          {
+            "id": "minus-zero-fraction",
+            "createdAt": -0.0,
+            "mode": "one-shot"
+          },
+          {
+            "id": "minus-zero-exponent",
+            "createdAt": -0.0,
+            "mode": "one-shot"
+          },
+          {
+            "id": "negative-underflow",
+            "createdAt": -0.0,
+            "mode": "one-shot"
+          },
+          {
+            "id": "positive-zero",
+            "createdAt": 0,
+            "mode": "one-shot"
+          }
+        ]
+      },
+      "note": "nonnegative admits -0 and the view keeps its sign; an underflowing negative is -0 too."
+    },
+    {
+      "id": "version-zero-spellings",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0.0,\"childId\":\"fraction\",\"childCreatedAt\":1,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":17,\"time\":1791337580017,\"data\":{\"version\":-0,\"childId\":\"minus\",\"childCreatedAt\":2,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":18,\"time\":1791337580018,\"data\":{\"version\":0e5,\"childId\":\"exponent\",\"childCreatedAt\":3,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":19,\"time\":1791337580019,\"data\":{\"version\":1e-400,\"childId\":\"underflow\",\"childCreatedAt\":4,\"mode\":\"continuable\",\"label\":\"U\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":20,\"time\":1791337580020,\"data\":{\"version\":-1e-400,\"childId\":\"minus-underflow\",\"childCreatedAt\":5,\"mode\":\"continuable\",\"label\":\"V\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "catalog",
+        "inheritedEventCount": 0,
+        "entries": [
+          {
+            "id": "fraction",
+            "createdAt": 1,
+            "mode": "one-shot"
+          },
+          {
+            "id": "minus",
+            "createdAt": 2,
+            "mode": "one-shot"
+          },
+          {
+            "id": "exponent",
+            "createdAt": 3,
+            "mode": "one-shot"
+          },
+          {
+            "id": "underflow",
+            "createdAt": 4,
+            "mode": "continuable",
+            "label": "U"
+          },
+          {
+            "id": "minus-underflow",
+            "createdAt": 5,
+            "mode": "continuable",
+            "label": "V"
+          }
+        ]
+      },
+      "note": "z.literal(0) compares with ===, so every zero spelling passes."
+    },
+    {
+      "id": "reject-created-at-fraction",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"c1\",\"childCreatedAt\":1.5,\"mode\":\"one-shot\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 16,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "reject-created-at-fraction-exponent",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"c1\",\"childCreatedAt\":1.25e1,\"mode\":\"one-shot\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 16,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "reject-created-at-subnormal",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"c1\",\"childCreatedAt\":5e-324,\"mode\":\"one-shot\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 16,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "reject-created-at-negative",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"c1\",\"childCreatedAt\":-1,\"mode\":\"one-shot\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 16,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "reject-created-at-negative-fraction",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"c1\",\"childCreatedAt\":-0.5,\"mode\":\"one-shot\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 16,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "reject-created-at-two-pow-53",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"c1\",\"childCreatedAt\":9007199254740992,\"mode\":\"one-shot\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 16,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "reject-created-at-rounds-to-two-pow-53",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"c1\",\"childCreatedAt\":9007199254740993,\"mode\":\"one-shot\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 16,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "reject-created-at-fraction-rounds-to-two-pow-53",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"c1\",\"childCreatedAt\":9007199254740991.5,\"mode\":\"one-shot\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 16,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "reject-created-at-two-pow-60",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"c1\",\"childCreatedAt\":1152921504606846976,\"mode\":\"one-shot\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 16,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "reject-created-at-large-exponent",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"c1\",\"childCreatedAt\":1e300,\"mode\":\"one-shot\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 16,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "reject-created-at-string",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"c1\",\"childCreatedAt\":\"1\",\"mode\":\"one-shot\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 16,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "reject-created-at-null",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"c1\",\"childCreatedAt\":null,\"mode\":\"one-shot\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 16,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "reject-created-at-missing",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"c1\",\"mode\":\"one-shot\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 16,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "reject-version-missing",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"childId\":\"c1\",\"childCreatedAt\":1,\"mode\":\"one-shot\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 16,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "reject-version-one",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":1,\"childId\":\"c1\",\"childCreatedAt\":1,\"mode\":\"one-shot\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 16,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "reject-version-subnormal",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":5e-324,\"childId\":\"c1\",\"childCreatedAt\":1,\"mode\":\"one-shot\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 16,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "reject-version-string",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":\"0\",\"childId\":\"c1\",\"childCreatedAt\":1,\"mode\":\"one-shot\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 16,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "reject-version-false",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":false,\"childId\":\"c1\",\"childCreatedAt\":1,\"mode\":\"one-shot\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 16,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "reject-child-id-missing",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childCreatedAt\":1,\"mode\":\"one-shot\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 16,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "reject-child-id-number",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":1,\"childCreatedAt\":1,\"mode\":\"one-shot\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 16,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "reject-child-id-null",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":null,\"childCreatedAt\":1,\"mode\":\"one-shot\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 16,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "reject-mode-missing",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"c1\",\"childCreatedAt\":1}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 16,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "reject-mode-unknown",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"c1\",\"childCreatedAt\":1,\"mode\":\"persistent\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 16,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "reject-mode-case",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"c1\",\"childCreatedAt\":1,\"mode\":\"One-Shot\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 16,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "reject-continuable-without-label",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"c1\",\"childCreatedAt\":1,\"mode\":\"continuable\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 16,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "reject-continuable-null-label",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"c1\",\"childCreatedAt\":1,\"mode\":\"continuable\",\"label\":null}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 16,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "reject-continuable-number-label",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"c1\",\"childCreatedAt\":1,\"mode\":\"continuable\",\"label\":1}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 16,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "reject-one-shot-null-label",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"c1\",\"childCreatedAt\":1,\"mode\":\"one-shot\",\"label\":null}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 16,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "reject-one-shot-array-label",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"c1\",\"childCreatedAt\":1,\"mode\":\"one-shot\",\"label\":[\"L\"]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 16,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "reject-one-shot-extra-key",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"c1\",\"childCreatedAt\":1,\"mode\":\"one-shot\",\"extra\":1}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 16,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "reject-continuable-extra-key",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"c1\",\"childCreatedAt\":1,\"mode\":\"continuable\",\"label\":\"L\",\"provider\":\"task\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 16,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "reject-extra-null-key",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"c1\",\"childCreatedAt\":1,\"mode\":\"one-shot\",\"label\":\"L\",\"note\":null}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 16,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "reject-proto-key",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"c1\",\"childCreatedAt\":1,\"mode\":\"one-shot\",\"__proto__\":{}}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 16,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "reject-data-null",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":null}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 16,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "reject-data-array",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":[{\"version\":0,\"childId\":\"c1\",\"childCreatedAt\":1,\"mode\":\"one-shot\"}]}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 16,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "reject-data-string",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":\"c1\"}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 16,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "reject-data-number",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":0}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 16,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "reject-data-empty-object",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 16,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "valid-invalid-valid-invalid",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"c1\",\"childCreatedAt\":1,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":17,\"time\":1791337580017,\"data\":{\"version\":0,\"childId\":\"c2\",\"childCreatedAt\":2.5,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":18,\"time\":1791337580018,\"data\":{\"version\":0,\"childId\":\"c3\",\"childCreatedAt\":3,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":19,\"time\":1791337580019,\"data\":{}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 17,
+        "class": "ZodError"
+      },
+      "note": "The fold stops at the first invalid own fact; no partial catalog is a result."
+    },
+    {
+      "id": "closers-after-catalog-in-open-step",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"c1\",\"childCreatedAt\":1,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":1791337580017,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"step/start\",\"seq\":18,\"time\":1791337580018,\"data\":{\"turn\":2,\"step\":1}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":19,\"time\":1791337580019,\"data\":{\"version\":0,\"childId\":\"c2\",\"childCreatedAt\":2,\"mode\":\"continuable\",\"label\":\"Open\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "catalog",
+        "inheritedEventCount": 0,
+        "entries": [
+          {
+            "id": "c1",
+            "createdAt": 1,
+            "mode": "one-shot"
+          },
+          {
+            "id": "c2",
+            "createdAt": 2,
+            "mode": "continuable",
+            "label": "Open"
+          }
+        ]
+      },
+      "note": "step/end and turn/end closers follow and change nothing."
+    },
+    {
+      "id": "closers-for-pending-tool-call",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 10
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":10,\"time\":1791337580010,\"data\":{\"version\":0,\"childId\":\"c1\",\"childCreatedAt\":1,\"mode\":\"one-shot\",\"label\":\"Mid\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "catalog",
+        "inheritedEventCount": 0,
+        "entries": [
+          {
+            "id": "c1",
+            "createdAt": 1,
+            "mode": "one-shot",
+            "label": "Mid"
+          }
+        ]
+      },
+      "note": "The cut capture's call c1 gets a synthetic result, then step/end and turn/end."
+    },
+    {
+      "id": "invalid-catalog-in-open-turn",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 3
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":3,\"time\":1791337580003,\"data\":{\"version\":0,\"childId\":\"c1\",\"childCreatedAt\":-1,\"mode\":\"one-shot\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 3,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "seeded-inherited-rows-ignored",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "header": "{\"type\":\"session\",\"version\":3,\"id\":\"a1\",\"createdAt\":1791337579861,\"isSeeded\":true,\"delegationDepth\":0}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":null}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":17,\"time\":1791337580017,\"data\":{\"version\":0,\"childId\":\"parent-child\",\"childCreatedAt\":1,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":18,\"time\":1791337580018,\"data\":{\"version\":1,\"extra\":true}}"
+        },
+        {
+          "append": "{\"type\":\"session/end-seed\",\"seq\":19,\"time\":1791337580019,\"data\":{\"inherited\":true}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":20,\"time\":1791337580020,\"data\":{\"version\":0,\"childId\":\"own\",\"childCreatedAt\":2,\"mode\":\"one-shot\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "catalog",
+        "inheritedEventCount": 19,
+        "entries": [
+          {
+            "id": "own",
+            "createdAt": 2,
+            "mode": "one-shot"
+          }
+        ]
+      },
+      "note": "Inherited rows, valid or not, are skipped before the schema runs."
+    },
+    {
+      "id": "seeded-own-invalid-rejects",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "header": "{\"type\":\"session\",\"version\":3,\"id\":\"a1\",\"createdAt\":1791337579861,\"isSeeded\":true,\"delegationDepth\":0}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":[]}"
+        },
+        {
+          "append": "{\"type\":\"session/end-seed\",\"seq\":17,\"time\":1791337580017,\"data\":{\"inherited\":true}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":18,\"time\":1791337580018,\"data\":{\"version\":0,\"childId\":\"own\",\"childCreatedAt\":1,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":19,\"time\":1791337580019,\"data\":{\"version\":2,\"childId\":\"bad\",\"childCreatedAt\":1,\"mode\":\"one-shot\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 17,
+        "seq": 19,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "seeded-inherited-only",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "header": "{\"type\":\"session\",\"version\":3,\"id\":\"a1\",\"createdAt\":1791337579861,\"isSeeded\":true,\"delegationDepth\":0}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"parent-child\",\"childCreatedAt\":1,\"mode\":\"continuable\",\"label\":\"P\"}}"
+        },
+        {
+          "append": "{\"type\":\"session/end-seed\",\"seq\":17,\"time\":1791337580017,\"data\":{\"inherited\":true}}"
+        }
+      ],
+      "ts": {
+        "outcome": "catalog",
+        "inheritedEventCount": 17,
+        "entries": []
+      }
+    },
+    {
+      "id": "seeded-cut-at-zero",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "header": "{\"type\":\"session\",\"version\":3,\"id\":\"a1\",\"createdAt\":1791337579861,\"isSeeded\":true,\"delegationDepth\":0}"
+        },
+        {
+          "truncate": 0
+        },
+        {
+          "append": "{\"type\":\"session/end-seed\",\"seq\":0,\"time\":1791337580000,\"data\":{\"inherited\":true}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":1,\"time\":1791337580001,\"data\":{\"version\":0,\"childId\":\"own\",\"childCreatedAt\":1,\"mode\":\"one-shot\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "catalog",
+        "inheritedEventCount": 0,
+        "entries": [
+          {
+            "id": "own",
+            "createdAt": 1,
+            "mode": "one-shot"
+          }
+        ]
+      },
+      "note": "The marker at seq 0 makes every row own."
+    },
+    {
+      "id": "seeded-two-inherited-markers",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "header": "{\"type\":\"session\",\"version\":3,\"id\":\"a1\",\"createdAt\":1791337579861,\"isSeeded\":true,\"delegationDepth\":0}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"grandparent-child\",\"childCreatedAt\":1,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"session/end-seed\",\"seq\":17,\"time\":1791337580017,\"data\":{\"inherited\":true}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":18,\"time\":1791337580018,\"data\":\"not a catalog fact\"}"
+        },
+        {
+          "append": "{\"type\":\"session/end-seed\",\"seq\":19,\"time\":1791337580019,\"data\":{\"inherited\":true}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":20,\"time\":1791337580020,\"data\":{\"version\":0,\"childId\":\"own\",\"childCreatedAt\":3,\"mode\":\"one-shot\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "catalog",
+        "inheritedEventCount": 19,
+        "entries": [
+          {
+            "id": "own",
+            "createdAt": 3,
+            "mode": "one-shot"
+          }
+        ]
+      },
+      "note": "The last inherited marker sets the cut, so the parent's malformed row is inherited."
+    },
+    {
+      "id": "seeded-ordinary-end-seeds-do-not-cut",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "header": "{\"type\":\"session\",\"version\":3,\"id\":\"a1\",\"createdAt\":1791337579861,\"isSeeded\":true,\"delegationDepth\":0}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{}}"
+        },
+        {
+          "append": "{\"type\":\"session/end-seed\",\"seq\":17,\"time\":1791337580017,\"data\":{\"inherited\":true}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":18,\"time\":1791337580018,\"data\":{\"version\":0,\"childId\":\"a\",\"childCreatedAt\":1,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"session/end-seed\",\"seq\":19,\"time\":1791337580019,\"data\":{}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":20,\"time\":1791337580020,\"data\":{\"version\":0,\"childId\":\"b\",\"childCreatedAt\":2,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"session/end-seed\",\"seq\":21,\"time\":1791337580021,\"data\":{}}"
+        }
+      ],
+      "ts": {
+        "outcome": "catalog",
+        "inheritedEventCount": 17,
+        "entries": [
+          {
+            "id": "a",
+            "createdAt": 1,
+            "mode": "one-shot"
+          },
+          {
+            "id": "b",
+            "createdAt": 2,
+            "mode": "one-shot"
+          }
+        ]
+      }
+    },
+    {
+      "id": "unseeded-ordinary-end-seeds",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"a\",\"childCreatedAt\":1,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"session/end-seed\",\"seq\":17,\"time\":1791337580017,\"data\":{}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":18,\"time\":1791337580018,\"data\":{\"version\":0,\"childId\":\"b\",\"childCreatedAt\":2,\"mode\":\"continuable\",\"label\":\"B\"}}"
+        },
+        {
+          "append": "{\"type\":\"session/end-seed\",\"seq\":19,\"time\":1791337580019,\"data\":{}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":20,\"time\":1791337580020,\"data\":{\"version\":0}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 20,
+        "class": "ZodError"
+      },
+      "note": "An ordinary end seed is no cut; the unseeded cut stays 0."
+    },
+    {
+      "id": "seeded-open-own-turn-closers",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "header": "{\"type\":\"session\",\"version\":3,\"id\":\"a1\",\"createdAt\":1791337579861,\"isSeeded\":true,\"delegationDepth\":0}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"x\":1}}"
+        },
+        {
+          "append": "{\"type\":\"session/end-seed\",\"seq\":17,\"time\":1791337580017,\"data\":{\"inherited\":true}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":18,\"time\":1791337580018,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"step/start\",\"seq\":19,\"time\":1791337580019,\"data\":{\"turn\":2,\"step\":1}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":20,\"time\":1791337580020,\"data\":{\"version\":0,\"childId\":\"own\",\"childCreatedAt\":9,\"mode\":\"continuable\",\"label\":\"Own\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "catalog",
+        "inheritedEventCount": 17,
+        "entries": [
+          {
+            "id": "own",
+            "createdAt": 9,
+            "mode": "continuable",
+            "label": "Own"
+          }
+        ]
+      }
+    },
+    {
+      "id": "prefix-16",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"a\",\"childCreatedAt\":1,\"mode\":\"one-shot\",\"label\":\"A\"}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":1791337580017,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":18,\"time\":1791337580018,\"data\":{\"version\":0,\"childId\":\"b\",\"childCreatedAt\":2,\"mode\":\"continuable\",\"label\":\"B\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":19,\"time\":1791337580019,\"data\":{\"version\":0,\"childId\":\"bad\",\"childCreatedAt\":3,\"extra\":0,\"mode\":\"one-shot\",\"label\":\"X\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":20,\"time\":1791337580020,\"data\":{\"version\":0,\"childId\":\"c\",\"childCreatedAt\":4,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":21,\"time\":1791337580021,\"data\":{\"turn\":2,\"reason\":{\"kind\":\"completed\"}}}"
+        },
+        {
+          "truncate": 16
+        }
+      ],
+      "ts": {
+        "outcome": "catalog",
+        "inheritedEventCount": 0,
+        "entries": []
+      }
+    },
+    {
+      "id": "prefix-17",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"a\",\"childCreatedAt\":1,\"mode\":\"one-shot\",\"label\":\"A\"}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":1791337580017,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":18,\"time\":1791337580018,\"data\":{\"version\":0,\"childId\":\"b\",\"childCreatedAt\":2,\"mode\":\"continuable\",\"label\":\"B\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":19,\"time\":1791337580019,\"data\":{\"version\":0,\"childId\":\"bad\",\"childCreatedAt\":3,\"extra\":0,\"mode\":\"one-shot\",\"label\":\"X\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":20,\"time\":1791337580020,\"data\":{\"version\":0,\"childId\":\"c\",\"childCreatedAt\":4,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":21,\"time\":1791337580021,\"data\":{\"turn\":2,\"reason\":{\"kind\":\"completed\"}}}"
+        },
+        {
+          "truncate": 17
+        }
+      ],
+      "ts": {
+        "outcome": "catalog",
+        "inheritedEventCount": 0,
+        "entries": [
+          {
+            "id": "a",
+            "createdAt": 1,
+            "mode": "one-shot",
+            "label": "A"
+          }
+        ]
+      }
+    },
+    {
+      "id": "prefix-18",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"a\",\"childCreatedAt\":1,\"mode\":\"one-shot\",\"label\":\"A\"}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":1791337580017,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":18,\"time\":1791337580018,\"data\":{\"version\":0,\"childId\":\"b\",\"childCreatedAt\":2,\"mode\":\"continuable\",\"label\":\"B\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":19,\"time\":1791337580019,\"data\":{\"version\":0,\"childId\":\"bad\",\"childCreatedAt\":3,\"extra\":0,\"mode\":\"one-shot\",\"label\":\"X\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":20,\"time\":1791337580020,\"data\":{\"version\":0,\"childId\":\"c\",\"childCreatedAt\":4,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":21,\"time\":1791337580021,\"data\":{\"turn\":2,\"reason\":{\"kind\":\"completed\"}}}"
+        },
+        {
+          "truncate": 18
+        }
+      ],
+      "ts": {
+        "outcome": "catalog",
+        "inheritedEventCount": 0,
+        "entries": [
+          {
+            "id": "a",
+            "createdAt": 1,
+            "mode": "one-shot",
+            "label": "A"
+          }
+        ]
+      }
+    },
+    {
+      "id": "prefix-19",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"a\",\"childCreatedAt\":1,\"mode\":\"one-shot\",\"label\":\"A\"}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":1791337580017,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":18,\"time\":1791337580018,\"data\":{\"version\":0,\"childId\":\"b\",\"childCreatedAt\":2,\"mode\":\"continuable\",\"label\":\"B\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":19,\"time\":1791337580019,\"data\":{\"version\":0,\"childId\":\"bad\",\"childCreatedAt\":3,\"extra\":0,\"mode\":\"one-shot\",\"label\":\"X\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":20,\"time\":1791337580020,\"data\":{\"version\":0,\"childId\":\"c\",\"childCreatedAt\":4,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":21,\"time\":1791337580021,\"data\":{\"turn\":2,\"reason\":{\"kind\":\"completed\"}}}"
+        },
+        {
+          "truncate": 19
+        }
+      ],
+      "ts": {
+        "outcome": "catalog",
+        "inheritedEventCount": 0,
+        "entries": [
+          {
+            "id": "a",
+            "createdAt": 1,
+            "mode": "one-shot",
+            "label": "A"
+          },
+          {
+            "id": "b",
+            "createdAt": 2,
+            "mode": "continuable",
+            "label": "B"
+          }
+        ]
+      }
+    },
+    {
+      "id": "prefix-20",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"a\",\"childCreatedAt\":1,\"mode\":\"one-shot\",\"label\":\"A\"}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":1791337580017,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":18,\"time\":1791337580018,\"data\":{\"version\":0,\"childId\":\"b\",\"childCreatedAt\":2,\"mode\":\"continuable\",\"label\":\"B\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":19,\"time\":1791337580019,\"data\":{\"version\":0,\"childId\":\"bad\",\"childCreatedAt\":3,\"extra\":0,\"mode\":\"one-shot\",\"label\":\"X\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":20,\"time\":1791337580020,\"data\":{\"version\":0,\"childId\":\"c\",\"childCreatedAt\":4,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":21,\"time\":1791337580021,\"data\":{\"turn\":2,\"reason\":{\"kind\":\"completed\"}}}"
+        },
+        {
+          "truncate": 20
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 19,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "prefix-22",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"a\",\"childCreatedAt\":1,\"mode\":\"one-shot\",\"label\":\"A\"}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":1791337580017,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":18,\"time\":1791337580018,\"data\":{\"version\":0,\"childId\":\"b\",\"childCreatedAt\":2,\"mode\":\"continuable\",\"label\":\"B\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":19,\"time\":1791337580019,\"data\":{\"version\":0,\"childId\":\"bad\",\"childCreatedAt\":3,\"extra\":0,\"mode\":\"one-shot\",\"label\":\"X\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":20,\"time\":1791337580020,\"data\":{\"version\":0,\"childId\":\"c\",\"childCreatedAt\":4,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":21,\"time\":1791337580021,\"data\":{\"turn\":2,\"reason\":{\"kind\":\"completed\"}}}"
+        },
+        {
+          "truncate": 22
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 19,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "chunk-full-64",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"k000\",\"childCreatedAt\":0,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":17,\"time\":1791337580017,\"data\":{\"version\":0,\"childId\":\"k001\",\"childCreatedAt\":1,\"mode\":\"one-shot\",\"label\":\"L1\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":18,\"time\":1791337580018,\"data\":{\"version\":0,\"childId\":\"k002\",\"childCreatedAt\":2,\"mode\":\"continuable\",\"label\":\"L2\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":19,\"time\":1791337580019,\"data\":{\"version\":0,\"childId\":\"k003\",\"childCreatedAt\":3,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":20,\"time\":1791337580020,\"data\":{\"version\":0,\"childId\":\"k004\",\"childCreatedAt\":4,\"mode\":\"one-shot\",\"label\":\"L4\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":21,\"time\":1791337580021,\"data\":{\"version\":0,\"childId\":\"k005\",\"childCreatedAt\":5,\"mode\":\"continuable\",\"label\":\"L5\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":22,\"time\":1791337580022,\"data\":{\"version\":0,\"childId\":\"k006\",\"childCreatedAt\":6,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":23,\"time\":1791337580023,\"data\":{\"version\":0,\"childId\":\"k007\",\"childCreatedAt\":7,\"mode\":\"one-shot\",\"label\":\"L7\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":24,\"time\":1791337580024,\"data\":{\"version\":0,\"childId\":\"k008\",\"childCreatedAt\":8,\"mode\":\"continuable\",\"label\":\"L8\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":25,\"time\":1791337580025,\"data\":{\"version\":0,\"childId\":\"k009\",\"childCreatedAt\":9,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":26,\"time\":1791337580026,\"data\":{\"version\":0,\"childId\":\"k010\",\"childCreatedAt\":10,\"mode\":\"one-shot\",\"label\":\"L10\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":27,\"time\":1791337580027,\"data\":{\"version\":0,\"childId\":\"k011\",\"childCreatedAt\":11,\"mode\":\"continuable\",\"label\":\"L11\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":28,\"time\":1791337580028,\"data\":{\"version\":0,\"childId\":\"k012\",\"childCreatedAt\":12,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":29,\"time\":1791337580029,\"data\":{\"version\":0,\"childId\":\"k013\",\"childCreatedAt\":13,\"mode\":\"one-shot\",\"label\":\"L13\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":30,\"time\":1791337580030,\"data\":{\"version\":0,\"childId\":\"k014\",\"childCreatedAt\":14,\"mode\":\"continuable\",\"label\":\"L14\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":31,\"time\":1791337580031,\"data\":{\"version\":0,\"childId\":\"k015\",\"childCreatedAt\":15,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":32,\"time\":1791337580032,\"data\":{\"version\":0,\"childId\":\"k016\",\"childCreatedAt\":16,\"mode\":\"one-shot\",\"label\":\"L16\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":33,\"time\":1791337580033,\"data\":{\"version\":0,\"childId\":\"k017\",\"childCreatedAt\":17,\"mode\":\"continuable\",\"label\":\"L17\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":34,\"time\":1791337580034,\"data\":{\"version\":0,\"childId\":\"k018\",\"childCreatedAt\":18,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":35,\"time\":1791337580035,\"data\":{\"version\":0,\"childId\":\"k019\",\"childCreatedAt\":19,\"mode\":\"one-shot\",\"label\":\"L19\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":36,\"time\":1791337580036,\"data\":{\"version\":0,\"childId\":\"k020\",\"childCreatedAt\":20,\"mode\":\"continuable\",\"label\":\"L20\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":37,\"time\":1791337580037,\"data\":{\"version\":0,\"childId\":\"k021\",\"childCreatedAt\":21,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":38,\"time\":1791337580038,\"data\":{\"version\":0,\"childId\":\"k022\",\"childCreatedAt\":22,\"mode\":\"one-shot\",\"label\":\"L22\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":39,\"time\":1791337580039,\"data\":{\"version\":0,\"childId\":\"k023\",\"childCreatedAt\":23,\"mode\":\"continuable\",\"label\":\"L23\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":40,\"time\":1791337580040,\"data\":{\"version\":0,\"childId\":\"k024\",\"childCreatedAt\":24,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":41,\"time\":1791337580041,\"data\":{\"version\":0,\"childId\":\"k025\",\"childCreatedAt\":25,\"mode\":\"one-shot\",\"label\":\"L25\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":42,\"time\":1791337580042,\"data\":{\"version\":0,\"childId\":\"k026\",\"childCreatedAt\":26,\"mode\":\"continuable\",\"label\":\"L26\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":43,\"time\":1791337580043,\"data\":{\"version\":0,\"childId\":\"k027\",\"childCreatedAt\":27,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":44,\"time\":1791337580044,\"data\":{\"version\":0,\"childId\":\"k028\",\"childCreatedAt\":28,\"mode\":\"one-shot\",\"label\":\"L28\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":45,\"time\":1791337580045,\"data\":{\"version\":0,\"childId\":\"k029\",\"childCreatedAt\":29,\"mode\":\"continuable\",\"label\":\"L29\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":46,\"time\":1791337580046,\"data\":{\"version\":0,\"childId\":\"k030\",\"childCreatedAt\":30,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":47,\"time\":1791337580047,\"data\":{\"version\":0,\"childId\":\"k031\",\"childCreatedAt\":31,\"mode\":\"one-shot\",\"label\":\"L31\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":48,\"time\":1791337580048,\"data\":{\"version\":0,\"childId\":\"k032\",\"childCreatedAt\":32,\"mode\":\"continuable\",\"label\":\"L32\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":49,\"time\":1791337580049,\"data\":{\"version\":0,\"childId\":\"k033\",\"childCreatedAt\":33,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":50,\"time\":1791337580050,\"data\":{\"version\":0,\"childId\":\"k034\",\"childCreatedAt\":34,\"mode\":\"one-shot\",\"label\":\"L34\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":51,\"time\":1791337580051,\"data\":{\"version\":0,\"childId\":\"k035\",\"childCreatedAt\":35,\"mode\":\"continuable\",\"label\":\"L35\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":52,\"time\":1791337580052,\"data\":{\"version\":0,\"childId\":\"k036\",\"childCreatedAt\":36,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":53,\"time\":1791337580053,\"data\":{\"version\":0,\"childId\":\"k037\",\"childCreatedAt\":37,\"mode\":\"one-shot\",\"label\":\"L37\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":54,\"time\":1791337580054,\"data\":{\"version\":0,\"childId\":\"k038\",\"childCreatedAt\":38,\"mode\":\"continuable\",\"label\":\"L38\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":55,\"time\":1791337580055,\"data\":{\"version\":0,\"childId\":\"k039\",\"childCreatedAt\":39,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":56,\"time\":1791337580056,\"data\":{\"version\":0,\"childId\":\"k040\",\"childCreatedAt\":40,\"mode\":\"one-shot\",\"label\":\"L40\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":57,\"time\":1791337580057,\"data\":{\"version\":0,\"childId\":\"k041\",\"childCreatedAt\":41,\"mode\":\"continuable\",\"label\":\"L41\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":58,\"time\":1791337580058,\"data\":{\"version\":0,\"childId\":\"k042\",\"childCreatedAt\":42,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":59,\"time\":1791337580059,\"data\":{\"version\":0,\"childId\":\"k043\",\"childCreatedAt\":43,\"mode\":\"one-shot\",\"label\":\"L43\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":60,\"time\":1791337580060,\"data\":{\"version\":0,\"childId\":\"k044\",\"childCreatedAt\":44,\"mode\":\"continuable\",\"label\":\"L44\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":61,\"time\":1791337580061,\"data\":{\"version\":0,\"childId\":\"k045\",\"childCreatedAt\":45,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":62,\"time\":1791337580062,\"data\":{\"version\":0,\"childId\":\"k046\",\"childCreatedAt\":46,\"mode\":\"one-shot\",\"label\":\"L46\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":63,\"time\":1791337580063,\"data\":{\"version\":0,\"childId\":\"k047\",\"childCreatedAt\":47,\"mode\":\"continuable\",\"label\":\"L47\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":64,\"time\":1791337580064,\"data\":{\"version\":0,\"childId\":\"k048\",\"childCreatedAt\":48,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":65,\"time\":1791337580065,\"data\":{\"version\":0,\"childId\":\"k049\",\"childCreatedAt\":49,\"mode\":\"one-shot\",\"label\":\"L49\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":66,\"time\":1791337580066,\"data\":{\"version\":0,\"childId\":\"k050\",\"childCreatedAt\":50,\"mode\":\"continuable\",\"label\":\"L50\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":67,\"time\":1791337580067,\"data\":{\"version\":0,\"childId\":\"k051\",\"childCreatedAt\":51,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":68,\"time\":1791337580068,\"data\":{\"version\":0,\"childId\":\"k052\",\"childCreatedAt\":52,\"mode\":\"one-shot\",\"label\":\"L52\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":69,\"time\":1791337580069,\"data\":{\"version\":0,\"childId\":\"k053\",\"childCreatedAt\":53,\"mode\":\"continuable\",\"label\":\"L53\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":70,\"time\":1791337580070,\"data\":{\"version\":0,\"childId\":\"k054\",\"childCreatedAt\":54,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":71,\"time\":1791337580071,\"data\":{\"version\":0,\"childId\":\"k055\",\"childCreatedAt\":55,\"mode\":\"one-shot\",\"label\":\"L55\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":72,\"time\":1791337580072,\"data\":{\"version\":0,\"childId\":\"k056\",\"childCreatedAt\":56,\"mode\":\"continuable\",\"label\":\"L56\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":73,\"time\":1791337580073,\"data\":{\"version\":0,\"childId\":\"k057\",\"childCreatedAt\":57,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":74,\"time\":1791337580074,\"data\":{\"version\":0,\"childId\":\"k058\",\"childCreatedAt\":58,\"mode\":\"one-shot\",\"label\":\"L58\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":75,\"time\":1791337580075,\"data\":{\"version\":0,\"childId\":\"k059\",\"childCreatedAt\":59,\"mode\":\"continuable\",\"label\":\"L59\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":76,\"time\":1791337580076,\"data\":{\"version\":0,\"childId\":\"k060\",\"childCreatedAt\":60,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":77,\"time\":1791337580077,\"data\":{\"version\":0,\"childId\":\"k061\",\"childCreatedAt\":61,\"mode\":\"one-shot\",\"label\":\"L61\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":78,\"time\":1791337580078,\"data\":{\"version\":0,\"childId\":\"k062\",\"childCreatedAt\":62,\"mode\":\"continuable\",\"label\":\"L62\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":79,\"time\":1791337580079,\"data\":{\"version\":0,\"childId\":\"k063\",\"childCreatedAt\":63,\"mode\":\"one-shot\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "catalog",
+        "inheritedEventCount": 0,
+        "entries": [
+          {
+            "id": "k000",
+            "createdAt": 0,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k001",
+            "createdAt": 1,
+            "mode": "one-shot",
+            "label": "L1"
+          },
+          {
+            "id": "k002",
+            "createdAt": 2,
+            "mode": "continuable",
+            "label": "L2"
+          },
+          {
+            "id": "k003",
+            "createdAt": 3,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k004",
+            "createdAt": 4,
+            "mode": "one-shot",
+            "label": "L4"
+          },
+          {
+            "id": "k005",
+            "createdAt": 5,
+            "mode": "continuable",
+            "label": "L5"
+          },
+          {
+            "id": "k006",
+            "createdAt": 6,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k007",
+            "createdAt": 7,
+            "mode": "one-shot",
+            "label": "L7"
+          },
+          {
+            "id": "k008",
+            "createdAt": 8,
+            "mode": "continuable",
+            "label": "L8"
+          },
+          {
+            "id": "k009",
+            "createdAt": 9,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k010",
+            "createdAt": 10,
+            "mode": "one-shot",
+            "label": "L10"
+          },
+          {
+            "id": "k011",
+            "createdAt": 11,
+            "mode": "continuable",
+            "label": "L11"
+          },
+          {
+            "id": "k012",
+            "createdAt": 12,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k013",
+            "createdAt": 13,
+            "mode": "one-shot",
+            "label": "L13"
+          },
+          {
+            "id": "k014",
+            "createdAt": 14,
+            "mode": "continuable",
+            "label": "L14"
+          },
+          {
+            "id": "k015",
+            "createdAt": 15,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k016",
+            "createdAt": 16,
+            "mode": "one-shot",
+            "label": "L16"
+          },
+          {
+            "id": "k017",
+            "createdAt": 17,
+            "mode": "continuable",
+            "label": "L17"
+          },
+          {
+            "id": "k018",
+            "createdAt": 18,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k019",
+            "createdAt": 19,
+            "mode": "one-shot",
+            "label": "L19"
+          },
+          {
+            "id": "k020",
+            "createdAt": 20,
+            "mode": "continuable",
+            "label": "L20"
+          },
+          {
+            "id": "k021",
+            "createdAt": 21,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k022",
+            "createdAt": 22,
+            "mode": "one-shot",
+            "label": "L22"
+          },
+          {
+            "id": "k023",
+            "createdAt": 23,
+            "mode": "continuable",
+            "label": "L23"
+          },
+          {
+            "id": "k024",
+            "createdAt": 24,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k025",
+            "createdAt": 25,
+            "mode": "one-shot",
+            "label": "L25"
+          },
+          {
+            "id": "k026",
+            "createdAt": 26,
+            "mode": "continuable",
+            "label": "L26"
+          },
+          {
+            "id": "k027",
+            "createdAt": 27,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k028",
+            "createdAt": 28,
+            "mode": "one-shot",
+            "label": "L28"
+          },
+          {
+            "id": "k029",
+            "createdAt": 29,
+            "mode": "continuable",
+            "label": "L29"
+          },
+          {
+            "id": "k030",
+            "createdAt": 30,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k031",
+            "createdAt": 31,
+            "mode": "one-shot",
+            "label": "L31"
+          },
+          {
+            "id": "k032",
+            "createdAt": 32,
+            "mode": "continuable",
+            "label": "L32"
+          },
+          {
+            "id": "k033",
+            "createdAt": 33,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k034",
+            "createdAt": 34,
+            "mode": "one-shot",
+            "label": "L34"
+          },
+          {
+            "id": "k035",
+            "createdAt": 35,
+            "mode": "continuable",
+            "label": "L35"
+          },
+          {
+            "id": "k036",
+            "createdAt": 36,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k037",
+            "createdAt": 37,
+            "mode": "one-shot",
+            "label": "L37"
+          },
+          {
+            "id": "k038",
+            "createdAt": 38,
+            "mode": "continuable",
+            "label": "L38"
+          },
+          {
+            "id": "k039",
+            "createdAt": 39,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k040",
+            "createdAt": 40,
+            "mode": "one-shot",
+            "label": "L40"
+          },
+          {
+            "id": "k041",
+            "createdAt": 41,
+            "mode": "continuable",
+            "label": "L41"
+          },
+          {
+            "id": "k042",
+            "createdAt": 42,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k043",
+            "createdAt": 43,
+            "mode": "one-shot",
+            "label": "L43"
+          },
+          {
+            "id": "k044",
+            "createdAt": 44,
+            "mode": "continuable",
+            "label": "L44"
+          },
+          {
+            "id": "k045",
+            "createdAt": 45,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k046",
+            "createdAt": 46,
+            "mode": "one-shot",
+            "label": "L46"
+          },
+          {
+            "id": "k047",
+            "createdAt": 47,
+            "mode": "continuable",
+            "label": "L47"
+          },
+          {
+            "id": "k048",
+            "createdAt": 48,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k049",
+            "createdAt": 49,
+            "mode": "one-shot",
+            "label": "L49"
+          },
+          {
+            "id": "k050",
+            "createdAt": 50,
+            "mode": "continuable",
+            "label": "L50"
+          },
+          {
+            "id": "k051",
+            "createdAt": 51,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k052",
+            "createdAt": 52,
+            "mode": "one-shot",
+            "label": "L52"
+          },
+          {
+            "id": "k053",
+            "createdAt": 53,
+            "mode": "continuable",
+            "label": "L53"
+          },
+          {
+            "id": "k054",
+            "createdAt": 54,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k055",
+            "createdAt": 55,
+            "mode": "one-shot",
+            "label": "L55"
+          },
+          {
+            "id": "k056",
+            "createdAt": 56,
+            "mode": "continuable",
+            "label": "L56"
+          },
+          {
+            "id": "k057",
+            "createdAt": 57,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k058",
+            "createdAt": 58,
+            "mode": "one-shot",
+            "label": "L58"
+          },
+          {
+            "id": "k059",
+            "createdAt": 59,
+            "mode": "continuable",
+            "label": "L59"
+          },
+          {
+            "id": "k060",
+            "createdAt": 60,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k061",
+            "createdAt": 61,
+            "mode": "one-shot",
+            "label": "L61"
+          },
+          {
+            "id": "k062",
+            "createdAt": 62,
+            "mode": "continuable",
+            "label": "L62"
+          },
+          {
+            "id": "k063",
+            "createdAt": 63,
+            "mode": "one-shot"
+          }
+        ]
+      }
+    },
+    {
+      "id": "chunk-cross-65",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"k000\",\"childCreatedAt\":0,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":17,\"time\":1791337580017,\"data\":{\"version\":0,\"childId\":\"k001\",\"childCreatedAt\":1,\"mode\":\"one-shot\",\"label\":\"L1\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":18,\"time\":1791337580018,\"data\":{\"version\":0,\"childId\":\"k002\",\"childCreatedAt\":2,\"mode\":\"continuable\",\"label\":\"L2\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":19,\"time\":1791337580019,\"data\":{\"version\":0,\"childId\":\"k003\",\"childCreatedAt\":3,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":20,\"time\":1791337580020,\"data\":{\"version\":0,\"childId\":\"k004\",\"childCreatedAt\":4,\"mode\":\"one-shot\",\"label\":\"L4\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":21,\"time\":1791337580021,\"data\":{\"version\":0,\"childId\":\"k005\",\"childCreatedAt\":5,\"mode\":\"continuable\",\"label\":\"L5\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":22,\"time\":1791337580022,\"data\":{\"version\":0,\"childId\":\"k006\",\"childCreatedAt\":6,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":23,\"time\":1791337580023,\"data\":{\"version\":0,\"childId\":\"k007\",\"childCreatedAt\":7,\"mode\":\"one-shot\",\"label\":\"L7\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":24,\"time\":1791337580024,\"data\":{\"version\":0,\"childId\":\"k008\",\"childCreatedAt\":8,\"mode\":\"continuable\",\"label\":\"L8\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":25,\"time\":1791337580025,\"data\":{\"version\":0,\"childId\":\"k009\",\"childCreatedAt\":9,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":26,\"time\":1791337580026,\"data\":{\"version\":0,\"childId\":\"k010\",\"childCreatedAt\":10,\"mode\":\"one-shot\",\"label\":\"L10\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":27,\"time\":1791337580027,\"data\":{\"version\":0,\"childId\":\"k011\",\"childCreatedAt\":11,\"mode\":\"continuable\",\"label\":\"L11\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":28,\"time\":1791337580028,\"data\":{\"version\":0,\"childId\":\"k012\",\"childCreatedAt\":12,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":29,\"time\":1791337580029,\"data\":{\"version\":0,\"childId\":\"k013\",\"childCreatedAt\":13,\"mode\":\"one-shot\",\"label\":\"L13\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":30,\"time\":1791337580030,\"data\":{\"version\":0,\"childId\":\"k014\",\"childCreatedAt\":14,\"mode\":\"continuable\",\"label\":\"L14\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":31,\"time\":1791337580031,\"data\":{\"version\":0,\"childId\":\"k015\",\"childCreatedAt\":15,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":32,\"time\":1791337580032,\"data\":{\"version\":0,\"childId\":\"k016\",\"childCreatedAt\":16,\"mode\":\"one-shot\",\"label\":\"L16\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":33,\"time\":1791337580033,\"data\":{\"version\":0,\"childId\":\"k017\",\"childCreatedAt\":17,\"mode\":\"continuable\",\"label\":\"L17\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":34,\"time\":1791337580034,\"data\":{\"version\":0,\"childId\":\"k018\",\"childCreatedAt\":18,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":35,\"time\":1791337580035,\"data\":{\"version\":0,\"childId\":\"k019\",\"childCreatedAt\":19,\"mode\":\"one-shot\",\"label\":\"L19\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":36,\"time\":1791337580036,\"data\":{\"version\":0,\"childId\":\"k020\",\"childCreatedAt\":20,\"mode\":\"continuable\",\"label\":\"L20\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":37,\"time\":1791337580037,\"data\":{\"version\":0,\"childId\":\"k021\",\"childCreatedAt\":21,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":38,\"time\":1791337580038,\"data\":{\"version\":0,\"childId\":\"k022\",\"childCreatedAt\":22,\"mode\":\"one-shot\",\"label\":\"L22\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":39,\"time\":1791337580039,\"data\":{\"version\":0,\"childId\":\"k023\",\"childCreatedAt\":23,\"mode\":\"continuable\",\"label\":\"L23\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":40,\"time\":1791337580040,\"data\":{\"version\":0,\"childId\":\"k024\",\"childCreatedAt\":24,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":41,\"time\":1791337580041,\"data\":{\"version\":0,\"childId\":\"k025\",\"childCreatedAt\":25,\"mode\":\"one-shot\",\"label\":\"L25\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":42,\"time\":1791337580042,\"data\":{\"version\":0,\"childId\":\"k026\",\"childCreatedAt\":26,\"mode\":\"continuable\",\"label\":\"L26\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":43,\"time\":1791337580043,\"data\":{\"version\":0,\"childId\":\"k027\",\"childCreatedAt\":27,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":44,\"time\":1791337580044,\"data\":{\"version\":0,\"childId\":\"k028\",\"childCreatedAt\":28,\"mode\":\"one-shot\",\"label\":\"L28\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":45,\"time\":1791337580045,\"data\":{\"version\":0,\"childId\":\"k029\",\"childCreatedAt\":29,\"mode\":\"continuable\",\"label\":\"L29\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":46,\"time\":1791337580046,\"data\":{\"version\":0,\"childId\":\"k030\",\"childCreatedAt\":30,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":47,\"time\":1791337580047,\"data\":{\"version\":0,\"childId\":\"k031\",\"childCreatedAt\":31,\"mode\":\"one-shot\",\"label\":\"L31\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":48,\"time\":1791337580048,\"data\":{\"version\":0,\"childId\":\"k032\",\"childCreatedAt\":32,\"mode\":\"continuable\",\"label\":\"L32\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":49,\"time\":1791337580049,\"data\":{\"version\":0,\"childId\":\"k033\",\"childCreatedAt\":33,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":50,\"time\":1791337580050,\"data\":{\"version\":0,\"childId\":\"k034\",\"childCreatedAt\":34,\"mode\":\"one-shot\",\"label\":\"L34\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":51,\"time\":1791337580051,\"data\":{\"version\":0,\"childId\":\"k035\",\"childCreatedAt\":35,\"mode\":\"continuable\",\"label\":\"L35\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":52,\"time\":1791337580052,\"data\":{\"version\":0,\"childId\":\"k036\",\"childCreatedAt\":36,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":53,\"time\":1791337580053,\"data\":{\"version\":0,\"childId\":\"k037\",\"childCreatedAt\":37,\"mode\":\"one-shot\",\"label\":\"L37\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":54,\"time\":1791337580054,\"data\":{\"version\":0,\"childId\":\"k038\",\"childCreatedAt\":38,\"mode\":\"continuable\",\"label\":\"L38\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":55,\"time\":1791337580055,\"data\":{\"version\":0,\"childId\":\"k039\",\"childCreatedAt\":39,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":56,\"time\":1791337580056,\"data\":{\"version\":0,\"childId\":\"k040\",\"childCreatedAt\":40,\"mode\":\"one-shot\",\"label\":\"L40\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":57,\"time\":1791337580057,\"data\":{\"version\":0,\"childId\":\"k041\",\"childCreatedAt\":41,\"mode\":\"continuable\",\"label\":\"L41\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":58,\"time\":1791337580058,\"data\":{\"version\":0,\"childId\":\"k042\",\"childCreatedAt\":42,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":59,\"time\":1791337580059,\"data\":{\"version\":0,\"childId\":\"k043\",\"childCreatedAt\":43,\"mode\":\"one-shot\",\"label\":\"L43\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":60,\"time\":1791337580060,\"data\":{\"version\":0,\"childId\":\"k044\",\"childCreatedAt\":44,\"mode\":\"continuable\",\"label\":\"L44\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":61,\"time\":1791337580061,\"data\":{\"version\":0,\"childId\":\"k045\",\"childCreatedAt\":45,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":62,\"time\":1791337580062,\"data\":{\"version\":0,\"childId\":\"k046\",\"childCreatedAt\":46,\"mode\":\"one-shot\",\"label\":\"L46\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":63,\"time\":1791337580063,\"data\":{\"version\":0,\"childId\":\"k047\",\"childCreatedAt\":47,\"mode\":\"continuable\",\"label\":\"L47\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":64,\"time\":1791337580064,\"data\":{\"version\":0,\"childId\":\"k048\",\"childCreatedAt\":48,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":65,\"time\":1791337580065,\"data\":{\"version\":0,\"childId\":\"k049\",\"childCreatedAt\":49,\"mode\":\"one-shot\",\"label\":\"L49\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":66,\"time\":1791337580066,\"data\":{\"version\":0,\"childId\":\"k050\",\"childCreatedAt\":50,\"mode\":\"continuable\",\"label\":\"L50\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":67,\"time\":1791337580067,\"data\":{\"version\":0,\"childId\":\"k051\",\"childCreatedAt\":51,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":68,\"time\":1791337580068,\"data\":{\"version\":0,\"childId\":\"k052\",\"childCreatedAt\":52,\"mode\":\"one-shot\",\"label\":\"L52\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":69,\"time\":1791337580069,\"data\":{\"version\":0,\"childId\":\"k053\",\"childCreatedAt\":53,\"mode\":\"continuable\",\"label\":\"L53\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":70,\"time\":1791337580070,\"data\":{\"version\":0,\"childId\":\"k054\",\"childCreatedAt\":54,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":71,\"time\":1791337580071,\"data\":{\"version\":0,\"childId\":\"k055\",\"childCreatedAt\":55,\"mode\":\"one-shot\",\"label\":\"L55\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":72,\"time\":1791337580072,\"data\":{\"version\":0,\"childId\":\"k056\",\"childCreatedAt\":56,\"mode\":\"continuable\",\"label\":\"L56\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":73,\"time\":1791337580073,\"data\":{\"version\":0,\"childId\":\"k057\",\"childCreatedAt\":57,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":74,\"time\":1791337580074,\"data\":{\"version\":0,\"childId\":\"k058\",\"childCreatedAt\":58,\"mode\":\"one-shot\",\"label\":\"L58\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":75,\"time\":1791337580075,\"data\":{\"version\":0,\"childId\":\"k059\",\"childCreatedAt\":59,\"mode\":\"continuable\",\"label\":\"L59\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":76,\"time\":1791337580076,\"data\":{\"version\":0,\"childId\":\"k060\",\"childCreatedAt\":60,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":77,\"time\":1791337580077,\"data\":{\"version\":0,\"childId\":\"k061\",\"childCreatedAt\":61,\"mode\":\"one-shot\",\"label\":\"L61\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":78,\"time\":1791337580078,\"data\":{\"version\":0,\"childId\":\"k062\",\"childCreatedAt\":62,\"mode\":\"continuable\",\"label\":\"L62\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":79,\"time\":1791337580079,\"data\":{\"version\":0,\"childId\":\"k063\",\"childCreatedAt\":63,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":80,\"time\":1791337580080,\"data\":{\"version\":0,\"childId\":\"k064\",\"childCreatedAt\":64,\"mode\":\"one-shot\",\"label\":\"L64\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "catalog",
+        "inheritedEventCount": 0,
+        "entries": [
+          {
+            "id": "k000",
+            "createdAt": 0,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k001",
+            "createdAt": 1,
+            "mode": "one-shot",
+            "label": "L1"
+          },
+          {
+            "id": "k002",
+            "createdAt": 2,
+            "mode": "continuable",
+            "label": "L2"
+          },
+          {
+            "id": "k003",
+            "createdAt": 3,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k004",
+            "createdAt": 4,
+            "mode": "one-shot",
+            "label": "L4"
+          },
+          {
+            "id": "k005",
+            "createdAt": 5,
+            "mode": "continuable",
+            "label": "L5"
+          },
+          {
+            "id": "k006",
+            "createdAt": 6,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k007",
+            "createdAt": 7,
+            "mode": "one-shot",
+            "label": "L7"
+          },
+          {
+            "id": "k008",
+            "createdAt": 8,
+            "mode": "continuable",
+            "label": "L8"
+          },
+          {
+            "id": "k009",
+            "createdAt": 9,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k010",
+            "createdAt": 10,
+            "mode": "one-shot",
+            "label": "L10"
+          },
+          {
+            "id": "k011",
+            "createdAt": 11,
+            "mode": "continuable",
+            "label": "L11"
+          },
+          {
+            "id": "k012",
+            "createdAt": 12,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k013",
+            "createdAt": 13,
+            "mode": "one-shot",
+            "label": "L13"
+          },
+          {
+            "id": "k014",
+            "createdAt": 14,
+            "mode": "continuable",
+            "label": "L14"
+          },
+          {
+            "id": "k015",
+            "createdAt": 15,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k016",
+            "createdAt": 16,
+            "mode": "one-shot",
+            "label": "L16"
+          },
+          {
+            "id": "k017",
+            "createdAt": 17,
+            "mode": "continuable",
+            "label": "L17"
+          },
+          {
+            "id": "k018",
+            "createdAt": 18,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k019",
+            "createdAt": 19,
+            "mode": "one-shot",
+            "label": "L19"
+          },
+          {
+            "id": "k020",
+            "createdAt": 20,
+            "mode": "continuable",
+            "label": "L20"
+          },
+          {
+            "id": "k021",
+            "createdAt": 21,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k022",
+            "createdAt": 22,
+            "mode": "one-shot",
+            "label": "L22"
+          },
+          {
+            "id": "k023",
+            "createdAt": 23,
+            "mode": "continuable",
+            "label": "L23"
+          },
+          {
+            "id": "k024",
+            "createdAt": 24,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k025",
+            "createdAt": 25,
+            "mode": "one-shot",
+            "label": "L25"
+          },
+          {
+            "id": "k026",
+            "createdAt": 26,
+            "mode": "continuable",
+            "label": "L26"
+          },
+          {
+            "id": "k027",
+            "createdAt": 27,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k028",
+            "createdAt": 28,
+            "mode": "one-shot",
+            "label": "L28"
+          },
+          {
+            "id": "k029",
+            "createdAt": 29,
+            "mode": "continuable",
+            "label": "L29"
+          },
+          {
+            "id": "k030",
+            "createdAt": 30,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k031",
+            "createdAt": 31,
+            "mode": "one-shot",
+            "label": "L31"
+          },
+          {
+            "id": "k032",
+            "createdAt": 32,
+            "mode": "continuable",
+            "label": "L32"
+          },
+          {
+            "id": "k033",
+            "createdAt": 33,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k034",
+            "createdAt": 34,
+            "mode": "one-shot",
+            "label": "L34"
+          },
+          {
+            "id": "k035",
+            "createdAt": 35,
+            "mode": "continuable",
+            "label": "L35"
+          },
+          {
+            "id": "k036",
+            "createdAt": 36,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k037",
+            "createdAt": 37,
+            "mode": "one-shot",
+            "label": "L37"
+          },
+          {
+            "id": "k038",
+            "createdAt": 38,
+            "mode": "continuable",
+            "label": "L38"
+          },
+          {
+            "id": "k039",
+            "createdAt": 39,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k040",
+            "createdAt": 40,
+            "mode": "one-shot",
+            "label": "L40"
+          },
+          {
+            "id": "k041",
+            "createdAt": 41,
+            "mode": "continuable",
+            "label": "L41"
+          },
+          {
+            "id": "k042",
+            "createdAt": 42,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k043",
+            "createdAt": 43,
+            "mode": "one-shot",
+            "label": "L43"
+          },
+          {
+            "id": "k044",
+            "createdAt": 44,
+            "mode": "continuable",
+            "label": "L44"
+          },
+          {
+            "id": "k045",
+            "createdAt": 45,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k046",
+            "createdAt": 46,
+            "mode": "one-shot",
+            "label": "L46"
+          },
+          {
+            "id": "k047",
+            "createdAt": 47,
+            "mode": "continuable",
+            "label": "L47"
+          },
+          {
+            "id": "k048",
+            "createdAt": 48,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k049",
+            "createdAt": 49,
+            "mode": "one-shot",
+            "label": "L49"
+          },
+          {
+            "id": "k050",
+            "createdAt": 50,
+            "mode": "continuable",
+            "label": "L50"
+          },
+          {
+            "id": "k051",
+            "createdAt": 51,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k052",
+            "createdAt": 52,
+            "mode": "one-shot",
+            "label": "L52"
+          },
+          {
+            "id": "k053",
+            "createdAt": 53,
+            "mode": "continuable",
+            "label": "L53"
+          },
+          {
+            "id": "k054",
+            "createdAt": 54,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k055",
+            "createdAt": 55,
+            "mode": "one-shot",
+            "label": "L55"
+          },
+          {
+            "id": "k056",
+            "createdAt": 56,
+            "mode": "continuable",
+            "label": "L56"
+          },
+          {
+            "id": "k057",
+            "createdAt": 57,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k058",
+            "createdAt": 58,
+            "mode": "one-shot",
+            "label": "L58"
+          },
+          {
+            "id": "k059",
+            "createdAt": 59,
+            "mode": "continuable",
+            "label": "L59"
+          },
+          {
+            "id": "k060",
+            "createdAt": 60,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k061",
+            "createdAt": 61,
+            "mode": "one-shot",
+            "label": "L61"
+          },
+          {
+            "id": "k062",
+            "createdAt": 62,
+            "mode": "continuable",
+            "label": "L62"
+          },
+          {
+            "id": "k063",
+            "createdAt": 63,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k064",
+            "createdAt": 64,
+            "mode": "one-shot",
+            "label": "L64"
+          }
+        ]
+      },
+      "note": "The 65th fact starts a second chunk; the view keeps one ordered list."
+    },
+    {
+      "id": "chunk-cross-129",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"k000\",\"childCreatedAt\":0,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":17,\"time\":1791337580017,\"data\":{\"version\":0,\"childId\":\"k001\",\"childCreatedAt\":1,\"mode\":\"one-shot\",\"label\":\"L1\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":18,\"time\":1791337580018,\"data\":{\"version\":0,\"childId\":\"k002\",\"childCreatedAt\":2,\"mode\":\"continuable\",\"label\":\"L2\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":19,\"time\":1791337580019,\"data\":{\"version\":0,\"childId\":\"k003\",\"childCreatedAt\":3,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":20,\"time\":1791337580020,\"data\":{\"version\":0,\"childId\":\"k004\",\"childCreatedAt\":4,\"mode\":\"one-shot\",\"label\":\"L4\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":21,\"time\":1791337580021,\"data\":{\"version\":0,\"childId\":\"k005\",\"childCreatedAt\":5,\"mode\":\"continuable\",\"label\":\"L5\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":22,\"time\":1791337580022,\"data\":{\"version\":0,\"childId\":\"k006\",\"childCreatedAt\":6,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":23,\"time\":1791337580023,\"data\":{\"version\":0,\"childId\":\"k007\",\"childCreatedAt\":7,\"mode\":\"one-shot\",\"label\":\"L7\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":24,\"time\":1791337580024,\"data\":{\"version\":0,\"childId\":\"k008\",\"childCreatedAt\":8,\"mode\":\"continuable\",\"label\":\"L8\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":25,\"time\":1791337580025,\"data\":{\"version\":0,\"childId\":\"k009\",\"childCreatedAt\":9,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":26,\"time\":1791337580026,\"data\":{\"version\":0,\"childId\":\"k010\",\"childCreatedAt\":10,\"mode\":\"one-shot\",\"label\":\"L10\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":27,\"time\":1791337580027,\"data\":{\"version\":0,\"childId\":\"k011\",\"childCreatedAt\":11,\"mode\":\"continuable\",\"label\":\"L11\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":28,\"time\":1791337580028,\"data\":{\"version\":0,\"childId\":\"k012\",\"childCreatedAt\":12,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":29,\"time\":1791337580029,\"data\":{\"version\":0,\"childId\":\"k013\",\"childCreatedAt\":13,\"mode\":\"one-shot\",\"label\":\"L13\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":30,\"time\":1791337580030,\"data\":{\"version\":0,\"childId\":\"k014\",\"childCreatedAt\":14,\"mode\":\"continuable\",\"label\":\"L14\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":31,\"time\":1791337580031,\"data\":{\"version\":0,\"childId\":\"k015\",\"childCreatedAt\":15,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":32,\"time\":1791337580032,\"data\":{\"version\":0,\"childId\":\"k016\",\"childCreatedAt\":16,\"mode\":\"one-shot\",\"label\":\"L16\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":33,\"time\":1791337580033,\"data\":{\"version\":0,\"childId\":\"k017\",\"childCreatedAt\":17,\"mode\":\"continuable\",\"label\":\"L17\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":34,\"time\":1791337580034,\"data\":{\"version\":0,\"childId\":\"k018\",\"childCreatedAt\":18,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":35,\"time\":1791337580035,\"data\":{\"version\":0,\"childId\":\"k019\",\"childCreatedAt\":19,\"mode\":\"one-shot\",\"label\":\"L19\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":36,\"time\":1791337580036,\"data\":{\"version\":0,\"childId\":\"k020\",\"childCreatedAt\":20,\"mode\":\"continuable\",\"label\":\"L20\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":37,\"time\":1791337580037,\"data\":{\"version\":0,\"childId\":\"k021\",\"childCreatedAt\":21,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":38,\"time\":1791337580038,\"data\":{\"version\":0,\"childId\":\"k022\",\"childCreatedAt\":22,\"mode\":\"one-shot\",\"label\":\"L22\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":39,\"time\":1791337580039,\"data\":{\"version\":0,\"childId\":\"k023\",\"childCreatedAt\":23,\"mode\":\"continuable\",\"label\":\"L23\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":40,\"time\":1791337580040,\"data\":{\"version\":0,\"childId\":\"k024\",\"childCreatedAt\":24,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":41,\"time\":1791337580041,\"data\":{\"version\":0,\"childId\":\"k025\",\"childCreatedAt\":25,\"mode\":\"one-shot\",\"label\":\"L25\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":42,\"time\":1791337580042,\"data\":{\"version\":0,\"childId\":\"k026\",\"childCreatedAt\":26,\"mode\":\"continuable\",\"label\":\"L26\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":43,\"time\":1791337580043,\"data\":{\"version\":0,\"childId\":\"k027\",\"childCreatedAt\":27,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":44,\"time\":1791337580044,\"data\":{\"version\":0,\"childId\":\"k028\",\"childCreatedAt\":28,\"mode\":\"one-shot\",\"label\":\"L28\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":45,\"time\":1791337580045,\"data\":{\"version\":0,\"childId\":\"k029\",\"childCreatedAt\":29,\"mode\":\"continuable\",\"label\":\"L29\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":46,\"time\":1791337580046,\"data\":{\"version\":0,\"childId\":\"k030\",\"childCreatedAt\":30,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":47,\"time\":1791337580047,\"data\":{\"version\":0,\"childId\":\"k031\",\"childCreatedAt\":31,\"mode\":\"one-shot\",\"label\":\"L31\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":48,\"time\":1791337580048,\"data\":{\"version\":0,\"childId\":\"k032\",\"childCreatedAt\":32,\"mode\":\"continuable\",\"label\":\"L32\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":49,\"time\":1791337580049,\"data\":{\"version\":0,\"childId\":\"k033\",\"childCreatedAt\":33,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":50,\"time\":1791337580050,\"data\":{\"version\":0,\"childId\":\"k034\",\"childCreatedAt\":34,\"mode\":\"one-shot\",\"label\":\"L34\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":51,\"time\":1791337580051,\"data\":{\"version\":0,\"childId\":\"k035\",\"childCreatedAt\":35,\"mode\":\"continuable\",\"label\":\"L35\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":52,\"time\":1791337580052,\"data\":{\"version\":0,\"childId\":\"k036\",\"childCreatedAt\":36,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":53,\"time\":1791337580053,\"data\":{\"version\":0,\"childId\":\"k037\",\"childCreatedAt\":37,\"mode\":\"one-shot\",\"label\":\"L37\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":54,\"time\":1791337580054,\"data\":{\"version\":0,\"childId\":\"k038\",\"childCreatedAt\":38,\"mode\":\"continuable\",\"label\":\"L38\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":55,\"time\":1791337580055,\"data\":{\"version\":0,\"childId\":\"k039\",\"childCreatedAt\":39,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":56,\"time\":1791337580056,\"data\":{\"version\":0,\"childId\":\"k040\",\"childCreatedAt\":40,\"mode\":\"one-shot\",\"label\":\"L40\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":57,\"time\":1791337580057,\"data\":{\"version\":0,\"childId\":\"k041\",\"childCreatedAt\":41,\"mode\":\"continuable\",\"label\":\"L41\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":58,\"time\":1791337580058,\"data\":{\"version\":0,\"childId\":\"k042\",\"childCreatedAt\":42,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":59,\"time\":1791337580059,\"data\":{\"version\":0,\"childId\":\"k043\",\"childCreatedAt\":43,\"mode\":\"one-shot\",\"label\":\"L43\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":60,\"time\":1791337580060,\"data\":{\"version\":0,\"childId\":\"k044\",\"childCreatedAt\":44,\"mode\":\"continuable\",\"label\":\"L44\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":61,\"time\":1791337580061,\"data\":{\"version\":0,\"childId\":\"k045\",\"childCreatedAt\":45,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":62,\"time\":1791337580062,\"data\":{\"version\":0,\"childId\":\"k046\",\"childCreatedAt\":46,\"mode\":\"one-shot\",\"label\":\"L46\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":63,\"time\":1791337580063,\"data\":{\"version\":0,\"childId\":\"k047\",\"childCreatedAt\":47,\"mode\":\"continuable\",\"label\":\"L47\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":64,\"time\":1791337580064,\"data\":{\"version\":0,\"childId\":\"k048\",\"childCreatedAt\":48,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":65,\"time\":1791337580065,\"data\":{\"version\":0,\"childId\":\"k049\",\"childCreatedAt\":49,\"mode\":\"one-shot\",\"label\":\"L49\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":66,\"time\":1791337580066,\"data\":{\"version\":0,\"childId\":\"k050\",\"childCreatedAt\":50,\"mode\":\"continuable\",\"label\":\"L50\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":67,\"time\":1791337580067,\"data\":{\"version\":0,\"childId\":\"k051\",\"childCreatedAt\":51,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":68,\"time\":1791337580068,\"data\":{\"version\":0,\"childId\":\"k052\",\"childCreatedAt\":52,\"mode\":\"one-shot\",\"label\":\"L52\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":69,\"time\":1791337580069,\"data\":{\"version\":0,\"childId\":\"k053\",\"childCreatedAt\":53,\"mode\":\"continuable\",\"label\":\"L53\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":70,\"time\":1791337580070,\"data\":{\"version\":0,\"childId\":\"k054\",\"childCreatedAt\":54,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":71,\"time\":1791337580071,\"data\":{\"version\":0,\"childId\":\"k055\",\"childCreatedAt\":55,\"mode\":\"one-shot\",\"label\":\"L55\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":72,\"time\":1791337580072,\"data\":{\"version\":0,\"childId\":\"k056\",\"childCreatedAt\":56,\"mode\":\"continuable\",\"label\":\"L56\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":73,\"time\":1791337580073,\"data\":{\"version\":0,\"childId\":\"k057\",\"childCreatedAt\":57,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":74,\"time\":1791337580074,\"data\":{\"version\":0,\"childId\":\"k058\",\"childCreatedAt\":58,\"mode\":\"one-shot\",\"label\":\"L58\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":75,\"time\":1791337580075,\"data\":{\"version\":0,\"childId\":\"k059\",\"childCreatedAt\":59,\"mode\":\"continuable\",\"label\":\"L59\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":76,\"time\":1791337580076,\"data\":{\"version\":0,\"childId\":\"k060\",\"childCreatedAt\":60,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":77,\"time\":1791337580077,\"data\":{\"version\":0,\"childId\":\"k061\",\"childCreatedAt\":61,\"mode\":\"one-shot\",\"label\":\"L61\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":78,\"time\":1791337580078,\"data\":{\"version\":0,\"childId\":\"k062\",\"childCreatedAt\":62,\"mode\":\"continuable\",\"label\":\"L62\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":79,\"time\":1791337580079,\"data\":{\"version\":0,\"childId\":\"k063\",\"childCreatedAt\":63,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":80,\"time\":1791337580080,\"data\":{\"version\":0,\"childId\":\"k064\",\"childCreatedAt\":64,\"mode\":\"one-shot\",\"label\":\"L64\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":81,\"time\":1791337580081,\"data\":{\"version\":0,\"childId\":\"k065\",\"childCreatedAt\":65,\"mode\":\"continuable\",\"label\":\"L65\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":82,\"time\":1791337580082,\"data\":{\"version\":0,\"childId\":\"k066\",\"childCreatedAt\":66,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":83,\"time\":1791337580083,\"data\":{\"version\":0,\"childId\":\"k067\",\"childCreatedAt\":67,\"mode\":\"one-shot\",\"label\":\"L67\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":84,\"time\":1791337580084,\"data\":{\"version\":0,\"childId\":\"k068\",\"childCreatedAt\":68,\"mode\":\"continuable\",\"label\":\"L68\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":85,\"time\":1791337580085,\"data\":{\"version\":0,\"childId\":\"k069\",\"childCreatedAt\":69,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":86,\"time\":1791337580086,\"data\":{\"version\":0,\"childId\":\"k070\",\"childCreatedAt\":70,\"mode\":\"one-shot\",\"label\":\"L70\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":87,\"time\":1791337580087,\"data\":{\"version\":0,\"childId\":\"k071\",\"childCreatedAt\":71,\"mode\":\"continuable\",\"label\":\"L71\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":88,\"time\":1791337580088,\"data\":{\"version\":0,\"childId\":\"k072\",\"childCreatedAt\":72,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":89,\"time\":1791337580089,\"data\":{\"version\":0,\"childId\":\"k073\",\"childCreatedAt\":73,\"mode\":\"one-shot\",\"label\":\"L73\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":90,\"time\":1791337580090,\"data\":{\"version\":0,\"childId\":\"k074\",\"childCreatedAt\":74,\"mode\":\"continuable\",\"label\":\"L74\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":91,\"time\":1791337580091,\"data\":{\"version\":0,\"childId\":\"k075\",\"childCreatedAt\":75,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":92,\"time\":1791337580092,\"data\":{\"version\":0,\"childId\":\"k076\",\"childCreatedAt\":76,\"mode\":\"one-shot\",\"label\":\"L76\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":93,\"time\":1791337580093,\"data\":{\"version\":0,\"childId\":\"k077\",\"childCreatedAt\":77,\"mode\":\"continuable\",\"label\":\"L77\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":94,\"time\":1791337580094,\"data\":{\"version\":0,\"childId\":\"k078\",\"childCreatedAt\":78,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":95,\"time\":1791337580095,\"data\":{\"version\":0,\"childId\":\"k079\",\"childCreatedAt\":79,\"mode\":\"one-shot\",\"label\":\"L79\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":96,\"time\":1791337580096,\"data\":{\"version\":0,\"childId\":\"k080\",\"childCreatedAt\":80,\"mode\":\"continuable\",\"label\":\"L80\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":97,\"time\":1791337580097,\"data\":{\"version\":0,\"childId\":\"k081\",\"childCreatedAt\":81,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":98,\"time\":1791337580098,\"data\":{\"version\":0,\"childId\":\"k082\",\"childCreatedAt\":82,\"mode\":\"one-shot\",\"label\":\"L82\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":99,\"time\":1791337580099,\"data\":{\"version\":0,\"childId\":\"k083\",\"childCreatedAt\":83,\"mode\":\"continuable\",\"label\":\"L83\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":100,\"time\":1791337580100,\"data\":{\"version\":0,\"childId\":\"k084\",\"childCreatedAt\":84,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":101,\"time\":1791337580101,\"data\":{\"version\":0,\"childId\":\"k085\",\"childCreatedAt\":85,\"mode\":\"one-shot\",\"label\":\"L85\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":102,\"time\":1791337580102,\"data\":{\"version\":0,\"childId\":\"k086\",\"childCreatedAt\":86,\"mode\":\"continuable\",\"label\":\"L86\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":103,\"time\":1791337580103,\"data\":{\"version\":0,\"childId\":\"k087\",\"childCreatedAt\":87,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":104,\"time\":1791337580104,\"data\":{\"version\":0,\"childId\":\"k088\",\"childCreatedAt\":88,\"mode\":\"one-shot\",\"label\":\"L88\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":105,\"time\":1791337580105,\"data\":{\"version\":0,\"childId\":\"k089\",\"childCreatedAt\":89,\"mode\":\"continuable\",\"label\":\"L89\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":106,\"time\":1791337580106,\"data\":{\"version\":0,\"childId\":\"k090\",\"childCreatedAt\":90,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":107,\"time\":1791337580107,\"data\":{\"version\":0,\"childId\":\"k091\",\"childCreatedAt\":91,\"mode\":\"one-shot\",\"label\":\"L91\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":108,\"time\":1791337580108,\"data\":{\"version\":0,\"childId\":\"k092\",\"childCreatedAt\":92,\"mode\":\"continuable\",\"label\":\"L92\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":109,\"time\":1791337580109,\"data\":{\"version\":0,\"childId\":\"k093\",\"childCreatedAt\":93,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":110,\"time\":1791337580110,\"data\":{\"version\":0,\"childId\":\"k094\",\"childCreatedAt\":94,\"mode\":\"one-shot\",\"label\":\"L94\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":111,\"time\":1791337580111,\"data\":{\"version\":0,\"childId\":\"k095\",\"childCreatedAt\":95,\"mode\":\"continuable\",\"label\":\"L95\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":112,\"time\":1791337580112,\"data\":{\"version\":0,\"childId\":\"k096\",\"childCreatedAt\":96,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":113,\"time\":1791337580113,\"data\":{\"version\":0,\"childId\":\"k097\",\"childCreatedAt\":97,\"mode\":\"one-shot\",\"label\":\"L97\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":114,\"time\":1791337580114,\"data\":{\"version\":0,\"childId\":\"k098\",\"childCreatedAt\":98,\"mode\":\"continuable\",\"label\":\"L98\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":115,\"time\":1791337580115,\"data\":{\"version\":0,\"childId\":\"k099\",\"childCreatedAt\":99,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":116,\"time\":1791337580116,\"data\":{\"version\":0,\"childId\":\"k100\",\"childCreatedAt\":100,\"mode\":\"one-shot\",\"label\":\"L100\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":117,\"time\":1791337580117,\"data\":{\"version\":0,\"childId\":\"k101\",\"childCreatedAt\":101,\"mode\":\"continuable\",\"label\":\"L101\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":118,\"time\":1791337580118,\"data\":{\"version\":0,\"childId\":\"k102\",\"childCreatedAt\":102,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":119,\"time\":1791337580119,\"data\":{\"version\":0,\"childId\":\"k103\",\"childCreatedAt\":103,\"mode\":\"one-shot\",\"label\":\"L103\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":120,\"time\":1791337580120,\"data\":{\"version\":0,\"childId\":\"k104\",\"childCreatedAt\":104,\"mode\":\"continuable\",\"label\":\"L104\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":121,\"time\":1791337580121,\"data\":{\"version\":0,\"childId\":\"k105\",\"childCreatedAt\":105,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":122,\"time\":1791337580122,\"data\":{\"version\":0,\"childId\":\"k106\",\"childCreatedAt\":106,\"mode\":\"one-shot\",\"label\":\"L106\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":123,\"time\":1791337580123,\"data\":{\"version\":0,\"childId\":\"k107\",\"childCreatedAt\":107,\"mode\":\"continuable\",\"label\":\"L107\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":124,\"time\":1791337580124,\"data\":{\"version\":0,\"childId\":\"k108\",\"childCreatedAt\":108,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":125,\"time\":1791337580125,\"data\":{\"version\":0,\"childId\":\"k109\",\"childCreatedAt\":109,\"mode\":\"one-shot\",\"label\":\"L109\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":126,\"time\":1791337580126,\"data\":{\"version\":0,\"childId\":\"k110\",\"childCreatedAt\":110,\"mode\":\"continuable\",\"label\":\"L110\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":127,\"time\":1791337580127,\"data\":{\"version\":0,\"childId\":\"k111\",\"childCreatedAt\":111,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":128,\"time\":1791337580128,\"data\":{\"version\":0,\"childId\":\"k112\",\"childCreatedAt\":112,\"mode\":\"one-shot\",\"label\":\"L112\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":129,\"time\":1791337580129,\"data\":{\"version\":0,\"childId\":\"k113\",\"childCreatedAt\":113,\"mode\":\"continuable\",\"label\":\"L113\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":130,\"time\":1791337580130,\"data\":{\"version\":0,\"childId\":\"k114\",\"childCreatedAt\":114,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":131,\"time\":1791337580131,\"data\":{\"version\":0,\"childId\":\"k115\",\"childCreatedAt\":115,\"mode\":\"one-shot\",\"label\":\"L115\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":132,\"time\":1791337580132,\"data\":{\"version\":0,\"childId\":\"k116\",\"childCreatedAt\":116,\"mode\":\"continuable\",\"label\":\"L116\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":133,\"time\":1791337580133,\"data\":{\"version\":0,\"childId\":\"k117\",\"childCreatedAt\":117,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":134,\"time\":1791337580134,\"data\":{\"version\":0,\"childId\":\"k118\",\"childCreatedAt\":118,\"mode\":\"one-shot\",\"label\":\"L118\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":135,\"time\":1791337580135,\"data\":{\"version\":0,\"childId\":\"k119\",\"childCreatedAt\":119,\"mode\":\"continuable\",\"label\":\"L119\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":136,\"time\":1791337580136,\"data\":{\"version\":0,\"childId\":\"k120\",\"childCreatedAt\":120,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":137,\"time\":1791337580137,\"data\":{\"version\":0,\"childId\":\"k121\",\"childCreatedAt\":121,\"mode\":\"one-shot\",\"label\":\"L121\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":138,\"time\":1791337580138,\"data\":{\"version\":0,\"childId\":\"k122\",\"childCreatedAt\":122,\"mode\":\"continuable\",\"label\":\"L122\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":139,\"time\":1791337580139,\"data\":{\"version\":0,\"childId\":\"k123\",\"childCreatedAt\":123,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":140,\"time\":1791337580140,\"data\":{\"version\":0,\"childId\":\"k124\",\"childCreatedAt\":124,\"mode\":\"one-shot\",\"label\":\"L124\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":141,\"time\":1791337580141,\"data\":{\"version\":0,\"childId\":\"k125\",\"childCreatedAt\":125,\"mode\":\"continuable\",\"label\":\"L125\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":142,\"time\":1791337580142,\"data\":{\"version\":0,\"childId\":\"k126\",\"childCreatedAt\":126,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":143,\"time\":1791337580143,\"data\":{\"version\":0,\"childId\":\"k127\",\"childCreatedAt\":127,\"mode\":\"one-shot\",\"label\":\"L127\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":144,\"time\":1791337580144,\"data\":{\"version\":0,\"childId\":\"k128\",\"childCreatedAt\":128,\"mode\":\"continuable\",\"label\":\"L128\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "catalog",
+        "inheritedEventCount": 0,
+        "entries": [
+          {
+            "id": "k000",
+            "createdAt": 0,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k001",
+            "createdAt": 1,
+            "mode": "one-shot",
+            "label": "L1"
+          },
+          {
+            "id": "k002",
+            "createdAt": 2,
+            "mode": "continuable",
+            "label": "L2"
+          },
+          {
+            "id": "k003",
+            "createdAt": 3,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k004",
+            "createdAt": 4,
+            "mode": "one-shot",
+            "label": "L4"
+          },
+          {
+            "id": "k005",
+            "createdAt": 5,
+            "mode": "continuable",
+            "label": "L5"
+          },
+          {
+            "id": "k006",
+            "createdAt": 6,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k007",
+            "createdAt": 7,
+            "mode": "one-shot",
+            "label": "L7"
+          },
+          {
+            "id": "k008",
+            "createdAt": 8,
+            "mode": "continuable",
+            "label": "L8"
+          },
+          {
+            "id": "k009",
+            "createdAt": 9,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k010",
+            "createdAt": 10,
+            "mode": "one-shot",
+            "label": "L10"
+          },
+          {
+            "id": "k011",
+            "createdAt": 11,
+            "mode": "continuable",
+            "label": "L11"
+          },
+          {
+            "id": "k012",
+            "createdAt": 12,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k013",
+            "createdAt": 13,
+            "mode": "one-shot",
+            "label": "L13"
+          },
+          {
+            "id": "k014",
+            "createdAt": 14,
+            "mode": "continuable",
+            "label": "L14"
+          },
+          {
+            "id": "k015",
+            "createdAt": 15,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k016",
+            "createdAt": 16,
+            "mode": "one-shot",
+            "label": "L16"
+          },
+          {
+            "id": "k017",
+            "createdAt": 17,
+            "mode": "continuable",
+            "label": "L17"
+          },
+          {
+            "id": "k018",
+            "createdAt": 18,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k019",
+            "createdAt": 19,
+            "mode": "one-shot",
+            "label": "L19"
+          },
+          {
+            "id": "k020",
+            "createdAt": 20,
+            "mode": "continuable",
+            "label": "L20"
+          },
+          {
+            "id": "k021",
+            "createdAt": 21,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k022",
+            "createdAt": 22,
+            "mode": "one-shot",
+            "label": "L22"
+          },
+          {
+            "id": "k023",
+            "createdAt": 23,
+            "mode": "continuable",
+            "label": "L23"
+          },
+          {
+            "id": "k024",
+            "createdAt": 24,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k025",
+            "createdAt": 25,
+            "mode": "one-shot",
+            "label": "L25"
+          },
+          {
+            "id": "k026",
+            "createdAt": 26,
+            "mode": "continuable",
+            "label": "L26"
+          },
+          {
+            "id": "k027",
+            "createdAt": 27,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k028",
+            "createdAt": 28,
+            "mode": "one-shot",
+            "label": "L28"
+          },
+          {
+            "id": "k029",
+            "createdAt": 29,
+            "mode": "continuable",
+            "label": "L29"
+          },
+          {
+            "id": "k030",
+            "createdAt": 30,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k031",
+            "createdAt": 31,
+            "mode": "one-shot",
+            "label": "L31"
+          },
+          {
+            "id": "k032",
+            "createdAt": 32,
+            "mode": "continuable",
+            "label": "L32"
+          },
+          {
+            "id": "k033",
+            "createdAt": 33,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k034",
+            "createdAt": 34,
+            "mode": "one-shot",
+            "label": "L34"
+          },
+          {
+            "id": "k035",
+            "createdAt": 35,
+            "mode": "continuable",
+            "label": "L35"
+          },
+          {
+            "id": "k036",
+            "createdAt": 36,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k037",
+            "createdAt": 37,
+            "mode": "one-shot",
+            "label": "L37"
+          },
+          {
+            "id": "k038",
+            "createdAt": 38,
+            "mode": "continuable",
+            "label": "L38"
+          },
+          {
+            "id": "k039",
+            "createdAt": 39,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k040",
+            "createdAt": 40,
+            "mode": "one-shot",
+            "label": "L40"
+          },
+          {
+            "id": "k041",
+            "createdAt": 41,
+            "mode": "continuable",
+            "label": "L41"
+          },
+          {
+            "id": "k042",
+            "createdAt": 42,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k043",
+            "createdAt": 43,
+            "mode": "one-shot",
+            "label": "L43"
+          },
+          {
+            "id": "k044",
+            "createdAt": 44,
+            "mode": "continuable",
+            "label": "L44"
+          },
+          {
+            "id": "k045",
+            "createdAt": 45,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k046",
+            "createdAt": 46,
+            "mode": "one-shot",
+            "label": "L46"
+          },
+          {
+            "id": "k047",
+            "createdAt": 47,
+            "mode": "continuable",
+            "label": "L47"
+          },
+          {
+            "id": "k048",
+            "createdAt": 48,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k049",
+            "createdAt": 49,
+            "mode": "one-shot",
+            "label": "L49"
+          },
+          {
+            "id": "k050",
+            "createdAt": 50,
+            "mode": "continuable",
+            "label": "L50"
+          },
+          {
+            "id": "k051",
+            "createdAt": 51,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k052",
+            "createdAt": 52,
+            "mode": "one-shot",
+            "label": "L52"
+          },
+          {
+            "id": "k053",
+            "createdAt": 53,
+            "mode": "continuable",
+            "label": "L53"
+          },
+          {
+            "id": "k054",
+            "createdAt": 54,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k055",
+            "createdAt": 55,
+            "mode": "one-shot",
+            "label": "L55"
+          },
+          {
+            "id": "k056",
+            "createdAt": 56,
+            "mode": "continuable",
+            "label": "L56"
+          },
+          {
+            "id": "k057",
+            "createdAt": 57,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k058",
+            "createdAt": 58,
+            "mode": "one-shot",
+            "label": "L58"
+          },
+          {
+            "id": "k059",
+            "createdAt": 59,
+            "mode": "continuable",
+            "label": "L59"
+          },
+          {
+            "id": "k060",
+            "createdAt": 60,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k061",
+            "createdAt": 61,
+            "mode": "one-shot",
+            "label": "L61"
+          },
+          {
+            "id": "k062",
+            "createdAt": 62,
+            "mode": "continuable",
+            "label": "L62"
+          },
+          {
+            "id": "k063",
+            "createdAt": 63,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k064",
+            "createdAt": 64,
+            "mode": "one-shot",
+            "label": "L64"
+          },
+          {
+            "id": "k065",
+            "createdAt": 65,
+            "mode": "continuable",
+            "label": "L65"
+          },
+          {
+            "id": "k066",
+            "createdAt": 66,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k067",
+            "createdAt": 67,
+            "mode": "one-shot",
+            "label": "L67"
+          },
+          {
+            "id": "k068",
+            "createdAt": 68,
+            "mode": "continuable",
+            "label": "L68"
+          },
+          {
+            "id": "k069",
+            "createdAt": 69,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k070",
+            "createdAt": 70,
+            "mode": "one-shot",
+            "label": "L70"
+          },
+          {
+            "id": "k071",
+            "createdAt": 71,
+            "mode": "continuable",
+            "label": "L71"
+          },
+          {
+            "id": "k072",
+            "createdAt": 72,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k073",
+            "createdAt": 73,
+            "mode": "one-shot",
+            "label": "L73"
+          },
+          {
+            "id": "k074",
+            "createdAt": 74,
+            "mode": "continuable",
+            "label": "L74"
+          },
+          {
+            "id": "k075",
+            "createdAt": 75,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k076",
+            "createdAt": 76,
+            "mode": "one-shot",
+            "label": "L76"
+          },
+          {
+            "id": "k077",
+            "createdAt": 77,
+            "mode": "continuable",
+            "label": "L77"
+          },
+          {
+            "id": "k078",
+            "createdAt": 78,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k079",
+            "createdAt": 79,
+            "mode": "one-shot",
+            "label": "L79"
+          },
+          {
+            "id": "k080",
+            "createdAt": 80,
+            "mode": "continuable",
+            "label": "L80"
+          },
+          {
+            "id": "k081",
+            "createdAt": 81,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k082",
+            "createdAt": 82,
+            "mode": "one-shot",
+            "label": "L82"
+          },
+          {
+            "id": "k083",
+            "createdAt": 83,
+            "mode": "continuable",
+            "label": "L83"
+          },
+          {
+            "id": "k084",
+            "createdAt": 84,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k085",
+            "createdAt": 85,
+            "mode": "one-shot",
+            "label": "L85"
+          },
+          {
+            "id": "k086",
+            "createdAt": 86,
+            "mode": "continuable",
+            "label": "L86"
+          },
+          {
+            "id": "k087",
+            "createdAt": 87,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k088",
+            "createdAt": 88,
+            "mode": "one-shot",
+            "label": "L88"
+          },
+          {
+            "id": "k089",
+            "createdAt": 89,
+            "mode": "continuable",
+            "label": "L89"
+          },
+          {
+            "id": "k090",
+            "createdAt": 90,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k091",
+            "createdAt": 91,
+            "mode": "one-shot",
+            "label": "L91"
+          },
+          {
+            "id": "k092",
+            "createdAt": 92,
+            "mode": "continuable",
+            "label": "L92"
+          },
+          {
+            "id": "k093",
+            "createdAt": 93,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k094",
+            "createdAt": 94,
+            "mode": "one-shot",
+            "label": "L94"
+          },
+          {
+            "id": "k095",
+            "createdAt": 95,
+            "mode": "continuable",
+            "label": "L95"
+          },
+          {
+            "id": "k096",
+            "createdAt": 96,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k097",
+            "createdAt": 97,
+            "mode": "one-shot",
+            "label": "L97"
+          },
+          {
+            "id": "k098",
+            "createdAt": 98,
+            "mode": "continuable",
+            "label": "L98"
+          },
+          {
+            "id": "k099",
+            "createdAt": 99,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k100",
+            "createdAt": 100,
+            "mode": "one-shot",
+            "label": "L100"
+          },
+          {
+            "id": "k101",
+            "createdAt": 101,
+            "mode": "continuable",
+            "label": "L101"
+          },
+          {
+            "id": "k102",
+            "createdAt": 102,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k103",
+            "createdAt": 103,
+            "mode": "one-shot",
+            "label": "L103"
+          },
+          {
+            "id": "k104",
+            "createdAt": 104,
+            "mode": "continuable",
+            "label": "L104"
+          },
+          {
+            "id": "k105",
+            "createdAt": 105,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k106",
+            "createdAt": 106,
+            "mode": "one-shot",
+            "label": "L106"
+          },
+          {
+            "id": "k107",
+            "createdAt": 107,
+            "mode": "continuable",
+            "label": "L107"
+          },
+          {
+            "id": "k108",
+            "createdAt": 108,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k109",
+            "createdAt": 109,
+            "mode": "one-shot",
+            "label": "L109"
+          },
+          {
+            "id": "k110",
+            "createdAt": 110,
+            "mode": "continuable",
+            "label": "L110"
+          },
+          {
+            "id": "k111",
+            "createdAt": 111,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k112",
+            "createdAt": 112,
+            "mode": "one-shot",
+            "label": "L112"
+          },
+          {
+            "id": "k113",
+            "createdAt": 113,
+            "mode": "continuable",
+            "label": "L113"
+          },
+          {
+            "id": "k114",
+            "createdAt": 114,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k115",
+            "createdAt": 115,
+            "mode": "one-shot",
+            "label": "L115"
+          },
+          {
+            "id": "k116",
+            "createdAt": 116,
+            "mode": "continuable",
+            "label": "L116"
+          },
+          {
+            "id": "k117",
+            "createdAt": 117,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k118",
+            "createdAt": 118,
+            "mode": "one-shot",
+            "label": "L118"
+          },
+          {
+            "id": "k119",
+            "createdAt": 119,
+            "mode": "continuable",
+            "label": "L119"
+          },
+          {
+            "id": "k120",
+            "createdAt": 120,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k121",
+            "createdAt": 121,
+            "mode": "one-shot",
+            "label": "L121"
+          },
+          {
+            "id": "k122",
+            "createdAt": 122,
+            "mode": "continuable",
+            "label": "L122"
+          },
+          {
+            "id": "k123",
+            "createdAt": 123,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k124",
+            "createdAt": 124,
+            "mode": "one-shot",
+            "label": "L124"
+          },
+          {
+            "id": "k125",
+            "createdAt": 125,
+            "mode": "continuable",
+            "label": "L125"
+          },
+          {
+            "id": "k126",
+            "createdAt": 126,
+            "mode": "one-shot"
+          },
+          {
+            "id": "k127",
+            "createdAt": 127,
+            "mode": "one-shot",
+            "label": "L127"
+          },
+          {
+            "id": "k128",
+            "createdAt": 128,
+            "mode": "continuable",
+            "label": "L128"
+          }
+        ]
+      }
+    },
+    {
+      "id": "chunk-invalid-after-64",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"k000\",\"childCreatedAt\":0,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":17,\"time\":1791337580017,\"data\":{\"version\":0,\"childId\":\"k001\",\"childCreatedAt\":1,\"mode\":\"one-shot\",\"label\":\"L1\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":18,\"time\":1791337580018,\"data\":{\"version\":0,\"childId\":\"k002\",\"childCreatedAt\":2,\"mode\":\"continuable\",\"label\":\"L2\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":19,\"time\":1791337580019,\"data\":{\"version\":0,\"childId\":\"k003\",\"childCreatedAt\":3,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":20,\"time\":1791337580020,\"data\":{\"version\":0,\"childId\":\"k004\",\"childCreatedAt\":4,\"mode\":\"one-shot\",\"label\":\"L4\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":21,\"time\":1791337580021,\"data\":{\"version\":0,\"childId\":\"k005\",\"childCreatedAt\":5,\"mode\":\"continuable\",\"label\":\"L5\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":22,\"time\":1791337580022,\"data\":{\"version\":0,\"childId\":\"k006\",\"childCreatedAt\":6,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":23,\"time\":1791337580023,\"data\":{\"version\":0,\"childId\":\"k007\",\"childCreatedAt\":7,\"mode\":\"one-shot\",\"label\":\"L7\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":24,\"time\":1791337580024,\"data\":{\"version\":0,\"childId\":\"k008\",\"childCreatedAt\":8,\"mode\":\"continuable\",\"label\":\"L8\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":25,\"time\":1791337580025,\"data\":{\"version\":0,\"childId\":\"k009\",\"childCreatedAt\":9,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":26,\"time\":1791337580026,\"data\":{\"version\":0,\"childId\":\"k010\",\"childCreatedAt\":10,\"mode\":\"one-shot\",\"label\":\"L10\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":27,\"time\":1791337580027,\"data\":{\"version\":0,\"childId\":\"k011\",\"childCreatedAt\":11,\"mode\":\"continuable\",\"label\":\"L11\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":28,\"time\":1791337580028,\"data\":{\"version\":0,\"childId\":\"k012\",\"childCreatedAt\":12,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":29,\"time\":1791337580029,\"data\":{\"version\":0,\"childId\":\"k013\",\"childCreatedAt\":13,\"mode\":\"one-shot\",\"label\":\"L13\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":30,\"time\":1791337580030,\"data\":{\"version\":0,\"childId\":\"k014\",\"childCreatedAt\":14,\"mode\":\"continuable\",\"label\":\"L14\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":31,\"time\":1791337580031,\"data\":{\"version\":0,\"childId\":\"k015\",\"childCreatedAt\":15,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":32,\"time\":1791337580032,\"data\":{\"version\":0,\"childId\":\"k016\",\"childCreatedAt\":16,\"mode\":\"one-shot\",\"label\":\"L16\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":33,\"time\":1791337580033,\"data\":{\"version\":0,\"childId\":\"k017\",\"childCreatedAt\":17,\"mode\":\"continuable\",\"label\":\"L17\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":34,\"time\":1791337580034,\"data\":{\"version\":0,\"childId\":\"k018\",\"childCreatedAt\":18,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":35,\"time\":1791337580035,\"data\":{\"version\":0,\"childId\":\"k019\",\"childCreatedAt\":19,\"mode\":\"one-shot\",\"label\":\"L19\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":36,\"time\":1791337580036,\"data\":{\"version\":0,\"childId\":\"k020\",\"childCreatedAt\":20,\"mode\":\"continuable\",\"label\":\"L20\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":37,\"time\":1791337580037,\"data\":{\"version\":0,\"childId\":\"k021\",\"childCreatedAt\":21,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":38,\"time\":1791337580038,\"data\":{\"version\":0,\"childId\":\"k022\",\"childCreatedAt\":22,\"mode\":\"one-shot\",\"label\":\"L22\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":39,\"time\":1791337580039,\"data\":{\"version\":0,\"childId\":\"k023\",\"childCreatedAt\":23,\"mode\":\"continuable\",\"label\":\"L23\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":40,\"time\":1791337580040,\"data\":{\"version\":0,\"childId\":\"k024\",\"childCreatedAt\":24,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":41,\"time\":1791337580041,\"data\":{\"version\":0,\"childId\":\"k025\",\"childCreatedAt\":25,\"mode\":\"one-shot\",\"label\":\"L25\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":42,\"time\":1791337580042,\"data\":{\"version\":0,\"childId\":\"k026\",\"childCreatedAt\":26,\"mode\":\"continuable\",\"label\":\"L26\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":43,\"time\":1791337580043,\"data\":{\"version\":0,\"childId\":\"k027\",\"childCreatedAt\":27,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":44,\"time\":1791337580044,\"data\":{\"version\":0,\"childId\":\"k028\",\"childCreatedAt\":28,\"mode\":\"one-shot\",\"label\":\"L28\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":45,\"time\":1791337580045,\"data\":{\"version\":0,\"childId\":\"k029\",\"childCreatedAt\":29,\"mode\":\"continuable\",\"label\":\"L29\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":46,\"time\":1791337580046,\"data\":{\"version\":0,\"childId\":\"k030\",\"childCreatedAt\":30,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":47,\"time\":1791337580047,\"data\":{\"version\":0,\"childId\":\"k031\",\"childCreatedAt\":31,\"mode\":\"one-shot\",\"label\":\"L31\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":48,\"time\":1791337580048,\"data\":{\"version\":0,\"childId\":\"k032\",\"childCreatedAt\":32,\"mode\":\"continuable\",\"label\":\"L32\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":49,\"time\":1791337580049,\"data\":{\"version\":0,\"childId\":\"k033\",\"childCreatedAt\":33,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":50,\"time\":1791337580050,\"data\":{\"version\":0,\"childId\":\"k034\",\"childCreatedAt\":34,\"mode\":\"one-shot\",\"label\":\"L34\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":51,\"time\":1791337580051,\"data\":{\"version\":0,\"childId\":\"k035\",\"childCreatedAt\":35,\"mode\":\"continuable\",\"label\":\"L35\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":52,\"time\":1791337580052,\"data\":{\"version\":0,\"childId\":\"k036\",\"childCreatedAt\":36,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":53,\"time\":1791337580053,\"data\":{\"version\":0,\"childId\":\"k037\",\"childCreatedAt\":37,\"mode\":\"one-shot\",\"label\":\"L37\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":54,\"time\":1791337580054,\"data\":{\"version\":0,\"childId\":\"k038\",\"childCreatedAt\":38,\"mode\":\"continuable\",\"label\":\"L38\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":55,\"time\":1791337580055,\"data\":{\"version\":0,\"childId\":\"k039\",\"childCreatedAt\":39,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":56,\"time\":1791337580056,\"data\":{\"version\":0,\"childId\":\"k040\",\"childCreatedAt\":40,\"mode\":\"one-shot\",\"label\":\"L40\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":57,\"time\":1791337580057,\"data\":{\"version\":0,\"childId\":\"k041\",\"childCreatedAt\":41,\"mode\":\"continuable\",\"label\":\"L41\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":58,\"time\":1791337580058,\"data\":{\"version\":0,\"childId\":\"k042\",\"childCreatedAt\":42,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":59,\"time\":1791337580059,\"data\":{\"version\":0,\"childId\":\"k043\",\"childCreatedAt\":43,\"mode\":\"one-shot\",\"label\":\"L43\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":60,\"time\":1791337580060,\"data\":{\"version\":0,\"childId\":\"k044\",\"childCreatedAt\":44,\"mode\":\"continuable\",\"label\":\"L44\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":61,\"time\":1791337580061,\"data\":{\"version\":0,\"childId\":\"k045\",\"childCreatedAt\":45,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":62,\"time\":1791337580062,\"data\":{\"version\":0,\"childId\":\"k046\",\"childCreatedAt\":46,\"mode\":\"one-shot\",\"label\":\"L46\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":63,\"time\":1791337580063,\"data\":{\"version\":0,\"childId\":\"k047\",\"childCreatedAt\":47,\"mode\":\"continuable\",\"label\":\"L47\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":64,\"time\":1791337580064,\"data\":{\"version\":0,\"childId\":\"k048\",\"childCreatedAt\":48,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":65,\"time\":1791337580065,\"data\":{\"version\":0,\"childId\":\"k049\",\"childCreatedAt\":49,\"mode\":\"one-shot\",\"label\":\"L49\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":66,\"time\":1791337580066,\"data\":{\"version\":0,\"childId\":\"k050\",\"childCreatedAt\":50,\"mode\":\"continuable\",\"label\":\"L50\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":67,\"time\":1791337580067,\"data\":{\"version\":0,\"childId\":\"k051\",\"childCreatedAt\":51,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":68,\"time\":1791337580068,\"data\":{\"version\":0,\"childId\":\"k052\",\"childCreatedAt\":52,\"mode\":\"one-shot\",\"label\":\"L52\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":69,\"time\":1791337580069,\"data\":{\"version\":0,\"childId\":\"k053\",\"childCreatedAt\":53,\"mode\":\"continuable\",\"label\":\"L53\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":70,\"time\":1791337580070,\"data\":{\"version\":0,\"childId\":\"k054\",\"childCreatedAt\":54,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":71,\"time\":1791337580071,\"data\":{\"version\":0,\"childId\":\"k055\",\"childCreatedAt\":55,\"mode\":\"one-shot\",\"label\":\"L55\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":72,\"time\":1791337580072,\"data\":{\"version\":0,\"childId\":\"k056\",\"childCreatedAt\":56,\"mode\":\"continuable\",\"label\":\"L56\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":73,\"time\":1791337580073,\"data\":{\"version\":0,\"childId\":\"k057\",\"childCreatedAt\":57,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":74,\"time\":1791337580074,\"data\":{\"version\":0,\"childId\":\"k058\",\"childCreatedAt\":58,\"mode\":\"one-shot\",\"label\":\"L58\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":75,\"time\":1791337580075,\"data\":{\"version\":0,\"childId\":\"k059\",\"childCreatedAt\":59,\"mode\":\"continuable\",\"label\":\"L59\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":76,\"time\":1791337580076,\"data\":{\"version\":0,\"childId\":\"k060\",\"childCreatedAt\":60,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":77,\"time\":1791337580077,\"data\":{\"version\":0,\"childId\":\"k061\",\"childCreatedAt\":61,\"mode\":\"one-shot\",\"label\":\"L61\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":78,\"time\":1791337580078,\"data\":{\"version\":0,\"childId\":\"k062\",\"childCreatedAt\":62,\"mode\":\"continuable\",\"label\":\"L62\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":79,\"time\":1791337580079,\"data\":{\"version\":0,\"childId\":\"k063\",\"childCreatedAt\":63,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":80,\"time\":1791337580080,\"data\":{\"version\":0,\"childId\":\"k064\",\"childCreatedAt\":64.5,\"mode\":\"one-shot\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 80,
+        "class": "ZodError"
+      }
+    },
+    {
+      "id": "chunk-invalid-in-second-chunk",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":16,\"time\":1791337580016,\"data\":{\"version\":0,\"childId\":\"k000\",\"childCreatedAt\":0,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":17,\"time\":1791337580017,\"data\":{\"version\":0,\"childId\":\"k001\",\"childCreatedAt\":1,\"mode\":\"one-shot\",\"label\":\"L1\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":18,\"time\":1791337580018,\"data\":{\"version\":0,\"childId\":\"k002\",\"childCreatedAt\":2,\"mode\":\"continuable\",\"label\":\"L2\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":19,\"time\":1791337580019,\"data\":{\"version\":0,\"childId\":\"k003\",\"childCreatedAt\":3,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":20,\"time\":1791337580020,\"data\":{\"version\":0,\"childId\":\"k004\",\"childCreatedAt\":4,\"mode\":\"one-shot\",\"label\":\"L4\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":21,\"time\":1791337580021,\"data\":{\"version\":0,\"childId\":\"k005\",\"childCreatedAt\":5,\"mode\":\"continuable\",\"label\":\"L5\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":22,\"time\":1791337580022,\"data\":{\"version\":0,\"childId\":\"k006\",\"childCreatedAt\":6,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":23,\"time\":1791337580023,\"data\":{\"version\":0,\"childId\":\"k007\",\"childCreatedAt\":7,\"mode\":\"one-shot\",\"label\":\"L7\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":24,\"time\":1791337580024,\"data\":{\"version\":0,\"childId\":\"k008\",\"childCreatedAt\":8,\"mode\":\"continuable\",\"label\":\"L8\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":25,\"time\":1791337580025,\"data\":{\"version\":0,\"childId\":\"k009\",\"childCreatedAt\":9,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":26,\"time\":1791337580026,\"data\":{\"version\":0,\"childId\":\"k010\",\"childCreatedAt\":10,\"mode\":\"one-shot\",\"label\":\"L10\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":27,\"time\":1791337580027,\"data\":{\"version\":0,\"childId\":\"k011\",\"childCreatedAt\":11,\"mode\":\"continuable\",\"label\":\"L11\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":28,\"time\":1791337580028,\"data\":{\"version\":0,\"childId\":\"k012\",\"childCreatedAt\":12,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":29,\"time\":1791337580029,\"data\":{\"version\":0,\"childId\":\"k013\",\"childCreatedAt\":13,\"mode\":\"one-shot\",\"label\":\"L13\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":30,\"time\":1791337580030,\"data\":{\"version\":0,\"childId\":\"k014\",\"childCreatedAt\":14,\"mode\":\"continuable\",\"label\":\"L14\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":31,\"time\":1791337580031,\"data\":{\"version\":0,\"childId\":\"k015\",\"childCreatedAt\":15,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":32,\"time\":1791337580032,\"data\":{\"version\":0,\"childId\":\"k016\",\"childCreatedAt\":16,\"mode\":\"one-shot\",\"label\":\"L16\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":33,\"time\":1791337580033,\"data\":{\"version\":0,\"childId\":\"k017\",\"childCreatedAt\":17,\"mode\":\"continuable\",\"label\":\"L17\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":34,\"time\":1791337580034,\"data\":{\"version\":0,\"childId\":\"k018\",\"childCreatedAt\":18,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":35,\"time\":1791337580035,\"data\":{\"version\":0,\"childId\":\"k019\",\"childCreatedAt\":19,\"mode\":\"one-shot\",\"label\":\"L19\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":36,\"time\":1791337580036,\"data\":{\"version\":0,\"childId\":\"k020\",\"childCreatedAt\":20,\"mode\":\"continuable\",\"label\":\"L20\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":37,\"time\":1791337580037,\"data\":{\"version\":0,\"childId\":\"k021\",\"childCreatedAt\":21,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":38,\"time\":1791337580038,\"data\":{\"version\":0,\"childId\":\"k022\",\"childCreatedAt\":22,\"mode\":\"one-shot\",\"label\":\"L22\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":39,\"time\":1791337580039,\"data\":{\"version\":0,\"childId\":\"k023\",\"childCreatedAt\":23,\"mode\":\"continuable\",\"label\":\"L23\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":40,\"time\":1791337580040,\"data\":{\"version\":0,\"childId\":\"k024\",\"childCreatedAt\":24,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":41,\"time\":1791337580041,\"data\":{\"version\":0,\"childId\":\"k025\",\"childCreatedAt\":25,\"mode\":\"one-shot\",\"label\":\"L25\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":42,\"time\":1791337580042,\"data\":{\"version\":0,\"childId\":\"k026\",\"childCreatedAt\":26,\"mode\":\"continuable\",\"label\":\"L26\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":43,\"time\":1791337580043,\"data\":{\"version\":0,\"childId\":\"k027\",\"childCreatedAt\":27,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":44,\"time\":1791337580044,\"data\":{\"version\":0,\"childId\":\"k028\",\"childCreatedAt\":28,\"mode\":\"one-shot\",\"label\":\"L28\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":45,\"time\":1791337580045,\"data\":{\"version\":0,\"childId\":\"k029\",\"childCreatedAt\":29,\"mode\":\"continuable\",\"label\":\"L29\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":46,\"time\":1791337580046,\"data\":{\"version\":0,\"childId\":\"k030\",\"childCreatedAt\":30,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":47,\"time\":1791337580047,\"data\":{\"version\":0,\"childId\":\"k031\",\"childCreatedAt\":31,\"mode\":\"one-shot\",\"label\":\"L31\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":48,\"time\":1791337580048,\"data\":{\"version\":0,\"childId\":\"k032\",\"childCreatedAt\":32,\"mode\":\"continuable\",\"label\":\"L32\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":49,\"time\":1791337580049,\"data\":{\"version\":0,\"childId\":\"k033\",\"childCreatedAt\":33,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":50,\"time\":1791337580050,\"data\":{\"version\":0,\"childId\":\"k034\",\"childCreatedAt\":34,\"mode\":\"one-shot\",\"label\":\"L34\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":51,\"time\":1791337580051,\"data\":{\"version\":0,\"childId\":\"k035\",\"childCreatedAt\":35,\"mode\":\"continuable\",\"label\":\"L35\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":52,\"time\":1791337580052,\"data\":{\"version\":0,\"childId\":\"k036\",\"childCreatedAt\":36,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":53,\"time\":1791337580053,\"data\":{\"version\":0,\"childId\":\"k037\",\"childCreatedAt\":37,\"mode\":\"one-shot\",\"label\":\"L37\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":54,\"time\":1791337580054,\"data\":{\"version\":0,\"childId\":\"k038\",\"childCreatedAt\":38,\"mode\":\"continuable\",\"label\":\"L38\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":55,\"time\":1791337580055,\"data\":{\"version\":0,\"childId\":\"k039\",\"childCreatedAt\":39,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":56,\"time\":1791337580056,\"data\":{\"version\":0,\"childId\":\"k040\",\"childCreatedAt\":40,\"mode\":\"one-shot\",\"label\":\"L40\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":57,\"time\":1791337580057,\"data\":{\"version\":0,\"childId\":\"k041\",\"childCreatedAt\":41,\"mode\":\"continuable\",\"label\":\"L41\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":58,\"time\":1791337580058,\"data\":{\"version\":0,\"childId\":\"k042\",\"childCreatedAt\":42,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":59,\"time\":1791337580059,\"data\":{\"version\":0,\"childId\":\"k043\",\"childCreatedAt\":43,\"mode\":\"one-shot\",\"label\":\"L43\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":60,\"time\":1791337580060,\"data\":{\"version\":0,\"childId\":\"k044\",\"childCreatedAt\":44,\"mode\":\"continuable\",\"label\":\"L44\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":61,\"time\":1791337580061,\"data\":{\"version\":0,\"childId\":\"k045\",\"childCreatedAt\":45,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":62,\"time\":1791337580062,\"data\":{\"version\":0,\"childId\":\"k046\",\"childCreatedAt\":46,\"mode\":\"one-shot\",\"label\":\"L46\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":63,\"time\":1791337580063,\"data\":{\"version\":0,\"childId\":\"k047\",\"childCreatedAt\":47,\"mode\":\"continuable\",\"label\":\"L47\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":64,\"time\":1791337580064,\"data\":{\"version\":0,\"childId\":\"k048\",\"childCreatedAt\":48,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":65,\"time\":1791337580065,\"data\":{\"version\":0,\"childId\":\"k049\",\"childCreatedAt\":49,\"mode\":\"one-shot\",\"label\":\"L49\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":66,\"time\":1791337580066,\"data\":{\"version\":0,\"childId\":\"k050\",\"childCreatedAt\":50,\"mode\":\"continuable\",\"label\":\"L50\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":67,\"time\":1791337580067,\"data\":{\"version\":0,\"childId\":\"k051\",\"childCreatedAt\":51,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":68,\"time\":1791337580068,\"data\":{\"version\":0,\"childId\":\"k052\",\"childCreatedAt\":52,\"mode\":\"one-shot\",\"label\":\"L52\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":69,\"time\":1791337580069,\"data\":{\"version\":0,\"childId\":\"k053\",\"childCreatedAt\":53,\"mode\":\"continuable\",\"label\":\"L53\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":70,\"time\":1791337580070,\"data\":{\"version\":0,\"childId\":\"k054\",\"childCreatedAt\":54,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":71,\"time\":1791337580071,\"data\":{\"version\":0,\"childId\":\"k055\",\"childCreatedAt\":55,\"mode\":\"one-shot\",\"label\":\"L55\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":72,\"time\":1791337580072,\"data\":{\"version\":0,\"childId\":\"k056\",\"childCreatedAt\":56,\"mode\":\"continuable\",\"label\":\"L56\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":73,\"time\":1791337580073,\"data\":{\"version\":0,\"childId\":\"k057\",\"childCreatedAt\":57,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":74,\"time\":1791337580074,\"data\":{\"version\":0,\"childId\":\"k058\",\"childCreatedAt\":58,\"mode\":\"one-shot\",\"label\":\"L58\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":75,\"time\":1791337580075,\"data\":{\"version\":0,\"childId\":\"k059\",\"childCreatedAt\":59,\"mode\":\"continuable\",\"label\":\"L59\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":76,\"time\":1791337580076,\"data\":{\"version\":0,\"childId\":\"k060\",\"childCreatedAt\":60,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":77,\"time\":1791337580077,\"data\":{\"version\":0,\"childId\":\"k061\",\"childCreatedAt\":61,\"mode\":\"one-shot\",\"label\":\"L61\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":78,\"time\":1791337580078,\"data\":{\"version\":0,\"childId\":\"k062\",\"childCreatedAt\":62,\"mode\":\"continuable\",\"label\":\"L62\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":79,\"time\":1791337580079,\"data\":{\"version\":0,\"childId\":\"k063\",\"childCreatedAt\":63,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":80,\"time\":1791337580080,\"data\":{\"version\":0,\"childId\":\"k064\",\"childCreatedAt\":64,\"mode\":\"one-shot\",\"label\":\"L64\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":81,\"time\":1791337580081,\"data\":{\"version\":0,\"childId\":\"k065\",\"childCreatedAt\":65,\"mode\":\"continuable\",\"label\":\"L65\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":82,\"time\":1791337580082,\"data\":{\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":83,\"time\":1791337580083,\"data\":{\"version\":0,\"childId\":\"t0\",\"childCreatedAt\":0,\"mode\":\"one-shot\"}}"
+        },
+        {
+          "append": "{\"type\":\"subagent/catalog\",\"seq\":84,\"time\":1791337580084,\"data\":{\"version\":0,\"childId\":\"t1\",\"childCreatedAt\":1,\"mode\":\"one-shot\"}}"
+        }
+      ],
+      "ts": {
+        "outcome": "rejected",
+        "inheritedEventCount": 0,
+        "seq": 82,
+        "class": "ZodError"
+      }
+    }
+  ]
+}

@@ -190,6 +190,8 @@ The Session reader pins `zstd-safe` 8.0.0 and `zstd-sys` 2.1.0 with vendored lib
 
 `bake-session` also provides [`subagent_identity` and `subagent_timing`](../conformance/README.md#subagent-identity-and-timing-cases) over a restored log. Identity follows the last descriptor, including clearing an earlier identity when that descriptor is invalid. Timing resets at each descriptor and includes interrupted-turn closers, stopping before the clock-stamped resume marker Session construction appends. These pure projections provide no child discovery, execution, or resume.
 
+`subagent_catalog` returns a restored parent's [direct-child catalog view](../conformance/README.md#subagent-catalog-cases). It filters inherited entries before validation, preserves event order and repeated child IDs, and refuses the first invalid own fact without returning a partial catalog. It reads no child Session and implements no registry or checkpoint cache.
+
 ## Checks
 
 ```sh

@@ -1198,6 +1198,7 @@
     {"path":"packages/subagent/subagent-spawn-in-process/tests/spawn-in-process.e2e.ts","lane":"vitest-integration","owner":"packages/subagent/subagent-spawn-in-process","scopes":["11"],"disposition":"reuse-oracle","basis":"packages/subagent"},
     {"path":"packages/subagent/subagent-spawn-in-process/tests/subagent-spawn-in-process.spec.ts","lane":"vitest-runtime","owner":"packages/subagent/subagent-spawn-in-process","scopes":["11"],"disposition":"reuse-oracle","basis":"packages/subagent"},
     {"path":"packages/subagent/subagent/tests/assistant-output.spec.ts","lane":"vitest-runtime","owner":"packages/subagent/subagent","scopes":["11"],"disposition":"reuse-oracle","basis":"packages/subagent"},
+    {"path":"packages/subagent/subagent/tests/catalog-conformance.spec.ts","lane":"vitest-runtime","owner":"packages/subagent/subagent","scopes":["11"],"disposition":"reuse-oracle","basis":"packages/subagent"},
     {"path":"packages/subagent/subagent/tests/catalog.spec.ts","lane":"vitest-runtime","owner":"packages/subagent/subagent","scopes":["11"],"disposition":"reuse-oracle","basis":"packages/subagent"},
     {"path":"packages/subagent/subagent/tests/child-agent.spec.ts","lane":"vitest-runtime","owner":"packages/subagent/subagent","scopes":["11"],"disposition":"reuse-oracle","basis":"packages/subagent"},
     {"path":"packages/subagent/subagent/tests/continuation-inheritance.spec.ts","lane":"vitest-runtime","owner":"packages/subagent/subagent","scopes":["11"],"disposition":"reuse-oracle","basis":"packages/subagent"},

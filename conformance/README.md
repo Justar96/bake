@@ -34,6 +34,7 @@ Compare TypeScript and Rust using controlled fixtures and independently checked 
 - [Current-format row encoding cases](#current-format-row-encoding-cases)
 - [V0 history read cases](#v0-history-read-cases)
 - [Subagent identity and timing cases](#subagent-identity-and-timing-cases)
+- [Subagent catalog cases](#subagent-catalog-cases)
 - [Runner contract](#runner-contract)
 - [Ownership and limits](#ownership-and-limits)
 
@@ -727,6 +728,21 @@ Identity is the last descriptor's mode, label, and seq. An invalid or unsupporte
 All 84 identity and timing outcomes match. The cases include every truncation of a descriptor-and-turn sequence, descriptor validation and clearing, inherited resets, stored end-seeds, negative and reversed times, repair closers, and exact and overflowing safe-integer totals. Both harnesses pin the case count and require every case to restore and match.
 
 Envelope times are safe integers. Native timing uses the same floating-point subtraction, zero clamp, and addition as JavaScript, preserving rounded totals beyond the safe-integer range. The cases check exact limits, rounded accumulation, arithmetic in a closer, and a later descriptor resetting a large total. The pure folds perform no child discovery, execution, or resume.
+
+## Subagent catalog cases
+
+[`session/subagent-catalog-cases.json`](session/subagent-catalog-cases.json) compares a restored parent's direct-child catalog with the TypeScript [catalog projection](../packages/subagent/subagent/src/catalog.ts). The [TypeScript spec](../packages/subagent/subagent/tests/catalog-conformance.spec.ts) runs the production initial state, fold, and wire view over parsed rows and interrupted-turn closers, using the restored inherited cut. The [Rust test](../rust/crates/bake-session/tests/subagent_catalog_cases.rs) restores the same bytes and checks `subagent_catalog` against independently specified entries or the first rejected event's seq.
+
+```sh
+bun run test:runtime packages/subagent/subagent/tests/catalog-conformance.spec.ts
+(cd rust && cargo test --locked -p bake-session --test subagent_catalog_cases)
+```
+
+Only `subagent/catalog` events at or after the inherited cut contribute. Filtering precedes payload validation, so malformed inherited facts are ignored. Own facts require the current catalog version, a child ID, a nonnegative safe-integer creation time, and a valid mode and label, with no unknown fields. Numeric spellings are interpreted as JavaScript numbers, including negative zero. Entries retain event order and duplicate child IDs; creation time does not sort them.
+
+All 82 cases match: 34 catalogs and 48 refusals. They cover both child modes, strict payload validation, repeated IDs and JSON keys, numeric rounding and negative zero, inherited cuts, interrupted turns, truncated prefixes, and catalog sizes crossing the TypeScript list's 64-entry chunk boundary. Both harnesses pin the case count and compare independently specified outcomes.
+
+An invalid own fact refuses the whole fold at its seq. TypeScript throws `ZodError`; the native refusal identifies the same event without reproducing Zod's issue tree or message. The output is the catalog view, not the TypeScript chunked-list checkpoint representation. The fold reads no child file and implements no registry lifecycle, child execution, or resume. Existing scan and restoration limits apply.
 
 ## Runner contract
 
