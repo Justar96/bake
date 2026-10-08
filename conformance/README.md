@@ -31,6 +31,7 @@ Compare TypeScript and Rust using controlled fixtures and independently checked 
 - [V1 to V2 transformed-stage cases](#v1-to-v2-transformed-stage-cases)
 - [V0 to V1 migration cases](#v0-to-v1-migration-cases)
 - [Turn boundary and title cases](#turn-boundary-and-title-cases)
+- [V0 history read cases](#v0-history-read-cases)
 - [Runner contract](#runner-contract)
 - [Ownership and limits](#ownership-and-limits)
 
@@ -648,6 +649,40 @@ The cases cover:
 - turns and titles copied as strings, objects, `null`, negative and largest safe integers, and an empty string, and a title set, retitled, or followed by an interrupted turn.
 
 A `rust` override names a native limit and the seq Rust refuses; TypeScript still asserts its own outcome. `undefined-member` marks a final `lastTurn` or title read from data that is not an object holding the member, which JavaScript reads as `undefined`; `null-data` marks `null` `session/title` data, whose read throws a `TypeError` and ends the fold; and `number` marks a final copy holding a number written with a fraction or an exponent, as -0, or beyond the safe-integer range. Restoration already refuses `null` `turn/start` data. A limited copy that a later event overwrites is not refused. Of the 52 cases, 38 fold identically and 14 are limits, 3 of them TypeScript throws. Both harnesses pin the case count and require every limit and both folds to be witnessed. Two negative controls were observed in both arms: clearing `lastStepStartSeq` on `step/end` fails `capture-tool-call-turn`, and ignoring the closers fails `interrupted-open-turn`. In Rust, refusing a limited `lastTurn` when it is copied instead of at the end fails `fraction-turn-overwritten`. The folds do not cover the inbox, the title service, or Agent resume.
+
+## V0 history read cases
+
+[`session/history-cases.json`](session/history-cases.json) holds 45 synthetic Sessions: 44 released v0 Sessions and one v1 Session, each a physical header and rows as JSON text. The [TypeScript spec](../packages/session/session-format-v2-to-v3/tests/history-conformance.spec.ts) feeds `releasedV0SessionFormatCodec.createDecoder(header, 'strict')`, or the v1 codec, into the stream of a `createSessionFormatChain` holding `sessionFormatV0ToV1`, `sessionFormatV1ToV2`, and `sessionFormatV2ToV3`, then finishes the decoder and the stream. The [Rust test](../rust/crates/bake-session/tests/history_cases.rs) decodes the same parsed header and rows with `decode_v0_v1_rows` under both path platforms, requires the decode to succeed, and passes the result to [`migrate_released_v0_history`](../rust/crates/bake-session/src/history.rs).
+
+```sh
+bun run test:runtime packages/session/session-format-v2-to-v3/tests/history-conformance.spec.ts
+(cd rust && cargo test --locked -p bake-session --test history_cases)
+```
+
+The chain streams each decoded event through every stage before the next one starts, so TypeScript reports the refusal at the earliest source event, and within one event the refusal of the earliest stage. The Rust stages run over a whole log, so Rust reruns each later stage over the events before the earliest refusal found so far and maps a v2→v3 refusal back to the source event whose output it checked. A migrated outcome compares the v3 header, the events in order with object members in JavaScript key order, and the inherited cut. A refusal compares the header, decoded-event index, or finish location and the exact message: each stage's unsupported errors pass through the chain, and its other errors are wrapped as `<migration> refuses this format vN Session: <detail>`. The cases cover:
+
+- clean histories through all three edges: the empty Assistant stream v1→v2 adds, the system heads v2→v3 inserts, unchanged and changed prompts, legacy messages that v0→v1 gives ids, references remapped by both later edges, and `code` renamed `ptc` in the header and an `agent-preset/selected` event;
+- seeded histories with an end-seed at the cut, one synthesized there, one emitted at finish, and an inherited delivery marker;
+- a legacy interrupted turn after a next-turn splice, with a system prompt and a title whose message seq both later edges shift;
+- each stage refusing alone, and a v2→v3 refusal located across events that v1→v2 inserted;
+- precedence: an earlier refusal beats a later one from every other stage, and within one event the earlier stage wins;
+- Assistant chunks before and after a refusal, and a packed run.
+
+A `rust` marker names a native limit and its location, and Rust claims nothing there. Each such case still asserts TypeScript's outcome. The limits are:
+
+- `v1-decoded-stage`: a v1 Session, which a chain reads with the v1→v2 decoded stage and its payload checks, which are not ported.
+- `assistant-chunk`: an `assistant/chunk` event that v0→v1 admitted. TypeScript starts an Assistant attempt and then buffers later events, and a packed run takes `transformRun` rather than its expanded events.
+- `untimed-event`: an event without `time`, which v1→v2 can copy into an event it synthesizes.
+- `interleaved-emission`: a v1→v2 refusal of an event for which v1→v2 may already have emitted an end-seed, an interrupted `turn/end`, or a `goal/change` into v2→v3. Rust applies the rule to every refusal of an event at the cut of a seeded log other than a `session/end-seed` there, which v1→v2 does not precede with a synthesized one, of a `turn/start` right after an inbox splice, and of a goal `user/message` carrying its change, including one raised before any emission. v0→v1 already refuses such a goal message as its own `legacy-goal-message` limit, so its arm is not reached.
+- A stage's own limit, named with that stage's prefix, such as `v0-to-v1/legacy-goal-message`; that stage's table witnesses the others.
+
+Of the 45 cases, 13 migrate and 24 are refusals both arms report exactly. The remaining 8 are limits: 7 TypeScript refusals and 1 that TypeScript migrates. Both harnesses pin the case count and require every listed limit to be witnessed. The expectations were written from the TypeScript sources before either harness ran. Three negative controls were observed:
+
+- returning the v0→v1 refusal without rerunning the later stages over the earlier events fails `v2-to-v3-before-later-v0-to-v1` and four other cases in Rust;
+- keeping the end-seed that v1→v2 `finish` adds to a seeded prefix fails `seeded-refusal-before-cut` in Rust;
+- expecting the later v0→v1 refusal in `v2-to-v3-before-later-v0-to-v1` fails that case in both arms.
+
+The result is stage output: the catalog's final check of the v3 artifact is not run. Recoverable decoding, Assistant attempts, and the decoded v1→v2 stage remain separate work. These cases close no roadmap scope.
 
 ## Runner contract
 

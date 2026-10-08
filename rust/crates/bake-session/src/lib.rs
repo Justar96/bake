@@ -46,6 +46,10 @@
 //! transformed stage over a decoded v1 Session, grouping its Assistant chunks,
 //! packed rows expanded, into attempts; it is the stage a chain runs after
 //! v0→v1, not production's read of a v1 file.
+//! [`migrate_released_v0_history`] reads a decoded v0 Session through all
+//! three edges to format v3, reporting the refusal TypeScript's streaming
+//! chain reports first; Assistant chunks and a decoded v1 Session are native
+//! limits.
 //! [`token_usage`] folds a [`RestoredLog`]'s provider-reported token usage,
 //! and [`context_pressure`] its context occupancy with the surface's
 //! heuristic token total.
@@ -66,6 +70,7 @@ mod envelope;
 mod fork;
 mod generation_header;
 mod goal;
+mod history;
 mod inbox;
 mod offload;
 mod pressure;
@@ -97,6 +102,7 @@ pub use goal::{
     GoalBlockReason, GoalLimit, GoalPhase, GoalProjection, GoalProjectionState, GoalRefusal,
     GoalSnapshot, goal_projection,
 };
+pub use history::{HistoryLimit, HistoryLocation, HistoryRefusal, migrate_released_v0_history};
 pub use inbox::{
     ConsumedWork, ConsumedWorkCoercion, ConsumedWorkLimit, InboxLimit, InboxRefusal, PendingInbox,
     consumed_work, restored_inbox,
