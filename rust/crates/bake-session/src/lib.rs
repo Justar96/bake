@@ -54,10 +54,10 @@
 //! file with over [`decode_v0_v1_items`] output: each event's payload checked
 //! at version 1, then the transformed stage, with each packed run sent
 //! through `transformRun` unchecked.
-//! [`migrate_released_v0_history`] reads a decoded v0 Session through all
-//! three edges to format v3, reporting the refusal TypeScript's streaming
-//! chain reports first; Assistant chunks and a decoded v1 Session are native
-//! limits.
+//! [`migrate_released_history`] reads a decoded v0 or v1 Session, packed
+//! runs kept, through every edge to format v3, reporting the refusal
+//! TypeScript's streaming chain reports first; a v1 Session takes the decoded
+//! v1→v2 stage.
 //! [`token_usage`] folds a [`RestoredLog`]'s provider-reported token usage,
 //! and [`context_pressure`] its context occupancy with the surface's
 //! heuristic token total.
@@ -130,7 +130,7 @@ pub use goal::{
     GoalBlockReason, GoalLimit, GoalPhase, GoalProjection, GoalProjectionState, GoalRefusal,
     GoalSnapshot, goal_projection,
 };
-pub use history::{HistoryLimit, HistoryLocation, HistoryRefusal, migrate_released_v0_history};
+pub use history::{HistoryLimit, HistoryLocation, HistoryRefusal, migrate_released_history};
 pub use inbox::{
     ConsumedWork, ConsumedWorkCoercion, ConsumedWorkLimit, InboxLimit, InboxRefusal, PendingInbox,
     consumed_work, restored_inbox,

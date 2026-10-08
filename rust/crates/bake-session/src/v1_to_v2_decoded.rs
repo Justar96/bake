@@ -142,7 +142,7 @@ pub fn migrate_v1_to_v2_decoded(
 
 /// The first expanded seq of the item at `index`: the events the items
 /// before it expand to.
-fn first_seq(items: &[V1Item], index: usize) -> usize {
+pub(crate) fn first_seq(items: &[V1Item], index: usize) -> usize {
     let seq = items
         .iter()
         .take(index)
@@ -155,7 +155,7 @@ fn first_seq(items: &[V1Item], index: usize) -> usize {
 
 /// The decoded stage's own step for the event at `seq`: a non-string
 /// `type`, or the payload check. An `assistant/chunk` event skips it.
-fn check_event(seq: u64, event: &Value) -> Option<V1ToV2DecodedRefusal> {
+pub(crate) fn check_event(seq: u64, event: &Value) -> Option<V1ToV2DecodedRefusal> {
     let location = V1ToV2Location::Event(usize::try_from(seq).unwrap_or(usize::MAX));
     let native = |limit| Some(V1ToV2DecodedRefusal::NativeSubset { location, limit });
     // The codec emits only objects; the transformed stage reports any other
