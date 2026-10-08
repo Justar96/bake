@@ -797,6 +797,7 @@
     {"path":"packages/core/agent-loop/tests/interception.spec.ts","lane":"vitest-runtime","owner":"packages/core/agent-loop","scopes":["09"],"disposition":"reuse-oracle","basis":"packages/core"},
     {"path":"packages/core/agent-loop/tests/invariant.spec.ts","lane":"vitest-runtime","owner":"packages/core/agent-loop","scopes":["09"],"disposition":"reuse-oracle","basis":"packages/core"},
     {"path":"packages/core/agent-loop/tests/loop.spec.ts","lane":"vitest-runtime","owner":"packages/core/agent-loop","scopes":["09"],"disposition":"reuse-oracle","basis":"packages/core"},
+    {"path":"packages/core/agent-loop/tests/prompt-admission-conformance.spec.ts","lane":"vitest-runtime","owner":"packages/core/agent-loop","scopes":["09"],"disposition":"reuse-oracle","basis":"packages/core"},
     {"path":"packages/core/agent-loop/tests/properties.spec.ts","lane":"vitest-runtime","owner":"packages/core/agent-loop","scopes":["09"],"disposition":"reuse-oracle","basis":"packages/core"},
     {"path":"packages/core/agent-loop/tests/request-cache.e2e.ts","lane":"vitest-integration","owner":"packages/core/agent-loop","scopes":["09"],"disposition":"reuse-oracle","basis":"packages/core"},
     {"path":"packages/core/agent-loop/tests/request-derivation-conformance.spec.ts","lane":"vitest-runtime","owner":"packages/core/agent-loop","scopes":["09"],"disposition":"reuse-oracle","basis":"packages/core"},

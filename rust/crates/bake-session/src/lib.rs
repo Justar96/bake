@@ -81,6 +81,10 @@
 //! [`RestoredLog`] into a child, or refuses as `SessionForkError` does.
 //! [`goal_projection`] folds a [`RestoredLog`]'s goal changes and goal rounds
 //! into its durable goal state, keeping the first replay failure.
+//! [`system_prompt_commits`] decides the system-prompt commits a step would
+//! admit over a [`RestoredLog`], and [`content_generation`],
+//! [`tools_changed`], and [`starts_request_series`] report the inputs of its
+//! request-series decision.
 //! [`turn_boundary`] and [`session_title`] fold a [`RestoredLog`]'s turn and
 //! step boundaries and its latest title.
 //! [`subagent_identity`] and [`subagent_timing`] fold a [`RestoredLog`]'s
@@ -137,6 +141,7 @@ mod offload;
 mod plain_append;
 mod plain_log_file;
 mod pressure;
+mod prompt_admission;
 mod relationships;
 mod released_rows;
 mod repair;
@@ -187,6 +192,10 @@ pub use plain_log_file::{LogFileLimit, LogFileRefusal, PlainLogFile};
 pub use pressure::{
     ContextPressureState, ContextPressureView, PressureLimit, PressureRefusal, RequestRoute,
     context_pressure,
+};
+pub use prompt_admission::{
+    PromptDecision, PromptIntent, SystemPromptCommit, content_generation, starts_request_series,
+    system_prompt_commits, tools_changed,
 };
 pub use relationships::{
     RelationshipExtensions, RelationshipLimit, RelationshipRefusal, check_released_relationships,

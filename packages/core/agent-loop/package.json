@@ -50,6 +50,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "bake-session-format-catalog": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^",
     "bake-llm-pi-ai": "workspace:^",
     "bake-agent": "workspace:^",

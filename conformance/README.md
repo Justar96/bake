@@ -43,6 +43,7 @@ Compare TypeScript and Rust using controlled fixtures and independently checked 
 - [Prefix restoration cases](#prefix-restoration-cases)
 - [Released relationship cases](#released-relationship-cases)
 - [Cross-runtime write lease](#cross-runtime-write-lease)
+- [Prompt admission cases](#prompt-admission-cases)
 - [Unfinished-work cases](#unfinished-work-cases)
 - [Runner contract](#runner-contract)
 - [Ownership and limits](#ownership-and-limits)
@@ -1017,6 +1018,38 @@ Both harnesses check the captures, pin the case count and distinct ids, and requ
 - naming row 8's time for the first closer of `dynamic-tools/10` fails that case in both arms.
 
 No capture has two calls pending at once, so call order among closers is checked only by the [plain log restoration](#plain-log-restoration-cases). Seeded and Zstd logs, request derivation, and Agent resume are not covered. These cases close no roadmap scope.
+
+## Prompt admission cases
+
+[`session/prompt-admission-cases.json`](session/prompt-admission-cases.json) holds 34 logs, each one of the three [runtime captures](#runtime-request-reconstruction) with text edits, and the prompt admission inputs a step would read from each restored Session. The [TypeScript spec](../packages/core/agent-loop/tests/prompt-admission-conformance.spec.ts) restores each log as the [plain log restoration](#plain-log-restoration-cases) does, with the catalog's message projections, then runs `SystemPromptProjection.project` from [`runtime-context.ts`](../packages/core/agent-loop/src/runtime-context.ts) for each prompt query, reads `session.surface.contentGeneration`, and repeats the agent's private `toolsChanged` body over the exported `headerEquals` and `canonicalHeader`. The [Rust test](../rust/crates/bake-session/tests/prompt_admission_cases.rs) restores the same bytes with `restore_plain_log`, requires each case without a `rust` marker to restore with no torn tail, and runs [`system_prompt_commits`, `content_generation`, `tools_changed`, and `starts_request_series`](../rust/crates/bake-session/src/prompt_admission.rs).
+
+```sh
+bun run test:runtime packages/core/agent-loop/tests/prompt-admission-conformance.spec.ts
+(cd rust && cargo test --locked -p bake-session --test prompt_admission_cases)
+```
+
+A case's `ts` states the content generation and lists of prompt, tool, and series queries. A prompt query gives the rendered prompt, `inHistory`, and `startsSeries`, and expects the ordered commits as text and an intent, `append` or `{replace: seq}`; the spec also checks each commit's message and surface intent exactly, apart from its minted id. A tool query gives candidate tools and whether they changed; `{"$log": pointer}` names a value in the case's own rows. A series query adds a declared series, the generation at the last request, and whether the route has native tool updates. `ReactLoopAgent` decides a series inline, so the spec composes that disjunction from the production pieces; that composition is the spec's, not production code. The expectations were written from the TypeScript sources before either harness ran. The cases cover:
+
+- no system node, where even an empty prompt is appended;
+- the three captures as recorded, including the dynamic-tools header changes and tool updates, which replace nothing;
+- an incapable route, a new series, and an empty rendering, which empty each later non-empty node in surface order and then rewrite the head only when its text differs, even when the effective text is unchanged;
+- a continuing capable series, which commits nothing for unchanged text and appends changed text;
+- dormant empty tails, a single empty text block, which reads as empty, and multiblock or reasoning nodes, which are active content that is not text;
+- a head that is not the first surface node, a replaced or cleared head, and a tail replaced by an empty node or shadowed by a summary;
+- a seeded child with its own prompt and with a replacement in its inherited prefix, a resumed open turn, and an interrupted tool call whose closer appends a result;
+- the generation after replacements, `image/offload` decisions, one of them with two targets, which counts once, and a prune of a projected node. No case has an `image/offload` that restores without projecting: `planSurfaceEvent` in [`surface.ts`](../packages/core/session/src/surface.ts) plans every event with a supplied projection as a projection, and the catalog's projection rejects an empty target list, an already offloaded image, and a missing index, so every accepted decision changes a message;
+- tool lists reordered, shortened, or with a changed member, member order, or number spelling, where `1.0` and `1e0` equal `1` and -0 equals 0 as their `JSON.stringify` text does, array-index keys enumerated first, a header without tools, and a config that the candidate header spreads and so never differs.
+
+Restoration's native limits bound the restored side. One is an open gap under [D21](../docs/roadmap/rust-0.4/scope-00/support.md#decision-register), not a permitted limit: restoration refuses a header or tool schema holding a fraction with `RestoreLimit::Number`, though Bake writes such values, for example a fractional `temperature` or a schema's `"minimum": 0.5`, so the limit must be ported. Case `limit-fractional-temperature` witnesses it with a `rust` marker naming the limit and the header's seq: TypeScript restores the log and answers `toolsChanged` as for any header, and Rust refuses the log, so it gives no prompt admission answer there. Every other case restores in both arms. Both harnesses pin the case count and distinct ids and require the limit to be witnessed. These negative controls were observed:
+
+- dropping the last case fails the count pin, and changing the table's oracle fails the schema check, in both arms;
+- expecting the wrong replacement seq in `appended-prompt` fails it in both arms;
+- comparing numbers as serde_json values fails `tools-numbers-compare-as-javascript-text`, and comparing members in insertion order fails `tools-array-index-keys-enumerate-first`, in Rust;
+- rewriting the head before emptying the tails fails `appended-prompt`, and reading a single empty text block as active fails `empty-text-block-is-dormant`, in Rust;
+- leaving `image/offload` out of the generation fails `generation-offload` in Rust, and restoring without the catalog's message projections fails the four offload cases in TypeScript;
+- ignoring the route's native tool updates in the series composition fails `capture-dynamic-tools` in TypeScript.
+
+The header reason, `request/context`, and `request/tool-update` decisions are private to request building and are not covered, nor are user admission order and the runtime-context snapshot. The generation at the last request is agent state no log records, so a caller supplies it. These cases close no roadmap scope.
 
 ## Unfinished-work cases
 
