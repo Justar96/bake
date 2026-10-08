@@ -2,7 +2,7 @@
 
 ## Summary
 
-Compare TypeScript and Rust using controlled fixtures and independently checked outcomes. The synthetic harness and [native eval fixture adapter](../evals/README.md#native-fixture-adapter) qualify comparison tooling for [migration scope 01](../docs/roadmap/rust-0.4/README.md#01--workspace-and-comparison-harness). Separate shared cases exercise Session headers, source references, row envelopes, strict V3 codec rows, and scans of plain logs against released codecs, and restoration of plain and Zstd-compressed bytes as the production read path restores them, and lookup of a Session by id in a root laid out on disk; three runtime fixtures capture a real TypeScript tool-call turn, a tool added, removed, and restored across turns, and a model request retried under a changed model, and request derivation cases replay the first and its variants through the TypeScript replay helper. The [qualification ledger](../docs/roadmap/rust-0.4/ledger/README.md) records partial evidence. Agent resume, restoration of migrated logs, replay of seeded, resumed, or compressed logs, and live native evals remain open.
+Compare TypeScript and Rust using controlled fixtures and independently checked outcomes. The synthetic harness and [native eval fixture adapter](../evals/README.md#native-fixture-adapter) qualify comparison tooling for [migration scope 01](../docs/roadmap/rust-0.4/README.md#01--workspace-and-comparison-harness). Separate shared cases exercise Session headers, source references, row envelopes, strict V3 codec rows, and scans of plain logs against released codecs, and restoration of plain and Zstd-compressed bytes as the production read path restores them, and lookup of a Session by id in a root laid out on disk; three runtime fixtures capture a real TypeScript tool-call turn, a tool added, removed, and restored across turns, and a model request retried under a changed model, and request derivation cases replay the first and its variants through the TypeScript replay helper. The [v2→v3 cases](#v2-to-v3-migration-cases) compare a strict in-memory adjacent migration, stopping before whole-artifact validation. The [qualification ledger](../docs/roadmap/rust-0.4/ledger/README.md) records partial evidence. Agent resume, restoration of migrated logs, replay of seeded, resumed, or compressed logs, and live native evals remain open.
 
 ## Table of Contents
 
@@ -19,6 +19,8 @@ Compare TypeScript and Rust using controlled fixtures and independently checked 
 - [Plain log restoration cases](#plain-log-restoration-cases)
 - [Zstd log restoration cases](#zstd-log-restoration-cases)
 - [Session lookup cases](#session-lookup-cases)
+- [Session metadata cases](#session-metadata-cases)
+- [V2 to V3 migration cases](#v2-to-v3-migration-cases)
 - [Token usage cases](#token-usage-cases)
 - [Runner contract](#runner-contract)
 - [Ownership and limits](#ownership-and-limits)
@@ -393,6 +395,36 @@ Directory order is unspecified: Rust visits entries in byte order and TypeScript
 
 The expectations were written from the TypeScript sources before either harness ran. The first TypeScript run showed one authoring mistake: the frozen v0 fixture had been expected to migrate, but the backend refuses it as unsupported, as `jsonl.spec.ts` also pins. The table's `amendments` records the corrected expectation and the added v2 case that migrates. Table version 2 added the 25 cases listed in `reviewAdditions` after a review of the first Rust candidate; their expectations were written from the TypeScript sources before their first run, and no earlier expectation changed. Restored counts reuse the expectations the [restoration](#plain-log-restoration-cases) and Zstd tables already authored.
 
+## Session metadata cases
+
+[`session/generation-header-cases.json`](session/generation-header-cases.json) compares the pure native header reader with the TypeScript backend's public `stat(id)`. Its 95 cases cover v0–v3 headers, the presence of `seedLength`, preset translation, omitted and null fields, numeric and parser limits, platform-specific absolute paths, and refusal precedence. The [Rust test](../rust/crates/bake-session/tests/generation_header_cases.rs) checks both path platforms; the [TypeScript spec](../packages/session/session-persistence-jsonl/tests/generation-header-conformance.spec.ts) checks its host's behavior through the real backend in private temporary roots. A `rust` entry records a native limit without weakening the TypeScript expectation.
+
+[`session/stat-cases.json`](session/stat-cases.json) adds 46 disk layouts for the built [`session stat` command](../rust/README.md#inspect-session-metadata). The [native test](../rust/crates/bake-cli/tests/session_stat.rs) and [TypeScript spec](../packages/session/session-persistence-jsonl/tests/stat-conformance.spec.ts) build each layout independently and compare the selected generation, header, absence, or refusal. They cover plain and Zstd headers, corrupt bodies that must be ignored, missing and malformed headers, generation and identity errors, symlinks, and both read budgets. Physical size is checked against the fixture file. The native test also verifies that a FIFO cannot block the command. Each platform-restricted case states why it is restricted.
+
+```sh
+bun run test:runtime packages/session/session-persistence-jsonl/tests/generation-header-conformance.spec.ts packages/session/session-persistence-jsonl/tests/stat-conformance.spec.ts
+(cd rust && cargo test --locked -p bake-session --test generation_header_cases)
+(cd rust && cargo test --locked -p bake-cli --test session_stat)
+```
+
+Expected outcomes were authored from the TypeScript source before either implementation ran. Both suites use the production `stat` path; they do not migrate event rows or open a Session for writing. The disk-layout tests compare input bytes, modification times, and link targets after execution, and the native command's private home must remain empty. The generation-header cases separately check unchanged file bytes. The native CI job runs these TypeScript comparisons alongside the Rust tests on each operating system.
+
+Header translation does not qualify historical event migration, Session resume, pending in-process Sessions, writer leases, or atomic observation during concurrent changes. TypeScript has no corresponding read-budget limit. JavaScript representations outside the native reader's supported subset remain named limits, and skipped platform cases remain missing evidence. These comparisons close no roadmap scope.
+
+## V2 to V3 migration cases
+
+[`session/v2-to-v3-cases.json`](session/v2-to-v3-cases.json) holds 367 synthetic cases for the strict released v2 codec feeding the adjacent migration chain. The [TypeScript spec](../packages/session/session-format-v2-to-v3/tests/v2-to-v3-migration-conformance.spec.ts) calls those production APIs, finishes the decoder, then finishes the chain. The [Rust test](../rust/crates/bake-session/tests/v2_to_v3_cases.rs) passes the same parsed header and rows to `migrate_v2_rows` under both path platforms. TypeScript checks its host's path behavior; CI runs the spec on Linux, macOS, and Windows.
+
+Successful cases compare the logical v3 header, transformed events, inherited cut, and object member order. They cover every released source event family, system-prompt promotion, deterministic message IDs and collisions, local reference remapping, delivery coordinates that remain unchanged, seeded history, and the owned PTC renames. Refusals compare the codec or migration layer, row or finish location, and message. Expectations come from executing TypeScript independently of Rust. The tests also check that inputs remain unchanged. Deliberately changing a generated ID, generated member order, or opaque negative zero fails both harnesses.
+
+```sh
+bun run test:runtime packages/session/session-format-v2-to-v3/tests/v2-to-v3-migration-conformance.spec.ts
+(cd rust && cargo test --locked -p bake-session --test v2_to_v3_cases)
+```
+
+The API consumes parsed JSON values and leaves framing, compression, and parser limits to its caller. Numbers compare with JavaScript semantics, preserving negative zero; integer-to-integer comparisons remain exact. Rust refuses retained integer values outside JavaScript's safe range after the row's ordinary checks succeed. Native limits also identify undecided integer spellings, engine-specific or numeric diagnostic text, and expanded source lists that exceed the caller's budget. Each fixture with a native limit still asserts TypeScript's outcome. Opaque floating-point values are preserved, but this suite does not qualify a byte encoder.
+
+The result stops before `restoreReleasedV3Artifact`, which validates relationships, protected system messages, and vocabulary across the complete transformed artifact. It therefore does not establish that TypeScript would open the migrated Session. Recoverable decoding, earlier adjacent migrations, historical plain or Zstd file reads, publication, and Agent resume remain separate work. These cases close no roadmap scope.
 ## Token usage cases
 
 [`session/usage-cases.json`](session/usage-cases.json) holds 34 edited runtime captures and the token-usage state token-meter folds from each. The [TypeScript spec](../packages/llm/token-meter/tests/usage-conformance.spec.ts) folds `tokenUsageProjectionDefinition.init` and `apply` from [`usage-projection.ts`](../packages/llm/token-meter/src/usage-projection.ts) over each case's `JSON.parse`d rows and their `interruptedTurnClosers`, and requires `Session.fromRestore`, without message projections, to admit the same events. The [Rust test](../rust/crates/bake-session/tests/usage_cases.rs) restores the same bytes with `restore_plain_log`, requires every case to restore with no torn tail, and folds the result with [`token_usage`](../rust/crates/bake-session/src/usage.rs).

@@ -2,6 +2,7 @@
 
 mod inspect;
 mod lookup;
+mod stat;
 
 use std::ffi::{OsStr, OsString};
 use std::io::{self, IsTerminal, Write};
@@ -9,6 +10,7 @@ use std::process::ExitCode;
 
 use bake_tui::PreviewExit;
 use inspect::{Encoding, InspectArgs, LookupArgs, MAX_BUDGET, Outcome, Target, parse_count};
+use stat::StatArgs;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -22,6 +24,9 @@ Usage:
   bake-rs session inspect --root <dir> --id <id> --max-bytes <N>
       --max-source-seqs <N> --max-entries <N> [--compression none|zstd]
                        Find one Session in a root and describe it, read-only
+  bake-rs session stat --root <dir> --id <id> --max-header-bytes <N>
+      --max-entries <N> [--compression none|zstd]
+                       Report one Session's header as JSON, read-only
   bake-rs --help       Show this help
   bake-rs --version    Show the version
 
@@ -70,6 +75,43 @@ Exit status: 0 restored, 3 refused log (a JSON record on standard output),
 1 unreadable file or directory or unsupported name, 2 usage error.
 ";
 
+const STAT_HELP: &str = "\
+bake-rs session stat: report one Session's header (Rust preview)
+
+Usage:
+  bake-rs session stat --root <dir> --id <id> --max-header-bytes <N>
+      --max-entries <N> [--compression none|zstd]
+
+Options:
+  --root <dir>              Session root to search
+  --id <id>                 Session id to find
+  --max-header-bytes <N>    Most bytes read for the header, plus one byte
+                            to detect the end of the file, and largest
+                            decoded header record
+  --max-entries <N>         Most directory entries the lookup reads
+  --compression <mode>      none or zstd, the root's encoding (default zstd)
+  -h, --help                Show this help
+
+Budgets are required positive integers no greater than 9007199254740991.
+
+The command finds the Session as 'session inspect --root --id' does, then
+decodes only the first line or Zstd frame of the newest generation, in a
+supported format, and reports its header translated to the current format.
+It never decodes events, never falls back to an older generation, and
+does not read the Bake home, configuration, or credentials. Nothing is
+written, locked, or migrated. sizeBytes is read after the header, so the
+record is an observation, not an atomic snapshot.
+
+A missing Session, a missing file, or an incomplete or malformed header is
+absent. A corrupt first Zstd frame, retired header fields, a header version
+other than the file name's, a newer format, a stored identity other than
+the selected file, and the root and lookup refusals of 'session inspect'
+are refused.
+
+Exit status: 0 found or absent, 3 refused (a JSON record on standard
+output), 1 unreadable file or directory, 2 usage error.
+";
+
 const KNOWN: &[&str] = &["-h", "--help", "help", "-V", "--version", "preview"];
 
 #[derive(Debug, PartialEq, Eq)]
@@ -79,6 +121,8 @@ enum Command {
     Preview,
     InspectHelp,
     Inspect(InspectArgs),
+    StatHelp,
+    Stat(StatArgs),
 }
 
 /// A usage error, and the help command it points to.
@@ -91,10 +135,12 @@ struct Usage {
 fn parse(args: &[OsString]) -> Result<Command, Usage> {
     // `session` operands are parsed as OS strings: a path need not be UTF-8.
     if args.first().is_some_and(|first| first == "session") {
-        return parse_session(&args[1..]).map_err(|message| Usage {
-            message,
-            help: "bake-rs session inspect --help",
-        });
+        let help = if args.get(1).is_some_and(|command| command == "stat") {
+            "bake-rs session stat --help"
+        } else {
+            "bake-rs session inspect --help"
+        };
+        return parse_session(&args[1..]).map_err(|message| Usage { message, help });
     }
     parse_top(args).map_err(|message| Usage {
         message,
@@ -139,6 +185,9 @@ fn parse_session(args: &[OsString]) -> Result<Command, String> {
     };
     if is_help(command) {
         return help(command, rest);
+    }
+    if command == "stat" {
+        return parse_stat(rest);
     }
     if command != "inspect" {
         return Err(format!("unknown command {} for 'session'", quoted(command)));
@@ -196,41 +245,9 @@ fn parse_session(args: &[OsString]) -> Result<Command, String> {
             "--max-bytes" => set_count(&mut max_bytes, option, value)?,
             "--max-source-seqs" => set_count(&mut max_source_seqs, option, value)?,
             "--max-entries" => set_count(&mut max_entries, option, value)?,
-            "--root" => {
-                // The TypeScript backend's root is a JavaScript string.
-                if value.to_str().is_none() {
-                    return Err(format!(
-                        "option '--root' needs a UTF-8 path, not {}",
-                        quoted(value)
-                    ));
-                }
-                root.replace(value.clone()).is_some()
-            }
-            "--id" => {
-                let text = value
-                    .to_str()
-                    .filter(|text| !text.is_empty())
-                    .ok_or_else(|| {
-                        format!(
-                            "option '--id' needs a non-empty UTF-8 Session id, not {}",
-                            quoted(value)
-                        )
-                    })?;
-                id.replace(text.to_owned()).is_some()
-            }
-            _ => {
-                let encoding = match value.to_str() {
-                    Some("none") => Encoding::None,
-                    Some("zstd") => Encoding::Zstd,
-                    _ => {
-                        return Err(format!(
-                            "option '--compression' needs none or zstd, not {}",
-                            quoted(value)
-                        ));
-                    }
-                };
-                compression.replace(encoding).is_some()
-            }
+            "--root" => root.replace(parse_root(value)?).is_some(),
+            "--id" => id.replace(parse_id(value)?).is_some(),
+            _ => compression.replace(parse_compression(value)?).is_some(),
         };
         if given {
             return Err(format!("option '{option}' was given more than once"));
@@ -270,6 +287,105 @@ fn parse_session(args: &[OsString]) -> Result<Command, String> {
         max_source_seqs,
         target,
     }))
+}
+
+/// Parse the operands of `session stat`, which takes options only.
+fn parse_stat(args: &[OsString]) -> Result<Command, String> {
+    if let Some((flag, extra)) = args.split_first().filter(|(flag, _)| is_help(flag)) {
+        return match extra.first() {
+            None => Ok(Command::StatHelp),
+            Some(extra) => Err(format!(
+                "unexpected argument {} after '{}'",
+                quoted(extra),
+                flag.display()
+            )),
+        };
+    }
+    let mut max_header_bytes = None;
+    let mut max_entries = None;
+    let mut root = None;
+    let mut id = None;
+    let mut compression = None;
+    let mut rest = args.iter();
+    while let Some(arg) = rest.next() {
+        let option = match arg.to_str() {
+            Some(
+                option @ ("--max-header-bytes" | "--max-entries" | "--root" | "--id"
+                | "--compression"),
+            ) => option,
+            Some(flag @ ("-h" | "--help")) => {
+                return Err(format!(
+                    "option '{flag}' must be the only operand of 'session stat'"
+                ));
+            }
+            _ if arg.as_encoded_bytes().starts_with(b"-") => {
+                return Err(format!("unknown option {} for 'session stat'", quoted(arg)));
+            }
+            _ => {
+                return Err(format!(
+                    "unexpected argument {} for 'session stat'",
+                    quoted(arg)
+                ));
+            }
+        };
+        let value = rest
+            .next()
+            .ok_or_else(|| format!("option '{option}' needs a value"))?;
+        let given = match option {
+            "--max-header-bytes" => set_count(&mut max_header_bytes, option, value)?,
+            "--max-entries" => set_count(&mut max_entries, option, value)?,
+            "--root" => root.replace(parse_root(value)?).is_some(),
+            "--id" => id.replace(parse_id(value)?).is_some(),
+            _ => compression.replace(parse_compression(value)?).is_some(),
+        };
+        if given {
+            return Err(format!("option '{option}' was given more than once"));
+        }
+    }
+    Ok(Command::Stat(StatArgs {
+        lookup: LookupArgs {
+            root: root.ok_or("missing required option '--root'")?,
+            id: id.ok_or("missing required option '--id'")?,
+            encoding: compression.unwrap_or(Encoding::Zstd),
+            max_entries: max_entries.ok_or("missing required option '--max-entries'")?,
+        },
+        max_header_bytes: max_header_bytes.ok_or("missing required option '--max-header-bytes'")?,
+    }))
+}
+
+/// The TypeScript backend's root is a JavaScript string, so it must be UTF-8.
+fn parse_root(value: &OsStr) -> Result<OsString, String> {
+    if value.to_str().is_none() {
+        return Err(format!(
+            "option '--root' needs a UTF-8 path, not {}",
+            quoted(value)
+        ));
+    }
+    Ok(value.to_owned())
+}
+
+fn parse_id(value: &OsStr) -> Result<String, String> {
+    value
+        .to_str()
+        .filter(|text| !text.is_empty())
+        .map(str::to_owned)
+        .ok_or_else(|| {
+            format!(
+                "option '--id' needs a non-empty UTF-8 Session id, not {}",
+                quoted(value)
+            )
+        })
+}
+
+fn parse_compression(value: &OsStr) -> Result<Encoding, String> {
+    match value.to_str() {
+        Some("none") => Ok(Encoding::None),
+        Some("zstd") => Ok(Encoding::Zstd),
+        _ => Err(format!(
+            "option '--compression' needs none or zstd, not {}",
+            quoted(value)
+        )),
+    }
 }
 
 /// Parse one budget into its slot; `Ok(true)` when the slot was already set.
@@ -318,22 +434,35 @@ fn main() -> ExitCode {
         Ok(Command::Version) => print(&format!("bake-rs {VERSION}\n")),
         Ok(Command::Preview) => preview(),
         Ok(Command::InspectHelp) => print(INSPECT_HELP),
-        Ok(Command::Inspect(args)) => match inspect::inspect(&args) {
-            Outcome::Record { json, status } => {
-                if write_stdout(&format!("{json}\n")) {
-                    ExitCode::from(status)
-                } else {
-                    ExitCode::FAILURE
-                }
-            }
-            Outcome::Failure(message) => {
-                eprintln!("bake-rs: {message}");
-                ExitCode::FAILURE
-            }
-        },
+        Ok(Command::Inspect(args)) => report(inspect::inspect(&args)),
+        Ok(Command::StatHelp) => print(STAT_HELP),
+        Ok(Command::Stat(args)) => report(match stat::run(&args) {
+            Ok((record, status)) => Outcome::Record {
+                json: record.to_string(),
+                status,
+            },
+            Err(message) => Outcome::Failure(message),
+        }),
         Err(Usage { message, help }) => {
             eprintln!("bake-rs: {message}\n\nRun '{help}' for usage.");
             ExitCode::from(2)
+        }
+    }
+}
+
+/// Print a record and exit with its status, or report a failure.
+fn report(outcome: Outcome) -> ExitCode {
+    match outcome {
+        Outcome::Record { json, status } => {
+            if write_stdout(&format!("{json}\n")) {
+                ExitCode::from(status)
+            } else {
+                ExitCode::FAILURE
+            }
+        }
+        Outcome::Failure(message) => {
+            eprintln!("bake-rs: {message}");
+            ExitCode::FAILURE
         }
     }
 }
@@ -618,6 +747,105 @@ mod tests {
                 Err(format!("option '{option}' needs '--root' and '--id'"))
             );
         }
+    }
+
+    #[test]
+    fn stat_takes_a_root_an_id_and_two_budgets() {
+        let stat = |encoding| {
+            Ok(Command::Stat(StatArgs {
+                lookup: LookupArgs {
+                    root: "r".into(),
+                    id: "a1".into(),
+                    encoding,
+                    max_entries: 5,
+                },
+                max_header_bytes: 7,
+            }))
+        };
+        let base = [
+            "session",
+            "stat",
+            "--max-entries",
+            "5",
+            "--id",
+            "a1",
+            "--max-header-bytes",
+            "7",
+            "--root",
+            "r",
+        ];
+        assert_eq!(parse_strs(&base), stat(Encoding::Zstd));
+        for (mode, encoding) in [("none", Encoding::None), ("zstd", Encoding::Zstd)] {
+            let args: Vec<&str> = base
+                .iter()
+                .copied()
+                .chain(["--compression", mode])
+                .collect();
+            assert_eq!(parse_strs(&args), stat(encoding));
+        }
+        for help in [
+            &["session", "stat", "-h"][..],
+            &["session", "stat", "--help"],
+        ] {
+            assert_eq!(parse_strs(help), Ok(Command::StatHelp));
+        }
+        let without = |option: &str| -> Vec<&str> {
+            let at = base.iter().position(|arg| *arg == option).unwrap();
+            let mut args = base.to_vec();
+            args.drain(at..at + 2);
+            args
+        };
+        let with = |extra: &[&'static str]| -> Vec<&str> {
+            base.iter().copied().chain(extra.iter().copied()).collect()
+        };
+        for (args, error) in [
+            (without("--root"), "missing required option '--root'"),
+            (without("--id"), "missing required option '--id'"),
+            (
+                without("--max-entries"),
+                "missing required option '--max-entries'",
+            ),
+            (
+                without("--max-header-bytes"),
+                "missing required option '--max-header-bytes'",
+            ),
+            (with(&["f"]), "unexpected argument 'f' for 'session stat'"),
+            (
+                with(&["--max-bytes", "1"]),
+                "unknown option '--max-bytes' for 'session stat'",
+            ),
+            (
+                with(&["--id", "b"]),
+                "option '--id' was given more than once",
+            ),
+            (
+                with(&["--help"]),
+                "option '--help' must be the only operand of 'session stat'",
+            ),
+            (
+                with(&["--compression"]),
+                "option '--compression' needs a value",
+            ),
+            (
+                with(&["--compression", "zst"]),
+                "option '--compression' needs none or zstd, not 'zst'",
+            ),
+            (
+                without("--max-header-bytes")
+                    .into_iter()
+                    .chain(["--max-header-bytes", "9007199254740992"])
+                    .collect(),
+                "option '--max-header-bytes' needs a positive decimal integer no greater than 9007199254740991, not '9007199254740992'",
+            ),
+            (
+                vec!["session", "stat", "--help", "x"],
+                "unexpected argument 'x' after '--help'",
+            ),
+        ] {
+            assert_eq!(parse_strs(&args), Err(error.into()), "{args:?}");
+        }
+        let usage = parse(&[OsString::from("session"), OsString::from("stat")]).unwrap_err();
+        assert_eq!(usage.help, "bake-rs session stat --help");
     }
 
     #[test]
