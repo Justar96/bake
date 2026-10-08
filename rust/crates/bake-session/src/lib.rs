@@ -38,6 +38,8 @@
 //! [`migrate_v2_rows`] strictly decodes a released v2 Session's parsed header
 //! and rows and runs the v2→v3 migration over them; its output is not an
 //! opened Session, since the final check of the transformed log is not run.
+//! [`decode_v0_v1_rows`] decodes a released v0 or v1 Session's parsed header
+//! and rows as the released physical codec does, without migrating them.
 //! [`token_usage`] folds a [`RestoredLog`]'s provider-reported token usage.
 //! [`restored_inbox`] and [`consumed_work`] fold a [`RestoredLog`]'s events
 //! into its pending inbox and its account of consumed work.
@@ -61,6 +63,7 @@ mod restore;
 mod scan;
 mod source_event_seqs;
 mod usage;
+mod v1_codec;
 mod v2_to_v3;
 mod v3_row;
 mod zstd;
@@ -93,6 +96,10 @@ pub use source_event_seqs::{
 };
 pub use usage::{
     LastTokenUsage, TokenUsageBuckets, TokenUsageState, UsageLimit, UsageRefusal, token_usage,
+};
+pub use v1_codec::{
+    DecodedV1Rows, V1CodecLimit, V1CodecLocation, V1CodecRecovery, V1CodecRefusal, V1CodecVersion,
+    decode_v0_v1_rows,
 };
 pub use v2_to_v3::{MigratedV2, V2ToV3Layer, V2ToV3Location, V2ToV3Refusal, migrate_v2_rows};
 pub use v3_row::{

@@ -13,7 +13,7 @@ const MAX_ARRAY_INDEX: u64 = u32::MAX as u64 - 1;
 /// ascending numeric order, then the other keys in insertion order. Values
 /// are unchanged, and serde_json's `preserve_order` already keeps a repeated
 /// key at its first position with its last value, as `JSON.parse` does.
-pub(super) fn js_order(value: Value) -> Value {
+pub(crate) fn js_order(value: Value) -> Value {
     match value {
         Value::Array(items) => Value::Array(items.into_iter().map(js_order).collect()),
         Value::Object(fields) => {
@@ -119,7 +119,7 @@ pub(super) fn is_count(value: Option<&Value>, expected: u64) -> bool {
 /// JavaScript's `String(number)` for an integer serde_json stores exactly.
 /// Every `u64` and `i64` is below 1e21, where both runtimes print the
 /// nearest double's shortest digits without an exponent. `None` for an `f64`.
-pub(super) fn integer_string(number: &Number) -> Option<String> {
+pub(crate) fn integer_string(number: &Number) -> Option<String> {
     let nearest = if let Some(number) = number.as_u64() {
         number as f64
     } else {

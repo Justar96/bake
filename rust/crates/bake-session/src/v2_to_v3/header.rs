@@ -139,7 +139,7 @@ fn is_version_two(version: &Value) -> Result<bool, StageError> {
     }
 }
 
-fn contains_negative_zero(value: &Value) -> bool {
+pub(crate) fn contains_negative_zero(value: &Value) -> bool {
     match value {
         Value::Number(number) => {
             !number.is_i64()

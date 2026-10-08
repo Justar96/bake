@@ -24,6 +24,7 @@ Compare TypeScript and Rust using controlled fixtures and independently checked 
 - [Token usage cases](#token-usage-cases)
 - [Pending inbox and consumed-work cases](#pending-inbox-and-consumed-work-cases)
 - [Fork seed cases](#fork-seed-cases)
+- [Released v0 and v1 codec cases](#released-v0-and-v1-codec-cases)
 - [Goal projection cases](#goal-projection-cases)
 - [Runner contract](#runner-contract)
 - [Ownership and limits](#ownership-and-limits)
@@ -481,6 +482,25 @@ The restored source is its stored events, then its closers, then the ordinary `s
 `ts` gives the inherited stored-event and closer counts and whether the appended end seed is inherited, or the error class, code, and exact message. Both harnesses check the inherited events against the decoded rows and closers. The appended end seed carries the time Session construction read from the clock, so neither table nor Rust claims it: Rust reports only that it is inherited, and TypeScript checks its type, seq, and `{}` data, its time against clock readings taken around the source's construction, and the whole prefix against the source's own events. Every case's source restores in both harnesses; the message projections are not registered, so no case holds an `image/offload` row.
 
 A `rust` override replaces the outcome for Rust. `unrepresentable` marks a boundary `fork_seed`'s `u64` cannot carry: -1, 0.5, and `15.0`, which `JSON.parse` reads as 15. A boundary above 2^53 − 1 is refused with the message JavaScript formats from the rounded number, including 2^64 − 1. `native-subset` with `turn-diagnostic` marks an `OPEN_TURN` message whose `turn` is not a string, `null`, absent, or a non-negative safe integer written without a fraction or exponent, which JavaScript formats with `String`; Rust claims nothing there. Both harnesses pin the case count and require every limit, refusal class and code, an unrepresentable boundary, and an inherited end seed to be witnessed. The expectations were written from the TypeScript sources before either harness ran. The cases claim nothing about the live store's source and child-id checks or the child's own tagged end seed.
+
+## Released v0 and v1 codec cases
+
+[`session/v1-codec-cases.json`](session/v1-codec-cases.json) holds 140 synthetic released v0 and v1 Sessions, each a physical header and rows as JSON text with a codec version and a recovery mode. The [TypeScript spec](../packages/session/session-format-v0-to-v1/tests/codec-conformance.spec.ts) calls `createDecoder(header, recovery)` on `releasedV0SessionFormatCodec` or `releasedV1SessionFormatCodec` from [`codec.ts`](../packages/session/session-format-v0-to-v1/src/codec.ts), passes each parsed row to `decodeRow` with a `SessionFormatEventCollector`, which expands packed Assistant chunk runs, then calls `finish`. The [Rust test](../rust/crates/bake-session/tests/v1_codec_cases.rs) passes the same parsed header and rows to [`decode_v0_v1_rows`](../rust/crates/bake-session/src/v1_codec.rs) under both path platforms. TypeScript checks its host's path behavior.
+
+```sh
+bun run test:runtime packages/session/session-format-v0-to-v1/tests/codec-conformance.spec.ts
+(cd rust && cargo test --locked -p bake-session --test v1_codec_cases)
+```
+
+A decoded outcome compares the logical header, the inherited cut from `seedLength`, and the emitted events, with numbers compared as JavaScript doubles and object members in JavaScript key order. A refusal compares the header, row, or finish location and the exact `SessionFormatError` message. The cases cover:
+
+- header members, types, order, the lossless-JSON check, `origin`, `seedLength` present or absent, path platforms, and a v0 or v2 header given to the v1 codec and the reverse;
+- ordinary rows, which the codec passes through unvalidated except for their seq order and `sourceEventSeqs`, including seq gaps whose message converts a missing, string, `null`, boolean, negative, unsafe, or -0 seq with `String`;
+- `sourceEventSeqs` members and ranges, their bound by the row's seq, and their ordering;
+- each packed tag, `dt` and payload mismatches, member times at and past the safe range, and a final seq that JavaScript's rounding brings back into range;
+- recoverable decoding, where the first issue ends the decoded prefix and a later row decoding as a `turn/end` event refuses with that issue, and an inherited cut beyond the decoded events.
+
+A `rust` marker names a native limit and its location, and Rust claims nothing there; each such case still asserts TypeScript's outcome. `header-float-lexeme`, `seq-float-lexeme`, `source-float-lexeme`, and `packed-float-lexeme` mark a fraction or exponent spelling where TypeScript compares or reads a number; `seq-diagnostic` marks an array or object seq that a gap message converts with `String`; `source-output-budget` marks an expanded `sourceEventSeqs` list beyond the caller's budget; and `unsafe-json-integer` marks an emitted row retaining an integer that `JSON.parse` rounds. Of the 140 cases, 31 decode, 95 are refusals both arms report exactly, 2 of which decode on Win32, and 14 are limits. Both harnesses pin the case count and require every limit, both versions, and both recovery modes to be witnessed. The expectations were written from the TypeScript sources before either harness ran. Three negative controls were observed: dropping the rethrow of the first issue at a later `turn/end` fails `recoverable-turn-end-after-issue` in both arms, offsetting the expanded chunk times fails `packed-text-expands` in both arms, and computing the final seq exactly instead of in doubles fails `packed-final-seq-rounds-into-range` in Rust. No migration runs: the events are codec output, not v1 or v2 events, and their vocabulary, payloads, and relationships are unchecked.
 
 ## Goal projection cases
 

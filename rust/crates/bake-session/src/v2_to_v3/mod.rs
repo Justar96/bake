@@ -29,7 +29,8 @@ use crate::envelope::{
     EnvelopeLimit, EnvelopeRefusal, EnvelopeRejection, NumberField, decode_row_envelope,
 };
 use crate::source_event_seqs::SourceEventSeqsLimit;
-use js::{integer_string, js_order};
+pub(crate) use header::contains_negative_zero;
+pub(crate) use js::{integer_string, js_order};
 use stage::Stage;
 
 /// `SURFACE_TYPES` in `payload.ts`; every other admitted event is log-only.
@@ -190,7 +191,7 @@ pub fn migrate_v2_rows(
     })
 }
 
-fn contains_unsafe_integer(value: &Value) -> bool {
+pub(crate) fn contains_unsafe_integer(value: &Value) -> bool {
     let mut pending = vec![value];
     while let Some(value) = pending.pop() {
         match value {
