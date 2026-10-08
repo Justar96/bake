@@ -21,6 +21,9 @@ Compare TypeScript and Rust using controlled fixtures and independently checked 
 - [Session lookup cases](#session-lookup-cases)
 - [Session metadata cases](#session-metadata-cases)
 - [V2 to V3 migration cases](#v2-to-v3-migration-cases)
+- [Token usage cases](#token-usage-cases)
+- [Pending inbox and consumed-work cases](#pending-inbox-and-consumed-work-cases)
+- [Fork seed cases](#fork-seed-cases)
 - [Runner contract](#runner-contract)
 - [Ownership and limits](#ownership-and-limits)
 
@@ -424,6 +427,58 @@ bun run test:runtime packages/session/session-format-v2-to-v3/tests/v2-to-v3-mig
 The API consumes parsed JSON values and leaves framing, compression, and parser limits to its caller. Numbers compare with JavaScript semantics, preserving negative zero; integer-to-integer comparisons remain exact. Rust refuses retained integer values outside JavaScript's safe range after the row's ordinary checks succeed. Native limits also identify undecided integer spellings, engine-specific or numeric diagnostic text, and expanded source lists that exceed the caller's budget. Each fixture with a native limit still asserts TypeScript's outcome. Opaque floating-point values are preserved, but this suite does not qualify a byte encoder.
 
 The result stops before `restoreReleasedV3Artifact`, which validates relationships, protected system messages, and vocabulary across the complete transformed artifact. It therefore does not establish that TypeScript would open the migrated Session. Recoverable decoding, earlier adjacent migrations, historical plain or Zstd file reads, publication, and Agent resume remain separate work. These cases close no roadmap scope.
+## Token usage cases
+
+[`session/usage-cases.json`](session/usage-cases.json) holds 34 edited runtime captures and the token-usage state token-meter folds from each. The [TypeScript spec](../packages/llm/token-meter/tests/usage-conformance.spec.ts) folds `tokenUsageProjectionDefinition.init` and `apply` from [`usage-projection.ts`](../packages/llm/token-meter/src/usage-projection.ts) over each case's `JSON.parse`d rows and their `interruptedTurnClosers`, and requires `Session.fromRestore`, without message projections, to admit the same events. The [Rust test](../rust/crates/bake-session/tests/usage_cases.rs) restores the same bytes with `restore_plain_log`, requires every case to restore with no torn tail, and folds the result with [`token_usage`](../rust/crates/bake-session/src/usage.rs).
+
+```sh
+bun run test:runtime packages/llm/token-meter/tests/usage-conformance.spec.ts
+(cd rust && cargo test --locked -p bake-session --test usage_cases)
+```
+
+Each Assistant settlement contributes one sample: an `assistant/message`'s own `usage` member when present, even `null`, otherwise the stream's last raw `usage` chunk, found as `lastAssistantStreamChunk` finds it, scanning backwards and stopping at the first hit, even one without a `usage` member. A sample for the coordinate the slot holds replaces it in the totals, an equal one changes nothing, and `llm/retry-started` with a strictly equal `turn` and `step` empties the slot, so the retried request adds. Missing or `null` cache counts are 0. `ts` is the folded `{totals, last}` state, or a `TypeError` and the seq of the event that throws it, written from the TypeScript sources and the committed captures before either harness ran. Each case edits one of the three [runtime captures](#runtime-request-reconstruction) as the [restoration table](#plain-log-restoration-cases) does, without header or tail edits.
+
+A `rust` override names a native limit and the refused seq, which must equal a TypeScript throw's: `number` for a sampled count not spelled as a safe integer (a fraction, an exponent, or out of range), which only an unqualified `assistant/attempt` stream can hold, or a running total past the safe-integer range; `usage` for a sample that is not an object or whose counts JavaScript would coerce; `stream` for a `null` record, or a `chunk` record whose `chunk` is absent or `null`, reached before a `usage` chunk; and `retry` for `llm/retry-started` data that is `null`, or lacks `turn` while the slot is empty. Of the 34 cases, 22 fold identically, 8 are TypeScript throws, and 4 are limits on input TypeScript folds through coercion or rounding. Both harnesses pin the case count and require every limit to be witnessed. Two negative controls were observed: dropping the `llm/retry-started` reset, or taking the first usage chunk instead of the last, fails `retry-started-closes-slot` in both arms. The fold does not cover `contextPressure`, turn usage, or pricing.
+
+## Pending inbox and consumed-work cases
+
+[`session/inbox-cases.json`](session/inbox-cases.json) holds 63 edits of the three [runtime captures](#runtime-request-reconstruction) and, for each, the pending inbox and the consumed-work account folded over its restored events. The [TypeScript spec](../packages/core/agent-loop/tests/inbox-conformance.spec.ts) restores each log with local copies of the [restore spec's](#plain-log-restoration-cases) `restorePlainLog` and `caseLog` helpers, then folds the restored Session's events, which are the stored events, the closers, and any appended end seed, with `inboxProjectionDefinition.apply` from `init()` and with `foldConsumedWork`. Because that package does not depend on the format catalog, the copy restores without message projections. Those projections change only derived messages, and the spec checks that no case logs an `image/offload`. The development [`bake-session`](../rust/crates/bake-session/src/inbox.rs) crate passes the same bytes to `restore_plain_log`, then to `restored_inbox` and `consumed_work`, which read the stored events and the closers. Neither fold reads the end seed.
+
+```sh
+bun run test:runtime packages/core/agent-loop/tests/inbox-conformance.spec.ts
+(cd rust && cargo test --locked -p bake-session --test inbox_cases)
+```
+
+Every case restores. `ts.inbox` is either the `next-turn` and `next-step` messages or the exact refusal `invalid persisted inbox splice at session seq N`. The fold wraps every error it throws in that message, `TypeError`s included, so a `null` message, a non-iterable `inserted`, and a target other than the two lists all refuse exactly. `ts.consumedWork` is the accounting `turn/end`, absent when none, and `droppedUnrun`, or the `TypeError` class that `foldConsumedWork` throws unwrapped. `{"$log": pointer}` and `{"$closer": pointer}` name a value in the edited rows or the closers.
+
+The cases cover:
+
+- the unedited captures, and logs cut before a claim, after a claim, and inside a step, where a closer's interrupted end does or does not account for the work;
+- `start` and `removedCount` at and past each bound, negative, absent, `null` (which removes nothing yet still counts as a claim or a cancellation), a string, and an unsafe integer;
+- duplicate pending ids within one insert and across targets, a reused id after a claim, and messages without an id;
+- cancellations with and without `inserted`, a replacement that inserts, and a claim outside a turn;
+- claimed-but-unstepped turns ending with each built-in reason and an unknown one, a stepped end without a reason, a claim that survives a stepped end, and turns whose value is a string, `null`, an object, or absent.
+
+A `rust` override names a native limit and the seq it applies to, and claims nothing for that fold. Inbox limits are a non-string `target`, which JavaScript coerces to a property key; a count spelled with a fraction or exponent; a string `inserted`, which the spread splits into characters; and a numeric message id that is not a safe integer lexeme. Consumed-work limits are `null` data, an absent or `null` `inserted` read for a cancellation, and an absent or `null` reason for a claimed turn, each a `TypeError`, and an object `inserted`, whose `length` this port does not read. A further limit covers a turn number that is not a safe integer lexeme. Both harnesses pin the case count, reject unknown keys, and require every limit to be witnessed. The expectations were written from the two TypeScript sources before either harness ran. Open compactions and open children have no pure TypeScript fold, so this table does not cover them.
+
+## Fork seed cases
+
+[`session/fork-cases.json`](session/fork-cases.json) holds 48 plain logs, each an edited [runtime capture](#runtime-request-reconstruction), with an optional inclusive fork boundary and the events a fork of the restored Session inherits. The [TypeScript spec](../packages/core/session/tests/fork-conformance.spec.ts) restores each source as `SessionStore.prepare` does, passing the parsed rows, with packed `sourceEventSeqs` ranges expanded, and `interruptedTurnClosers` to `Session.fromRestore` with `eventState: 'detached'`, enters it into a `SessionStore`, and calls `fork`. The [Rust test](../rust/crates/bake-session/tests/fork_cases.rs) restores the same bytes with `restore_plain_log` and calls [`fork_seed`](../rust/crates/bake-session/src/fork.rs).
+
+```sh
+bun run test:runtime packages/core/session/tests/fork-conformance.spec.ts
+(cd rust && cargo test --locked -p bake-session --test fork_cases)
+```
+
+The restored source is its stored events, then its closers, then the ordinary `session/end-seed` restoration appends unless the last event is one. An omitted boundary is the source's last event. The checks run in this order:
+
+1. The boundary must be a non-negative safe integer, then below the source's next seq (`SessionForkError` `INVALID_BOUNDARY`).
+2. The last `turn/start` or `turn/end` at or before the boundary must not be a `turn/start` (`OPEN_TURN`). A closer can therefore be inherited, but a boundary on a closer before the closing `turn/end` is inside the turn. A `turn/start` whose `turn` is `null` counts as open here, though `interruptedTurnClosers` treats it as closed.
+3. The child's Session construction takes a lossless JSON snapshot, which refuses the first selected event holding -0 with a plain `Error`. `Session.fromRestore` takes none, so a log-only row with -0 restores but cannot be inherited.
+
+`ts` gives the inherited stored-event and closer counts and whether the appended end seed is inherited, or the error class, code, and exact message. Both harnesses check the inherited events against the decoded rows and closers. The appended end seed carries the time Session construction read from the clock, so neither table nor Rust claims it: Rust reports only that it is inherited, and TypeScript checks its type, seq, and `{}` data, its time against clock readings taken around the source's construction, and the whole prefix against the source's own events. Every case's source restores in both harnesses; the message projections are not registered, so no case holds an `image/offload` row.
+
+A `rust` override replaces the outcome for Rust. `unrepresentable` marks a boundary `fork_seed`'s `u64` cannot carry: -1, 0.5, and `15.0`, which `JSON.parse` reads as 15. A boundary above 2^53 − 1 is refused with the message JavaScript formats from the rounded number, including 2^64 − 1. `native-subset` with `turn-diagnostic` marks an `OPEN_TURN` message whose `turn` is not a string, `null`, absent, or a non-negative safe integer written without a fraction or exponent, which JavaScript formats with `String`; Rust claims nothing there. Both harnesses pin the case count and require every limit, refusal class and code, an unrepresentable boundary, and an inherited end seed to be witnessed. The expectations were written from the TypeScript sources before either harness ran. The cases claim nothing about the live store's source and child-id checks or the child's own tagged end seed.
 
 ## Runner contract
 
