@@ -43,8 +43,13 @@
 //! [`migrate_v0_to_v1`] runs the v0→v1 migration over a decoded v0 Session;
 //! its output is the edge's, not an opened Session.
 //! [`migrate_v1_to_v2_transformed`] runs the released v1→v2 migration's
-//! transformed stage over a decoded v1 Session, without Assistant chunks; it
-//! is the stage a chain runs after v0→v1, not production's read of a v1 file.
+//! transformed stage over a decoded v1 Session, grouping its Assistant chunks,
+//! packed rows expanded, into attempts; it is the stage a chain runs after
+//! v0→v1, not production's read of a v1 file.
+//! [`migrate_released_v0_history`] reads a decoded v0 Session through all
+//! three edges to format v3, reporting the refusal TypeScript's streaming
+//! chain reports first; Assistant chunks and a decoded v1 Session are native
+//! limits.
 //! [`token_usage`] folds a [`RestoredLog`]'s provider-reported token usage,
 //! and [`context_pressure`] its context occupancy with the surface's
 //! heuristic token total.
@@ -59,14 +64,20 @@
 //! [`subagent_identity`] and [`subagent_timing`] fold a [`RestoredLog`]'s
 //! subagent descriptors and turn times into its identity and active-turn
 //! timing.
-//! None reads or writes a file or encodes a log. The crate is
+//! [`encode_header_line`] and [`encode_event_line`] produce the exact text
+//! TypeScript writes for a current header record and one current event row,
+//! without the LF, or refuse with `Unadmitted` where TypeScript throws, or
+//! with a native limit.
+//! None reads or writes a file. The crate is
 //! unstable and unshipped; the preview's `session inspect` and `session stat` use it.
 
+mod assistant_stream;
 mod boundary;
 mod envelope;
 mod fork;
 mod generation_header;
 mod goal;
+mod history;
 mod inbox;
 mod offload;
 mod pressure;
@@ -74,6 +85,7 @@ mod repair;
 mod replay;
 mod request;
 mod restore;
+mod row_encode;
 mod scan;
 mod source_event_seqs;
 mod subagent;
@@ -99,6 +111,7 @@ pub use goal::{
     GoalBlockReason, GoalLimit, GoalPhase, GoalProjection, GoalProjectionState, GoalRefusal,
     GoalSnapshot, goal_projection,
 };
+pub use history::{HistoryLimit, HistoryLocation, HistoryRefusal, migrate_released_v0_history};
 pub use inbox::{
     ConsumedWork, ConsumedWorkCoercion, ConsumedWorkLimit, InboxLimit, InboxRefusal, PendingInbox,
     consumed_work, restored_inbox,
@@ -114,6 +127,7 @@ pub use restore::{
     RestoreLimit, RestoreRefusal, RestoredLog, StagedLog, TornTail, Unsupported, restore_plain_log,
     stage_plain_log,
 };
+pub use row_encode::{EncodeLimit, EncodeRefusal, encode_event_line, encode_header_line};
 pub use scan::{FinishRejection, ScanIssue, ScanLimit, ScanRefusal, ScannedLog, scan_log};
 pub use source_event_seqs::{
     SourceEventSeqsLimit, SourceEventSeqsRefusal, SourceEventSeqsRejection,

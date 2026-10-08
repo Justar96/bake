@@ -30,6 +30,7 @@ use crate::envelope::{
 };
 use crate::source_event_seqs::SourceEventSeqsLimit;
 pub(crate) use admission::OBJECT_PROTOTYPE_NAMES;
+use header::SourceHeader;
 pub(crate) use header::contains_negative_zero;
 pub(crate) use js::{integer_string, js_order};
 pub(crate) use payload_semantics::{
@@ -194,6 +195,114 @@ pub fn migrate_v2_rows(
         events,
         inherited_event_count,
     })
+}
+
+/// `sessionFormatV2ToV3` as a chain runs it after the v1→v2 transformed
+/// stage: `migrateHeader` over the logical v2 `header`, then the stage's
+/// `transformEvent` for each logical v2 event, then its `finish`. No codec
+/// runs, so a refusal's [`V2ToV3Location::Row`] is an index into `events`,
+/// and every refusal is in the migration layer.
+///
+/// The header must be what the earlier stages emit after a released v0 or
+/// v1 decode, which `assertReleasedV2Header` and `assertReleasedV3Header`
+/// always admit; any other header reports the `decode-invariant` limit.
+pub(crate) fn migrate_logical_v2(
+    header: &Value,
+    events: &[Value],
+) -> Result<MigratedV2, V2ToV3Refusal> {
+    let (source, target_header) = logical_header(header)?;
+    let stage = transform_logical_events(source, events)?;
+    let (events, inherited_event_count) = stage
+        .finish()
+        .map_err(|error| migration(V2ToV3Location::Finish, error))?;
+    Ok(MigratedV2 {
+        header: target_header,
+        events,
+        inherited_event_count,
+    })
+}
+
+/// [`migrate_logical_v2`] without the stage's `finish`: whether the edge
+/// refuses any of `events`, as a chain stream does before an earlier stage
+/// refuses the next source event. Its output is then discarded.
+pub(crate) fn check_logical_v2_prefix(
+    header: &Value,
+    events: &[Value],
+) -> Result<(), V2ToV3Refusal> {
+    let (source, _) = logical_header(header)?;
+    transform_logical_events(source, events).map(drop)
+}
+
+fn transform_logical_events(
+    source: SourceHeader,
+    events: &[Value],
+) -> Result<Stage, V2ToV3Refusal> {
+    let mut stage = Stage::new(source);
+    for (index, event) in events.iter().enumerate() {
+        stage
+            .transform(event.clone())
+            .map_err(|error| migration(V2ToV3Location::Row(index), error))?;
+    }
+    Ok(stage)
+}
+
+/// The chain's v2→v3 `migrateHeader` over a logical v2 header: `version` 3
+/// in place, and an `agentPreset` of `code` renamed `ptc` in place.
+fn logical_header(header: &Value) -> Result<(SourceHeader, Value), V2ToV3Refusal> {
+    const REQUIRED: [&str; 5] = ["version", "id", "createdAt", "isSeeded", "delegationDepth"];
+    const OPTIONAL: [&str; 4] = ["cwd", "parentSession", "origin", "agentPreset"];
+    let invariant = || V2ToV3Refusal::NativeSubset {
+        location: V2ToV3Location::Header,
+        limit: "decode-invariant".to_owned(),
+    };
+    let Value::Object(fields) = header else {
+        return Err(invariant());
+    };
+    let exact = fields
+        .keys()
+        .all(|key| REQUIRED.contains(&key.as_str()) || OPTIONAL.contains(&key.as_str()))
+        && REQUIRED.iter().all(|key| fields.contains_key(*key));
+    let counted = |key: &str| {
+        fields
+            .get(key)
+            .and_then(Value::as_u64)
+            .is_some_and(|value| value <= crate::MAX_SAFE_INTEGER)
+    };
+    let strings = ["cwd", "parentSession", "agentPreset"]
+        .iter()
+        .all(|key| fields.get(*key).is_none_or(Value::is_string));
+    let origin = fields
+        .get("origin")
+        .is_none_or(|origin| origin == "subagent");
+    let (Some(Value::String(id)), Some(Value::Bool(is_seeded))) =
+        (fields.get("id"), fields.get("isSeeded"))
+    else {
+        return Err(invariant());
+    };
+    // The decoders already proved `cwd` absolute on the caller's platform.
+    if !exact
+        || fields.get("version").and_then(Value::as_u64) != Some(2)
+        || !counted("createdAt")
+        || !counted("delegationDepth")
+        || !strings
+        || !origin
+    {
+        return Err(invariant());
+    }
+    let mut target = fields.clone();
+    target.insert("version".to_owned(), Value::from(3_u64));
+    if target
+        .get("agentPreset")
+        .is_some_and(|preset| preset == "code")
+    {
+        target.insert("agentPreset".to_owned(), Value::from("ptc"));
+    }
+    let source = SourceHeader {
+        id: id.clone(),
+        is_seeded: *is_seeded,
+        has_parent: fields.contains_key("parentSession"),
+    };
+    Ok((source, Value::Object(target)))
 }
 
 pub(crate) fn contains_unsafe_integer(value: &Value) -> bool {

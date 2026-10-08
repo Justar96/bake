@@ -12,17 +12,24 @@
 //! casts and refuses with a [`V1ToV2Limit`] wherever TypeScript would throw a
 //! `TypeError` or coerce a value.
 //!
-//! The subset is chunk-free. Every `assistant/chunk` event, including those
-//! expanded from packed rows, refuses with [`V1ToV2Limit::AssistantChunk`]
-//! where TypeScript would start compacting it into an attempt. Without
-//! chunks no attempt is ever pending, so the attempt grouping, stream
-//! compaction, and buffering paths are never reached.
+//! Every `assistant/chunk` event, including those expanded from packed rows,
+//! goes through `transformChunk` and the stage's `AssistantStreamAccumulator`,
+//! ported in [`crate::assistant_stream`]. TypeScript would send a packed row
+//! through `transformRun` instead, which this port does not include, so a
+//! log with packed rows matches TypeScript's `transformEvent` over its
+//! expanded events, not a chain reading the file.
+//!
+//! The stage flushes the accumulator into an empty stream once per attempt,
+//! when it emits the attempt or its message, so `appendStreamRecord` never
+//! merges two records: the accumulator already splits wherever that merge
+//! would, on a type, index, id, or name change or an unsafe gap.
 
 use std::collections::HashMap;
 
 use serde_json::{Map, Value};
 
 use crate::MAX_SAFE_INTEGER;
+use crate::assistant_stream::{AssistantStreamAccumulator, StreamPushError};
 use crate::v1_codec::DecodedV1Rows;
 use crate::v2_to_v3::integer_string;
 
@@ -148,23 +155,27 @@ pub enum V1ToV2Refusal {
 /// Input whose TypeScript outcome this port does not reproduce.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum V1ToV2Limit {
-    /// An `assistant/chunk` event that passed its envelope check, where
-    /// TypeScript would add it to an Assistant attempt.
-    AssistantChunk,
+    /// An `assistant/chunk` whose `time` or `data.chunk` the stream
+    /// accumulator refuses: TypeScript throws a `TypeError`, or an `Error`
+    /// from `assertNever` for an unknown chunk type.
+    ChunkShape,
     /// An event `type` that is not a string, which the vocabulary lookup
     /// converts to a property key.
     NonStringType,
     /// A value the stage casts without checking and then reads as an object
     /// member, spreads, maps as an array, or adds to or prints as a number,
     /// where it is not of that kind: JavaScript throws a `TypeError` or
-    /// coerces it.
+    /// coerces it. This includes an attempt coordinate that is an object or
+    /// array, which `!==` compares by reference.
     UncheckedShape,
     /// A number spelled with a fraction or exponent, or beyond `u64`, where
-    /// TypeScript compares, looks up, adds to, or prints it.
+    /// TypeScript compares, looks up, adds to, or prints it, including a
+    /// chunk's `time` or `index`.
     FloatLexeme,
     /// An emitted event would carry a member whose value is `undefined`,
     /// which JSON cannot express: a synthesized event's `time` from an event
-    /// without one, or a passed-through event without `data`.
+    /// without one, a passed-through event without `data`, or an attempt
+    /// whose first chunk had no `turn` or `step`.
     UndefinedMember,
 }
 
@@ -172,7 +183,7 @@ impl V1ToV2Limit {
     /// The limit's name in `conformance/session/v1-to-v2-cases.json`.
     pub const fn name(self) -> &'static str {
         match self {
-            Self::AssistantChunk => "assistant-chunk",
+            Self::ChunkShape => "chunk-shape",
             Self::NonStringType => "non-string-type",
             Self::UncheckedShape => "unchecked-shape",
             Self::FloatLexeme => "float-lexeme",
@@ -240,7 +251,83 @@ enum OpenTurn {
     Open(Option<Value>),
 }
 
-/// `ReleasedV1ToV2State` with no pending attempt.
+/// `StreamingAttempt` and its `AttemptGroup`: the chunks of one Assistant
+/// attempt so far, and the events buffered after its last chunk.
+struct PendingAttempt {
+    /// `turn` and `step` of the attempt's first chunk, `None` when absent.
+    turn: Option<Value>,
+    step: Option<Value>,
+    /// `spans` as `(firstSeq, eventCount)`.
+    spans: Vec<(u64, u64)>,
+    accumulator: AssistantStreamAccumulator,
+    chunk_count: u64,
+    last_chunk_seq: u64,
+    /// The last chunk's `time`, a safe integer the accumulator admitted.
+    last_chunk_time: Value,
+    terminal: bool,
+    /// `afterLastChunk`: each buffered event's index and members.
+    after_last_chunk: Vec<(u64, Map<String, Value>)>,
+}
+
+impl PendingAttempt {
+    /// `assertAttemptCut`: an attempt's chunks and its message must all
+    /// precede the source cut or all follow it.
+    fn assert_cut(&self, source_cut: u64, member: u64) -> Checked<()> {
+        let first = self.spans.first().map_or(member, |(first, _)| *first);
+        if (first < source_cut) != (member < source_cut) {
+            return Err(Failure::Unsupported(format!(
+                "inherited Session cut {source_cut} splits one Assistant attempt"
+            )));
+        }
+        Ok(())
+    }
+
+    /// `recordChunkSpan` for one chunk event.
+    fn record_chunk(&mut self, seq: u64, time: Value) {
+        match self.spans.last_mut() {
+            Some((first, count)) if first.checked_add(*count) == Some(seq) => *count += 1,
+            _ => self.spans.push((seq, 1)),
+        }
+        self.chunk_count += 1;
+        self.last_chunk_seq = seq;
+        self.last_chunk_time = time;
+    }
+
+    /// `matchesChunkSources`: the message cites exactly this attempt's
+    /// chunks, in order.
+    fn matches_sources(&self, sources: &[Value]) -> bool {
+        if sources.len() as u64 != self.chunk_count {
+            return false;
+        }
+        let mut cited = sources.iter();
+        self.spans.iter().all(|(first, count)| {
+            (0..*count)
+                .all(|offset| cited.next().and_then(Value::as_u64) == first.checked_add(offset))
+        })
+    }
+
+    /// `attemptEvent`: the `assistant/attempt` at the last chunk's seq and time.
+    fn attempt_event(&self) -> Checked<Map<String, Value>> {
+        let (Some(turn), Some(step)) = (&self.turn, &self.step) else {
+            return Err(Failure::Limit(V1ToV2Limit::UndefinedMember));
+        };
+        let mut data = Map::new();
+        data.insert("turn".to_owned(), turn.clone());
+        data.insert("step".to_owned(), step.clone());
+        data.insert(
+            "stream".to_owned(),
+            Value::Array(self.accumulator.snapshot()),
+        );
+        generated(
+            "assistant/attempt",
+            self.last_chunk_seq,
+            Some(&self.last_chunk_time),
+            Value::Object(data),
+        )
+    }
+}
+
+/// `ReleasedV1ToV2State`.
 struct Stage<'a> {
     header: &'a Map<String, Value>,
     events: &'a [Value],
@@ -256,6 +343,7 @@ struct Stage<'a> {
     target_cut: Option<u64>,
     /// `lastTime`, `None` when an event had no `time`.
     last_time: Option<Value>,
+    pending: Option<PendingAttempt>,
     output: Vec<Value>,
 }
 
@@ -274,6 +362,7 @@ impl<'a> Stage<'a> {
             target_seq: 0,
             target_cut: if is_seeded { None } else { Some(0) },
             last_time: header.get("createdAt").cloned(),
+            pending: None,
             output: Vec::new(),
         }
     }
@@ -313,6 +402,7 @@ impl<'a> Stage<'a> {
         self.observe_legacy_turn(event_type, fields, index)?;
         self.last_time = fields.get("time").cloned();
         if let Some(interrupted) = interrupted {
+            self.finish_attempt()?;
             self.emit_generated(seq, interrupted)?;
         }
         if let Some(LegacyGoalSplit { change, message }) =
@@ -322,11 +412,95 @@ impl<'a> Stage<'a> {
             return self.emit_source(seq, message, fields.get("time"));
         }
         match event_type {
-            "assistant/chunk" => Err(Failure::Limit(V1ToV2Limit::AssistantChunk)),
+            "assistant/chunk" => self.transform_chunk(fields, seq),
             "assistant/message" => self.transform_message(fields, seq),
-            // `closesAttempt` finishes an attempt first, and none is pending.
-            _ => self.emit_source(seq, fields.clone(), fields.get("time")),
+            // `closesAttempt`.
+            "turn/end" | "step/end" | "llm/retry" | "llm/retry-started" => {
+                self.finish_attempt()?;
+                self.emit_source(seq, fields.clone(), fields.get("time"))
+            }
+            _ => match &mut self.pending {
+                Some(pending) => {
+                    pending.after_last_chunk.push((seq, fields.clone()));
+                    Ok(())
+                }
+                None => self.emit_source(seq, fields.clone(), fields.get("time")),
+            },
         }
+    }
+
+    /// `transformChunk`.
+    fn transform_chunk(&mut self, fields: &Map<String, Value>, seq: u64) -> Checked<()> {
+        let data = record(fields.get("data"))?;
+        let turn = data.get("turn");
+        let step = data.get("step");
+        if let Some(pending) = &self.pending {
+            let continues = !pending.terminal
+                && same_coordinate(pending.turn.as_ref(), turn)?
+                && same_coordinate(pending.step.as_ref(), step)?;
+            if continues {
+                self.flush_buffered()?;
+            } else {
+                self.finish_attempt()?;
+            }
+        }
+        let source_cut = self.source_cut;
+        let pending = self.pending.get_or_insert_with(|| PendingAttempt {
+            turn: turn.cloned(),
+            step: step.cloned(),
+            spans: Vec::new(),
+            accumulator: AssistantStreamAccumulator::default(),
+            chunk_count: 0,
+            last_chunk_seq: seq,
+            last_chunk_time: Value::Null,
+            terminal: false,
+            after_last_chunk: Vec::new(),
+        });
+        pending.assert_cut(source_cut, seq)?;
+        let chunk = data.get("chunk");
+        pending
+            .accumulator
+            .push(fields.get("time"), chunk)
+            .map_err(|error| {
+                Failure::Limit(match error {
+                    StreamPushError::ChunkShape => V1ToV2Limit::ChunkShape,
+                    StreamPushError::FloatLexeme => V1ToV2Limit::FloatLexeme,
+                })
+            })?;
+        // `push` admitted the time, so it is present.
+        pending.record_chunk(seq, fields.get("time").cloned().unwrap_or(Value::Null));
+        if chunk.and_then(|chunk| chunk.get("type")) == Some(&Value::from("finish")) {
+            pending.terminal = true;
+        }
+        Ok(())
+    }
+
+    /// `finishAttempt`: emit the pending attempt, then the events buffered
+    /// after its last chunk.
+    fn finish_attempt(&mut self) -> Checked<()> {
+        let Some(pending) = self.pending.take() else {
+            return Ok(());
+        };
+        let attempt = pending.attempt_event()?;
+        self.emit_generated(pending.last_chunk_seq, attempt)?;
+        self.emit_buffered(pending.after_last_chunk)
+    }
+
+    /// `flushBuffered` for the attempt that stays pending.
+    fn flush_buffered(&mut self) -> Checked<()> {
+        let buffered = match &mut self.pending {
+            Some(pending) => std::mem::take(&mut pending.after_last_chunk),
+            None => return Ok(()),
+        };
+        self.emit_buffered(buffered)
+    }
+
+    fn emit_buffered(&mut self, buffered: Vec<(u64, Map<String, Value>)>) -> Checked<()> {
+        for (seq, fields) in buffered {
+            let time = fields.get("time").cloned();
+            self.emit_source(seq, fields, time.as_ref())?;
+        }
+        Ok(())
     }
 
     /// `legacyInterruptedTurn`: the `turn/end` a released next-turn splice
@@ -446,24 +620,44 @@ impl<'a> Stage<'a> {
         Ok(())
     }
 
-    /// `transformMessage` with no pending attempt.
+    /// `transformMessage`.
     fn transform_message(&mut self, fields: &Map<String, Value>, seq: u64) -> Checked<()> {
-        // `data['turn']` and `data['step']` are read, but only for a pending attempt.
         let data = record(fields.get("data"))?;
-        if let Some(Value::Array(sources)) = fields.get("sourceEventSeqs")
-            && !sources.is_empty()
+        let time = fields.get("time");
+        if let Some(pending) = &self.pending
+            && !(same_coordinate(pending.turn.as_ref(), data.get("turn"))?
+                && same_coordinate(pending.step.as_ref(), data.get("step"))?)
         {
+            self.finish_attempt()?;
+            return self.emit_source(seq, message_event(fields, data, Vec::new()), time);
+        }
+        let sources = match fields.get("sourceEventSeqs") {
+            Some(Value::Array(sources)) => sources,
+            _ => {
+                if self.pending.is_some() {
+                    return Err(Failure::Unsupported(format!(
+                        "assistant/message {seq} does not cite its complete v1 chunk attempt"
+                    )));
+                }
+                return self.emit_source(seq, message_event(fields, data, Vec::new()), time);
+            }
+        };
+        if sources.is_empty() {
+            self.finish_attempt()?;
+            return self.emit_source(seq, message_event(fields, data, Vec::new()), time);
+        }
+        let Some(pending) = self
+            .pending
+            .take_if(|pending| pending.matches_sources(sources))
+        else {
             return Err(Failure::Unsupported(format!(
                 "assistant/message {seq} chunk references are not one complete ordered attempt"
             )));
-        }
-        // `messageEvent` with an empty stream.
-        let mut message = fields.clone();
-        message.shift_remove("sourceEventSeqs");
-        let mut message_data = data.clone();
-        message_data.insert("stream".to_owned(), Value::Array(Vec::new()));
-        message.insert("data".to_owned(), Value::Object(message_data));
-        self.emit_source(seq, message, fields.get("time"))
+        };
+        pending.assert_cut(self.source_cut, seq)?;
+        let stream = pending.accumulator.snapshot();
+        self.emit_buffered(pending.after_last_chunk)?;
+        self.emit_source(seq, message_event(fields, data, stream), time)
     }
 
     /// `emitSource`. `time` is the source event's own.
@@ -529,8 +723,9 @@ impl<'a> Stage<'a> {
         Ok(())
     }
 
-    /// `finishMigration` with no pending attempt.
+    /// `finishMigration`.
     fn finish(&mut self) -> Checked<u64> {
+        self.finish_attempt()?;
         if let Some(cut) = self.target_cut {
             return Ok(cut);
         }
@@ -709,6 +904,46 @@ fn assert_chunk_envelope(fields: &Map<String, Value>, seq: u64) -> Checked<()> {
         )));
     }
     Ok(())
+}
+
+/// `messageEvent`: the message without `sourceEventSeqs`, with `stream` set
+/// in `data`.
+fn message_event(
+    fields: &Map<String, Value>,
+    data: &Map<String, Value>,
+    stream: Vec<Value>,
+) -> Map<String, Value> {
+    let mut message = fields.clone();
+    message.shift_remove("sourceEventSeqs");
+    let mut message_data = data.clone();
+    message_data.insert("stream".to_owned(), Value::Array(stream));
+    message.insert("data".to_owned(), Value::Object(message_data));
+    message
+}
+
+/// `!==` between attempt coordinates, negated: numbers compare by value,
+/// other primitives and `undefined` by identity. An object or array, which
+/// compares by reference, and a fraction or exponent spelling are limits.
+fn same_coordinate(left: Option<&Value>, right: Option<&Value>) -> Checked<bool> {
+    let integer = |number: &serde_json::Number| {
+        number
+            .as_u64()
+            .map(i128::from)
+            .or_else(|| number.as_i64().map(i128::from))
+    };
+    match (left, right) {
+        (Some(Value::Object(_) | Value::Array(_)), _)
+        | (_, Some(Value::Object(_) | Value::Array(_))) => {
+            Err(Failure::Limit(V1ToV2Limit::UncheckedShape))
+        }
+        (Some(Value::Number(left)), Some(Value::Number(right))) => {
+            match (integer(left), integer(right)) {
+                (Some(left), Some(right)) => Ok(left == right),
+                _ => Err(Failure::Limit(V1ToV2Limit::FloatLexeme)),
+            }
+        }
+        _ => Ok(left == right),
+    }
 }
 
 /// The two events a legacy goal message becomes.

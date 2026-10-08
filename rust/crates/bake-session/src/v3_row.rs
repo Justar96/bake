@@ -113,7 +113,7 @@ const SYSTEM_MESSAGE_KEYS: [&str; 4] = ["id", "role", "source", "content"];
 
 /// How `assertV3Event` classifies a type before checking its envelope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Vocabulary {
+pub(crate) enum Vocabulary {
     Surface,
     /// Known and not surface: only `ignorable` may join the required fields.
     Known,
@@ -121,7 +121,7 @@ enum Vocabulary {
     Opaque,
 }
 
-fn vocabulary(event_type: &str) -> Vocabulary {
+pub(crate) fn vocabulary(event_type: &str) -> Vocabulary {
     if SURFACE_TYPES.contains(&event_type) {
         Vocabulary::Surface
     } else if OBSOLETE_TYPES.contains(&event_type) {
