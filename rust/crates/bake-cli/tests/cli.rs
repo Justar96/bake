@@ -47,3 +47,17 @@ fn unexpected_arguments_fail_with_usage_guidance() {
     assert!(stderr.contains("unexpected argument 'now' for 'preview'"));
     assert!(stderr.contains("bake-rs --help"));
 }
+
+#[test]
+fn session_stat_has_its_own_help_and_usage_errors() {
+    let out = run(&["session", "stat", "--help"]);
+    assert!(out.status.success());
+    assert!(text(&out.stdout).contains("bake-rs session stat --root <dir> --id <id>"));
+    assert!(out.stderr.is_empty());
+    let out = run(&["session", "stat", "--root", "r", "--id", "a1"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(out.stdout.is_empty());
+    let stderr = text(&out.stderr);
+    assert!(stderr.contains("missing required option '--max-entries'"));
+    assert!(stderr.contains("bake-rs session stat --help"));
+}
