@@ -1,0 +1,1792 @@
+{
+  "schema": "bake/session-conformance/inbox-cases",
+  "version": 1,
+  "oracle": "inboxProjectionDefinition.apply from init() and foldConsumedWork over the events restorePlainLog(log) restores in packages/core/agent-loop/tests/inbox-conformance.spec.ts",
+  "logs": {
+    "tool-call-turn": "conformance/runtime/request-reconstruction/tool-call-turn/session.jsonl",
+    "dynamic-tools": "conformance/runtime/request-reconstruction/dynamic-tools/session.jsonl",
+    "retry-attempt": "conformance/runtime/request-reconstruction/retry-attempt/session.jsonl"
+  },
+  "cases": [
+    {
+      "id": "tool-call-turn",
+      "log": "tool-call-turn",
+      "edits": [],
+      "ts": {
+        "inbox": {
+          "outcome": "pending",
+          "next-turn": [],
+          "next-step": []
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/15"
+          },
+          "droppedUnrun": false
+        }
+      },
+      "note": "The unedited capture: its one prompt was claimed by the turn that stepped."
+    },
+    {
+      "id": "dynamic-tools",
+      "log": "dynamic-tools",
+      "edits": [],
+      "ts": {
+        "inbox": {
+          "outcome": "pending",
+          "next-turn": [],
+          "next-step": []
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/37"
+          },
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "retry-attempt",
+      "log": "retry-attempt",
+      "edits": [],
+      "ts": {
+        "inbox": {
+          "outcome": "pending",
+          "next-turn": [],
+          "next-step": []
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/13"
+          },
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "empty-log",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 0
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "pending",
+          "next-turn": [],
+          "next-step": []
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "pending-at-crash",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 1
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "pending",
+          "next-turn": [
+            {
+              "$log": "/0/data/inserted/0"
+            }
+          ],
+          "next-step": []
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "claimed-turn-interrupted-before-step",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 3
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "pending",
+          "next-turn": [],
+          "next-step": []
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$closer": "/0"
+          },
+          "droppedUnrun": false
+        }
+      },
+      "note": "The closer's interrupted end accounts for the claimed input."
+    },
+    {
+      "id": "stepped-turn-interrupted",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "truncate": 14
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "pending",
+          "next-turn": [],
+          "next-step": []
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$closer": "/1"
+          },
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "dynamic-tools-claimed-turn-interrupted",
+      "log": "dynamic-tools",
+      "edits": [
+        {
+          "truncate": 21
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "pending",
+          "next-turn": [],
+          "next-step": []
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$closer": "/0"
+          },
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "retry-attempt-open-turn-before-claim",
+      "log": "retry-attempt",
+      "edits": [
+        {
+          "truncate": 2
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "pending",
+          "next-turn": [
+            {
+              "$log": "/0/data/inserted/0"
+            }
+          ],
+          "next-step": []
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "droppedUnrun": false
+        }
+      },
+      "note": "The closer ends a turn that neither claimed nor stepped, so nothing accounts."
+    },
+    {
+      "id": "append-both-targets",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"}]}}"
+        },
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":17,\"time\":1791337579871,\"data\":{\"target\":\"next-step\",\"start\":0,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"b\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-b\"}]}}"
+        },
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":18,\"time\":1791337579871,\"data\":{\"target\":\"next-step\",\"start\":1,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"c\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-c\"}]}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "pending",
+          "next-turn": [
+            {
+              "$log": "/16/data/inserted/0"
+            }
+          ],
+          "next-step": [
+            {
+              "$log": "/17/data/inserted/0"
+            },
+            {
+              "$log": "/18/data/inserted/0"
+            }
+          ]
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/15"
+          },
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "prepend-and-replace",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"},{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"b\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-b\"}]}}"
+        },
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":17,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"c\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-c\"}]}}"
+        },
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":18,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":1,\"removedCount\":1,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"d\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-d\"}],\"outcome\":\"canceled\"}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "pending",
+          "next-turn": [
+            {
+              "$log": "/17/data/inserted/0"
+            },
+            {
+              "$log": "/18/data/inserted/0"
+            },
+            {
+              "$log": "/16/data/inserted/1"
+            }
+          ],
+          "next-step": []
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/15"
+          },
+          "droppedUnrun": false
+        }
+      },
+      "note": "A replacement is a cancellation that inserts, so nothing is dropped unrun."
+    },
+    {
+      "id": "cancel-drops-unrun",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"}]}}"
+        },
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":17,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"removedCount\":1,\"inserted\":[],\"outcome\":\"canceled\"}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "pending",
+          "next-turn": [],
+          "next-step": []
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/15"
+          },
+          "droppedUnrun": true
+        }
+      }
+    },
+    {
+      "id": "cancel-then-accounting-turn",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"}]}}"
+        },
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":17,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"removedCount\":1,\"inserted\":[],\"outcome\":\"canceled\"}}"
+        },
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":18,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"b\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-b\"}]}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":19,\"time\":1791337579871,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":20,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"removedCount\":1,\"inserted\":[]}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":21,\"time\":1791337579871,\"data\":{\"turn\":2,\"reason\":{\"kind\":\"blocked\"}}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "pending",
+          "next-turn": [],
+          "next-step": []
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/21"
+          },
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "claim-outside-turn",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"}]}}"
+        },
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":17,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"removedCount\":1,\"inserted\":[]}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":18,\"time\":1791337579871,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":19,\"time\":1791337579871,\"data\":{\"turn\":2,\"reason\":{\"kind\":\"error\"}}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "pending",
+          "next-turn": [],
+          "next-step": []
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/15"
+          },
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "claimed-turn-completed",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"}]}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":1791337579871,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":18,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"removedCount\":1,\"inserted\":[]}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":19,\"time\":1791337579871,\"data\":{\"turn\":2,\"reason\":{\"kind\":\"completed\"}}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "pending",
+          "next-turn": [],
+          "next-step": []
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/15"
+          },
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "claimed-turn-blocked",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"}]}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":1791337579871,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":18,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"removedCount\":1,\"inserted\":[]}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":19,\"time\":1791337579871,\"data\":{\"turn\":2,\"reason\":{\"kind\":\"blocked\"}}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "pending",
+          "next-turn": [],
+          "next-step": []
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/19"
+          },
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "claimed-turn-aborted",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"}]}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":1791337579871,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":18,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"removedCount\":1,\"inserted\":[]}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":19,\"time\":1791337579871,\"data\":{\"turn\":2,\"reason\":{\"kind\":\"aborted\"}}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "pending",
+          "next-turn": [],
+          "next-step": []
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/19"
+          },
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "claimed-turn-interrupted",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"}]}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":1791337579871,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":18,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"removedCount\":1,\"inserted\":[]}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":19,\"time\":1791337579871,\"data\":{\"turn\":2,\"reason\":{\"kind\":\"interrupted\"}}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "pending",
+          "next-turn": [],
+          "next-step": []
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/19"
+          },
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "claimed-turn-error",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"}]}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":1791337579871,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":18,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"removedCount\":1,\"inserted\":[]}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":19,\"time\":1791337579871,\"data\":{\"turn\":2,\"reason\":{\"kind\":\"error\"}}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "pending",
+          "next-turn": [],
+          "next-step": []
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/19"
+          },
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "claimed-turn-max-tokens",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"}]}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":1791337579871,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":18,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"removedCount\":1,\"inserted\":[]}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":19,\"time\":1791337579871,\"data\":{\"turn\":2,\"reason\":{\"kind\":\"max-tokens\"}}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "pending",
+          "next-turn": [],
+          "next-step": []
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/19"
+          },
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "claimed-turn-paused",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"}]}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":1791337579871,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":18,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"removedCount\":1,\"inserted\":[]}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":19,\"time\":1791337579871,\"data\":{\"turn\":2,\"reason\":{\"kind\":\"paused\"}}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "pending",
+          "next-turn": [],
+          "next-step": []
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/19"
+          },
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "unclaimed-unstepped-turn",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":16,\"time\":1791337579871,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":17,\"time\":1791337579871,\"data\":{\"turn\":2,\"reason\":{\"kind\":\"error\"}}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "pending",
+          "next-turn": [],
+          "next-step": []
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/15"
+          },
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "stepped-turn-without-reason",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":16,\"time\":1791337579871,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"step/start\",\"seq\":17,\"time\":1791337579871,\"data\":{\"turn\":2,\"step\":1}}"
+        },
+        {
+          "append": "{\"type\":\"step/end\",\"seq\":18,\"time\":1791337579871,\"data\":{\"turn\":2,\"step\":1}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":19,\"time\":1791337579871,\"data\":{\"turn\":2}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "pending",
+          "next-turn": [],
+          "next-step": []
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/19"
+          },
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "claim-survives-stepped-end",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"}]}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":1791337579871,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":18,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"removedCount\":1,\"inserted\":[]}}"
+        },
+        {
+          "append": "{\"type\":\"step/start\",\"seq\":19,\"time\":1791337579871,\"data\":{\"turn\":2,\"step\":1}}"
+        },
+        {
+          "append": "{\"type\":\"step/end\",\"seq\":20,\"time\":1791337579871,\"data\":{\"turn\":2,\"step\":1}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":21,\"time\":1791337579871,\"data\":{\"turn\":2,\"reason\":{\"kind\":\"completed\"}}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":22,\"time\":1791337579871,\"data\":{\"turn\":2,\"reason\":{\"kind\":\"error\"}}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "pending",
+          "next-turn": [],
+          "next-step": []
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/22"
+          },
+          "droppedUnrun": false
+        }
+      },
+      "note": "A stepped end short-circuits before the claim is deleted, so a second end for the turn still finds it."
+    },
+    {
+      "id": "null-removed-count-claims",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"}]}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":1791337579871,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":18,\"time\":1791337579871,\"data\":{\"target\":\"next-step\",\"start\":0,\"removedCount\":null,\"inserted\":[]}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":19,\"time\":1791337579871,\"data\":{\"turn\":2,\"reason\":{\"kind\":\"blocked\"}}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "pending",
+          "next-turn": [
+            {
+              "$log": "/16/data/inserted/0"
+            }
+          ],
+          "next-step": []
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/19"
+          },
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "null-removed-count-cancel",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"}]}}"
+        },
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":17,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"removedCount\":null,\"inserted\":[],\"outcome\":\"canceled\"}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "pending",
+          "next-turn": [
+            {
+              "$log": "/16/data/inserted/0"
+            }
+          ],
+          "next-step": []
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/15"
+          },
+          "droppedUnrun": true
+        }
+      }
+    },
+    {
+      "id": "string-turn-values",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"}]}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":1791337579871,\"data\":{\"turn\":\"2\"}}"
+        },
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":18,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"removedCount\":1,\"inserted\":[]}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":19,\"time\":1791337579871,\"data\":{\"turn\":2,\"reason\":{\"kind\":\"error\"}}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "pending",
+          "next-turn": [],
+          "next-step": []
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/15"
+          },
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "null-turn-claims",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"}]}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":1791337579871,\"data\":{\"turn\":null}}"
+        },
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":18,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"removedCount\":1,\"inserted\":[]}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":19,\"time\":1791337579871,\"data\":{\"turn\":null,\"reason\":{\"kind\":\"blocked\"}}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "pending",
+          "next-turn": [],
+          "next-step": []
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/19"
+          },
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "object-turn-never-matches",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"}]}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":1791337579871,\"data\":{\"turn\":{\"n\":2}}}"
+        },
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":18,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"removedCount\":1,\"inserted\":[]}}"
+        },
+        {
+          "append": "{\"type\":\"step/start\",\"seq\":19,\"time\":1791337579871,\"data\":{\"turn\":{\"n\":2},\"step\":1}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":20,\"time\":1791337579871,\"data\":{\"turn\":{\"n\":2},\"reason\":{\"kind\":\"error\"}}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "pending",
+          "next-turn": [],
+          "next-step": []
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/15"
+          },
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "absent-turn-steps",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"}]}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":1791337579871,\"data\":{}}"
+        },
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":18,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"removedCount\":1,\"inserted\":[]}}"
+        },
+        {
+          "append": "{\"type\":\"step/start\",\"seq\":19,\"time\":1791337579871,\"data\":{\"step\":1}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":20,\"time\":1791337579871,\"data\":{\"reason\":{\"kind\":\"completed\"}}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "pending",
+          "next-turn": [],
+          "next-step": []
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/20"
+          },
+          "droppedUnrun": false
+        }
+      },
+      "note": "An absent turn records no claim, but a step and an end both name undefined."
+    },
+    {
+      "id": "reused-id-after-claim",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"again\"}],\"source\":{\"kind\":\"user\"},\"id\":\"f7802400-aed0-4b44-bbfd-9efc7f04e4c5\"}]}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "pending",
+          "next-turn": [
+            {
+              "$log": "/16/data/inserted/0"
+            }
+          ],
+          "next-step": []
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/15"
+          },
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "duplicate-across-targets",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"}]}}"
+        },
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":17,\"time\":1791337579871,\"data\":{\"target\":\"next-step\",\"start\":0,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"again\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"}]}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "rejected",
+          "message": "invalid persisted inbox splice at session seq 17"
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/15"
+          },
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "duplicate-within-insert",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-step\",\"start\":0,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"},{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"}]}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "rejected",
+          "message": "invalid persisted inbox splice at session seq 16"
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/15"
+          },
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "start-past-end",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":1,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"}]}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "rejected",
+          "message": "invalid persisted inbox splice at session seq 16"
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/15"
+          },
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "negative-start",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":-1,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"}]}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "rejected",
+          "message": "invalid persisted inbox splice at session seq 16"
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/15"
+          },
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "removed-past-end",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"}]}}"
+        },
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":17,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"removedCount\":2,\"inserted\":[]}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "rejected",
+          "message": "invalid persisted inbox splice at session seq 17"
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/15"
+          },
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "removed-to-end",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"},{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"b\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-b\"}]}}"
+        },
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":17,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":1,\"removedCount\":1,\"inserted\":[]}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "pending",
+          "next-turn": [
+            {
+              "$log": "/16/data/inserted/0"
+            }
+          ],
+          "next-step": []
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/15"
+          },
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "start-plus-removed-past-end",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"},{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"b\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-b\"}]}}"
+        },
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":17,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":1,\"removedCount\":2,\"inserted\":[]}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "rejected",
+          "message": "invalid persisted inbox splice at session seq 17"
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/15"
+          },
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "negative-removed",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"}]}}"
+        },
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":17,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"removedCount\":-1,\"inserted\":[]}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "rejected",
+          "message": "invalid persisted inbox splice at session seq 17"
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/15"
+          },
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "string-start",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":\"0\",\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"}]}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "rejected",
+          "message": "invalid persisted inbox splice at session seq 16"
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/15"
+          },
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "missing-start",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"}]}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "rejected",
+          "message": "invalid persisted inbox splice at session seq 16"
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/15"
+          },
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "unsafe-integer-start",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":9007199254740993,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"}]}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "rejected",
+          "message": "invalid persisted inbox splice at session seq 16"
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/15"
+          },
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "float-lexeme-start",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0.0,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"}]}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "pending",
+          "next-turn": [
+            {
+              "$log": "/16/data/inserted/0"
+            }
+          ],
+          "next-step": []
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/15"
+          },
+          "droppedUnrun": false
+        }
+      },
+      "rust": {
+        "inbox": {
+          "outcome": "native-subset",
+          "limit": "count",
+          "seq": 16
+        }
+      }
+    },
+    {
+      "id": "fractional-start",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"}]}}"
+        },
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":17,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0.5,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"b\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-b\"}]}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "rejected",
+          "message": "invalid persisted inbox splice at session seq 17"
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/15"
+          },
+          "droppedUnrun": false
+        }
+      },
+      "rust": {
+        "inbox": {
+          "outcome": "native-subset",
+          "limit": "count",
+          "seq": 17
+        }
+      }
+    },
+    {
+      "id": "float-lexeme-removed-count",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"}]}}"
+        },
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":17,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"removedCount\":1.0,\"inserted\":[]}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "pending",
+          "next-turn": [],
+          "next-step": []
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/15"
+          },
+          "droppedUnrun": false
+        }
+      },
+      "rust": {
+        "inbox": {
+          "outcome": "native-subset",
+          "limit": "count",
+          "seq": 17
+        }
+      }
+    },
+    {
+      "id": "unknown-target",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next\",\"start\":0,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"}]}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "rejected",
+          "message": "invalid persisted inbox splice at session seq 16"
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/15"
+          },
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "missing-target",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"start\":0,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"}]}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "rejected",
+          "message": "invalid persisted inbox splice at session seq 16"
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/15"
+          },
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "proto-target",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"__proto__\",\"start\":0,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"}]}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "rejected",
+          "message": "invalid persisted inbox splice at session seq 16"
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/15"
+          },
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "non-string-target",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":[\"next-turn\"],\"start\":0,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"}]}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "pending",
+          "next-turn": [],
+          "next-step": [
+            {
+              "$log": "/16/data/inserted/0"
+            }
+          ]
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/15"
+          },
+          "droppedUnrun": false
+        }
+      },
+      "rust": {
+        "inbox": {
+          "outcome": "native-subset",
+          "limit": "target",
+          "seq": 16
+        }
+      },
+      "note": "JavaScript reads next-turn through the coerced key but stores the result as next-step."
+    },
+    {
+      "id": "null-data",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":null}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "rejected",
+          "message": "invalid persisted inbox splice at session seq 16"
+        },
+        "consumedWork": {
+          "outcome": "rejected",
+          "class": "TypeError"
+        }
+      },
+      "rust": {
+        "consumedWork": {
+          "outcome": "native-subset",
+          "limit": "data",
+          "seq": 16
+        }
+      }
+    },
+    {
+      "id": "array-data",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":[]}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "rejected",
+          "message": "invalid persisted inbox splice at session seq 16"
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/15"
+          },
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "inserted-object",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"inserted\":{}}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "rejected",
+          "message": "invalid persisted inbox splice at session seq 16"
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/15"
+          },
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "inserted-missing",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "rejected",
+          "message": "invalid persisted inbox splice at session seq 16"
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/15"
+          },
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "inserted-string",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"inserted\":\"a\"}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "pending",
+          "next-turn": [
+            "a"
+          ],
+          "next-step": []
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/15"
+          },
+          "droppedUnrun": false
+        }
+      },
+      "rust": {
+        "inbox": {
+          "outcome": "native-subset",
+          "limit": "inserted",
+          "seq": 16
+        }
+      }
+    },
+    {
+      "id": "null-message",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"inserted\":[null]}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "rejected",
+          "message": "invalid persisted inbox splice at session seq 16"
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/15"
+          },
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "messages-without-id",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"inserted\":[{\"role\":\"user\"}]}}"
+        },
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":17,\"time\":1791337579871,\"data\":{\"target\":\"next-step\",\"start\":0,\"inserted\":[{\"role\":\"user\"}]}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "rejected",
+          "message": "invalid persisted inbox splice at session seq 17"
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/15"
+          },
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "integer-and-string-ids",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"inserted\":[{\"id\":1},{\"id\":\"1\"}]}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "pending",
+          "next-turn": [
+            {
+              "$log": "/16/data/inserted/0"
+            },
+            {
+              "$log": "/16/data/inserted/1"
+            }
+          ],
+          "next-step": []
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/15"
+          },
+          "droppedUnrun": false
+        }
+      }
+    },
+    {
+      "id": "float-message-id",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"inserted\":[{\"id\":1}]}}"
+        },
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":17,\"time\":1791337579871,\"data\":{\"target\":\"next-step\",\"start\":0,\"inserted\":[{\"id\":1.0}]}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "rejected",
+          "message": "invalid persisted inbox splice at session seq 17"
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/15"
+          },
+          "droppedUnrun": false
+        }
+      },
+      "rust": {
+        "inbox": {
+          "outcome": "native-subset",
+          "limit": "message-id",
+          "seq": 17
+        }
+      }
+    },
+    {
+      "id": "turn-end-null-data",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":16,\"time\":1791337579871,\"data\":null}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "pending",
+          "next-turn": [],
+          "next-step": []
+        },
+        "consumedWork": {
+          "outcome": "rejected",
+          "class": "TypeError"
+        }
+      },
+      "rust": {
+        "consumedWork": {
+          "outcome": "native-subset",
+          "limit": "data",
+          "seq": 16
+        }
+      }
+    },
+    {
+      "id": "fractional-turn",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"}]}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":1791337579871,\"data\":{\"turn\":2.0}}"
+        },
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":18,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"removedCount\":1,\"inserted\":[]}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":19,\"time\":1791337579871,\"data\":{\"turn\":2,\"reason\":{\"kind\":\"blocked\"}}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "pending",
+          "next-turn": [],
+          "next-step": []
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/19"
+          },
+          "droppedUnrun": false
+        }
+      },
+      "rust": {
+        "consumedWork": {
+          "outcome": "native-subset",
+          "limit": "turn",
+          "seq": 17
+        }
+      }
+    },
+    {
+      "id": "claimed-turn-null-reason",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"}]}}"
+        },
+        {
+          "append": "{\"type\":\"turn/start\",\"seq\":17,\"time\":1791337579871,\"data\":{\"turn\":2}}"
+        },
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":18,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"removedCount\":1,\"inserted\":[]}}"
+        },
+        {
+          "append": "{\"type\":\"turn/end\",\"seq\":19,\"time\":1791337579871,\"data\":{\"turn\":2,\"reason\":null}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "pending",
+          "next-turn": [],
+          "next-step": []
+        },
+        "consumedWork": {
+          "outcome": "rejected",
+          "class": "TypeError"
+        }
+      },
+      "rust": {
+        "consumedWork": {
+          "outcome": "native-subset",
+          "limit": "reason",
+          "seq": 19
+        }
+      }
+    },
+    {
+      "id": "canceled-missing-inserted",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"}]}}"
+        },
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":17,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"removedCount\":1,\"outcome\":\"canceled\"}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "rejected",
+          "message": "invalid persisted inbox splice at session seq 17"
+        },
+        "consumedWork": {
+          "outcome": "rejected",
+          "class": "TypeError"
+        }
+      },
+      "rust": {
+        "consumedWork": {
+          "outcome": "native-subset",
+          "limit": "inserted",
+          "seq": 17
+        }
+      }
+    },
+    {
+      "id": "canceled-missing-inserted-after-drop",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":16,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"inserted\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-a\"},{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"b\"}],\"source\":{\"kind\":\"user\"},\"id\":\"m-b\"}]}}"
+        },
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":17,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"removedCount\":1,\"inserted\":[],\"outcome\":\"canceled\"}}"
+        },
+        {
+          "append": "{\"type\":\"agent/inbox/spliced\",\"seq\":18,\"time\":1791337579871,\"data\":{\"target\":\"next-turn\",\"start\":0,\"removedCount\":1,\"outcome\":\"canceled\"}}"
+        }
+      ],
+      "ts": {
+        "inbox": {
+          "outcome": "rejected",
+          "message": "invalid persisted inbox splice at session seq 18"
+        },
+        "consumedWork": {
+          "outcome": "folded",
+          "end": {
+            "$log": "/15"
+          },
+          "droppedUnrun": true
+        }
+      },
+      "note": "Once work is dropped, a later cancellation's inserted list is never read."
+    }
+  ]
+}

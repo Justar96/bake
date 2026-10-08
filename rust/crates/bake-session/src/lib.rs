@@ -34,10 +34,13 @@
 //! can check the stored identity before [`StagedLog::restore`] runs the rest,
 //! and [`zstd_header_record`] decodes only a compressed log's header frame.
 //! [`token_usage`] folds a [`RestoredLog`]'s provider-reported token usage.
+//! [`restored_inbox`] and [`consumed_work`] fold a [`RestoredLog`]'s events
+//! into its pending inbox and its account of consumed work.
 //! None reads or writes a file or encodes a log. The crate is
 //! unstable and unshipped; only the preview's `session inspect` uses it.
 
 mod envelope;
+mod inbox;
 mod offload;
 mod repair;
 mod replay;
@@ -52,6 +55,10 @@ mod zstd;
 pub use envelope::{
     EnvelopeLimit, EnvelopeRefusal, EnvelopeRejection, NumberField, RequiredField,
     UnadmittedEnvelope, decode_row_envelope,
+};
+pub use inbox::{
+    ConsumedWork, ConsumedWorkCoercion, ConsumedWorkLimit, InboxLimit, InboxRefusal, PendingInbox,
+    consumed_work, restored_inbox,
 };
 pub use offload::OffloadRejection;
 pub use replay::{ReplayLimit, ReplayRefusal, SeedRejection, replay_requests};

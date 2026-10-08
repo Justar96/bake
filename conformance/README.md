@@ -20,6 +20,7 @@ Compare TypeScript and Rust using controlled fixtures and independently checked 
 - [Zstd log restoration cases](#zstd-log-restoration-cases)
 - [Session lookup cases](#session-lookup-cases)
 - [Token usage cases](#token-usage-cases)
+- [Pending inbox and consumed-work cases](#pending-inbox-and-consumed-work-cases)
 - [Runner contract](#runner-contract)
 - [Ownership and limits](#ownership-and-limits)
 
@@ -405,6 +406,27 @@ bun run test:runtime packages/llm/token-meter/tests/usage-conformance.spec.ts
 Each Assistant settlement contributes one sample: an `assistant/message`'s own `usage` member when present, even `null`, otherwise the stream's last raw `usage` chunk, found as `lastAssistantStreamChunk` finds it, scanning backwards and stopping at the first hit, even one without a `usage` member. A sample for the coordinate the slot holds replaces it in the totals, an equal one changes nothing, and `llm/retry-started` with a strictly equal `turn` and `step` empties the slot, so the retried request adds. Missing or `null` cache counts are 0. `ts` is the folded `{totals, last}` state, or a `TypeError` and the seq of the event that throws it, written from the TypeScript sources and the committed captures before either harness ran. Each case edits one of the three [runtime captures](#runtime-request-reconstruction) as the [restoration table](#plain-log-restoration-cases) does, without header or tail edits.
 
 A `rust` override names a native limit and the refused seq, which must equal a TypeScript throw's: `number` for a sampled count not spelled as a safe integer (a fraction, an exponent, or out of range), which only an unqualified `assistant/attempt` stream can hold, or a running total past the safe-integer range; `usage` for a sample that is not an object or whose counts JavaScript would coerce; `stream` for a `null` record, or a `chunk` record whose `chunk` is absent or `null`, reached before a `usage` chunk; and `retry` for `llm/retry-started` data that is `null`, or lacks `turn` while the slot is empty. Of the 34 cases, 22 fold identically, 8 are TypeScript throws, and 4 are limits on input TypeScript folds through coercion or rounding. Both harnesses pin the case count and require every limit to be witnessed. Two negative controls were observed: dropping the `llm/retry-started` reset, or taking the first usage chunk instead of the last, fails `retry-started-closes-slot` in both arms. The fold does not cover `contextPressure`, turn usage, or pricing.
+
+## Pending inbox and consumed-work cases
+
+[`session/inbox-cases.json`](session/inbox-cases.json) holds 63 edits of the three [runtime captures](#runtime-request-reconstruction) and, for each, the pending inbox and the consumed-work account folded over its restored events. The [TypeScript spec](../packages/core/agent-loop/tests/inbox-conformance.spec.ts) restores each log with local copies of the [restore spec's](#plain-log-restoration-cases) `restorePlainLog` and `caseLog` helpers, then folds the restored Session's events, which are the stored events, the closers, and any appended end seed, with `inboxProjectionDefinition.apply` from `init()` and with `foldConsumedWork`. Because that package does not depend on the format catalog, the copy restores without message projections. Those projections change only derived messages, and the spec checks that no case logs an `image/offload`. The development [`bake-session`](../rust/crates/bake-session/src/inbox.rs) crate passes the same bytes to `restore_plain_log`, then to `restored_inbox` and `consumed_work`, which read the stored events and the closers. Neither fold reads the end seed.
+
+```sh
+bun run test:runtime packages/core/agent-loop/tests/inbox-conformance.spec.ts
+(cd rust && cargo test --locked -p bake-session --test inbox_cases)
+```
+
+Every case restores. `ts.inbox` is either the `next-turn` and `next-step` messages or the exact refusal `invalid persisted inbox splice at session seq N`. The fold wraps every error it throws in that message, `TypeError`s included, so a `null` message, a non-iterable `inserted`, and a target other than the two lists all refuse exactly. `ts.consumedWork` is the accounting `turn/end`, absent when none, and `droppedUnrun`, or the `TypeError` class that `foldConsumedWork` throws unwrapped. `{"$log": pointer}` and `{"$closer": pointer}` name a value in the edited rows or the closers.
+
+The cases cover:
+
+- the unedited captures, and logs cut before a claim, after a claim, and inside a step, where a closer's interrupted end does or does not account for the work;
+- `start` and `removedCount` at and past each bound, negative, absent, `null` (which removes nothing yet still counts as a claim or a cancellation), a string, and an unsafe integer;
+- duplicate pending ids within one insert and across targets, a reused id after a claim, and messages without an id;
+- cancellations with and without `inserted`, a replacement that inserts, and a claim outside a turn;
+- claimed-but-unstepped turns ending with each built-in reason and an unknown one, a stepped end without a reason, a claim that survives a stepped end, and turns whose value is a string, `null`, an object, or absent.
+
+A `rust` override names a native limit and the seq it applies to, and claims nothing for that fold. Inbox limits are a non-string `target`, which JavaScript coerces to a property key; a count spelled with a fraction or exponent; a string `inserted`, which the spread splits into characters; and a numeric message id that is not a safe integer lexeme. Consumed-work limits are `null` data, an absent or `null` `inserted` read for a cancellation, and an absent or `null` reason for a claimed turn, each a `TypeError`, and an object `inserted`, whose `length` this port does not read. A further limit covers a turn number that is not a safe integer lexeme. Both harnesses pin the case count, reject unknown keys, and require every limit to be witnessed. The expectations were written from the two TypeScript sources before either harness ran. Open compactions and open children have no pure TypeScript fold, so this table does not cover them.
 
 ## Runner contract
 

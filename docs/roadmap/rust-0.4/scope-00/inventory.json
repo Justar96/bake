@@ -788,6 +788,7 @@
     {"path":"packages/core/agent-loop/tests/config-session-id.spec.ts","lane":"vitest-runtime","owner":"packages/core/agent-loop","scopes":["09"],"disposition":"reuse-oracle","basis":"packages/core"},
     {"path":"packages/core/agent-loop/tests/contract-regressions.spec.ts","lane":"vitest-runtime","owner":"packages/core/agent-loop","scopes":["09"],"disposition":"reuse-oracle","basis":"packages/core"},
     {"path":"packages/core/agent-loop/tests/coverage-edges.spec.ts","lane":"vitest-runtime","owner":"packages/core/agent-loop","scopes":["09"],"disposition":"reuse-oracle","basis":"packages/core"},
+    {"path":"packages/core/agent-loop/tests/inbox-conformance.spec.ts","lane":"vitest-runtime","owner":"packages/core/agent-loop","scopes":["09"],"disposition":"reuse-oracle","basis":"packages/core"},
     {"path":"packages/core/agent-loop/tests/inbox.spec.ts","lane":"vitest-runtime","owner":"packages/core/agent-loop","scopes":["09"],"disposition":"reuse-oracle","basis":"packages/core"},
     {"path":"packages/core/agent-loop/tests/interception.spec.ts","lane":"vitest-runtime","owner":"packages/core/agent-loop","scopes":["09"],"disposition":"reuse-oracle","basis":"packages/core"},
     {"path":"packages/core/agent-loop/tests/invariant.spec.ts","lane":"vitest-runtime","owner":"packages/core/agent-loop","scopes":["09"],"disposition":"reuse-oracle","basis":"packages/core"},
