@@ -6,7 +6,10 @@
 //! keeps the log file beneath a Session root equal to the model's bytes:
 //!
 //! - [`PlainLogFile::create`] is the backend's `create`: the header must
-//!   encode, then the root is checked as `ensureRootEncoding` checks it, then
+//!   encode, then the root is checked as `ensureRootEncoding` checks it,
+//!   which refuses a Session directory holding a canonical generation with
+//!   the `.zstd` suffix by TypeScript's encoding-mismatch message, naming
+//!   the highest such generation, then
 //!   the id must have no canonical generation in any project directory, as
 //!   `findLog` resolves it. Nothing is written.
 //! - [`PlainLogFile::open`] is a write `open`: the root check, then `findLog`,
@@ -26,7 +29,10 @@
 //!   new `session.v3.jsonl`, as TypeScript publishes it on POSIX, so a
 //!   failed write, or a process killed before the link, never leaves that
 //!   file. The source is never changed.
-//!   The handle then holds those bytes, opened as a current log.
+//!   The handle then holds those bytes, opened as a current log. The
+//!   in-memory half, the read `open`'s preparation without its publication,
+//!   is [`released_generation_header`] followed by
+//!   [`migrate_released_generation`].
 //! - [`PlainLogFile::append`] and [`PlainLogFile::flush`] run the model's
 //!   operation, then bring the file to the model's bytes, refused operations
 //!   included: a first write creates the Session directory and a new file
@@ -47,10 +53,16 @@
 //! backend instance, so two values of one Session are arbitrated by that
 //! lock alone. Dropping the value is the handle's `close`, which releases
 //! the lock. The refusals TypeScript's `SessionAlreadyExistsError`,
-//! `SessionPersistenceNotFoundError`, and duplicate-id `Error` carry are
-//! returned with their exact messages, as are the
+//! `SessionPersistenceNotFoundError`, and duplicate-id and encoding-mismatch
+//! `Error` carry are returned with their exact messages, as are the
 //! `SessionPersistenceCorruptionError` and `SessionFormatUnsupportedError` a
 //! migration reports, which name the source path.
+//!
+//! An id's directory is named by `encodeSegment` alone, as Node names it on
+//! POSIX, so an id such as `con`, `nightly.`, or `aux.txt` is laid out as
+//! any other. On a Win32 path platform, where Windows would treat such a
+//! name as a device or drop its trailing dot, it is refused as
+//! [`LogFileLimit::WindowsName`].
 //!
 //! A migration's streaming order is recovered from batch stages: a refusal
 //! the codec raises at a row is reported only when reading the rows before
@@ -62,7 +74,10 @@
 //! Paths are spelled from `root` as given, and TypeScript spells them from
 //! `path.resolve(root)`, so the messages are exact only for an absolute root
 //! that `path.resolve` leaves unchanged, with no `.` or `..` component and
-//! no trailing or repeated separator.
+//! no trailing or repeated separator. Node lists a directory in the
+//! filesystem's order, which this model takes as byte order, so where a
+//! root holds more than one entry TypeScript refuses, the one an
+//! encoding-mismatch message names may differ.
 //!
 //! A TypeScript backend instance's in-process write claims and pending
 //! creates, which refuse a second handle of one Session within that
@@ -92,16 +107,18 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use serde_json::Value;
 
 use crate::fork::holds_negative_zero;
+use crate::json_text::json_text;
 use crate::log_layout::{CURRENT_LOG_FILENAME, canonical_generation, encode_segment, log_path};
 use crate::released_rows::{ParseStop, parse_released_header, parse_released_rows};
 use crate::write_lease::{LeaseRefusal, WriteLease};
 use crate::{
     AppendRefusal, CURRENT_SESSION_FORMAT_VERSION, CreateRefusal, FinalCheckRefusal,
     GenerationHeaderRefusal, HistoryLocation, HistoryRefusal, MigratedV2, PathPlatform,
-    PlainAppendLog, ScanRefusal, SubsetLimit, V1CodecLocation, V1CodecRecovery, V1CodecRefusal,
-    V1CodecVersion, V2ToV3Layer, V2ToV3Location, V2ToV3Refusal, check_transformed_artifact,
-    decode_v0_v1_items, encode_event_line, encode_header_line, first_record,
-    migrate_released_history, migrate_v2_rows, read_generation_header_record, read_header_record,
+    PlainAppendLog, ScanRefusal, SessionHeader, SubsetLimit, V1CodecLocation, V1CodecRecovery,
+    V1CodecRefusal, V1CodecVersion, V2ToV3Layer, V2ToV3Location, V2ToV3Refusal,
+    check_transformed_artifact, decode_v0_v1_items, encode_event_line, encode_header_line,
+    first_record, migrate_released_history, migrate_v2_rows, read_generation_header_record,
+    read_header_record,
 };
 
 /// One write handle of a plain current-format Session log under a root.
@@ -133,6 +150,12 @@ pub enum LogFileRefusal {
     /// Two or more project directories hold a canonical generation of the id;
     /// TypeScript's `findLog` throws a plain `Error` with this exact message.
     Duplicate { message: String },
+    /// A Session directory holds a canonical generation with the `.zstd`
+    /// suffix, which a backend configured for compression `none` does not
+    /// read; TypeScript's `encodingMismatch` throws a plain `Error` with this
+    /// exact message, which names that generation's path. Nothing was
+    /// written.
+    EncodingMismatch { message: String },
     /// Migrating an older generation found it corrupt; TypeScript throws
     /// `SessionPersistenceCorruptionError` with this exact message, which
     /// names the source path. No file was written.
@@ -163,6 +186,7 @@ impl LogFileRefusal {
             | Self::AlreadyExists { message }
             | Self::NotFound { message }
             | Self::Duplicate { message }
+            | Self::EncodingMismatch { message }
             | Self::Corrupt { message }
             | Self::Unsupported { message } => Some(message),
             Self::Append(refusal) => refusal.message(),
@@ -184,17 +208,15 @@ pub enum LogFileLimit {
     /// a root without a project directory and otherwise throws while
     /// encoding it; `create` reports [`crate::CreateLimit::EmptyId`].
     EmptyId,
-    /// The encoded id ends in `.` or names a Windows device, such as `CON`,
-    /// `nul`, or `COM1`, which Windows path normalization would not keep as
-    /// a directory name. It is refused on every host.
+    /// On a Win32 path platform, the encoded id ends in `.` or names a
+    /// Windows device, such as `CON`, `nul`, `aux.txt`, or `COM1`, which
+    /// Windows would not keep as a directory name. A POSIX path platform
+    /// lays such an id out as TypeScript does.
     WindowsName,
     /// A project directory holds an entry whose name ends in `.jsonl` or
     /// `.jsonl.zstd`. TypeScript refuses a file named so as the flat legacy
     /// layout, and probes the id's flat names by opening them.
     LegacyLayout,
-    /// A Session directory holds a canonical generation with the `.zstd`
-    /// suffix, which TypeScript refuses as an encoding mismatch.
-    OppositeEncoding,
     /// The root or a project directory lists a name that is not UTF-8, which
     /// Node lists with replacement characters and then opens by that spelling.
     NonUtf8Name,
@@ -255,7 +277,7 @@ impl PlainLogFile {
     ) -> Result<Self, LogFileRefusal> {
         let log = PlainAppendLog::create(header, inherited_event_count)
             .map_err(LogFileRefusal::Create)?;
-        let encoded = encoded_id(log.id())?;
+        let encoded = encoded_id(log.id(), PathPlatform::host())?;
         let found = find_generations(root, &encoded)?;
         if !found.is_empty() {
             return Err(duplicate(log.id(), &found).unwrap_or_else(|| {
@@ -281,7 +303,7 @@ impl PlainLogFile {
         if id.is_empty() {
             return Err(LogFileRefusal::NativeSubset(LogFileLimit::EmptyId));
         }
-        let encoded = encoded_id(id)?;
+        let encoded = encoded_id(id, PathPlatform::host())?;
         let mut found = find_generations(root, &encoded)?;
         if let Some(refusal) = duplicate(id, &found) {
             return Err(refusal);
@@ -339,66 +361,40 @@ impl PlainLogFile {
     ) -> Result<Self, LogFileRefusal> {
         let bytes = fs::read(&selected.path)?;
         let platform = PathPlatform::host();
-        let refusal = |refused: Refused| refused.into_refusal(id, selected);
-        let Some(record) = first_record(&bytes) else {
-            return Err(refusal(Refused::Corrupt(
-                "Error: empty or header-less session log".to_owned(),
-            )));
-        };
-        let header = parse_released_header(record, selected.version)
-            .map_err(|stop| refusal(Refused::from(stop)))?;
+        let refusal = |refused: ReleasedGenerationRefusal| refused.into_refusal(id, selected);
         // `validateSourceIdentity` checks a header its codec reads, before any row.
-        match read_generation_header_record(record, selected.version, platform) {
-            Ok(Some(stored)) => {
-                if stored.id != id {
-                    let path = selected.path.display();
-                    return Err(refusal(Refused::Corrupt(format!(
-                        "Error: corrupt session log \"{path}\": requested id \"{id}\" \
-                         does not match header id \"{}\"",
-                        stored.id
-                    ))));
-                }
-                let current = selected.path.with_file_name(CURRENT_LOG_FILENAME);
-                if log_path(root, stored.cwd.as_deref(), encoded) != current {
-                    return Err(LogFileRefusal::NativeSubset(LogFileLimit::Identity));
-                }
+        if let Some(stored) =
+            released_generation_header(&bytes, selected.version, platform).map_err(refusal)?
+        {
+            if stored.id != id {
+                let path = selected.path.display();
+                return Err(refusal(ReleasedGenerationRefusal::Corrupt(format!(
+                    "Error: corrupt session log \"{path}\": requested id \"{id}\" \
+                     does not match header id \"{}\"",
+                    stored.id
+                ))));
             }
-            // The codec refuses a header with retired fields.
-            Ok(None) | Err(GenerationHeaderRefusal::Rejected(_)) => {}
-            Err(GenerationHeaderRefusal::Unsupported(_)) => {
-                return Err(refusal(Refused::Limit("decode-invariant".to_owned())));
-            }
-            Err(GenerationHeaderRefusal::NativeSubset(limit)) => {
-                return Err(refusal(Refused::Limit(header_limit(limit).to_owned())));
+            let current = selected.path.with_file_name(CURRENT_LOG_FILENAME);
+            if log_path(root, stored.cwd.as_deref(), encoded) != current {
+                return Err(LogFileRefusal::NativeSubset(LogFileLimit::Identity));
             }
         }
-        let parsed = parse_released_rows(&bytes[record.len()..]);
-        let stop = parsed.stop.map(Refused::from);
-        let migrated = if selected.version == 2 {
-            migrate_v2(&header, &parsed.rows, stop, source_budget)
-        } else {
-            let version = if selected.version == 0 {
-                V1CodecVersion::V0
-            } else {
-                V1CodecVersion::V1
-            };
-            migrate_v0_v1(&header, &parsed.rows, stop, version, source_budget)
-        }
-        .map_err(refusal)?;
+        let migrated = migrate_released_generation(&bytes, selected.version, source_budget)
+            .map_err(refusal)?;
         // The catalog checks the transformed artifact when the chain finishes.
         if let Err(checked) = check_transformed_artifact(&migrated, platform) {
             return Err(refusal(match checked {
                 FinalCheckRefusal::NativeSubset(name) => {
-                    Refused::Limit(format!("final-check/{name}"))
+                    ReleasedGenerationRefusal::Limit(format!("final-check/{name}"))
                 }
-                checked => Refused::Unsupported(
+                checked => ReleasedGenerationRefusal::Unsupported(
                     checked
                         .catalog_message(selected.version)
                         .unwrap_or_default(),
                 ),
             }));
         }
-        let encode = || Refused::Limit("encode".to_owned());
+        let encode = || ReleasedGenerationRefusal::Limit("encode".to_owned());
         let mut text = encode_header_line(&migrated.header, Some(migrated.inherited_event_count))
             .map_err(|_| refusal(encode()))?;
         text.push('\n');
@@ -408,7 +404,7 @@ impl PlainLogFile {
         }
         let bytes = text.into_bytes();
         let log = PlainAppendLog::open(&bytes, platform, source_budget)
-            .map_err(|_| refusal(Refused::Limit("scan".to_owned())))?;
+            .map_err(|_| refusal(ReleasedGenerationRefusal::Limit("scan".to_owned())))?;
         let path = selected.path.with_file_name(CURRENT_LOG_FILENAME);
         publish_new_file(&path, &bytes)?;
         Ok(Self {
@@ -497,19 +493,25 @@ impl PlainLogFile {
     }
 }
 
-/// A migration's refusal before the source path and the requested id are
-/// put in its message.
-enum Refused {
-    /// `SessionPersistenceCorruptionError`, with `String(error)` of the cause.
+/// Why [`released_generation_header`] or [`migrate_released_generation`]
+/// read no migrated Session, before the backend's `generationFailure` puts
+/// the requested id and the source path in its message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReleasedGenerationRefusal {
+    /// TypeScript throws `SessionPersistenceCorruptionError` with the message
+    /// `session "<id>": stored log is corrupt: <cause> (raw log: <source>)`;
+    /// this is the cause, `String(error)` of the underlying error.
     Corrupt(String),
-    /// `SessionFormatUnsupportedError`, with the format edge's or the
-    /// catalog's message.
+    /// TypeScript throws `SessionFormatUnsupportedError` with the message
+    /// `<reason>; source v<N> artifact remains unchanged (raw log:
+    /// <source>)`; this is the format edge's or the catalog's reason.
     Unsupported(String),
-    /// [`LogFileLimit::Migration`], with its name.
+    /// This crate does not decide the TypeScript outcome; the string names
+    /// the limit as [`LogFileLimit::Migration`] names it.
     Limit(String),
 }
 
-impl Refused {
+impl ReleasedGenerationRefusal {
     /// The backend's `generationFailure` translation.
     fn into_refusal(self, id: &str, selected: &Generation) -> LogFileRefusal {
         let source = selected.path.display();
@@ -565,12 +567,89 @@ impl Refused {
     }
 }
 
-impl From<ParseStop> for Refused {
+impl From<ParseStop> for ReleasedGenerationRefusal {
     fn from(stop: ParseStop) -> Self {
         match stop {
             ParseStop::Corrupt(message) => Self::Corrupt(format!("Error: {message}")),
             ParseStop::Limit(name) => Self::Limit(name.to_owned()),
         }
+    }
+}
+
+/// The header of a plain v0, v1, or v2 generation, read as the backend's
+/// `prepareStoredMigration` reads it before any row: framed and parsed as
+/// `decodeStreamingMigration` frames and parses it, then read by the
+/// catalog for `validateSourceIdentity`. `source_version` is the version the
+/// file name selected, and `log` is the whole file.
+///
+/// `Ok(Some(header))` is the migrated header whose stored identity the
+/// caller checks against the requested id and the selected path before
+/// calling [`migrate_released_generation`]; `Ok(None)` is a header the
+/// identity check skips, which the codec refuses. Nothing is read from or
+/// written to a file.
+pub fn released_generation_header(
+    log: &[u8],
+    source_version: u64,
+    platform: PathPlatform,
+) -> Result<Option<SessionHeader>, ReleasedGenerationRefusal> {
+    let Some(record) = first_record(log) else {
+        return Err(ReleasedGenerationRefusal::Corrupt(
+            "Error: empty or header-less session log".to_owned(),
+        ));
+    };
+    parse_released_header(record, source_version)?;
+    match read_generation_header_record(record, source_version, platform) {
+        Ok(stored) => Ok(stored),
+        // The codec refuses a header with retired fields.
+        Err(GenerationHeaderRefusal::Rejected(_)) => Ok(None),
+        Err(GenerationHeaderRefusal::Unsupported(_)) => Err(invariant()),
+        Err(GenerationHeaderRefusal::NativeSubset(limit)) => Err(ReleasedGenerationRefusal::Limit(
+            header_limit(limit).to_owned(),
+        )),
+    }
+}
+
+/// Migrate a plain v0, v1, or v2 generation in memory, as the backend's
+/// `prepareStoredMigration` decodes it after
+/// [`released_generation_header`] admitted its header: the rows are parsed,
+/// decoded by the released codec in recoverable mode, and read through every
+/// format edge to v3, in TypeScript's streaming order, with this host's path
+/// platform and `source_budget` for each expanded `sourceEventSeqs` list.
+///
+/// The catalog's final check is not run; [`crate::restore_migrated`] runs it.
+/// Nothing is read from or written to a file, so the source stays as it was,
+/// as a TypeScript read leaves it. A `source_version` above 2 is the
+/// `decode-invariant` limit.
+pub fn migrate_released_generation(
+    log: &[u8],
+    source_version: u64,
+    source_budget: usize,
+) -> Result<MigratedV2, ReleasedGenerationRefusal> {
+    let Some(record) = first_record(log) else {
+        return Err(ReleasedGenerationRefusal::Corrupt(
+            "Error: empty or header-less session log".to_owned(),
+        ));
+    };
+    let header = parse_released_header(record, source_version)?;
+    let parsed = parse_released_rows(&log[record.len()..]);
+    let stop = parsed.stop.map(ReleasedGenerationRefusal::from);
+    match source_version {
+        2 => migrate_v2(&header, &parsed.rows, stop, source_budget),
+        0 => migrate_v0_v1(
+            &header,
+            &parsed.rows,
+            stop,
+            V1CodecVersion::V0,
+            source_budget,
+        ),
+        1 => migrate_v0_v1(
+            &header,
+            &parsed.rows,
+            stop,
+            V1CodecVersion::V1,
+            source_budget,
+        ),
+        _ => Err(invariant()),
     }
 }
 
@@ -588,10 +667,10 @@ const fn header_limit(limit: SubsetLimit) -> &'static str {
 fn migrate_v0_v1(
     header: &Value,
     rows: &[Value],
-    stop: Option<Refused>,
+    stop: Option<ReleasedGenerationRefusal>,
     version: V1CodecVersion,
     source_budget: usize,
-) -> Result<MigratedV2, Refused> {
+) -> Result<MigratedV2, ReleasedGenerationRefusal> {
     let decode = |rows: &[Value]| {
         decode_v0_v1_items(
             header,
@@ -605,10 +684,12 @@ fn migrate_v0_v1(
     let refusal = match decode(rows) {
         Ok(items) => {
             return match (migrate_released_history(&items), stop) {
-                (Err(refused), _) if !at_finish(&refused) => Err(Refused::history(refused)),
+                (Err(refused), _) if !at_finish(&refused) => {
+                    Err(ReleasedGenerationRefusal::history(refused))
+                }
                 // Every row streamed before the stop, and `finish` runs after it.
                 (_, Some(stop)) => Err(stop),
-                (outcome, None) => outcome.map_err(Refused::history),
+                (outcome, None) => outcome.map_err(ReleasedGenerationRefusal::history),
             };
         }
         Err(refusal) => refusal,
@@ -618,9 +699,11 @@ fn migrate_v0_v1(
         | V1CodecRefusal::NativeSubset { location, .. } => *location,
     };
     let row = match location {
-        V1CodecLocation::Header => return Err(Refused::codec(refusal)),
+        V1CodecLocation::Header => return Err(ReleasedGenerationRefusal::codec(refusal)),
         // The rows the decoder emitted before `finish` are not returned.
-        V1CodecLocation::Finish => return Err(Refused::Limit("finish-order".to_owned())),
+        V1CodecLocation::Finish => {
+            return Err(ReleasedGenerationRefusal::Limit("finish-order".to_owned()));
+        }
         V1CodecLocation::Row(row) => row,
     };
     // The items before the refused row streamed through every edge first.
@@ -629,12 +712,12 @@ fn migrate_v0_v1(
         Err(V1CodecRefusal::Rejected {
             location: V1CodecLocation::Finish,
             ..
-        }) => return Err(Refused::Limit("finish-order".to_owned())),
+        }) => return Err(ReleasedGenerationRefusal::Limit("finish-order".to_owned())),
         Err(_) => return Err(invariant()),
     };
     match migrate_released_history(&prefix) {
-        Err(refused) if !at_finish(&refused) => Err(Refused::history(refused)),
-        _ => Err(Refused::codec(refusal)),
+        Err(refused) if !at_finish(&refused) => Err(ReleasedGenerationRefusal::history(refused)),
+        _ => Err(ReleasedGenerationRefusal::codec(refusal)),
     }
 }
 
@@ -651,8 +734,8 @@ fn at_finish(refusal: &HistoryRefusal) -> bool {
     )
 }
 
-fn invariant() -> Refused {
-    Refused::Limit("decode-invariant".to_owned())
+fn invariant() -> ReleasedGenerationRefusal {
+    ReleasedGenerationRefusal::Limit("decode-invariant".to_owned())
 }
 
 /// A v2 log's parsed `rows` through the released v2 codec in recoverable
@@ -663,9 +746,9 @@ fn invariant() -> Refused {
 fn migrate_v2(
     header: &Value,
     rows: &[Value],
-    stop: Option<Refused>,
+    stop: Option<ReleasedGenerationRefusal>,
     source_budget: usize,
-) -> Result<MigratedV2, Refused> {
+) -> Result<MigratedV2, ReleasedGenerationRefusal> {
     let migrate =
         |rows: &[Value]| migrate_v2_rows(header, rows, PathPlatform::host(), source_budget);
     let streamed = match migrate(rows) {
@@ -683,7 +766,9 @@ fn migrate_v2(
                 .skip(row.saturating_add(1))
                 .any(|later| has_type(later, "turn/end"));
             if throws {
-                return Err(Refused::Limit("v2-codec-recovery".to_owned()));
+                return Err(ReleasedGenerationRefusal::Limit(
+                    "v2-codec-recovery".to_owned(),
+                ));
             }
             match migrate(rows.get(..row).unwrap_or_default()) {
                 Err(
@@ -714,7 +799,7 @@ fn migrate_v2(
     match stop {
         // Every row streamed before the stop, and `finish` runs after it.
         Some(stop) if !before_stop => Err(stop),
-        _ => streamed.map_err(Refused::v2),
+        _ => streamed.map_err(ReleasedGenerationRefusal::v2),
     }
 }
 
@@ -776,10 +861,11 @@ fn acquire_lease(dir: &Path, id: &str) -> Result<WriteLease, LogFileRefusal> {
     })
 }
 
-/// The id's path segment, or the [`LogFileLimit::WindowsName`] limit.
-fn encoded_id(id: &str) -> Result<String, LogFileRefusal> {
+/// The id's path segment, or, on a Win32 path platform, the
+/// [`LogFileLimit::WindowsName`] limit.
+fn encoded_id(id: &str, platform: PathPlatform) -> Result<String, LogFileRefusal> {
     let encoded = encode_segment(id);
-    if windows_device_or_dot(&encoded) {
+    if platform == PathPlatform::Win32 && windows_device_or_dot(&encoded) {
         return Err(LogFileRefusal::NativeSubset(LogFileLimit::WindowsName));
     }
     Ok(encoded)
@@ -875,6 +961,9 @@ fn find_generations(root: &Path, encoded: &str) -> Result<Vec<Generation>, LogFi
     }
     for project in &projects {
         let project_dir = root.join(project);
+        // `listSessionDirs` refuses a flat file before any Session directory
+        // of the project is checked.
+        let mut sessions = Vec::new();
         for entry in list(&project_dir)?.unwrap_or_default() {
             let Some(name) = entry.name else {
                 return Err(NON_UTF8_NAME);
@@ -883,7 +972,17 @@ fn find_generations(root: &Path, encoded: &str) -> Result<Vec<Generation>, LogFi
                 return Err(LogFileRefusal::NativeSubset(LogFileLimit::LegacyLayout));
             }
             if entry.is_dir {
-                refuse_opposite(&utf8_names(&project_dir.join(name))?)?;
+                sessions.push(name);
+            }
+        }
+        for session in sessions {
+            let dir = project_dir.join(session);
+            let highest = utf8_names(&dir)?
+                .into_iter()
+                .filter_map(|name| opposite_generation(&name).map(|version| (version, name)))
+                .max();
+            if let Some((_, name)) = highest {
+                return Err(encoding_mismatch(&dir.join(name)));
             }
         }
     }
@@ -891,7 +990,13 @@ fn find_generations(root: &Path, encoded: &str) -> Result<Vec<Generation>, LogFi
     for project in &projects {
         let dir = root.join(project).join(encoded);
         let names = utf8_names(&dir)?;
-        refuse_opposite(&names)?;
+        // `resolveGenerationInDirectory` names the first one it lists.
+        if let Some(name) = names
+            .iter()
+            .find(|name| opposite_generation(name).is_some())
+        {
+            return Err(encoding_mismatch(&dir.join(name)));
+        }
         let newest = names
             .into_iter()
             .filter_map(|name| canonical_generation(&name).map(|version| (version, name)))
@@ -906,18 +1011,22 @@ fn find_generations(root: &Path, encoded: &str) -> Result<Vec<Generation>, LogFi
     Ok(found)
 }
 
-/// The [`LogFileLimit::OppositeEncoding`] limit when a Session directory's
-/// `names` hold a canonical generation with the `.zstd` suffix.
-fn refuse_opposite(names: &[String]) -> Result<(), LogFileRefusal> {
-    let opposite = names.iter().any(|name| {
-        name.strip_suffix(".zstd")
-            .and_then(canonical_generation)
-            .is_some()
-    });
-    if opposite {
-        return Err(LogFileRefusal::NativeSubset(LogFileLimit::OppositeEncoding));
+/// The generation a canonical name with the `.zstd` suffix carries,
+/// `parseGenerationLogFilename(name, 'zstd')`.
+fn opposite_generation(name: &str) -> Option<u64> {
+    name.strip_suffix(".zstd").and_then(canonical_generation)
+}
+
+/// TypeScript's `encodingMismatch(path)` of a backend configured for
+/// compression `none`, which spells `path` with `JSON.stringify`.
+fn encoding_mismatch(path: &Path) -> LogFileRefusal {
+    let spelled = json_text(&Value::String(path.display().to_string()));
+    LogFileRefusal::EncodingMismatch {
+        message: format!(
+            "session artifact {spelled} uses .jsonl.zstd, but this backend is configured for \
+             compression \"none\"; use a separate root or select the matching compression mode"
+        ),
     }
-    Ok(())
 }
 
 /// Create the Session directory and a new log file holding `bytes`.
@@ -956,4 +1065,67 @@ fn rewrite_tail(path: &Path, before: &[u8], after: &[u8]) -> io::Result<()> {
     }
     file.seek(SeekFrom::Start(shared as u64))?;
     file.write_all(&after[shared..])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn windows_names_are_refused_on_the_win32_path_platform_only() {
+        for (id, encoded) in [
+            ("con", "con"),
+            ("CON", "CON"),
+            ("nightly.", "nightly."),
+            ("aux.txt", "aux.txt"),
+            ("Nul", "Nul"),
+            ("COM1", "COM1"),
+            ("lpt9.log", "lpt9.log"),
+        ] {
+            assert_eq!(
+                encoded_id(id, PathPlatform::Posix).ok().as_deref(),
+                Some(encoded),
+                "{id}"
+            );
+            assert!(
+                matches!(
+                    encoded_id(id, PathPlatform::Win32),
+                    Err(LogFileRefusal::NativeSubset(LogFileLimit::WindowsName))
+                ),
+                "{id}"
+            );
+        }
+        // A space and `$` are escaped, so `CONIN$` and `con ` are not devices.
+        for (id, encoded) in [
+            ("console", "console"),
+            ("COM0", "COM0"),
+            ("COM10", "COM10"),
+            ("a.con", "a.con"),
+            ("CONIN$", "CONIN~0024"),
+            ("con ", "con~0020"),
+            (".", "~002E"),
+            ("..", "~002E~002E"),
+        ] {
+            for platform in [PathPlatform::Posix, PathPlatform::Win32] {
+                assert_eq!(
+                    encoded_id(id, platform).ok().as_deref(),
+                    Some(encoded),
+                    "{id} {platform:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn encoding_mismatch_spells_the_path_as_json_stringify_does() {
+        let refusal = encoding_mismatch(Path::new("/r/\"q\"/session.v3.jsonl.zstd"));
+        assert_eq!(
+            refusal.message(),
+            Some(
+                "session artifact \"/r/\\\"q\\\"/session.v3.jsonl.zstd\" uses .jsonl.zstd, but \
+                 this backend is configured for compression \"none\"; use a separate root or \
+                 select the matching compression mode"
+            )
+        );
+    }
 }

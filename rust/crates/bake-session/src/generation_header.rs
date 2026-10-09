@@ -7,9 +7,10 @@
 
 use serde_json::{Map, Value};
 
+use crate::json_parse::dismantle_fields;
 use crate::{
     CURRENT_SESSION_FORMAT_VERSION, Count, HeaderOrigin, PathPlatform, SessionHeader, SubsetLimit,
-    count, is_absolute, is_syntax_error,
+    count, dismantle, is_absolute, parse_json,
 };
 
 const RETIRED_FIELDS: &str = "session header uses retired policy baseline fields";
@@ -61,20 +62,32 @@ pub fn read_generation_header_record(
     source_version: u64,
     platform: PathPlatform,
 ) -> Result<Option<SessionHeader>, GenerationHeaderRefusal> {
-    use GenerationHeaderRefusal::{NativeSubset, Rejected, Unsupported};
+    use GenerationHeaderRefusal::NativeSubset;
     let body = match record.split_last() {
         Some((b'\n', body)) if !body.contains(&b'\n') => body,
         _ => return Ok(None),
     };
     let text = std::str::from_utf8(body).map_err(|_| NativeSubset(SubsetLimit::InvalidUtf8))?;
-    let value: Value = match serde_json::from_str(text) {
-        Ok(value) => value,
-        Err(error) if is_syntax_error(&error) => return Ok(None),
+    let fields = match parse_json(text) {
+        Ok(Value::Object(fields)) => fields,
+        Ok(other) => {
+            dismantle(other);
+            return Ok(None);
+        }
+        Err(error) if error.is_syntax() => return Ok(None),
         Err(_) => return Err(NativeSubset(SubsetLimit::JsonParser)),
     };
-    let Value::Object(fields) = value else {
-        return Ok(None);
-    };
+    let header = decode_fields(&fields, source_version, platform);
+    dismantle_fields(fields);
+    header
+}
+
+fn decode_fields(
+    fields: &Map<String, Value>,
+    source_version: u64,
+    platform: PathPlatform,
+) -> Result<Option<SessionHeader>, GenerationHeaderRefusal> {
+    use GenerationHeaderRefusal::{NativeSubset, Rejected, Unsupported};
     if fields.contains_key("sandboxMode") || fields.contains_key("approvalPolicy") {
         return Err(Rejected(RETIRED_FIELDS.to_owned()));
     }
@@ -97,7 +110,7 @@ pub fn read_generation_header_record(
              upgrade the harness to open it"
         )));
     }
-    decode(&fields, stored_version, platform).map_err(NativeSubset)
+    decode(fields, stored_version, platform).map_err(NativeSubset)
 }
 
 /// The released codec for `version`, then the header migrations. A check

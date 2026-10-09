@@ -17,7 +17,7 @@
 //! only such numbers, so a `Value` equality between two of them is a
 //! JavaScript `===` between their values.
 
-use serde_json::{Number, Value};
+use serde_json::{Map, Number, Value};
 
 use crate::request::js_members;
 
@@ -78,43 +78,74 @@ pub(crate) fn is_writer_spelling(number: &Number) -> bool {
 
 /// `JSON.stringify(value)` for a parsed value. A number prints from the
 /// double `JSON.parse` would read, so any spelling prints as JavaScript prints
-/// its value. The recursion follows the value's nesting, which serde_json's
-/// parser bounds.
+/// its value. The walk keeps its own stack, so it is safe at any depth.
 pub fn json_text(value: &Value) -> String {
     let mut text = String::new();
-    write_json(value, &mut text);
+    write_json(Piece::Value(value), &mut text);
     text
 }
 
-fn write_json(value: &Value, text: &mut String) {
-    match value {
-        Value::Number(number) => {
-            text.push_str(&json_number_text(number.as_f64().unwrap_or(f64::NAN)));
-        }
-        Value::Array(items) => {
-            text.push('[');
-            for (index, item) in items.iter().enumerate() {
-                if index > 0 {
-                    text.push(',');
-                }
-                write_json(item, text);
+/// [`json_text`] of an object holding `fields`.
+pub(crate) fn json_object_text(fields: &Map<String, Value>) -> String {
+    let mut text = String::new();
+    write_json(Piece::Object(fields), &mut text);
+    text
+}
+
+/// What remains to write: a value, an object's members, or literal text.
+enum Piece<'a> {
+    Value(&'a Value),
+    Object(&'a Map<String, Value>),
+    Text(&'static str),
+    Key(&'a str),
+}
+
+fn write_json(root: Piece<'_>, text: &mut String) {
+    let mut pending = vec![root];
+    while let Some(piece) = pending.pop() {
+        let value = match piece {
+            Piece::Text(literal) => {
+                text.push_str(literal);
+                continue;
             }
-            text.push(']');
-        }
-        Value::Object(fields) => {
-            text.push('{');
-            for (index, (key, item)) in js_members(fields).into_iter().enumerate() {
-                if index > 0 {
-                    text.push(',');
-                }
+            Piece::Key(key) => {
                 write_string(key, text);
                 text.push(':');
-                write_json(item, text);
+                continue;
             }
-            text.push('}');
+            Piece::Object(fields) => {
+                text.push('{');
+                pending.push(Piece::Text("}"));
+                let members = js_members(fields);
+                for (index, (key, item)) in members.into_iter().enumerate().rev() {
+                    pending.push(Piece::Value(item));
+                    pending.push(Piece::Key(key));
+                    if index > 0 {
+                        pending.push(Piece::Text(","));
+                    }
+                }
+                continue;
+            }
+            Piece::Value(value) => value,
+        };
+        match value {
+            Value::Number(number) => {
+                text.push_str(&json_number_text(number.as_f64().unwrap_or(f64::NAN)));
+            }
+            Value::Array(items) => {
+                text.push('[');
+                pending.push(Piece::Text("]"));
+                for (index, item) in items.iter().enumerate().rev() {
+                    pending.push(Piece::Value(item));
+                    if index > 0 {
+                        pending.push(Piece::Text(","));
+                    }
+                }
+            }
+            Value::Object(fields) => pending.push(Piece::Object(fields)),
+            Value::String(string) => write_string(string, text),
+            Value::Null | Value::Bool(_) => text.push_str(&value.to_string()),
         }
-        Value::String(string) => write_string(string, text),
-        Value::Null | Value::Bool(_) => text.push_str(&value.to_string()),
     }
 }
 

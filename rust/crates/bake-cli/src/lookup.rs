@@ -19,9 +19,14 @@
 //! 3. `generation`: a newer generation is refused from its first line or
 //!    Zstd frame alone, although the whole file is read within `--max-bytes`
 //!    where TypeScript reads only that header; an absent file there is a
-//!    malformed header, as in TypeScript. An older generation is a native
-//!    limit decided from its name, before any file is opened, because
-//!    TypeScript migrates it.
+//!    malformed header, as in TypeScript. An older generation, format v0,
+//!    v1, or v2, is read within `--max-bytes` and migrated in memory as
+//!    `prepareStoredMigration` migrates it for a read: a Zstd file's frames
+//!    are scanned and decoded with `released_zstd_plaintext`, its header is
+//!    parsed, its stored identity checked, its rows taken through every
+//!    format edge with bake-session's released-history migration, and the
+//!    result restored with `restore_migrated`, all at this stage. Nothing is
+//!    published, as a TypeScript read publishes nothing.
 //! 4. `scan`, `identity`, `restore`: the current generation is scanned, its
 //!    header id and the path its id and `cwd` name are checked against the
 //!    selected file, with a `realpath` comparison when the spellings differ,
@@ -35,8 +40,10 @@
 //! order the source fixes. `--max-entries` bounds the entries read across all
 //! listings, counting a directory again each time it is listed. Names that are
 //! not UTF-8, which Node reads with replacement characters, are native limits
-//! where they would be traversed. Nothing is written, locked, or migrated,
-//! and the metadata comparisons are not an atomic snapshot of the root.
+//! where they would be traversed. Nothing is written or locked, a migration
+//! stays in memory, and the metadata comparisons are not an atomic snapshot
+//! of the root. A migrated record's `committedPlaintextBytes` counts the
+//! current-format encoding the restoration read back, not the source file.
 
 use std::ffi::OsStr;
 use std::fs::{self, DirEntry};
@@ -46,8 +53,11 @@ use std::path::{Path, PathBuf};
 pub use bake_session::{encode_segment, project_key};
 
 use bake_session::{
-    CURRENT_SESSION_FORMAT_VERSION, HeaderRefusal, PathPlatform, Rejection, RestoreRefusal,
-    SessionHeader, SubsetLimit, first_record, read_header_record, zstd_header_record,
+    CURRENT_SESSION_FORMAT_VERSION, FinalCheckRefusal, HeaderRefusal, MigratedRestoreRefusal,
+    PathPlatform, RELEASED_ZSTD_PLAINTEXT_BUDGET, Rejection, ReleasedGenerationRefusal,
+    RestoreRefusal, RestoredLog, SessionHeader, SubsetLimit, dismantle, first_record,
+    migrate_released_generation, migrate_released_zstd_generation, parse_json, read_header_record,
+    released_generation_header, released_zstd_plaintext, restore_migrated, zstd_header_record,
 };
 use serde_json::{Map, Value, json};
 
@@ -619,17 +629,9 @@ pub fn run(args: &InspectArgs, lookup: &LookupArgs) -> Result<(Value, u8), Strin
             selected_path = Some(relative.clone());
             let path = selected.path(&root);
             if selected.version < CURRENT_SESSION_FORMAT_VERSION {
-                return Err(refused(
-                    "generation",
-                    "migration-required",
-                    Kind::NativeLimit,
-                    format!(
-                        "{relative} is a format v{} generation, which TypeScript migrates and this \
-                     preview does not",
-                        selected.version
-                    ),
-                    Some(relative),
-                ));
+                let bytes = read_bounded(&path, args.max_bytes).map_err(Stop::Failure)?;
+                file_bytes = Some(bytes.len());
+                return migrate_older(&root, &path, &selected, lookup, args, &bytes, &relative);
             }
             if selected.version > CURRENT_SESSION_FORMAT_VERSION {
                 // `readGenerationHeader` treats an absent file as a malformed
@@ -685,6 +687,133 @@ pub fn run(args: &InspectArgs, lookup: &LookupArgs) -> Result<(Value, u8), Strin
             Ok((Value::Object(record), 3))
         }
     }
+}
+
+/// `requireStoredLog` for a plain or Zstd v0, v1, or v2 generation in a read
+/// `open`: `prepareStoredMigration` decodes it in memory, checking the
+/// stored identity once its header is read, and nothing is published. Every
+/// refusal is at the `generation` stage, as the backend's migration reports
+/// it, with the root-relative path where TypeScript names the absolute one.
+fn migrate_older(
+    root: &Path,
+    path: &Path,
+    selected: &Selected,
+    lookup: &LookupArgs,
+    args: &InspectArgs,
+    bytes: &[u8],
+    relative: &str,
+) -> Step<RestoredLog> {
+    let platform = PathPlatform::host();
+    let source_budget = usize::try_from(args.max_source_seqs).unwrap_or(usize::MAX);
+    let id = &lookup.id;
+    let generation = |refusal| match refusal {
+        // The same refusal as a current generation's decoded plaintext.
+        ReleasedGenerationRefusal::Limit(name) if name == RELEASED_ZSTD_PLAINTEXT_BUDGET => {
+            restore_stage(
+                "generation",
+                &RestoreRefusal::NativePlaintextBudget {
+                    max_plaintext_bytes: plaintext_budget(args),
+                },
+                args,
+                relative,
+            )
+        }
+        refusal => generation_refusal(refusal, None, id, selected.version, relative),
+    };
+    let decoded = match lookup.encoding {
+        Encoding::None => None,
+        Encoding::Zstd => {
+            Some(released_zstd_plaintext(bytes, plaintext_budget(args)).map_err(generation)?)
+        }
+    };
+    let plaintext = decoded.as_ref().map_or(bytes, |decoded| &decoded.plaintext);
+    if let Some(stored) =
+        released_generation_header(plaintext, selected.version, platform).map_err(generation)?
+    {
+        if stored.id != *id {
+            return Err(generation_refusal(
+                ReleasedGenerationRefusal::Corrupt(format!(
+                    "Error: corrupt session log \"{relative}\": requested id \"{id}\" does not \
+                     match header id \"{}\"",
+                    stored.id
+                )),
+                Some("id-mismatch"),
+                id,
+                selected.version,
+                relative,
+            ));
+        }
+        check_identity(root, path, selected, None, &stored, relative).map_err(
+            |stop| match stop {
+                Stop::Refused(mut refused) => {
+                    refused.stage = "generation";
+                    Stop::Refused(refused)
+                }
+                failure @ Stop::Failure(_) => failure,
+            },
+        )?;
+    }
+    let migrated = match &decoded {
+        None => migrate_released_generation(bytes, selected.version, source_budget),
+        Some(decoded) => migrate_released_zstd_generation(decoded, selected.version, source_budget),
+    }
+    .map_err(generation)?;
+    restore_migrated(&migrated, platform, source_budget).map_err(|refusal| match refusal {
+        MigratedRestoreRefusal::FinalCheck(FinalCheckRefusal::NativeSubset(name)) => generation(
+            ReleasedGenerationRefusal::Limit(format!("final-check/{name}")),
+        ),
+        MigratedRestoreRefusal::FinalCheck(checked) => {
+            generation(ReleasedGenerationRefusal::Unsupported(
+                checked
+                    .catalog_message(selected.version)
+                    .unwrap_or_default(),
+            ))
+        }
+        MigratedRestoreRefusal::Refused(refusal) => {
+            restore_stage("generation", &refusal, args, relative)
+        }
+        MigratedRestoreRefusal::NativeSubset(limit) => generation(
+            ReleasedGenerationRefusal::Limit(format!("restore-migrated/{}", limit.name())),
+        ),
+    })
+}
+
+/// The backend's `generationFailure` translation of a migration refusal.
+fn generation_refusal(
+    refusal: ReleasedGenerationRefusal,
+    reason: Option<&'static str>,
+    id: &str,
+    version: u64,
+    relative: &str,
+) -> Stop {
+    let (reason, kind, message) = match refusal {
+        ReleasedGenerationRefusal::Corrupt(cause) => (
+            reason,
+            Kind::Invalid,
+            format!("session \"{id}\": stored log is corrupt: {cause} (raw log: {relative})"),
+        ),
+        ReleasedGenerationRefusal::Unsupported(catalog) => (
+            None,
+            Kind::Unsupported,
+            format!(
+                "{catalog}; source v{version} artifact remains unchanged (raw log: {relative})"
+            ),
+        ),
+        ReleasedGenerationRefusal::Limit(name) => (
+            Some("migration-limit"),
+            Kind::NativeLimit,
+            format!(
+                "{relative} reaches the migration limit {name}, whose TypeScript outcome this \
+                 preview does not decide"
+            ),
+        ),
+    };
+    Stop::Refused(Box::new(Refused {
+        stage: "generation",
+        reason,
+        refusal: Refusal::new(kind, message),
+        path: Some(relative.to_owned()),
+    }))
 }
 
 fn restore_stage(
@@ -823,8 +952,13 @@ fn newer_generation(
         }
         _ => {}
     }
-    let value: Value =
-        serde_json::from_slice(&record).expect("the header reader parsed this record");
+    let value = ParsedHeader(Some(
+        std::str::from_utf8(&record)
+            .ok()
+            .and_then(|text| parse_json(text).ok())
+            .expect("the header reader parsed this record"),
+    ));
+    let value: &Value = &value;
     if let Value::Object(fields) = &value
         && (fields.contains_key("sandboxMode") || fields.contains_key("approvalPolicy"))
     {
@@ -884,6 +1018,26 @@ fn newer_generation(
         ),
         path,
     )
+}
+
+/// A parsed header record, which may nest any member arbitrarily deep, so it
+/// is dropped iteratively.
+struct ParsedHeader(Option<Value>);
+
+impl std::ops::Deref for ParsedHeader {
+    type Target = Value;
+
+    fn deref(&self) -> &Value {
+        self.0.as_ref().expect("present until dropped")
+    }
+}
+
+impl Drop for ParsedHeader {
+    fn drop(&mut self) {
+        if let Some(value) = self.0.take() {
+            dismantle(value);
+        }
+    }
 }
 
 #[cfg(test)]

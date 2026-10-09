@@ -20,10 +20,13 @@
 //! Assistant message's `message.content` an array and each tool result's
 //! `source.callId` a non-empty string. An Assistant step needs no check here:
 //! Session construction refuses a step that is not a safe count, or limits a
-//! spelled one, at the message row, before it reaches any closer.
+//! spelled one, at the message row. That check runs after this scan, so a
+//! result closer copies the step as logged, at any depth, and the closers are
+//! held so that dropping them never recurses.
 
 use serde_json::{Map, Value, json};
 
+use crate::json_parse::{Deep, clone_value};
 use crate::{MAX_SAFE_INTEGER, RestoreLimit, UnadmittedEnvelope};
 
 /// `TOOL_NOT_STARTED`'s result text in `repair.ts`.
@@ -48,7 +51,7 @@ struct Pending<'a> {
 /// row the scan cannot follow without guessing JavaScript's coercion.
 pub(crate) fn interrupted_turn_closers(
     events: &[UnadmittedEnvelope<'_>],
-) -> Result<Vec<Value>, (u64, RestoreLimit)> {
+) -> Result<Deep<Vec<Value>>, (u64, RestoreLimit)> {
     let mut open_turn: Open<'_> = None;
     let mut open_step: Open<'_> = None;
     let mut pending: Vec<Pending<'_>> = Vec::new();
@@ -119,12 +122,12 @@ pub(crate) fn interrupted_turn_closers(
         }
     }
     let (Some((turn_seq, turn)), Some(last)) = (open_turn, events.last()) else {
-        return Ok(Vec::new());
+        return Ok(Deep::default());
     };
     let turn = safe_count(turn).ok_or((turn_seq, RestoreLimit::Coordinate))?;
     let mut seq = last.seq + 1;
     let time = last.time;
-    let mut closers = Vec::new();
+    let mut closers = Deep::<Vec<Value>>::default();
     for call in pending {
         let Value::String(id) = call.id else {
             return Err((call.assistant_seq, RestoreLimit::Repair));
@@ -165,7 +168,8 @@ fn safe_count(value: Option<&Value>) -> Option<u64> {
 }
 
 /// The error result for one pending call. Its step is the Assistant row's
-/// value, which Session construction checks before this closer.
+/// value, copied before Session construction refuses one that is not a safe
+/// count, so it may nest as deep as its row.
 fn result_closer(
     seq: u64,
     time: i64,
@@ -185,7 +189,7 @@ fn result_closer(
     let mut data = Map::new();
     data.insert("turn".to_owned(), turn.into());
     if let Some(step) = step {
-        data.insert("step".to_owned(), step.clone());
+        data.insert("step".to_owned(), clone_value(step));
     }
     data.insert(
         "message".to_owned(),
@@ -202,11 +206,15 @@ fn result_closer(
         }),
     );
     data.insert("error".to_owned(), json!({"name": name, "code": code}));
-    let mut closer = json!({
-        "type": "tool/result", "seq": seq, "time": time, "data": data, "surfaceOp": "append",
-    });
+    // `json!` would serialize `data`, and with it the step, recursively.
+    let mut closer = Map::new();
+    closer.insert("type".to_owned(), "tool/result".into());
+    closer.insert("seq".to_owned(), seq.into());
+    closer.insert("time".to_owned(), time.into());
+    closer.insert("data".to_owned(), Value::Object(data));
+    closer.insert("surfaceOp".to_owned(), "append".into());
     if let Some(call_seq) = call_seq {
-        closer["sourceEventSeqs"] = json!([call_seq]);
+        closer.insert("sourceEventSeqs".to_owned(), json!([call_seq]));
     }
-    closer
+    Value::Object(closer)
 }

@@ -37,6 +37,7 @@
 
 use serde_json::{Map, Value};
 
+use crate::json_parse::{Deep, clone_fields};
 use crate::repair::interrupted_turn_closers;
 use crate::replay::{KNOWN_EVENT_TYPES, ReplayRefusal, admit, adopt, folded, qualify_payload};
 use crate::request::{FoldRefusal, RequestFold};
@@ -57,10 +58,10 @@ use crate::{
 pub struct RestoredLog {
     stored: ScannedLog,
     torn: Option<TornTail>,
-    closers: Vec<Value>,
+    closers: Deep<Vec<Value>>,
     end_seed_appended: bool,
     fold: RequestFold,
-    context: Option<Map<String, Value>>,
+    context: Option<Deep<Map<String, Value>>>,
 }
 
 /// Recovery metadata in the physical input and the restored row sequence.
@@ -102,18 +103,23 @@ impl RestoredLog {
     /// `deriveMessages`: each current surface node's message, as logged or as
     /// the `image/offload` projection last changed it. A projected message
     /// keeps its identity and member order; only selected image blocks gain
-    /// `offloaded: true`.
+    /// `offloaded: true`. A message may nest as deep as its log row; drop
+    /// each with [`crate::dismantle`] rather than recursively.
     pub fn messages(&self) -> Vec<Value> {
-        self.fold.messages().cloned().map(Value::Object).collect()
+        self.fold
+            .messages()
+            .map(|message| Value::Object(clone_fields(message)))
+            .collect()
     }
 
     /// `requestHeader`: the latest header in `canonicalHeader` form, or
-    /// `None` before the first.
+    /// `None` before the first. Drop it with [`crate::dismantle`].
     pub fn request_header(&self) -> Option<Value> {
         self.fold.request_header()
     }
 
-    /// `toolHistory`: the `ToolHistoryProjection` snapshot.
+    /// `toolHistory`: the `ToolHistoryProjection` snapshot. Drop it with
+    /// [`crate::dismantle`].
     pub fn tool_history(&self) -> Value {
         self.fold.tool_history_json()
     }
@@ -127,7 +133,10 @@ impl RestoredLog {
     /// `requestContext`: the latest `request/context` data, or `None` before
     /// the first.
     pub const fn request_context(&self) -> Option<&Map<String, Value>> {
-        self.context.as_ref()
+        match &self.context {
+            Some(context) => Some(context.as_inner()),
+            None => None,
+        }
     }
 }
 
@@ -181,9 +190,6 @@ pub enum RestoreLimit {
     /// produces either; every number one writes restores, even where no
     /// output carries it, such as usage.
     Number,
-    /// One of those payloads nests arrays and objects more than 64
-    /// containers deep.
-    Depth,
     /// An Assistant settlement's `turn` or `step` is a positive number with a
     /// fraction or exponent, or a closer would copy an open turn or step that
     /// is not a safe count.
@@ -317,11 +323,9 @@ fn restore_scanned(
         .rev()
         .find(|envelope| envelope.event_type == "request/context")
         .map(|envelope| {
-            envelope
-                .data
-                .as_object()
-                .expect("qualified context")
-                .clone()
+            Deep::new(clone_fields(
+                envelope.data.as_object().expect("qualified context"),
+            ))
         });
     drop(closer_envelopes);
     drop(envelopes);
@@ -384,7 +388,6 @@ fn restore_refusal(refusal: ReplayRefusal) -> RestoreRefusal {
 fn limit(limit: ReplayLimit) -> RestoreLimit {
     match limit {
         ReplayLimit::Number => RestoreLimit::Number,
-        ReplayLimit::Depth => RestoreLimit::Depth,
         ReplayLimit::Coordinate | ReplayLimit::RepeatedCoordinate => RestoreLimit::Coordinate,
         ReplayLimit::ConfigMember => RestoreLimit::ConfigMember,
         ReplayLimit::ToolSchema => RestoreLimit::ToolSchema,

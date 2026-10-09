@@ -10,9 +10,8 @@
 //! later target's shape. Derivation constructs its Session without
 //! projections, so its fold refuses the decision without validating it.
 //!
-//! `seq` and image indexes are JavaScript numbers. The workspace parses JSON
-//! with `float_roundtrip`, which rounds a decimal spelling as `JSON.parse`
-//! does, and the scan has already refused integer parts longer than 768
+//! `seq` and image indexes are JavaScript numbers. [`crate::parse_json`]
+//! rounds a decimal spelling as `JSON.parse` does, and the scan has already refused integer parts longer than 768
 //! digits and numbers outside the `f64` range as native limits. So, unlike
 //! settlement coordinates, which leave fraction and exponent spellings
 //! undecided, this projection decides them: `5.0`, `5e0`, and `1e-400` (+0)
@@ -27,6 +26,7 @@
 use serde_json::{Map, Value};
 
 use crate::MAX_SAFE_INTEGER;
+use crate::json_parse::{clone_value, dismantle};
 
 /// Why `imageOffloadProjection` rejects a decision. Session construction
 /// throws "invalid seed event at index `seq`: " followed by
@@ -155,8 +155,9 @@ pub(crate) enum Walk {
 /// depth-first through `tool-result` blocks, as `offloaded: true`. Unchanged
 /// members keep their positions, and a replaced `offloaded` member keeps its
 /// place, as an object spread does. `indexes` is non-empty and strictly
-/// increasing. The message is a qualified surface payload, so the recursion
-/// is at most 64 containers deep.
+/// increasing. The walk and its copies are iterative, so a qualified surface
+/// payload of any depth is safe; the caller drops the projection with
+/// [`crate::dismantle`] or keeps it in a [`crate::json_parse::Deep`].
 pub(crate) fn offload_images(
     message: &Map<String, Value>,
     indexes: &[u64],
@@ -171,13 +172,34 @@ pub(crate) fn offload_images(
         .expect("admission proved message content an array");
     let content = walk.visit(content)?;
     if let Some(&index) = indexes.get(walk.selected) {
+        if let Some(content) = content {
+            dismantle(Value::Array(content));
+        }
         return Err(Walk::Rejected(OffloadRejection::MissingIndex { index }));
     }
-    let mut projected = message.clone();
-    if let Some(content) = content {
-        projected.insert("content".to_owned(), Value::Array(content));
+    Ok(match content {
+        Some(content) => with_member(message, "content", Value::Array(content)),
+        None => with_member(message, "content", clone_value(&message["content"])),
+    })
+}
+
+/// `{...fields, [key]: value}` copied without recursing: the other members
+/// are copied in place, `key` keeps its position or is appended, and the
+/// replaced member is never copied, so no deep value drops recursively.
+fn with_member(fields: &Map<String, Value>, key: &str, value: Value) -> Map<String, Value> {
+    let mut copy = Map::new();
+    let mut value = Some(value);
+    for (name, member) in fields {
+        if name == key {
+            copy.insert(name.clone(), value.take().unwrap_or(Value::Null));
+        } else {
+            copy.insert(name.clone(), clone_value(member));
+        }
     }
-    Ok(projected)
+    if let Some(value) = value {
+        copy.insert(key.to_owned(), value);
+    }
+    copy
 }
 
 struct Images<'a> {
@@ -186,55 +208,114 @@ struct Images<'a> {
     selected: usize,
 }
 
-impl Images<'_> {
-    /// The projected blocks, or `None` when none changed.
-    fn visit(&mut self, blocks: &[Value]) -> Result<Option<Vec<Value>>, Walk> {
-        let mut next: Option<Vec<Value>> = None;
-        for (position, block) in blocks.iter().enumerate() {
-            let projected = match block {
-                Value::Null => return Err(Walk::Coercion),
-                Value::Object(fields) => self.block(fields)?,
-                // A primitive or array block has no `type`.
-                _ => None,
-            };
-            if projected.is_some() && next.is_none() {
-                next = Some(blocks[..position].to_vec());
-            }
-            if let Some(next) = &mut next {
-                next.push(projected.unwrap_or_else(|| block.clone()));
-            }
+/// One block list being walked: its blocks, the next position, the
+/// projected copy once a block changed, and the `tool-result` block that
+/// holds the list, `None` for the message content.
+struct Blocks<'a> {
+    blocks: &'a [Value],
+    position: usize,
+    next: Option<Vec<Value>>,
+    owner: Option<&'a Map<String, Value>>,
+}
+
+impl<'a> Blocks<'a> {
+    const fn new(blocks: &'a [Value], owner: Option<&'a Map<String, Value>>) -> Self {
+        Self {
+            blocks,
+            position: 0,
+            next: None,
+            owner,
         }
-        Ok(next)
     }
 
-    fn block(&mut self, fields: &Map<String, Value>) -> Result<Option<Value>, Walk> {
-        match fields.get("type").and_then(Value::as_str) {
-            Some("image") => {
-                let index = self.image;
-                self.image += 1;
-                if self.indexes.get(self.selected) != Some(&index) {
-                    return Ok(None);
-                }
-                if fields.get("offloaded") == Some(&Value::Bool(true)) {
-                    return Err(Walk::Rejected(OffloadRejection::AlreadyOffloaded { index }));
-                }
-                self.selected += 1;
-                let mut block = fields.clone();
-                block.insert("offloaded".to_owned(), Value::Bool(true));
-                Ok(Some(Value::Object(block)))
-            }
-            Some("tool-result") => {
-                let Some(Value::Array(content)) = fields.get("content") else {
-                    return Err(Walk::Coercion);
-                };
-                Ok(self.visit(content)?.map(|content| {
-                    let mut block = fields.clone();
-                    block.insert("content".to_owned(), Value::Array(content));
-                    Value::Object(block)
-                }))
-            }
-            _ => Ok(None),
+    /// The projected copy, leaving none for [`Drop`] to dismantle.
+    fn take_next(&mut self) -> Option<Vec<Value>> {
+        self.next.take()
+    }
+
+    /// Record the current block's projection, or its copy once an earlier
+    /// block changed, and move past it.
+    fn record(&mut self, projected: Option<Value>) {
+        if projected.is_some() && self.next.is_none() {
+            self.next = Some(
+                self.blocks[..self.position]
+                    .iter()
+                    .map(clone_value)
+                    .collect(),
+            );
         }
+        if let Some(next) = &mut self.next {
+            next.push(projected.unwrap_or_else(|| clone_value(&self.blocks[self.position])));
+        }
+        self.position += 1;
+    }
+}
+
+/// A walk that stops early drops its open lists' partial copies, which may
+/// hold deep blocks, without recursing.
+impl Drop for Blocks<'_> {
+    fn drop(&mut self) {
+        if let Some(next) = self.next.take() {
+            dismantle(Value::Array(next));
+        }
+    }
+}
+
+impl Images<'_> {
+    /// The projected blocks, or `None` when none changed. Nested
+    /// `tool-result` content is walked depth-first on an explicit stack, so
+    /// any nesting is safe.
+    fn visit(&mut self, blocks: &[Value]) -> Result<Option<Vec<Value>>, Walk> {
+        let mut stack = vec![Blocks::new(blocks, None)];
+        loop {
+            let frame = stack.last_mut().expect("an open block list");
+            if let Some(block) = frame.blocks.get(frame.position) {
+                let projected = match block {
+                    Value::Null => return Err(Walk::Coercion),
+                    Value::Object(fields) => match fields.get("type").and_then(Value::as_str) {
+                        Some("image") => self.image(fields)?,
+                        Some("tool-result") => {
+                            let Some(Value::Array(content)) = fields.get("content") else {
+                                return Err(Walk::Coercion);
+                            };
+                            stack.push(Blocks::new(content, Some(fields)));
+                            continue;
+                        }
+                        _ => None,
+                    },
+                    // A primitive or array block has no `type`.
+                    _ => None,
+                };
+                frame.record(projected);
+                continue;
+            }
+            let mut done = stack.pop().expect("the frame just read");
+            let next = done.take_next();
+            let Some(parent) = stack.last_mut() else {
+                return Ok(next);
+            };
+            let owner = done.owner.expect("a nested list has its tool-result block");
+            parent.record(next.map(|content| {
+                Value::Object(with_member(owner, "content", Value::Array(content)))
+            }));
+        }
+    }
+
+    fn image(&mut self, fields: &Map<String, Value>) -> Result<Option<Value>, Walk> {
+        let index = self.image;
+        self.image += 1;
+        if self.indexes.get(self.selected) != Some(&index) {
+            return Ok(None);
+        }
+        if fields.get("offloaded") == Some(&Value::Bool(true)) {
+            return Err(Walk::Rejected(OffloadRejection::AlreadyOffloaded { index }));
+        }
+        self.selected += 1;
+        Ok(Some(Value::Object(with_member(
+            fields,
+            "offloaded",
+            Value::Bool(true),
+        ))))
     }
 }
 

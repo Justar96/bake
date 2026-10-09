@@ -47,9 +47,8 @@ const UNNAMED_SEQS: [(&str, u64); 4] = [
     ("known-ignorable-tool-update-marker", 14),
     ("known-ignorable-routing-decision-marker", 16),
 ];
-const LIMITS: [(&str, RestoreLimit); 8] = [
+const LIMITS: [(&str, RestoreLimit); 7] = [
     ("number", RestoreLimit::Number),
-    ("depth", RestoreLimit::Depth),
     ("coordinate", RestoreLimit::Coordinate),
     ("config-member", RestoreLimit::ConfigMember),
     ("tool-schema", RestoreLimit::ToolSchema),
@@ -206,7 +205,7 @@ fn load() -> Vec<Case> {
         BTreeSet::from(["cases", "history", "logs", "oracle", "schema", "version"])
     );
     assert_eq!(table["schema"], SCHEMA);
-    assert_eq!(table["version"], 3);
+    assert_eq!(table["version"], 4);
     assert!(
         table["history"]
             .as_array()

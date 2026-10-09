@@ -7,9 +7,12 @@
 //! the root must have the hand-written text, a `session.lock` file read only
 //! by its size, since Windows refuses to read a locked range, and no other
 //! file may exist. A thrown outcome maps to the refusal Rust claims: the
-//! exact already-owned, already-exists, not-found, duplicate-id, contiguity,
-//! lossless-snapshot, corruption, or unsupported-migration message, with `{src}` rendered as the root joined with the step's `src`
-//! path, or `Unadmitted` for any other throw of a create or append. A `rust`
+//! exact already-owned, already-exists, not-found, duplicate-id,
+//! encoding-mismatch, contiguity, lossless-snapshot, corruption, or
+//! unsupported-migration message, with `{src}` rendered as the root joined
+//! with the step's `src` path and `{srcJson}` as that path spelled by
+//! `JSON.stringify`, or `Unadmitted` for any other throw of a create or
+//! append. A `rust`
 //! override names a native limit, or marks the step outside the model's
 //! domain, which Rust does not run; either ends the case. Every limit must
 //! be named by some case of the table, and every case that applies here must
@@ -28,15 +31,14 @@ use serde_json::{Map, Value};
 const SCHEMA: &str = "bake/session-conformance/plain-log-file-cases";
 const ORACLE: &str = "in an owned temporary root holding the seeded entries, run each step through the JSONL backend with compression none on the step's handle, a or b, each its own backend instance over the root: create, a write open, or the open handle's append, flush, or close; after each step list every file beneath the root with its text, an empty session.lock by its size";
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 64;
+const CASE_COUNT: usize = 69;
 const SOURCE_BUDGET: usize = 64;
-const LIMITS: [&str; 12] = [
+const LIMITS: [&str; 11] = [
     "empty-id",
     "encode",
     "seq-value",
     "windows-name",
     "legacy-layout",
-    "opposite-encoding",
     "non-utf8-name",
     "newer-generation",
     "identity",
@@ -114,7 +116,7 @@ fn load() -> Vec<Map<String, Value>> {
         BTreeSet::from(["cases", "history", "oracle", "schema", "version"])
     );
     assert_eq!(table["schema"], SCHEMA);
-    assert_eq!(table["version"], 5);
+    assert_eq!(table["version"], 6);
     assert_eq!(table["oracle"], ORACLE);
     assert!(
         table["history"]
@@ -266,10 +268,6 @@ fn limit_matches(name: &str, refusal: &LogFileRefusal) -> bool {
             Append(AppendRefusal::NativeSubset(AppendLimit::SeqValue))
         ) | ("windows-name", NativeSubset(LogFileLimit::WindowsName))
             | ("legacy-layout", NativeSubset(LogFileLimit::LegacyLayout))
-            | (
-                "opposite-encoding",
-                NativeSubset(LogFileLimit::OppositeEncoding)
-            )
             | ("non-utf8-name", NativeSubset(LogFileLimit::NonUtf8Name))
             | (
                 "newer-generation",
@@ -287,6 +285,12 @@ fn expected_kind(step: &str, class: &str, message: &str) -> &'static str {
         (_, "SessionAlreadyExistsError") => "already-exists",
         (_, "SessionPersistenceNotFoundError") => "not-found",
         (_, "Error") if message.starts_with("duplicate JSONL session id ") => "duplicate",
+        ("create" | "open", "Error")
+            if message.starts_with("session artifact ")
+                && message.contains(" but this backend is configured for compression ") =>
+        {
+            "encoding-mismatch"
+        }
         ("append", "Error") if message.starts_with("append seq mismatch for ") => "seq-mismatch",
         ("append", "TypeError") if message == NOT_LOSSLESS => "not-lossless",
         ("open", "SessionPersistenceCorruptionError") => "corrupt",
@@ -303,6 +307,7 @@ fn kind(refusal: &LogFileRefusal) -> &'static str {
         LogFileRefusal::AlreadyExists { .. } => "already-exists",
         LogFileRefusal::NotFound { .. } => "not-found",
         LogFileRefusal::Duplicate { .. } => "duplicate",
+        LogFileRefusal::EncodingMismatch { .. } => "encoding-mismatch",
         LogFileRefusal::Corrupt { .. } => "corrupt",
         LogFileRefusal::Unsupported { .. } => "unsupported",
         LogFileRefusal::Append(AppendRefusal::SeqMismatch { .. }) => "seq-mismatch",
@@ -334,8 +339,8 @@ fn outcome<'a>(step: &'a Map<String, Value>, context: &str) -> Option<(&'a str, 
 }
 
 /// The step's `src` path joined to `root`, which a `{src}` placeholder in
-/// its message renders; a message holds the placeholder exactly when the
-/// step names `src`.
+/// its message renders, and `{srcJson}` as `JSON.stringify` spells it; a
+/// message holds a placeholder exactly when the step names `src`.
 fn rendered_source(
     root: &Path,
     step: &Map<String, Value>,
@@ -344,13 +349,21 @@ fn rendered_source(
 ) -> Option<String> {
     let placeholder = expected
         .and_then(|(_, message)| message)
-        .is_some_and(|message| message.contains("{src}"));
+        .is_some_and(|message| message.contains("{src}") || message.contains("{srcJson}"));
     assert_eq!(placeholder, step.contains_key("src"), "{context}: src");
     let source = text(step.get("src")?, context);
     let path = source
         .split('/')
         .fold(root.to_path_buf(), |path, segment| path.join(segment));
     Some(path.display().to_string())
+}
+
+/// `message` with its `{src}` and `{srcJson}` placeholders rendered.
+fn render(message: &str, source: &str) -> String {
+    let spelled = serde_json::to_string(source).expect("a string serializes");
+    message
+        .replace("{srcJson}", &spelled)
+        .replace("{src}", source)
 }
 
 /// Every limit a `rust` override of the case names.
@@ -378,6 +391,7 @@ fn run_step(
             "header",
             "inheritedEventCount",
             "rust",
+            "src",
             "step",
             "tree",
             "ts",
@@ -511,10 +525,9 @@ fn shared_cases_lay_out_and_write_like_the_typescript_backend() {
                     let expected_kind = expected_kind(name, class, message);
                     assert_eq!(kind(&refusal), expected_kind, "{context}: {refusal:?}");
                     if !expected_kind.ends_with("unadmitted") {
-                        let message = source.as_deref().map_or_else(
-                            || message.to_owned(),
-                            |source| message.replace("{src}", source),
-                        );
+                        let message = source
+                            .as_deref()
+                            .map_or_else(|| message.to_owned(), |source| render(message, source));
                         assert_eq!(refusal.message(), Some(message.as_str()), "{context}");
                     }
                     refusals.insert(expected_kind);
@@ -539,6 +552,7 @@ fn shared_cases_lay_out_and_write_like_the_typescript_backend() {
             "append-unadmitted",
             "corrupt",
             "duplicate",
+            "encoding-mismatch",
             "not-found",
             "not-lossless",
             "seq-mismatch",

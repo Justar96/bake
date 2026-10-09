@@ -7,7 +7,8 @@
 //! file by root and id first. Either read is bounded by `--max-bytes` and
 //! refused when the opened file's observed metadata changes while it is read.
 //! This is a diagnostic, not a production reader: it takes no lease and never
-//! truncates, repairs, or migrates the log.
+//! truncates, repairs, or writes the log; the lookup form migrates an older
+//! generation in memory only.
 
 use std::ffi::OsString;
 use std::fs::{File, Metadata, OpenOptions};
@@ -18,7 +19,7 @@ use bake_session::{
     CURRENT_SESSION_FORMAT_VERSION, EnvelopeLimit, HeaderOrigin, HeaderRefusal, OffloadRejection,
     PathPlatform, Rejection, RestoreLimit, RestoreRefusal, RestoredLog, ScanLimit, ScanRefusal,
     SeedRejection, SourceEventSeqsLimit, StagedLog, SubsetLimit, Unsupported, V3Limit, ZstdRefusal,
-    stage_plain_log, stage_zstd_log,
+    dismantle, stage_plain_log, stage_zstd_log,
 };
 use serde_json::{Value, json};
 
@@ -335,6 +336,14 @@ pub(crate) fn restored_fields(restored: &RestoredLog) -> serde_json::Map<String,
         .iter()
         .map(|closer| &closer["type"])
         .collect();
+    // Restored messages and the request header may nest as deep as their log
+    // rows, so they are dismantled rather than dropped recursively.
+    let messages = restored.messages();
+    let message_count = messages.len();
+    messages.into_iter().for_each(dismantle);
+    let request_header = restored.request_header();
+    let has_request_header = request_header.is_some();
+    request_header.into_iter().for_each(dismantle);
     let fields = json!({
         "header": {
             "id": header.id,
@@ -355,8 +364,8 @@ pub(crate) fn restored_fields(restored: &RestoredLog) -> serde_json::Map<String,
             "endSeedAppended": restored.end_seed_appended(),
         },
         "projection": {
-            "messageCount": restored.messages().len(),
-            "hasRequestHeader": restored.request_header().is_some(),
+            "messageCount": message_count,
+            "hasRequestHeader": has_request_header,
             "hasRequestContext": restored.request_context().is_some(),
         },
     });
@@ -601,7 +610,6 @@ fn scan_limit(limit: ScanLimit, args: &InspectArgs) -> String {
 const fn restore_limit(limit: RestoreLimit) -> &'static str {
     match limit {
         RestoreLimit::Number => "a projected payload holds a number other than a safe integer",
-        RestoreLimit::Depth => "a projected payload nests more than 64 arrays and objects",
         RestoreLimit::Coordinate => "a turn or step coordinate is not a safe count",
         RestoreLimit::ConfigMember => {
             "a request header's config has a member this preview does not restore"

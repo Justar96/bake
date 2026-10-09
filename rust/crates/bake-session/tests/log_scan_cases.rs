@@ -38,10 +38,17 @@ fn table() -> Vec<Value> {
     let fields = table.as_object().expect("table object");
     assert_eq!(
         keys(fields),
-        BTreeSet::from(["schema", "version", "oracle", "cases"])
+        BTreeSet::from(["schema", "version", "history", "oracle", "cases"])
     );
     assert_eq!(fields["schema"], SCHEMA);
-    assert_eq!(fields["version"], 1);
+    assert_eq!(fields["version"], 2);
+    assert!(
+        fields["history"]
+            .as_array()
+            .expect("history")
+            .iter()
+            .all(Value::is_string)
+    );
     assert_eq!(fields["oracle"], ORACLE);
     fields["cases"].as_array().expect("cases").clone()
 }
@@ -170,7 +177,11 @@ fn assert_scanned(scan: &ScannedLog, log: &[u8], ts: &Value, id: &str) {
         .split(|byte| *byte == b'\n')
         .skip(1)
         .take(count)
-        .map(|record| serde_json::from_slice(record).expect("decoded record"))
+        // serde_json's own parser bounds nesting at 128 levels.
+        .map(|record| {
+            bake_session::parse_json(std::str::from_utf8(record).expect("UTF-8"))
+                .expect("decoded record")
+        })
         .collect();
     assert_eq!(scan.rows(), records.as_slice(), "{id}: rows");
     let sources = ts

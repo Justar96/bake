@@ -60,6 +60,7 @@ interface Table {
   inputs: Record<string, { path: string; sha256: string }>
   defaults: { maxBytes: number; maxSourceSeqs: number; maxEntries: number }
   reviewAdditions: string[]
+  versionFourAdditions: string[]
   segments: Array<[string, string]>
   projectKeys: Array<[string, string]>
   cases: LookupCase[]
@@ -68,7 +69,7 @@ interface Selected { sourcePath: string; sourceVersion: number }
 interface StoredPrefix { tornTruncateTo?: number; recoveredTail: unknown[]; events: unknown[] }
 
 const REPO = new URL('../../../../', import.meta.url)
-const CASE_COUNT = 88
+const CASE_COUNT = 100
 const RESTORED_KEYS = ['outcome', 'path', 'header', 'storedEventCount', 'closerCount', 'messageCount',
   'inheritedEventCount', 'endSeedAppended', 'torn']
 const table = JSON.parse(readFileSync(new URL('conformance/session/lookup-cases.json', REPO), 'utf8')) as Table
@@ -344,9 +345,11 @@ afterAll(async () => {
 describe('shared Session lookup cases', () => {
   it('pins the inputs, the table, and its expectations', () => {
     expect(table.schema).toBe('bake/session-conformance/lookup-cases')
-    expect(table.version).toBe(3)
+    expect(table.version).toBe(4)
     expect(table.defaults).toEqual({ maxBytes: 1048576, maxSourceSeqs: 64, maxEntries: 1024 })
-    expect(table.reviewAdditions.every(id => table.cases.some(entry => entry.id === id))).toBe(true)
+    for (const additions of [table.reviewAdditions, table.versionFourAdditions]) {
+      expect(additions.every(id => table.cases.some(entry => entry.id === id))).toBe(true)
+    }
     for (const spec of Object.values(table.inputs)) {
       expect(createHash('sha256').update(readFileSync(new URL(spec.path, REPO))).digest('hex'), spec.path).toBe(spec.sha256)
     }

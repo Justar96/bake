@@ -1145,22 +1145,6 @@ enum Equality {
     Undecided,
 }
 
-impl Equality {
-    /// The conjunction of member results, which `every` reaches in any order
-    /// because no member comparison throws.
-    fn all(results: impl Iterator<Item = Self>) -> Self {
-        let mut outcome = Self::Equal;
-        for result in results {
-            match result {
-                Self::Unequal => return Self::Unequal,
-                Self::Undecided => outcome = Self::Undecided,
-                Self::Equal => {}
-            }
-        }
-        outcome
-    }
-}
-
 /// `deepEqualJson` from `packages/util/values/src/index.ts`.
 fn deep_equal_json(left: Option<&Value>, right: Option<&Value>) -> Checked<bool> {
     let outcome = match (left, right) {
@@ -1175,50 +1159,56 @@ fn deep_equal_json(left: Option<&Value>, right: Option<&Value>) -> Checked<bool>
     }
 }
 
+/// `deepEqualJson`'s member walk. Its result is the conjunction of member
+/// results, which `every` reaches in any order because no member comparison
+/// throws, so the pairs are compared from an explicit stack, safe at any
+/// depth the parser produced.
 fn deep_equal(left: &Value, right: &Value) -> Equality {
-    let same = |equal: bool| {
-        if equal {
-            Equality::Equal
-        } else {
-            Equality::Unequal
-        }
-    };
-    match (left, right) {
-        (Value::Array(left), Value::Array(right)) => {
-            if left.len() != right.len() {
-                return Equality::Unequal;
-            }
-            Equality::all(
-                left.iter()
-                    .zip(right)
-                    .map(|(left, right)| deep_equal(left, right)),
-            )
-        }
-        (Value::Array(_), _) | (_, Value::Array(_)) => Equality::Unequal,
-        (Value::Object(left), Value::Object(right)) => {
-            if left.len() != right.len() {
-                return Equality::Unequal;
-            }
-            Equality::all(left.iter().map(|(key, value)| match right.get(key) {
-                Some(other) => deep_equal(value, other),
-                // `key in right` finds the inherited member. Every inherited
-                // member but `__proto__` is a function, which never equals
-                // JSON; `Object.prototype` has no own enumerable keys, so only
-                // an empty object can equal it.
-                None if key == "__proto__"
-                    && value.as_object().is_some_and(serde_json::Map::is_empty) =>
-                {
-                    Equality::Undecided
+    let mut outcome = Equality::Equal;
+    let mut pending = vec![(left, right)];
+    while let Some((left, right)) = pending.pop() {
+        let equal = match (left, right) {
+            (Value::Array(left), Value::Array(right)) => {
+                if left.len() != right.len() {
+                    return Equality::Unequal;
                 }
-                None => Equality::Unequal,
-            }))
+                pending.extend(left.iter().zip(right));
+                true
+            }
+            (Value::Array(_), _) | (_, Value::Array(_)) => false,
+            (Value::Object(left), Value::Object(right)) => {
+                if left.len() != right.len() {
+                    return Equality::Unequal;
+                }
+                for (key, value) in left {
+                    match right.get(key) {
+                        Some(other) => pending.push((value, other)),
+                        // `key in right` finds the inherited member. Every
+                        // inherited member but `__proto__` is a function,
+                        // which never equals JSON; `Object.prototype` has no
+                        // own enumerable keys, so only an empty object can
+                        // equal it.
+                        None if key == "__proto__"
+                            && value.as_object().is_some_and(serde_json::Map::is_empty) =>
+                        {
+                            outcome = Equality::Undecided;
+                        }
+                        None => return Equality::Unequal,
+                    }
+                }
+                true
+            }
+            (Value::Null, Value::Null) => true,
+            (Value::Bool(left), Value::Bool(right)) => left == right,
+            (Value::Number(left), Value::Number(right)) => left.as_f64() == right.as_f64(),
+            (Value::String(left), Value::String(right)) => left == right,
+            _ => false,
+        };
+        if !equal {
+            return Equality::Unequal;
         }
-        (Value::Null, Value::Null) => Equality::Equal,
-        (Value::Bool(left), Value::Bool(right)) => same(left == right),
-        (Value::Number(left), Value::Number(right)) => same(left.as_f64() == right.as_f64()),
-        (Value::String(left), Value::String(right)) => same(left == right),
-        _ => Equality::Unequal,
     }
+    outcome
 }
 
 #[cfg(test)]

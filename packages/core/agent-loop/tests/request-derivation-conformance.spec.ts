@@ -28,7 +28,7 @@ const CASE_COUNT = 211
 /** Bounds each case's input edits. */
 const MAX_EDITS = 8
 const LIMITS = [
-  'number', 'depth', 'coordinate',
+  'number', 'coordinate',
   'repeated-coordinate', 'config-member', 'tool-schema', 'header', 'codec',
 ]
 const SEED_CHECKS = [
@@ -241,11 +241,11 @@ function parseRust(value: unknown, ts: Outcome, context: string): RustOverride {
 function loadTable() {
   const table: unknown = JSON.parse(readFileSync(new URL('conformance/runtime/request-derivation-cases.json', REPO), 'utf8'))
   if (!isObject(table) || sortedKeys(table) !== 'cases,fixture,history,oracle,schema,version'
-    || table.schema !== SCHEMA || table.version !== 4 || table.oracle !== ORACLE || !Array.isArray(table.cases)
+    || table.schema !== SCHEMA || table.version !== 5 || table.oracle !== ORACLE || !Array.isArray(table.cases)
     || !Array.isArray(table.history) || !table.history.every(entry => typeof entry === 'string')
     || !isObject(table.fixture) || sortedKeys(table.fixture) !== 'expected,log'
     || table.fixture.log !== FIXTURE_LOG || table.fixture.expected !== FIXTURE_EXPECTED) {
-    throw new Error('request-derivation-cases.json does not match its version-4 schema')
+    throw new Error('request-derivation-cases.json does not match its version-5 schema')
   }
   const log = readFileSync(new URL(FIXTURE_LOG, REPO))
   const expectedBytes = readFileSync(new URL(FIXTURE_EXPECTED, REPO))

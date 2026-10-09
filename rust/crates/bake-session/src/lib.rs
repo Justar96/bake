@@ -142,6 +142,7 @@ mod goal;
 mod history;
 mod inbox;
 mod js_count;
+mod json_parse;
 mod json_text;
 mod log_layout;
 mod migrated_restore;
@@ -194,12 +195,16 @@ pub use inbox::{
     consumed_work, restored_inbox,
 };
 pub use js_count::JsCount;
+pub use json_parse::{JsonParseError, dismantle, parse_json};
 pub use json_text::{json_number_text, json_text};
 pub use log_layout::{encode_segment, project_key, session_log_path};
 pub use migrated_restore::{MigratedRestoreLimit, MigratedRestoreRefusal, restore_migrated};
 pub use offload::OffloadRejection;
 pub use plain_append::{AppendLimit, AppendRefusal, CreateLimit, CreateRefusal, PlainAppendLog};
-pub use plain_log_file::{LogFileLimit, LogFileRefusal, PlainLogFile};
+pub use plain_log_file::{
+    LogFileLimit, LogFileRefusal, PlainLogFile, ReleasedGenerationRefusal,
+    migrate_released_generation, released_generation_header,
+};
 pub use pressure::{
     ContextPressureState, ContextPressureView, PressureLimit, PressureRefusal, RequestRoute,
     context_pressure,
@@ -252,9 +257,15 @@ pub use v3_row::{
     Coordinate, Endpoint, EventRejection, StructuralRejection, SystemRecord, V3CodecEvent, V3Limit,
     V3NumberField, V3Rejection, V3RowRefusal, V3Unsupported, decode_v3_row,
 };
-pub use zstd::{ZstdRefusal, restore_zstd_log, stage_zstd_log, zstd_header_record};
+pub use zstd::{
+    RELEASED_ZSTD_PLAINTEXT_BUDGET, ReleasedZstdPlaintext, ZstdRefusal,
+    migrate_released_zstd_generation, released_zstd_plaintext, restore_zstd_log, stage_zstd_log,
+    zstd_header_record,
+};
 
 use serde_json::{Map, Value};
+
+use crate::json_parse::dismantle_fields;
 
 /// The only Session format version this reader admits.
 pub const CURRENT_SESSION_FORMAT_VERSION: u64 = 3;
@@ -269,29 +280,6 @@ const REQUIRED_KEYS: [&str; 6] = [
     "delegationDepth",
 ];
 const OPTIONAL_KEYS: [&str; 4] = ["cwd", "parentSession", "origin", "agentPreset"];
-
-/// serde_json 1.0.151 error codes for input that violates the JSON grammar.
-/// `JSON.parse` rejects the same input, so these map to [`Rejection::Json`]
-/// for a header and to an unparsable record for [`scan_log`]; any other parse
-/// error is a native limit. A unit test requires
-/// a shared header case witnessing each entry under both runtimes.
-const JSON_SYNTAX_ERRORS: [&str; 15] = [
-    "EOF while parsing a list",
-    "EOF while parsing an object",
-    "EOF while parsing a string",
-    "EOF while parsing a value",
-    "expected `:`",
-    "expected `,` or `]`",
-    "expected `,` or `}`",
-    "expected ident",
-    "expected value",
-    "invalid escape",
-    "invalid number",
-    "control character (\\u0000-\\u001F) found while parsing a string",
-    "key must be a string",
-    "trailing comma",
-    "trailing characters",
-];
 
 /// Logical metadata of an admitted current header, as TypeScript's `fromHeaderLine` builds it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -401,34 +389,29 @@ pub fn read_header_record(
     };
     let text = std::str::from_utf8(body)
         .map_err(|_| HeaderRefusal::NativeSubset(SubsetLimit::InvalidUtf8))?;
-    let Value::Object(fields) =
-        serde_json::from_str(text).map_err(|error| parse_refusal(&error))?
-    else {
-        return Err(HeaderRefusal::Rejected(Rejection::NotObject));
+    let fields = match parse_json(text).map_err(parse_refusal)? {
+        Value::Object(fields) => fields,
+        other => {
+            dismantle(other);
+            return Err(HeaderRefusal::Rejected(Rejection::NotObject));
+        }
     };
-    refuse_foreign_version(&fields)?;
-    if fields.contains_key("sandboxMode") || fields.contains_key("approvalPolicy") {
-        return Err(HeaderRefusal::Rejected(Rejection::RetiredPolicyFields));
-    }
-    header_line(&fields, platform)
+    let header = refuse_foreign_version(&fields).and_then(|()| {
+        if fields.contains_key("sandboxMode") || fields.contains_key("approvalPolicy") {
+            return Err(HeaderRefusal::Rejected(Rejection::RetiredPolicyFields));
+        }
+        header_line(&fields, platform)
+    });
+    dismantle_fields(fields);
+    header
 }
 
-fn parse_refusal(error: &serde_json::Error) -> HeaderRefusal {
-    if is_syntax_error(error) {
+fn parse_refusal(error: JsonParseError) -> HeaderRefusal {
+    if error.is_syntax() {
         HeaderRefusal::Rejected(Rejection::Json)
     } else {
         HeaderRefusal::NativeSubset(SubsetLimit::JsonParser)
     }
-}
-
-/// Whether serde_json refused input that `JSON.parse` also rejects, by its
-/// [`JSON_SYNTAX_ERRORS`] code. Any other parse error decides nothing.
-fn is_syntax_error(error: &serde_json::Error) -> bool {
-    let message = error.to_string();
-    let code = message
-        .split_once(" at line ")
-        .map_or(message.as_str(), |(code, _)| code);
-    JSON_SYNTAX_ERRORS.contains(&code)
 }
 
 /// TypeScript's `refuseForeignFormatVersion`: only a numeric version is compared.
@@ -565,17 +548,9 @@ mod tests {
         serde_json::from_str(&text).expect("parse header-cases.json")
     }
 
-    fn parse_error_code(record: &str) -> String {
-        let error =
-            serde_json::from_str::<Value>(record).expect_err("serde_json refuses the record");
-        let message = error.to_string();
-        message
-            .split_once(" at line ")
-            .map_or(message.clone(), |(code, _)| code.to_owned())
-    }
-
-    /// Error codes of the shared cases with `record` text and the given expectation.
-    fn codes_where(expect: impl Fn(&Value) -> bool) -> Vec<(String, String)> {
+    /// Shared cases with `record` text and the given expectation, with the
+    /// parser's outcome for each.
+    fn parses_where(expect: impl Fn(&Value) -> bool) -> Vec<(String, Result<(), JsonParseError>)> {
         let table = table();
         let cases = table["cases"].as_array().expect("cases array");
         cases
@@ -585,51 +560,40 @@ mod tests {
                 let record = case["record"].as_str().expect("witness uses record text");
                 (
                     case["id"].as_str().expect("case id").to_owned(),
-                    parse_error_code(record),
+                    parse_json(record).map(dismantle),
                 )
             })
             .collect()
     }
 
     #[test]
-    fn every_syntax_error_entry_has_a_shared_json_parse_witness() {
+    fn every_json_parse_rejection_is_a_syntax_error() {
         // The TypeScript spec runs these same cases through JSON.parse in the real scanner.
-        let witnesses = codes_where(|case| {
+        let witnesses = parses_where(|case| {
             case["ts"] == serde_json::json!({"outcome": "rejected", "reason": "json"})
         });
-        for (id, code) in &witnesses {
-            assert!(
-                JSON_SYNTAX_ERRORS.contains(&code.as_str()),
-                "{id}: {code:?} is not allow-listed"
-            );
-        }
-        for entry in JSON_SYNTAX_ERRORS {
-            assert!(
-                witnesses.iter().any(|(_, code)| code == entry),
-                "no shared case witnesses {entry:?}"
-            );
+        assert!(!witnesses.is_empty());
+        for (id, outcome) in &witnesses {
+            assert_eq!(*outcome, Err(JsonParseError::Syntax), "{id}");
         }
     }
 
     #[test]
-    fn parse_errors_on_input_json_parse_accepts_are_not_allow_listed() {
-        let mut codes: Vec<String> = codes_where(|case| case["rust"]["limit"] == "json-parser")
-            .into_iter()
-            .map(|(_, code)| code)
-            .collect();
-        codes.sort();
-        codes.dedup();
+    fn parse_refusals_on_input_json_parse_accepts_are_not_syntax_errors() {
+        let mut errors: Vec<JsonParseError> =
+            parses_where(|case| case["rust"]["limit"] == "json-parser")
+                .into_iter()
+                .map(|(id, outcome)| outcome.expect_err(&id))
+                .collect();
+        errors.sort_by_key(|error| *error as u8);
+        errors.dedup();
         assert_eq!(
-            codes,
+            errors,
             [
-                "number out of range",
-                "recursion limit exceeded",
-                "unexpected end of hex escape"
+                JsonParseError::LoneSurrogate,
+                JsonParseError::NumberOutOfRange
             ]
         );
-        for code in &codes {
-            assert!(!JSON_SYNTAX_ERRORS.contains(&code.as_str()));
-        }
     }
 
     #[test]

@@ -187,10 +187,24 @@ fn shared_header_cases_match_on_both_platforms() {
     let table = object(&table, "table");
     assert_eq!(
         keys(table),
-        BTreeSet::from(["schema", "version", "oracle", "cases", "absolutePaths"])
+        BTreeSet::from([
+            "schema",
+            "version",
+            "history",
+            "oracle",
+            "cases",
+            "absolutePaths"
+        ])
     );
     assert_eq!(table["schema"], SCHEMA);
-    assert_eq!(table["version"], 1);
+    assert_eq!(table["version"], 2);
+    assert!(
+        table["history"]
+            .as_array()
+            .expect("history")
+            .iter()
+            .all(Value::is_string)
+    );
     assert_eq!(table["oracle"], ORACLE);
     for row in table["absolutePaths"]
         .as_array()

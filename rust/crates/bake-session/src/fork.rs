@@ -24,12 +24,15 @@
 
 use serde_json::Value;
 
+use crate::json_parse::{Deep, clone_value, dismantle};
 use crate::{MAX_SAFE_INTEGER, RestoredLog};
 
-/// The events a fork of a restored Session inherits, in seq order.
+/// The events a fork of a restored Session inherits, in seq order. They are
+/// held so that the seed drops, copies, and compares without recursing over
+/// an event's nesting.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ForkSeed {
-    events: Vec<Value>,
+    events: Deep<Vec<Value>>,
     end_seed: bool,
 }
 
@@ -127,7 +130,7 @@ pub fn fork_seed(restored: &RestoredLog, boundary: Option<u64>) -> Result<ForkSe
     let next_seq = (listed + usize::from(restored.end_seed_appended())) as u64;
     let Some(boundary) = boundary.or_else(|| next_seq.checked_sub(1)) else {
         return Ok(ForkSeed {
-            events: Vec::new(),
+            events: Deep::default(),
             end_seed: false,
         });
     };
@@ -172,19 +175,26 @@ pub fn fork_seed(restored: &RestoredLog, boundary: Option<u64>) -> Result<ForkSe
     {
         return Err(ForkRefusal::NotLossless { index });
     }
-    let mut events: Vec<Value> = stored
+    let mut events: Deep<Vec<Value>> = stored
         .events()
         .zip(rows)
         .take(count)
         .map(|(event, row)| {
-            let mut row = row.clone();
-            if let Some(seqs) = &event.envelope().source_event_seqs {
-                row["sourceEventSeqs"] = seqs.iter().copied().map(Value::from).collect();
+            let mut row = clone_value(row);
+            if let Some(seqs) = &event.envelope().source_event_seqs
+                && let Some(fields) = row.as_object_mut()
+                && let Some(logged) = fields.insert(
+                    "sourceEventSeqs".to_owned(),
+                    seqs.iter().copied().map(Value::from).collect(),
+                )
+            {
+                dismantle(logged);
             }
             row
         })
         .collect();
-    events.extend(closers.iter().take(count - events.len()).cloned());
+    let inherited = events.len();
+    events.extend(closers.iter().take(count - inherited).map(clone_value));
     Ok(ForkSeed { events, end_seed })
 }
 
@@ -205,15 +215,25 @@ fn turn_label(data: &Value) -> Option<String> {
 }
 
 /// Whether `value` holds a number JavaScript reads as -0, which
-/// `snapshotJsonValue` refuses. serde_json parses every such spelling to a
-/// negative-zero float.
+/// `snapshotJsonValue` refuses. [`crate::parse_json`] parses every such
+/// spelling to a negative-zero float. The walk is iterative, so it is safe at
+/// any depth the parser produced.
 pub(crate) fn holds_negative_zero(value: &Value) -> bool {
-    match value {
-        Value::Number(number) => number
-            .as_f64()
-            .is_some_and(|number| number == 0.0 && number.is_sign_negative()),
-        Value::Array(items) => items.iter().any(holds_negative_zero),
-        Value::Object(fields) => fields.values().any(holds_negative_zero),
-        _ => false,
+    let mut pending = vec![value];
+    while let Some(value) = pending.pop() {
+        match value {
+            Value::Number(number) => {
+                if number
+                    .as_f64()
+                    .is_some_and(|number| number == 0.0 && number.is_sign_negative())
+                {
+                    return true;
+                }
+            }
+            Value::Array(items) => pending.extend(items),
+            Value::Object(fields) => pending.extend(fields.values()),
+            Value::Null | Value::Bool(_) | Value::String(_) => {}
+        }
     }
+    false
 }

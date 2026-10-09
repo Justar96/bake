@@ -13,7 +13,8 @@
  * The development Rust model `PlainLogFile` in `rust/crates/bake-session`
  * checks the same table. `ts` is the step's outcome, or the thrown class
  * with its exact message, in which `{src}` stands for the case root joined
- * with the open step's `src` path. A `rust` override names a native limit or
+ * with the create or open step's `src` path, and `{srcJson}` for that path
+ * as `JSON.stringify` spells it. A `rust` override names a native limit or
  * marks the step outside the Rust model's domain; it ends the case in Rust,
  * and TypeScript still asserts every step. The spec reads only the table.
  */
@@ -38,10 +39,9 @@ const REPO = new URL('../../../../', import.meta.url)
 const SCHEMA = 'bake/session-conformance/plain-log-file-cases'
 const ORACLE = 'in an owned temporary root holding the seeded entries, run each step through the JSONL backend with compression none on the step\'s handle, a or b, each its own backend instance over the root: create, a write open, or the open handle\'s append, flush, or close; after each step list every file beneath the root with its text, an empty session.lock by its size'
 /** Both harnesses pin the table size, so a dropped case fails. */
-const CASE_COUNT = 64
+const CASE_COUNT = 69
 const LIMITS = [
-  'empty-id', 'encode', 'seq-value', 'windows-name', 'legacy-layout', 'opposite-encoding',
-  'non-utf8-name', 'newer-generation', 'identity', 'scan', 'migration/v2-codec-recovery',
+  'empty-id', 'encode', 'seq-value', 'windows-name', 'legacy-layout', 'non-utf8-name', 'newer-generation', 'identity', 'scan', 'migration/v2-codec-recovery',
   'migration/row/json-parser',
 ]
 /** A `rust` override marking a step outside the Rust model's domain. */
@@ -66,7 +66,7 @@ type Seed = { file: string; text: string } | { dir: string; rawNameHex: string }
 type Tree = Record<string, string>
 type Handle = typeof HANDLES[number]
 type Step = { handle: Handle } & (
-  | { step: 'create'; header: unknown; inheritedEventCount?: number; ts: Outcome; rust?: string; tree: Tree }
+  | { step: 'create'; header: unknown; inheritedEventCount?: number; src?: string; ts: Outcome; rust?: string; tree: Tree }
   | { step: 'open'; id: string; src?: string; ts: Outcome; rust?: string; tree: Tree }
   | { step: 'append'; events: unknown[]; ts: Outcome; rust?: string; tree: Tree }
   | { step: 'flush'; ts: Outcome; rust?: string; tree: Tree }
@@ -80,7 +80,7 @@ interface FileCase {
 }
 
 const STEP_KEYS: Record<Step['step'], string[]> = {
-  create: ['step', 'handle', 'header', 'inheritedEventCount', 'ts', 'rust', 'tree'],
+  create: ['step', 'handle', 'header', 'inheritedEventCount', 'src', 'ts', 'rust', 'tree'],
   open: ['step', 'handle', 'id', 'src', 'ts', 'rust', 'tree'],
   append: ['step', 'handle', 'events', 'ts', 'rust', 'tree'],
   flush: ['step', 'handle', 'ts', 'rust', 'tree'],
@@ -155,6 +155,13 @@ function parseStep(value: unknown, id: string): Step {
     throw new Error(`${id}: a throw without a message needs a rust limit`)
   }
   const handle = value.handle ?? 'a'
+  const src = value.src
+  const placeholder = ts.outcome === 'thrown'
+    && (ts.message?.includes('{src}') === true || ts.message?.includes('{srcJson}') === true)
+  if ((src !== undefined && typeof src !== 'string') || placeholder !== (src !== undefined)) {
+    throw new Error(`${id}: invalid src`)
+  }
+  const source = src === undefined ? {} : { src }
   if (!HANDLES.includes(handle as Handle)) throw new Error(`${id}: invalid handle ${JSON.stringify(handle)}`)
   const extra = { handle: handle as Handle, ...(rust === undefined ? {} : { rust }) }
   switch (name) {
@@ -164,17 +171,13 @@ function parseStep(value: unknown, id: string): Step {
         throw new Error(`${id}: invalid create`)
       }
       return {
-        step: 'create', header: value.header, ts, tree, ...extra,
+        step: 'create', header: value.header, ts, tree, ...extra, ...source,
         ...(count === undefined ? {} : { inheritedEventCount: count as number }),
       }
     }
-    case 'open': {
-      const src = value.src
-      const placeholder = ts.outcome === 'thrown' && ts.message?.includes('{src}') === true
-      if (typeof value.id !== 'string' || (src !== undefined && typeof src !== 'string')
-        || placeholder !== (src !== undefined)) throw new Error(`${id}: invalid open`)
-      return { step: 'open', id: value.id, ts, tree, ...extra, ...(src === undefined ? {} : { src }) }
-    }
+    case 'open':
+      if (typeof value.id !== 'string') throw new Error(`${id}: invalid open`)
+      return { step: 'open', id: value.id, ts, tree, ...extra, ...source }
     case 'append':
       if (!Array.isArray(value.events)) throw new Error(`${id}: invalid append`)
       return { step: 'append', events: value.events, ts, tree, ...extra }
@@ -189,9 +192,9 @@ function parseStep(value: unknown, id: string): Step {
 function loadTable(): FileCase[] {
   const table: unknown = JSON.parse(readFileSync(new URL('conformance/session/plain-log-file-cases.json', REPO), 'utf8'))
   if (!isObject(table) || sortedKeys(table) !== 'cases,history,oracle,schema,version' || table.schema !== SCHEMA
-    || table.version !== 5 || table.oracle !== ORACLE || !Array.isArray(table.cases)
+    || table.version !== 6 || table.oracle !== ORACLE || !Array.isArray(table.cases)
     || !Array.isArray(table.history) || !table.history.every(line => typeof line === 'string')) {
-    throw new Error('plain-log-file-cases.json does not match its version-5 schema')
+    throw new Error('plain-log-file-cases.json does not match its version-6 schema')
   }
   return table.cases.map((entry: unknown): FileCase => {
     if (!isObject(entry) || typeof entry.id !== 'string' || !Array.isArray(entry.steps) || !Array.isArray(entry.seed)) {
@@ -250,14 +253,16 @@ async function outcome(run: () => Promise<void>): Promise<Outcome> {
 
 /**
  * Compare a step's outcome, rendering `{src}` in the expected message as the
- * backend's resolved root joined with `src`.
+ * backend's resolved root joined with `src`, and `{srcJson}` as that path's
+ * `JSON.stringify` spelling.
  */
 function expectOutcome(actual: Outcome, expected: Outcome, root: string, src: string | undefined, context: string): void {
   if (expected.outcome === 'thrown' && expected.message === undefined) {
     expect(actual.outcome === 'thrown' ? actual.class : actual, context).toBe(expected.class)
   } else if (expected.outcome === 'thrown' && src !== undefined) {
     const source = resolve(root, ...src.split('/'))
-    expect(actual, context).toStrictEqual({ ...expected, message: expected.message?.replaceAll('{src}', source) })
+    const message = expected.message?.replaceAll('{srcJson}', JSON.stringify(source)).replaceAll('{src}', source)
+    expect(actual, context).toStrictEqual({ ...expected, message })
   } else {
     expect(actual, context).toStrictEqual(expected)
   }
@@ -333,7 +338,11 @@ describe('shared plain-log file cases', () => {
     expect(() => parseRust({ outcome: 'native-subset', limit: 'other' }, 'malformed')).toThrow('invalid rust override')
     expect(() => parseStep({ step: 'flush', handle: 'c', ts: { outcome: 'ok' }, tree: {} }, 'malformed')).toThrow('invalid handle')
     expect(() => parseStep({ step: 'open', id: 'x', ts: { outcome: 'thrown', class: 'Error', message: '{src}' }, tree: {} }, 'malformed'))
-      .toThrow('invalid open')
+      .toThrow('invalid src')
+    expect(() => parseStep({ step: 'create', header: {}, ts: { outcome: 'thrown', class: 'Error', message: '{srcJson}' }, tree: {} }, 'malformed'))
+      .toThrow('invalid src')
+    expect(() => parseStep({ step: 'flush', src: 'x', ts: { outcome: 'ok' }, tree: {} }, 'malformed'))
+      .toThrow('invalid flush step')
   })
 
   for (const entry of cases) {
@@ -379,7 +388,7 @@ describe('shared plain-log file cases', () => {
               handles.delete(step.handle)
               break
           }
-          expectOutcome(actual, step.ts, caseRoot, step.step === 'open' ? step.src : undefined, context)
+          expectOutcome(actual, step.ts, caseRoot, step.step === 'open' || step.step === 'create' ? step.src : undefined, context)
           expect(await readTree(caseRoot), context).toStrictEqual(step.tree)
         }
       } finally {

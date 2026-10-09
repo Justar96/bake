@@ -23,11 +23,12 @@
 
 use serde_json::Value;
 
+use crate::json_parse::Deep;
 use crate::v3_row::{Admission, admit_v3_row};
 use crate::{
     HeaderRefusal, PathPlatform, Rejection, SessionHeader, StructuralRejection, V3CodecEvent,
-    V3Limit, V3Rejection, V3RowRefusal, V3Unsupported, decode_v3_row, first_record,
-    is_syntax_error, read_header_record,
+    V3Limit, V3Rejection, V3RowRefusal, V3Unsupported, decode_v3_row, dismantle, first_record,
+    parse_json, read_header_record,
 };
 
 /// The header, decoded event prefix, inherited cut, and committed byte
@@ -38,7 +39,7 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScannedLog {
     header: SessionHeader,
-    rows: Vec<Value>,
+    rows: Deep<Vec<Value>>,
     inherited_event_count: u64,
     committed_bytes: usize,
     source_budget: usize,
@@ -58,7 +59,7 @@ impl ScannedLog {
 
     /// The codec's output for each row of [`ScannedLog::rows`].
     pub fn events(&self) -> impl Iterator<Item = V3CodecEvent<'_>> {
-        (0u64..).zip(&self.rows).map(|(seq, row)| {
+        (0u64..).zip(self.rows.iter()).map(|(seq, row)| {
             decode_v3_row(row, seq, self.source_budget)
                 .expect("the scan decoded this immutable row with the same budget")
         })
@@ -183,9 +184,8 @@ impl FinishRejection {
 pub enum ScanLimit {
     /// The record is not UTF-8. Node decodes it with replacement characters.
     InvalidUtf8,
-    /// serde_json refused input not proven invalid for `JSON.parse`, such as
-    /// a lone surrogate escape, nesting deeper than 128, or a number outside
-    /// the `f64` range.
+    /// The parser refused input not proven invalid for `JSON.parse`: a lone
+    /// surrogate escape or a number outside the `f64` range.
     JsonParser,
     /// A number's integer part has more than 768 digits. serde_json 1.0.151
     /// keeps 768 significant digits and treats any further digit as nonzero
@@ -227,7 +227,7 @@ pub fn scan_log(
 /// `finish`, whose inherited-marker check can otherwise hide a frame failure.
 pub(crate) struct LogScanner {
     header: SessionHeader,
-    rows: Vec<Value>,
+    rows: Deep<Vec<Value>>,
     inherited: Option<u64>,
     issue: Option<ScanIssue>,
     committed_bytes: usize,
@@ -246,7 +246,7 @@ impl LogScanner {
         let header = read_header_record(record, platform).map_err(ScanRefusal::Header)?;
         Ok(Self {
             header,
-            rows: Vec::new(),
+            rows: Deep::new(Vec::new()),
             inherited: None,
             issue: None,
             committed_bytes: record.len(),
@@ -304,18 +304,39 @@ impl LogScanner {
         let line = self.line;
         let limit = |limit| ScanRefusal::NativeSubset { line, limit };
         let text = std::str::from_utf8(text).map_err(|_| limit(ScanLimit::InvalidUtf8))?;
-        let row: Value = match serde_json::from_str(text) {
+        let row: Value = match parse_json(text) {
             Ok(row) => row,
-            Err(error) if is_syntax_error(&error) => {
+            Err(error) if error.is_syntax() => {
                 self.issue.get_or_insert(ScanIssue::Unparsable { line });
                 return Ok(());
             }
             Err(_) => return Err(limit(ScanLimit::JsonParser)),
         };
+        // A row may nest arbitrarily deep, so every path drops it iteratively.
+        match self.decode(line, text, &row) {
+            Ok(true) => {
+                self.rows.push(row);
+                self.committed_bytes = end_byte;
+                Ok(())
+            }
+            Ok(false) => {
+                dismantle(row);
+                Ok(())
+            }
+            Err(refusal) => {
+                dismantle(row);
+                Err(refusal)
+            }
+        }
+    }
+
+    /// Admit and decode one parsed row; `Ok(true)` when it extends the prefix.
+    fn decode(&mut self, line: u64, text: &str, row: &Value) -> Result<bool, ScanRefusal> {
+        let limit = |limit| ScanRefusal::NativeSubset { line, limit };
         if long_integer_part(text) {
             return Err(limit(ScanLimit::NumberLexeme));
         }
-        admit_v3_row(&row).map_err(|refusal| match refusal {
+        admit_v3_row(row).map_err(|refusal| match refusal {
             Admission::Structural(rejection) => ScanRefusal::Structural { line, rejection },
             Admission::Unsupported(unsupported) => ScanRefusal::Unsupported { line, unsupported },
             Admission::Limit(codec) => limit(ScanLimit::Codec(codec)),
@@ -328,14 +349,14 @@ impl LogScanner {
                     issue: issue.clone(),
                 });
             }
-            return Ok(());
+            return Ok(false);
         }
         let seq = self.rows.len() as u64;
         let marker = row
             .get("type")
             .is_some_and(|value| value == "session/end-seed")
             && row["data"].get("inherited") == Some(&Value::Bool(true));
-        match decode_v3_row(&row, seq, self.source_budget) {
+        match decode_v3_row(row, seq, self.source_budget) {
             Ok(_) => {}
             // The codec reruns the admission that passed above.
             Err(V3RowRefusal::Rejected(V3Rejection::Structural(rejection))) => {
@@ -354,7 +375,7 @@ impl LogScanner {
                     });
                 }
                 self.issue = Some(invalid);
-                return Ok(());
+                return Ok(false);
             }
             Err(V3RowRefusal::NativeSubset(codec)) => return Err(limit(ScanLimit::Codec(codec))),
             Err(V3RowRefusal::ExpectedSeqOutOfRange) => return Err(limit(ScanLimit::EventCount)),
@@ -365,12 +386,9 @@ impl LogScanner {
         if marker {
             self.inherited = Some(seq);
         }
-        self.rows.push(row);
-        self.committed_bytes = end_byte;
-        Ok(())
+        Ok(true)
     }
 }
-
 /// The most integer-part digits serde_json 1.0.151 rounds as `JSON.parse`
 /// does, by [`ScanLimit::NumberLexeme`].
 const MAX_INTEGER_DIGITS: usize = 768;
