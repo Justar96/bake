@@ -43,6 +43,7 @@
 use serde_json::{Map, Value};
 
 use crate::RestoredLog;
+use crate::json_parse::Deep;
 use crate::request::{SurfaceKind, js_members};
 
 /// The route and series facts one prompt decision is made under,
@@ -157,6 +158,8 @@ pub fn tools_changed(restored: &RestoredLog, tools: &[Value]) -> bool {
     let Some(header) = restored.request_header() else {
         return false;
     };
+    // The header copy may nest as deep as its log row.
+    let header = Deep::new(header);
     let baseline = header
         .get("tools")
         .and_then(Value::as_array)
@@ -187,20 +190,35 @@ pub fn starts_request_series(
 /// JavaScript prints each double distinctly except ±0, and `as_f64` rounds
 /// a decimal integer as `JSON.parse` does.
 fn same_json_text(a: &Value, b: &Value) -> bool {
-    match (a, b) {
-        (Value::Number(a), Value::Number(b)) => a.as_f64() == b.as_f64(),
-        (Value::Array(a), Value::Array(b)) => {
-            a.len() == b.len() && a.iter().zip(b).all(|(a, b)| same_json_text(a, b))
+    // Compared from an explicit stack, so any depth the parser produced is
+    // safe; every pair must match, in any order.
+    let mut pending = vec![(a, b)];
+    while let Some((a, b)) = pending.pop() {
+        let same =
+            match (a, b) {
+                (Value::Number(a), Value::Number(b)) => a.as_f64() == b.as_f64(),
+                (Value::Array(a), Value::Array(b)) => {
+                    pending.extend(a.iter().zip(b));
+                    a.len() == b.len()
+                }
+                (Value::Object(a), Value::Object(b)) => {
+                    a.len() == b.len()
+                        && js_members(a).into_iter().zip(js_members(b)).all(
+                            |((ka, va), (kb, vb))| {
+                                pending.push((va, vb));
+                                ka == kb
+                            },
+                        )
+                }
+                (Value::Array(_) | Value::Object(_), _)
+                | (_, Value::Array(_) | Value::Object(_)) => false,
+                _ => a == b,
+            };
+        if !same {
+            return false;
         }
-        (Value::Object(a), Value::Object(b)) => {
-            a.len() == b.len()
-                && js_members(a)
-                    .into_iter()
-                    .zip(js_members(b))
-                    .all(|((ka, va), (kb, vb))| ka == kb && same_json_text(va, vb))
-        }
-        _ => a == b,
     }
+    true
 }
 
 #[cfg(test)]

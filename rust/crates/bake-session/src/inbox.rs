@@ -22,10 +22,14 @@ use std::collections::HashSet;
 
 use serde_json::Value;
 
+use crate::json_parse::{Deep, clone_value};
 use crate::{MAX_SAFE_INTEGER, RestoredLog};
 
 /// The pending messages `inboxProjectionDefinition` restores, in list order,
-/// as logged.
+/// as logged. A message may nest as deep as its log row; drop each with
+/// [`crate::dismantle`] rather than recursively. This struct's derived
+/// `Clone`, `PartialEq`, and `Debug` also recurse once per level a message
+/// nests.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PendingInbox {
     pub next_turn: Vec<Value>,
@@ -71,9 +75,13 @@ pub enum InboxLimit {
 }
 
 /// The account `foldConsumedWork` gives of a restored log.
+///
+/// `end` is a plain `Value`, so this struct's derived `Clone`, `PartialEq`,
+/// and `Debug`, like its drop, recurse once per level that value nests.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConsumedWork {
-    /// The latest accounting `turn/end`, as logged or as a closer.
+    /// The latest accounting `turn/end`, as logged or as a closer. It may
+    /// nest as deep as its log row; drop it with [`crate::dismantle`].
     pub end: Option<Value>,
     pub dropped_unrun: bool,
 }
@@ -194,7 +202,7 @@ fn count(value: Option<&Value>) -> Count {
 /// Fold the restored log's `agent/inbox/spliced` events into its pending
 /// messages, as `inboxProjectionDefinition` does from `init()`.
 pub fn restored_inbox(restored: &RestoredLog) -> Result<PendingInbox, InboxRefusal> {
-    let mut inbox = PendingInbox::default();
+    let mut inbox = Lists::default();
     for event in restored_events(restored) {
         if event.event_type == "agent/inbox/spliced" {
             splice(&mut inbox, event.data).map_err(|outcome| match outcome {
@@ -206,11 +214,22 @@ pub fn restored_inbox(restored: &RestoredLog) -> Result<PendingInbox, InboxRefus
             })?;
         }
     }
-    Ok(inbox)
+    Ok(PendingInbox {
+        next_turn: std::mem::take(&mut *inbox.next_turn),
+        next_step: std::mem::take(&mut *inbox.next_step),
+    })
+}
+
+/// The pending lists while they fold, held so that a replaced list, a
+/// spliced-out message, and a refused fold drop without recursing.
+#[derive(Default)]
+struct Lists {
+    next_turn: Deep<Vec<Value>>,
+    next_step: Deep<Vec<Value>>,
 }
 
 /// One splice; `Err(None)` is the wrapped throw.
-fn splice(inbox: &mut PendingInbox, data: &Value) -> Result<(), Option<InboxLimit>> {
+fn splice(inbox: &mut Lists, data: &Value) -> Result<(), Option<InboxLimit>> {
     // `null` data throws reading `target`; any other non-object reads
     // `undefined`, which names no list.
     let Some(splice) = data.as_object() else {
@@ -253,7 +272,10 @@ fn splice(inbox: &mut PendingInbox, data: &Value) -> Result<(), Option<InboxLimi
     let start = usize::try_from(start).expect("bounded by a length");
     let removed = usize::try_from(removed).expect("bounded by a length");
     let mut next = list.clone();
-    next.splice(start..start + removed, inserted.iter().cloned());
+    let spliced: Deep<Vec<Value>> = next
+        .splice(start..start + removed, inserted.iter().map(clone_value))
+        .collect();
+    drop(spliced);
     let combined = if next_turn {
         next.iter().chain(&inbox.next_step)
     } else {
@@ -356,14 +378,17 @@ pub fn consumed_work(restored: &RestoredLog) -> Result<ConsumedWork, ConsumedWor
                         && accounts_for_claim(member(data, "reason"))
                             .ok_or_else(|| limit(ConsumedWorkCoercion::Reason))?);
                 if accounts {
-                    end = Some(event.json.clone());
+                    end = Some(Deep::new(clone_value(event.json)));
                     dropped_unrun = false;
                 }
             }
             _ => {}
         }
     }
-    Ok(ConsumedWork { end, dropped_unrun })
+    Ok(ConsumedWork {
+        end: end.map(|mut end| std::mem::take(&mut *end)),
+        dropped_unrun,
+    })
 }
 
 /// `accountsForClaim`; `None` where reading `reason.kind` throws.

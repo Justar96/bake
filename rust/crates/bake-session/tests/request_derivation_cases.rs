@@ -29,9 +29,8 @@ const EXPECTED_BYTES: usize = 2775;
 const CASE_COUNT: usize = 211;
 const MAX_EDITS: usize = 8;
 const SOURCE_BUDGET: usize = 64;
-const LIMITS: [&str; 8] = [
+const LIMITS: [&str; 7] = [
     "number",
-    "depth",
     "coordinate",
     "repeated-coordinate",
     "config-member",
@@ -135,7 +134,7 @@ fn table() -> Map<String, Value> {
         BTreeSet::from(["schema", "version", "history", "oracle", "fixture", "cases"])
     );
     assert_eq!(fields["schema"], SCHEMA);
-    assert_eq!(fields["version"], 4);
+    assert_eq!(fields["version"], 5);
     assert!(
         fields["history"]
             .as_array()
@@ -421,7 +420,6 @@ fn classify(refusal: &ReplayRefusal) -> String {
             "limit:{}",
             match limit {
                 ReplayLimit::Number => "number",
-                ReplayLimit::Depth => "depth",
                 ReplayLimit::Coordinate => "coordinate",
                 ReplayLimit::RepeatedCoordinate => "repeated-coordinate",
                 ReplayLimit::ConfigMember => "config-member",

@@ -35,12 +35,19 @@
 
 use serde_json::Value;
 
+use crate::json_parse::clone_value;
 use crate::{
     InboxRefusal, PendingInbox, RestoredLog, SubagentCatalogEntry, SubagentCatalogRefusal,
     restored_inbox, subagent_catalog,
 };
 
 /// The unfinished work [`unfinished_work`] reads from a restored log.
+///
+/// The tools' steps, the compaction's data, and the inbox's messages are
+/// plain `Value`s that may nest as deep as their rows. Dropping this struct
+/// drops them recursively, and its derived `Clone`, `PartialEq`, and `Debug`
+/// recurse over them too; take them out and drop each with
+/// [`crate::dismantle`] when they may be deep.
 #[derive(Debug, Clone, PartialEq)]
 pub struct UnfinishedWork {
     /// The turn the closers end, or `None` when the last turn ended.
@@ -65,12 +72,16 @@ pub struct OpenTurn {
 }
 
 /// One tool call an interrupted turn left without a result.
+///
+/// `step` is a plain `Value`, so this struct's derived `Clone`, `PartialEq`,
+/// and `Debug`, like its drop, recurse once per level that value nests.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PendingToolCall {
     pub call_id: String,
     /// The seq of the synthetic `tool/result` closer that ends the call.
     pub closer_seq: u64,
     /// The requesting Assistant row's `step`, as logged; `None` when absent.
+    /// It may nest as deep as its row; drop it with [`crate::dismantle`].
     pub step: Option<Value>,
     /// The seq of the recorded `tool/call`, or `None` when the call was never
     /// recorded as started.
@@ -89,10 +100,14 @@ impl PendingToolCall {
 }
 
 /// A `compaction/start` whose bracket is still open.
+///
+/// `data` is a plain `Value`, so this struct's derived `Clone`, `PartialEq`,
+/// and `Debug`, like its drop, recurse once per level that value nests.
 #[derive(Debug, Clone, PartialEq)]
 pub struct OpenCompaction {
     pub start_seq: u64,
-    /// The start's `data`, as logged.
+    /// The start's `data`, as logged. It may nest as deep as its row; drop
+    /// it with [`crate::dismantle`].
     pub data: Value,
 }
 
@@ -145,7 +160,7 @@ fn turn_and_tools(closers: &[Value]) -> (Option<OpenTurn>, Vec<PendingToolCall>)
                 .expect("closer call id")
                 .to_owned(),
             closer_seq: closer["seq"].as_u64().expect("closer seq"),
-            step: closer["data"].get("step").cloned(),
+            step: closer["data"].get("step").map(clone_value),
             call_seq: closer
                 .get("sourceEventSeqs")
                 .map(|seqs| seqs[0].as_u64().expect("closer source")),
@@ -184,7 +199,7 @@ fn open_compaction(restored: &RestoredLog) -> Option<OpenCompaction> {
     }
     Some(OpenCompaction {
         start_seq,
-        data: data.clone(),
+        data: clone_value(data),
     })
 }
 

@@ -309,7 +309,7 @@ fn variant_reader_sees_the_known_limit_enums() {
     let variants = source_variants();
     for known in [
         "ReplayLimit::Number",
-        "RestoreLimit::Depth",
+        "RestoreLimit::Number",
         "ConsumedWorkCoercion::Reason",
         "EncodeLimit::FloatNumber",
         "V3Limit::SystemPayload",

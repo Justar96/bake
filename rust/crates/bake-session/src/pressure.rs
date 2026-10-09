@@ -393,34 +393,36 @@ fn message_tokens(event_type: &str, data: &Value) -> Result<u64, PressureLimit> 
     }
 }
 
-/// `estimateContent`.
+/// `estimateContent`. Nested `tool-result` content is summed from an explicit
+/// stack, so any nesting is safe; every failure is the same limit, so the
+/// order blocks are read in decides nothing.
 fn content_tokens(blocks: &[Value]) -> Result<u64, PressureLimit> {
     let mut tokens = 0;
-    for block in blocks {
-        let block = block.as_object().ok_or(PressureLimit::Block)?;
-        let text = |key: &str| match block.get(key) {
-            Some(Value::String(text)) => Ok(utf16_len(text).div_ceil(CHARS_PER_TOKEN)),
-            _ => Err(PressureLimit::Block),
-        };
-        tokens += match block.get("type").and_then(Value::as_str) {
-            Some("text" | "reasoning") => text("text")? + BLOCK_OVERHEAD,
-            Some("tool-call") => text("name")? + text("arguments")? + BLOCK_OVERHEAD,
-            Some("tool-result") => match block.get("content") {
-                Some(Value::Array(content)) => content_tokens(content)? + BLOCK_OVERHEAD,
-                _ => return Err(PressureLimit::Block),
-            },
-            kind => {
-                // `estimateStructuralBlock` drops an image's `offloaded` mark.
-                let length = if kind == Some("image") {
-                    let mut reference = block.clone();
-                    reference.shift_remove("offloaded");
-                    object_len(&reference)?
-                } else {
-                    object_len(block)?
-                };
-                BLOCK_OVERHEAD + length.div_ceil(CHARS_PER_TOKEN)
-            }
-        };
+    let mut pending = vec![blocks];
+    while let Some(blocks) = pending.pop() {
+        for block in blocks {
+            let block = block.as_object().ok_or(PressureLimit::Block)?;
+            let text = |key: &str| match block.get(key) {
+                Some(Value::String(text)) => Ok(utf16_len(text).div_ceil(CHARS_PER_TOKEN)),
+                _ => Err(PressureLimit::Block),
+            };
+            tokens += match block.get("type").and_then(Value::as_str) {
+                Some("text" | "reasoning") => text("text")? + BLOCK_OVERHEAD,
+                Some("tool-call") => text("name")? + text("arguments")? + BLOCK_OVERHEAD,
+                Some("tool-result") => match block.get("content") {
+                    Some(Value::Array(content)) => {
+                        pending.push(content);
+                        BLOCK_OVERHEAD
+                    }
+                    _ => return Err(PressureLimit::Block),
+                },
+                kind => {
+                    // `estimateStructuralBlock` drops an image's `offloaded` mark.
+                    let skipped = (kind == Some("image")).then_some("offloaded");
+                    BLOCK_OVERHEAD + object_len_without(block, skipped)?.div_ceil(CHARS_PER_TOKEN)
+                }
+            };
+        }
     }
     Ok(tokens)
 }
@@ -449,32 +451,53 @@ fn utf16_len(text: &str) -> u64 {
 /// `JSON.stringify(value).length`. Member order does not change the length,
 /// a number's text is ASCII, and a restored message holds no lone surrogate.
 fn stringified_len(value: &Value) -> Result<u64, PressureLimit> {
-    Ok(match value {
-        Value::Null => 4,
-        Value::Bool(flag) => 4 + u64::from(!*flag),
-        Value::Number(number) => json_number_text(number.as_f64().unwrap_or(f64::NAN)).len() as u64,
-        Value::String(text) => quoted_len(text),
-        Value::Array(items) => {
-            let mut length = 2 + items.len().saturating_sub(1) as u64;
-            for item in items {
-                length += stringified_len(item)?;
-            }
-            length
-        }
-        Value::Object(fields) => object_len(fields)?,
-    })
+    Ok(values_len(vec![value]))
 }
 
-fn object_len(fields: &Map<String, Value>) -> Result<u64, PressureLimit> {
-    let mut length = 2 + fields.len().saturating_sub(1) as u64;
-    for (key, value) in fields {
-        length += quoted_len(key) + 1 + stringified_len(value)?;
+/// `JSON.stringify(fields).length` without the member `skipped`, as if it
+/// were removed.
+fn object_len_without(
+    fields: &Map<String, Value>,
+    skipped: Option<&str>,
+) -> Result<u64, PressureLimit> {
+    let members = fields
+        .iter()
+        .filter(|(key, _)| Some(key.as_str()) != skipped);
+    let mut length = 2;
+    let mut pending = Vec::new();
+    for (key, value) in members {
+        length += quoted_len(key) + 1 + u64::from(!pending.is_empty());
+        pending.push(value);
     }
-    Ok(length)
+    Ok(length + values_len(pending))
 }
 
-/// `JSON.stringify` of a string: quotes, two-unit short escapes, and
-/// six-unit `\u00XX` escapes for the remaining control characters.
+/// The summed `JSON.stringify` lengths of `pending`, walked from an explicit
+/// stack so any depth the parser produced is safe.
+fn values_len(mut pending: Vec<&Value>) -> u64 {
+    let mut length = 0;
+    while let Some(value) = pending.pop() {
+        length += match value {
+            Value::Null => 4,
+            Value::Bool(flag) => 4 + u64::from(!*flag),
+            Value::Number(number) => {
+                json_number_text(number.as_f64().unwrap_or(f64::NAN)).len() as u64
+            }
+            Value::String(text) => quoted_len(text),
+            Value::Array(items) => {
+                pending.extend(items);
+                2 + items.len().saturating_sub(1) as u64
+            }
+            Value::Object(fields) => {
+                pending.extend(fields.values());
+                2 + fields.len().saturating_sub(1) as u64
+                    + fields.keys().map(|key| quoted_len(key) + 1).sum::<u64>()
+            }
+        };
+    }
+    length
+}
+
 fn quoted_len(text: &str) -> u64 {
     2 + text
         .chars()

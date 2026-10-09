@@ -25,6 +25,7 @@ use std::collections::HashSet;
 
 use serde_json::{Map, Value};
 
+use crate::json_parse::{Deep, clone_fields, dismantle};
 use crate::json_text::{is_writer_spelling, json_text};
 use crate::v2_to_v3::quote;
 use crate::v3_row::{Vocabulary, vocabulary};
@@ -227,7 +228,9 @@ pub fn encode_event_line(event: &Value) -> Result<String, EncodeRefusal> {
         // `assertV3Event` requires a string type.
         return unadmitted();
     };
-    let mut row = fields.clone();
+    // The copy may nest as deep as the event, so it is held to drop without
+    // recursing on every exit.
+    let mut row = Deep::new(Value::Object(clone_fields(fields)));
     let mut source_budget = 0;
     if let Some(sources) = fields.get("sourceEventSeqs") {
         let seqs = match vocabulary(event_type) {
@@ -237,9 +240,13 @@ pub fn encode_event_line(event: &Value) -> Result<String, EncodeRefusal> {
             Vocabulary::Opaque => opaque_sources(sources, seq)?,
         };
         source_budget = seqs.len();
-        row.insert("sourceEventSeqs".to_owned(), encode_seq_ranges(&seqs));
+        if let Value::Object(members) = &mut *row
+            && let Some(logical) =
+                members.insert("sourceEventSeqs".to_owned(), encode_seq_ranges(&seqs))
+        {
+            dismantle(logical);
+        }
     }
-    let row = Value::Object(row);
     match decode_v3_row(&row, seq, source_budget) {
         Ok(_) => {}
         // The released v2 decoder checks end-seed data; the encoder does not.

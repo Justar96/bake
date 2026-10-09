@@ -819,3 +819,48 @@ fn a_closed_stdout_exits_1_without_a_panic() {
         input.assert_unchanged();
     }
 }
+
+/// A user message and a header tool schema nested a million arrays deep, as
+/// the restoration reads them at any depth, restore and are counted without
+/// a recursive drop overflowing the command's main-thread stack.
+#[test]
+fn a_payload_nested_a_million_deep_restores() {
+    let depth = 1_000_000;
+    let deep = format!("{}1{}", "[".repeat(depth), "]".repeat(depth));
+    let rows = [
+        r#"{"type":"session","version":3,"id":"deep","createdAt":5,"isSeeded":false,"delegationDepth":0}"#.to_owned(),
+        r#"{"type":"turn/start","seq":0,"time":100,"data":{"turn":1}}"#.to_owned(),
+        r#"{"type":"step/start","seq":1,"time":101,"data":{"turn":1,"step":1}}"#.to_owned(),
+        format!(
+            r#"{{"type":"user/message","seq":2,"time":102,"data":{{"id":"u1","role":"user","content":[{{"type":"text","text":"go"}}],"source":{{"kind":"user"}},"deep":{deep}}},"surfaceOp":"append"}}"#
+        ),
+        format!(
+            r#"{{"type":"request/header","seq":3,"time":103,"data":{{"header":{{"config":{{"provider":"p","model":"m"}},"tools":[{{"name":"t","parameters":{deep}}}]}},"reason":"initial"}}}}"#
+        ),
+        r#"{"type":"assistant/message","seq":4,"time":104,"data":{"turn":1,"step":1,"message":{"id":"a1","role":"assistant","source":{"kind":"model","provider":"p","model":"m"},"content":[{"type":"text","text":"ok"}]},"stream":[]},"surfaceOp":"append"}"#.to_owned(),
+        r#"{"type":"step/end","seq":5,"time":105,"data":{"turn":1,"step":1}}"#.to_owned(),
+        r#"{"type":"turn/end","seq":6,"time":106,"data":{"turn":1,"reason":{"kind":"completed"}}}"#.to_owned(),
+    ];
+    let mut bytes = Vec::new();
+    for row in rows {
+        bytes.extend_from_slice(row.as_bytes());
+        bytes.push(b'\n');
+    }
+    let scratch = Scratch::new("deep");
+    let input = Input::write(&scratch.dir("in"), "session.v3.jsonl", &bytes);
+    let out = run(
+        &scratch,
+        &inspect_args(&json!(bytes.len()), &json!(64), &input.path),
+    );
+    assert_eq!(out.code(), Some(0), "{}", out.stderr());
+    assert!(out.stderr.is_empty());
+    let record = out.record();
+    assert_eq!(record["status"], "restored");
+    assert_eq!(record["storedEventCount"], 7);
+    assert_eq!(
+        record["projection"],
+        json!({"messageCount": 2, "hasRequestHeader": true, "hasRequestContext": false})
+    );
+    scratch.assert_home_unused();
+    input.assert_unchanged();
+}

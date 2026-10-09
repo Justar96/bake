@@ -40,7 +40,7 @@
     {
      "table": "session/header-cases.json",
      "name": "json-parser",
-     "count": 5
+     "count": 3
     },
     {
      "table": "session/generation-header-cases.json",
@@ -50,7 +50,7 @@
    ],
    "kind": "format",
    "classification": "undecided",
-   "evidence": "headers are written by toHeaderLine through JSON.stringify (packages/session/session-persistence-jsonl/src/index.ts:1208) from a header whose createdAt is Date.now() (packages/core/session/src/index.ts:151) and whose version is SESSION_FORMAT_VERSION = 3 (packages/core/session/src/types.ts:89). The header is flat, so serde_json's depth bound is unreachable, and JSON.stringify writes only finite doubles. A lone surrogate can still be escaped into id or cwd: cwd comes from process.cwd() (packages/bundle/headless/src/index.ts:445), and a Windows directory name may hold an unpaired surrogate. D21 keeps escaped lone surrogates as limits until their reachability is settled",
+   "evidence": "headers are written by toHeaderLine through JSON.stringify (packages/session/session-persistence-jsonl/src/index.ts:1208) from a header whose createdAt is Date.now() (packages/core/session/src/index.ts:151) and whose version is SESSION_FORMAT_VERSION = 3 (packages/core/session/src/types.ts:89). The current header parser has no nesting bound, and the header is flat, so the 128-level bound the migration parser keeps for older-generation headers is unreachable, and JSON.stringify writes only finite doubles. A lone surrogate can still be escaped into id or cwd: cwd comes from process.cwd() (packages/bundle/headless/src/index.ts:445), and a Windows directory name may hold an unpaired surrogate. D21 keeps escaped lone surrogates as limits until their reachability is settled",
    "followUp": "Settle lone-surrogate reachability for cwd on Windows (D21); if reachable, port lone-surrogate escapes in the header parser."
   },
   {
@@ -282,22 +282,33 @@
    "variants": [
     "ScanLimit::JsonParser"
    ],
-   "stageNames": [
-    "row/json-parser"
-   ],
+   "stageNames": [],
    "id": "scan-json-parser",
    "crate": "bake-session",
    "cases": [
     {
      "table": "session/log-scan-cases.json",
      "name": "json-parser",
-     "count": 5
+     "count": 4
     }
    ],
+   "kind": "format",
+   "classification": "undecided",
+   "evidence": "The current-format scan parses rows with an iterative parser that has no nesting bound (rust/crates/bake-session/src/json_parse.rs), so ScanLimit::JsonParser refuses only lone-surrogate escapes, which a Rust string cannot hold and D21 leaves undecided as header-json-parser does, and numbers outside the f64 range, which are unreachable because JSON.stringify writes only finite doubles. Three of its four cases are lone surrogates",
+   "followUp": "Settle lone-surrogate reachability with header-json-parser (D21); if reachable, port lone-surrogate escapes in the row parser."
+  },
+  {
+   "variants": [],
+   "stageNames": [
+    "row/json-parser"
+   ],
+   "id": "migration-row-json-parser",
+   "crate": "bake-session",
+   "cases": [],
    "kind": "resource",
    "classification": "reachable-gap",
-   "evidence": "serde_json refuses nesting deeper than 128, and an MCP server's inputSchema is kept as parsed (packages/mcp/mcp-client/src/protocol.ts:300-302, mode keep), becomes the tool's parameters (packages/mcp/mcp-client/src/tools.ts:143,243), and is logged in request/header tools (packages/core/agent-loop/src/agent.ts:640-653); the v2 and v0 writers did the same (81dcacbb44:packages/mcp/mcp-client/src/tools.ts:168 and 81dcacbb44:packages/core/agent-loop/src/agent.ts:552; 3efd4b51e0:packages/mcp/mcp-client/src/tools.ts:168 and agent.ts:508). No depth or magnitude bound applies, so a schema nesting past 64 containers or holding an integer such as 9223372036854775807 (written 9223372036854776000) is logged. A schema nested about 125 levels therefore yields a row JSON.parse reads and serde_json refuses. Numbers outside the f64 range are unreachable (JSON.stringify writes only finite doubles), and lone-surrogate escapes stay undecided under D21",
-   "followUp": "Port: parse rows without serde_json's recursion limit (serde_json's unbounded_depth feature with an explicit iterative drop, or a stack-safe parser), keeping lone surrogates as the remaining D21 limit. Needs a Cargo.toml feature change."
+   "evidence": "The row/json-parser stage of the older-generation migrations keeps serde_json's former 128-level bound (MIGRATION_PARSE_DEPTH in rust/crates/bake-session/src/json_parse.rs), because the v0-to-v1, v1-to-v2, and v2-to-v3 transforms copy and compare rows recursively; an MCP server's inputSchema is kept as parsed (packages/mcp/mcp-client/src/protocol.ts:300-302, mode keep) and the v2 and v0 writers logged it in request/header tools (81dcacbb44:packages/mcp/mcp-client/src/tools.ts:168 and 81dcacbb44:packages/core/agent-loop/src/agent.ts:552; 3efd4b51e0:packages/mcp/mcp-client/src/tools.ts:168 and agent.ts:508), so a v0 to v2 log holding a schema nested about 125 levels yields a row JSON.parse reads and the migration refuses. The same stage name also reports a lone-surrogate escape or an out-of-range number in an older-generation row, as scan-json-parser does; no case table yet witnesses the depth bound",
+   "followUp": "Port: make the older-generation migrations copy, compare, and drop rows without recursing, then parse their rows without MIGRATION_PARSE_DEPTH, and add a case table row that witnesses a v0 to v2 row nested past 127 levels."
   },
   {
    "variants": [
@@ -469,25 +480,6 @@
   },
   {
    "variants": [
-    "ReplayLimit::Depth"
-   ],
-   "stageNames": [],
-   "id": "replay-depth",
-   "crate": "bake-session",
-   "cases": [
-    {
-     "table": "runtime/request-derivation-cases.json",
-     "name": "depth",
-     "count": 1
-    }
-   ],
-   "kind": "resource",
-   "classification": "reachable-gap",
-   "evidence": "the limit refuses projected payloads nested past 64 containers; an MCP server's inputSchema is kept as parsed (packages/mcp/mcp-client/src/protocol.ts:300-302, mode keep), becomes the tool's parameters (packages/mcp/mcp-client/src/tools.ts:143,243), and is logged in request/header tools (packages/core/agent-loop/src/agent.ts:640-653); the v2 and v0 writers did the same (81dcacbb44:packages/mcp/mcp-client/src/tools.ts:168 and 81dcacbb44:packages/core/agent-loop/src/agent.ts:552; 3efd4b51e0:packages/mcp/mcp-client/src/tools.ts:168 and agent.ts:508). No depth or magnitude bound applies, so a schema nesting past 64 containers or holding an integer such as 9223372036854775807 (written 9223372036854776000) is logged. TypeScript has no bound short of the V8 stack",
-   "followUp": "Port: make the qualification walk iterative and drop MAX_PAYLOAD_DEPTH (rust/crates/bake-session/src/replay.rs:198), keeping the row parser's own bound (see scan-json-parser). Slice: deep payloads in replay and restore."
-  },
-  {
-   "variants": [
     "ReplayLimit::Coordinate"
    ],
    "stageNames": [],
@@ -590,25 +582,6 @@
    "classification": "unreachable",
    "evidence": "lane N closed the fractional-number gap: restoration admits every JSON.stringify spelling and keeps the limit for 1.0-style spellings, non-round-trip digits, and -0. every released writer serializes rows and headers with JSON.stringify: v3 packages/session/session-persistence-jsonl/src/format.ts:322 and index.ts:1208; v2 81dcacbb44:packages/session/session-persistence-jsonl/src/format.ts:321 and index.ts:1212; v1 0bb7bba015:packages/session/session-persistence-jsonl/src/format.ts:350 and index.ts:1026; v0 3efd4b51e0:packages/session/session-persistence-jsonl/src/format.ts:256 and index.ts:659. Number::toString writes an integral double below 1e21 without a fraction or exponent, 0 for -0, and the shortest round-trip digits. Session.append snapshots data as lossless JSON and throws on -0, non-finite numbers, and non-plain values: packages/core/session/src/index.ts:737-740 with packages/util/values/src/index.ts:180; 3efd4b51e0:packages/core/session/src/index.ts:678, 0bb7bba015:...:670, 81dcacbb44:...:688, each with packages/util/values/src/index.ts:129",
    "followUp": "None."
-  },
-  {
-   "variants": [
-    "RestoreLimit::Depth"
-   ],
-   "stageNames": [],
-   "id": "restore-depth",
-   "crate": "bake-session",
-   "cases": [
-    {
-     "table": "session/restore-cases.json",
-     "name": "depth",
-     "count": 1
-    }
-   ],
-   "kind": "resource",
-   "classification": "reachable-gap",
-   "evidence": "as replay-depth: an MCP server's inputSchema is kept as parsed (packages/mcp/mcp-client/src/protocol.ts:300-302, mode keep), becomes the tool's parameters (packages/mcp/mcp-client/src/tools.ts:143,243), and is logged in request/header tools (packages/core/agent-loop/src/agent.ts:640-653); the v2 and v0 writers did the same (81dcacbb44:packages/mcp/mcp-client/src/tools.ts:168 and 81dcacbb44:packages/core/agent-loop/src/agent.ts:552; 3efd4b51e0:packages/mcp/mcp-client/src/tools.ts:168 and agent.ts:508). No depth or magnitude bound applies, so a schema nesting past 64 containers or holding an integer such as 9223372036854775807 (written 9223372036854776000) is logged",
-   "followUp": "Port with replay-depth: an iterative qualification walk without the 64-container bound."
   },
   {
    "variants": [
@@ -1929,9 +1902,9 @@
    "crate": "bake-session",
    "cases": [],
    "kind": "pass-through",
-   "classification": "reachable-gap",
-   "evidence": "Passes RestoreLimit through, which includes restore-depth.",
-   "followUp": "Follows restore-depth."
+   "classification": "undecided",
+   "evidence": "Passes RestoreLimit through, which includes restore-config-member.",
+   "followUp": "Follows restore-config-member."
   },
   {
    "variants": [
@@ -2237,8 +2210,8 @@
     }
    ],
    "kind": "pass-through",
-   "classification": "reachable-gap",
-   "evidence": "Passes ScanRefusal through, which includes scan-json-parser; the witnessed case is a scan limit on stored bytes.",
+   "classification": "undecided",
+   "evidence": "Passes ScanRefusal through, whose only unsettled limit is scan-json-parser, undecided; the witnessed case is a scan limit on stored bytes.",
    "followUp": "Follows scan-json-parser."
   },
   {
@@ -2267,8 +2240,8 @@
    ],
    "kind": "pass-through",
    "classification": "reachable-gap",
-   "evidence": "Its row/json-parser name follows scan-json-parser; its encode name now meets only encode-float-number's unreachable spellings. finish-order and v2-codec-recovery depend on rows a writer may or may not produce and are not traced",
-   "followUp": "Follows scan-json-parser; trace finish-order and v2-codec-recovery separately."
+   "evidence": "Its row/json-parser name follows migration-row-json-parser; its encode name now meets only encode-float-number's unreachable spellings. finish-order and v2-codec-recovery depend on rows a writer may or may not produce and are not traced",
+   "followUp": "Follows migration-row-json-parser; trace finish-order and v2-codec-recovery separately."
   },
   {
    "variants": [],

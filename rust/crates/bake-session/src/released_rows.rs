@@ -9,13 +9,16 @@
 //! bytes after the last LF are a torn tail that is never parsed. The first
 //! row `JSON.parse` rejects is the issue: no later row reaches a codec, and a
 //! later row parsing as an object whose `type` is `turn/end` throws the
-//! issue. Where serde_json and `JSON.parse` may disagree, the parse ends at a
-//! named limit instead.
+//! issue. Where this crate's parser and `JSON.parse` may disagree, the parse
+//! ends at a named limit instead. The migrations copy and compare rows
+//! recursively, so these rows keep serde_json's former 128-level nesting
+//! bound as part of that limit.
 
 use serde_json::Value;
 
+use crate::json_parse::{MIGRATION_PARSE_DEPTH, parse_json_within};
 use crate::scan::long_integer_part;
-use crate::{Count, count, is_syntax_error};
+use crate::{Count, count};
 
 /// Where parsing ended early.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,9 +49,9 @@ pub(crate) fn parse_released_header(
 ) -> Result<Value, ParseStop> {
     let body = record.strip_suffix(b"\n").unwrap_or(record);
     let text = std::str::from_utf8(body).map_err(|_| ParseStop::Limit("header/invalid-utf8"))?;
-    let value: Value = match serde_json::from_str(text) {
+    let value: Value = match parse_json_within(text, MIGRATION_PARSE_DEPTH) {
         Ok(value) => value,
-        Err(error) if is_syntax_error(&error) => {
+        Err(error) if error.is_syntax() => {
             return Err(ParseStop::Corrupt(
                 "corrupt session log: header line is not valid JSON".to_owned(),
             ));
@@ -92,9 +95,9 @@ pub(crate) fn parse_released_rows(body: &[u8]) -> ReleasedRows {
             // Node decodes the record with replacement characters.
             return limit(rows, "row/invalid-utf8");
         };
-        let row: Value = match serde_json::from_str(text) {
+        let row: Value = match parse_json_within(text, MIGRATION_PARSE_DEPTH) {
             Ok(row) => row,
-            Err(error) if is_syntax_error(&error) => {
+            Err(error) if error.is_syntax() => {
                 issue.get_or_insert(number);
                 continue;
             }

@@ -23,6 +23,7 @@
 
 use serde_json::Value;
 
+use crate::json_parse::clone_value;
 use crate::{MAX_SAFE_INTEGER, RestoredLog};
 
 /// Which boundary a step most recently crossed.
@@ -50,6 +51,10 @@ pub struct StepBoundary {
 }
 
 /// `TurnBoundaryProjection` after the closers.
+///
+/// `last_turn` is a plain `Value`, so this struct's derived `Clone`,
+/// `PartialEq`, and `Debug`, like its drop, recurse once per level that
+/// value nests.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TurnBoundaryState {
     /// The seq of a `turn/start` no `turn/end` has followed. A closer ends
@@ -59,7 +64,8 @@ pub struct TurnBoundaryState {
     /// The latest `step/start`'s seq; a `step/end` keeps it.
     pub last_step_start_seq: Option<u64>,
     pub last_step_boundary: Option<StepBoundary>,
-    /// `0` until a `turn/start`, then that event's `data.turn` as logged.
+    /// `0` until a `turn/start`, then that event's `data.turn` as logged. It
+    /// may nest as deep as its row; drop it with [`crate::dismantle`].
     pub last_turn: Value,
 }
 
@@ -135,7 +141,9 @@ pub fn turn_boundary(restored: &RestoredLog) -> Result<TurnBoundaryState, Bounda
 
 /// Fold `titleProjectionDefinition` from `init()` over the restored stored
 /// events and then the closers: `null` until a `session/title`, then that
-/// event's `data.title` as logged.
+/// event's `data.title` as logged. It may nest as deep as its row; drop it
+/// with [`crate::dismantle`], and note that its derived `Clone`,
+/// `PartialEq`, and `Debug` recurse over that nesting.
 pub fn session_title(restored: &RestoredLog) -> Result<Value, BoundaryRefusal> {
     let mut title: Option<Copied<'_>> = None;
     for (seq, event_type, data) in events(restored) {
@@ -196,5 +204,5 @@ fn settle((seq, value): Copied<'_>) -> Result<Value, BoundaryRefusal> {
             Value::Null | Value::Bool(_) | Value::String(_) => {}
         }
     }
-    Ok(value.clone())
+    Ok(clone_value(value))
 }

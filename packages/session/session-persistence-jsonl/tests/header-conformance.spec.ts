@@ -119,10 +119,11 @@ function parseCase(value: unknown): HeaderCase {
 
 function loadTable(): { cases: HeaderCase[]; absolutePaths: { path: string; posix: boolean; win32: boolean }[] } {
   const table: unknown = JSON.parse(readFileSync(new URL('conformance/session/header-cases.json', REPO), 'utf8'))
-  if (!isObject(table) || sortedKeys(table).join() !== 'absolutePaths,cases,oracle,schema,version'
-    || table.schema !== SCHEMA || table.version !== 1 || table.oracle !== ORACLE
+  if (!isObject(table) || sortedKeys(table).join() !== 'absolutePaths,cases,history,oracle,schema,version'
+    || table.schema !== SCHEMA || table.version !== 2 || table.oracle !== ORACLE
+    || !Array.isArray(table.history) || !table.history.every(line => typeof line === 'string')
     || !Array.isArray(table.cases) || !Array.isArray(table.absolutePaths)) {
-    throw new Error('header-cases.json does not match its version-1 schema')
+    throw new Error('header-cases.json does not match its version-2 schema')
   }
   const cases = table.cases.map(parseCase)
   const ids = new Set(cases.map(entry => entry.id))

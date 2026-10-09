@@ -35,8 +35,8 @@
 //!    request per settlement with its coordinate. Both `assistant/message`
 //!    and `assistant/attempt` supply cutoffs, including interrupted messages.
 //! 4. Each prefix that ends before a settlement: per event, the -0 check that
-//!    is exactly the lossless snapshot for scan-admitted rows, number and
-//!    depth qualification of projected payloads, the Session construction
+//!    is exactly the lossless snapshot for scan-admitted rows, number
+//!    qualification of projected payloads, the Session construction
 //!    checks the codec does not already cover, and the [`RequestFold`], which
 //!    plans each surface replacement and checks each tool update against the
 //!    current state before it changes them.
@@ -63,10 +63,11 @@
 //!
 //! Projected payloads, those of the surface messages, request headers, and
 //! tool updates, admit only numbers spelled as `JSON.stringify` writes their
-//! values, which every number a released writer produces is, and at most 64
-//! nested containers, because their values reach request JSON and its
-//! copies. Other payloads reach no request, so any number except -0 and any
-//! depth the scan parsed is admitted, as the lossless snapshot admits them.
+//! values, which every number a released writer produces is, because their
+//! values reach request JSON. Other payloads reach no request, so any number
+//! except -0 is admitted, as the lossless snapshot admits it. Payloads of any
+//! depth are admitted: the fold keeps them in [`crate::json_parse::Deep`],
+//! whose copies, comparisons, and drops never recurse.
 //!
 //! The -0 check belongs to this prefix loop alone. Per-event admission,
 //! [`admit`], runs the rest and is shared with [`crate::restore`], whose
@@ -97,6 +98,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Map, Value};
 
+use crate::fork::holds_negative_zero;
+use crate::json_parse::{Deep, clone_fields, clone_value};
 use crate::json_text::is_writer_spelling;
 use crate::offload::{self, OffloadRejection};
 use crate::request::{Fact, FoldRefusal, Request, RequestFold, SurfaceKind, SurfaceOp};
@@ -171,7 +174,7 @@ pub(crate) const KNOWN_EVENT_TYPES: [&str; 60] = [
     "workspace/changes",
 ];
 /// The types whose payload a request can carry. Their payloads keep the
-/// number spelling and depth qualification.
+/// number spelling qualification.
 const PROJECTED_TYPES: [&str; 6] = [
     "system/message",
     "user/message",
@@ -192,10 +195,6 @@ const CONFIG_KEYS: [&str; 6] = [
     "stop",
 ];
 const HEADER_REASONS: [&str; 4] = ["initial", "resume", "change", "series"];
-/// Deepest array and object nesting this subset copies; a scalar may sit one
-/// level below it. Copies and comparisons of `serde_json::Value` recurse, so
-/// this bounds them.
-const MAX_PAYLOAD_DEPTH: usize = 64;
 
 /// Why [`replay_requests`] returned no requests.
 ///
@@ -349,9 +348,6 @@ pub enum ReplayLimit {
     /// round-trip, such as `9007199254740993`. No released writer produces
     /// these spellings; every number a writer produces is admitted.
     Number,
-    /// A projected prefix payload nests arrays and objects more than 64
-    /// containers deep.
-    Depth,
     /// A `step/start`, `assistant/attempt`, or `assistant/message` coordinate
     /// is not an object member of safe-integer `turn` and `step`.
     Coordinate,
@@ -527,7 +523,11 @@ fn non_empty_string(value: Option<&Value>) -> bool {
 }
 
 /// The lossless snapshot Session construction takes of each prefix event
-/// before any other check.
+/// before any other check. `snapshotJsonValue` refuses -0 and non-finite
+/// numbers; the scan refuses a number outside the `f64` range as a native
+/// limit, and [`crate::parse_json`] keeps the sign of every zero, including an
+/// underflowing spelling such as `-1e-400`, so for an admitted row the -0 walk
+/// is exactly that refusal.
 fn lossless(seq: u64, row: &Value) -> Result<(), ReplayRefusal> {
     if holds_negative_zero(row) {
         return Err(seed(seq, SeedRejection::LosslessJson));
@@ -571,7 +571,7 @@ pub(crate) fn admit(envelope: &UnadmittedEnvelope<'_>) -> Result<Fact, ReplayRef
             op,
             // `message_shape` proved the message an object, and the codec
             // proved a tool result's data one.
-            payload: payload.as_object().expect("object payload").clone(),
+            payload: Deep::new(clone_fields(payload.as_object().expect("object payload"))),
         })
     };
     match envelope.event_type {
@@ -693,32 +693,6 @@ fn settlement(seq: u64, data: &Value) -> Result<(), ReplayRefusal> {
     Ok(())
 }
 
-/// Whether `value` holds -0 anywhere. `snapshotJsonValue` refuses -0 and
-/// non-finite numbers in a whole prefix event. The scan refuses a number
-/// outside the `f64` range as a native limit, and `float_roundtrip` parsing
-/// keeps the sign of every zero, including an underflowing spelling such as
-/// `-1e-400`, so for an admitted row this is exactly that refusal. The walk is
-/// iterative, so it is safe at any depth the parser produced.
-fn holds_negative_zero(value: &Value) -> bool {
-    let mut pending = vec![value];
-    while let Some(value) = pending.pop() {
-        match value {
-            Value::Number(number) => {
-                if number
-                    .as_f64()
-                    .is_some_and(|n| n == 0.0 && n.is_sign_negative())
-                {
-                    return true;
-                }
-            }
-            Value::Array(items) => pending.extend(items),
-            Value::Object(fields) => pending.extend(fields.values()),
-            Value::Null | Value::Bool(_) | Value::String(_) => {}
-        }
-    }
-    false
-}
-
 /// `validateToolUpdateData` over a qualified payload, as a fact.
 fn tool_update(seq: u64, data: &Value) -> Option<Fact> {
     let names = |key| {
@@ -758,32 +732,20 @@ fn tool_update(seq: u64, data: &Value) -> Option<Fact> {
 /// `Value`s. Admitting only numbers spelled as `JSON.stringify` writes their
 /// values, which every released writer's numbers are, makes each admitted
 /// value one stored `Number`, so `Value` equality is JavaScript's `===` and
-/// [`json_text`](crate::json_text) prints JavaScript's text; copies and
-/// comparisons recurse, so depth is bounded. The walk is iterative, so it is
-/// safe at any depth the caller's parser produced. When one payload holds
-/// both an unqualified number and excess depth, which limit is reported
-/// depends on member order and is not specified; neither claims anything.
+/// [`json_text`](crate::json_text) prints JavaScript's text. The walk is
+/// iterative, and the copies and comparisons the fold makes are too, so any
+/// depth the parser produced is admitted.
 pub(crate) fn qualify_payload(data: &Value) -> Result<(), ReplayLimit> {
-    let mut pending = vec![(data, 1usize)];
-    while let Some((value, depth)) = pending.pop() {
+    let mut pending = vec![data];
+    while let Some(value) = pending.pop() {
         match value {
             Value::Number(number) => {
                 if !is_writer_spelling(number) {
                     return Err(ReplayLimit::Number);
                 }
             }
-            Value::Array(items) => {
-                if depth > MAX_PAYLOAD_DEPTH {
-                    return Err(ReplayLimit::Depth);
-                }
-                pending.extend(items.iter().map(|item| (item, depth + 1)));
-            }
-            Value::Object(fields) => {
-                if depth > MAX_PAYLOAD_DEPTH {
-                    return Err(ReplayLimit::Depth);
-                }
-                pending.extend(fields.values().map(|item| (item, depth + 1)));
-            }
+            Value::Array(items) => pending.extend(items),
+            Value::Object(fields) => pending.extend(fields.values()),
             Value::Null | Value::Bool(_) | Value::String(_) => {}
         }
     }
@@ -884,16 +846,18 @@ fn request_header(seq: u64, data: &Value) -> Result<Fact, ReplayRefusal> {
     }
     let tools = match header.get("tools") {
         None => None,
-        Some(Value::Array(tools)) if tools.iter().all(Value::is_object) => Some(tools.clone()),
+        Some(Value::Array(tools)) if tools.iter().all(Value::is_object) => {
+            Some(tools.iter().map(clone_value).collect())
+        }
         Some(_) => return Err(limit(seq, ReplayLimit::ToolSchema)),
     };
     Ok(Fact::Header {
         seq,
-        config: config.clone(),
+        config: Deep::new(clone_fields(config)),
         adapter_defaults: header
             .get("adapterDefaults")
             .and_then(Value::as_object)
-            .cloned(),
+            .map(|defaults| Deep::new(clone_fields(defaults))),
         tools,
         resets: data["reason"] == "series" || data.get("startsSeries").is_some(),
     })

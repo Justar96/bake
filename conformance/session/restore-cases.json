@@ -1,12 +1,13 @@
 {
   "schema": "bake/session-conformance/restore-cases",
-  "version": 3,
+  "version": 4,
   "oracle": "restorePlainLog(log) in packages/session/session-persistence-jsonl/tests/restore-conformance.spec.ts: scanLog, validateStoredEvents, interruptedTurnClosers, then Session.fromRestore(..., \"detached\", currentSessionMessageProjections)",
   "history": [
     "Version 1: 57 cases. Rust refused known ignorable rows and image/offload as the native limits ignorable and event-type.",
     "Version 2: Rust restores image/offload with the catalog projection and known ignorable rows. The ignorable and event-type limits are removed and projection added. known-ignorable-hook-result and known-ignorable-user-message lose their rust overrides, and known-ignorable-tool-update and image-offload name restore causes; their version-1 TypeScript outcomes are unchanged. The 42 cases after unknown-type-before-fallback-header were written from the TypeScript sources before either harness ran.",
     "Round 2 of version 2 added 19 cases for the independent review's obligations, written from the TypeScript sources before either harness ran on them.",
-    "Version 3: Rust restores every number spelled as JSON.stringify writes its value. usage-fraction and context-fraction lose their rust overrides; their version-2 TypeScript outcomes are unchanged. negative-zero-in-user-message still witnesses the number limit, which remains for spellings no writer produces."
+    "Version 3: Rust restores every number spelled as JSON.stringify writes its value. usage-fraction and context-fraction lose their rust overrides; their version-2 TypeScript outcomes are unchanged. negative-zero-in-user-message still witnesses the number limit, which remains for spellings no writer produces.",
+    "Version 4: Rust restores payloads of any depth, which it parses, copies, compares, and drops without recursing, and the depth limit is removed. user-message-depth loses its rust override; its version-3 TypeScript outcome is unchanged."
   ],
   "logs": {
     "tool-call-turn": "conformance/runtime/request-reconstruction/tool-call-turn/session.jsonl",
@@ -2487,10 +2488,6 @@
           "provider": "mock",
           "model": "mock"
         }
-      },
-      "rust": {
-        "outcome": "native-subset",
-        "limit": "depth"
       }
     },
     {

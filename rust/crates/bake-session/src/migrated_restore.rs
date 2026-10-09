@@ -97,7 +97,6 @@ impl MigratedRestoreLimit {
 const fn restore_limit_name(limit: RestoreLimit) -> &'static str {
     match limit {
         RestoreLimit::Number => "number",
-        RestoreLimit::Depth => "depth",
         RestoreLimit::Coordinate => "coordinate",
         RestoreLimit::ConfigMember => "config-member",
         RestoreLimit::ToolSchema => "tool-schema",

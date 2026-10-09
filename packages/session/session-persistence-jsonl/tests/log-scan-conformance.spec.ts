@@ -121,9 +121,10 @@ function parseRust(value: unknown, ts: Outcome, id: string): ScanCase['rust'] {
 
 function loadTable(): ScanCase[] {
   const table: unknown = JSON.parse(readFileSync(new URL('conformance/session/log-scan-cases.json', REPO), 'utf8'))
-  if (!isObject(table) || sortedKeys(table) !== 'cases,oracle,schema,version' || table.schema !== SCHEMA
-    || table.version !== 1 || table.oracle !== ORACLE || !Array.isArray(table.cases)) {
-    throw new Error('log-scan-cases.json does not match its version-1 schema')
+  if (!isObject(table) || sortedKeys(table) !== 'cases,history,oracle,schema,version' || table.schema !== SCHEMA
+    || table.version !== 2 || table.oracle !== ORACLE || !Array.isArray(table.cases)
+    || !Array.isArray(table.history) || !table.history.every(line => typeof line === 'string')) {
+    throw new Error('log-scan-cases.json does not match its version-2 schema')
   }
   return table.cases.map((entry: unknown): ScanCase => {
     if (!isObject(entry) || typeof entry.id !== 'string') throw new Error(`invalid case ${JSON.stringify(entry)}`)

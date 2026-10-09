@@ -40,6 +40,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Map, Value};
 
+#[cfg(doc)]
+use crate::json_parse::dismantle;
+use crate::json_parse::{Deep, DeepJson, clone_fields, clone_value, values_equal};
 use crate::json_text::json_number_text;
 use crate::offload::{Decision, OffloadRejection, Target, Walk, offload_images};
 
@@ -77,7 +80,7 @@ pub(crate) enum Fact {
         seq: u64,
         kind: SurfaceKind,
         op: SurfaceOp,
-        payload: Map<String, Value>,
+        payload: Deep<Map<String, Value>>,
     },
     /// A `request/header` in canonical form: `config` and `adapterDefaults`
     /// are copied verbatim and `tools` is absent or a non-empty list of
@@ -85,9 +88,9 @@ pub(crate) enum Fact {
     /// `startsSeries: true`.
     Header {
         seq: u64,
-        config: Map<String, Value>,
-        adapter_defaults: Option<Map<String, Value>>,
-        tools: Option<Vec<Value>>,
+        config: Deep<Map<String, Value>>,
+        adapter_defaults: Option<Deep<Map<String, Value>>>,
+        tools: Option<Deep<Vec<Value>>>,
         resets: bool,
     },
     /// A `request/tool-update` whose data `validateToolUpdateData` accepts.
@@ -183,9 +186,9 @@ impl NameKey {
 #[derive(Debug, Clone, PartialEq)]
 struct Header {
     seq: u64,
-    config: Map<String, Value>,
-    adapter_defaults: Option<Map<String, Value>>,
-    tools: Option<Vec<Value>>,
+    config: Deep<Map<String, Value>>,
+    adapter_defaults: Option<Deep<Map<String, Value>>>,
+    tools: Option<Deep<Vec<Value>>>,
     /// Each tool's name key, in tool order.
     names: Vec<NameKey>,
 }
@@ -201,7 +204,7 @@ impl Header {
 #[derive(Debug, Clone, PartialEq)]
 struct Update {
     after_message_id: String,
-    additions: Vec<Value>,
+    additions: Deep<Vec<Value>>,
     removals: Vec<String>,
 }
 
@@ -210,9 +213,9 @@ struct Update {
 #[derive(Debug, Clone, Default, PartialEq)]
 struct ToolHistory {
     baseline: Option<u64>,
-    declared: BTreeMap<NameKey, Value>,
+    declared: BTreeMap<NameKey, Deep<Value>>,
     available: BTreeSet<NameKey>,
-    tools: Vec<Value>,
+    tools: Deep<Vec<Value>>,
     updates: Vec<Update>,
 }
 
@@ -231,7 +234,7 @@ struct Node {
     seq: u64,
     kind: SurfaceKind,
     /// As [`Fact::Surface`] carries it.
-    payload: Map<String, Value>,
+    payload: Deep<Map<String, Value>>,
 }
 
 impl Node {
@@ -262,7 +265,7 @@ pub(crate) struct RequestFold {
     projects_images: bool,
     /// Projected messages keyed by their original seq, including those of
     /// nodes a replacement has since shadowed.
-    projected: BTreeMap<u64, Map<String, Value>>,
+    projected: BTreeMap<u64, Deep<Map<String, Value>>>,
     /// `contentGeneration`: committed replacements plus committed projection
     /// events, one per event however many targets it projects.
     content_generation: u64,
@@ -375,7 +378,7 @@ impl RequestFold {
     fn project(
         &self,
         decision: &Decision,
-    ) -> Result<BTreeMap<u64, Map<String, Value>>, FoldRefusal> {
+    ) -> Result<BTreeMap<u64, Deep<Map<String, Value>>>, FoldRefusal> {
         let rejected = FoldRefusal::ImageOffload;
         let targets = decision
             .0
@@ -399,12 +402,15 @@ impl RequestFold {
             let indexes = indexes
                 .as_deref()
                 .ok_or(rejected(OffloadRejection::ImageIndexes))?;
-            let message = self.projected.get(&seq).unwrap_or_else(|| node.message());
+            let message = self
+                .projected
+                .get(&seq)
+                .map_or_else(|| node.message(), |message| message);
             let projected = offload_images(message, indexes).map_err(|walk| match walk {
                 Walk::Rejected(rejection) => rejected(rejection),
                 Walk::Coercion => FoldRefusal::ProjectionCoercion,
             })?;
-            messages.insert(seq, projected);
+            messages.insert(seq, Deep::new(projected));
         }
         Ok(messages)
     }
@@ -542,7 +548,7 @@ impl RequestFold {
         if history.baseline.is_none() || resets || redeclared || incomplete {
             let mut declared = BTreeMap::new();
             for (name, tool) in header.tools() {
-                declared.insert(name.clone(), tool.clone());
+                declared.insert(name.clone(), Deep::new(clone_value(tool)));
             }
             self.history = ToolHistory {
                 baseline: Some(header.seq),
@@ -570,9 +576,11 @@ impl RequestFold {
                     .tools()
                     .find(|(key, _)| key.is_string(name))
                     .expect("validated additions name active tools");
-                self.history.declared.insert(key.clone(), tool.clone());
+                self.history
+                    .declared
+                    .insert(key.clone(), Deep::new(clone_value(tool)));
                 self.history.available.insert(key.clone());
-                tool.clone()
+                clone_value(tool)
             })
             .collect();
         for name in &removals {
@@ -589,7 +597,7 @@ impl RequestFold {
 
     /// `ToolHistoryProjection.snapshot`: when updates are missing, as in a
     /// historical log or a crash tail, the active declarations alone.
-    fn tool_history(&self) -> (Vec<Value>, Vec<Update>) {
+    fn tool_history(&self) -> (Deep<Vec<Value>>, Vec<Update>) {
         if self.history.incomplete(self.header.as_ref()) {
             let tools = self.header.as_ref().and_then(|header| header.tools.clone());
             return (tools.unwrap_or_default(), Vec::new());
@@ -604,7 +612,7 @@ impl RequestFold {
         let (history_tools, updates) = self.tool_history();
         Some(Request {
             config: header.config.clone(),
-            messages: self.messages().cloned().collect(),
+            messages: self.messages().map(clone_fields).collect(),
             history_tools,
             updates,
             tools: header.tools.clone(),
@@ -636,11 +644,14 @@ impl RequestFold {
     /// `foldRequestHeader`: the latest header's `canonicalHeader` form, or
     /// `None` before the first. `adapterDefaults` stays when it marks
     /// `reasoningEffort` or `maxTokens`, and `tools` when present, which the
-    /// codec allows only non-empty.
+    /// codec allows only non-empty. The caller drops it with [`dismantle`].
     pub(crate) fn request_header(&self) -> Option<Value> {
         let header = self.header.as_ref()?;
         let mut canonical = Map::new();
-        canonical.insert("config".to_owned(), Value::Object(header.config.clone()));
+        canonical.insert(
+            "config".to_owned(),
+            Value::Object(clone_fields(&header.config)),
+        );
         if let Some(defaults) = header.adapter_defaults.as_ref().filter(|defaults| {
             ["reasoningEffort", "maxTokens"]
                 .iter()
@@ -648,16 +659,17 @@ impl RequestFold {
         }) {
             canonical.insert(
                 "adapterDefaults".to_owned(),
-                Value::Object(defaults.clone()),
+                Value::Object(clone_fields(defaults)),
             );
         }
         if let Some(tools) = &header.tools {
-            canonical.insert("tools".to_owned(), Value::Array(tools.clone()));
+            canonical.insert("tools".to_owned(), Value::Array(tools.deep_clone()));
         }
         Some(Value::Object(canonical))
     }
 
-    /// `ToolHistoryProjection.snapshot` as JSON.
+    /// `ToolHistoryProjection.snapshot` as JSON, which the caller drops with
+    /// [`dismantle`].
     pub(crate) fn tool_history_json(&self) -> Value {
         let (tools, updates) = self.tool_history();
         history_json(&tools, &updates)
@@ -674,37 +686,58 @@ fn history_json(tools: &[Value], updates: &[Update]) -> Value {
         );
         fields.insert(
             "additions".to_owned(),
-            Value::Array(update.additions.clone()),
+            Value::Array(update.additions.deep_clone()),
         );
         let removals = update.removals.iter().cloned().map(Value::String).collect();
         fields.insert("removals".to_owned(), Value::Array(removals));
         Value::Object(fields)
     });
     let mut history = Map::new();
-    history.insert("tools".to_owned(), Value::Array(tools.to_vec()));
+    history.insert(
+        "tools".to_owned(),
+        Value::Array(tools.iter().map(clone_value).collect()),
+    );
     history.insert("updates".to_owned(), Value::Array(updates.collect()));
     Value::Object(history)
 }
 
 /// Whether `JSON.stringify` writes the same text for two values the import
 /// side qualified: numbers spelled as `JSON.stringify` writes them, so equal
-/// texts are equal `Number`s, and bounded depth. JavaScript enumerates an
-/// object's array-index keys first, in ascending numeric order, then its
-/// other keys in insertion order, which a parsed [`Map`] keeps.
+/// texts are equal `Number`s. JavaScript enumerates an object's array-index
+/// keys first, in ascending numeric order, then its other keys in insertion
+/// order, which a parsed [`Map`] keeps. The walk is iterative.
 fn same_js_text(a: &Value, b: &Value) -> bool {
-    match (a, b) {
-        (Value::Array(a), Value::Array(b)) => {
-            a.len() == b.len() && a.iter().zip(b).all(|(a, b)| same_js_text(a, b))
+    let mut pending = vec![(a, b)];
+    while let Some((a, b)) = pending.pop() {
+        match (a, b) {
+            (Value::Array(a), Value::Array(b)) => {
+                if a.len() != b.len() {
+                    return false;
+                }
+                pending.extend(a.iter().zip(b));
+            }
+            (Value::Object(a), Value::Object(b)) => {
+                if a.len() != b.len() {
+                    return false;
+                }
+                for ((ka, va), (kb, vb)) in js_members(a).into_iter().zip(js_members(b)) {
+                    if ka != kb {
+                        return false;
+                    }
+                    pending.push((va, vb));
+                }
+            }
+            (Value::Array(_) | Value::Object(_), _) | (_, Value::Array(_) | Value::Object(_)) => {
+                return false;
+            }
+            _ => {
+                if a != b {
+                    return false;
+                }
+            }
         }
-        (Value::Object(a), Value::Object(b)) => {
-            a.len() == b.len()
-                && js_members(a)
-                    .into_iter()
-                    .zip(js_members(b))
-                    .all(|((ka, va), (kb, vb))| ka == kb && same_js_text(va, vb))
-        }
-        _ => a == b,
     }
+    true
 }
 
 /// An object's members in JavaScript enumeration order.
@@ -750,7 +783,7 @@ fn same_outside_result_content(
         a.len() == b.len()
             && a.iter().all(|(name, value)| {
                 b.get(name)
-                    .is_some_and(|other| name == key || other == value)
+                    .is_some_and(|other| name == key || values_equal(other, value))
             })
     }
     fn message(data: &Map<String, Value>) -> Option<&Map<String, Value>> {
@@ -776,11 +809,11 @@ fn same_outside_result_content(
 /// omitted.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Request {
-    config: Map<String, Value>,
-    messages: Vec<Map<String, Value>>,
-    history_tools: Vec<Value>,
+    config: Deep<Map<String, Value>>,
+    messages: Deep<Vec<Map<String, Value>>>,
+    history_tools: Deep<Vec<Value>>,
     updates: Vec<Update>,
-    tools: Option<Vec<Value>>,
+    tools: Option<Deep<Vec<Value>>>,
     session_id: String,
 }
 
@@ -793,18 +826,27 @@ impl Request {
     /// of the prefix. Equal values do not imply equal provider wire bytes or
     /// member order; [`crate::json_text`] of the value is the text
     /// `JSON.stringify` writes for the request TypeScript derives.
+    ///
+    /// The value may nest as deep as the log's payloads; drop it with
+    /// [`crate::dismantle`] rather than recursively.
     pub fn to_json(&self) -> Value {
-        let mut request = self.config.clone();
+        let mut request = clone_fields(&self.config);
         request.insert(
             "messages".to_owned(),
-            Value::Array(self.messages.iter().cloned().map(Value::Object).collect()),
+            Value::Array(
+                self.messages
+                    .iter()
+                    .map(clone_fields)
+                    .map(Value::Object)
+                    .collect(),
+            ),
         );
         request.insert(
             "toolHistory".to_owned(),
             history_json(&self.history_tools, &self.updates),
         );
         if let Some(tools) = &self.tools {
-            request.insert("tools".to_owned(), Value::Array(tools.clone()));
+            request.insert("tools".to_owned(), Value::Array(tools.deep_clone()));
         }
         request.insert(
             "sessionId".to_owned(),
@@ -833,9 +875,9 @@ mod tests {
     fn header_with(seq: u64, tools: &[Value], resets: bool) -> Fact {
         Fact::Header {
             seq,
-            config: object(json!({"provider": "p", "model": "m"})),
+            config: Deep::new(object(json!({"provider": "p", "model": "m"}))),
             adapter_defaults: None,
-            tools: (!tools.is_empty()).then(|| tools.to_vec()),
+            tools: (!tools.is_empty()).then(|| Deep::new(tools.to_vec())),
             resets,
         }
     }
@@ -902,7 +944,7 @@ mod tests {
             seq,
             kind,
             op,
-            payload,
+            payload: Deep::new(payload),
         }
     }
 
@@ -1195,10 +1237,10 @@ mod tests {
             seq,
             kind: SurfaceKind::User,
             op: SurfaceOp::Append,
-            payload: message(
+            payload: Deep::new(message(
                 "u",
                 json!([{"type": "image", "n": 0}, {"type": "text"}, {"type": "image", "n": 1}]),
-            ),
+            )),
         }
     }
 
@@ -1314,9 +1356,11 @@ mod tests {
         let mut fold = RequestFold::new("s".to_owned());
         fold.append(Fact::Header {
             seq: 0,
-            config: object(json!({"provider": "p", "model": "m", "maxTokens": 8})),
-            adapter_defaults: Some(object(json!({"maxTokens": true}))),
-            tools: Some(vec![tool("a")]),
+            config: Deep::new(object(
+                json!({"provider": "p", "model": "m", "maxTokens": 8}),
+            )),
+            adapter_defaults: Some(Deep::new(object(json!({"maxTokens": true})))),
+            tools: Some(Deep::new(vec![tool("a")])),
             resets: false,
         })
         .expect("header");

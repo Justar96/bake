@@ -55,8 +55,8 @@ pub use bake_session::{encode_segment, project_key};
 use bake_session::{
     CURRENT_SESSION_FORMAT_VERSION, FinalCheckRefusal, HeaderRefusal, MigratedRestoreRefusal,
     PathPlatform, RELEASED_ZSTD_PLAINTEXT_BUDGET, Rejection, ReleasedGenerationRefusal,
-    RestoreRefusal, RestoredLog, SessionHeader, SubsetLimit, first_record,
-    migrate_released_generation, migrate_released_zstd_generation, read_header_record,
+    RestoreRefusal, RestoredLog, SessionHeader, SubsetLimit, dismantle, first_record,
+    migrate_released_generation, migrate_released_zstd_generation, parse_json, read_header_record,
     released_generation_header, released_zstd_plaintext, restore_migrated, zstd_header_record,
 };
 use serde_json::{Map, Value, json};
@@ -952,8 +952,13 @@ fn newer_generation(
         }
         _ => {}
     }
-    let value: Value =
-        serde_json::from_slice(&record).expect("the header reader parsed this record");
+    let value = ParsedHeader(Some(
+        std::str::from_utf8(&record)
+            .ok()
+            .and_then(|text| parse_json(text).ok())
+            .expect("the header reader parsed this record"),
+    ));
+    let value: &Value = &value;
     if let Value::Object(fields) = &value
         && (fields.contains_key("sandboxMode") || fields.contains_key("approvalPolicy"))
     {
@@ -1013,6 +1018,26 @@ fn newer_generation(
         ),
         path,
     )
+}
+
+/// A parsed header record, which may nest any member arbitrarily deep, so it
+/// is dropped iteratively.
+struct ParsedHeader(Option<Value>);
+
+impl std::ops::Deref for ParsedHeader {
+    type Target = Value;
+
+    fn deref(&self) -> &Value {
+        self.0.as_ref().expect("present until dropped")
+    }
+}
+
+impl Drop for ParsedHeader {
+    fn drop(&mut self) {
+        if let Some(value) = self.0.take() {
+            dismantle(value);
+        }
+    }
 }
 
 #[cfg(test)]
