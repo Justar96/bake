@@ -15,8 +15,8 @@ const REPO = new URL('../../../../', import.meta.url)
 const SCHEMA = 'bake/session-conformance/json-parse-cases'
 const ORACLE = 'JSON.stringify(JSON.parse(text)), the parse scanLog runs on every record and the serialization a request takes; a thrown SyntaxError is syntax-error'
 /** Both harnesses pin the table size, so a dropped case fails. */
-const CASE_COUNT = 50
-const REFUSALS = ['lone-surrogate', 'number-out-of-range']
+const CASE_COUNT = 56
+const REFUSALS = ['number-out-of-range']
 
 type Outcome = { outcome: 'parsed'; text: string } | { outcome: 'syntax-error' }
 
@@ -66,9 +66,9 @@ function parseCase(value: unknown): ParseCase {
 function loadTable(): ParseCase[] {
   const table: unknown = JSON.parse(readFileSync(new URL('conformance/session/json-parse-cases.json', REPO), 'utf8'))
   if (!isObject(table) || sortedKeys(table) !== 'cases,history,oracle,schema,version' || table.schema !== SCHEMA
-    || table.version !== 1 || table.oracle !== ORACLE || !Array.isArray(table.cases)
+    || table.version !== 2 || table.oracle !== ORACLE || !Array.isArray(table.cases)
     || !Array.isArray(table.history) || !table.history.every(line => typeof line === 'string')) {
-    throw new Error('json-parse-cases.json does not match its version-1 schema')
+    throw new Error('json-parse-cases.json does not match its version-2 schema')
   }
   return table.cases.map(parseCase)
 }

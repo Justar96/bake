@@ -17,9 +17,11 @@
 //!   double; `-0` is the double -0. Any other number is the nearest double.
 //!   A number whose nearest double is infinite is [`JsonParseError::NumberOutOfRange`];
 //!   `JSON.parse` reads it as `Infinity`, which no writer stores.
-//! - A `\u` escape of an unpaired surrogate, which `JSON.parse` keeps and a
-//!   Rust string cannot hold, is [`JsonParseError::LoneSurrogate`] at the
-//!   point serde_json refuses it, which D21 leaves undecided.
+//! - A `\u` escape of an unpaired surrogate, which `JSON.parse` keeps as a
+//!   lone code unit and serde_json refuses, is kept in the string or key in
+//!   the [`crate::js_string`] spelling; so is a literal U+FDD0, which that
+//!   spelling doubles. Two escapes that form a surrogate pair are the scalar
+//!   value they pair into. Every other string is the one serde_json builds.
 //! - A repeated object key keeps its first position and its last value, as
 //!   `JSON.parse` defines its member and its value. `__proto__` is an ordinary
 //!   key, as `JSON.parse` creates it as an own data property.
@@ -31,13 +33,13 @@
 
 use serde_json::{Map, Number, Value};
 
+use crate::js_string;
+
 /// Why [`parse_json`] built no value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JsonParseError {
     /// The text is not JSON; `JSON.parse` throws `SyntaxError`.
     Syntax,
-    /// A `\u` escape leaves a surrogate unpaired.
-    LoneSurrogate,
     /// A number's nearest double is infinite.
     NumberOutOfRange,
 }
@@ -305,10 +307,9 @@ impl Parser<'_> {
                 }
                 self.index += 1;
             }
-            text.push_str(
-                std::str::from_utf8(&self.bytes[start..self.index])
-                    .expect("the input is UTF-8 and the run ends at an ASCII byte"),
-            );
+            let run = std::str::from_utf8(&self.bytes[start..self.index])
+                .expect("the input is UTF-8 and the run ends at an ASCII byte");
+            text.push_str(&js_string::from_rust(run));
             match self.peek() {
                 Some(b'"') => {
                     self.index += 1;
@@ -342,31 +343,13 @@ impl Parser<'_> {
         Ok(())
     }
 
-    /// serde_json's `parse_unicode_escape` with validation: the cursor is
-    /// past `\u`. Each refusal happens where serde_json's does, so an
-    /// earlier syntax error still wins.
+    /// A `\u` escape's code unit, the cursor past `\u`. A surrogate is
+    /// kept lone, as `JSON.parse` keeps it, unless it is a low surrogate escape
+    /// directly after a high one, which [`js_string::push_units`] pairs with
+    /// the high surrogate the text ends with.
     fn unicode_escape(&mut self, text: &mut String) -> Result<(), JsonParseError> {
-        let first = self.hex_escape()?;
-        if (0xDC00..=0xDFFF).contains(&first) {
-            return Err(JsonParseError::LoneSurrogate);
-        }
-        if !(0xD800..=0xDBFF).contains(&first) {
-            text.push(char::from_u32(first.into()).expect("not a surrogate"));
-            return Ok(());
-        }
-        for expected in *b"\\u" {
-            match self.peek() {
-                None => return Err(JsonParseError::Syntax),
-                Some(byte) if byte == expected => self.index += 1,
-                Some(_) => return Err(JsonParseError::LoneSurrogate),
-            }
-        }
-        let second = self.hex_escape()?;
-        if !(0xDC00..=0xDFFF).contains(&second) {
-            return Err(JsonParseError::LoneSurrogate);
-        }
-        let code = 0x1_0000 + ((u32::from(first) - 0xD800) << 10) + (u32::from(second) - 0xDC00);
-        text.push(char::from_u32(code).expect("a surrogate pair is a scalar value"));
+        let unit = self.hex_escape()?;
+        js_string::push_units(text, [unit]);
         Ok(())
     }
 
@@ -852,27 +835,44 @@ mod tests {
         "trailing characters",
     ];
 
-    fn serde_outcome(text: &str) -> Result<Value, JsonParseError> {
-        serde_json::from_str(text).map_err(|error: serde_json::Error| {
-            let message = error.to_string();
-            let code = message
-                .split_once(" at line ")
-                .map_or(message.as_str(), |(code, _)| code);
-            match code {
-                code if SERDE_SYNTAX_ERRORS.contains(&code) => JsonParseError::Syntax,
-                "number out of range" => JsonParseError::NumberOutOfRange,
-                "lone leading surrogate in hex escape" | "unexpected end of hex escape" => {
-                    JsonParseError::LoneSurrogate
-                }
-                other => panic!("{text:?}: unclassified serde_json error {other:?}"),
-            }
-        })
+    /// serde_json's outcome, or `None` where it refuses a lone surrogate
+    /// that `JSON.parse` and [`parse_json`] keep.
+    fn serde_outcome(text: &str) -> Option<Result<Value, JsonParseError>> {
+        let error = match serde_json::from_str(text) {
+            Ok(value) => return Some(Ok(value)),
+            Err(error) => error.to_string(),
+        };
+        let code = error
+            .split_once(" at line ")
+            .map_or(error.as_str(), |(code, _)| code);
+        match code {
+            code if SERDE_SYNTAX_ERRORS.contains(&code) => Some(Err(JsonParseError::Syntax)),
+            "number out of range" => Some(Err(JsonParseError::NumberOutOfRange)),
+            "lone leading surrogate in hex escape" | "unexpected end of hex escape" => None,
+            other => panic!("{text:?}: unclassified serde_json error {other:?}"),
+        }
     }
 
-    /// Same value, member order, and number representation, or the same refusal.
+    /// Same value, member order, and number representation, or the same
+    /// refusal. Where serde_json refuses a lone surrogate, the value must be
+    /// one [`crate::json_text`] writes back as `JSON.stringify` does, or a
+    /// syntax error after it.
     fn assert_matches_serde(text: &str) {
         let ours = parse_json(text);
-        let theirs = serde_outcome(text);
+        let Some(theirs) = serde_outcome(text) else {
+            match ours {
+                Ok(value) => assert_eq!(
+                    Some(crate::json_text(&value).as_str()),
+                    LONE_SURROGATE_TEXTS
+                        .iter()
+                        .find(|(input, _)| *input == text)
+                        .map(|(_, output)| *output),
+                    "{text:?}"
+                ),
+                Err(error) => assert_eq!(error, JsonParseError::Syntax, "{text:?}"),
+            }
+            return;
+        };
         match (&ours, &theirs) {
             (Ok(ours), Ok(theirs)) => assert_eq!(
                 serde_json::to_string(ours).unwrap(),
@@ -882,6 +882,22 @@ mod tests {
             _ => assert_eq!(ours, theirs, "{text:?}"),
         }
     }
+
+    /// `JSON.stringify(JSON.parse(input))` for each input serde_json refuses
+    /// as a lone surrogate, from the ECMAScript definitions.
+    const LONE_SURROGATE_TEXTS: [(&str, &str); 8] = [
+        ("\"\\uD800\"", "\"\\ud800\""),
+        ("\"\\uDC00\"", "\"\\udc00\""),
+        ("\"\\uD800x\"", "\"\\ud800x\""),
+        ("\"\\uD800\\n\"", "\"\\ud800\\n\""),
+        ("\"\\uD800\\u0041\"", "\"\\ud800A\""),
+        ("\"\\uD800\\uD800\"", "\"\\ud800\\ud800\""),
+        ("\"\\uDC00\\uD800\"", "\"\\udc00\\ud800\""),
+        (
+            "{\"\\uDBFF\":\"\u{FDD0}\\uDFFF\"}",
+            "{\"\\udbff\":\"\u{FDD0}\\udfff\"}",
+        ),
+    ];
 
     #[test]
     fn values_and_refusals_match_serde_json() {
@@ -976,6 +992,8 @@ mod tests {
             "\"\\uD800",
             "\"\\uD800\\u12",
             "\"\\uDC00\\q\"",
+            "\"\\uDC00\\uD800\"",
+            "{\"\\uDBFF\":\"\u{FDD0}\\uDFFF\"}",
             "\"\\u0000\"",
             "{\"a\":1,\"b\":2,\"a\":3}",
             "{\"__proto__\":1,\"b\":[]}",

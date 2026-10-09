@@ -111,7 +111,6 @@ use serde_json::Value;
 
 use crate::fork::holds_negative_zero;
 use crate::json_parse::{Deep, dismantle};
-use crate::json_text::json_text;
 use crate::log_layout::{CURRENT_LOG_FILENAME, canonical_generation, encode_segment, log_path};
 use crate::released_rows::{ParseStop, parse_released_header, parse_released_rows};
 use crate::write_lease::{LeaseRefusal, WriteLease};
@@ -244,9 +243,9 @@ pub enum LogFileLimit {
     /// this crate does not decide. Nothing was written. The name is one of:
     ///
     /// - `header/<name>` or `row/<name>`: the header or a row is not UTF-8
-    ///   (`invalid-utf8`), holds a lone-surrogate escape or a number beyond
-    ///   the double range, which `JSON.parse` admits and the parser, which
-    ///   reads any nesting depth, refuses (`json-parser`), or a number has
+    ///   (`invalid-utf8`), holds a number beyond the double range, which
+    ///   `JSON.parse` admits and the parser, which reads any nesting depth
+    ///   and keeps lone surrogates, refuses (`json-parser`), or a number has
     ///   more integer digits than
     ///   serde_json rounds as `JSON.parse` does (`number-lexeme`), as
     ///   [`crate::ScanLimit`] describes them; or the header's version or a
@@ -280,7 +279,8 @@ impl PlainLogFile {
     /// The backend's `create(header, { inheritedEventCount })` in `root`.
     /// The header is checked as [`PlainAppendLog::create`] checks it, then
     /// the root, then every project directory for a canonical generation of
-    /// the id. No file or directory is written.
+    /// the id. No file or directory is written. The header's strings use
+    /// [`crate::js_string`]'s spelling, as [`crate::parse_json`] returns them.
     pub fn create(
         root: &Path,
         header: &Value,
@@ -309,7 +309,8 @@ impl PlainLogFile {
 
     /// The backend's write `open(id)` in `root`, scanning the current
     /// generation's bytes with this host's path platform and `source_budget`,
-    /// as [`PlainAppendLog::open`] does.
+    /// as [`PlainAppendLog::open`] does. `id` uses [`crate::js_string`]'s
+    /// spelling: [`crate::js_string::from_rust`] spells an argument.
     pub fn open(root: &Path, id: &str, source_budget: usize) -> Result<Self, LogFileRefusal> {
         if id.is_empty() {
             return Err(LogFileRefusal::NativeSubset(LogFileLimit::EmptyId));
@@ -378,7 +379,8 @@ impl PlainLogFile {
             released_generation_header(&bytes, selected.version, platform).map_err(refusal)?
         {
             if stored.id != id {
-                let path = selected.path.display();
+                let path = selected.path.display().to_string();
+                let path = crate::js_string::from_rust(&path);
                 return Err(refusal(ReleasedGenerationRefusal::Corrupt(format!(
                     "Error: corrupt session log \"{path}\": requested id \"{id}\" \
                      does not match header id \"{}\"",
@@ -525,7 +527,8 @@ pub enum ReleasedGenerationRefusal {
 impl ReleasedGenerationRefusal {
     /// The backend's `generationFailure` translation.
     fn into_refusal(self, id: &str, selected: &Generation) -> LogFileRefusal {
-        let source = selected.path.display();
+        let source = selected.path.display().to_string();
+        let source = crate::js_string::from_rust(&source);
         match self {
             Self::Corrupt(cause) => LogFileRefusal::Corrupt {
                 message: format!(
@@ -1056,7 +1059,8 @@ fn probe_exists(path: &Path) -> Result<bool, LogFileRefusal> {
 /// TypeScript's `legacyLayout(path)`, which spells `path` with
 /// `JSON.stringify`.
 fn legacy_layout(path: &Path) -> LogFileRefusal {
-    let spelled = json_text(&Value::String(path.display().to_string()));
+    let path = path.display().to_string();
+    let spelled = crate::js_string::quote(&crate::js_string::from_rust(&path));
     LogFileRefusal::LegacyLayout {
         message: format!(
             "session artifact {spelled} uses the unsupported flat-file layout; use a separate \
@@ -1074,7 +1078,8 @@ fn opposite_generation(name: &str) -> Option<u64> {
 /// TypeScript's `encodingMismatch(path)` of a backend configured for
 /// compression `none`, which spells `path` with `JSON.stringify`.
 fn encoding_mismatch(path: &Path) -> LogFileRefusal {
-    let spelled = json_text(&Value::String(path.display().to_string()));
+    let path = path.display().to_string();
+    let spelled = crate::js_string::quote(&crate::js_string::from_rust(&path));
     LogFileRefusal::EncodingMismatch {
         message: format!(
             "session artifact {spelled} uses .jsonl.zstd, but this backend is configured for \

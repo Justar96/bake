@@ -134,7 +134,7 @@ pub enum Outcome {
 pub fn inspect(args: &InspectArgs) -> Outcome {
     match run(args) {
         Ok((record, status)) => Outcome::Record {
-            json: record.to_string(),
+            json: bake_session::json_text(&record),
             status,
         },
         Err(message) => Outcome::Failure(message),
@@ -557,8 +557,8 @@ pub(crate) const fn header_limit(limit: SubsetLimit) -> &'static str {
     match limit {
         SubsetLimit::InvalidUtf8 => "this preview requires valid UTF-8 in the session header",
         SubsetLimit::JsonParser => {
-            "the session header uses JSON this preview does not read, such as a lone surrogate \
-             escape, deep nesting, or an out-of-range number"
+            "the session header holds a number beyond the double range, which this preview \
+             does not read"
         }
         SubsetLimit::FloatLexeme => {
             "a session header count is written with a fraction or an exponent, or does not fit \
@@ -577,8 +577,8 @@ fn scan_limit(limit: ScanLimit, args: &InspectArgs) -> String {
     match limit {
         ScanLimit::InvalidUtf8 => "this preview requires valid UTF-8 in event records",
         ScanLimit::JsonParser => {
-            "an event record uses JSON this preview does not read, such as a lone surrogate \
-             escape, deep nesting, or an out-of-range number"
+            "an event record holds a number beyond the double range, which this preview does \
+             not read"
         }
         ScanLimit::NumberLexeme => "this preview reads numbers of at most 768 integer digits",
         ScanLimit::EventCount => "this preview reads at most 2^53 - 1 events",

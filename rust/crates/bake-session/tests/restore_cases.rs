@@ -38,7 +38,7 @@ const LOGS: [(&str, &str, usize); 3] = [
     ),
 ];
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 122;
+const CASE_COUNT: usize = 124;
 const SOURCE_BUDGET: usize = 64;
 /// Cases whose `image/offload` rejection message is compared exactly.
 const OFFLOAD_MESSAGES: usize = 28;
@@ -158,9 +158,10 @@ fn build(entry: &Map<String, Value>, id: &str) -> (Vec<u8>, Vec<String>) {
     for edit in edits {
         let edit = object(edit, id);
         let line = |key: &str| {
-            let value = text(&edit[key], id);
+            // The table is read with `parse_json`; write its text as real text.
+            let value = bake_session::js_string::to_rust(text(&edit[key], id)).into_owned();
             assert!(!value.contains('\n'), "{id}: {key} holds an LF");
-            value.to_owned()
+            value
         };
         match keys(edit).into_iter().collect::<Vec<_>>().as_slice() {
             ["truncate"] => {
@@ -196,8 +197,10 @@ fn build(entry: &Map<String, Value>, id: &str) -> (Vec<u8>, Vec<String>) {
 }
 
 fn load() -> Vec<Case> {
-    let table: Value = serde_json::from_slice(
-        &std::fs::read(repo_path("conformance/session/restore-cases.json")).expect("read table"),
+    // Expected strings use `parse_json`'s spelling, as restored ones do.
+    let table: Value = bake_session::parse_json(
+        &std::fs::read_to_string(repo_path("conformance/session/restore-cases.json"))
+            .expect("read table"),
     )
     .expect("parse table");
     let table = object(&table, "table");
@@ -206,7 +209,7 @@ fn load() -> Vec<Case> {
         BTreeSet::from(["cases", "history", "logs", "oracle", "schema", "version"])
     );
     assert_eq!(table["schema"], SCHEMA);
-    assert_eq!(table["version"], 5);
+    assert_eq!(table["version"], 6);
     assert!(
         table["history"]
             .as_array()
@@ -232,7 +235,7 @@ fn load() -> Vec<Case> {
             let (log, rows) = build(&entry, &id);
             let rows = rows
                 .iter()
-                .map(|row| serde_json::from_str(row).unwrap_or(Value::Null))
+                .map(|row| bake_session::parse_json(row).unwrap_or(Value::Null))
                 .collect();
             Case {
                 id,

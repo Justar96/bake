@@ -20,7 +20,7 @@ const ORACLE = 'scanLog(log) from packages/session/session-persistence-jsonl/src
 const FIXTURE = 'conformance/runtime/request-reconstruction/tool-call-turn/session.jsonl'
 const FIXTURE_SHA256 = 'a7a8222990ef9f4c4f00a051c019de86d3156ca7f6c3c0d28af4be4cc3fbe657'
 /** Both harnesses pin the table size, so a dropped case fails. */
-const CASE_COUNT = 76
+const CASE_COUNT = 79
 const CLASSES = ['Error', 'SessionFormatError', 'SessionFormatUnsupportedError']
 const LIMITS = ['invalid-utf8', 'json-parser', 'number-lexeme', 'codec']
 
@@ -122,9 +122,9 @@ function parseRust(value: unknown, ts: Outcome, id: string): ScanCase['rust'] {
 function loadTable(): ScanCase[] {
   const table: unknown = JSON.parse(readFileSync(new URL('conformance/session/log-scan-cases.json', REPO), 'utf8'))
   if (!isObject(table) || sortedKeys(table) !== 'cases,history,oracle,schema,version' || table.schema !== SCHEMA
-    || table.version !== 2 || table.oracle !== ORACLE || !Array.isArray(table.cases)
+    || table.version !== 3 || table.oracle !== ORACLE || !Array.isArray(table.cases)
     || !Array.isArray(table.history) || !table.history.every(line => typeof line === 'string')) {
-    throw new Error('log-scan-cases.json does not match its version-2 schema')
+    throw new Error('log-scan-cases.json does not match its version-3 schema')
   }
   return table.cases.map((entry: unknown): ScanCase => {
     if (!isObject(entry) || typeof entry.id !== 'string') throw new Error(`invalid case ${JSON.stringify(entry)}`)

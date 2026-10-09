@@ -12,13 +12,15 @@ use bake_session::{
 use serde_json::{Map, Value};
 
 const SCHEMA: &str = "bake/session-format-conformance/generation-header-cases";
-const CASE_COUNT: usize = 95;
+const CASE_COUNT: usize = 98;
 
 fn table() -> Value {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../../conformance/session/generation-header-cases.json");
     let text = std::fs::read_to_string(path).expect("read generation-header-cases.json");
-    serde_json::from_str(&text).expect("parse generation-header-cases.json")
+    // Expected headers and messages may hold a lone surrogate, which only
+    // `parse_json` reads.
+    bake_session::parse_json(&text).expect("parse generation-header-cases.json")
 }
 
 fn hex(text: &str) -> Vec<u8> {
@@ -91,7 +93,7 @@ fn outcome(expected: &Value) -> Outcome {
 fn every_shared_generation_header_case_matches() {
     let table = table();
     assert_eq!(table["schema"], SCHEMA);
-    assert_eq!(table["version"], 1);
+    assert_eq!(table["version"], 2);
     let cases = table["cases"].as_array().expect("cases");
     assert_eq!(cases.len(), CASE_COUNT);
     let mut ids = std::collections::BTreeSet::new();

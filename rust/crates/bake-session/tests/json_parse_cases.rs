@@ -12,7 +12,7 @@ use serde_json::Value;
 const SCHEMA: &str = "bake/session-conformance/json-parse-cases";
 const ORACLE: &str = "JSON.stringify(JSON.parse(text)), the parse scanLog runs on every record and the serialization a request takes; a thrown SyntaxError is syntax-error";
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 50;
+const CASE_COUNT: usize = 56;
 
 fn table() -> Value {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -23,7 +23,6 @@ fn table() -> Value {
 
 fn refusal(name: &str) -> JsonParseError {
     match name {
-        "lone-surrogate" => JsonParseError::LoneSurrogate,
         "number-out-of-range" => JsonParseError::NumberOutOfRange,
         other => panic!("unknown refusal {other}"),
     }
@@ -38,7 +37,7 @@ fn shared_cases_parse_as_json_parse_does() {
         BTreeSet::from(["schema", "version", "history", "oracle", "cases"])
     );
     assert_eq!(fields["schema"], SCHEMA);
-    assert_eq!(fields["version"], 1);
+    assert_eq!(fields["version"], 2);
     assert_eq!(fields["oracle"], ORACLE);
     assert!(
         fields["history"]
@@ -77,7 +76,7 @@ fn shared_cases_parse_as_json_parse_does() {
     }
     assert_eq!(
         refusals,
-        BTreeSet::from(["lone-surrogate", "number-out-of-range"]),
+        BTreeSet::from(["number-out-of-range"]),
         "every refusal is witnessed"
     );
 }

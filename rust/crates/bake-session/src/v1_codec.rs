@@ -652,10 +652,9 @@ fn exact_keys(
     Ok(())
 }
 
-/// `JSON.stringify` of a string. A Rust string holds no lone surrogate, and
-/// for every other string both escape the same characters the same way.
+/// `JSON.stringify` of a string.
 fn quoted(key: &str) -> String {
-    serde_json::to_string(key).expect("a string serializes")
+    crate::v2_to_v3::quote(key)
 }
 
 /// `sessionFormatCount`. A non-negative `f64` reports `limit`.

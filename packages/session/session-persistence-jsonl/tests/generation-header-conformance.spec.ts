@@ -38,7 +38,7 @@ interface GenerationHeaderCase {
 }
 
 const REPO = new URL('../../../../', import.meta.url)
-const CASE_COUNT = 95
+const CASE_COUNT = 98
 const LIMITS = ['invalid-utf8', 'json-parser', 'float-lexeme', 'version-diagnostic']
 const table = JSON.parse(readFileSync(new URL('conformance/session/generation-header-cases.json', REPO), 'utf8')) as {
   schema: string
@@ -98,7 +98,7 @@ afterAll(async () => {
 describe('shared Session generation header cases', () => {
   it('pins the table', () => {
     expect(table.schema).toBe('bake/session-format-conformance/generation-header-cases')
-    expect(table.version).toBe(1)
+    expect(table.version).toBe(2)
     expect(table.cases).toHaveLength(CASE_COUNT)
     expect(new Set(table.cases.map(entry => entry.id)).size).toBe(CASE_COUNT)
     for (const entry of table.cases) {

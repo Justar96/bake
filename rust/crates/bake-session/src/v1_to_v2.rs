@@ -1347,7 +1347,10 @@ fn record(value: Option<&Value>) -> Checked<&Map<String, Value>> {
 /// `JSON.stringify(value)` in a message, `undefined` when absent; every
 /// number prints as JavaScript prints its value.
 fn stringify(value: Option<&Value>) -> String {
-    value.map_or_else(|| "undefined".to_owned(), crate::json_text)
+    value.map_or_else(
+        || "undefined".to_owned(),
+        |value| crate::js_string::from_rust(&crate::json_text(value)).into_owned(),
+    )
 }
 
 #[cfg(test)]

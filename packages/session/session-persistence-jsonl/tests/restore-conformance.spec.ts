@@ -52,7 +52,7 @@ const LOGS: Record<string, { path: string; sha256: string }> = {
   },
 }
 /** Both harnesses pin the table size, so a dropped case fails. */
-const CASE_COUNT = 122
+const CASE_COUNT = 124
 const CLASSES = ['Error', 'TypeError', 'SessionFormatUnsupportedError', 'SessionPersistenceCorruptionError']
 const LIMITS = [
   'number', 'coordinate', 'tool-schema', 'context', 'repair', 'projection',
@@ -255,10 +255,10 @@ function parseRust(value: unknown, ts: Outcome, id: string): RustOverride {
 function loadTable(): RestoreCase[] {
   const table: unknown = JSON.parse(readFileSync(new URL('conformance/session/restore-cases.json', REPO), 'utf8'))
   if (!isObject(table) || sortedKeys(table) !== 'cases,history,logs,oracle,schema,version' || table.schema !== SCHEMA
-    || table.version !== 5 || table.oracle !== ORACLE || !Array.isArray(table.cases)
+    || table.version !== 6 || table.oracle !== ORACLE || !Array.isArray(table.cases)
     || !Array.isArray(table.history) || !table.history.every(isLine)
     || JSON.stringify(table.logs) !== JSON.stringify(Object.fromEntries(Object.entries(LOGS).map(([name, { path }]) => [name, path])))) {
-    throw new Error('restore-cases.json does not match its version-5 schema')
+    throw new Error('restore-cases.json does not match its version-6 schema')
   }
   return table.cases.map((entry: unknown): RestoreCase => {
     if (!isObject(entry) || typeof entry.id !== 'string' || typeof entry.log !== 'string') {

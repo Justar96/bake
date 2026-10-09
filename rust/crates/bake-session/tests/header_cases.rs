@@ -183,7 +183,8 @@ fn outcome_value(result: &Result<SessionHeader, HeaderRefusal>) -> Value {
 fn shared_header_cases_match_on_both_platforms() {
     let text = std::fs::read_to_string(repo_path("conformance/session/header-cases.json"))
         .expect("read header-cases.json");
-    let table: Value = serde_json::from_str(&text).expect("parse header-cases.json");
+    // Expected metadata may hold a lone surrogate, which only `parse_json` reads.
+    let table: Value = bake_session::parse_json(&text).expect("parse header-cases.json");
     let table = object(&table, "table");
     assert_eq!(
         keys(table),
@@ -197,7 +198,7 @@ fn shared_header_cases_match_on_both_platforms() {
         ])
     );
     assert_eq!(table["schema"], SCHEMA);
-    assert_eq!(table["version"], 2);
+    assert_eq!(table["version"], 3);
     assert!(
         table["history"]
             .as_array()

@@ -44,7 +44,8 @@ fn repo_path(relative: &str) -> PathBuf {
 
 fn read_json(path: &Path) -> Value {
     let text = fs::read_to_string(path).unwrap_or_else(|error| panic!("{path:?}: {error}"));
-    serde_json::from_str(&text).unwrap_or_else(|error| panic!("{path:?}: {error}"))
+    // Tables may hold lone surrogates, which only `parse_json` reads.
+    bake_session::parse_json(&text).unwrap_or_else(|error| panic!("{path:?}: {error:?}"))
 }
 
 fn object<'a>(value: &'a Value, context: &str) -> &'a Map<String, Value> {

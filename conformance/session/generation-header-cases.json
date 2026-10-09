@@ -1,6 +1,10 @@
 {
   "schema": "bake/session-format-conformance/generation-header-cases",
-  "version": 1,
+  "version": 2,
+  "history": [
+    "Version 1: 95 cases.",
+    "Version 2: 98 cases. Rust holds lone surrogates, so lone-surrogate-in-unexpected-member loses its json-parser limit, and three cases written from the TypeScript sources before either harness ran read a lone surrogate in a v0 id, a reversed pair in a v3 id beside a lone surrogate in cwd, and a lone surrogate in a newer generation's id, which the unsupported message quotes."
+  ],
   "oracle": "JsonlSessionPersistence.stat(id) through readGenerationHeader in packages/session/session-persistence-jsonl/src/index.ts",
   "cases": [
     {
@@ -793,9 +797,6 @@
       "record": "{\"type\":\"session\",\"version\":3,\"x\":\"\\ud800\"}",
       "expect": {
         "outcome": "absent"
-      },
-      "rust": {
-        "limit": "json-parser"
       }
     },
     {
@@ -1003,6 +1004,46 @@
       },
       "rust": {
         "limit": "version-diagnostic"
+      }
+    },
+    {
+      "id": "v0-lone-low-surrogate-id",
+      "sourceVersion": 0,
+      "record": "{\"type\":\"session\",\"version\":0,\"id\":\"\\udc00x\",\"createdAt\":1700000000000,\"delegationDepth\":0}",
+      "expect": {
+        "outcome": "header",
+        "header": {
+          "version": 3,
+          "id": "\udc00x",
+          "createdAt": 1700000000000,
+          "isSeeded": false,
+          "delegationDepth": 0
+        }
+      }
+    },
+    {
+      "id": "v3-reversed-surrogate-id-and-cwd",
+      "sourceVersion": 3,
+      "record": "{\"type\":\"session\",\"version\":3,\"id\":\"\\ude00\\ud83d\",\"createdAt\":1,\"cwd\":\"/\\ud800\",\"isSeeded\":false,\"delegationDepth\":0}",
+      "expect": {
+        "outcome": "header",
+        "header": {
+          "version": 3,
+          "id": "\ude00\ud83d",
+          "createdAt": 1,
+          "cwd": "/\ud800",
+          "isSeeded": false,
+          "delegationDepth": 0
+        }
+      }
+    },
+    {
+      "id": "newer-lone-surrogate-id",
+      "sourceVersion": 4,
+      "record": "{\"version\":4,\"id\":\"\\ud800\"}",
+      "expect": {
+        "outcome": "unsupported",
+        "message": "session \"\ud800\" uses log format v4, but this harness reads only v3: the log was written by a newer harness — upgrade the harness to open it"
       }
     }
   ]

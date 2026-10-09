@@ -17,7 +17,7 @@ const FIXTURE: &str = "conformance/runtime/request-reconstruction/tool-call-turn
 /// The TypeScript spec checks the fixture's SHA-256; this crate pins its size.
 const FIXTURE_BYTES: usize = 4533;
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 76;
+const CASE_COUNT: usize = 79;
 const SOURCE_BUDGET: usize = 64;
 const LIMITS: [&str; 4] = ["invalid-utf8", "json-parser", "number-lexeme", "codec"];
 
@@ -34,14 +34,15 @@ fn keys(object: &Map<String, Value>) -> BTreeSet<&str> {
 fn table() -> Vec<Value> {
     let text = std::fs::read_to_string(repo_path("conformance/session/log-scan-cases.json"))
         .expect("read log-scan-cases.json");
-    let table: Value = serde_json::from_str(&text).expect("parse log-scan-cases.json");
+    // Expected headers may hold a lone surrogate, which only `parse_json` reads.
+    let table: Value = bake_session::parse_json(&text).expect("parse log-scan-cases.json");
     let fields = table.as_object().expect("table object");
     assert_eq!(
         keys(fields),
         BTreeSet::from(["schema", "version", "history", "oracle", "cases"])
     );
     assert_eq!(fields["schema"], SCHEMA);
-    assert_eq!(fields["version"], 2);
+    assert_eq!(fields["version"], 3);
     assert!(
         fields["history"]
             .as_array()

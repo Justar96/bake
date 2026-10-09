@@ -17,9 +17,10 @@
 //! class or message is claimed. Where JavaScript's own semantics decide the
 //! outcome, or TypeScript writes a row its own strict decoder refuses, the
 //! encoder returns an [`EncodeLimit`] and claims nothing. A `Value` stands for
-//! the value `JSON.parse` returns, so lone surrogates, which serde_json cannot
-//! hold, are outside the input domain. Nothing is read from or written to a
-//! file.
+//! the value `JSON.parse` returns, its strings in the [`crate::js_string`]
+//! spelling, so a lone surrogate is written as `JSON.stringify` writes it, a
+//! lowercase `\udxxx` escape; the returned line is the text itself. Nothing
+//! is read from or written to a file.
 
 use std::collections::HashSet;
 
@@ -27,7 +28,6 @@ use serde_json::{Map, Value};
 
 use crate::json_parse::{Deep, clone_fields, dismantle};
 use crate::json_text::{is_writer_spelling, json_text};
-use crate::v2_to_v3::quote;
 use crate::v3_row::{Vocabulary, vocabulary};
 use crate::{
     CURRENT_SESSION_FORMAT_VERSION, Count, EnvelopeRejection, MAX_SAFE_INTEGER, PathPlatform,
@@ -167,24 +167,35 @@ pub fn encode_header_line(
     };
     let mut line = format!(
         "{{\"type\":\"session\",\"version\":{CURRENT_SESSION_FORMAT_VERSION},\"id\":{},\"createdAt\":{created_at}",
-        quote(id)
+        json_string(id)
     );
     if let Some(cwd) = cwd {
-        line.push_str(&format!(",\"cwd\":{}", quote(cwd)));
+        line.push_str(&format!(",\"cwd\":{}", json_string(cwd)));
     }
     if let Some(parent_session) = parent_session {
-        line.push_str(&format!(",\"parentSession\":{}", quote(parent_session)));
+        line.push_str(&format!(
+            ",\"parentSession\":{}",
+            json_string(parent_session)
+        ));
     }
     line.push_str(&format!(",\"isSeeded\":{is_seeded}"));
     if let Some(origin) = origin {
-        line.push_str(&format!(",\"origin\":{}", quote(origin)));
+        line.push_str(&format!(",\"origin\":{}", json_string(origin)));
     }
     line.push_str(&format!(",\"delegationDepth\":{delegation_depth}"));
     if let Some(agent_preset) = agent_preset {
-        line.push_str(&format!(",\"agentPreset\":{}", quote(agent_preset)));
+        line.push_str(&format!(",\"agentPreset\":{}", json_string(agent_preset)));
     }
     line.push('}');
     Ok(line)
+}
+
+/// `JSON.stringify` of a string as line bytes: a literal U+FDD0 is written
+/// once, as `JSON.stringify` writes it.
+fn json_string(text: &str) -> String {
+    let mut quoted = String::new();
+    crate::js_string::push_quoted(&mut quoted, text);
+    quoted
 }
 
 /// An absent member, or a present string; any other value, `null` included,

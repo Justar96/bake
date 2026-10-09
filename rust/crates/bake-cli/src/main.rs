@@ -472,7 +472,7 @@ fn parse_id(value: &OsStr) -> Result<String, String> {
     value
         .to_str()
         .filter(|text| !text.is_empty())
-        .map(str::to_owned)
+        .map(|text| bake_session::js_string::from_rust(text).into_owned())
         .ok_or_else(|| {
             format!(
                 "option '--id' needs a non-empty UTF-8 Session id, not {}",

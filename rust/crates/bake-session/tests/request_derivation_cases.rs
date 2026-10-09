@@ -26,7 +26,7 @@ const FIXTURE_EXPECTED: &str =
 const LOG_BYTES: usize = 4533;
 const EXPECTED_BYTES: usize = 2775;
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 217;
+const CASE_COUNT: usize = 220;
 const MAX_EDITS: usize = 8;
 const SOURCE_BUDGET: usize = 64;
 const LIMITS: [&str; 6] = [
@@ -113,7 +113,7 @@ fn fixture() -> Fixture {
     let mut lines: Vec<String> = log.split('\n').map(str::to_owned).collect();
     assert_eq!(lines.pop().as_deref(), Some(""), "fixture log ends with LF");
     assert_eq!(lines.len(), 17, "header and 16 rows");
-    let expected: Value = serde_json::from_str(&expected).expect("parse fixture expectation");
+    let expected: Value = bake_session::parse_json(&expected).expect("parse fixture expectation");
     let requests = expected["requests"]
         .as_array()
         .expect("fixture expectation requests")
@@ -126,14 +126,16 @@ fn table() -> Map<String, Value> {
         "conformance/runtime/request-derivation-cases.json",
     ))
     .expect("read request-derivation-cases.json");
-    let table: Value = serde_json::from_str(&text).expect("parse request-derivation-cases.json");
+    // Edits may hold a lone surrogate, which only `parse_json` reads.
+    let table: Value =
+        bake_session::parse_json(&text).expect("parse request-derivation-cases.json");
     let fields = object(&table, "table").clone();
     assert_eq!(
         keys(&fields),
         BTreeSet::from(["schema", "version", "history", "oracle", "fixture", "cases"])
     );
     assert_eq!(fields["schema"], SCHEMA);
-    assert_eq!(fields["version"], 6);
+    assert_eq!(fields["version"], 7);
     assert!(
         fields["history"]
             .as_array()
@@ -247,7 +249,17 @@ fn stringify(row: &Value, id: &str) -> String {
             _ => {}
         }
     }
-    serde_json::to_string(row).expect("serialize row")
+    // `JSON.stringify`, which writes a lone surrogate as a `\udxxx` escape.
+    bake_session::json_text(row)
+}
+
+/// A table string as the text it stands for: the table is read with
+/// `parse_json`, so a lone surrogate or U+FDD0 arrives spelled.
+fn raw(value: &Value, field: &str) -> String {
+    let text = value
+        .as_str()
+        .unwrap_or_else(|| panic!("{field} is a string"));
+    bake_session::js_string::to_rust(text).into_owned()
 }
 
 /// The case's log bytes, as the TypeScript spec builds them: the lines joined
@@ -271,8 +283,8 @@ fn case_log(case: &Map<String, Value>, fixture: &Fixture, id: &str) -> Vec<u8> {
                 row + 1
             };
             match keys(fields).into_iter().collect::<Vec<_>>().as_slice() {
-                ["header"] => lines[0] = edit["header"].as_str().expect("header").to_owned(),
-                ["tail"] => edit["tail"].as_str().expect("tail").clone_into(&mut tail),
+                ["header"] => lines[0] = raw(&edit["header"], "header"),
+                ["tail"] => tail = raw(&edit["tail"], "tail"),
                 ["truncate"] => {
                     let keep = edit["truncate"].as_u64().expect("truncate") as usize;
                     assert!(keep < rows, "{id}: truncate keeps fewer rows");
@@ -281,21 +293,23 @@ fn case_log(case: &Map<String, Value>, fixture: &Fixture, id: &str) -> Vec<u8> {
                 }
                 ["row", "text"] => {
                     let line = row();
-                    lines[line] = edit["text"].as_str().expect("text").to_owned();
+                    lines[line] = raw(&edit["text"], "text");
                     values[line] = None;
                 }
                 ["pointer", "row", "value"] => {
                     assert_integer_numbers(&edit["value"], id);
                     let line = row();
-                    let value = values[line]
-                        .get_or_insert_with(|| serde_json::from_str(&lines[line]).expect("row"));
+                    let value = values[line].get_or_insert_with(|| {
+                        bake_session::parse_json(&lines[line]).expect("row")
+                    });
                     let pointer = edit["pointer"].as_str().expect("pointer");
                     apply_edit(value, pointer, Operation::Set(edit["value"].clone()));
                 }
                 ["pointer", "remove", "row"] if edit["remove"] == true => {
                     let line = row();
-                    let value = values[line]
-                        .get_or_insert_with(|| serde_json::from_str(&lines[line]).expect("row"));
+                    let value = values[line].get_or_insert_with(|| {
+                        bake_session::parse_json(&lines[line]).expect("row")
+                    });
                     apply_edit(
                         value,
                         edit["pointer"].as_str().expect("pointer"),
@@ -311,7 +325,7 @@ fn case_log(case: &Map<String, Value>, fixture: &Fixture, id: &str) -> Vec<u8> {
             .as_array()
             .expect("log lines")
             .iter()
-            .map(|line| line.as_str().expect("log line").to_owned())
+            .map(|line| raw(line, "log line"))
             .collect();
         assert!(!lines.is_empty(), "{id}: log has a header");
         values = vec![None; lines.len()];
@@ -578,7 +592,7 @@ fn plugin_and_resumed_logs_derive_the_same_requests_when_restored() {
 #[test]
 fn fixture_rows_reserialize_to_their_text() {
     for line in fixture().lines {
-        let row: Value = serde_json::from_str(&line).expect("fixture line");
+        let row: Value = bake_session::parse_json(&line).expect("fixture line");
         assert_eq!(stringify(&row, "fixture"), line);
     }
 }
@@ -589,7 +603,7 @@ fn requests_keep_the_logged_message_ids() {
     let log = format!("{}\n", fixture.lines.join("\n"));
     let rows: Vec<Value> = fixture.lines[1..]
         .iter()
-        .map(|line| serde_json::from_str(line).expect("row"))
+        .map(|line| bake_session::parse_json(line).expect("row"))
         .collect();
     let logged = |seq: usize| {
         let data = &rows[seq]["data"];

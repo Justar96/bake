@@ -1,7 +1,7 @@
 {
  "schema": "bake/session-conformance/json-parse-cases",
- "version": 1,
- "history": ["Version 1: 50 cases, written from the ECMAScript JSON.parse and JSON.stringify definitions before either harness ran."],
+ "version": 2,
+ "history": ["Version 1: 50 cases, written from the ECMAScript JSON.parse and JSON.stringify definitions before either harness ran.", "Version 2: 56 cases. Rust holds lone surrogates, so lone-high-surrogate and lone-low-surrogate lose their rust lone-surrogate refusal, and six cases written from the same definitions before either harness ran add a reversed pair, a lone high surrogate before a pair and before an escape, lone surrogates in a key, U+FDD0 beside a lone surrogate, and an escaped backslash before surrogate text."],
  "oracle": "JSON.stringify(JSON.parse(text)), the parse scanLog runs on every record and the serialization a request takes; a thrown SyntaxError is syntax-error",
  "cases": [
   {"id": "whitespace-around", "text": " \t\n\r[ 1 , {\n\"a\" :\r2 } ]\n ", "ts": {"outcome": "parsed", "text": "[1,{\"a\":2}]"}},
@@ -26,8 +26,14 @@
   {"id": "raw-del-and-line-separator", "text": "\" \"", "ts": {"outcome": "parsed", "text": "\" \""}},
   {"id": "surrogate-pair", "text": "\"\\uD83D\\uDE00\"", "ts": {"outcome": "parsed", "text": "\"😀\""}},
   {"id": "escaped-nul", "text": "\"\\u0000\"", "ts": {"outcome": "parsed", "text": "\"\\u0000\""}},
-  {"id": "lone-high-surrogate", "text": "\"\\uD800\"", "ts": {"outcome": "parsed", "text": "\"\\ud800\""}, "rust": {"refusal": "lone-surrogate"}},
-  {"id": "lone-low-surrogate", "text": "\"\\uDC00\"", "ts": {"outcome": "parsed", "text": "\"\\udc00\""}, "rust": {"refusal": "lone-surrogate"}},
+  {"id": "lone-high-surrogate", "text": "\"\\uD800\"", "ts": {"outcome": "parsed", "text": "\"\\ud800\""}},
+  {"id": "lone-low-surrogate", "text": "\"\\uDC00\"", "ts": {"outcome": "parsed", "text": "\"\\udc00\""}},
+  {"id": "reversed-surrogate-pair", "text": "\"\\uDC00\\uD83D\"", "ts": {"outcome": "parsed", "text": "\"\\udc00\\ud83d\""}},
+  {"id": "lone-high-before-pair", "text": "\"\\uD83D\\uD83D\\uDE00\"", "ts": {"outcome": "parsed", "text": "\"\\ud83d😀\""}},
+  {"id": "lone-high-before-escape", "text": "\"a\\uDBFF\\u0041\\n\"", "ts": {"outcome": "parsed", "text": "\"a\\udbffA\\n\""}},
+  {"id": "lone-surrogate-key", "text": "{\"\\uDFFF\":[\"\\uD800\"],\"1\":0}", "ts": {"outcome": "parsed", "text": "{\"1\":0,\"\\udfff\":[\"\\ud800\"]}"}},
+  {"id": "noncharacter-beside-lone-surrogate", "text": "\"\uFDD0\\uFDD0d800\\uD800\"", "ts": {"outcome": "parsed", "text": "\"\uFDD0\uFDD0d800\\ud800\""}},
+  {"id": "escaped-backslash-surrogate-text", "text": "\"\\\\ud800\"", "ts": {"outcome": "parsed", "text": "\"\\\\ud800\""}},
   {"id": "negative-zero", "text": "-0", "ts": {"outcome": "parsed", "text": "0"}},
   {"id": "integral-fraction", "text": "1.0", "ts": {"outcome": "parsed", "text": "1"}},
   {"id": "upper-exponent", "text": "1E2", "ts": {"outcome": "parsed", "text": "100"}},

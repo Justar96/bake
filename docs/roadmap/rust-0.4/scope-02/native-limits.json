@@ -40,18 +40,18 @@
     {
      "table": "session/header-cases.json",
      "name": "json-parser",
-     "count": 3
+     "count": 1
     },
     {
      "table": "session/generation-header-cases.json",
      "name": "json-parser",
-     "count": 2
+     "count": 1
     }
    ],
    "kind": "format",
-   "classification": "reachable-gap",
-   "evidence": "A configured agents[].sessionId is any non-empty string (packages/core/agent-loop/src/index.ts:323) that replaces the generated id (packages/core/agent-loop/src/index.ts:385), and encodeSegment is documented to encode lone surrogates injectively for exactly this reason (packages/session/session-persistence-jsonl/src/format.ts:188-192); JSON.stringify escapes the lone half into the header id ([W5](#writer-anchors)). A Windows cwd with an unpaired surrogate is a second, unverified path (packages/bundle/headless/src/index.ts:445). Neither header parser has a nesting bound, and JSON.stringify writes only finite doubles. A read-only scan of the owner's home (93 Zstandard format-3 logs, 40,514 rows; no v0 to v2 log) found no header with a surrogate escape",
-   "followUp": "Port lone-surrogate strings in the header parser with scan-json-parser."
+   "classification": "unreachable",
+   "evidence": "[W5](#writer-anchors). The lone-surrogates port made both header parsers hold a lone surrogate, so a configured agents[].sessionId holding one (packages/core/agent-loop/src/index.ts:323, encoded injectively by encodeSegment at packages/session/session-persistence-jsonl/src/format.ts:188-192) reads as TypeScript reads it (rust/crates/bake-session/src/json_parse.rs:349, rust/crates/bake-session/src/js_string.rs). The limit remains only for a number whose nearest double is infinite, which JSON.stringify never writes: it writes only finite doubles, and createdAt is Date.now() (packages/core/session/src/index.ts:151). Neither header parser has a nesting bound",
+   "followUp": "None."
   },
   {
    "variants": [
@@ -291,13 +291,13 @@
     {
      "table": "session/log-scan-cases.json",
      "name": "json-parser",
-     "count": 4
+     "count": 2
     }
    ],
    "kind": "format",
-   "classification": "reachable-gap",
-   "evidence": "A released writer puts a lone surrogate in a row: boundContextSummary cuts a notice summary with slice(0, 119) on UTF-16 code units (packages/llm/llm/src/message.ts:121-124), which splits a surrogate pair, and tool-goal passes it the goal objective (packages/goal/tool-goal/src/index.ts:353) into a deferred user/message source; every Bake tag from v0.1.1 and the v0 to v2 writers carry both (3efd4b51e0:packages/llm/llm/src/message.ts:124, 3efd4b51e0:packages/goal/tool-goal/src/index.ts:321; 81dcacbb44:packages/goal/tool-goal/src/index.ts:321). Session.append's snapshot keeps strings as they are (packages/util/values/src/index.ts:177-180), and JSON.stringify writes the lone half as a \\udXXX escape ([W1](#writer-anchors)), which Node's JSON.parse reads back as a lone surrogate the TypeScript reader keeps. The Rust parser refuses it (rust/crates/bake-session/src/json_parse.rs), so the scan and the older-generation row parser refuse a log TypeScript reads. Numbers outside the f64 range stay unreachable: JSON.stringify writes only finite doubles. A read-only scan of the owner's home (93 Zstandard format-3 logs, 40,514 rows; no v0 to v2 log) found no surrogate escape in any row (8 escaped-backslash literals in 2 rows) and no row failing UTF-8 decoding",
-   "followUp": "Port lone-surrogate strings in the row parser and the values that hold them (section: Reachable gaps)."
+   "classification": "unreachable",
+   "evidence": "[W1](#writer-anchors). The lone-surrogates port made the row parser hold a lone surrogate in a string or key, so the scan and the older-generation row parser read the lone surrogates boundContextSummary leaves in a user/message source (packages/llm/llm/src/message.ts:121-124, packages/goal/tool-goal/src/index.ts:353; 3efd4b51e0:packages/llm/llm/src/message.ts:124) as JSON.parse reads them (rust/crates/bake-session/src/json_parse.rs:349, rust/crates/bake-session/src/js_string.rs). The limit remains only for a number whose nearest double is infinite, which no writer stores: JSON.stringify writes only finite doubles, and Session.append throws on a non-finite number (packages/util/values/src/index.ts:180)",
+   "followUp": "None."
   },
   {
    "variants": [
@@ -2123,9 +2123,9 @@
     }
    ],
    "kind": "pass-through",
-   "classification": "reachable-gap",
-   "evidence": "Passes ScanRefusal through, which includes scan-json-parser, a reachable gap; the witnessed case is a scan limit on stored bytes.",
-   "followUp": "Follows scan-json-parser."
+   "classification": "unreachable",
+   "evidence": "Passes ScanRefusal through, whose limits (scan-invalid-utf8, scan-json-parser, scan-number-lexeme, scan-codec) are all unreachable since the lone-surrogates port; the witnessed case is a scan limit on stored bytes.",
+   "followUp": "None."
   },
   {
    "variants": [
@@ -2144,17 +2144,12 @@
      "table": "session/plain-log-file-cases.json",
      "name": "migration/v2-codec-recovery",
      "count": 1
-    },
-    {
-     "table": "session/plain-log-file-cases.json",
-     "name": "migration/row/json-parser",
-     "count": 1
     }
    ],
    "kind": "pass-through",
-   "classification": "reachable-gap",
-   "evidence": "Passes migration limits through. Its row/json-parser name is scan-json-parser's lone-surrogate refusal, reachable in v0 to v2 rows (3efd4b51e0:packages/llm/llm/src/message.ts:124); its encode name meets only encode-float-number's unreachable spellings. finish-order and v2-codec-recovery depend on rows a writer may or may not produce and are not traced",
-   "followUp": "Follows scan-json-parser; trace finish-order and v2-codec-recovery separately."
+   "classification": "undecided",
+   "evidence": "Passes migration limits through. Its row/json-parser name, scan-json-parser's refusal, now refuses only out-of-range numbers no writer stores, and its encode name meets only encode-float-number's unreachable spellings. finish-order and v2-codec-recovery depend on rows a writer may or may not produce and are not traced",
+   "followUp": "Trace finish-order and v2-codec-recovery against the v0 to v2 writers."
   },
   {
    "variants": [],
@@ -2225,8 +2220,8 @@
    "crate": "bake-cli",
    "cases": [],
    "kind": "pass-through",
-   "classification": "reachable-gap",
-   "evidence": "Passes a migration limit of `migrate_released_generation` (`LogFileLimit::Migration`'s names), `migrate_released_zstd_generation` (`zstd/stop-order`), or `restore_migrated` (`MigratedRestoreLimit`) through; log-file-migration is a reachable gap, and migrated-restore-restore is unreachable",
+   "classification": "undecided",
+   "evidence": "Passes a migration limit of `migrate_released_generation` (`LogFileLimit::Migration`'s names), `migrate_released_zstd_generation` (`zstd/stop-order`), or `restore_migrated` (`MigratedRestoreLimit`) through; log-file-migration is undecided, and migrated-restore-restore is unreachable",
    "followUp": "Follows log-file-migration."
   },
   {
