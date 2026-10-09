@@ -36,7 +36,7 @@ const LOGS: [(&str, &str, usize); 3] = [
     ),
 ];
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 36;
+const CASE_COUNT: usize = 37;
 const SOURCE_BUDGET: usize = 64;
 const LIMITS: [(&str, PressureLimit); 7] = [
     ("number", PressureLimit::Number),
@@ -148,7 +148,7 @@ fn load() -> Vec<Case> {
         BTreeSet::from(["cases", "history", "logs", "oracle", "schema", "version"])
     );
     assert_eq!(table["schema"], SCHEMA);
-    assert_eq!(table["version"], 1);
+    assert_eq!(table["version"], 2);
     assert!(
         table["history"]
             .as_array()

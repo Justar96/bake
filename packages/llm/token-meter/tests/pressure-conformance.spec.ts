@@ -36,7 +36,7 @@ const LOGS: Record<string, { path: string; sha256: string }> = {
   },
 }
 /** Both harnesses pin the table size, so a dropped case fails. */
-const CASE_COUNT = 36
+const CASE_COUNT = 37
 const LIMITS = ['number', 'usage', 'stream', 'claim', 'block', 'route', 'context-window']
 
 const definition = contextPressureProjectionDefinition
@@ -146,10 +146,10 @@ function parseOutcome(value: unknown, id: string): Outcome {
 function loadTable(): PressureCase[] {
   const table: unknown = JSON.parse(readFileSync(new URL('conformance/session/pressure-cases.json', REPO), 'utf8'))
   if (!isObject(table) || sortedKeys(table) !== 'cases,history,logs,oracle,schema,version' || table.schema !== SCHEMA
-    || table.version !== 1 || table.oracle !== ORACLE || !Array.isArray(table.cases)
+    || table.version !== 2 || table.oracle !== ORACLE || !Array.isArray(table.cases)
     || !Array.isArray(table.history) || !table.history.every(isLine)
     || JSON.stringify(table.logs) !== JSON.stringify(Object.fromEntries(Object.entries(LOGS).map(([name, { path }]) => [name, path])))) {
-    throw new Error('pressure-cases.json does not match its version-1 schema')
+    throw new Error('pressure-cases.json does not match its version-2 schema')
   }
   return table.cases.map((entry: unknown): PressureCase => {
     if (!isObject(entry) || typeof entry.id !== 'string' || typeof entry.log !== 'string' || !Array.isArray(entry.edits)) {

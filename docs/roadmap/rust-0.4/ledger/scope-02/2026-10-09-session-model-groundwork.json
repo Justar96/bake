@@ -1,0 +1,1359 @@
+{
+  "schema": "bake/rust-migration/qualification-attempt",
+  "version": 1,
+  "id": "2026-10-09-session-model-groundwork",
+  "scope": "02",
+  "status": "partial",
+  "recordedOn": "2026-10-09",
+  "summary": "Scope 02 groundwork only: the development-only bake-session crate's Session restoration, replay and request derivation, released-format migrations, projections (usage, pressure, inbox, goal, subagent, boundary), unfinished work, fork seeds, prompt admission, and restored request derivation, compared with TypeScript through 36 shared case tables (3303 cases) and three runtime captures. A clean checkout of candidate e9e1e55034338bc4a521cd18d1a2a857bc2b9268 passed 461 workspace Cargo tests and 4079 Vitest tests (4 skipped) in the 40 TypeScript specs that read those tables. CI for PR #134 tested synthetic merge cc348b8494ce16fad9465cef987a7c7d586ce11e, which has the candidate's tree a6f38828bd3fd7527f8b17c92a5911566193e8be. One shared-table control was rejected by both harnesses. Native-limit refusals are not parity; children's own logs, migrated and Zstd unfinished work, Agent resume, and full preflight are missing. Not scope acceptance.",
+  "supersedes": [],
+  "provenance": {
+    "base": "586083f7545d0cf139e0a9dfc92f03d2a7d0fae8",
+    "candidate": "e9e1e55034338bc4a521cd18d1a2a857bc2b9268",
+    "oracle": {
+      "missing": "Scope 00 has not accepted a final frozen TypeScript oracle."
+    }
+  },
+  "support": {
+    "notApplicable": "Development-only test oracles and an unshipped crate; this attempt changes no shipped support entry."
+  },
+  "fixtures": {
+    "files": [
+      {
+        "path": "conformance/runtime/request-derivation-cases.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "dae6a867bfb5eb61241bc47e096a53f6be9a3c9bfedc10aa1aa3deaed68ca61e"
+      },
+      {
+        "path": "conformance/runtime/request-reconstruction/dynamic-tools/expected-requests.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "48c9b154b9d5f8fb4d9c43272ce19375bd94e3ed6c37c4de243878021a487378"
+      },
+      {
+        "path": "conformance/runtime/request-reconstruction/dynamic-tools/session.jsonl",
+        "role": "shared-fixture-bytes",
+        "sha256": "43852e686ea6ef5f599065a7ead57f82d27f8b20e9e936e81b0b0596636e61e2"
+      },
+      {
+        "path": "conformance/runtime/request-reconstruction/retry-attempt/expected-requests.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "e6fa5d82b507ae3f2970e069fad9ceb15d0c604ffc395a08c0ab617ef7354895"
+      },
+      {
+        "path": "conformance/runtime/request-reconstruction/retry-attempt/session.jsonl",
+        "role": "shared-fixture-bytes",
+        "sha256": "cd79f036ffd20337af3393ab1dcfb57f62aa7434129a6ec3ddea9398c9a7a2db"
+      },
+      {
+        "path": "conformance/runtime/request-reconstruction/tool-call-turn/expected-requests.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "460b031e6fd308bd9ac3fd97834aad64729b2384f0f3e803c424d7502f9dfa02"
+      },
+      {
+        "path": "conformance/runtime/request-reconstruction/tool-call-turn/session.jsonl",
+        "role": "shared-fixture-bytes",
+        "sha256": "a7a8222990ef9f4c4f00a051c019de86d3156ca7f6c3c0d28af4be4cc3fbe657"
+      },
+      {
+        "path": "conformance/runtime/restored-request-derivation-cases.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "7911f430b1ad5230e1bb839a3d8f31b01b775778b8084078269dd888cb362e4f"
+      },
+      {
+        "path": "conformance/session/boundary-cases.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "cbd709ccabe5aaf6fe873ab4beed9b07552eae70ae969088874794ee8788717d"
+      },
+      {
+        "path": "conformance/session/event-envelope-cases.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "6a43162a916323c39eef367fb8f823ab3c3beecebc5dca99f0da4b560de8621a"
+      },
+      {
+        "path": "conformance/session/fork-cases.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "baa0d7137855b8c260927317e0afbb2c6f586a269667218821abe17753c5a5f1"
+      },
+      {
+        "path": "conformance/session/generation-header-cases.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "58dd0a8b5a97c0510821a5c17e5a7dffbcf628b481f5e8596540efd2e30a0c9f"
+      },
+      {
+        "path": "conformance/session/goal-cases.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "c0fa2379f1904a7f1f09c194adadd83f17f5f3a6db7aec1cbcb7180dccb2e7a5"
+      },
+      {
+        "path": "conformance/session/header-cases.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "78494c5964baf4654a3fbfc812afc1b0e341f514a7441f7708b8297ca21bcd61"
+      },
+      {
+        "path": "conformance/session/history-cases.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "6796e3b4a7bbeade2de4769df6ef9a64338b8ed019fe158a8cc202a354c9a668"
+      },
+      {
+        "path": "conformance/session/inbox-cases.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "badffcf1da303c1b20584ea12424464da5706e5dde4606a672d9c2093c256afb"
+      },
+      {
+        "path": "conformance/session/list-cases.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "6b13ceedc6e873acb9d9a61a3bdb6005c233dbeaa75ef3de3347f426ae1feebd"
+      },
+      {
+        "path": "conformance/session/log-scan-cases.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "9dcc538faa4bc07edddca71c5642aaeb32c42b27ebeed928f0e58b597100f5ec"
+      },
+      {
+        "path": "conformance/session/lookup-cases.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "5086573e520e97cfe7769938bc3ef0df5f4063e2c3aa806744841b389ac8e70f"
+      },
+      {
+        "path": "conformance/session/migrated-restore-cases.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "36533850227b5fe2e82f3e4ee6a392805cbec9a5b163e936a252151506f63acf"
+      },
+      {
+        "path": "conformance/session/plain-append-cases.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "4407d12ca6ddd08277a9e614ac7b671f6267ab1ca2a3a70482ec59b7c3977e9a"
+      },
+      {
+        "path": "conformance/session/plain-log-file-cases.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "b58677e79f5d137817b38320ccb5d904dc3843bd15f7258d493d34de011fd522"
+      },
+      {
+        "path": "conformance/session/prefix-restore-cases.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "da8f697ec7b4e29cf86b5197ddd4eb397d7f5e069b7c41a3e9d16ea48eef471e"
+      },
+      {
+        "path": "conformance/session/pressure-cases.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "2b6749219e9d79b4f48e7124897c78bf30047ec49d7a7aa11b168fc52a8264a4"
+      },
+      {
+        "path": "conformance/session/prompt-admission-cases.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "e30f447beebb8e4526bdb2c4f562d68d3158f18d11cba8c4f155d7376410021f"
+      },
+      {
+        "path": "conformance/session/relationships-cases.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "35fe8526bdf0e5e7686bed8f89c74a5e9edb8f6243970818072d678892096963"
+      },
+      {
+        "path": "conformance/session/restore-cases.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "d295778eb5a10dad6dc074b508d5c4b2a80e4cf40145a462cdc5e53f8af0c988"
+      },
+      {
+        "path": "conformance/session/row-encode-cases.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "59389925b68941fbcf3bf5e98b33ee6ead57342714a14ddc64eeda55c77c66eb"
+      },
+      {
+        "path": "conformance/session/source-event-seqs-cases.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "714dedb9ec52afe7a5dc91334ed3fcdabf0f51adff318c9a539e58c2687bade7"
+      },
+      {
+        "path": "conformance/session/stat-cases.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "7fd650b923fed1d44075c10ee45866810cb75928b3f11376366d51f751f23713"
+      },
+      {
+        "path": "conformance/session/subagent-cases.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "94d889199483c44b77c61284ff0cdb2efdaaf821dbc12fc6c7c03711f4d0be74"
+      },
+      {
+        "path": "conformance/session/subagent-catalog-cases.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "3dee523e8b37c39c3e2cf93f276fa1e6b89018064ca0ef8710d1a402f0dd5366"
+      },
+      {
+        "path": "conformance/session/unfinished-work-cases.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "61063cf91dc87206dbdf350c3ca9e75342853d50081db5221f369d0bb0ddb5da"
+      },
+      {
+        "path": "conformance/session/usage-cases.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "b6f10b4eb0d970ce85e3695c6590181f5ed2a998d6ea61b62eb0931a6bac7981"
+      },
+      {
+        "path": "conformance/session/v0-to-v1-cases.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "2a9e3b50b8d26e32c7d705575ef464afdafb8ac58db47337175635a962c976e8"
+      },
+      {
+        "path": "conformance/session/v1-codec-cases.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "c6bea45a639562be05a496b4b3bb33fd06cad9cd5d29f8d5e038cc2dd0f823b0"
+      },
+      {
+        "path": "conformance/session/v1-to-v2-cases.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "907c0b0ea9b6468b4f016517d5febe937a098ceb3f9001d2ecec19264209e7de"
+      },
+      {
+        "path": "conformance/session/v1-to-v2-decoded-cases.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "af769e4f4085e64521014f4fbaed8c17d04918c53fb46c7e51f50a18e9927d4e"
+      },
+      {
+        "path": "conformance/session/v1-to-v2-run-cases.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "1b6cc00756c4d8c60dbffac6edf46518510475d2a154945cbe2e37b709307f3a"
+      },
+      {
+        "path": "conformance/session/v2-to-v3-cases.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "8adb990ccc48bc0f380cc74251ebba5bb814de06a905528ef77d16e8699edd73"
+      },
+      {
+        "path": "conformance/session/v3-row-cases.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "ff7e1439e99af3b5c201a7d5035d225a264f95e190d6f2b706cde57fe0691059"
+      },
+      {
+        "path": "conformance/session/zstd-cases.json",
+        "role": "shared-fixture-bytes",
+        "sha256": "00af05058ff23d0f2981f605499d5977f637d1ebd9fe7629cc64df7196451b59"
+      },
+      {
+        "path": "packages/compaction/compaction-basic/tests/unfinished-compaction-conformance.spec.ts",
+        "role": "fixture-definition-source",
+        "sha256": "a2de6ccf551d2f023e2f80fa4a4a28e871826c21673b1083d64d596eda7bfd9a"
+      },
+      {
+        "path": "packages/core/agent-loop/tests/inbox-conformance.spec.ts",
+        "role": "fixture-definition-source",
+        "sha256": "c7d37483079f777a21775cd3b496413ff280b0bd113f24d326760f6b3fb546f9"
+      },
+      {
+        "path": "packages/core/agent-loop/tests/prompt-admission-conformance.spec.ts",
+        "role": "fixture-definition-source",
+        "sha256": "c9d84da63c987f7645ba3355d0824c690801bf989dce891d6e7548ac4dba21ce"
+      },
+      {
+        "path": "packages/core/agent-loop/tests/request-derivation-conformance.spec.ts",
+        "role": "fixture-definition-source",
+        "sha256": "5bc70525c98db731fa04da0164d786f053d730dbf01fb942027b2acc2ca5d812"
+      },
+      {
+        "path": "packages/core/agent-loop/tests/request-reconstruction.fixture.spec.ts",
+        "role": "fixture-definition-source",
+        "sha256": "33661e9a5a4a45e07a77e5c002dbafc1d7c752b1f517bbe612276b923702e5a4"
+      },
+      {
+        "path": "packages/core/agent-loop/tests/restored-request-derivation-conformance.spec.ts",
+        "role": "fixture-definition-source",
+        "sha256": "43a4f604f689ceb4415f0a969a71f2ab1a8c8bdcc753eee7e096b96a9c4d93ec"
+      },
+      {
+        "path": "packages/core/agent-loop/tests/unfinished-inbox-conformance.spec.ts",
+        "role": "fixture-definition-source",
+        "sha256": "83294431c23adc0321960bddcae8ecb3cfd340087c28bbb50692af46c754fc6e"
+      },
+      {
+        "path": "packages/core/session/tests/fork-conformance.spec.ts",
+        "role": "fixture-definition-source",
+        "sha256": "7bd2b6d0d19369a210f67333b2e6447fba276f039a2f002dc144b60059d30eaf"
+      },
+      {
+        "path": "packages/core/session/tests/unfinished-turn-conformance.spec.ts",
+        "role": "fixture-definition-source",
+        "sha256": "6d121498a6fad21e8338529e94b90d647d58683b88605085c8aae703143d428e"
+      },
+      {
+        "path": "packages/goal/goal/tests/goal-conformance.spec.ts",
+        "role": "fixture-definition-source",
+        "sha256": "8992fbbe9bace0a873aac2e350f70e21f1c66351a5234714c7796654e83b2663"
+      },
+      {
+        "path": "packages/llm/token-meter/tests/pressure-conformance.spec.ts",
+        "role": "fixture-definition-source",
+        "sha256": "8bdeaa486744f34ec5eeb4265fa0366972c6ce93ff1ed1f4949d309fe532c68a"
+      },
+      {
+        "path": "packages/llm/token-meter/tests/usage-conformance.spec.ts",
+        "role": "fixture-definition-source",
+        "sha256": "31216fc44204f537a003a30656206170ce98121b180add88914b51bb32ec9e08"
+      },
+      {
+        "path": "packages/session/session-format-v0-to-v1/tests/codec-conformance.spec.ts",
+        "role": "fixture-definition-source",
+        "sha256": "0bf7fb7cb1e1f49b62d4459afb00af7052f66d250f455bf1a2646a2c8a21b686"
+      },
+      {
+        "path": "packages/session/session-format-v0-to-v1/tests/migration-conformance.spec.ts",
+        "role": "fixture-definition-source",
+        "sha256": "72735cb54e2f8f17d9eda4a7755264d7fd3e085306731de7f3de44f795a7edde"
+      },
+      {
+        "path": "packages/session/session-format-v0-to-v1/tests/relationships-conformance.spec.ts",
+        "role": "fixture-definition-source",
+        "sha256": "3168673ea891af356585f9a3257e390c092091343d99cbfc78a545abaf1fbaab"
+      },
+      {
+        "path": "packages/session/session-format-v1-to-v2/tests/decoded-conformance.spec.ts",
+        "role": "fixture-definition-source",
+        "sha256": "a49cfc874dd6285cb6b59dc16c59ebdb71b5afc6bca14353f20bc129f57d10c8"
+      },
+      {
+        "path": "packages/session/session-format-v1-to-v2/tests/migration-conformance.spec.ts",
+        "role": "fixture-definition-source",
+        "sha256": "ccd1c407122a052fde98509edc505873bc948e17df0263b9e63f4f04cd933796"
+      },
+      {
+        "path": "packages/session/session-format-v1-to-v2/tests/run-conformance.spec.ts",
+        "role": "fixture-definition-source",
+        "sha256": "e222bbd2fabc0e35a94640540d3e729af0f3a5305d34eadd60b0861a85e7f674"
+      },
+      {
+        "path": "packages/session/session-format-v2-to-v3/tests/event-envelope-conformance.spec.ts",
+        "role": "fixture-definition-source",
+        "sha256": "e46efa1ebe4d81ca98455157084d81bade5480000c7185f5748d532f681c1d13"
+      },
+      {
+        "path": "packages/session/session-format-v2-to-v3/tests/history-conformance.spec.ts",
+        "role": "fixture-definition-source",
+        "sha256": "fd2c0a14ea1519bced1e8479d0bde4d6e0d9d001cb24833a5f02f512557a2815"
+      },
+      {
+        "path": "packages/session/session-format-v2-to-v3/tests/source-event-seqs-conformance.spec.ts",
+        "role": "fixture-definition-source",
+        "sha256": "4ea3ff3ae51039b29326b541eae2a455520df4405803c4b086be2c23eb2413eb"
+      },
+      {
+        "path": "packages/session/session-format-v2-to-v3/tests/v2-to-v3-migration-conformance.spec.ts",
+        "role": "fixture-definition-source",
+        "sha256": "a441b87668eacc423be400825f2c387173d6d0e5b1a620e772e85f1f7c8d64c5"
+      },
+      {
+        "path": "packages/session/session-format-v2-to-v3/tests/v3-row-conformance.spec.ts",
+        "role": "fixture-definition-source",
+        "sha256": "07c8799c9d10b9fa2d310596a5347a5ee6181230f89f74b18300fd8c31935acd"
+      },
+      {
+        "path": "packages/session/session-persistence-jsonl/tests/generation-header-conformance.spec.ts",
+        "role": "fixture-definition-source",
+        "sha256": "dc2b0f00765d4188aef442ce8cbeb9f91a54616898dd4ff775ee21fe3e087f61"
+      },
+      {
+        "path": "packages/session/session-persistence-jsonl/tests/header-conformance.spec.ts",
+        "role": "fixture-definition-source",
+        "sha256": "4823957b4e7e6c66c1f6c0586ff03da4c71dc284f1c8aa525ee40b3c0ff00004"
+      },
+      {
+        "path": "packages/session/session-persistence-jsonl/tests/list-conformance.spec.ts",
+        "role": "fixture-definition-source",
+        "sha256": "a429c625c4218dd8e0bbf240b7c4923695f814b5ec0b1effea49e1c6f38e24c0"
+      },
+      {
+        "path": "packages/session/session-persistence-jsonl/tests/log-scan-conformance.spec.ts",
+        "role": "fixture-definition-source",
+        "sha256": "6cc1348b040bd4d6e83bce4b0e77f1ccf18ef3e3c8cacc5430dfc98562d9535c"
+      },
+      {
+        "path": "packages/session/session-persistence-jsonl/tests/lookup-conformance.spec.ts",
+        "role": "fixture-definition-source",
+        "sha256": "8b4425cf21f41803a9ecf2c1da14548d1704dc75086e5d4c373cdde62c00731c"
+      },
+      {
+        "path": "packages/session/session-persistence-jsonl/tests/migrated-restore-conformance.spec.ts",
+        "role": "fixture-definition-source",
+        "sha256": "d0da8b631e73d1207e47c1fd330f0605f9cac9907e023b422bd39f579420fee4"
+      },
+      {
+        "path": "packages/session/session-persistence-jsonl/tests/plain-append-conformance.spec.ts",
+        "role": "fixture-definition-source",
+        "sha256": "d391214fada018588c0bf254713e1a6a7f36a222602209fbc73a972d7396a987"
+      },
+      {
+        "path": "packages/session/session-persistence-jsonl/tests/plain-log-file-conformance.spec.ts",
+        "role": "fixture-definition-source",
+        "sha256": "1c61dd99051698038d9870c60c88d77cc9a64d2046faef54952853d73ea2a837"
+      },
+      {
+        "path": "packages/session/session-persistence-jsonl/tests/prefix-restore-conformance.spec.ts",
+        "role": "fixture-definition-source",
+        "sha256": "b7b54b8247c9f4cad6df466b708283238230c695028780bd21b05660d171c792"
+      },
+      {
+        "path": "packages/session/session-persistence-jsonl/tests/restore-conformance.spec.ts",
+        "role": "fixture-definition-source",
+        "sha256": "39a163726f27ba1dd306ab7012fc32df46a96f6674907bcc7339952f54b2f1f6"
+      },
+      {
+        "path": "packages/session/session-persistence-jsonl/tests/row-encode-conformance.spec.ts",
+        "role": "fixture-definition-source",
+        "sha256": "900dde9f6544553b1e4ef09eb2c8a9ba4c66e536bb64b2c183054aec6e33ec05"
+      },
+      {
+        "path": "packages/session/session-persistence-jsonl/tests/stat-conformance.spec.ts",
+        "role": "fixture-definition-source",
+        "sha256": "c10c9d20bac99d809ec05cb3f692b923d86ad1cf26cf17c0fe54e60a298e942c"
+      },
+      {
+        "path": "packages/session/session-persistence-jsonl/tests/zstd-conformance.spec.ts",
+        "role": "fixture-definition-source",
+        "sha256": "f5194f53f8b6814ff2889a50fe7757324dac3d39366a6d70f0f624a9bd6936a1"
+      },
+      {
+        "path": "packages/session/session-title/tests/boundary-conformance.spec.ts",
+        "role": "fixture-definition-source",
+        "sha256": "8e662b72af657dc084c46a80d48f8ed12b3fce60ce042d9caf4048036e0dc8b7"
+      },
+      {
+        "path": "packages/subagent/subagent/tests/catalog-conformance.spec.ts",
+        "role": "fixture-definition-source",
+        "sha256": "ebbb00935a6d8942e07dcb5f8b3a11d5fed18d84e03de1db03b6b64bc2629554"
+      },
+      {
+        "path": "packages/subagent/subagent/tests/projection-conformance.spec.ts",
+        "role": "fixture-definition-source",
+        "sha256": "e4cdc73aaf7b588092be311d65ad5f81763329b0b934c1b61755fdaa5403f748"
+      },
+      {
+        "path": "packages/subagent/subagent/tests/unfinished-children-conformance.spec.ts",
+        "role": "fixture-definition-source",
+        "sha256": "8fba507851f67341f513845c6e13658c085156cbadce0d29184d1a70e554df10"
+      },
+      {
+        "path": "rust/crates/bake-cli/src/lookup.rs",
+        "role": "fixture-definition-source",
+        "sha256": "8c211d80a3a9b84a6d7d17e5fceead3afd33757f84f23a0873cbdff675ee9fa1"
+      },
+      {
+        "path": "rust/crates/bake-cli/tests/session_inspect.rs",
+        "role": "fixture-definition-source",
+        "sha256": "46a6dd75bc078de74f300f8fd7ca96e90ca6b0d387f16318ca978522bb305d96"
+      },
+      {
+        "path": "rust/crates/bake-cli/tests/session_list.rs",
+        "role": "fixture-definition-source",
+        "sha256": "bd93ed6a5f1431fb7a50ee3e2af2624f702ed239e3fc95b19d847d6ad5c9bb22"
+      },
+      {
+        "path": "rust/crates/bake-cli/tests/session_lookup.rs",
+        "role": "fixture-definition-source",
+        "sha256": "a37203a2eb49e4080f89c8c8b8578337c87d58bff38ff18a80a9f9d909fef453"
+      },
+      {
+        "path": "rust/crates/bake-cli/tests/session_stat.rs",
+        "role": "fixture-definition-source",
+        "sha256": "5d1b8803ebf62038fcfa465ca31d9557de516339809a98797af334a0a8b195f1"
+      },
+      {
+        "path": "rust/crates/bake-session/src/lib.rs",
+        "role": "fixture-definition-source",
+        "sha256": "5cd50ed43969f92da28ef476af2074993937a6b493df2234a6cd3ab6ff6dcfc1"
+      },
+      {
+        "path": "rust/crates/bake-session/src/v0_to_v1/dispositions.rs",
+        "role": "fixture-definition-source",
+        "sha256": "f068d9d76ccf2a68cfe756634cbb0fb4bdf987aba473b280c2c03d90ce0d6e82"
+      },
+      {
+        "path": "rust/crates/bake-session/src/v1_to_v2.rs",
+        "role": "fixture-definition-source",
+        "sha256": "9c4c3016dace181992f88bdd01114ef3f5cda050c6c1b4f33ce342cad1f752df"
+      },
+      {
+        "path": "rust/crates/bake-session/src/v2_to_v3/admission/dispositions.rs",
+        "role": "fixture-definition-source",
+        "sha256": "53fc77f00904c5040578697aa4d4f18ccfda7330aaa90624856181380e273786"
+      },
+      {
+        "path": "rust/crates/bake-session/src/v3_row.rs",
+        "role": "fixture-definition-source",
+        "sha256": "0d92d5761fa8606373bbe79e78606627ae5b734b0756b467ab1d1c4bec90b6a7"
+      },
+      {
+        "path": "rust/crates/bake-session/tests/boundary_cases.rs",
+        "role": "fixture-definition-source",
+        "sha256": "3ba7237823ba9e977691255ca89b8351b87c7fb41af75fe12270f0544fb94fa3"
+      },
+      {
+        "path": "rust/crates/bake-session/tests/event_envelope_cases.rs",
+        "role": "fixture-definition-source",
+        "sha256": "987a800f0a0564efdcba0702fbdfd4f6379a7cf0639b8416172608660c6474b9"
+      },
+      {
+        "path": "rust/crates/bake-session/tests/fork_cases.rs",
+        "role": "fixture-definition-source",
+        "sha256": "ba88b561435476b07692c7ecda43cebd2edcd5b22f8baa6ea16316e307db1b74"
+      },
+      {
+        "path": "rust/crates/bake-session/tests/generation_header_cases.rs",
+        "role": "fixture-definition-source",
+        "sha256": "5090f149eaa73637f3893350e5c1525d83fce705cad7a9116d8bfe7f6881e46e"
+      },
+      {
+        "path": "rust/crates/bake-session/tests/goal_cases.rs",
+        "role": "fixture-definition-source",
+        "sha256": "9bf7bbdc0de2830c45b32064f58b6864d18ba38bb70b0827335441d109b92533"
+      },
+      {
+        "path": "rust/crates/bake-session/tests/header_cases.rs",
+        "role": "fixture-definition-source",
+        "sha256": "cd6e0fc8c4d29c51743b9dd8f910e3535ad514f4824a2aab7350b35fb6a5a370"
+      },
+      {
+        "path": "rust/crates/bake-session/tests/history_cases.rs",
+        "role": "fixture-definition-source",
+        "sha256": "d48b4bd0ec69cd2eee10b91653a05eefb4043879799db89474684c20242ae2d0"
+      },
+      {
+        "path": "rust/crates/bake-session/tests/inbox_cases.rs",
+        "role": "fixture-definition-source",
+        "sha256": "cb7905f1d84098e166c844a7111e080e9b41ad0a728bbd625ff2ef11d6091151"
+      },
+      {
+        "path": "rust/crates/bake-session/tests/log_scan_cases.rs",
+        "role": "fixture-definition-source",
+        "sha256": "33270612f300e5a4991c85b6e450c606e76bf3733cdf11d38cf9b51e81409643"
+      },
+      {
+        "path": "rust/crates/bake-session/tests/migrated_restore_cases.rs",
+        "role": "fixture-definition-source",
+        "sha256": "5ec1b58067e3d0e903ff94cc31625942e8784b2486c77b96c65fa646da536ddd"
+      },
+      {
+        "path": "rust/crates/bake-session/tests/plain_append_cases.rs",
+        "role": "fixture-definition-source",
+        "sha256": "300c8c8d99e9bda93ae0bea3eff03ec28779625c6aae44601b45001ab9173e87"
+      },
+      {
+        "path": "rust/crates/bake-session/tests/plain_log_file_cases.rs",
+        "role": "fixture-definition-source",
+        "sha256": "aa5d657366b4b56d42385cb9a219d7b8a43738dc122d9a3a6ab99f29f23e1891"
+      },
+      {
+        "path": "rust/crates/bake-session/tests/prefix_restore_cases.rs",
+        "role": "fixture-definition-source",
+        "sha256": "4d071a2d0423128febbb1b6668e15146d7069f2057034223bf7894a4a3f4aeb0"
+      },
+      {
+        "path": "rust/crates/bake-session/tests/pressure_cases.rs",
+        "role": "fixture-definition-source",
+        "sha256": "9f2b857cee9086d0a42749de7ee75d43eb9c69bac985cb1a6dbaf40cd1243ae3"
+      },
+      {
+        "path": "rust/crates/bake-session/tests/prompt_admission_cases.rs",
+        "role": "fixture-definition-source",
+        "sha256": "1752045b7a4be71f4250f99090ba91f7f8faf88823d7bec780223cb94f8407c0"
+      },
+      {
+        "path": "rust/crates/bake-session/tests/relationships_cases.rs",
+        "role": "fixture-definition-source",
+        "sha256": "41793ff2b543053d9c624372d9ec16cec528c593734b871e718005436025472e"
+      },
+      {
+        "path": "rust/crates/bake-session/tests/request_derivation_cases.rs",
+        "role": "fixture-definition-source",
+        "sha256": "b2eff07ba1a262c79b3799fe27bf5dccbeb67ff31c970bdf7b6247736a9066e0"
+      },
+      {
+        "path": "rust/crates/bake-session/tests/restore_cases.rs",
+        "role": "fixture-definition-source",
+        "sha256": "8661ba5bb6534849e90d8f826dd3b2b59d871336ca8c2f89f92d05d5b0a9614a"
+      },
+      {
+        "path": "rust/crates/bake-session/tests/restored_replay_cases.rs",
+        "role": "fixture-definition-source",
+        "sha256": "e7c0de54e599b7c492aadd476255cc45bcb32784f5c9e48d108ecf9a0f4d6d34"
+      },
+      {
+        "path": "rust/crates/bake-session/tests/row_encode_cases.rs",
+        "role": "fixture-definition-source",
+        "sha256": "5d92c25b5b92d40c7ed667362c1f5782e2219956e41384a75c8f2550b21d9660"
+      },
+      {
+        "path": "rust/crates/bake-session/tests/runtime_capture.rs",
+        "role": "fixture-definition-source",
+        "sha256": "7b18abc9ced20141492d3b18e36c61a1eeae08ae6b4b6b0f47d52ed4242e30e2"
+      },
+      {
+        "path": "rust/crates/bake-session/tests/source_event_seqs_cases.rs",
+        "role": "fixture-definition-source",
+        "sha256": "22f0a5f7bd9cdeef55d02dde250b4bb122c87ae070e8ba94194a4fcc48f4b12b"
+      },
+      {
+        "path": "rust/crates/bake-session/tests/subagent_cases.rs",
+        "role": "fixture-definition-source",
+        "sha256": "1502008f668a48b02865a9e60981192067778e3e6059383b111e7af5b702cd7f"
+      },
+      {
+        "path": "rust/crates/bake-session/tests/subagent_catalog_cases.rs",
+        "role": "fixture-definition-source",
+        "sha256": "465942150fb615cc6832ae67e7cd276d25e76ff5e0cffc504bd527d418a63a6d"
+      },
+      {
+        "path": "rust/crates/bake-session/tests/unfinished_work_cases.rs",
+        "role": "fixture-definition-source",
+        "sha256": "013583d3d56eb663d7b84b978de60ef691c2f825fe916aafe8c19c75c448e8e3"
+      },
+      {
+        "path": "rust/crates/bake-session/tests/usage_cases.rs",
+        "role": "fixture-definition-source",
+        "sha256": "389e795d9dc0ae85a886771dfc585972eace6d483b2414e6720836378b45d833"
+      },
+      {
+        "path": "rust/crates/bake-session/tests/v0_to_v1_cases.rs",
+        "role": "fixture-definition-source",
+        "sha256": "83fb41683879002cc2e1fe4ca6225c8db9d2212159d6cf1e49faadb769a44c15"
+      },
+      {
+        "path": "rust/crates/bake-session/tests/v1_codec_cases.rs",
+        "role": "fixture-definition-source",
+        "sha256": "9f8dde6f15d75e841fd93ee2f63ed5b5deb534993b063b7c54526e04b7c6089f"
+      },
+      {
+        "path": "rust/crates/bake-session/tests/v1_to_v2_cases.rs",
+        "role": "fixture-definition-source",
+        "sha256": "534d376b057a1aa3fd92b338384aff3960cf2e8d6dcce846869bb42224bd6393"
+      },
+      {
+        "path": "rust/crates/bake-session/tests/v1_to_v2_decoded_cases.rs",
+        "role": "fixture-definition-source",
+        "sha256": "26dba478d90e335f3c1c53dfe6d3f03777539fe39b439423f8c78aa9eaca347c"
+      },
+      {
+        "path": "rust/crates/bake-session/tests/v1_to_v2_run_cases.rs",
+        "role": "fixture-definition-source",
+        "sha256": "c0fc1f198909b31d86d42ce8270b7d477a72cab71a5cccfc1b0941821e8b90a6"
+      },
+      {
+        "path": "rust/crates/bake-session/tests/v2_to_v3_cases.rs",
+        "role": "fixture-definition-source",
+        "sha256": "6279dbf5eb7ced08c70815e0a04a6a174b64828e7d66d3cab0a1dbf7da173fff"
+      },
+      {
+        "path": "rust/crates/bake-session/tests/v3_row_cases.rs",
+        "role": "fixture-definition-source",
+        "sha256": "02ca71fb27b192a547aed59842472ea90bc9607f03195f636795ee87a58fb14c"
+      },
+      {
+        "path": "rust/crates/bake-session/tests/zstd_cases.rs",
+        "role": "fixture-definition-source",
+        "sha256": "6bff6b1e3ae67206ae9ca1f10c45d7e090f7dd8dd9fa54efb44325ef99f2c9b4"
+      }
+    ],
+    "digest": "66cfb19292a1295c9adf23aedffc6159ca05f9fefb8400ff7bcf3db96c3dafc5"
+  },
+  "artifacts": [
+    {
+      "id": "mutated-prompt-admission-cases",
+      "description": "conformance/session/prompt-admission-cases.json with only the first case's (no-system-node-open-turn) ts.contentGeneration changed from 0 to 1, saved at .preflight/ledger/scope-02-evidence/prompt-admission-cases.mutated.json; read by control-ts and control-rust. The original hash is the fixture manifest entry, and .preflight/ledger/scope-02-evidence/control-restore.txt (sha256 a50387c78a0b906cb196df0b13510ace11ba65213866be36082291066f85178e) records the restored hash and an empty git status.",
+      "sha256": "1abc3ebbbe2346752e203b9daa0d9243080046685bf46465ffd4c614f2b0346f",
+      "command": "control-ts"
+    },
+    {
+      "id": "ci-native-linux",
+      "description": "Compiled native artifacts on linux.",
+      "sha256": {
+        "missing": "Successful native jobs retain gate summaries only; their binary hashes are not in the downloadable job log."
+      },
+      "command": "ci-native-linux"
+    },
+    {
+      "id": "ci-native-macos",
+      "description": "Compiled native artifacts on macos.",
+      "sha256": {
+        "missing": "Successful native jobs retain gate summaries only; their binary hashes are not in the downloadable job log."
+      },
+      "command": "ci-native-macos"
+    },
+    {
+      "id": "ci-native-windows",
+      "description": "Compiled native artifacts on windows.",
+      "sha256": {
+        "missing": "Successful native jobs retain gate summaries only; their binary hashes are not in the downloadable job log."
+      },
+      "command": "ci-native-windows"
+    }
+  ],
+  "commands": [
+    {
+      "id": "cargo-test",
+      "argv": [
+        "cargo",
+        "test",
+        "--workspace",
+        "--locked"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local; kernel 7.2.8-200.fc44.x86_64"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v26.10.0",
+        "git": "2.56.0",
+        "rustc": "1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "1.99.0 (5f94df478 2026-08-27)"
+      },
+      "testedCommit": "e9e1e55034338bc4a521cd18d1a2a857bc2b9268",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 461,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/ledger/scope-02-evidence/cargo-test.json",
+        "sha256": "29a7cb579b1c5f4b39b58870ba3d2d7b7e4edb6db6dcc262aa799c88387391c6"
+      }
+    },
+    {
+      "id": "ts-conformance",
+      "argv": [
+        "bun",
+        "run",
+        "test:runtime",
+        "packages/compaction/compaction-basic/tests/unfinished-compaction-conformance.spec.ts",
+        "packages/core/agent-loop/tests/inbox-conformance.spec.ts",
+        "packages/core/agent-loop/tests/prompt-admission-conformance.spec.ts",
+        "packages/core/agent-loop/tests/request-derivation-conformance.spec.ts",
+        "packages/core/agent-loop/tests/request-reconstruction.fixture.spec.ts",
+        "packages/core/agent-loop/tests/restored-request-derivation-conformance.spec.ts",
+        "packages/core/agent-loop/tests/unfinished-inbox-conformance.spec.ts",
+        "packages/core/session/tests/fork-conformance.spec.ts",
+        "packages/core/session/tests/unfinished-turn-conformance.spec.ts",
+        "packages/goal/goal/tests/goal-conformance.spec.ts",
+        "packages/llm/token-meter/tests/pressure-conformance.spec.ts",
+        "packages/llm/token-meter/tests/usage-conformance.spec.ts",
+        "packages/session/session-format-v0-to-v1/tests/codec-conformance.spec.ts",
+        "packages/session/session-format-v0-to-v1/tests/migration-conformance.spec.ts",
+        "packages/session/session-format-v0-to-v1/tests/relationships-conformance.spec.ts",
+        "packages/session/session-format-v1-to-v2/tests/decoded-conformance.spec.ts",
+        "packages/session/session-format-v1-to-v2/tests/migration-conformance.spec.ts",
+        "packages/session/session-format-v1-to-v2/tests/run-conformance.spec.ts",
+        "packages/session/session-format-v2-to-v3/tests/event-envelope-conformance.spec.ts",
+        "packages/session/session-format-v2-to-v3/tests/history-conformance.spec.ts",
+        "packages/session/session-format-v2-to-v3/tests/source-event-seqs-conformance.spec.ts",
+        "packages/session/session-format-v2-to-v3/tests/v2-to-v3-migration-conformance.spec.ts",
+        "packages/session/session-format-v2-to-v3/tests/v3-row-conformance.spec.ts",
+        "packages/session/session-persistence-jsonl/tests/generation-header-conformance.spec.ts",
+        "packages/session/session-persistence-jsonl/tests/header-conformance.spec.ts",
+        "packages/session/session-persistence-jsonl/tests/list-conformance.spec.ts",
+        "packages/session/session-persistence-jsonl/tests/log-scan-conformance.spec.ts",
+        "packages/session/session-persistence-jsonl/tests/lookup-conformance.spec.ts",
+        "packages/session/session-persistence-jsonl/tests/migrated-restore-conformance.spec.ts",
+        "packages/session/session-persistence-jsonl/tests/plain-append-conformance.spec.ts",
+        "packages/session/session-persistence-jsonl/tests/plain-log-file-conformance.spec.ts",
+        "packages/session/session-persistence-jsonl/tests/prefix-restore-conformance.spec.ts",
+        "packages/session/session-persistence-jsonl/tests/restore-conformance.spec.ts",
+        "packages/session/session-persistence-jsonl/tests/row-encode-conformance.spec.ts",
+        "packages/session/session-persistence-jsonl/tests/stat-conformance.spec.ts",
+        "packages/session/session-persistence-jsonl/tests/zstd-conformance.spec.ts",
+        "packages/session/session-title/tests/boundary-conformance.spec.ts",
+        "packages/subagent/subagent/tests/catalog-conformance.spec.ts",
+        "packages/subagent/subagent/tests/projection-conformance.spec.ts",
+        "packages/subagent/subagent/tests/unfinished-children-conformance.spec.ts",
+        "--reporter",
+        "verbose"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local; kernel 7.2.8-200.fc44.x86_64"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v26.10.0",
+        "git": "2.56.0"
+      },
+      "testedCommit": "e9e1e55034338bc4a521cd18d1a2a857bc2b9268",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 4079,
+        "failed": 0,
+        "skipped": 4,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/ledger/scope-02-evidence/ts-conformance.json",
+        "sha256": "c51777e1c3a893aae4635224f5aa18fb831afbd485e220933a5b28ecf8525775"
+      }
+    },
+    {
+      "id": "control-ts",
+      "argv": [
+        "bun",
+        "run",
+        "test:runtime",
+        "packages/core/agent-loop/tests/prompt-admission-conformance.spec.ts",
+        "--reporter",
+        "verbose"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local; kernel 7.2.8-200.fc44.x86_64"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v26.10.0",
+        "git": "2.56.0"
+      },
+      "testedCommit": {
+        "missing": "Working tree of e9e1e55034338bc4a521cd18d1a2a857bc2b9268 with one deliberate uncommitted edit to conformance/session/prompt-admission-cases.json; not a committed checkout."
+      },
+      "expectedExit": 1,
+      "actualExit": 1,
+      "counts": {
+        "passed": 35,
+        "failed": 1,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/ledger/scope-02-evidence/control-ts.json",
+        "sha256": "dad978d27b5cdb07037c3d434027ab5ca391b1c6e7e0a3831d55ea880055a945"
+      }
+    },
+    {
+      "id": "control-rust",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "bake-session",
+        "--test",
+        "prompt_admission_cases"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local; kernel 7.2.8-200.fc44.x86_64"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v26.10.0",
+        "git": "2.56.0",
+        "rustc": "1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "1.99.0 (5f94df478 2026-08-27)"
+      },
+      "testedCommit": {
+        "missing": "Working tree of e9e1e55034338bc4a521cd18d1a2a857bc2b9268 with one deliberate uncommitted edit to conformance/session/prompt-admission-cases.json; not a committed checkout."
+      },
+      "expectedExit": 101,
+      "actualExit": 101,
+      "counts": {
+        "passed": 3,
+        "failed": 1,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/ledger/scope-02-evidence/control-rust.json",
+        "sha256": "9f1eb902ee5f35aa4fd813b65fa1129844789138c3ef9ec750b042744bdd6d2d"
+      }
+    },
+    {
+      "id": "ci-native-linux",
+      "argv": [
+        "bun",
+        "run",
+        "preflight",
+        "--only",
+        "native"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "ubuntu-latest; image ubuntu-24.04 20261004.327.1"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v24.21.0",
+        "rust-toolchain": "1.99.0-x86_64-unknown-linux-gnu"
+      },
+      "testedCommit": "cc348b8494ce16fad9465cef987a7c7d586ce11e",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "warned": 0,
+        "passed": 5,
+        "failed": 0,
+        "skipped": 0
+      },
+      "evidence": {
+        "reference": "https://github.com/Justar96/bake/actions/runs/37845375343/job/113544896810",
+        "sha256": "c687a403bd130ab89d54c79a00861b026ae74a5206a1e9cc1468e265f45bc385"
+      }
+    },
+    {
+      "id": "ci-native-macos",
+      "argv": [
+        "bun",
+        "run",
+        "preflight",
+        "--only",
+        "native"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "darwin",
+        "arch": "arm64",
+        "runner": "macos-latest; image macos-26-arm64 20260907.0351.1"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v24.20.0",
+        "rust-toolchain": "1.99.0-aarch64-apple-darwin"
+      },
+      "testedCommit": "cc348b8494ce16fad9465cef987a7c7d586ce11e",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "warned": 0,
+        "passed": 5,
+        "failed": 0,
+        "skipped": 0
+      },
+      "evidence": {
+        "reference": "https://github.com/Justar96/bake/actions/runs/37845375343/job/113544896962",
+        "sha256": "06f0f17d7884ca9e7a6a426dc5478d32ce59f79264a108a11d20a7556b28425e"
+      }
+    },
+    {
+      "id": "ci-native-windows",
+      "argv": [
+        "bun",
+        "run",
+        "preflight",
+        "--only",
+        "native"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "win32",
+        "arch": "x64",
+        "runner": "windows-latest; image windows-2025-vs2026 20260925.250.1"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v24.21.0",
+        "rust-toolchain": "1.99.0-x86_64-pc-windows-msvc"
+      },
+      "testedCommit": "cc348b8494ce16fad9465cef987a7c7d586ce11e",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "warned": 0,
+        "passed": 4,
+        "failed": 0,
+        "skipped": 1
+      },
+      "evidence": {
+        "reference": "https://github.com/Justar96/bake/actions/runs/37845375343/job/113544896985",
+        "sha256": "0160a84a6303ee4f98a81593dc730a648aa982f95f40fe2c746c548b34644762"
+      }
+    },
+    {
+      "id": "ci-ts-linux",
+      "argv": [
+        "bun",
+        "run",
+        "test:runtime",
+        "packages/session/session-persistence-jsonl/tests/lookup-conformance.spec.ts",
+        "packages/session/session-persistence-jsonl/tests/generation-header-conformance.spec.ts",
+        "packages/session/session-persistence-jsonl/tests/stat-conformance.spec.ts",
+        "packages/session/session-persistence-jsonl/tests/list-conformance.spec.ts",
+        "packages/session/session-format-v2-to-v3/tests/v2-to-v3-migration-conformance.spec.ts",
+        "packages/subagent/subagent/tests/projection-conformance.spec.ts",
+        "packages/subagent/subagent/tests/catalog-conformance.spec.ts"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "ubuntu-latest; image ubuntu-24.04 20261004.327.1"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v24.21.0"
+      },
+      "testedCommit": "cc348b8494ce16fad9465cef987a7c7d586ce11e",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "warned": 0,
+        "passed": 829,
+        "failed": 0,
+        "skipped": 4
+      },
+      "evidence": {
+        "reference": "https://github.com/Justar96/bake/actions/runs/37845375343/job/113544896810",
+        "sha256": "c687a403bd130ab89d54c79a00861b026ae74a5206a1e9cc1468e265f45bc385"
+      }
+    },
+    {
+      "id": "ci-ts-macos",
+      "argv": [
+        "bun",
+        "run",
+        "test:runtime",
+        "packages/session/session-persistence-jsonl/tests/lookup-conformance.spec.ts",
+        "packages/session/session-persistence-jsonl/tests/generation-header-conformance.spec.ts",
+        "packages/session/session-persistence-jsonl/tests/stat-conformance.spec.ts",
+        "packages/session/session-persistence-jsonl/tests/list-conformance.spec.ts",
+        "packages/session/session-format-v2-to-v3/tests/v2-to-v3-migration-conformance.spec.ts",
+        "packages/subagent/subagent/tests/projection-conformance.spec.ts",
+        "packages/subagent/subagent/tests/catalog-conformance.spec.ts"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "darwin",
+        "arch": "arm64",
+        "runner": "macos-latest; image macos-26-arm64 20260907.0351.1"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v24.20.0"
+      },
+      "testedCommit": "cc348b8494ce16fad9465cef987a7c7d586ce11e",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "warned": 0,
+        "passed": 826,
+        "failed": 0,
+        "skipped": 7
+      },
+      "evidence": {
+        "reference": "https://github.com/Justar96/bake/actions/runs/37845375343/job/113544896962",
+        "sha256": "06f0f17d7884ca9e7a6a426dc5478d32ce59f79264a108a11d20a7556b28425e"
+      }
+    },
+    {
+      "id": "ci-ts-windows",
+      "argv": [
+        "bun",
+        "run",
+        "test:runtime",
+        "packages/session/session-persistence-jsonl/tests/lookup-conformance.spec.ts",
+        "packages/session/session-persistence-jsonl/tests/generation-header-conformance.spec.ts",
+        "packages/session/session-persistence-jsonl/tests/stat-conformance.spec.ts",
+        "packages/session/session-persistence-jsonl/tests/list-conformance.spec.ts",
+        "packages/session/session-format-v2-to-v3/tests/v2-to-v3-migration-conformance.spec.ts",
+        "packages/subagent/subagent/tests/projection-conformance.spec.ts",
+        "packages/subagent/subagent/tests/catalog-conformance.spec.ts"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "win32",
+        "arch": "x64",
+        "runner": "windows-latest; image windows-2025-vs2026 20260925.250.1"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v24.21.0"
+      },
+      "testedCommit": "cc348b8494ce16fad9465cef987a7c7d586ce11e",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "warned": 0,
+        "passed": 792,
+        "failed": 0,
+        "skipped": 41
+      },
+      "evidence": {
+        "reference": "https://github.com/Justar96/bake/actions/runs/37845375343/job/113544896985",
+        "sha256": "0160a84a6303ee4f98a81593dc730a648aa982f95f40fe2c746c548b34644762"
+      }
+    },
+    {
+      "id": "ci-checks-linux",
+      "argv": [
+        "bun",
+        "run",
+        "preflight",
+        "--fast",
+        "--skip",
+        "native"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "ubuntu-latest; image ubuntu-24.04 20261004.327.1"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v24.21.0"
+      },
+      "testedCommit": "cc348b8494ce16fad9465cef987a7c7d586ce11e",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "warned": 0,
+        "passed": 24,
+        "failed": 0,
+        "skipped": 12
+      },
+      "evidence": {
+        "reference": "https://github.com/Justar96/bake/actions/runs/37845375343/job/113544896833",
+        "sha256": "b6f7a2c6f2b76ce54d45490fb7e8f272c36168d3efae206293659a8ce673332b"
+      }
+    },
+    {
+      "id": "ci-runtime-linux-pr131",
+      "argv": [
+        "bun",
+        "run",
+        "preflight",
+        "--full",
+        "--only",
+        "build,runtime"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "ubuntu-latest; image ubuntu-24.04 20261004.327.1"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v24.21.0"
+      },
+      "testedCommit": "191a8ba4b385a1448ed843b540fa3d71be54aefe",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "warned": 0,
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0
+      },
+      "evidence": {
+        "reference": "https://github.com/Justar96/bake/actions/runs/37840396071/job/113528093897",
+        "sha256": "f132ab54aedaa9632f8403722a93704f409346e3de2e89e5ba187899115389e9"
+      }
+    }
+  ],
+  "results": [
+    {
+      "id": "ts-oracle",
+      "behavior": "All 40 TypeScript specs under packages/ that read a conformance/session or conformance/runtime table passed: 4079 Vitest tests passed and 4 skipped (four win32-only lookup cases on this POSIX host). Counts describe Vitest tests across 40 files, not table cases.",
+      "owner": "packages/session/session-persistence-jsonl/tests/restore-conformance.spec.ts",
+      "report": ".preflight/ledger/scope-02-evidence/ts-conformance.json",
+      "commands": [
+        "ts-conformance"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "rust-agreement",
+      "behavior": "cargo test --workspace --locked passed 461 tests across 53 test targets (4 doc-test targets ran none). bake-session contributed 128: 59 unit tests and 69 integration tests in 34 binaries, most of which iterate a whole shared table inside one test, so counts describe Cargo tests, not cases. Formatting, clippy, and rustdoc were not run for this record.",
+      "owner": "rust/crates/bake-session/tests/restore_cases.rs",
+      "report": ".preflight/ledger/scope-02-evidence/cargo-test.json",
+      "commands": [
+        "cargo-test"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "ci-native",
+      "behavior": "On PR #134 synthetic merge (candidate tree), native preflight passed 5 gates on Linux and macOS (rust, rust-pty, rust-conformance, rust-eval, rust-lease) and 4 on Windows with rust-pty skipped (ConPTY scenarios not implemented). Counts describe gates.",
+      "owner": "scripts/preflight.ts",
+      "report": "https://github.com/Justar96/bake/actions/runs/37845375343",
+      "commands": [
+        "ci-native-linux",
+        "ci-native-macos",
+        "ci-native-windows"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "ci-ts-subset",
+      "behavior": "The rust jobs then ran seven of the 40 conformance specs (lookup, generation-header, stat, list, v2-to-v3 migration, subagent projection and catalog) on each OS: 829 passed and 4 skipped on Linux, 826 and 7 on macOS, 792 and 41 on Windows. Counts describe Vitest tests across those seven files.",
+      "owner": ".github/workflows/ci.yml",
+      "report": "https://github.com/Justar96/bake/actions/runs/37845375343",
+      "commands": [
+        "ci-ts-linux",
+        "ci-ts-macos",
+        "ci-ts-windows"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "ci-app-checks",
+      "behavior": "App checks with --fast --skip native passed 24 gates and skipped 12 on Linux, including typecheck, lint, verify-persistence-catalog, verify-rust-migration-inventory, and the ledger verifier; whitespace (no merge base) and actionlint were among the skips. Counts describe gates.",
+      "owner": "scripts/preflight.ts",
+      "report": "https://github.com/Justar96/bake/actions/runs/37845375343",
+      "commands": [
+        "ci-checks-linux"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "ci-runtime-pr131",
+      "behavior": "PR #134's run had no runtime job. The last runtime job before the candidate, PR #131's (stack top), passed the build, runtime (whole suite, since no merge base was found), and integration gates on Linux at synthetic merge 191a8ba4b385a1448ed843b540fa3d71be54aefe, which differs from the candidate only in AGENTS.md and three docs/roadmap/rust-0.4 files. Counts describe gates.",
+      "owner": "scripts/preflight.ts",
+      "report": "https://github.com/Justar96/bake/actions/runs/37840396071",
+      "commands": [
+        "ci-runtime-linux-pr131"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "native-subset",
+      "behavior": "Several tables carry explicit native-limit refusals (JavaScript coercion, TypeError inputs, float and -0 spellings, fractional restore numbers) that the Rust tests require instead of the TypeScript outcome. This checks refuse-rather-than-guess; it is not parity for those cases.",
+      "owner": "conformance/README.md",
+      "report": ".preflight/ledger/scope-02-evidence/cargo-test.json",
+      "commands": [
+        "cargo-test"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "windows-macos-local",
+      "behavior": "Local runs of the 40 specs and cargo test on Windows and macOS.",
+      "owner": "unassigned",
+      "report": {
+        "missing": "No local Windows or macOS command ran."
+      },
+      "commands": [],
+      "outcome": "skip",
+      "reason": "The local host is Linux; Windows and macOS evidence is the CI native gates and the seven-spec subset above."
+    },
+    {
+      "id": "actionlint",
+      "behavior": "Workflow syntax lint.",
+      "owner": "scripts/preflight.ts",
+      "report": "https://github.com/Justar96/bake/actions/runs/37845375343",
+      "commands": [
+        "ci-checks-linux"
+      ],
+      "outcome": "skip",
+      "reason": "actionlint 1.7.12+ was not on PATH on the app CI runner."
+    }
+  ],
+  "negativeControls": [
+    {
+      "id": "flip-prompt-admission-expectation",
+      "defect": "In this record's working tree of the candidate, changed only no-system-node-open-turn's expected ts.contentGeneration from 0 to 1 in conformance/session/prompt-admission-cases.json.",
+      "assertion": "Both harnesses reject the edited table: Vitest failed only no-system-node-open-turn (35 passed, 1 failed; exit 1) and the Rust shared_cases_admit_prompts_like_the_agent_loop test panicked with \"no-system-node-open-turn: content generation\" left 0, right 1 (3 passed, 1 failed; exit 101).",
+      "observed": "rejected",
+      "commands": [
+        "control-ts",
+        "control-rust"
+      ]
+    }
+  ],
+  "missingEvidence": [
+    {
+      "what": "Children's own logs in unfinished work",
+      "reason": "The unfinished-work projection reports catalog children from the parent log only; no case reads a child Session's own log.",
+      "owner": "rust/crates/bake-session"
+    },
+    {
+      "what": "Migrated and Zstd logs in unfinished work and prefix restoration",
+      "reason": "Unfinished-work and prefix-restoration cases cover plain current-format logs only.",
+      "owner": "rust/crates/bake-session"
+    },
+    {
+      "what": "Agent resume and composed-runtime integration",
+      "reason": "Every primitive is a development-only fold over a restored log; no Agent resumes and no real composed runtime runs, which the verification contract requires for product-visible behavior.",
+      "owner": "unassigned"
+    },
+    {
+      "what": "Private request-building decisions",
+      "reason": "Prompt admission stops before the header-reason, request/context, and tool-update decisions, which stay private to TypeScript request building.",
+      "owner": "rust/crates/bake-session"
+    },
+    {
+      "what": "Native-limit classification",
+      "reason": "The native-limit refusals across the tables are not yet classified against what D21 permits; that work is in progress and unrecorded here.",
+      "owner": "docs/roadmap/rust-0.4/scope-00/support.md"
+    },
+    {
+      "what": "Fractional restore numbers",
+      "reason": "Restoration refuses some fractional numbers as a native limit although a released writer can produce them, an open writer-reachable gap under D21; the fix is in progress and unrecorded here.",
+      "owner": "rust/crates/bake-session"
+    },
+    {
+      "what": "Acceptance-matrix failure controls",
+      "reason": "This record observes one flipped expectation only; it does not record controls for an unknown required event, an invalid reference, and sequence corruption, though some tables contain such refusal cases.",
+      "owner": "unassigned"
+    },
+    {
+      "what": "Crash-recovery cases",
+      "reason": "The crash-recovery matrix kill-and-restart cases for scope 02 are not recorded.",
+      "owner": "docs/roadmap/rust-0.4/durable-execution.md"
+    },
+    {
+      "what": "Local Windows and macOS runs",
+      "reason": "No local Windows or macOS host; CI ran native gates on all three and only seven of the 40 specs on each.",
+      "owner": "unassigned"
+    },
+    {
+      "what": "Full preflight on the candidate",
+      "reason": "No full or fast preflight ran locally; CI on the candidate tree ran native and --fast app checks only, and the runtime suite last ran on PR #131's merge.",
+      "owner": "scripts/preflight.ts"
+    },
+    {
+      "what": "Rust lint, format, and docs on the candidate",
+      "reason": "cargo fmt, clippy, and rustdoc were not run locally for this record; CI's rust gate ran check:rust.",
+      "owner": "rust/"
+    },
+    {
+      "what": "CI test-level output and artifact digests",
+      "reason": "Successful preflight job logs retain gate summaries only, not inner Cargo test output or binary digests. Local logs live in ignored .preflight and are not published.",
+      "owner": "scripts/preflight.ts"
+    },
+    {
+      "what": "Scope 00 decisions and accepted full baseline",
+      "reason": "Owner decisions, fixed qualification budgets, minimum supported hosts, and complete baseline qualification remain open.",
+      "owner": "docs/roadmap/rust-0.4/scope-00/support.md"
+    },
+    {
+      "what": "Scope acceptance",
+      "reason": "No qualification reviewer or product-owner acceptance is recorded.",
+      "owner": "unassigned"
+    }
+  ],
+  "evalRecords": {
+    "notApplicable": "Nothing model-visible changes: every primitive is development-only and unshipped."
+  },
+  "performanceRecords": {
+    "notApplicable": "No performance qualification attempted; command duration is not a performance baseline."
+  },
+  "rollback": {
+    "observed": "The local command wrapper observed an empty git status before and after cargo-test and ts-conformance. The control edited one tracked fixture in place; after control-rust the original bytes were copied back, the file hashed to its manifest value e30f447beebb8e4526bdb2c4f562d68d3158f18d11cba8c4f155d7376410021f, and git status and git diff were empty. Surviving descendants were not measured. All primitives are pure operations over fixture copies or private temporary directories; no user install or Session storage is touched.",
+    "commands": [
+      "cargo-test",
+      "ts-conformance",
+      "control-ts",
+      "control-rust"
+    ]
+  },
+  "review": {
+    "missing": "No reviewer has accepted scope 02 qualification. Code review and green CI do not establish scope acceptance."
+  }
+}

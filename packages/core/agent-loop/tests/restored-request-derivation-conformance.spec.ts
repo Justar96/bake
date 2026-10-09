@@ -56,7 +56,7 @@ const LOGS: Record<string, { path: string; sha256: string }> = {
   },
 }
 /** Both harnesses pin the table size, so a dropped case fails. */
-const CASE_COUNT = 32
+const CASE_COUNT = 33
 /** Rust's native limits; each must be witnessed. */
 const LIMITS = ['coordinate', 'repeated-coordinate', 'restore/number']
 /** The refusals Rust reports with the helper's message; each must be witnessed. */
@@ -288,11 +288,11 @@ function parseMigrated(value: unknown, id: string): Migrated {
 function loadTable(): DerivationCase[] {
   const table: unknown = JSON.parse(readFileSync(new URL('conformance/runtime/restored-request-derivation-cases.json', REPO), 'utf8'))
   if (!isObject(table) || sortedKeys(table) !== 'cases,history,logs,oracle,schema,version' || table.schema !== SCHEMA
-    || table.version !== 1 || table.oracle !== ORACLE || !Array.isArray(table.cases)
+    || table.version !== 2 || table.oracle !== ORACLE || !Array.isArray(table.cases)
     || !Array.isArray(table.history) || !table.history.every(isLine)
     || !isObject(table.logs) || sortedKeys(table.logs) !== Object.keys(LOGS).sort().join()
     || Object.entries(LOGS).some(([name, { path }]) => (table.logs as Record<string, unknown>)[name] !== path)) {
-    throw new Error('restored-request-derivation-cases.json does not match its version-1 schema')
+    throw new Error('restored-request-derivation-cases.json does not match its version-2 schema')
   }
   return table.cases.map((entry: unknown): DerivationCase => {
     if (!isObject(entry) || typeof entry.id !== 'string') throw new Error(`invalid case ${JSON.stringify(entry)}`)

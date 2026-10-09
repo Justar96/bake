@@ -37,7 +37,7 @@ const LOGS: [(&str, &str, usize); 3] = [
     ),
 ];
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 34;
+const CASE_COUNT: usize = 35;
 const SOURCE_BUDGET: usize = 64;
 
 fn repo_path(relative: &str) -> PathBuf {
@@ -161,7 +161,7 @@ fn load() -> Vec<Case> {
         BTreeSet::from(["cases", "history", "logs", "oracle", "schema", "version"])
     );
     assert_eq!(table["schema"], SCHEMA);
-    assert_eq!(table["version"], 1);
+    assert_eq!(table["version"], 2);
     assert_eq!(table["oracle"], ORACLE);
     assert!(
         list(&table["history"], "history")

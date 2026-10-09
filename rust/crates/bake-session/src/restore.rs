@@ -175,8 +175,11 @@ pub enum Unsupported {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RestoreLimit {
     /// A surface message, request header, tool update, or `request/context`
-    /// payload holds a number other than a safe integer and not -0, even
-    /// where no output carries it, such as usage.
+    /// payload holds a number not spelled as `JSON.stringify` writes its
+    /// value, as [`crate::ReplayLimit::Number`] describes, or -0, which
+    /// restoration takes no lossless snapshot to refuse. No released writer
+    /// produces either; every number one writes restores, even where no
+    /// output carries it, such as usage.
     Number,
     /// One of those payloads nests arrays and objects more than 64
     /// containers deep.

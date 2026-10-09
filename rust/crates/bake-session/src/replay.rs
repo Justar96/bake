@@ -60,10 +60,11 @@
 //! nodes, so the fold runs them.
 //!
 //! Projected payloads, those of the surface messages, request headers, and
-//! tool updates, admit only safe integers and at most 64 nested containers,
-//! because their values reach request JSON and its copies. Other payloads
-//! reach no request, so any number except -0 and any depth the scan parsed is
-//! admitted, as the lossless snapshot admits them.
+//! tool updates, admit only numbers spelled as `JSON.stringify` writes their
+//! values, which every number a released writer produces is, and at most 64
+//! nested containers, because their values reach request JSON and its
+//! copies. Other payloads reach no request, so any number except -0 and any
+//! depth the scan parsed is admitted, as the lossless snapshot admits them.
 //!
 //! The -0 check belongs to this prefix loop alone. Per-event admission,
 //! [`admit`], runs the rest and is shared with [`crate::restore`], whose
@@ -94,6 +95,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Map, Value};
 
+use crate::json_text::is_writer_spelling;
 use crate::offload::{self, OffloadRejection};
 use crate::request::{Fact, FoldRefusal, Request, RequestFold, SurfaceKind, SurfaceOp};
 use crate::{
@@ -169,7 +171,7 @@ pub(crate) const KNOWN_EVENT_TYPES: [&str; 60] = [
 /// The known type this subset still refuses: it belongs to seeded logs.
 const EXCLUDED_TYPE: &str = "session/end-seed";
 /// The types whose payload a request can carry. Their payloads keep the
-/// conservative number and depth qualification.
+/// number spelling and depth qualification.
 const PROJECTED_TYPES: [&str; 6] = [
     "system/message",
     "user/message",
@@ -344,8 +346,11 @@ pub enum ReplayLimit {
     /// known `session/end-seed`, which belongs to seeded logs.
     EventType,
     /// A projected prefix payload, that of a surface message, request header,
-    /// or tool update, holds a number other than a safe integer and not -0.
-    /// JavaScript's rounding of what a request copies is not decided here.
+    /// or tool update, holds a number not spelled as `JSON.stringify` writes
+    /// its value: -0, an integral value written with a fraction or exponent
+    /// below 2^64, such as `1.0` or `1e5`, or an integer whose digits do not
+    /// round-trip, such as `9007199254740993`. No released writer produces
+    /// these spellings; every number a writer produces is admitted.
     Number,
     /// A projected prefix payload nests arrays and objects more than 64
     /// containers deep.
@@ -751,23 +756,21 @@ fn tool_update(seq: u64, data: &Value) -> Option<Fact> {
     })
 }
 
-/// A projected payload's numbers reach request JSON, and JavaScript rounds
-/// integers beyond 2^53, so admitting only safe integers keeps them exact;
-/// copies and comparisons recurse, so depth is bounded. The walk is
-/// iterative, so it is safe at any depth the caller's parser produced. When
-/// one payload holds both an unqualified number and excess depth, which limit
-/// is reported depends on member order and is not specified; neither claims
-/// anything.
+/// A projected payload's numbers reach request JSON and are compared as
+/// `Value`s. Admitting only numbers spelled as `JSON.stringify` writes their
+/// values, which every released writer's numbers are, makes each admitted
+/// value one stored `Number`, so `Value` equality is JavaScript's `===` and
+/// [`json_text`](crate::json_text) prints JavaScript's text; copies and
+/// comparisons recurse, so depth is bounded. The walk is iterative, so it is
+/// safe at any depth the caller's parser produced. When one payload holds
+/// both an unqualified number and excess depth, which limit is reported
+/// depends on member order and is not specified; neither claims anything.
 pub(crate) fn qualify_payload(data: &Value) -> Result<(), ReplayLimit> {
     let mut pending = vec![(data, 1usize)];
     while let Some((value, depth)) = pending.pop() {
         match value {
             Value::Number(number) => {
-                let safe = number.as_u64().is_some_and(|n| n <= MAX_SAFE_INTEGER)
-                    || number
-                        .as_i64()
-                        .is_some_and(|n| n.unsigned_abs() <= MAX_SAFE_INTEGER);
-                if !safe {
+                if !is_writer_spelling(number) {
                     return Err(ReplayLimit::Number);
                 }
             }

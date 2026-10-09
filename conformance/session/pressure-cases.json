@@ -1,9 +1,10 @@
 {
   "schema": "bake/session-conformance/pressure-cases",
-  "version": 1,
+  "version": 2,
   "oracle": "contextPressureProjectionDefinition.init/apply and wire.view in packages/llm/token-meter/src/usage-projection.ts, folded over the events Session.fromRestore holds for each case's parsed rows and their interruptedTurnClosers",
   "history": [
-    "Version 1: 36 cases, written from the TypeScript sources before either harness ran."
+    "Version 1: 36 cases, written from the TypeScript sources before either harness ran.",
+    "Version 2: 37 cases; adds limit-context-window-fraction, a fractional contextWindow, which restoration now admits."
   ],
   "logs": {
     "tool-call-turn": "conformance/runtime/request-reconstruction/tool-call-turn/session.jsonl",
@@ -1365,6 +1366,51 @@
         "seq": 7
       },
       "note": "The next context removes the window before any sample."
+    },
+    {
+      "id": "limit-context-window-fraction",
+      "log": "retry-attempt",
+      "edits": [
+        {
+          "row": 7,
+          "find": "\"data\":{\"provider\":\"mock\",\"model\":\"mock\"}",
+          "replace": "\"data\":{\"provider\":\"mock\",\"model\":\"mock\",\"contextWindow\":1000.5}"
+        }
+      ],
+      "ts": {
+        "outcome": "folded",
+        "state": {
+          "pressureTokens": 10,
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock-b"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock-b"
+          },
+          "surfaceTokens": 25,
+          "sampledSurfaceTokens": 16
+        },
+        "view": {
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock-b"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock-b"
+          },
+          "pressureTokens": 10,
+          "projectedTokens": 19
+        }
+      },
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "context-window",
+        "seq": 7
+      },
+      "note": "A writer spells this window 1000.5, which restoration admits; the next context removes it before any sample."
     }
   ]
 }

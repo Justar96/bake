@@ -40,6 +40,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Map, Value};
 
+use crate::json_text::json_number_text;
 use crate::offload::{Decision, OffloadRejection, Target, Walk, offload_images};
 
 /// A surface event type, which fixes how its message derives.
@@ -146,13 +147,14 @@ pub(crate) enum FoldRefusal {
 /// A tool `name` as a JavaScript `Map` or `Set` key. Session construction
 /// detaches every event into fresh values, so an object or array name equals
 /// only itself, and its one tree occurrence is the header seq and tool index.
-/// Numbers are already qualified to safe integers other than -0.
+/// A number is keyed by its `Number::toString` text, which differs between
+/// any two doubles `SameValueZero` tells apart.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum NameKey {
     Absent,
     Null,
     Bool(bool),
-    Number(i64),
+    Number(String),
     String(String),
     Occurrence(u64, usize),
 }
@@ -164,7 +166,7 @@ impl NameKey {
             Some(Value::Null) => Self::Null,
             Some(Value::Bool(flag)) => Self::Bool(*flag),
             Some(Value::Number(number)) => {
-                Self::Number(number.as_i64().expect("qualified safe integer"))
+                Self::Number(number.as_f64().map_or_else(String::new, json_number_text))
             }
             Some(Value::String(name)) => Self::String(name.clone()),
             Some(Value::Array(_) | Value::Object(_)) => Self::Occurrence(header_seq, index),
@@ -685,9 +687,10 @@ fn history_json(tools: &[Value], updates: &[Update]) -> Value {
 }
 
 /// Whether `JSON.stringify` writes the same text for two values the import
-/// side qualified: safe-integer numbers and bounded depth. JavaScript
-/// enumerates an object's array-index keys first, in ascending numeric order,
-/// then its other keys in insertion order, which a parsed [`Map`] keeps.
+/// side qualified: numbers spelled as `JSON.stringify` writes them, so equal
+/// texts are equal `Number`s, and bounded depth. JavaScript enumerates an
+/// object's array-index keys first, in ascending numeric order, then its
+/// other keys in insertion order, which a parsed [`Map`] keeps.
 fn same_js_text(a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::Array(a), Value::Array(b)) => {
@@ -737,7 +740,8 @@ fn array_index(key: &str) -> Option<u32> {
 /// construction proved that each message's `content` is exactly one block
 /// object with array `content`, so only member sets and the remaining member
 /// values decide. `Value` equality ignores member order, as `isDeepEqualJson`
-/// does, and the import side admits only safe-integer numbers.
+/// does, and the import side admits only numbers spelled as `JSON.stringify`
+/// writes them, whose `Value` equality is JavaScript's `===`.
 fn same_outside_result_content(
     original: &Map<String, Value>,
     replacement: &Map<String, Value>,
@@ -787,7 +791,8 @@ impl Request {
     /// `toolHistory`, `tools` when that header declares tools, and
     /// `sessionId`. The tool history is the `ToolHistoryProjection` snapshot
     /// of the prefix. Equal values do not imply equal provider wire bytes or
-    /// member order.
+    /// member order; [`crate::json_text`] of the value is the text
+    /// `JSON.stringify` writes for the request TypeScript derives.
     pub fn to_json(&self) -> Value {
         let mut request = self.config.clone();
         request.insert(

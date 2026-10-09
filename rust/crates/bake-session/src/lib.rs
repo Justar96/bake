@@ -31,8 +31,11 @@
 //! Agent resume. [`replay_restored_requests`] rebuilds the requests of a
 //! [`RestoredLog`]'s own dispatches, seeded, resumed, or migrated, with the
 //! `image/offload` projection applied, skipping cuts inside the inherited
-//! prefix. [`restore_zstd_log`] restores default-format compressed bytes
-//! with a caller-supplied plaintext budget and physical torn-tail metadata.
+//! prefix. [`json_text`] and [`json_number_text`] write a parsed value and a
+//! double as `JSON.stringify` does, so a derived request prints as the
+//! TypeScript request does. [`restore_zstd_log`] restores default-format
+//! compressed bytes with a caller-supplied plaintext budget and physical
+//! torn-tail metadata.
 //! [`stage_plain_log`] and [`stage_zstd_log`] stop after the scan, so a caller
 //! can check the stored identity before [`StagedLog::restore`] runs the rest,
 //! and [`zstd_header_record`] decodes only a compressed log's header frame.
@@ -138,6 +141,7 @@ mod generation_header;
 mod goal;
 mod history;
 mod inbox;
+mod json_text;
 mod log_layout;
 mod migrated_restore;
 mod offload;
@@ -188,6 +192,7 @@ pub use inbox::{
     ConsumedWork, ConsumedWorkCoercion, ConsumedWorkLimit, InboxLimit, InboxRefusal, PendingInbox,
     consumed_work, restored_inbox,
 };
+pub use json_text::{json_number_text, json_text};
 pub use log_layout::{encode_segment, project_key, session_log_path};
 pub use migrated_restore::{MigratedRestoreLimit, MigratedRestoreRefusal, restore_migrated};
 pub use offload::OffloadRejection;

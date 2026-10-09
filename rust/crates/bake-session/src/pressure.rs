@@ -22,14 +22,16 @@
 //! nothing else, so the folded state has no claim.
 //!
 //! Restoration proved each surface message an object of the right role with
-//! an array `content`, its numbers safe integers, its nesting bounded, and a
-//! `system/message`'s blocks text or reasoning; it qualified `request/context`
-//! numbers and `request/header` routes. Where JavaScript would throw a
-//! `TypeError` or compute with coerced or rounded values, [`context_pressure`]
-//! refuses with a [`PressureLimit`] and claims no TypeScript outcome.
+//! an array `content`, its numbers spelled as `JSON.stringify` writes them,
+//! its nesting bounded, and a `system/message`'s blocks text or reasoning; it
+//! qualified `request/context` numbers the same way and `request/header`
+//! routes. Where JavaScript would throw a `TypeError` or compute with coerced
+//! or rounded values, [`context_pressure`] refuses with a [`PressureLimit`]
+//! and claims no TypeScript outcome.
 
 use serde_json::{Map, Value};
 
+use crate::json_text::json_number_text;
 use crate::usage::sample;
 use crate::{MAX_SAFE_INTEGER, RestoredLog};
 
@@ -161,7 +163,9 @@ pub enum PressureLimit {
     Block,
     /// A `request/context` `provider` or `model` is not a string.
     Route,
-    /// A `request/context` `contextWindow` is present but not a number.
+    /// A `request/context` `contextWindow` is present but not a safe
+    /// integer, such as a fraction, which restoration admits but this state
+    /// does not hold.
     ContextWindow,
 }
 
@@ -239,10 +243,12 @@ impl Fold {
                 state.request_route = Some(RequestRoute { provider, model });
                 state.context_window = match data.get("contextWindow") {
                     None => None,
-                    // Restoration proved every number a safe integer.
-                    Some(Value::Number(window)) => {
-                        Some(window.as_i64().expect("qualified context window"))
-                    }
+                    Some(Value::Number(window)) => Some(
+                        window
+                            .as_i64()
+                            .and_then(safe)
+                            .ok_or(native(PressureLimit::ContextWindow))?,
+                    ),
                     Some(_) => return Err(native(PressureLimit::ContextWindow)),
                 };
             }
@@ -429,17 +435,12 @@ fn utf16_len(text: &str) -> u64 {
 }
 
 /// `JSON.stringify(value).length`. Member order does not change the length,
-/// and a restored message holds only safe integers and no lone surrogate.
+/// a number's text is ASCII, and a restored message holds no lone surrogate.
 fn stringified_len(value: &Value) -> Result<u64, PressureLimit> {
     Ok(match value {
         Value::Null => 4,
         Value::Bool(flag) => 4 + u64::from(!*flag),
-        Value::Number(number) => number
-            .as_i64()
-            .and_then(safe)
-            .ok_or(PressureLimit::Number)?
-            .to_string()
-            .len() as u64,
+        Value::Number(number) => json_number_text(number.as_f64().unwrap_or(f64::NAN)).len() as u64,
         Value::String(text) => quoted_len(text),
         Value::Array(items) => {
             let mut length = 2 + items.len().saturating_sub(1) as u64;
@@ -475,4 +476,23 @@ fn quoted_len(text: &str) -> u64 {
 
 fn safe(value: i64) -> Option<i64> {
     (value.unsigned_abs() <= MAX_SAFE_INTEGER).then_some(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::json_text;
+
+    #[test]
+    fn a_number_prices_its_javascript_text() {
+        let value: Value =
+            serde_json::from_str(r#"{"a":[0.7,1e21,1.5e-7,-5e-324,9007199254740994,0]}"#)
+                .expect("JSON");
+        let text = json_text(&value);
+        assert_eq!(
+            text,
+            r#"{"a":[0.7,1e+21,1.5e-7,-5e-324,9007199254740994,0]}"#
+        );
+        assert_eq!(stringified_len(&value), Ok(utf16_len(&text)));
+    }
 }

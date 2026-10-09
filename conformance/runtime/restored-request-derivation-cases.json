@@ -1,9 +1,10 @@
 {
   "schema": "bake/runtime-conformance/restored-request-derivation-cases",
-  "version": 1,
+  "version": 2,
   "oracle": "deriveRestoredRequests in packages/core/agent-loop/tests/restored-request-derivation-conformance.spec.ts: the restored events of restorePlainLog (scanLog, validateStoredEvents, interruptedTurnClosers, Session.fromRestore) or of readColdSessionLog for a migrated file, then for each settlement at or after the inherited cut, Session.fromRestore(prefix, ..., \"detached\", currentSessionMessageProjections) and foldRequestHeader(prefix) assembled as replayRequests assembles them",
   "history": [
-    "Version 1: 32 cases, written from the TypeScript sources before either harness ran."
+    "Version 1: 32 cases, written from the TypeScript sources before either harness ran.",
+    "Version 2: Rust restores every number spelled as JSON.stringify writes its value. limit-restore-fractional-temperature becomes restore-fractional-temperature and loses its rust override; its version-1 TypeScript outcome is unchanged. limit-restore-integral-fraction-temperature, written from the TypeScript sources before either harness ran, witnesses the restore/number limit, which remains for spellings no writer produces, such as 1.0."
   ],
   "logs": {
     "tool-call-turn": "conformance/runtime/request-reconstruction/tool-call-turn/session.jsonl",
@@ -2130,7 +2131,7 @@
       "note": "The second step 1.1 starts after the first settlement of its coordinate."
     },
     {
-      "id": "limit-restore-fractional-temperature",
+      "id": "restore-fractional-temperature",
       "log": "tool-call-turn",
       "edits": [
         {
@@ -2205,11 +2206,89 @@
           }
         ]
       },
+      "note": "A released writer produces a fractional temperature, and the request carries it as JSON.stringify writes it."
+    },
+    {
+      "id": "limit-restore-integral-fraction-temperature",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 6,
+          "find": "\"model\":\"mock\"}",
+          "replace": "\"model\":\"mock\",\"temperature\":1.0}"
+        }
+      ],
+      "ts": {
+        "outcome": "requests",
+        "inheritedEventCount": 0,
+        "requests": [
+          {
+            "provider": "mock",
+            "model": "mock",
+            "temperature": 1,
+            "messages": [
+              {
+                "$log": "/4/data/message"
+              },
+              {
+                "$log": "/5/data"
+              }
+            ],
+            "toolHistory": {
+              "tools": [
+                {
+                  "$log": "/6/data/header/tools/0"
+                }
+              ],
+              "updates": []
+            },
+            "tools": [
+              {
+                "$log": "/6/data/header/tools/0"
+              }
+            ],
+            "sessionId": "a1"
+          },
+          {
+            "provider": "mock",
+            "model": "mock",
+            "temperature": 1,
+            "messages": [
+              {
+                "$log": "/4/data/message"
+              },
+              {
+                "$log": "/5/data"
+              },
+              {
+                "$log": "/8/data/message"
+              },
+              {
+                "$log": "/10/data/message"
+              }
+            ],
+            "toolHistory": {
+              "tools": [
+                {
+                  "$log": "/6/data/header/tools/0"
+                }
+              ],
+              "updates": []
+            },
+            "tools": [
+              {
+                "$log": "/6/data/header/tools/0"
+              }
+            ],
+            "sessionId": "a1"
+          }
+        ]
+      },
+      "note": "JSON.parse reads 1.0 as 1, which JSON.stringify writes as 1, so no released writer spells it 1.0; restoration refuses that spelling.",
       "rust": {
         "outcome": "native-subset",
         "limit": "restore/number"
-      },
-      "note": "Restoration refuses the fraction before derivation runs. A released writer can produce it, so D21 requires a port, not this limit."
+      }
     },
     {
       "id": "migrated-v2-clean-turn",
