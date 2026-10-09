@@ -108,11 +108,13 @@ fn objects_ten_thousand_deep() {
 }
 
 #[test]
+#[ignore = "million-level depth is slow and memory-heavy; run with --ignored. The 10,000-level twin on a 256 KiB stack already fails on any recursion."]
 fn arrays_a_million_deep() {
     read_deep(1_000_000, false);
 }
 
 #[test]
+#[ignore = "million-level depth is slow and memory-heavy; run with --ignored. The 10,000-level twin on a 256 KiB stack already fails on any recursion."]
 fn objects_a_million_deep() {
     read_deep(1_000_000, true);
 }
@@ -212,6 +214,7 @@ fn offloads_ten_thousand_deep() {
 }
 
 #[test]
+#[ignore = "million-level depth is slow and memory-heavy; run with --ignored. The 10,000-level twin on a 256 KiB stack already fails on any recursion."]
 fn offloads_a_million_deep() {
     offload_deep(1_000_000);
 }
@@ -388,6 +391,7 @@ fn closers_ten_thousand_deep() {
 }
 
 #[test]
+#[ignore = "million-level depth is slow and memory-heavy; run with --ignored. The 10,000-level twin on a 256 KiB stack already fails on any recursion."]
 fn closers_a_million_deep() {
     closers_deep(1_000_000);
 }
@@ -398,6 +402,7 @@ fn projections_ten_thousand_deep() {
 }
 
 #[test]
+#[ignore = "million-level depth is slow and memory-heavy; run with --ignored. The 10,000-level twin on a 256 KiB stack already fails on any recursion."]
 fn projections_a_million_deep() {
     project_deep(1_000_000);
 }
@@ -446,6 +451,7 @@ fn interrupted_step_ten_thousand_deep() {
 }
 
 #[test]
+#[ignore = "million-level depth is slow and memory-heavy; run with --ignored. The 10,000-level twin on a 256 KiB stack already fails on any recursion."]
 fn interrupted_step_a_million_deep() {
     interrupted_deep_step(1_000_000);
 }
@@ -511,6 +517,7 @@ fn interrupted_consumers_ten_thousand_deep() {
 }
 
 #[test]
+#[ignore = "million-level depth is slow and memory-heavy; run with --ignored. The 10,000-level twin on a 256 KiB stack already fails on any recursion."]
 fn interrupted_consumers_a_million_deep() {
     interrupted_deep_consumers(1_000_000);
 }
@@ -669,6 +676,7 @@ fn migrations_ten_thousand_deep() {
 }
 
 #[test]
+#[ignore = "million-level depth is slow and memory-heavy; run with --ignored. The 10,000-level twin on a 256 KiB stack already fails on any recursion."]
 fn migrations_a_million_deep() {
     migrate_deep(1_000_000, true);
 }
@@ -724,6 +732,7 @@ fn write_open_migrates_ten_thousand_deep() {
 }
 
 #[test]
+#[ignore = "million-level depth is slow and memory-heavy; run with --ignored. The 10,000-level twin on a 256 KiB stack already fails on any recursion."]
 fn write_open_migrates_a_million_deep() {
     open_deep(1_000_000);
 }
@@ -838,6 +847,7 @@ fn tool_result_chains_ten_thousand_deep() {
 }
 
 #[test]
+#[ignore = "million-level depth is slow and memory-heavy; run with --ignored. The 10,000-level twin on a 256 KiB stack already fails on any recursion."]
 fn tool_result_chains_a_million_deep() {
     migrate_tool_result_chain(1_000_000);
 }
@@ -923,6 +933,7 @@ fn raw_chunks_ten_thousand_deep() {
 }
 
 #[test]
+#[ignore = "million-level depth is slow and memory-heavy; run with --ignored. The 10,000-level twin on a 256 KiB stack already fails on any recursion."]
 fn raw_chunks_a_million_deep() {
     migrate_deep_raw_chunk(1_000_000);
 }
@@ -957,6 +968,7 @@ fn legacy_content_refusals_ten_thousand_deep() {
 }
 
 #[test]
+#[ignore = "million-level depth is slow and memory-heavy; run with --ignored. The 10,000-level twin on a 256 KiB stack already fails on any recursion."]
 fn legacy_content_refusals_a_million_deep() {
     refuse_deep_legacy_content(1_000_000);
 }
@@ -1011,6 +1023,7 @@ fn chunk_turn_refusals_ten_thousand_deep() {
 }
 
 #[test]
+#[ignore = "million-level depth is slow and memory-heavy; run with --ignored. The 10,000-level twin on a 256 KiB stack already fails on any recursion."]
 fn chunk_turn_refusals_a_million_deep() {
     refuse_deep_chunk_turn(1_000_000);
 }
@@ -1037,6 +1050,7 @@ fn surface_operations_ten_thousand_deep() {
 }
 
 #[test]
+#[ignore = "million-level depth is slow and memory-heavy; run with --ignored. The 10,000-level twin on a 256 KiB stack already fails on any recursion."]
 fn surface_operations_a_million_deep() {
     remap_deep_surface_operation(1_000_000);
 }
@@ -1067,6 +1081,7 @@ fn message_stream_refusals_ten_thousand_deep() {
 }
 
 #[test]
+#[ignore = "million-level depth is slow and memory-heavy; run with --ignored. The 10,000-level twin on a 256 KiB stack already fails on any recursion."]
 fn message_stream_refusals_a_million_deep() {
     refuse_deep_message_stream(1_000_000);
 }
@@ -1095,6 +1110,7 @@ fn interrupted_turn_times_ten_thousand_deep() {
 }
 
 #[test]
+#[ignore = "million-level depth is slow and memory-heavy; run with --ignored. The 10,000-level twin on a 256 KiB stack already fails on any recursion."]
 fn interrupted_turn_times_a_million_deep() {
     refuse_deep_interrupted_turn_time(1_000_000);
 }
@@ -1120,6 +1136,7 @@ fn unclosed_turn_refusals_ten_thousand_deep() {
 }
 
 #[test]
+#[ignore = "million-level depth is slow and memory-heavy; run with --ignored. The 10,000-level twin on a 256 KiB stack already fails on any recursion."]
 fn unclosed_turn_refusals_a_million_deep() {
     refuse_deep_unclosed_turn(1_000_000);
 }

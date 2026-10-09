@@ -237,6 +237,7 @@ fn lookup_migrates_payloads_ten_thousand_deep() {
 }
 
 #[test]
+#[ignore = "million-level depth is slow and memory-heavy; run with --ignored. `deepened_cli_cases` drives the same commands in-process on a 256 KiB stack, where 10,000 levels already fail on any recursion."]
 fn lookup_migrates_payloads_a_million_deep() {
     inspect_deep(1_000_000);
 }
