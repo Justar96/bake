@@ -12,6 +12,11 @@
 //! while held, then locked with `LockFileEx`. std locks the whole file where
 //! TypeScript locks its first byte; the ranges overlap.
 //!
+//! The lock file's operations go through the `storage_io` seam. A holder
+//! that dies leaves the file and its lock to the kernel, which releases the
+//! lock when it closes the file; the fault-injection tests drop a crashed
+//! value for that.
+//!
 //! Exclusion between a Rust and a TypeScript holder is tested across real
 //! processes by `bun run test:rust:lease`, which drives the development-only
 //! `bake-session-lease-probe` against the TypeScript JSONL backend: a live
@@ -19,9 +24,11 @@
 //! or killed holder lets the other take over and append. A stopped (not
 //! killed) holder's exclusion is tested on Unix only.
 
-use std::fs::{self, File, OpenOptions, TryLockError};
+use std::fs::File;
 use std::io;
 use std::path::Path;
+
+use crate::storage_io::{LockFailure, StorageIo};
 
 /// Base name of the lock file in a Session directory.
 const LEASE_FILENAME: &str = "session.lock";
@@ -54,32 +61,18 @@ impl From<io::Error> for LeaseRefusal {
 }
 
 impl WriteLease {
-    /// Lock `dir/session.lock`, creating `dir` and the file when absent.
-    pub(crate) fn acquire(dir: &Path) -> Result<Self, LeaseRefusal> {
-        let mut builder = fs::DirBuilder::new();
-        builder.recursive(true);
-        #[cfg(unix)]
-        std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
-        builder.create(dir)?;
+    /// Lock `dir/session.lock` through `io`, creating `dir` and the file when
+    /// absent.
+    pub(crate) fn acquire(io: &dyn StorageIo, dir: &Path) -> Result<Self, LeaseRefusal> {
+        io.create_dir_all(dir)?;
         let path = dir.join(LEASE_FILENAME);
         #[cfg(unix)]
         {
-            use std::os::unix::fs::MetadataExt;
             for _ in 0..ATTEMPTS {
-                let file = OpenOptions::new()
-                    .write(true)
-                    .create(true)
-                    .truncate(true)
-                    .open(&path)?;
-                lock(&file)?;
-                let held = file.metadata()?;
-                match fs::metadata(&path) {
-                    Ok(current) if current.dev() == held.dev() && current.ino() == held.ino() => {
-                        return Ok(Self { file });
-                    }
-                    Ok(_) => {}
-                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                    Err(error) => return Err(error.into()),
+                let file = io.open_lock(&path)?;
+                lock(io, &file)?;
+                if io.lock_is_current(&file, &path)? {
+                    return Ok(Self { file });
                 }
                 // The locked inode is no longer at the path; dropping the
                 // file releases its lock before the next attempt.
@@ -88,17 +81,8 @@ impl WriteLease {
         }
         #[cfg(windows)]
         {
-            use std::os::windows::fs::OpenOptionsExt;
-            const FILE_SHARE_READ: u32 = 1;
-            const FILE_SHARE_WRITE: u32 = 2;
-            let file = OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .truncate(false)
-                .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
-                .open(&path)?;
-            lock(&file)?;
+            let file = io.open_lock(&path)?;
+            lock(io, &file)?;
             Ok(Self { file })
         }
         #[cfg(not(any(unix, windows)))]
@@ -113,11 +97,11 @@ impl WriteLease {
 
 /// Take `file`'s exclusive lock without blocking.
 #[cfg(any(unix, windows))]
-fn lock(file: &File) -> Result<(), LeaseRefusal> {
-    match file.try_lock() {
+fn lock(io: &dyn StorageIo, file: &File) -> Result<(), LeaseRefusal> {
+    match io.try_lock(file) {
         Ok(()) => Ok(()),
-        Err(TryLockError::WouldBlock) => Err(LeaseRefusal::AlreadyOwned),
-        Err(TryLockError::Error(error)) => Err(LeaseRefusal::Io(error)),
+        Err(LockFailure::WouldBlock) => Err(LeaseRefusal::AlreadyOwned),
+        Err(LockFailure::Io(error)) => Err(LeaseRefusal::Io(error)),
     }
 }
 

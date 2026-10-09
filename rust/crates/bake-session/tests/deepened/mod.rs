@@ -491,6 +491,8 @@ fn plain_append_cases(table: &Value, collector: &mut Collector) {
     }
 }
 
+/// `plain-log-file` and `fault` cases: seeded file text, a hard-linked
+/// seed carrying none, and the logs their create and append steps write.
 fn plain_log_file_cases(table: &Value, collector: &mut Collector) {
     for case in cases(table) {
         let id = case_id(case);
@@ -518,12 +520,20 @@ fn plain_log_file_cases(table: &Value, collector: &mut Collector) {
                 .as_array()
                 .expect("seed")
                 .iter()
+                .filter(|seed| seed["file"].as_str().is_some_and(is_log_seed))
                 .find_map(|seed| seed.get("text"));
             if let Some(file_text) = seeded {
                 collector.opened_events(&id, &raw(file_text, &id), &appended);
             }
         }
     }
+}
+
+/// Whether a seed is a log rather than the write lock or a temporary file
+/// a fault case also seeds, so an opened case's header comes from its log.
+fn is_log_seed(file: &str) -> bool {
+    let name = file.rsplit('/').next().unwrap_or(file);
+    name != "session.lock" && !name.ends_with(".tmp")
 }
 
 /// `list`, `stat`, and `lookup` directory layouts: inline text, Zstd frame
@@ -625,6 +635,10 @@ const TABLES: &[(&str, Coverage)] = &[
     (
         "session/event-envelope-cases.json",
         Coverage::Logs(row_cases),
+    ),
+    (
+        "session/fault-cases.json",
+        Coverage::Logs(plain_log_file_cases),
     ),
     ("session/fork-cases.json", Coverage::Logs(capture_cases)),
     (
