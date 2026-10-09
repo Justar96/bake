@@ -1,0 +1,363 @@
+{
+  "schema": "bake/session-conformance/number-cases",
+  "version": 1,
+  "oracle": "JSON.stringify(JSON.parse(lexeme)) for printing; for derivation, JSON.stringify of each request replayRequests(log) returns in packages/core/agent-loop/tests/runtime-fixture.ts and of each request number-conformance.spec.ts derives from the Session restorePlainLog(log) restores, as restored-request-derivation-conformance.spec.ts derives one",
+  "history": [
+    "Version 1: 56 printing cases and 5 derivation cases, written from ECMAScript Number::toString and the TypeScript sources before either harness ran."
+  ],
+  "printing": [
+    {
+      "lexeme": "0",
+      "text": "0"
+    },
+    {
+      "lexeme": "-0",
+      "text": "0"
+    },
+    {
+      "lexeme": "0.0",
+      "text": "0"
+    },
+    {
+      "lexeme": "-0.0",
+      "text": "0"
+    },
+    {
+      "lexeme": "0.1",
+      "text": "0.1"
+    },
+    {
+      "lexeme": "0.7",
+      "text": "0.7"
+    },
+    {
+      "lexeme": "-0.7",
+      "text": "-0.7"
+    },
+    {
+      "lexeme": "1.5",
+      "text": "1.5"
+    },
+    {
+      "lexeme": "100",
+      "text": "100"
+    },
+    {
+      "lexeme": "123.456",
+      "text": "123.456"
+    },
+    {
+      "lexeme": "0.30000000000000004",
+      "text": "0.30000000000000004"
+    },
+    {
+      "lexeme": "4.35",
+      "text": "4.35"
+    },
+    {
+      "lexeme": "1234.5",
+      "text": "1234.5"
+    },
+    {
+      "lexeme": "7.77537499999994",
+      "text": "7.77537499999994"
+    },
+    {
+      "lexeme": "1e20",
+      "text": "100000000000000000000"
+    },
+    {
+      "lexeme": "100000000000000000000",
+      "text": "100000000000000000000"
+    },
+    {
+      "lexeme": "123456789012345678",
+      "text": "123456789012345680"
+    },
+    {
+      "lexeme": "123456789012345680000",
+      "text": "123456789012345680000"
+    },
+    {
+      "lexeme": "999999999999999999999",
+      "text": "1e+21"
+    },
+    {
+      "lexeme": "1e21",
+      "text": "1e+21"
+    },
+    {
+      "lexeme": "1e+21",
+      "text": "1e+21"
+    },
+    {
+      "lexeme": "-1e21",
+      "text": "-1e+21"
+    },
+    {
+      "lexeme": "1.5e+21",
+      "text": "1.5e+21"
+    },
+    {
+      "lexeme": "1e100",
+      "text": "1e+100"
+    },
+    {
+      "lexeme": "0.000001",
+      "text": "0.000001"
+    },
+    {
+      "lexeme": "1e-6",
+      "text": "0.000001"
+    },
+    {
+      "lexeme": "-0.000001",
+      "text": "-0.000001"
+    },
+    {
+      "lexeme": "0.0000015",
+      "text": "0.0000015"
+    },
+    {
+      "lexeme": "1e-7",
+      "text": "1e-7"
+    },
+    {
+      "lexeme": "0.0000001",
+      "text": "1e-7"
+    },
+    {
+      "lexeme": "1.5e-7",
+      "text": "1.5e-7"
+    },
+    {
+      "lexeme": "0.00000015",
+      "text": "1.5e-7"
+    },
+    {
+      "lexeme": "123e-20",
+      "text": "1.23e-18"
+    },
+    {
+      "lexeme": "5e-324",
+      "text": "5e-324"
+    },
+    {
+      "lexeme": "-5e-324",
+      "text": "-5e-324"
+    },
+    {
+      "lexeme": "2.2250738585072014e-308",
+      "text": "2.2250738585072014e-308"
+    },
+    {
+      "lexeme": "1.7976931348623157e308",
+      "text": "1.7976931348623157e+308"
+    },
+    {
+      "lexeme": "-1.7976931348623157e308",
+      "text": "-1.7976931348623157e+308"
+    },
+    {
+      "lexeme": "1e-400",
+      "text": "0"
+    },
+    {
+      "lexeme": "-1e-400",
+      "text": "0"
+    },
+    {
+      "lexeme": "9007199254740991",
+      "text": "9007199254740991"
+    },
+    {
+      "lexeme": "-9007199254740991",
+      "text": "-9007199254740991"
+    },
+    {
+      "lexeme": "9007199254740992",
+      "text": "9007199254740992"
+    },
+    {
+      "lexeme": "9007199254740993",
+      "text": "9007199254740992"
+    },
+    {
+      "lexeme": "9007199254740994",
+      "text": "9007199254740994"
+    },
+    {
+      "lexeme": "-9007199254740994",
+      "text": "-9007199254740994"
+    },
+    {
+      "lexeme": "9223372036854775807",
+      "text": "9223372036854776000"
+    },
+    {
+      "lexeme": "-9223372036854775808",
+      "text": "-9223372036854776000"
+    },
+    {
+      "lexeme": "18446744073709551615",
+      "text": "18446744073709552000"
+    },
+    {
+      "lexeme": "18446744073709552000",
+      "text": "18446744073709552000"
+    },
+    {
+      "lexeme": "1.0",
+      "text": "1"
+    },
+    {
+      "lexeme": "1E5",
+      "text": "100000"
+    },
+    {
+      "lexeme": "1e0",
+      "text": "1"
+    },
+    {
+      "lexeme": "0.10",
+      "text": "0.1"
+    },
+    {
+      "lexeme": "0.1e1",
+      "text": "1"
+    },
+    {
+      "lexeme": "-123.456e-3",
+      "text": "-0.123456"
+    }
+  ],
+  "derivation": [
+    {
+      "id": "writer-numbers",
+      "lines": [
+        "{\"type\":\"session\",\"version\":3,\"id\":\"numbers\",\"createdAt\":5,\"isSeeded\":false,\"delegationDepth\":0}",
+        "{\"type\":\"turn/start\",\"seq\":0,\"time\":100,\"data\":{\"turn\":1}}",
+        "{\"type\":\"step/start\",\"seq\":1,\"time\":101,\"data\":{\"turn\":1,\"step\":1}}",
+        "{\"type\":\"system/message\",\"seq\":2,\"time\":102,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"0000000a-5a5a-4a5a-8a5a-5a5a5a5a5a5a\",\"role\":\"system\",\"source\":{\"kind\":\"plugin\",\"plugin\":\"p\"},\"content\":[{\"type\":\"text\",\"text\":\"sys\"}]}},\"surfaceOp\":\"append\"}",
+        "{\"type\":\"user/message\",\"seq\":3,\"time\":103,\"data\":{\"id\":\"0000000b-5a5a-4a5a-8a5a-5a5a5a5a5a5a\",\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"go\"}],\"source\":{\"kind\":\"user\"},\"n\":[0.1,1e+21,1.5e-7,-0.000001,123456789012345680000,5e-324,9007199254740994]},\"surfaceOp\":\"append\"}",
+        "{\"type\":\"request/header\",\"seq\":4,\"time\":104,\"data\":{\"header\":{\"config\":{\"provider\":\"p\",\"model\":\"m\",\"temperature\":0.7},\"tools\":[{\"name\":\"a\",\"parameters\":{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\",\"minimum\":1e-7,\"maximum\":1e+21,\"multipleOf\":0.5}}}}]},\"reason\":\"initial\"}}",
+        "{\"type\":\"assistant/attempt\",\"seq\":5,\"time\":105,\"data\":{\"turn\":1,\"step\":1,\"stream\":[{\"type\":\"chunk\",\"time\":105,\"chunk\":{\"type\":\"finish\",\"reason\":{\"kind\":\"error\",\"failure\":{\"message\":\"retry\",\"code\":\"SERVER\"}}}}]}}",
+        "{\"type\":\"llm/retry\",\"seq\":6,\"time\":106,\"data\":{\"retryId\":\"r\",\"turn\":1,\"step\":1,\"provider\":\"p\",\"mode\":\"always\",\"policyKey\":\"k\",\"retry\":1,\"delayMs\":1234.5,\"failure\":{\"message\":\"retry\",\"code\":\"SERVER\"}}}",
+        "{\"type\":\"llm/retry-started\",\"seq\":7,\"time\":107,\"data\":{\"retryId\":\"r\",\"turn\":1,\"step\":1,\"retry\":1}}",
+        "{\"type\":\"assistant/message\",\"seq\":8,\"time\":108,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"0000000c-5a5a-4a5a-8a5a-5a5a5a5a5a5a\",\"role\":\"assistant\",\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"},\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]},\"stream\":[]},\"surfaceOp\":\"append\"}",
+        "{\"type\":\"hook/result\",\"seq\":9,\"time\":109,\"data\":{\"turn\":1,\"point\":\"PostToolUse\",\"handlerId\":\"h\",\"decision\":\"allow\",\"durationMs\":7.77537499999994}}",
+        "{\"type\":\"step/end\",\"seq\":10,\"time\":110,\"data\":{\"turn\":1,\"step\":1}}",
+        "{\"type\":\"turn/end\",\"seq\":11,\"time\":111,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}"
+      ],
+      "requests": [
+        "{\"provider\":\"p\",\"model\":\"m\",\"temperature\":0.7,\"messages\":[{\"id\":\"0000000a-5a5a-4a5a-8a5a-5a5a5a5a5a5a\",\"role\":\"system\",\"source\":{\"kind\":\"plugin\",\"plugin\":\"p\"},\"content\":[{\"type\":\"text\",\"text\":\"sys\"}]},{\"id\":\"0000000b-5a5a-4a5a-8a5a-5a5a5a5a5a5a\",\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"go\"}],\"source\":{\"kind\":\"user\"},\"n\":[0.1,1e+21,1.5e-7,-0.000001,123456789012345680000,5e-324,9007199254740994]}],\"toolHistory\":{\"tools\":[{\"name\":\"a\",\"parameters\":{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\",\"minimum\":1e-7,\"maximum\":1e+21,\"multipleOf\":0.5}}}}],\"updates\":[]},\"tools\":[{\"name\":\"a\",\"parameters\":{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\",\"minimum\":1e-7,\"maximum\":1e+21,\"multipleOf\":0.5}}}}],\"sessionId\":\"numbers\"}",
+        "{\"provider\":\"p\",\"model\":\"m\",\"temperature\":0.7,\"messages\":[{\"id\":\"0000000a-5a5a-4a5a-8a5a-5a5a5a5a5a5a\",\"role\":\"system\",\"source\":{\"kind\":\"plugin\",\"plugin\":\"p\"},\"content\":[{\"type\":\"text\",\"text\":\"sys\"}]},{\"id\":\"0000000b-5a5a-4a5a-8a5a-5a5a5a5a5a5a\",\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"go\"}],\"source\":{\"kind\":\"user\"},\"n\":[0.1,1e+21,1.5e-7,-0.000001,123456789012345680000,5e-324,9007199254740994]}],\"toolHistory\":{\"tools\":[{\"name\":\"a\",\"parameters\":{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\",\"minimum\":1e-7,\"maximum\":1e+21,\"multipleOf\":0.5}}}}],\"updates\":[]},\"tools\":[{\"name\":\"a\",\"parameters\":{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\",\"minimum\":1e-7,\"maximum\":1e+21,\"multipleOf\":0.5}}}}],\"sessionId\":\"numbers\"}"
+      ],
+      "note": "Every number is spelled as JSON.stringify writes it: a fractional temperature, tool-schema bounds, message members, a fractional llm/retry delayMs, and a fractional hook/result durationMs."
+    },
+    {
+      "id": "trailing-zero-spellings",
+      "lines": [
+        "{\"type\":\"session\",\"version\":3,\"id\":\"numbers\",\"createdAt\":5,\"isSeeded\":false,\"delegationDepth\":0}",
+        "{\"type\":\"turn/start\",\"seq\":0,\"time\":100,\"data\":{\"turn\":1}}",
+        "{\"type\":\"step/start\",\"seq\":1,\"time\":101,\"data\":{\"turn\":1,\"step\":1}}",
+        "{\"type\":\"system/message\",\"seq\":2,\"time\":102,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"0000000a-5a5a-4a5a-8a5a-5a5a5a5a5a5a\",\"role\":\"system\",\"source\":{\"kind\":\"plugin\",\"plugin\":\"p\"},\"content\":[{\"type\":\"text\",\"text\":\"sys\"}]}},\"surfaceOp\":\"append\"}",
+        "{\"type\":\"user/message\",\"seq\":3,\"time\":103,\"data\":{\"id\":\"0000000b-5a5a-4a5a-8a5a-5a5a5a5a5a5a\",\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"go\"}],\"source\":{\"kind\":\"user\"},\"n\":[0.10,1.50e0,2.5E-7]},\"surfaceOp\":\"append\"}",
+        "{\"type\":\"request/header\",\"seq\":4,\"time\":104,\"data\":{\"header\":{\"config\":{\"provider\":\"p\",\"model\":\"m\",\"temperature\":0.70},\"tools\":[{\"name\":\"a\",\"parameters\":{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\",\"minimum\":1e-7,\"maximum\":1e+21,\"multipleOf\":0.5}}}}]},\"reason\":\"initial\"}}",
+        "{\"type\":\"assistant/attempt\",\"seq\":5,\"time\":105,\"data\":{\"turn\":1,\"step\":1,\"stream\":[{\"type\":\"chunk\",\"time\":105,\"chunk\":{\"type\":\"finish\",\"reason\":{\"kind\":\"error\",\"failure\":{\"message\":\"retry\",\"code\":\"SERVER\"}}}}]}}",
+        "{\"type\":\"llm/retry\",\"seq\":6,\"time\":106,\"data\":{\"retryId\":\"r\",\"turn\":1,\"step\":1,\"provider\":\"p\",\"mode\":\"always\",\"policyKey\":\"k\",\"retry\":1,\"delayMs\":1234.5,\"failure\":{\"message\":\"retry\",\"code\":\"SERVER\"}}}",
+        "{\"type\":\"llm/retry-started\",\"seq\":7,\"time\":107,\"data\":{\"retryId\":\"r\",\"turn\":1,\"step\":1,\"retry\":1}}",
+        "{\"type\":\"assistant/message\",\"seq\":8,\"time\":108,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"0000000c-5a5a-4a5a-8a5a-5a5a5a5a5a5a\",\"role\":\"assistant\",\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"},\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]},\"stream\":[]},\"surfaceOp\":\"append\"}",
+        "{\"type\":\"hook/result\",\"seq\":9,\"time\":109,\"data\":{\"turn\":1,\"point\":\"PostToolUse\",\"handlerId\":\"h\",\"decision\":\"allow\",\"durationMs\":7.77537499999994}}",
+        "{\"type\":\"step/end\",\"seq\":10,\"time\":110,\"data\":{\"turn\":1,\"step\":1}}",
+        "{\"type\":\"turn/end\",\"seq\":11,\"time\":111,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}"
+      ],
+      "requests": [
+        "{\"provider\":\"p\",\"model\":\"m\",\"temperature\":0.7,\"messages\":[{\"id\":\"0000000a-5a5a-4a5a-8a5a-5a5a5a5a5a5a\",\"role\":\"system\",\"source\":{\"kind\":\"plugin\",\"plugin\":\"p\"},\"content\":[{\"type\":\"text\",\"text\":\"sys\"}]},{\"id\":\"0000000b-5a5a-4a5a-8a5a-5a5a5a5a5a5a\",\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"go\"}],\"source\":{\"kind\":\"user\"},\"n\":[0.1,1.5,2.5e-7]}],\"toolHistory\":{\"tools\":[{\"name\":\"a\",\"parameters\":{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\",\"minimum\":1e-7,\"maximum\":1e+21,\"multipleOf\":0.5}}}}],\"updates\":[]},\"tools\":[{\"name\":\"a\",\"parameters\":{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\",\"minimum\":1e-7,\"maximum\":1e+21,\"multipleOf\":0.5}}}}],\"sessionId\":\"numbers\"}",
+        "{\"provider\":\"p\",\"model\":\"m\",\"temperature\":0.7,\"messages\":[{\"id\":\"0000000a-5a5a-4a5a-8a5a-5a5a5a5a5a5a\",\"role\":\"system\",\"source\":{\"kind\":\"plugin\",\"plugin\":\"p\"},\"content\":[{\"type\":\"text\",\"text\":\"sys\"}]},{\"id\":\"0000000b-5a5a-4a5a-8a5a-5a5a5a5a5a5a\",\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"go\"}],\"source\":{\"kind\":\"user\"},\"n\":[0.1,1.5,2.5e-7]}],\"toolHistory\":{\"tools\":[{\"name\":\"a\",\"parameters\":{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\",\"minimum\":1e-7,\"maximum\":1e+21,\"multipleOf\":0.5}}}}],\"updates\":[]},\"tools\":[{\"name\":\"a\",\"parameters\":{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\",\"minimum\":1e-7,\"maximum\":1e+21,\"multipleOf\":0.5}}}}],\"sessionId\":\"numbers\"}"
+      ],
+      "note": "These spellings store the value a writer's spelling stores, so both arms derive the request as JavaScript prints it."
+    },
+    {
+      "id": "limit-integral-fraction-temperature",
+      "lines": [
+        "{\"type\":\"session\",\"version\":3,\"id\":\"numbers\",\"createdAt\":5,\"isSeeded\":false,\"delegationDepth\":0}",
+        "{\"type\":\"turn/start\",\"seq\":0,\"time\":100,\"data\":{\"turn\":1}}",
+        "{\"type\":\"step/start\",\"seq\":1,\"time\":101,\"data\":{\"turn\":1,\"step\":1}}",
+        "{\"type\":\"system/message\",\"seq\":2,\"time\":102,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"0000000a-5a5a-4a5a-8a5a-5a5a5a5a5a5a\",\"role\":\"system\",\"source\":{\"kind\":\"plugin\",\"plugin\":\"p\"},\"content\":[{\"type\":\"text\",\"text\":\"sys\"}]}},\"surfaceOp\":\"append\"}",
+        "{\"type\":\"user/message\",\"seq\":3,\"time\":103,\"data\":{\"id\":\"0000000b-5a5a-4a5a-8a5a-5a5a5a5a5a5a\",\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"go\"}],\"source\":{\"kind\":\"user\"},\"n\":[0.1,1e+21,1.5e-7,-0.000001,123456789012345680000,5e-324,9007199254740994]},\"surfaceOp\":\"append\"}",
+        "{\"type\":\"request/header\",\"seq\":4,\"time\":104,\"data\":{\"header\":{\"config\":{\"provider\":\"p\",\"model\":\"m\",\"temperature\":1.0},\"tools\":[{\"name\":\"a\",\"parameters\":{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\",\"minimum\":1e-7,\"maximum\":1e+21,\"multipleOf\":0.5}}}}]},\"reason\":\"initial\"}}",
+        "{\"type\":\"assistant/attempt\",\"seq\":5,\"time\":105,\"data\":{\"turn\":1,\"step\":1,\"stream\":[{\"type\":\"chunk\",\"time\":105,\"chunk\":{\"type\":\"finish\",\"reason\":{\"kind\":\"error\",\"failure\":{\"message\":\"retry\",\"code\":\"SERVER\"}}}}]}}",
+        "{\"type\":\"llm/retry\",\"seq\":6,\"time\":106,\"data\":{\"retryId\":\"r\",\"turn\":1,\"step\":1,\"provider\":\"p\",\"mode\":\"always\",\"policyKey\":\"k\",\"retry\":1,\"delayMs\":1234.5,\"failure\":{\"message\":\"retry\",\"code\":\"SERVER\"}}}",
+        "{\"type\":\"llm/retry-started\",\"seq\":7,\"time\":107,\"data\":{\"retryId\":\"r\",\"turn\":1,\"step\":1,\"retry\":1}}",
+        "{\"type\":\"assistant/message\",\"seq\":8,\"time\":108,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"0000000c-5a5a-4a5a-8a5a-5a5a5a5a5a5a\",\"role\":\"assistant\",\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"},\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]},\"stream\":[]},\"surfaceOp\":\"append\"}",
+        "{\"type\":\"hook/result\",\"seq\":9,\"time\":109,\"data\":{\"turn\":1,\"point\":\"PostToolUse\",\"handlerId\":\"h\",\"decision\":\"allow\",\"durationMs\":7.77537499999994}}",
+        "{\"type\":\"step/end\",\"seq\":10,\"time\":110,\"data\":{\"turn\":1,\"step\":1}}",
+        "{\"type\":\"turn/end\",\"seq\":11,\"time\":111,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}"
+      ],
+      "requests": [
+        "{\"provider\":\"p\",\"model\":\"m\",\"temperature\":1,\"messages\":[{\"id\":\"0000000a-5a5a-4a5a-8a5a-5a5a5a5a5a5a\",\"role\":\"system\",\"source\":{\"kind\":\"plugin\",\"plugin\":\"p\"},\"content\":[{\"type\":\"text\",\"text\":\"sys\"}]},{\"id\":\"0000000b-5a5a-4a5a-8a5a-5a5a5a5a5a5a\",\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"go\"}],\"source\":{\"kind\":\"user\"},\"n\":[0.1,1e+21,1.5e-7,-0.000001,123456789012345680000,5e-324,9007199254740994]}],\"toolHistory\":{\"tools\":[{\"name\":\"a\",\"parameters\":{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\",\"minimum\":1e-7,\"maximum\":1e+21,\"multipleOf\":0.5}}}}],\"updates\":[]},\"tools\":[{\"name\":\"a\",\"parameters\":{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\",\"minimum\":1e-7,\"maximum\":1e+21,\"multipleOf\":0.5}}}}],\"sessionId\":\"numbers\"}",
+        "{\"provider\":\"p\",\"model\":\"m\",\"temperature\":1,\"messages\":[{\"id\":\"0000000a-5a5a-4a5a-8a5a-5a5a5a5a5a5a\",\"role\":\"system\",\"source\":{\"kind\":\"plugin\",\"plugin\":\"p\"},\"content\":[{\"type\":\"text\",\"text\":\"sys\"}]},{\"id\":\"0000000b-5a5a-4a5a-8a5a-5a5a5a5a5a5a\",\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"go\"}],\"source\":{\"kind\":\"user\"},\"n\":[0.1,1e+21,1.5e-7,-0.000001,123456789012345680000,5e-324,9007199254740994]}],\"toolHistory\":{\"tools\":[{\"name\":\"a\",\"parameters\":{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\",\"minimum\":1e-7,\"maximum\":1e+21,\"multipleOf\":0.5}}}}],\"updates\":[]},\"tools\":[{\"name\":\"a\",\"parameters\":{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\",\"minimum\":1e-7,\"maximum\":1e+21,\"multipleOf\":0.5}}}}],\"sessionId\":\"numbers\"}"
+      ],
+      "rust": {
+        "limit": "number",
+        "seq": 4
+      },
+      "note": "JSON.stringify writes this value as 1, so no released writer spells it 1.0; replay and restoration refuse the spelling."
+    },
+    {
+      "id": "limit-exponent-temperature",
+      "lines": [
+        "{\"type\":\"session\",\"version\":3,\"id\":\"numbers\",\"createdAt\":5,\"isSeeded\":false,\"delegationDepth\":0}",
+        "{\"type\":\"turn/start\",\"seq\":0,\"time\":100,\"data\":{\"turn\":1}}",
+        "{\"type\":\"step/start\",\"seq\":1,\"time\":101,\"data\":{\"turn\":1,\"step\":1}}",
+        "{\"type\":\"system/message\",\"seq\":2,\"time\":102,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"0000000a-5a5a-4a5a-8a5a-5a5a5a5a5a5a\",\"role\":\"system\",\"source\":{\"kind\":\"plugin\",\"plugin\":\"p\"},\"content\":[{\"type\":\"text\",\"text\":\"sys\"}]}},\"surfaceOp\":\"append\"}",
+        "{\"type\":\"user/message\",\"seq\":3,\"time\":103,\"data\":{\"id\":\"0000000b-5a5a-4a5a-8a5a-5a5a5a5a5a5a\",\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"go\"}],\"source\":{\"kind\":\"user\"},\"n\":[0.1,1e+21,1.5e-7,-0.000001,123456789012345680000,5e-324,9007199254740994]},\"surfaceOp\":\"append\"}",
+        "{\"type\":\"request/header\",\"seq\":4,\"time\":104,\"data\":{\"header\":{\"config\":{\"provider\":\"p\",\"model\":\"m\",\"temperature\":1e5},\"tools\":[{\"name\":\"a\",\"parameters\":{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\",\"minimum\":1e-7,\"maximum\":1e+21,\"multipleOf\":0.5}}}}]},\"reason\":\"initial\"}}",
+        "{\"type\":\"assistant/attempt\",\"seq\":5,\"time\":105,\"data\":{\"turn\":1,\"step\":1,\"stream\":[{\"type\":\"chunk\",\"time\":105,\"chunk\":{\"type\":\"finish\",\"reason\":{\"kind\":\"error\",\"failure\":{\"message\":\"retry\",\"code\":\"SERVER\"}}}}]}}",
+        "{\"type\":\"llm/retry\",\"seq\":6,\"time\":106,\"data\":{\"retryId\":\"r\",\"turn\":1,\"step\":1,\"provider\":\"p\",\"mode\":\"always\",\"policyKey\":\"k\",\"retry\":1,\"delayMs\":1234.5,\"failure\":{\"message\":\"retry\",\"code\":\"SERVER\"}}}",
+        "{\"type\":\"llm/retry-started\",\"seq\":7,\"time\":107,\"data\":{\"retryId\":\"r\",\"turn\":1,\"step\":1,\"retry\":1}}",
+        "{\"type\":\"assistant/message\",\"seq\":8,\"time\":108,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"0000000c-5a5a-4a5a-8a5a-5a5a5a5a5a5a\",\"role\":\"assistant\",\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"},\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]},\"stream\":[]},\"surfaceOp\":\"append\"}",
+        "{\"type\":\"hook/result\",\"seq\":9,\"time\":109,\"data\":{\"turn\":1,\"point\":\"PostToolUse\",\"handlerId\":\"h\",\"decision\":\"allow\",\"durationMs\":7.77537499999994}}",
+        "{\"type\":\"step/end\",\"seq\":10,\"time\":110,\"data\":{\"turn\":1,\"step\":1}}",
+        "{\"type\":\"turn/end\",\"seq\":11,\"time\":111,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}"
+      ],
+      "requests": [
+        "{\"provider\":\"p\",\"model\":\"m\",\"temperature\":100000,\"messages\":[{\"id\":\"0000000a-5a5a-4a5a-8a5a-5a5a5a5a5a5a\",\"role\":\"system\",\"source\":{\"kind\":\"plugin\",\"plugin\":\"p\"},\"content\":[{\"type\":\"text\",\"text\":\"sys\"}]},{\"id\":\"0000000b-5a5a-4a5a-8a5a-5a5a5a5a5a5a\",\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"go\"}],\"source\":{\"kind\":\"user\"},\"n\":[0.1,1e+21,1.5e-7,-0.000001,123456789012345680000,5e-324,9007199254740994]}],\"toolHistory\":{\"tools\":[{\"name\":\"a\",\"parameters\":{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\",\"minimum\":1e-7,\"maximum\":1e+21,\"multipleOf\":0.5}}}}],\"updates\":[]},\"tools\":[{\"name\":\"a\",\"parameters\":{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\",\"minimum\":1e-7,\"maximum\":1e+21,\"multipleOf\":0.5}}}}],\"sessionId\":\"numbers\"}",
+        "{\"provider\":\"p\",\"model\":\"m\",\"temperature\":100000,\"messages\":[{\"id\":\"0000000a-5a5a-4a5a-8a5a-5a5a5a5a5a5a\",\"role\":\"system\",\"source\":{\"kind\":\"plugin\",\"plugin\":\"p\"},\"content\":[{\"type\":\"text\",\"text\":\"sys\"}]},{\"id\":\"0000000b-5a5a-4a5a-8a5a-5a5a5a5a5a5a\",\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"go\"}],\"source\":{\"kind\":\"user\"},\"n\":[0.1,1e+21,1.5e-7,-0.000001,123456789012345680000,5e-324,9007199254740994]}],\"toolHistory\":{\"tools\":[{\"name\":\"a\",\"parameters\":{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\",\"minimum\":1e-7,\"maximum\":1e+21,\"multipleOf\":0.5}}}}],\"updates\":[]},\"tools\":[{\"name\":\"a\",\"parameters\":{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\",\"minimum\":1e-7,\"maximum\":1e+21,\"multipleOf\":0.5}}}}],\"sessionId\":\"numbers\"}"
+      ],
+      "rust": {
+        "limit": "number",
+        "seq": 4
+      },
+      "note": "JSON.stringify writes this value as 100000, so no released writer spells it 1e5; replay and restoration refuse the spelling."
+    },
+    {
+      "id": "limit-unsafe-integer-digits",
+      "lines": [
+        "{\"type\":\"session\",\"version\":3,\"id\":\"numbers\",\"createdAt\":5,\"isSeeded\":false,\"delegationDepth\":0}",
+        "{\"type\":\"turn/start\",\"seq\":0,\"time\":100,\"data\":{\"turn\":1}}",
+        "{\"type\":\"step/start\",\"seq\":1,\"time\":101,\"data\":{\"turn\":1,\"step\":1}}",
+        "{\"type\":\"system/message\",\"seq\":2,\"time\":102,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"0000000a-5a5a-4a5a-8a5a-5a5a5a5a5a5a\",\"role\":\"system\",\"source\":{\"kind\":\"plugin\",\"plugin\":\"p\"},\"content\":[{\"type\":\"text\",\"text\":\"sys\"}]}},\"surfaceOp\":\"append\"}",
+        "{\"type\":\"user/message\",\"seq\":3,\"time\":103,\"data\":{\"id\":\"0000000b-5a5a-4a5a-8a5a-5a5a5a5a5a5a\",\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"go\"}],\"source\":{\"kind\":\"user\"},\"n\":[0.1,1e+21,1.5e-7,-0.000001,123456789012345680000,5e-324,9007199254740993]},\"surfaceOp\":\"append\"}",
+        "{\"type\":\"request/header\",\"seq\":4,\"time\":104,\"data\":{\"header\":{\"config\":{\"provider\":\"p\",\"model\":\"m\",\"temperature\":0.7},\"tools\":[{\"name\":\"a\",\"parameters\":{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\",\"minimum\":1e-7,\"maximum\":1e+21,\"multipleOf\":0.5}}}}]},\"reason\":\"initial\"}}",
+        "{\"type\":\"assistant/attempt\",\"seq\":5,\"time\":105,\"data\":{\"turn\":1,\"step\":1,\"stream\":[{\"type\":\"chunk\",\"time\":105,\"chunk\":{\"type\":\"finish\",\"reason\":{\"kind\":\"error\",\"failure\":{\"message\":\"retry\",\"code\":\"SERVER\"}}}}]}}",
+        "{\"type\":\"llm/retry\",\"seq\":6,\"time\":106,\"data\":{\"retryId\":\"r\",\"turn\":1,\"step\":1,\"provider\":\"p\",\"mode\":\"always\",\"policyKey\":\"k\",\"retry\":1,\"delayMs\":1234.5,\"failure\":{\"message\":\"retry\",\"code\":\"SERVER\"}}}",
+        "{\"type\":\"llm/retry-started\",\"seq\":7,\"time\":107,\"data\":{\"retryId\":\"r\",\"turn\":1,\"step\":1,\"retry\":1}}",
+        "{\"type\":\"assistant/message\",\"seq\":8,\"time\":108,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"0000000c-5a5a-4a5a-8a5a-5a5a5a5a5a5a\",\"role\":\"assistant\",\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"},\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]},\"stream\":[]},\"surfaceOp\":\"append\"}",
+        "{\"type\":\"hook/result\",\"seq\":9,\"time\":109,\"data\":{\"turn\":1,\"point\":\"PostToolUse\",\"handlerId\":\"h\",\"decision\":\"allow\",\"durationMs\":7.77537499999994}}",
+        "{\"type\":\"step/end\",\"seq\":10,\"time\":110,\"data\":{\"turn\":1,\"step\":1}}",
+        "{\"type\":\"turn/end\",\"seq\":11,\"time\":111,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}"
+      ],
+      "requests": [
+        "{\"provider\":\"p\",\"model\":\"m\",\"temperature\":0.7,\"messages\":[{\"id\":\"0000000a-5a5a-4a5a-8a5a-5a5a5a5a5a5a\",\"role\":\"system\",\"source\":{\"kind\":\"plugin\",\"plugin\":\"p\"},\"content\":[{\"type\":\"text\",\"text\":\"sys\"}]},{\"id\":\"0000000b-5a5a-4a5a-8a5a-5a5a5a5a5a5a\",\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"go\"}],\"source\":{\"kind\":\"user\"},\"n\":[0.1,1e+21,1.5e-7,-0.000001,123456789012345680000,5e-324,9007199254740992]}],\"toolHistory\":{\"tools\":[{\"name\":\"a\",\"parameters\":{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\",\"minimum\":1e-7,\"maximum\":1e+21,\"multipleOf\":0.5}}}}],\"updates\":[]},\"tools\":[{\"name\":\"a\",\"parameters\":{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\",\"minimum\":1e-7,\"maximum\":1e+21,\"multipleOf\":0.5}}}}],\"sessionId\":\"numbers\"}",
+        "{\"provider\":\"p\",\"model\":\"m\",\"temperature\":0.7,\"messages\":[{\"id\":\"0000000a-5a5a-4a5a-8a5a-5a5a5a5a5a5a\",\"role\":\"system\",\"source\":{\"kind\":\"plugin\",\"plugin\":\"p\"},\"content\":[{\"type\":\"text\",\"text\":\"sys\"}]},{\"id\":\"0000000b-5a5a-4a5a-8a5a-5a5a5a5a5a5a\",\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"go\"}],\"source\":{\"kind\":\"user\"},\"n\":[0.1,1e+21,1.5e-7,-0.000001,123456789012345680000,5e-324,9007199254740992]}],\"toolHistory\":{\"tools\":[{\"name\":\"a\",\"parameters\":{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\",\"minimum\":1e-7,\"maximum\":1e+21,\"multipleOf\":0.5}}}}],\"updates\":[]},\"tools\":[{\"name\":\"a\",\"parameters\":{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\",\"minimum\":1e-7,\"maximum\":1e+21,\"multipleOf\":0.5}}}}],\"sessionId\":\"numbers\"}"
+      ],
+      "rust": {
+        "limit": "number",
+        "seq": 3
+      },
+      "note": "JSON.parse reads 9007199254740993 as the double 9007199254740992, which JSON.stringify writes with those digits, so no released writer spells it 9007199254740993; replay and restoration refuse the spelling."
+    }
+  ]
+}

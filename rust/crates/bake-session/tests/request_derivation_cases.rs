@@ -25,7 +25,7 @@ const FIXTURE_EXPECTED: &str =
 const LOG_BYTES: usize = 4533;
 const EXPECTED_BYTES: usize = 2775;
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 200;
+const CASE_COUNT: usize = 201;
 const MAX_EDITS: usize = 8;
 const SOURCE_BUDGET: usize = 64;
 const LIMITS: [&str; 9] = [
@@ -135,7 +135,7 @@ fn table() -> Map<String, Value> {
         BTreeSet::from(["schema", "version", "history", "oracle", "fixture", "cases"])
     );
     assert_eq!(fields["schema"], SCHEMA);
-    assert_eq!(fields["version"], 2);
+    assert_eq!(fields["version"], 3);
     assert!(
         fields["history"]
             .as_array()

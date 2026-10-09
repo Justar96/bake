@@ -254,10 +254,10 @@ function parseRust(value: unknown, ts: Outcome, id: string): RustOverride {
 function loadTable(): RestoreCase[] {
   const table: unknown = JSON.parse(readFileSync(new URL('conformance/session/restore-cases.json', REPO), 'utf8'))
   if (!isObject(table) || sortedKeys(table) !== 'cases,history,logs,oracle,schema,version' || table.schema !== SCHEMA
-    || table.version !== 2 || table.oracle !== ORACLE || !Array.isArray(table.cases)
+    || table.version !== 3 || table.oracle !== ORACLE || !Array.isArray(table.cases)
     || !Array.isArray(table.history) || !table.history.every(isLine)
     || JSON.stringify(table.logs) !== JSON.stringify(Object.fromEntries(Object.entries(LOGS).map(([name, { path }]) => [name, path])))) {
-    throw new Error('restore-cases.json does not match its version-2 schema')
+    throw new Error('restore-cases.json does not match its version-3 schema')
   }
   return table.cases.map((entry: unknown): RestoreCase => {
     if (!isObject(entry) || typeof entry.id !== 'string' || typeof entry.log !== 'string') {

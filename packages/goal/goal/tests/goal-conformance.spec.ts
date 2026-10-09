@@ -28,7 +28,7 @@ const LOGS: Record<string, { path: string; sha256: string }> = {
   },
 }
 /** Both harnesses pin the table size, so a dropped case fails. */
-const CASE_COUNT = 112
+const CASE_COUNT = 113
 const LIMITS = ['number', 'version-diagnostic']
 
 type Edit =
@@ -105,10 +105,10 @@ function parseState(value: unknown, id: string): GoalProjectionState {
 function loadTable(): GoalCase[] {
   const table: unknown = JSON.parse(readFileSync(new URL('conformance/session/goal-cases.json', REPO), 'utf8'))
   if (!isObject(table) || sortedKeys(table) !== 'cases,history,logs,oracle,schema,version' || table.schema !== SCHEMA
-    || table.version !== 1 || table.oracle !== ORACLE || !Array.isArray(table.cases)
+    || table.version !== 2 || table.oracle !== ORACLE || !Array.isArray(table.cases)
     || !Array.isArray(table.history) || !table.history.every(isLine)
     || JSON.stringify(table.logs) !== JSON.stringify(Object.fromEntries(Object.entries(LOGS).map(([name, { path }]) => [name, path])))) {
-    throw new Error('goal-cases.json does not match its version-1 schema')
+    throw new Error('goal-cases.json does not match its version-2 schema')
   }
   return table.cases.map((entry: unknown): GoalCase => {
     if (!isObject(entry) || typeof entry.id !== 'string' || typeof entry.log !== 'string' || !Array.isArray(entry.edits)) {

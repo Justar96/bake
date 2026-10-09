@@ -14,7 +14,7 @@
 //! that event, and every later event is ignored.
 //!
 //! Restoration proved each `user/message`'s data and source objects, and
-//! every number in them a safe integer other than -0, but checked no
+//! every number in them spelled as `JSON.stringify` writes it, but checked no
 //! `goal/change` payload. Where TypeScript's outcome rests on JavaScript
 //! number reading or `String` formatting this port does not reproduce,
 //! [`goal_projection`] refuses with a [`GoalLimit`] and claims no TypeScript
@@ -392,10 +392,11 @@ fn apply_round(
         Some(Value::String(id)) if !id.is_empty() => id,
         _ => return invalid(),
     };
-    let Some(revision) = safe_integer(source.get("revision"))?.filter(|value| *value >= 1) else {
+    let Some(revision) = message_safe_integer(source.get("revision")).filter(|value| *value >= 1)
+    else {
         return invalid();
     };
-    let Some(round) = safe_integer(source.get("round"))?.filter(|value| *value >= 1) else {
+    let Some(round) = message_safe_integer(source.get("round")).filter(|value| *value >= 1) else {
         return invalid();
     };
     let admitted = state.current.as_ref().filter(|current| {
@@ -597,6 +598,14 @@ fn safe_integer(value: Option<&Value>) -> Result<Option<i64>, GoalLimit> {
         return Ok((number.unsigned_abs() <= MAX_SAFE_INTEGER).then_some(number));
     }
     Err(GoalLimit::Number)
+}
+
+/// `Number.isSafeInteger` of a restored `user/message` number, as the value.
+/// Restoration admitted only numbers spelled as `JSON.stringify` writes them,
+/// and it writes every safe integer without a fraction or an exponent, so a
+/// number serde_json holds as a float is not one.
+fn message_safe_integer(value: Option<&Value>) -> Option<i64> {
+    safe_integer(value).ok().flatten()
 }
 
 /// `String(value['version'])` where this port reproduces it.

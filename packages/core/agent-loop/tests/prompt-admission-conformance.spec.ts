@@ -45,7 +45,7 @@ const LOGS: Record<string, { path: string; sha256: string }> = {
   },
 }
 /** Both harnesses pin the table size, so a dropped case fails. */
-const CASE_COUNT = 34
+const CASE_COUNT = 35
 
 type Edit =
   | { truncate: number }
@@ -191,10 +191,10 @@ function parseExpected(value: unknown, id: string): Expected {
 function loadTable(): PromptCase[] {
   const table: unknown = JSON.parse(readFileSync(new URL('conformance/session/prompt-admission-cases.json', REPO), 'utf8'))
   if (!isObject(table) || sortedKeys(table) !== 'cases,history,logs,oracle,schema,version' || table.schema !== SCHEMA
-    || table.version !== 1 || table.oracle !== ORACLE || !Array.isArray(table.cases)
+    || table.version !== 2 || table.oracle !== ORACLE || !Array.isArray(table.cases)
     || !Array.isArray(table.history) || !table.history.every(isLine)
     || JSON.stringify(table.logs) !== JSON.stringify(Object.fromEntries(Object.entries(LOGS).map(([name, { path }]) => [name, path])))) {
-    throw new Error('prompt-admission-cases.json does not match its version-1 schema')
+    throw new Error('prompt-admission-cases.json does not match its version-2 schema')
   }
   return table.cases.map((entry: unknown): PromptCase => {
     if (!isObject(entry) || typeof entry.id !== 'string' || typeof entry.log !== 'string' || !Array.isArray(entry.edits)) {

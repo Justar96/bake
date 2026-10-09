@@ -1,9 +1,10 @@
 {
   "schema": "bake/session-conformance/goal-cases",
-  "version": 1,
+  "version": 2,
   "oracle": "goalProjectionDefinition.init and applyGoalProjection in packages/goal/goal/src/index.ts, folded over each case's parsed rows and their interruptedTurnClosers",
   "history": [
-    "Version 1: 112 cases, written from the TypeScript sources before either harness ran."
+    "Version 1: 112 cases, written from the TypeScript sources before either harness ran.",
+    "Version 2: 113 cases; adds round-source-fractional-round, a goal-sourced message whose round a writer spells 1.5, which restoration now admits."
   ],
   "logs": {
     "tool-call-turn": "conformance/runtime/request-reconstruction/tool-call-turn/session.jsonl"
@@ -2878,6 +2879,37 @@
         ],
         "failure": "goal replay failed at session event 17: goal message source is invalid"
       }
+    },
+    {
+      "id": "round-source-fractional-round",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "append": "{\"type\":\"goal/change\",\"seq\":16,\"time\":1791337579871,\"data\":{\"kind\":\"goal/change\",\"version\":1,\"operation\":\"create\",\"goal\":{\"id\":\"g1\",\"revision\":1,\"objective\":\"ship it\",\"phase\":\"active\",\"maxGoalRounds\":3},\"roundsStarted\":0,\"createdAt\":100,\"updatedAt\":100}}"
+        },
+        {
+          "append": "{\"type\":\"user/message\",\"seq\":17,\"time\":1791337579871,\"data\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"continue\"}],\"source\":{\"kind\":\"goal\",\"goalId\":\"g1\",\"revision\":1,\"round\":1.5},\"id\":\"m17\"},\"surfaceOp\":\"append\"}"
+        }
+      ],
+      "ts": {
+        "current": {
+          "goal": {
+            "id": "g1",
+            "revision": 1,
+            "objective": "ship it",
+            "phase": "active",
+            "maxGoalRounds": 3
+          },
+          "roundsStarted": 0,
+          "createdAt": 100,
+          "updatedAt": 100
+        },
+        "seenGoalIds": [
+          "g1"
+        ],
+        "failure": "goal replay failed at session event 17: goal message source is invalid"
+      },
+      "note": "A writer spells this round 1.5, which restoration admits; Number.isSafeInteger(1.5) is false."
     },
     {
       "id": "limit-after-failure-unread",

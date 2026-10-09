@@ -206,7 +206,7 @@ fn load() -> Vec<Case> {
         BTreeSet::from(["cases", "history", "logs", "oracle", "schema", "version"])
     );
     assert_eq!(table["schema"], SCHEMA);
-    assert_eq!(table["version"], 2);
+    assert_eq!(table["version"], 3);
     assert!(
         table["history"]
             .as_array()
