@@ -35,7 +35,7 @@ const REPO = new URL('../../../../', import.meta.url)
 const SCHEMA = 'bake/session-format-conformance/v0-to-v1-cases'
 const ORACLE = 'releasedV0SessionFormatCodec.createDecoder(header, recovery) feeding createSessionFormatChain({currentVersion: 1, migrations: [sessionFormatV0ToV1]}).createStream; decoder.finish, then stream.finish'
 /** Both harnesses pin the table size, so a dropped case fails. */
-const CASE_COUNT = 95
+const CASE_COUNT = 96
 /**
  * Native limits: a float spelling where TypeScript reads a seq, count, or `Map` key, a non-string
  * type that TypeScript coerces, a V8 TypeError text the chain wraps, and the unported legacy goal
@@ -113,9 +113,9 @@ function parseCase(value: unknown): MigrationCase {
 function loadTable(): { cases: MigrationCase[]; dispositions: unknown } {
   const table: unknown = JSON.parse(readFileSync(new URL('conformance/session/v0-to-v1-cases.json', REPO), 'utf8'))
   if (!isObject(table) || sortedKeys(table) !== 'cases,dispositions,history,oracle,schema,version'
-    || table.schema !== SCHEMA || table.version !== 1 || table.oracle !== ORACLE || !Array.isArray(table.cases)
+    || table.schema !== SCHEMA || table.version !== 2 || table.oracle !== ORACLE || !Array.isArray(table.cases)
     || !Array.isArray(table.history) || !table.history.every(entry => typeof entry === 'string')) {
-    throw new Error('v0-to-v1-cases.json does not match its version-1 schema')
+    throw new Error('v0-to-v1-cases.json does not match its version-2 schema')
   }
   const cases = table.cases.map(parseCase)
   if (new Set(cases.map(entry => entry.id)).size !== cases.length) throw new Error('case ids must be unique')

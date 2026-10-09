@@ -1,10 +1,11 @@
 {
   "schema": "bake/session-conformance/plain-append-cases",
-  "version": 1,
+  "version": 2,
   "oracle": "create or write-open a handle of the JSONL backend with compression none in an owned temporary root, apply append and flush in order, and read the log file's bytes after each operation; scanLog reads the final bytes back",
   "history": [
     "Version 1: 44 cases, written from the TypeScript sources before either harness ran. The first TypeScript run refused to open two logs whose user/message lacked a source, which validateStoredEvents requires; the source was added to that event, in its input and in every expected log that carries it, and no outcome changed.",
-    "Review added create-empty-id-limited and the create-level rust override, making 45 cases: an empty id had been modelled as an ordinary log, so Rust claimed a contiguity message and written bytes where TypeScript throws while resolving the session directory."
+    "Review added create-empty-id-limited and the create-level rust override, making 45 cases: an empty id had been modelled as an ordinary log, so Rust claimed a contiguity message and written bytes where TypeScript throws while resolving the session directory.",
+    "Version 2: 46 cases. Rust writes numbers as JSON.stringify writes them, so encode-fraction-written, a fraction in free data, has no Rust limit, and encode-limit-float now witnesses the encode limit with a source member spelled 0.0; both were written from the TypeScript sources before either harness ran."
   ],
   "cases": [
     {
@@ -1164,7 +1165,7 @@
       "note": "No row of a refused batch is written."
     },
     {
-      "id": "encode-limit-float",
+      "id": "encode-fraction-written",
       "create": {
         "header": {
           "version": 3,
@@ -1191,14 +1192,54 @@
           "ts": {
             "outcome": "appended"
           },
-          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"c29\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"ext/note\",\"seq\":0,\"time\":1,\"ignorable\":true,\"data\":{\"x\":1.5}}\n",
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"c29\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"ext/note\",\"seq\":0,\"time\":1,\"ignorable\":true,\"data\":{\"x\":1.5}}\n"
+        }
+      ],
+      "note": "JavaScript writes 1.5, a writer spelling, and so does Rust."
+    },
+    {
+      "id": "encode-limit-float",
+      "create": {
+        "header": {
+          "version": 3,
+          "id": "c29",
+          "createdAt": 1,
+          "isSeeded": false,
+          "delegationDepth": 0
+        }
+      },
+      "ops": [
+        {
+          "op": "append",
+          "events": [
+            {
+              "type": "ext/note",
+              "seq": 0,
+              "time": 1,
+              "ignorable": true,
+              "data": {}
+            },
+            {
+              "type": "ext/derived",
+              "seq": 1,
+              "time": 1,
+              "sourceEventSeqs": [
+                0.0
+              ],
+              "data": {}
+            }
+          ],
+          "ts": {
+            "outcome": "appended"
+          },
+          "log": "{\"type\":\"session\",\"version\":3,\"id\":\"c29\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"ext/note\",\"seq\":0,\"time\":1,\"ignorable\":true,\"data\":{}}\n{\"type\":\"ext/derived\",\"seq\":1,\"time\":1,\"sourceEventSeqs\":[0],\"data\":{}}\n",
           "rust": {
             "outcome": "native-subset",
             "limit": "encode"
           }
         }
       ],
-      "note": "JavaScript writes 1.5; Rust does not claim JavaScript's number spelling."
+      "note": "The source member 0.0 is a count spelled other than JSON.stringify writes it; JavaScript writes 0, and Rust claims nothing."
     },
     {
       "id": "encode-type-number-after-materialized",

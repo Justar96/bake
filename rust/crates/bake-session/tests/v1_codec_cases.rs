@@ -18,7 +18,7 @@ use serde_json::{Map, Value};
 const SCHEMA: &str = "bake/session-format-conformance/v1-codec-cases";
 const ORACLE: &str = "releasedV0SessionFormatCodec or releasedV1SessionFormatCodec .createDecoder(header, recovery), decodeRow for each row into a SessionFormatEventCollector, then finish";
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 140;
+const CASE_COUNT: usize = 141;
 /// The budget a case without `sourceBudget` runs with; TypeScript has none.
 const DEFAULT_SOURCE_BUDGET: usize = 10_000;
 const LIMITS: [V1CodecLimit; 7] = [
@@ -138,7 +138,7 @@ fn load() -> Vec<Case> {
         BTreeSet::from(["schema", "version", "oracle", "history", "cases"])
     );
     assert_eq!(table["schema"], SCHEMA);
-    assert_eq!(table["version"], 1);
+    assert_eq!(table["version"], 2);
     assert_eq!(table["oracle"], ORACLE);
     assert!(
         table["history"]

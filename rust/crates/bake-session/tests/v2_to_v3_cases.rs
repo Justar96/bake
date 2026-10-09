@@ -17,7 +17,7 @@ use serde_json::{Map, Value};
 const SCHEMA: &str = "bake/session-format-conformance/v2-to-v3-cases";
 const ORACLE: &str = "releasedV2SessionFormatCodec.createDecoder(header, 'strict') feeding createSessionFormatChain([sessionFormatV0ToV1, sessionFormatV1ToV2, sessionFormatV2ToV3]).createStream; decoder.finish, then stream.finish";
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 367;
+const CASE_COUNT: usize = 370;
 /// The budget a case without `sourceBudget` runs with; TypeScript has none.
 const DEFAULT_SOURCE_BUDGET: usize = 10_000;
 /// Inherent native limits: a fraction or exponent spelling where TypeScript
@@ -201,10 +201,10 @@ fn load() -> Vec<Case> {
     let fields = object(&table, "table");
     assert_eq!(
         keys(fields),
-        BTreeSet::from(["schema", "version", "oracle", "cases"])
+        BTreeSet::from(["schema", "version", "oracle", "history", "cases"])
     );
     assert_eq!(table["schema"], SCHEMA);
-    assert_eq!(table["version"], 1);
+    assert_eq!(table["version"], 2);
     assert_eq!(table["oracle"], ORACLE);
     let allowed = BTreeSet::from([
         "id",

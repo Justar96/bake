@@ -35,7 +35,7 @@ const ORACLE = "JsonlSessionPersistence({compression: 'none'}) with session.v<N>
 /** Both harnesses pin the table size, so a dropped case fails. */
 const CASE_COUNT = 18
 /** Rust's native limits; each must be witnessed. */
-const LIMITS = ['encode', 'scan']
+const LIMITS = ['scan']
 const CLASSES = ['Error', 'SessionFormatUnsupportedError', 'SessionPersistenceCorruptionError']
 const RESTORED_KEYS = [
   'outcome', 'header', 'inheritedEventCount', 'events', 'closers', 'endSeedAppended', 'messages',
@@ -112,9 +112,9 @@ function parseRust(value: unknown, ts: Outcome, id: string): RustOverride {
 function loadTable(): MigratedCase[] {
   const table: unknown = JSON.parse(readFileSync(new URL('conformance/session/migrated-restore-cases.json', REPO), 'utf8'))
   if (!isObject(table) || sortedKeys(table) !== 'cases,history,oracle,schema,version' || table.schema !== SCHEMA
-    || table.version !== 2 || table.oracle !== ORACLE || !Array.isArray(table.cases)
+    || table.version !== 3 || table.oracle !== ORACLE || !Array.isArray(table.cases)
     || !Array.isArray(table.history) || !table.history.every(isLine)) {
-    throw new Error('migrated-restore-cases.json does not match its version-2 schema')
+    throw new Error('migrated-restore-cases.json does not match its version-3 schema')
   }
   return table.cases.map((entry: unknown): MigratedCase => {
     if (!isObject(entry) || typeof entry.id !== 'string') throw new Error(`invalid case ${JSON.stringify(entry)}`)

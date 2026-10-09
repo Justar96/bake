@@ -380,11 +380,9 @@ fn restore_refusal(refusal: ReplayRefusal) -> RestoreRefusal {
     }
 }
 
-/// The restoration limit for one of the shared admission's. Event types are
-/// qualified only by derivation's whole-log pass.
+/// The restoration limit for one of the shared admission's.
 fn limit(limit: ReplayLimit) -> RestoreLimit {
     match limit {
-        ReplayLimit::EventType => unreachable!("admission qualifies no event type"),
         ReplayLimit::Number => RestoreLimit::Number,
         ReplayLimit::Depth => RestoreLimit::Depth,
         ReplayLimit::Coordinate | ReplayLimit::RepeatedCoordinate => RestoreLimit::Coordinate,

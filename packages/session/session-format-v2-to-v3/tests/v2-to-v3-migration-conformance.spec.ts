@@ -25,7 +25,7 @@ const REPO = new URL('../../../../', import.meta.url)
 const SCHEMA = 'bake/session-format-conformance/v2-to-v3-cases'
 const ORACLE = "releasedV2SessionFormatCodec.createDecoder(header, 'strict') feeding createSessionFormatChain([sessionFormatV0ToV1, sessionFormatV1ToV2, sessionFormatV2ToV3]).createStream; decoder.finish, then stream.finish"
 /** Both harnesses pin the table size, so a dropped case fails. */
-const CASE_COUNT = 367
+const CASE_COUNT = 370
 /**
  * Inherent native limits: a fraction or exponent spelling where TypeScript reads a count or
  * safe integer, Rust's own source budget, and a V8 TypeError text the chain wraps.
@@ -107,9 +107,10 @@ function parseCase(value: unknown): MigrationCase {
 
 function loadTable(): MigrationCase[] {
   const table: unknown = JSON.parse(readFileSync(new URL('conformance/session/v2-to-v3-cases.json', REPO), 'utf8'))
-  if (!isObject(table) || sortedKeys(table) !== 'cases,oracle,schema,version'
-    || table.schema !== SCHEMA || table.version !== 1 || table.oracle !== ORACLE || !Array.isArray(table.cases)) {
-    throw new Error('v2-to-v3-cases.json does not match its version-1 schema')
+  if (!isObject(table) || sortedKeys(table) !== 'cases,history,oracle,schema,version'
+    || table.schema !== SCHEMA || table.version !== 2 || table.oracle !== ORACLE || !Array.isArray(table.cases)
+    || !Array.isArray(table.history) || !table.history.every(entry => typeof entry === 'string')) {
+    throw new Error('v2-to-v3-cases.json does not match its version-2 schema')
   }
   const cases = table.cases.map(parseCase)
   if (new Set(cases.map(entry => entry.id)).size !== cases.length) throw new Error('case ids must be unique')

@@ -36,7 +36,7 @@ const LOGS: Record<string, { path: string; sha256: string }> = {
   },
 }
 /** Both harnesses pin the table size, so a dropped case fails. */
-const CASE_COUNT = 37
+const CASE_COUNT = 41
 const LIMITS = ['number', 'usage', 'stream', 'claim', 'block', 'route', 'context-window']
 
 const definition = contextPressureProjectionDefinition
@@ -122,13 +122,16 @@ const VIEW_KEYS = ['contextWindow', 'sampledContextWindow', 'requestRoute', 'sam
   'projectedTokens']
 const ROUTE_KEYS = new Set(['requestRoute', 'sampledRoute'])
 
-/** Integer slots, route slots, and nothing else; `required` must be present. */
+/**
+ * Count slots as `JSON.stringify` writes them (a number, a string count, or
+ * null for NaN), route slots, and nothing else; `required` must be present.
+ */
 function isSlots(value: unknown, known: string[], required: string[]): boolean {
   return isObject(value) && required.every(key => key in value)
     && Object.entries(value).every(([key, slot]) => known.includes(key) && (ROUTE_KEYS.has(key)
       ? isObject(slot) && sortedKeys(slot) === 'model,provider' && typeof slot.provider === 'string'
         && typeof slot.model === 'string'
-      : Number.isSafeInteger(slot)))
+      : slot === null || typeof slot === 'string' || Number.isFinite(slot)))
 }
 
 function parseOutcome(value: unknown, id: string): Outcome {
@@ -146,10 +149,10 @@ function parseOutcome(value: unknown, id: string): Outcome {
 function loadTable(): PressureCase[] {
   const table: unknown = JSON.parse(readFileSync(new URL('conformance/session/pressure-cases.json', REPO), 'utf8'))
   if (!isObject(table) || sortedKeys(table) !== 'cases,history,logs,oracle,schema,version' || table.schema !== SCHEMA
-    || table.version !== 2 || table.oracle !== ORACLE || !Array.isArray(table.cases)
+    || table.version !== 3 || table.oracle !== ORACLE || !Array.isArray(table.cases)
     || !Array.isArray(table.history) || !table.history.every(isLine)
     || JSON.stringify(table.logs) !== JSON.stringify(Object.fromEntries(Object.entries(LOGS).map(([name, { path }]) => [name, path])))) {
-    throw new Error('pressure-cases.json does not match its version-2 schema')
+    throw new Error('pressure-cases.json does not match its version-3 schema')
   }
   return table.cases.map((entry: unknown): PressureCase => {
     if (!isObject(entry) || typeof entry.id !== 'string' || typeof entry.log !== 'string' || !Array.isArray(entry.edits)) {
@@ -239,7 +242,8 @@ describe('shared context-pressure cases', () => {
         }
         return
       }
-      expect(actual).toStrictEqual(entry.ts)
+      // The state's JSON text is the observable: NaN prints as null.
+      expect(JSON.parse(JSON.stringify(actual))).toStrictEqual(entry.ts)
     })
   }
 })

@@ -1,8 +1,8 @@
 //! Development-only Session format primitives: one current-format header
 //! record, one event's `sourceEventSeqs` field, one event row's envelope, one
 //! strict V3 codec row decode, a scan of a plain current-format log, and
-//! request derivation over unseeded, plain current-format logs of known event
-//! types, and restoration of a plain current-format log.
+//! request derivation over unseeded, plain current-format logs of any event
+//! type, and restoration of a plain current-format log.
 //!
 //! [`read_header_record`] decodes the first physical record of a current
 //! (format 3) Session log into its logical header metadata, or refuses it with
@@ -141,6 +141,7 @@ mod generation_header;
 mod goal;
 mod history;
 mod inbox;
+mod js_count;
 mod json_text;
 mod log_layout;
 mod migrated_restore;
@@ -192,6 +193,7 @@ pub use inbox::{
     ConsumedWork, ConsumedWorkCoercion, ConsumedWorkLimit, InboxLimit, InboxRefusal, PendingInbox,
     consumed_work, restored_inbox,
 };
+pub use js_count::JsCount;
 pub use json_text::{json_number_text, json_text};
 pub use log_layout::{encode_segment, project_key, session_log_path};
 pub use migrated_restore::{MigratedRestoreLimit, MigratedRestoreRefusal, restore_migrated};

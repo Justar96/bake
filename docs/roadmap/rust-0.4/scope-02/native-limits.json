@@ -445,25 +445,6 @@
   },
   {
    "variants": [
-    "ReplayLimit::EventType"
-   ],
-   "stageNames": [],
-   "id": "replay-event-type",
-   "crate": "bake-session",
-   "cases": [
-    {
-     "table": "runtime/request-derivation-cases.json",
-     "name": "event-type",
-     "count": 3
-    }
-   ],
-   "kind": "format",
-   "classification": "reachable-gap",
-   "evidence": "Session.append accepts any type a plugin merges into SessionEventMap, and documents ignorable unknown records (packages/core/session/src/index.ts:697-701,722), so a 0.3 profile plugin logs types outside the 60 known ones. Restoration of an unseeded log appends a session/end-seed that later appends persist (packages/core/session/src/index.ts:619-620), so a resumed plain log holds the type this limit refuses",
-   "followUp": "Retire replay_requests, which ports a test helper, in favor of restore_plain_log with replay_restored_requests; or admit ignorable unknown types and session/end-seed as the helper does. Slice: request derivation over resumed and plugin logs."
-  },
-  {
-   "variants": [
     "ReplayLimit::Number"
    ],
    "stageNames": [],
@@ -1040,13 +1021,13 @@
     {
      "table": "session/usage-cases.json",
      "name": "number",
-     "count": 2
+     "count": 1
     }
    ],
    "kind": "format",
-   "classification": "reachable-gap",
-   "evidence": "provider usage reaches the log unvalidated: pi-ai 1.0.0 (bun.lock, also in v0.3.8) copies wire counts in parseChunkUsage (node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js:1160-1180), mapUsage copies them (packages/llm/llm-pi-ai/src/stream.ts:25-33), and the stream accumulator records the usage chunk as is (packages/llm/llm/src/assistant-stream.ts:170-172); the v2 writer did the same (81dcacbb44:packages/llm/llm-deepseek/src/translate.ts:55-71), checking only its own total with Number.isSafeInteger. A provider count such as 12.5, 2^53, or the string \"5\" (which `cacheRead > 0` and `completion_tokens || 0` keep) is written",
-   "followUp": "Port: fold usage counts as doubles the way the TypeScript fold adds them, after lane N's writer-spelling check, keeping the limit only for non-writer spellings. Slice: provider usage numbers in usage and pressure."
+   "classification": "unreachable",
+   "evidence": "The fold now sums every number spelled as JSON.stringify writes it, and every string count, with JavaScript's + and - (rust/crates/bake-session/src/usage.rs:150-153; rust/crates/bake-session/src/js_count.rs:27). The limit keeps only number spellings no writer produces, such as 1e3, 1.0, or -0: every released writer serializes with JSON.stringify (packages/session/session-persistence-jsonl/src/format.ts:322)",
+   "followUp": "None; attempt-usage-exponent witnesses the remaining spelling."
   },
   {
    "variants": [
@@ -1059,13 +1040,13 @@
     {
      "table": "session/usage-cases.json",
      "name": "usage",
-     "count": 4
+     "count": 2
     }
    ],
    "kind": "format",
-   "classification": "reachable-gap",
-   "evidence": "provider usage reaches the log unvalidated: pi-ai 1.0.0 (bun.lock, also in v0.3.8) copies wire counts in parseChunkUsage (node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js:1160-1180), mapUsage copies them (packages/llm/llm-pi-ai/src/stream.ts:25-33), and the stream accumulator records the usage chunk as is (packages/llm/llm/src/assistant-stream.ts:170-172); the v2 writer did the same (81dcacbb44:packages/llm/llm-deepseek/src/translate.ts:55-71), checking only its own total with Number.isSafeInteger. A provider count such as 12.5, 2^53, or the string \"5\" (which `cacheRead > 0` and `completion_tokens || 0` keep) is written. A string count reaches this limit; a non-object sample does not (the stream invariant and the accumulator write an object, packages/llm/llm/src/assistant-stream.ts:170-172)",
-   "followUp": "Port the JavaScript coercion the fold applies to string counts, with the usage-number slice; a non-object sample stays unreachable."
+   "classification": "undecided",
+   "evidence": "String counts are ported. The limit keeps a non-object sample, which the stream invariant and the accumulator never write (packages/llm/llm/src/assistant-stream.ts:170-172), and a count that is neither a number nor a string. pi-ai 1.0.0 parseChunkUsage (node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js:1160-1180) keeps completion_tokens || 0, so any truthy wire value such as true reaches outputTokens, and mapUsage keeps cacheRead and cacheWrite only when > 0 (packages/llm/llm-pi-ai/src/stream.ts:25-33), which true and [5] pass; whether a provider sends such a value is not traced",
+   "followUp": "Decide whether a supported provider can send a boolean or array token count; if one can, extend JsCount with JavaScript's + and ToNumber for it."
   },
   {
    "variants": [
@@ -1120,9 +1101,9 @@
     }
    ],
    "kind": "format",
-   "classification": "reachable-gap",
-   "evidence": "sampled counts: provider usage reaches the log unvalidated: pi-ai 1.0.0 (bun.lock, also in v0.3.8) copies wire counts in parseChunkUsage (node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js:1160-1180), mapUsage copies them (packages/llm/llm-pi-ai/src/stream.ts:25-33), and the stream accumulator records the usage chunk as is (packages/llm/llm/src/assistant-stream.ts:170-172); the v2 writer did the same (81dcacbb44:packages/llm/llm-deepseek/src/translate.ts:55-71), checking only its own total with Number.isSafeInteger. A provider count such as 12.5, 2^53, or the string \"5\" (which `cacheRead > 0` and `completion_tokens || 0` keep) is written. shadowedTokenCount is the compaction's integer estimate (packages/compaction/compaction-basic/src/region.ts:587)",
-   "followUp": "Port with usage-number."
+   "classification": "unreachable",
+   "evidence": "Sampled counts fold as JsCount (rust/crates/bake-session/src/pressure.rs:424-440), so the limit keeps sampled number spellings no writer produces (packages/session/session-persistence-jsonl/src/format.ts:322) and a claim price that is not a safe integer; shadowedTokenCount is the compaction's integer estimate (packages/compaction/compaction-basic/src/region.ts:587)",
+   "followUp": "None."
   },
   {
    "variants": [
@@ -1139,9 +1120,9 @@
     }
    ],
    "kind": "format",
-   "classification": "reachable-gap",
-   "evidence": "as usage-usage: provider usage reaches the log unvalidated: pi-ai 1.0.0 (bun.lock, also in v0.3.8) copies wire counts in parseChunkUsage (node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js:1160-1180), mapUsage copies them (packages/llm/llm-pi-ai/src/stream.ts:25-33), and the stream accumulator records the usage chunk as is (packages/llm/llm/src/assistant-stream.ts:170-172); the v2 writer did the same (81dcacbb44:packages/llm/llm-deepseek/src/translate.ts:55-71), checking only its own total with Number.isSafeInteger. A provider count such as 12.5, 2^53, or the string \"5\" (which `cacheRead > 0` and `completion_tokens || 0` keep) is written",
-   "followUp": "Port with usage-usage."
+   "classification": "undecided",
+   "evidence": "As usage-usage: string counts are ported; a boolean or array count that pi-ai 1.0.0 parseChunkUsage (node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js:1160-1180) and mapUsage (packages/llm/llm-pi-ai/src/stream.ts:25-33) may pass is not traced",
+   "followUp": "Decide with usage-usage."
   },
   {
    "variants": [
@@ -1234,9 +1215,9 @@
     }
    ],
    "kind": "format",
-   "classification": "reachable-gap",
-   "evidence": "contextWindow must pass Number.isInteger and be positive (packages/llm/llm/src/index.ts:776; the v0 to v2 writers checked the same: 3efd4b51e0:packages/llm/llm/src/index.ts:751, 0bb7bba015:packages/llm/llm/src/index.ts:751, 81dcacbb44:packages/llm/llm/src/index.ts:765), so a fraction or a string is never written; but an integer of 2^53 or more passes that check, and provider discovery admits any positive integer (packages/llm/llm-pi-ai/src/discovery.ts:91-96,207-225), so a provider listing can put one in request/context (packages/core/agent-loop/src/agent.ts:657-670)",
-   "followUp": "Port: hold the window as the double TypeScript holds for integers of 2^53 or more; fractional and string windows stay limits. Slice: with usage-number."
+   "classification": "unreachable",
+   "evidence": "The window is held as the double TypeScript holds, so an integer of 2^53 or more spelled as JSON.stringify writes it folds (rust/crates/bake-session/src/pressure.rs:261-268). contextWindow must pass Number.isInteger and be positive (packages/llm/llm/src/index.ts:776; 3efd4b51e0:packages/llm/llm/src/index.ts:751, 0bb7bba015:packages/llm/llm/src/index.ts:751, 81dcacbb44:packages/llm/llm/src/index.ts:765), so the remaining fraction and string windows are never written",
+   "followUp": "None."
   },
   {
    "variants": [
@@ -1467,9 +1448,9 @@
     }
    ],
    "kind": "format",
-   "classification": "reachable-gap",
-   "evidence": "free payload data can hold an integer beyond 2^53 - 1 spelled as JSON.stringify writes it: an MCP server's inputSchema is kept as parsed (packages/mcp/mcp-client/src/protocol.ts:300-302, mode keep), becomes the tool's parameters (packages/mcp/mcp-client/src/tools.ts:143,243), and is logged in request/header tools (packages/core/agent-loop/src/agent.ts:640-653); the v2 and v0 writers did the same (81dcacbb44:packages/mcp/mcp-client/src/tools.ts:168 and 81dcacbb44:packages/core/agent-loop/src/agent.ts:552; 3efd4b51e0:packages/mcp/mcp-client/src/tools.ts:168 and agent.ts:508). No depth or magnitude bound applies, so a schema nesting past 64 containers or holding an integer such as 9223372036854775807 (written 9223372036854776000) is logged",
-   "followUp": "Port: keep integers beyond the safe range as the double JSON.parse reads, printing them with json_number_text. Slice: unsafe integers in migration."
+   "classification": "unreachable",
+   "evidence": "An unsafe integer spelled as JSON.stringify writes it, such as 9223372036854776000, is kept (rust/crates/bake-session/src/v2_to_v3/mod.rs:315-336); the limit keeps only integers whose digits do not round-trip, such as 9007199254740993, which JSON.stringify never writes (packages/session/session-persistence-jsonl/src/format.ts:322; 81dcacbb44:packages/session/session-persistence-jsonl/src/format.ts:321)",
+   "followUp": "None."
   },
   {
    "variants": [],
@@ -1489,7 +1470,7 @@
     {
      "table": "session/v2-to-v3-cases.json",
      "name": "payload-float-lexeme",
-     "count": 2
+     "count": 1
     },
     {
      "table": "session/v1-to-v2-decoded-cases.json",
@@ -1498,9 +1479,9 @@
     }
    ],
    "kind": "format",
-   "classification": "reachable-gap",
-   "evidence": "the frozen payload rules check token usage as counts (packages/session/session-format-v0-to-v1/src/payload-validation.ts:53,91,415-422,736), and provider usage reaches the log unvalidated: pi-ai 1.0.0 (bun.lock, also in v0.3.8) copies wire counts in parseChunkUsage (node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js:1160-1180), mapUsage copies them (packages/llm/llm-pi-ai/src/stream.ts:25-33), and the stream accumulator records the usage chunk as is (packages/llm/llm/src/assistant-stream.ts:170-172); the v2 writer did the same (81dcacbb44:packages/llm/llm-deepseek/src/translate.ts:55-71), checking only its own total with Number.isSafeInteger. A provider count such as 12.5, 2^53, or the string \"5\" (which `cacheRead > 0` and `completion_tokens || 0` keep) is written. TypeScript rejects a fractional or unsafe count; Rust reports this limit because it refuses every f64 count",
-   "followUp": "Port: decide a count held as f64 by its value when the lexeme is a writer spelling (lane N's is_writer_spelling): a fraction or an unsafe value is TypeScript's rejection; keep the limit for 1.0-style spellings. Slice: writer-spelling counts in migration."
+   "classification": "unreachable",
+   "evidence": "A count held as f64 and spelled as JSON.stringify writes it is decided by value and rejected as TypeScript rejects it (rust/crates/bake-session/src/v2_to_v3/payload_semantics.rs:52-65; rust/crates/bake-session/src/v0_to_v1/normalize.rs:608-624). The limit keeps integral spellings such as 1.0 and 3.0, which the v0 to v2 writers never produced: they serialized with JSON.stringify (3efd4b51e0:packages/session/session-persistence-jsonl/src/index.ts:659; 81dcacbb44:packages/session/session-persistence-jsonl/src/format.ts:321)",
+   "followUp": "None."
   },
   {
    "variants": [],
@@ -1787,9 +1768,9 @@
    "crate": "bake-session",
    "cases": [],
    "kind": "pass-through",
-   "classification": "reachable-gap",
-   "evidence": "Passes the payload check's named limits through; its cases are counted under payload-float-lexeme (reachable-gap), object-prototype-type (undecided), and legacy-goal-message (unreachable).",
-   "followUp": "Follows payload-float-lexeme."
+   "classification": "undecided",
+   "evidence": "Passes the payload check's named limits through; its cases are counted under payload-float-lexeme (unreachable), object-prototype-type (undecided), and legacy-goal-message (unreachable).",
+   "followUp": "Follows object-prototype-type."
   },
   {
    "variants": [
@@ -1851,9 +1832,9 @@
    "crate": "bake-session",
    "cases": [],
    "kind": "pass-through",
-   "classification": "reachable-gap",
-   "evidence": "Passes the v0-to-v1 named limits through; payload-float-lexeme among them is a reachable gap. Its witnessed case is counted under legacy-goal-message.",
-   "followUp": "Follows payload-float-lexeme."
+   "classification": "undecided",
+   "evidence": "Passes the v0-to-v1 named limits through, object-prototype-type (undecided) among them. Its witnessed case is counted under legacy-goal-message.",
+   "followUp": "Follows object-prototype-type."
   },
   {
    "variants": [
@@ -1877,9 +1858,9 @@
    "crate": "bake-session",
    "cases": [],
    "kind": "pass-through",
-   "classification": "reachable-gap",
-   "evidence": "Passes V1ToV2DecodedLimit through, which includes payload-float-lexeme.",
-   "followUp": "Follows payload-float-lexeme."
+   "classification": "undecided",
+   "evidence": "Passes V1ToV2DecodedLimit through, which includes object-prototype-type (undecided).",
+   "followUp": "Follows object-prototype-type."
   },
   {
    "variants": [
@@ -1890,9 +1871,9 @@
    "crate": "bake-session",
    "cases": [],
    "kind": "pass-through",
-   "classification": "reachable-gap",
-   "evidence": "Passes the v2-to-v3 named limits through, which include payload-float-lexeme and unsafe-json-integer.",
-   "followUp": "Follows payload-float-lexeme and unsafe-json-integer."
+   "classification": "undecided",
+   "evidence": "Passes the v2-to-v3 named limits through, which include object-prototype-type and content-kind-diagnostic (undecided).",
+   "followUp": "Follows object-prototype-type and content-kind-diagnostic."
   },
   {
    "variants": [
@@ -1901,17 +1882,11 @@
    "stageNames": [],
    "id": "migrated-restore-encode",
    "crate": "bake-session",
-   "cases": [
-    {
-     "table": "session/migrated-restore-cases.json",
-     "name": "encode",
-     "count": 1
-    }
-   ],
+   "cases": [],
    "kind": "pass-through",
-   "classification": "reachable-gap",
-   "evidence": "re-encoding a migrated log meets EncodeLimit::FloatNumber on a writer-produced fraction: the llm/retry delayMs is fractional: retryDelayMs multiplies by a random jitter (packages/llm/llm/src/retry-policy.ts:233-234) and is logged at packages/llm/llm-retry/src/index.ts:182; the v2 writer jittered the same way (81dcacbb44:packages/llm/llm-retry/src/index.ts:62)",
-   "followUp": "Follows encode-float-number."
+   "classification": "unreachable",
+   "evidence": "Passes EncodeLimit through, and every variant it passes is itself unreachable: encode-float-number (the encoder writes every number as JSON.stringify writes it, and migration output carries no count spelled as an integral float), encode-type-error, encode-source-coercion, encode-unreadable-row, and encode-codec, each with its own writer citation.",
+   "followUp": "None."
   },
   {
    "variants": [
@@ -1969,13 +1944,13 @@
     {
      "table": "session/row-encode-cases.json",
      "name": "float-number",
-     "count": 7
+     "count": 4
     }
    ],
    "kind": "format",
-   "classification": "reachable-gap",
-   "evidence": "the TypeScript writer writes fractions and unsafe integers in free data: the llm/retry delayMs is fractional: retryDelayMs multiplies by a random jitter (packages/llm/llm/src/retry-policy.ts:233-234) and is logged at packages/llm/llm-retry/src/index.ts:182; the v2 writer jittered the same way (81dcacbb44:packages/llm/llm-retry/src/index.ts:62); temperature such as 0.7 is logged in request/header config; and an MCP server's inputSchema is kept as parsed (packages/mcp/mcp-client/src/protocol.ts:300-302, mode keep), becomes the tool's parameters (packages/mcp/mcp-client/src/tools.ts:143,243), and is logged in request/header tools (packages/core/agent-loop/src/agent.ts:640-653); the v2 and v0 writers did the same (81dcacbb44:packages/mcp/mcp-client/src/tools.ts:168 and 81dcacbb44:packages/core/agent-loop/src/agent.ts:552; 3efd4b51e0:packages/mcp/mcp-client/src/tools.ts:168 and agent.ts:508). No depth or magnitude bound applies, so a schema nesting past 64 containers or holding an integer such as 9223372036854775807 (written 9223372036854776000) is logged",
-   "followUp": "Port: write numbers with json_number_text and admit every writer spelling, keeping the limit for counts held as f64 that are not writer spellings. Slice: writer-spelling numbers in the row encoder, which also closes migrated-restore-encode and log-file-migration encode."
+   "classification": "unreachable",
+   "evidence": "The encoder writes every number with json_text (rust/crates/bake-session/src/row_encode.rs:257) and decides a count spelled as a writer spells it by value. The limit keeps counts (a seq, a header count, or a source member) spelled as integral floats such as 2.0, which no writer produces: the writer serializes with JSON.stringify (packages/session/session-persistence-jsonl/src/format.ts:322), and Session.append assigns seq from the log length (packages/core/session/src/index.ts:751-752)",
+   "followUp": "None."
   },
   {
    "variants": [
@@ -2129,9 +2104,9 @@
     }
    ],
    "kind": "pass-through",
-   "classification": "reachable-gap",
-   "evidence": "Passes EncodeLimit through; both witnessed cases are fractions, which encode-float-number shows the TypeScript writer writes.",
-   "followUp": "Follows encode-float-number."
+   "classification": "unreachable",
+   "evidence": "Passes EncodeLimit through; both witnessed cases are a source member spelled 0.0, which encode-float-number shows no writer produces.",
+   "followUp": "None."
   },
   {
    "variants": [
@@ -2311,8 +2286,8 @@
    ],
    "kind": "pass-through",
    "classification": "reachable-gap",
-   "evidence": "its encode name meets encode-float-number on a migrated fraction (the llm/retry delayMs is fractional: retryDelayMs multiplies by a random jitter (packages/llm/llm/src/retry-policy.ts:233-234) and is logged at packages/llm/llm-retry/src/index.ts:182; the v2 writer jittered the same way (81dcacbb44:packages/llm/llm-retry/src/index.ts:62)), and its row/json-parser name follows scan-json-parser; finish-order and v2-codec-recovery depend on rows a writer may or may not produce and are not traced",
-   "followUp": "Follows encode-float-number and scan-json-parser; trace finish-order and v2-codec-recovery separately."
+   "evidence": "Its row/json-parser name follows scan-json-parser; its encode name now meets only encode-float-number's unreachable spellings. finish-order and v2-codec-recovery depend on rows a writer may or may not produce and are not traced",
+   "followUp": "Follows scan-json-parser; trace finish-order and v2-codec-recovery separately."
   },
   {
    "variants": [],

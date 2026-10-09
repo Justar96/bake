@@ -21,7 +21,7 @@ const REPO = new URL('../../../../', import.meta.url)
 const SCHEMA = 'bake/session-conformance/row-encode-cases'
 const ORACLE = 'JSON.stringify(toHeaderLine(header, inheritedEventCount)) and eventLine(event) from packages/session/session-persistence-jsonl/src/format.ts; log cases join the lines and scanLog reads them back'
 /** Both harnesses pin the table size, so a dropped case fails. */
-const CASE_COUNT = 95
+const CASE_COUNT = 98
 const LIMITS = ['float-number', 'type-error', 'source-coercion', 'unreadable-row', 'codec']
 /** Classes are matched exactly: the unsupported error subclasses SessionFormatError. */
 const CLASSES = new Map<string, abstract new (...args: never[]) => Error>([
@@ -85,9 +85,9 @@ function parseRust(value: unknown, id: string): string | undefined {
 function loadTable(): RowCase[] {
   const table: unknown = JSON.parse(readFileSync(new URL('conformance/session/row-encode-cases.json', REPO), 'utf8'))
   if (!isObject(table) || sortedKeys(table) !== 'cases,history,oracle,schema,version' || table.schema !== SCHEMA
-    || table.version !== 1 || table.oracle !== ORACLE || !Array.isArray(table.cases)
+    || table.version !== 2 || table.oracle !== ORACLE || !Array.isArray(table.cases)
     || !Array.isArray(table.history) || !table.history.every(line => typeof line === 'string')) {
-    throw new Error('row-encode-cases.json does not match its version-1 schema')
+    throw new Error('row-encode-cases.json does not match its version-2 schema')
   }
   return table.cases.map((entry: unknown): RowCase => {
     if (!isObject(entry) || typeof entry.id !== 'string') throw new Error(`invalid case ${JSON.stringify(entry)}`)

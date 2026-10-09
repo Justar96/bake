@@ -25,14 +25,18 @@
 //! an array `content`, its numbers spelled as `JSON.stringify` writes them,
 //! its nesting bounded, and a `system/message`'s blocks text or reasoning; it
 //! qualified `request/context` numbers the same way and `request/header`
-//! routes. Where JavaScript would throw a `TypeError` or compute with coerced
-//! or rounded values, [`context_pressure`] refuses with a [`PressureLimit`]
-//! and claims no TypeScript outcome.
+//! routes. Sampled counts are [`JsCount`]s summed with JavaScript's `+`, so
+//! a fraction, an unsafe integer, or a string count folds as TypeScript folds
+//! it, and the context window is the double TypeScript holds. Where
+//! JavaScript would throw a `TypeError`, or a value is a spelling no writer
+//! produces, [`context_pressure`] refuses with a [`PressureLimit`] and claims
+//! no TypeScript outcome.
 
 use serde_json::{Map, Value};
 
+use crate::js_count::JsCount;
 use crate::json_text::json_number_text;
-use crate::usage::sample;
+use crate::usage::{sample, sampled_count};
 use crate::{MAX_SAFE_INTEGER, RestoredLog};
 
 /// Fixed text density of `estimate.ts`.
@@ -56,11 +60,11 @@ pub struct RequestRoute {
 }
 
 /// `ContextPressureState` after the end seed, which leaves no claim.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct ContextPressureState {
-    pub context_window: Option<i64>,
-    pub sampled_context_window: Option<i64>,
-    pub pressure_tokens: Option<i64>,
+    pub context_window: Option<f64>,
+    pub sampled_context_window: Option<f64>,
+    pub pressure_tokens: Option<JsCount>,
     pub request_route: Option<RequestRoute>,
     pub sampled_route: Option<RequestRoute>,
     /// May be negative: a claim can price more than the surface holds.
@@ -68,37 +72,50 @@ pub struct ContextPressureState {
     pub sampled_surface_tokens: Option<i64>,
 }
 
-/// `ContextPressureProjection`, the wire view token-meter publishes.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// `ContextPressureProjection` as the definition's `wire.view` computes it,
+/// before `viewSchema.parse`. TypeScript's `restore` and `viewCheckpoint`
+/// parse it with `z.number().int().nonnegative()` and throw on a fractional,
+/// string, or `NaN` count rather than publish it; this view keeps the value.
+#[derive(Debug, Clone, PartialEq)]
 pub struct ContextPressureView {
-    pub context_window: Option<i64>,
-    pub sampled_context_window: Option<i64>,
+    pub context_window: Option<f64>,
+    pub sampled_context_window: Option<f64>,
     pub request_route: Option<RequestRoute>,
     pub sampled_route: Option<RequestRoute>,
-    pub pressure_tokens: Option<i64>,
-    /// The sample plus the surface's movement since it, at least 0.
-    pub projected_tokens: Option<i64>,
+    pub pressure_tokens: Option<JsCount>,
+    /// `Math.max(0, pressureTokens + surfaceTokens - sampledSurfaceTokens)`
+    /// in doubles; `NaN` when the pressure does not convert to a number.
+    pub projected_tokens: Option<f64>,
 }
 
 impl ContextPressureState {
-    /// The definition's `wire.view`. For a folded state [`context_pressure`]
-    /// proved the sum a safe integer; a hand-built state whose sum leaves
-    /// `i64` saturates instead of overflowing.
+    /// The definition's `wire.view`, before `viewSchema.parse` (see
+    /// [`ContextPressureView`]).
     pub fn view(&self) -> ContextPressureView {
         ContextPressureView {
             context_window: self.context_window,
             sampled_context_window: self.sampled_context_window,
             request_route: self.request_route.clone(),
             sampled_route: self.sampled_route.clone(),
-            pressure_tokens: self.pressure_tokens,
-            projected_tokens: self.pressure_tokens.zip(self.sampled_surface_tokens).map(
-                |(pressure, sampled)| {
-                    let sum = i128::from(pressure) + i128::from(self.surface_tokens)
-                        - i128::from(sampled);
-                    i64::try_from(sum.max(0)).unwrap_or(i64::MAX)
-                },
-            ),
+            pressure_tokens: self.pressure_tokens.clone(),
+            projected_tokens: self
+                .pressure_tokens
+                .as_ref()
+                .zip(self.sampled_surface_tokens)
+                .map(|(pressure, sampled)| projected(pressure, self.surface_tokens, sampled)),
         }
+    }
+}
+
+/// `Math.max(0, pressure + surface - sampled)`: `NaN` stays `NaN`, and -0
+/// becomes 0.
+fn projected(pressure: &JsCount, surface: i64, sampled: i64) -> f64 {
+    let sum = pressure.plus(&JsCount::Number(surface as f64)).to_number();
+    let difference = sum - sampled as f64;
+    if difference.is_nan() {
+        f64::NAN
+    } else {
+        difference.max(0.0) + 0.0
     }
 }
 
@@ -143,12 +160,14 @@ impl PressureRefusal {
 /// `TypeError`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PressureLimit {
-    /// A sampled count is not spelled as a safe integer, a consumed claim's
-    /// `shadowedTokenCount` is not a number spelled as one, or a pressure sum, surface total, or the view's
-    /// `pressureTokens + surfaceTokens` leaves the safe-integer range.
+    /// A sampled count is a number not spelled as `JSON.stringify` writes
+    /// its value, a consumed claim's
+    /// `shadowedTokenCount` is not a number spelled as a safe integer, or the
+    /// surface total leaves the safe-integer range.
     Number,
-    /// The sample is not an object, its `inputTokens` is not a number, or a
-    /// cache count is neither absent, `null`, nor a number.
+    /// The sample is not an object, its `inputTokens` is neither a number nor
+    /// a string, or a cache count is neither absent, `null`, a number, nor a
+    /// string.
     Usage,
     /// The backward stream scan reaches a `null` record, or a `chunk` record
     /// whose `chunk` is absent or `null`, before a `usage` chunk.
@@ -163,9 +182,9 @@ pub enum PressureLimit {
     Block,
     /// A `request/context` `provider` or `model` is not a string.
     Route,
-    /// A `request/context` `contextWindow` is present but not a safe
-    /// integer, such as a fraction, which restoration admits but this state
-    /// does not hold.
+    /// A `request/context` `contextWindow` is present but not an integer
+    /// number spelled as `JSON.stringify` writes it, such as a fraction or a
+    /// string, which the writers never log.
     ContextWindow,
 }
 
@@ -244,9 +263,9 @@ impl Fold {
                 state.context_window = match data.get("contextWindow") {
                     None => None,
                     Some(Value::Number(window)) => Some(
-                        window
-                            .as_i64()
-                            .and_then(safe)
+                        JsCount::from_writer_number(window)
+                            .map(|window| window.to_number())
+                            .filter(|window| window.fract() == 0.0)
                             .ok_or(native(PressureLimit::ContextWindow))?,
                     ),
                     Some(_) => return Err(native(PressureLimit::ContextWindow)),
@@ -270,13 +289,6 @@ impl Fold {
         }
         state.surface_tokens =
             safe(state.surface_tokens + delta).ok_or(native(PressureLimit::Number))?;
-        if let (Some(pressure), Some(sampled)) =
-            (state.pressure_tokens, state.sampled_surface_tokens)
-        {
-            safe(pressure + state.surface_tokens)
-                .and_then(|sum| safe(sum - sampled))
-                .ok_or(native(PressureLimit::Number))?;
-        }
         self.claim = claim;
         Ok(())
     }
@@ -413,20 +425,20 @@ fn content_tokens(blocks: &[Value]) -> Result<u64, PressureLimit> {
     Ok(tokens)
 }
 
-/// `pressureFrom`, refusing every input JavaScript would not sum exactly.
-fn pressure(usage: &Value) -> Result<i64, PressureLimit> {
+/// `pressureFrom`: `input + (read ?? 0) + (write ?? 0)` with JavaScript's
+/// `+`.
+fn pressure(usage: &Value) -> Result<JsCount, PressureLimit> {
     let usage = usage.as_object().ok_or(PressureLimit::Usage)?;
-    let count = |key: &str, optional: bool| match usage.get(key) {
-        None | Some(Value::Null) if optional => Ok(0),
-        Some(Value::Number(number)) => number.as_i64().and_then(safe).ok_or(PressureLimit::Number),
-        _ => Err(PressureLimit::Usage),
+    let count = |key: &str, optional: bool| {
+        sampled_count(usage.get(key), optional).map_err(|refusal| match refusal {
+            None => PressureLimit::Number,
+            Some(_) => PressureLimit::Usage,
+        })
     };
     let input = count("inputTokens", false)?;
     let read = count("cacheReadTokens", true)?;
     let write = count("cacheWriteTokens", true)?;
-    safe(input + read)
-        .and_then(|sum| safe(sum + write))
-        .ok_or(PressureLimit::Number)
+    Ok(input.plus(&read).plus(&write))
 }
 
 /// `.length` of a JavaScript string: UTF-16 code units.

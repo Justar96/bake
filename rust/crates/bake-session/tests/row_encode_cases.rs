@@ -19,7 +19,7 @@ use serde_json::{Map, Value};
 const SCHEMA: &str = "bake/session-conformance/row-encode-cases";
 const ORACLE: &str = "JSON.stringify(toHeaderLine(header, inheritedEventCount)) and eventLine(event) from packages/session/session-persistence-jsonl/src/format.ts; log cases join the lines and scanLog reads them back";
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 95;
+const CASE_COUNT: usize = 98;
 const SOURCE_BUDGET: usize = 64;
 const LIMITS: [&str; 5] = [
     "float-number",
@@ -68,7 +68,7 @@ fn load() -> Vec<Map<String, Value>> {
         BTreeSet::from(["cases", "history", "oracle", "schema", "version"])
     );
     assert_eq!(table["schema"], SCHEMA);
-    assert_eq!(table["version"], 1);
+    assert_eq!(table["version"], 2);
     assert_eq!(table["oracle"], ORACLE);
     assert!(
         table["history"]

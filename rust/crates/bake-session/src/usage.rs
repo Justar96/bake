@@ -14,26 +14,40 @@
 //! Restoration proved each settlement's `turn` and `step` safe counts and its
 //! `stream` an array, and qualified every number in an `assistant/message`;
 //! an `assistant/attempt` stream and `llm/retry-started` data are not
-//! qualified. Where JavaScript would throw a `TypeError` or compute with
-//! coerced or rounded values, [`token_usage`] refuses with a
+//! qualified. Counts are [`JsCount`]s summed with JavaScript's `+` and `-`,
+//! so a fraction, an unsafe integer, or a string count folds as TypeScript
+//! folds it. Where JavaScript would throw a `TypeError`, or a count is a
+//! number spelling no writer produces, [`token_usage`] refuses with a
 //! [`UsageLimit`] and claims no TypeScript outcome.
 
 use serde_json::Value;
 
-use crate::{MAX_SAFE_INTEGER, RestoredLog};
+use crate::RestoredLog;
+use crate::js_count::JsCount;
 
 /// `TokenUsageProjection`: provider token counts by bucket.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TokenUsageBuckets {
-    pub uncached_input_tokens: i64,
-    pub output_tokens: i64,
-    pub cache_read_tokens: i64,
-    pub cache_write_tokens: i64,
+    pub uncached_input_tokens: JsCount,
+    pub output_tokens: JsCount,
+    pub cache_read_tokens: JsCount,
+    pub cache_write_tokens: JsCount,
+}
+
+impl Default for TokenUsageBuckets {
+    fn default() -> Self {
+        Self {
+            uncached_input_tokens: JsCount::Number(0.0),
+            output_tokens: JsCount::Number(0.0),
+            cache_read_tokens: JsCount::Number(0.0),
+            cache_write_tokens: JsCount::Number(0.0),
+        }
+    }
 }
 
 /// The replacement slot: the coordinate and buckets of the last counted
 /// sample.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LastTokenUsage {
     pub turn: u64,
     pub step: u64,
@@ -41,8 +55,10 @@ pub struct LastTokenUsage {
 }
 
 /// `TokenUsageState`: the running totals, whose wire view token-meter
-/// publishes, and the replacement slot.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// publishes, and the replacement slot. The totals are the state before
+/// `viewSchema.parse`, which in TypeScript throws on a fractional, string, or
+/// `NaN` total rather than publish it.
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct TokenUsageState {
     pub totals: TokenUsageBuckets,
     pub last: Option<LastTokenUsage>,
@@ -60,12 +76,12 @@ pub struct UsageRefusal {
 /// `TypeError`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UsageLimit {
-    /// A sampled count is not spelled as a safe integer (a fraction, an
-    /// exponent, or out of range), or a running total leaves the safe-integer
-    /// range, where doubles may round.
+    /// A sampled count is a number not spelled as `JSON.stringify` writes
+    /// its value, such as `1e3`, `1.0`, or `-0`.
     Number,
-    /// The sample is not an object, its `inputTokens` or `outputTokens` is not
-    /// a number, or a cache count is neither absent, `null`, nor a number.
+    /// The sample is not an object, its `inputTokens` or `outputTokens` is
+    /// neither a number nor a string, or a cache count is neither absent,
+    /// `null`, a number, nor a string.
     Usage,
     /// The backward stream scan reaches a `null` record, or a `chunk` record
     /// whose `chunk` is absent or `null`, before a `usage` chunk.
@@ -102,7 +118,7 @@ fn apply(state: &mut TokenUsageState, event_type: &str, data: &Value) -> Result<
             return Err(UsageLimit::Retry);
         }
         let member = |key| data.as_object().and_then(|fields| fields.get(key));
-        match state.last {
+        match &state.last {
             // `undefined === data.turn` holds only for an absent member.
             None if member("turn").is_none() => return Err(UsageLimit::Retry),
             Some(last)
@@ -126,39 +142,39 @@ fn apply(state: &mut TokenUsageState, event_type: &str, data: &Value) -> Result<
     let (turn, step) = (coordinate("turn"), coordinate("step"));
     let previous = state
         .last
+        .as_ref()
         .filter(|last| last.turn == turn && last.step == step)
-        .map(|last| last.buckets);
-    if previous == Some(buckets) {
+        .map(|last| last.buckets.clone());
+    if previous.as_ref() == Some(&buckets) {
         return Ok(());
     }
     let previous = previous.unwrap_or_default();
-    let replace = |total: i64, previous: i64, next: i64| {
-        safe(total - previous)
-            .and_then(|kept| safe(kept + next))
-            .ok_or(UsageLimit::Number)
+    // `addReplacing`: `total - previous + next`.
+    let replace = |total: &JsCount, previous: &JsCount, next: &JsCount| {
+        JsCount::Number(total.to_number() - previous.to_number()).plus(next)
     };
-    let totals = state.totals;
+    let totals = &state.totals;
     state.totals = TokenUsageBuckets {
         uncached_input_tokens: replace(
-            totals.uncached_input_tokens,
-            previous.uncached_input_tokens,
-            buckets.uncached_input_tokens,
-        )?,
+            &totals.uncached_input_tokens,
+            &previous.uncached_input_tokens,
+            &buckets.uncached_input_tokens,
+        ),
         output_tokens: replace(
-            totals.output_tokens,
-            previous.output_tokens,
-            buckets.output_tokens,
-        )?,
+            &totals.output_tokens,
+            &previous.output_tokens,
+            &buckets.output_tokens,
+        ),
         cache_read_tokens: replace(
-            totals.cache_read_tokens,
-            previous.cache_read_tokens,
-            buckets.cache_read_tokens,
-        )?,
+            &totals.cache_read_tokens,
+            &previous.cache_read_tokens,
+            &buckets.cache_read_tokens,
+        ),
         cache_write_tokens: replace(
-            totals.cache_write_tokens,
-            previous.cache_write_tokens,
-            buckets.cache_write_tokens,
-        )?,
+            &totals.cache_write_tokens,
+            &previous.cache_write_tokens,
+            &buckets.cache_write_tokens,
+        ),
     };
     state.last = Some(LastTokenUsage {
         turn,
@@ -199,13 +215,12 @@ pub(crate) fn sample<'a>(
     Ok(None)
 }
 
-/// `bucketsFrom`, refusing every input JavaScript would not sum exactly.
+/// `bucketsFrom`, with `?? 0` for the cache counts.
 fn buckets(usage: &Value) -> Result<TokenUsageBuckets, UsageLimit> {
     let usage = usage.as_object().ok_or(UsageLimit::Usage)?;
-    let count = |key: &str, optional: bool| match usage.get(key) {
-        None | Some(Value::Null) if optional => Ok(0),
-        Some(Value::Number(number)) => number.as_i64().and_then(safe).ok_or(UsageLimit::Number),
-        _ => Err(UsageLimit::Usage),
+    let count = |key: &str, optional: bool| {
+        sampled_count(usage.get(key), optional)
+            .map_err(|refusal| refusal.unwrap_or(UsageLimit::Number))
     };
     Ok(TokenUsageBuckets {
         uncached_input_tokens: count("inputTokens", false)?,
@@ -222,6 +237,18 @@ fn strictly_equal(member: Option<&Value>, count: u64) -> bool {
     member.and_then(Value::as_f64) == Some(count as f64)
 }
 
-fn safe(value: i64) -> Option<i64> {
-    (value.unsigned_abs() <= MAX_SAFE_INTEGER).then_some(value)
+/// One sampled count as the fold reads it: an absent or `null` optional
+/// count is 0, a number spelled as a writer spells it is its double, and a
+/// string is kept. `Err(None)` for any other number spelling;
+/// `Err(Some(UsageLimit::Usage))` for any other value.
+pub(crate) fn sampled_count(
+    value: Option<&Value>,
+    optional: bool,
+) -> Result<JsCount, Option<UsageLimit>> {
+    match value {
+        None | Some(Value::Null) if optional => Ok(JsCount::Number(0.0)),
+        Some(Value::Number(number)) => JsCount::from_writer_number(number).ok_or(None),
+        Some(Value::String(text)) => Ok(JsCount::String(text.clone())),
+        _ => Err(Some(UsageLimit::Usage)),
+    }
 }

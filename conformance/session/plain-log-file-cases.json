@@ -1,13 +1,14 @@
 {
   "schema": "bake/session-conformance/plain-log-file-cases",
-  "version": 4,
+  "version": 5,
   "oracle": "in an owned temporary root holding the seeded entries, run each step through the JSONL backend with compression none on the step's handle, a or b, each its own backend instance over the root: create, a write open, or the open handle's append, flush, or close; after each step list every file beneath the root with its text, an empty session.lock by its size",
   "history": [
     "Version 1: 33 cases, written from the TypeScript sources before either harness ran; both arms passed on their first run.",
     "A Rust negative control that skipped the truncation still passed open-torn-tail-truncated-by-first-append, whose torn tail was a prefix of the row appended after it. Its tail became a longer torn ext/note row, and no outcome changed.",
     "Version 2: 55 cases. Rust migrates an older generation at a write open, so the older-generation limit is removed and limit-older-generation became migrate-header-less, with TypeScript's exact message. An open step's message may hold a {src} placeholder for the source path its src field names, and an open step may be marked outside-domain. The 22 added cases and the changed one were written from the TypeScript sources before either harness ran; both arms passed on their first run.",
     "Version 3: 61 cases. Rust takes the write lease as TypeScript does, so trees list session.lock, which both harnesses read only by its size, and a step may name a handle, a or b, each its own backend instance over the root. The 6 added cases and the session.lock entries of the existing trees were written from the TypeScript sources before either harness ran. Both arms passed on their first run.",
-    "Version 4: 63 cases. Rust runs the catalog's final check of a migrated log, so outside-domain-final-check became migrate-final-check-turn-order with TypeScript's exact message and no rust override, and 2 cases were added: a final-check refusal of a v0 source and a v2 TOOL_NOT_STARTED repair the final check admits. The changed and added expectations were written from the TypeScript sources before either harness ran. Both arms passed without any expectation change."
+    "Version 4: 63 cases. Rust runs the catalog's final check of a migrated log, so outside-domain-final-check became migrate-final-check-turn-order with TypeScript's exact message and no rust override, and 2 cases were added: a final-check refusal of a v0 source and a v2 TOOL_NOT_STARTED repair the final check admits. The changed and added expectations were written from the TypeScript sources before either harness ran. Both arms passed without any expectation change.",
+    "Version 5: 64 cases. Rust writes numbers as JSON.stringify writes them, so encode-fraction-written, a fraction in free data, has no Rust limit, and limit-encode now witnesses the encode limit with a source member spelled 0.0; both were written from the TypeScript sources before either harness ran."
   ],
   "cases": [
     {
@@ -1994,7 +1995,7 @@
       "note": "TypeScript's create admits the empty id in a root without a project directory; the flush throws while the write lease resolves the Session directory."
     },
     {
-      "id": "limit-encode",
+      "id": "encode-fraction-written",
       "seed": [],
       "steps": [
         {
@@ -2027,17 +2028,66 @@
           "ts": {
             "outcome": "ok"
           },
-          "rust": {
-            "outcome": "native-subset",
-            "limit": "encode"
-          },
           "tree": {
             "_no-cwd/x1/session.lock": "",
             "_no-cwd/x1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"x1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"ext/note\",\"seq\":0,\"time\":1,\"ignorable\":true,\"data\":{\"x\":1.5}}\n"
           }
         }
       ],
-      "note": "JavaScript writes 1.5; Rust does not claim JavaScript's number spelling."
+      "note": "JavaScript writes 1.5, a writer spelling, and so does Rust."
+    },
+    {
+      "id": "limit-encode",
+      "seed": [],
+      "steps": [
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": "x1",
+            "createdAt": 1,
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {}
+        },
+        {
+          "step": "append",
+          "events": [
+            {
+              "type": "ext/note",
+              "seq": 0,
+              "time": 1,
+              "ignorable": true,
+              "data": {}
+            },
+            {
+              "type": "ext/derived",
+              "seq": 1,
+              "time": 1,
+              "sourceEventSeqs": [
+                0.0
+              ],
+              "data": {}
+            }
+          ],
+          "ts": {
+            "outcome": "ok"
+          },
+          "rust": {
+            "outcome": "native-subset",
+            "limit": "encode"
+          },
+          "tree": {
+            "_no-cwd/x1/session.lock": "",
+            "_no-cwd/x1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"x1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"ext/note\",\"seq\":0,\"time\":1,\"ignorable\":true,\"data\":{}}\n{\"type\":\"ext/derived\",\"seq\":1,\"time\":1,\"sourceEventSeqs\":[0],\"data\":{}}\n"
+          }
+        }
+      ],
+      "note": "The source member 0.0 is a count spelled other than JSON.stringify writes it; JavaScript writes 0, and Rust claims nothing."
     },
     {
       "id": "limit-seq-value",

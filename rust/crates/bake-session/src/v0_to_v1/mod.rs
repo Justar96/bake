@@ -75,8 +75,9 @@ pub enum V0ToV1Refusal {
     /// `type-coercion` for a non-string `type`, which TypeScript coerces to
     /// a property key and into messages; `object-prototype-type` for an
     /// inherited JavaScript property name, where TypeScript throws an engine
-    /// `TypeError`; `payload-float-lexeme` for a non-negative `f64` where a
-    /// count is read or compared; `reference-float-lexeme` for a replacement
+    /// `TypeError`; `payload-float-lexeme` for a non-negative `f64` spelled
+    /// other than `JSON.stringify` writes it, such as `3.0`, where a count is
+    /// read or compared; `reference-float-lexeme` for a replacement
     /// `start` spelled as a float; and `legacy-goal-message` for a user
     /// message whose goal source carries `change`, which TypeScript checks
     /// against a `JSON.stringify` rendering. `decode-invariant` guards input

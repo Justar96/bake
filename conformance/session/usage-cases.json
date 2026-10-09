@@ -1,9 +1,10 @@
 {
   "schema": "bake/session-conformance/usage-cases",
-  "version": 1,
+  "version": 2,
   "oracle": "tokenUsageProjectionDefinition.init/apply in packages/llm/token-meter/src/usage-projection.ts, folded over each case's parsed rows and their interruptedTurnClosers",
   "history": [
-    "Version 1: 34 cases, written from the TypeScript sources before either harness ran."
+    "Version 1: 34 cases, written from the TypeScript sources before either harness ran.",
+    "Version 2: 38 cases; the fold now sums counts with JavaScript's + and -, so attempt-usage-string-count, attempt-cache-count-string, attempt-usage-fraction, and message-usage-total-past-safe lose their Rust limits, and message-usage-string-total, message-usage-not-a-number-total, message-usage-fraction-total, and attempt-usage-exponent are added. A folded state is compared as its JSON.stringify text."
   ],
   "logs": {
     "tool-call-turn": "conformance/runtime/request-reconstruction/tool-call-turn/session.jsonl",
@@ -900,11 +901,6 @@
           }
         }
       },
-      "rust": {
-        "outcome": "native-subset",
-        "limit": "usage",
-        "seq": 8
-      },
       "note": "JavaScript concatenates 0 + \"5\" to \"05\", and the message's replacement subtracts it back to a number."
     },
     {
@@ -939,11 +935,6 @@
             "cacheWriteTokens": 0
           }
         }
-      },
-      "rust": {
-        "outcome": "native-subset",
-        "limit": "usage",
-        "seq": 8
       }
     },
     {
@@ -974,11 +965,6 @@
             "cacheWriteTokens": 0
           }
         }
-      },
-      "rust": {
-        "outcome": "native-subset",
-        "limit": "number",
-        "seq": 8
       },
       "note": "Attempt payloads are not qualified on restore; the replacement computes 1.5 - 1.5 + 10 exactly."
     },
@@ -1016,12 +1002,135 @@
           }
         }
       },
+      "note": "2^54 - 2 is exact in a double but not a safe integer."
+    },
+    {
+      "id": "message-usage-string-total",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 13,
+          "find": "\"usage\":{\"inputTokens\":10,\"outputTokens\":4},\"stream\"",
+          "replace": "\"usage\":{\"inputTokens\":\"10\",\"outputTokens\":4},\"stream\""
+        }
+      ],
+      "ts": {
+        "outcome": "folded",
+        "totals": {
+          "uncachedInputTokens": "1010",
+          "outputTokens": 9,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0
+        },
+        "last": {
+          "turn": 1,
+          "step": 2,
+          "buckets": {
+            "uncachedInputTokens": "10",
+            "outputTokens": 4,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          }
+        }
+      },
+      "note": "A new coordinate adds: 10 - 0 + \"10\" concatenates to \"1010\", which the state keeps."
+    },
+    {
+      "id": "message-usage-not-a-number-total",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 8,
+          "find": "\"usage\":{\"inputTokens\":10,\"outputTokens\":5},\"stream\"",
+          "replace": "\"usage\":{\"inputTokens\":\"abc\",\"outputTokens\":5},\"stream\""
+        }
+      ],
+      "ts": {
+        "outcome": "folded",
+        "totals": {
+          "uncachedInputTokens": null,
+          "outputTokens": 9,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0
+        },
+        "last": {
+          "turn": 1,
+          "step": 2,
+          "buckets": {
+            "uncachedInputTokens": 10,
+            "outputTokens": 4,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          }
+        }
+      },
+      "note": "0 - 0 + \"abc\" is \"0abc\"; \"0abc\" - 0 + 10 is NaN, which JSON.stringify writes as null."
+    },
+    {
+      "id": "message-usage-fraction-total",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 13,
+          "find": "\"usage\":{\"inputTokens\":10,\"outputTokens\":4},\"stream\"",
+          "replace": "\"usage\":{\"inputTokens\":10.25,\"outputTokens\":4},\"stream\""
+        }
+      ],
+      "ts": {
+        "outcome": "folded",
+        "totals": {
+          "uncachedInputTokens": 20.25,
+          "outputTokens": 9,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0
+        },
+        "last": {
+          "turn": 1,
+          "step": 2,
+          "buckets": {
+            "uncachedInputTokens": 10.25,
+            "outputTokens": 4,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          }
+        }
+      }
+    },
+    {
+      "id": "attempt-usage-exponent",
+      "log": "retry-attempt",
+      "edits": [
+        {
+          "row": 8,
+          "find": "\"stream\":[",
+          "replace": "\"stream\":[{\"type\":\"chunk\",\"time\":1791378812492,\"chunk\":{\"type\":\"usage\",\"usage\":{\"inputTokens\":1e3,\"outputTokens\":1}}},"
+        }
+      ],
+      "ts": {
+        "outcome": "folded",
+        "totals": {
+          "uncachedInputTokens": 10,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0
+        },
+        "last": {
+          "turn": 1,
+          "step": 1,
+          "buckets": {
+            "uncachedInputTokens": 10,
+            "outputTokens": 4,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          }
+        }
+      },
       "rust": {
         "outcome": "native-subset",
         "limit": "number",
-        "seq": 13
+        "seq": 8
       },
-      "note": "2^54 - 2 is exact in a double but not a safe integer."
+      "note": "JSON.stringify writes 1000 as 1000, never 1e3; the message's sample later replaces it."
     }
   ]
 }

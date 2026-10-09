@@ -9,8 +9,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use bake_session::{
-    HeaderRefusal, PathPlatform, ReplayLimit, ReplayRefusal, ScanLimit, ScanRefusal, SeedRejection,
-    replay_requests,
+    HeaderRefusal, PathPlatform, ReplayLimit, ReplayRefusal, RestoreRefusal, ScanLimit,
+    ScanRefusal, SeedRejection, Unsupported, replay_requests, replay_restored_requests,
+    restore_plain_log,
 };
 use serde_json::{Map, Value};
 
@@ -25,11 +26,10 @@ const FIXTURE_EXPECTED: &str =
 const LOG_BYTES: usize = 4533;
 const EXPECTED_BYTES: usize = 2775;
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 201;
+const CASE_COUNT: usize = 211;
 const MAX_EDITS: usize = 8;
 const SOURCE_BUDGET: usize = 64;
-const LIMITS: [&str; 9] = [
-    "event-type",
+const LIMITS: [&str; 8] = [
     "number",
     "depth",
     "coordinate",
@@ -135,7 +135,7 @@ fn table() -> Map<String, Value> {
         BTreeSet::from(["schema", "version", "history", "oracle", "fixture", "cases"])
     );
     assert_eq!(fields["schema"], SCHEMA);
-    assert_eq!(fields["version"], 3);
+    assert_eq!(fields["version"], 4);
     assert!(
         fields["history"]
             .as_array()
@@ -420,7 +420,6 @@ fn classify(refusal: &ReplayRefusal) -> String {
         ReplayRefusal::NativeSubset { limit, .. } => format!(
             "limit:{}",
             match limit {
-                ReplayLimit::EventType => "event-type",
                 ReplayLimit::Number => "number",
                 ReplayLimit::Depth => "depth",
                 ReplayLimit::Coordinate => "coordinate",
@@ -524,6 +523,60 @@ fn shared_cases_derive_like_replay_requests() {
         BTreeSet::from(["requests".to_owned(), "rejected".to_owned()]),
         "limits cover accepted and rejected input"
     );
+}
+
+/// The plugin-type and resumed logs that `replay_requests` admits, through
+/// the production path. Restoration refuses an unknown required type, as the
+/// `unknown-required-type` case of `conformance/session/restore-cases.json`
+/// witnesses for
+/// TypeScript; every other log derives the requests the helper derives, as
+/// the matching cases of `restored-request-derivation-cases.json` witness.
+#[test]
+fn plugin_and_resumed_logs_derive_the_same_requests_when_restored() {
+    let table = table();
+    let fixture = fixture();
+    let log = |id: &str| {
+        let case = table["cases"]
+            .as_array()
+            .expect("cases")
+            .iter()
+            .find(|case| case["id"] == id)
+            .unwrap_or_else(|| panic!("no case {id}"));
+        case_log(object(case, id), &fixture, id)
+    };
+    for (id, seq) in [
+        ("unknown-required-type", 7),
+        ("plugin-type-payload", 2),
+        ("plugin-type-marker-after-last-cut", 14),
+        ("object-prototype-type", 7),
+    ] {
+        assert!(replay(&log(id)).is_ok(), "{id}: replay");
+        assert_eq!(
+            restore_plain_log(&log(id), PathPlatform::host(), SOURCE_BUDGET).map(drop),
+            Err(RestoreRefusal::Unsupported {
+                seq,
+                cause: Unsupported::UnknownType
+            }),
+            "{id}"
+        );
+    }
+    for id in [
+        "unknown-ignorable-type",
+        "plugin-type-ignorable-markers",
+        "resume-end-seed-in-unseeded-log",
+        "end-seed-ignorable",
+        "end-seed-twice",
+        "resumed-log-then-turn",
+    ] {
+        let replayed = replay_requests(&log(id), PathPlatform::host(), SOURCE_BUDGET)
+            .unwrap_or_else(|refusal| panic!("{id}: replay: {refusal:?}"));
+        let restored = restore_plain_log(&log(id), PathPlatform::host(), SOURCE_BUDGET)
+            .unwrap_or_else(|refusal| panic!("{id}: restore: {refusal:?}"));
+        let derived = replay_restored_requests(&restored)
+            .unwrap_or_else(|refusal| panic!("{id}: derive: {refusal:?}"));
+        assert!(!derived.is_empty(), "{id}");
+        assert_eq!(derived, replayed, "{id}");
+    }
 }
 
 #[test]
