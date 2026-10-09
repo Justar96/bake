@@ -41,8 +41,11 @@
 //!   [`migrate_released_generation`].
 //! - [`PlainLogFile::append`] and [`PlainLogFile::flush`] run the model's
 //!   operation, then bring the file to the model's bytes, refused operations
-//!   included: a first write creates the Session directory and a new file
-//!   holding every byte, and a later one truncates the file to the bytes it
+//!   included: a first write creates the Session directory and publishes a
+//!   new file holding every byte, written to a `session.v3.jsonl.<token>.tmp`
+//!   beside it and hard-linked into place as TypeScript's `materialize`
+//!   publishes it on POSIX, so a failed write or a killed process never
+//!   leaves a partial log; a later write truncates the file to the bytes it
 //!   shares with the model and writes the rest. A created handle first takes
 //!   the write lock, creating the Session directory, at its first flush or
 //!   its first batch that is neither empty nor refused for -0, before the
@@ -92,7 +95,7 @@
 //! instance, are not modelled; exclusion between a Rust value and a
 //! TypeScript handle is tested between processes only, with uncompressed
 //! logs, as the `write_lease` module describes. Fsync and directory sync, the
-//! publication's verifier, rollback after a failed write, file modes, Zstd
+//! publication's verifier, file modes, Zstd
 //! compression, and the `validateStoredEvents` check of an opened log are
 //! not modelled. Opening a log TypeScript's validation refuses is
 //! outside this model's domain. So is migrating a log whose v3
@@ -103,15 +106,23 @@
 //! replaced included. A symbolic link is followed where a path is joined,
 //! never where a directory is listed, as Node's `Dirent.isDirectory` does
 //! not follow one. Every listing is visited in byte order of its UTF-8
-//! names. A migration's
+//! names. A published file's
 //! temporary file is removed after a failed write or link, and a failed
 //! removal is reported with that failure; one a killed process leaves is
-//! not a generation. After an I/O error in `append` or `flush` the file may
-//! hold a partial write, and every later operation on the value fails.
+//! not a generation, and a failed removal after the link, which leaves a
+//! second link of the published file, is ignored, as TypeScript ignores it.
+//! A failed write of a later `append` or `flush` truncates the file back to
+//! the bytes it shared with the model, as TypeScript's `rollbackAppend`
+//! restores the size before its append, though a torn tail's bytes the new
+//! rows share stay until the next write; every later operation on the value
+//! then fails, where a TypeScript handle stays usable and retries the batch.
+//!
+//! Every filesystem operation goes through the hidden `storage_io` seam,
+//! which is the real filesystem except in the fault-injection tests.
 
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, ErrorKind, Seek, SeekFrom, Write};
+use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::Value;
@@ -120,6 +131,7 @@ use crate::fork::holds_negative_zero;
 use crate::json_parse::{Deep, dismantle};
 use crate::log_layout::{CURRENT_LOG_FILENAME, canonical_generation, encode_segment, log_path};
 use crate::released_rows::{ParseStop, parse_released_header, parse_released_rows};
+use crate::storage_io::{RealIo, StorageIo};
 use crate::v1_codec::decode_v0_v1_items_before_finish;
 use crate::v2_to_v3::{RecoverableRefusal, recoverable_refusal, rethrows_recovery_issue};
 use crate::write_lease::{LeaseRefusal, WriteLease};
@@ -135,6 +147,8 @@ use crate::{
 /// One write handle of a plain current-format Session log under a root.
 #[derive(Debug)]
 pub struct PlainLogFile {
+    /// Every filesystem operation of the handle goes through this seam.
+    io: Arc<dyn StorageIo>,
     path: PathBuf,
     log: PlainAppendLog,
     /// The Session directory's write lock, held from a write `open` or from
@@ -292,10 +306,23 @@ impl PlainLogFile {
         header: &Value,
         inherited_event_count: Option<u64>,
     ) -> Result<Self, LogFileRefusal> {
+        Self::create_with_io(Arc::new(RealIo), root, header, inherited_event_count)
+    }
+
+    /// [`PlainLogFile::create`] with every filesystem operation of the
+    /// handle made through `io`, for fault-injection tests; see
+    /// [`crate::storage_io`].
+    #[doc(hidden)]
+    pub fn create_with_io(
+        io: Arc<dyn StorageIo>,
+        root: &Path,
+        header: &Value,
+        inherited_event_count: Option<u64>,
+    ) -> Result<Self, LogFileRefusal> {
         let log = PlainAppendLog::create(header, inherited_event_count)
             .map_err(LogFileRefusal::Create)?;
         let encoded = encoded_id(log.id(), PathPlatform::host())?;
-        let found = find_generations(root, &encoded)?;
+        let found = find_generations(&*io, root, &encoded)?;
         if !found.is_empty() {
             return Err(duplicate(log.id(), &found).unwrap_or_else(|| {
                 LogFileRefusal::AlreadyExists {
@@ -306,6 +333,7 @@ impl PlainLogFile {
         // The encoder admits only an absent `cwd` or an absolute string.
         let cwd = header.get("cwd").and_then(Value::as_str);
         Ok(Self {
+            io,
             path: log_path(root, cwd, &encoded),
             log,
             lease: None,
@@ -318,11 +346,24 @@ impl PlainLogFile {
     /// as [`PlainAppendLog::open`] does. `id` uses [`crate::js_string`]'s
     /// spelling: [`crate::js_string::from_rust`] spells an argument.
     pub fn open(root: &Path, id: &str, source_budget: usize) -> Result<Self, LogFileRefusal> {
+        Self::open_with_io(Arc::new(RealIo), root, id, source_budget)
+    }
+
+    /// [`PlainLogFile::open`] with every filesystem operation of the handle
+    /// made through `io`, for fault-injection tests; see
+    /// [`crate::storage_io`].
+    #[doc(hidden)]
+    pub fn open_with_io(
+        io: Arc<dyn StorageIo>,
+        root: &Path,
+        id: &str,
+        source_budget: usize,
+    ) -> Result<Self, LogFileRefusal> {
         if id.is_empty() {
             return Err(LogFileRefusal::NativeSubset(LogFileLimit::EmptyId));
         }
         let encoded = encoded_id(id, PathPlatform::host())?;
-        let mut found = find_generations(root, &encoded)?;
+        let mut found = find_generations(&*io, root, &encoded)?;
         if let Some(refusal) = duplicate(id, &found) {
             return Err(refusal);
         }
@@ -337,14 +378,14 @@ impl PlainLogFile {
             .path
             .parent()
             .ok_or_else(|| io::Error::other("a Session log path has a directory"))?;
-        let lease = acquire_lease(dir, id)?;
+        let lease = acquire_lease(&*io, dir, id)?;
         if selected.version < CURRENT_SESSION_FORMAT_VERSION {
-            return Self::migrate(root, id, &encoded, &selected, lease, source_budget);
+            return Self::migrate(io, root, id, &encoded, &selected, lease, source_budget);
         }
         if selected.version > CURRENT_SESSION_FORMAT_VERSION {
             return Err(LogFileRefusal::NativeSubset(LogFileLimit::NewerGeneration));
         }
-        let bytes = fs::read(&selected.path)?;
+        let bytes = io.read(&selected.path)?;
         let platform = PathPlatform::host();
         let log = PlainAppendLog::open(&bytes, platform, source_budget)
             .map_err(|refusal| LogFileRefusal::NativeSubset(LogFileLimit::Scan(refusal)))?;
@@ -353,10 +394,12 @@ impl PlainLogFile {
             .map(|record| read_header_record(record, platform))
             .and_then(Result::ok)
             .ok_or_else(|| io::Error::other("an opened log's header decodes again"))?;
-        if let Some(cause) = stored_identity_mismatch(root, id, &encoded, &header, &selected)? {
+        if let Some(cause) = stored_identity_mismatch(&*io, root, id, &encoded, &header, &selected)?
+        {
             return Err(LogFileRefusal::StoredIdentity { message: cause });
         }
         Ok(Self {
+            io,
             path: selected.path,
             log,
             lease: Some(lease),
@@ -368,6 +411,7 @@ impl PlainLogFile {
     /// then `publishStoredMigration`, which writes the encoded v3 log beside
     /// the unchanged source before the handle holds it.
     fn migrate(
+        io: Arc<dyn StorageIo>,
         root: &Path,
         id: &str,
         encoded: &str,
@@ -375,13 +419,14 @@ impl PlainLogFile {
         lease: WriteLease,
         source_budget: usize,
     ) -> Result<Self, LogFileRefusal> {
-        let bytes = fs::read(&selected.path)?;
+        let bytes = io.read(&selected.path)?;
         let platform = PathPlatform::host();
         let refusal = |refused: ReleasedGenerationRefusal| refused.into_refusal(id, selected);
         // `validateSourceIdentity` checks a header its codec reads, before any row.
         if let Some(stored) =
             released_generation_header(&bytes, selected.version, platform).map_err(refusal)?
-            && let Some(cause) = stored_identity_mismatch(root, id, encoded, &stored, selected)?
+            && let Some(cause) =
+                stored_identity_mismatch(&*io, root, id, encoded, &stored, selected)?
         {
             return Err(refusal(ReleasedGenerationRefusal::Corrupt(format!(
                 "Error: {cause}"
@@ -414,8 +459,9 @@ impl PlainLogFile {
         let log = PlainAppendLog::open(&bytes, platform, source_budget)
             .map_err(|_| refusal(ReleasedGenerationRefusal::Limit("scan".to_owned())))?;
         let path = selected.path.with_file_name(CURRENT_LOG_FILENAME);
-        publish_new_file(&path, &bytes)?;
+        publish_new_file(&*io, &path, "session.migration.", &bytes)?;
         Ok(Self {
+            io,
             path,
             log,
             lease: Some(lease),
@@ -470,7 +516,7 @@ impl PlainLogFile {
                 .path
                 .parent()
                 .ok_or_else(|| io::Error::other("a Session log path has a directory"))?;
-            self.lease = Some(acquire_lease(dir, self.log.id())?);
+            self.lease = Some(acquire_lease(&*self.io, dir, self.log.id())?);
         }
         Ok(())
     }
@@ -491,8 +537,8 @@ impl PlainLogFile {
             return Ok(());
         };
         let written = match before {
-            None => create_log_file(&self.path, after),
-            Some(before) => rewrite_tail(&self.path, before, after),
+            None => create_log_file(&*self.io, &self.path, after),
+            Some(before) => rewrite_tail(&*self.io, &self.path, before, after),
         };
         written.map_err(|error| {
             self.failed = true;
@@ -634,6 +680,20 @@ pub fn migrate_released_generation(
     source_version: u64,
     source_budget: usize,
 ) -> Result<MigratedV2, ReleasedGenerationRefusal> {
+    migrate_released_generation_before_stop(log, source_version, source_budget, None)
+}
+
+/// [`migrate_released_generation`] over the rows a stream delivered before
+/// `body_stop`, which it throws after them: the parse stop of `log`'s own
+/// rows, which come first, or else `body_stop` takes the parse stop's place,
+/// after every row-time refusal and before the decoders' and the chain's
+/// `finish`.
+pub(crate) fn migrate_released_generation_before_stop(
+    log: &[u8],
+    source_version: u64,
+    source_budget: usize,
+    body_stop: Option<ReleasedGenerationRefusal>,
+) -> Result<MigratedV2, ReleasedGenerationRefusal> {
     let Some(record) = first_record(log) else {
         return Err(ReleasedGenerationRefusal::Corrupt(
             "Error: empty or header-less session log".to_owned(),
@@ -641,7 +701,10 @@ pub fn migrate_released_generation(
     };
     let header = Deep::new(parse_released_header(record, source_version)?);
     let parsed = parse_released_rows(&log[record.len()..]);
-    let stop = parsed.stop.map(ReleasedGenerationRefusal::from);
+    let stop = parsed
+        .stop
+        .map(ReleasedGenerationRefusal::from)
+        .or(body_stop);
     match source_version {
         2 => migrate_v2(&header, &parsed.rows, stop, source_budget),
         0 => migrate_v0_v1(
@@ -836,56 +899,51 @@ fn migrate_v2(
 }
 
 /// Publish `bytes` as a new file at `path`, whose directory exists: write
-/// them to a new `session.migration.<token>.tmp` beside it, which is never a
-/// canonical generation, then hard-link that file to `path`, which fails if
-/// `path` exists, and remove it. A write or link failure removes the
-/// temporary file and never leaves a file at `path`; a failed removal is
-/// reported with the failure that made the file disposable.
-fn publish_new_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
+/// them to a new `<prefix><token>.tmp` beside it, which is never a canonical
+/// generation, then hard-link that file to `path`, which fails if `path`
+/// exists, and remove it. A write or link failure removes the temporary file
+/// and never leaves a file at `path`; a failed removal is reported with the
+/// failure that made the file disposable. A process killed before the link
+/// leaves at most the temporary file, and one killed after it leaves `path`
+/// whole.
+fn publish_new_file(io: &dyn StorageIo, path: &Path, prefix: &str, bytes: &[u8]) -> io::Result<()> {
     static NEXT_TOKEN: AtomicU64 = AtomicU64::new(0);
     let dir = path
         .parent()
         .ok_or_else(|| io::Error::other("a Session log path has a directory"))?;
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
     let (staged, mut file) = loop {
         let token = NEXT_TOKEN.fetch_add(1, Ordering::Relaxed);
-        let staged = dir.join(format!(
-            "session.migration.{}-{token}.tmp",
-            std::process::id()
-        ));
-        match options.open(&staged) {
+        let staged = dir.join(format!("{prefix}{}-{token}.tmp", std::process::id()));
+        match io.create_new(&staged) {
             Ok(file) => break (staged, file),
             Err(error) if error.kind() == ErrorKind::AlreadyExists => {}
             Err(error) => return Err(error),
         }
     };
-    let written = file.write_all(bytes);
+    let written = io.write_at(&mut file, 0, bytes);
     // Windows removes and links only a file no handle holds open.
     drop(file);
-    if let Err(error) = written.and_then(|()| fs::hard_link(&staged, path)) {
-        return Err(match fs::remove_file(&staged) {
+    if let Err(error) = written.and_then(|()| io.hard_link(&staged, path)) {
+        return Err(match io.remove_file(&staged) {
             Ok(()) => error,
             Err(cleanup) => io::Error::new(
                 error.kind(),
                 format!(
-                    "{error}; failed to remove migration temporary \"{}\": {cleanup}",
+                    "{error}; failed to remove temporary \"{}\": {cleanup}",
                     staged.display()
                 ),
             ),
         });
     }
     // `path` holds the bytes; a leftover temporary is never a generation.
-    let _ = fs::remove_file(&staged);
+    let _ = io.remove_file(&staged);
     Ok(())
 }
 
 /// The write lock of the Session directory `dir`, or TypeScript's
 /// `SessionAlreadyOwnedError` refusal for `id`.
-fn acquire_lease(dir: &Path, id: &str) -> Result<WriteLease, LogFileRefusal> {
-    WriteLease::acquire(dir).map_err(|refusal| match refusal {
+fn acquire_lease(io: &dyn StorageIo, dir: &Path, id: &str) -> Result<WriteLease, LogFileRefusal> {
+    WriteLease::acquire(io, dir).map_err(|refusal| match refusal {
         LeaseRefusal::AlreadyOwned => LogFileRefusal::AlreadyOwned {
             message: format!("session \"{id}\" is already owned by an active write handle"),
         },
@@ -932,6 +990,7 @@ fn windows_device_or_dot(encoded: &str) -> bool {
 /// path, by spelling or else by `realpath`. A requested id is never empty,
 /// so `generationLogPath` names a path.
 fn stored_identity_mismatch(
+    io: &dyn StorageIo,
     root: &Path,
     id: &str,
     encoded: &str,
@@ -950,7 +1009,7 @@ fn stored_identity_mismatch(
         Some(name) => current.with_file_name(name),
         None => current,
     };
-    if expected == selected.path || same_file(&selected.path, &expected)? {
+    if expected == selected.path || same_file(io, &selected.path, &expected)? {
         return Ok(None);
     }
     let expected = crate::js_string::from_rust(&expected.display().to_string()).into_owned();
@@ -961,13 +1020,8 @@ fn stored_identity_mismatch(
 
 /// `sameFile`: whether both paths resolve to one file, as `realpath`
 /// resolves them; an absent path resolves to none.
-fn same_file(path: &Path, expected: &Path) -> Result<bool, LogFileRefusal> {
-    let resolve = |path: &Path| match fs::canonicalize(path) {
-        Ok(resolved) => Ok(Some(resolved)),
-        Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(LogFileRefusal::Io(error)),
-    };
-    let (actual, expected) = (resolve(path)?, resolve(expected)?);
+fn same_file(io: &dyn StorageIo, path: &Path, expected: &Path) -> Result<bool, LogFileRefusal> {
+    let (actual, expected) = (io.canonicalize(path)?, io.canonicalize(expected)?);
     Ok(actual.is_some() && actual == expected)
 }
 
@@ -990,22 +1044,18 @@ struct Entry {
 
 /// The listing of `dir`, UTF-8 names in byte order before the others, or
 /// `None` when `dir` is absent.
-fn list(dir: &Path) -> Result<Option<Vec<Entry>>, LogFileRefusal> {
-    let entries = match fs::read_dir(dir) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(error.into()),
+fn list(io: &dyn StorageIo, dir: &Path) -> Result<Option<Vec<Entry>>, LogFileRefusal> {
+    let Some(entries) = io.read_dir(dir)? else {
+        return Ok(None);
     };
-    let mut listed = Vec::new();
-    for entry in entries {
-        let entry = entry?;
-        let kind = entry.file_type()?;
-        listed.push(Entry {
-            is_dir: kind.is_dir(),
-            is_file: kind.is_file(),
-            name: entry.file_name().into_string().ok(),
-        });
-    }
+    let mut listed: Vec<Entry> = entries
+        .into_iter()
+        .map(|entry| Entry {
+            is_dir: entry.is_dir,
+            is_file: entry.is_file,
+            name: entry.name.into_string().ok(),
+        })
+        .collect();
     listed.sort_by(|left, right| match (&left.name, &right.name) {
         (Some(left), Some(right)) => left.cmp(right),
         (left, right) => right.is_some().cmp(&left.is_some()),
@@ -1015,8 +1065,8 @@ fn list(dir: &Path) -> Result<Option<Vec<Entry>>, LogFileRefusal> {
 
 /// The UTF-8 names `dir` lists; a name that is not UTF-8 is never a
 /// canonical generation, even in Node's replacement spelling.
-fn utf8_names(dir: &Path) -> Result<Vec<String>, LogFileRefusal> {
-    Ok(list(dir)?
+fn utf8_names(io: &dyn StorageIo, dir: &Path) -> Result<Vec<String>, LogFileRefusal> {
+    Ok(list(io, dir)?
         .unwrap_or_default()
         .into_iter()
         .filter_map(|entry| entry.name)
@@ -1027,9 +1077,13 @@ const NON_UTF8_NAME: LogFileRefusal = LogFileRefusal::NativeSubset(LogFileLimit:
 
 /// The root check of `ensureRootEncoding`, then `findLog` for the encoded id:
 /// the highest canonical generation of each project directory holding one.
-fn find_generations(root: &Path, encoded: &str) -> Result<Vec<Generation>, LogFileRefusal> {
+fn find_generations(
+    io: &dyn StorageIo,
+    root: &Path,
+    encoded: &str,
+) -> Result<Vec<Generation>, LogFileRefusal> {
     let mut projects = Vec::new();
-    for entry in list(root)?.unwrap_or_default() {
+    for entry in list(io, root)?.unwrap_or_default() {
         // Only directories are traversed.
         match entry {
             Entry { is_dir: false, .. } => {}
@@ -1045,7 +1099,7 @@ fn find_generations(root: &Path, encoded: &str) -> Result<Vec<Generation>, LogFi
         // of the project is checked; a directory with that suffix is a
         // Session directory, since it checks `isFile()`.
         let mut sessions = Vec::new();
-        for entry in list(&project_dir)?.unwrap_or_default() {
+        for entry in list(io, &project_dir)?.unwrap_or_default() {
             let Some(name) = entry.name else {
                 return Err(NON_UTF8_NAME);
             };
@@ -1058,7 +1112,7 @@ fn find_generations(root: &Path, encoded: &str) -> Result<Vec<Generation>, LogFi
         }
         for session in sessions {
             let dir = project_dir.join(session);
-            let highest = utf8_names(&dir)?
+            let highest = utf8_names(io, &dir)?
                 .into_iter()
                 .filter_map(|name| opposite_generation(&name).map(|version| (version, name)))
                 .max();
@@ -1073,12 +1127,12 @@ fn find_generations(root: &Path, encoded: &str) -> Result<Vec<Generation>, LogFi
         // `rejectLegacyFlatArtifact` probes the id's flat names first.
         for suffix in [".jsonl.zstd", ".jsonl"] {
             let path = project_dir.join(format!("{encoded}{suffix}"));
-            if probe_exists(&path)? {
+            if io.probe(&path)? {
                 return Err(legacy_layout(&path));
             }
         }
         let dir = project_dir.join(encoded);
-        let names = utf8_names(&dir)?;
+        let names = utf8_names(io, &dir)?;
         // `resolveGenerationInDirectory` names the first one it lists.
         if let Some(name) = names
             .iter()
@@ -1098,25 +1152,6 @@ fn find_generations(root: &Path, encoded: &str) -> Result<Vec<Generation>, LogFi
         }
     }
     Ok(found)
-}
-
-/// `exists(path)`: whether `open(path, 'r')` succeeds, following a symlink;
-/// only an absent path is false. libuv opens with `O_RDONLY` on POSIX and
-/// with `FILE_FLAG_BACKUP_SEMANTICS` on Windows (`fs__open` in
-/// `src/win/fs.c`), so a directory exists on both.
-fn probe_exists(path: &Path) -> Result<bool, LogFileRefusal> {
-    let mut options = OpenOptions::new();
-    options.read(true);
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::OpenOptionsExt;
-        options.custom_flags(0x0200_0000); // FILE_FLAG_BACKUP_SEMANTICS
-    }
-    match options.open(path) {
-        Ok(_) => Ok(true),
-        Err(error) if error.kind() == ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(error.into()),
-    }
 }
 
 /// TypeScript's `legacyLayout(path)`, which spells `path` with
@@ -1151,27 +1186,28 @@ fn encoding_mismatch(path: &Path) -> LogFileRefusal {
     }
 }
 
-/// Create the Session directory and a new log file holding `bytes`.
-fn create_log_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
+/// Create the Session directory and publish a new log file holding `bytes`,
+/// as TypeScript's `materialize` does: written to a
+/// `session.v3.jsonl.<token>.tmp` beside it, then linked into place, so a
+/// failed write or a killed process never leaves a partial log.
+fn create_log_file(io: &dyn StorageIo, path: &Path, bytes: &[u8]) -> io::Result<()> {
     let dir = path
         .parent()
         .ok_or_else(|| io::Error::other("a Session log path has a directory"))?;
-    let mut builder = fs::DirBuilder::new();
-    builder.recursive(true);
-    #[cfg(unix)]
-    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
-    builder.create(dir)?;
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-    let mut file = options.open(path)?;
-    file.write_all(bytes)
+    io.create_dir_all(dir)?;
+    let name = path
+        .file_name()
+        .ok_or_else(|| io::Error::other("a Session log path has a file name"))?;
+    let prefix = format!("{}.", name.to_string_lossy());
+    publish_new_file(io, path, &prefix, bytes)
 }
 
 /// Bring a file holding `before` to `after`: truncate it to their common
-/// prefix, then write the rest of `after` there.
-fn rewrite_tail(path: &Path, before: &[u8], after: &[u8]) -> io::Result<()> {
+/// prefix, then write the rest of `after` there. A failed write truncates
+/// the file to that prefix again, as TypeScript's `rollbackAppend` restores
+/// the size before its append; a failed rollback is reported with the write
+/// failure.
+fn rewrite_tail(io: &dyn StorageIo, path: &Path, before: &[u8], after: &[u8]) -> io::Result<()> {
     let shared = before
         .iter()
         .zip(after)
@@ -1180,13 +1216,23 @@ fn rewrite_tail(path: &Path, before: &[u8], after: &[u8]) -> io::Result<()> {
     if shared == before.len() && shared == after.len() {
         return Ok(());
     }
-    let mut file: File = OpenOptions::new().write(true).open(path)?;
+    let mut file = io.open_write(path)?;
+    // A byte count of an in-memory buffer fits in u64.
+    let shared_len = shared as u64;
     if shared < before.len() {
-        // A byte count of an in-memory buffer fits in u64.
-        file.set_len(shared as u64)?;
+        io.set_len(&file, shared_len)?;
     }
-    file.seek(SeekFrom::Start(shared as u64))?;
-    file.write_all(&after[shared..])
+    io.write_at(&mut file, shared_len, &after[shared..])
+        .map_err(|error| match io.set_len(&file, shared_len) {
+            Ok(()) => error,
+            Err(rollback) => io::Error::new(
+                error.kind(),
+                format!(
+                    "{error}; failed to roll back \"{}\": {rollback}",
+                    path.display()
+                ),
+            ),
+        })
 }
 
 #[cfg(test)]

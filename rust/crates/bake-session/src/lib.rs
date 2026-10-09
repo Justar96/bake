@@ -162,6 +162,8 @@ mod restored_replay;
 mod row_encode;
 mod scan;
 mod source_event_seqs;
+#[doc(hidden)]
+pub mod storage_io;
 mod subagent;
 mod subagent_catalog;
 mod unfinished;
