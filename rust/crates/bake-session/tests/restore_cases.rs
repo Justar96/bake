@@ -3,7 +3,8 @@
 //! case's expected outcome is its `rust` override when present, otherwise the
 //! hand-written restored state the TypeScript `restorePlainLog` helper also
 //! meets, with messages also compared as serialized text, since `Value`
-//! equality ignores member order. An `image/offload` rejection also claims
+//! equality ignores member order, and the request header as the text
+//! `JSON.stringify` writes, array-index keys first. An `image/offload` rejection also claims
 //! TypeScript's exact message. Nothing here reads TypeScript output.
 
 use std::collections::BTreeSet;
@@ -11,7 +12,8 @@ use std::path::PathBuf;
 
 use bake_session::{
     HeaderOrigin, OffloadRejection, PathPlatform, ReplayRefusal, RestoreLimit, RestoreRefusal,
-    RestoredLog, SeedRejection, SessionHeader, Unsupported, replay_requests, restore_plain_log,
+    RestoredLog, SeedRejection, SessionHeader, Unsupported, json_text, replay_requests,
+    restore_plain_log,
 };
 use serde_json::{Map, Value, json};
 
@@ -36,7 +38,7 @@ const LOGS: [(&str, &str, usize); 3] = [
     ),
 ];
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 118;
+const CASE_COUNT: usize = 122;
 const SOURCE_BUDGET: usize = 64;
 /// Cases whose `image/offload` rejection message is compared exactly.
 const OFFLOAD_MESSAGES: usize = 28;
@@ -47,10 +49,9 @@ const UNNAMED_SEQS: [(&str, u64); 4] = [
     ("known-ignorable-tool-update-marker", 14),
     ("known-ignorable-routing-decision-marker", 16),
 ];
-const LIMITS: [(&str, RestoreLimit); 7] = [
+const LIMITS: [(&str, RestoreLimit); 6] = [
     ("number", RestoreLimit::Number),
     ("coordinate", RestoreLimit::Coordinate),
-    ("config-member", RestoreLimit::ConfigMember),
     ("tool-schema", RestoreLimit::ToolSchema),
     ("context", RestoreLimit::Context),
     ("repair", RestoreLimit::Repair),
@@ -205,7 +206,7 @@ fn load() -> Vec<Case> {
         BTreeSet::from(["cases", "history", "logs", "oracle", "schema", "version"])
     );
     assert_eq!(table["schema"], SCHEMA);
-    assert_eq!(table["version"], 4);
+    assert_eq!(table["version"], 5);
     assert!(
         table["history"]
             .as_array()
@@ -481,6 +482,12 @@ fn shared_cases_restore_like_the_read_path() {
                     actual["messages"].to_string(),
                     expected["messages"].to_string(),
                     "{id}: member order"
+                );
+                // `JSON.stringify` order: array-index keys first.
+                assert_eq!(
+                    json_text(&actual["requestHeader"]),
+                    json_text(&expected["requestHeader"]),
+                    "{id}: request header text"
                 );
                 // Restoration returns the scanned rows unchanged.
                 let stored = restored.stored().rows();

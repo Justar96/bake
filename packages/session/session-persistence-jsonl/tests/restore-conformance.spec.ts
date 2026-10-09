@@ -11,7 +11,8 @@
  * limit, or the internal cause Rust reports for a rejection; TypeScript still
  * asserts its own outcome. Restored messages are also compared as
  * `JSON.stringify` text, because `toStrictEqual` ignores member order and an
- * image projection must keep each block's members in place. Refusal classes
+ * image projection must keep each block's members in place; so is the
+ * restored request header, whose `config` keeps the logged members. Refusal classes
  * and messages belong to this helper; the file backend adds path context to
  * unsupported-format refusals and wraps other scan failures as
  * SessionPersistenceCorruptionError.
@@ -51,10 +52,10 @@ const LOGS: Record<string, { path: string; sha256: string }> = {
   },
 }
 /** Both harnesses pin the table size, so a dropped case fails. */
-const CASE_COUNT = 118
+const CASE_COUNT = 122
 const CLASSES = ['Error', 'TypeError', 'SessionFormatUnsupportedError', 'SessionPersistenceCorruptionError']
 const LIMITS = [
-  'number', 'coordinate', 'config-member', 'tool-schema', 'context', 'repair', 'projection',
+  'number', 'coordinate', 'tool-schema', 'context', 'repair', 'projection',
 ]
 /** The `assertMessageEventShape`, tool-update data, and marker checks adoption runs. */
 const STORED_CHECKS = [
@@ -254,10 +255,10 @@ function parseRust(value: unknown, ts: Outcome, id: string): RustOverride {
 function loadTable(): RestoreCase[] {
   const table: unknown = JSON.parse(readFileSync(new URL('conformance/session/restore-cases.json', REPO), 'utf8'))
   if (!isObject(table) || sortedKeys(table) !== 'cases,history,logs,oracle,schema,version' || table.schema !== SCHEMA
-    || table.version !== 4 || table.oracle !== ORACLE || !Array.isArray(table.cases)
+    || table.version !== 5 || table.oracle !== ORACLE || !Array.isArray(table.cases)
     || !Array.isArray(table.history) || !table.history.every(isLine)
     || JSON.stringify(table.logs) !== JSON.stringify(Object.fromEntries(Object.entries(LOGS).map(([name, { path }]) => [name, path])))) {
-    throw new Error('restore-cases.json does not match its version-4 schema')
+    throw new Error('restore-cases.json does not match its version-5 schema')
   }
   return table.cases.map((entry: unknown): RestoreCase => {
     if (!isObject(entry) || typeof entry.id !== 'string' || typeof entry.log !== 'string') {
@@ -407,6 +408,7 @@ describe('shared restore cases', () => {
       const want = expected({ ...entry, ts })
       expect(actual).toStrictEqual(want)
       expect(JSON.stringify(actual.messages)).toBe(JSON.stringify(want.messages))
+      expect(JSON.stringify(actual.requestHeader)).toBe(JSON.stringify(want.requestHeader))
       for (const { seq, sourceEventSeqs } of ts.events ?? []) {
         expect(events[seq]?.sourceEventSeqs, `event ${seq}`).toStrictEqual(sourceEventSeqs)
       }

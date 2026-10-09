@@ -194,8 +194,6 @@ pub enum RestoreLimit {
     /// fraction or exponent, or a closer would copy an open turn or step that
     /// is not a safe count.
     Coordinate,
-    /// A header's `config` holds a member outside `LlmCallConfig`.
-    ConfigMember,
     /// A header's `tools` is present but not an array of objects.
     ToolSchema,
     /// `request/context` data is not an object, which `requestContext`
@@ -389,7 +387,6 @@ fn limit(limit: ReplayLimit) -> RestoreLimit {
     match limit {
         ReplayLimit::Number => RestoreLimit::Number,
         ReplayLimit::Coordinate | ReplayLimit::RepeatedCoordinate => RestoreLimit::Coordinate,
-        ReplayLimit::ConfigMember => RestoreLimit::ConfigMember,
         ReplayLimit::ToolSchema => RestoreLimit::ToolSchema,
     }
 }

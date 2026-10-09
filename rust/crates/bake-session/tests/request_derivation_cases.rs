@@ -26,14 +26,13 @@ const FIXTURE_EXPECTED: &str =
 const LOG_BYTES: usize = 4533;
 const EXPECTED_BYTES: usize = 2775;
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 211;
+const CASE_COUNT: usize = 217;
 const MAX_EDITS: usize = 8;
 const SOURCE_BUDGET: usize = 64;
-const LIMITS: [&str; 7] = [
+const LIMITS: [&str; 6] = [
     "number",
     "coordinate",
     "repeated-coordinate",
-    "config-member",
     "tool-schema",
     "header",
     "codec",
@@ -134,7 +133,7 @@ fn table() -> Map<String, Value> {
         BTreeSet::from(["schema", "version", "history", "oracle", "fixture", "cases"])
     );
     assert_eq!(fields["schema"], SCHEMA);
-    assert_eq!(fields["version"], 5);
+    assert_eq!(fields["version"], 6);
     assert!(
         fields["history"]
             .as_array()
@@ -422,7 +421,6 @@ fn classify(refusal: &ReplayRefusal) -> String {
                 ReplayLimit::Number => "number",
                 ReplayLimit::Coordinate => "coordinate",
                 ReplayLimit::RepeatedCoordinate => "repeated-coordinate",
-                ReplayLimit::ConfigMember => "config-member",
                 ReplayLimit::ToolSchema => "tool-schema",
             }
         ),

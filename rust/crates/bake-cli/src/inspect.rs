@@ -611,9 +611,6 @@ const fn restore_limit(limit: RestoreLimit) -> &'static str {
     match limit {
         RestoreLimit::Number => "a projected payload holds a number other than a safe integer",
         RestoreLimit::Coordinate => "a turn or step coordinate is not a safe count",
-        RestoreLimit::ConfigMember => {
-            "a request header's config has a member this preview does not restore"
-        }
         RestoreLimit::ToolSchema => "a request header's tools are not an array of objects",
         RestoreLimit::Context => "request/context data is not an object",
         RestoreLimit::Repair => "the closers for an interrupted turn cannot be built",
