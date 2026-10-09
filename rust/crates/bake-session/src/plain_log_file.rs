@@ -20,10 +20,14 @@
 //!   generation is read; every later refusal releases the lock and keeps its
 //!   file. The generation must not be newer than the current one. A current
 //!   generation's bytes are opened as [`PlainAppendLog::open`] opens them,
-//!   and the selected path must be the one the header's id and `cwd` name.
+//!   and, as `assertStoredIdentity` checks it, the header must carry the
+//!   requested id and its id and `cwd` must name the selected path, by
+//!   spelling or else by `realpath`, which resolves a case alias on a
+//!   case-insensitive volume, or a symbolic link, to one file.
 //!   An older generation, format v0, v1, or v2, is migrated as the backend
 //!   prepares and publishes it: its header and rows are parsed, its header
-//!   identity is checked against the requested id and the selected path, its
+//!   identity is checked against the requested id and the selected path as a
+//!   current header's is, its
 //!   rows are decoded by the released codec in recoverable mode and read
 //!   through every format edge to v3, the result passes the catalog's final
 //!   check ([`check_transformed_artifact`]), and it is encoded, written to
@@ -55,8 +59,9 @@
 //! backend instance, so two values of one Session are arbitrated by that
 //! lock alone. Dropping the value is the handle's `close`, which releases
 //! the lock. The refusals TypeScript's `SessionAlreadyExistsError`,
-//! `SessionPersistenceNotFoundError`, and duplicate-id, flat-layout, and
-//! encoding-mismatch `Error` carry are returned with their exact messages,
+//! `SessionPersistenceNotFoundError`, and duplicate-id, flat-layout,
+//! encoding-mismatch, and stored-identity `Error` carry are returned with
+//! their exact messages,
 //! as are the `SessionPersistenceCorruptionError` and
 //! `SessionFormatUnsupportedError` a migration reports, which name the
 //! source path.
@@ -93,9 +98,11 @@
 //! outside this model's domain. So is migrating a log whose v3
 //! result the publication's verifier or `validateStoredEvents` refuses: Rust
 //! writes the migrated file where TypeScript refuses and writes nothing. So
-//! is a path the filesystem refuses, such as one longer than a file or path name may
-//! be, a symlink, or a root another process changes, a lock file removed or
-//! replaced included. Every listing is visited in byte order of its UTF-8
+//! is a path the filesystem refuses, such as one longer than a file or path
+//! name may be, or a root another process changes, a lock file removed or
+//! replaced included. A symbolic link is followed where a path is joined,
+//! never where a directory is listed, as Node's `Dirent.isDirectory` does
+//! not follow one. Every listing is visited in byte order of its UTF-8
 //! names. A migration's
 //! temporary file is removed after a failed write or link, and a failed
 //! removal is reported with that failure; one a killed process leaves is
@@ -113,15 +120,16 @@ use crate::fork::holds_negative_zero;
 use crate::json_parse::{Deep, dismantle};
 use crate::log_layout::{CURRENT_LOG_FILENAME, canonical_generation, encode_segment, log_path};
 use crate::released_rows::{ParseStop, parse_released_header, parse_released_rows};
+use crate::v1_codec::decode_v0_v1_items_before_finish;
+use crate::v2_to_v3::{RecoverableRefusal, recoverable_refusal, rethrows_recovery_issue};
 use crate::write_lease::{LeaseRefusal, WriteLease};
 use crate::{
     AppendRefusal, CURRENT_SESSION_FORMAT_VERSION, CreateRefusal, FinalCheckRefusal,
     GenerationHeaderRefusal, HistoryLocation, HistoryRefusal, MigratedV2, PathPlatform,
     PlainAppendLog, ScanRefusal, SessionHeader, SubsetLimit, V1CodecLocation, V1CodecRecovery,
     V1CodecRefusal, V1CodecVersion, V2ToV3Layer, V2ToV3Location, V2ToV3Refusal,
-    check_transformed_artifact, decode_v0_v1_items, encode_event_line, encode_header_line,
-    first_record, migrate_released_history, migrate_v2_rows, read_generation_header_record,
-    read_header_record,
+    check_transformed_artifact, encode_event_line, encode_header_line, first_record,
+    migrate_released_history, migrate_v2_rows, read_generation_header_record, read_header_record,
 };
 
 /// One write handle of a plain current-format Session log under a root.
@@ -167,6 +175,13 @@ pub enum LogFileRefusal {
     /// `nightly`. TypeScript's `legacyLayout` throws a plain `Error` with
     /// this exact message, which names the path. Nothing was written.
     LegacyLayout { message: String },
+    /// A selected current log's header id differs from the requested one,
+    /// or its id and `cwd` name another path than the selected one, which
+    /// `realpath` does not resolve to the same file; TypeScript's
+    /// `assertStoredIdentity` throws a plain `Error` with this exact message,
+    /// which names the selected path, and the other path when the id
+    /// matches. The lock file is kept.
+    StoredIdentity { message: String },
     /// Migrating an older generation found it corrupt; TypeScript throws
     /// `SessionPersistenceCorruptionError` with this exact message, which
     /// names the source path. No file was written.
@@ -199,6 +214,7 @@ impl LogFileRefusal {
             | Self::Duplicate { message }
             | Self::EncodingMismatch { message }
             | Self::LegacyLayout { message }
+            | Self::StoredIdentity { message }
             | Self::Corrupt { message }
             | Self::Unsupported { message } => Some(message),
             Self::Append(refusal) => refusal.message(),
@@ -231,11 +247,6 @@ pub enum LogFileLimit {
     /// The id's highest canonical generation is newer than the current one;
     /// TypeScript reads its header and refuses it.
     NewerGeneration,
-    /// The selected current log's header id differs from the requested one,
-    /// or a selected log's header id and `cwd` name another path than the
-    /// selected one. TypeScript refuses unless `realpath` resolves both paths
-    /// to one file.
-    Identity,
     /// [`PlainAppendLog::open`] refused the stored bytes, which TypeScript
     /// reports with the path of the log in its message.
     Scan(ScanRefusal),
@@ -252,14 +263,9 @@ pub enum LogFileLimit {
     ///   count is held as a float (`float-lexeme`) or its identity check
     ///   reports `version-diagnostic`.
     /// - `codec/<name>`, `history/<name>`, `v2-to-v3/<name>`, or
-    ///   `final-check/<name>`: a limit of [`decode_v0_v1_items`],
+    ///   `final-check/<name>`: a limit of [`decode_v0_v1_items`](crate::decode_v0_v1_items),
     ///   [`migrate_released_history`], [`migrate_v2_rows`], or
     ///   [`check_transformed_artifact`], under its name there.
-    /// - `finish-order`: the v0 or v1 codec's `finish` refuses rows that the
-    ///   later stages, or an earlier stop, must see first.
-    /// - `v2-codec-recovery`: the v2 codec refuses a `turn/end` or
-    ///   `session/end-seed` row, or a row before a later `turn/end`, whose
-    ///   recoverable outcome depends on which check refused it.
     /// - `decode-invariant`: a rerun over a prefix disagrees with the first
     ///   run.
     /// - `encode` or `scan`: the migrated log reaches a native limit of this
@@ -342,15 +348,13 @@ impl PlainLogFile {
         let platform = PathPlatform::host();
         let log = PlainAppendLog::open(&bytes, platform, source_budget)
             .map_err(|refusal| LogFileRefusal::NativeSubset(LogFileLimit::Scan(refusal)))?;
-        let identity = LogFileRefusal::NativeSubset(LogFileLimit::Identity);
         // The scan admitted this header record, so it decodes again.
-        let Some(Ok(header)) =
-            first_record(&bytes).map(|record| read_header_record(record, platform))
-        else {
-            return Err(identity);
-        };
-        if header.id != id || log_path(root, header.cwd.as_deref(), &encoded) != selected.path {
-            return Err(identity);
+        let header = first_record(&bytes)
+            .map(|record| read_header_record(record, platform))
+            .and_then(Result::ok)
+            .ok_or_else(|| io::Error::other("an opened log's header decodes again"))?;
+        if let Some(cause) = stored_identity_mismatch(root, id, &encoded, &header, &selected)? {
+            return Err(LogFileRefusal::StoredIdentity { message: cause });
         }
         Ok(Self {
             path: selected.path,
@@ -377,20 +381,11 @@ impl PlainLogFile {
         // `validateSourceIdentity` checks a header its codec reads, before any row.
         if let Some(stored) =
             released_generation_header(&bytes, selected.version, platform).map_err(refusal)?
+            && let Some(cause) = stored_identity_mismatch(root, id, encoded, &stored, selected)?
         {
-            if stored.id != id {
-                let path = selected.path.display().to_string();
-                let path = crate::js_string::from_rust(&path);
-                return Err(refusal(ReleasedGenerationRefusal::Corrupt(format!(
-                    "Error: corrupt session log \"{path}\": requested id \"{id}\" \
-                     does not match header id \"{}\"",
-                    stored.id
-                ))));
-            }
-            let current = selected.path.with_file_name(CURRENT_LOG_FILENAME);
-            if log_path(root, stored.cwd.as_deref(), encoded) != current {
-                return Err(LogFileRefusal::NativeSubset(LogFileLimit::Identity));
-            }
+            return Err(refusal(ReleasedGenerationRefusal::Corrupt(format!(
+                "Error: {cause}"
+            ))));
         }
         let migrated = migrate_released_generation(&bytes, selected.version, source_budget)
             .map_err(refusal)?;
@@ -686,7 +681,7 @@ fn migrate_v0_v1(
     source_budget: usize,
 ) -> Result<MigratedV2, ReleasedGenerationRefusal> {
     let decode = |rows: &[Value]| {
-        decode_v0_v1_items(
+        decode_v0_v1_items_before_finish(
             header,
             rows,
             version,
@@ -696,14 +691,16 @@ fn migrate_v0_v1(
         )
     };
     let refusal = match decode(rows) {
-        Ok(items) => {
-            return match (migrate_released_history(&items), stop) {
-                (Err(refused), _) if !at_finish(&refused) => {
+        Ok((items, finish)) => {
+            return match (migrate_released_history(&items), stop, finish) {
+                (Err(refused), _, _) if !at_finish(&refused) => {
                     Err(ReleasedGenerationRefusal::history(refused))
                 }
                 // Every row streamed before the stop, and `finish` runs after it.
-                (_, Some(stop)) => Err(stop),
-                (outcome, None) => outcome.map_err(ReleasedGenerationRefusal::history),
+                (_, Some(stop), _) => Err(stop),
+                // The decoder's `finish` runs before the chain's.
+                (_, None, Some(finish)) => Err(ReleasedGenerationRefusal::codec(finish)),
+                (outcome, None, None) => outcome.map_err(ReleasedGenerationRefusal::history),
             };
         }
         Err(refusal) => refusal,
@@ -714,19 +711,14 @@ fn migrate_v0_v1(
     };
     let row = match location {
         V1CodecLocation::Header => return Err(ReleasedGenerationRefusal::codec(refusal)),
-        // The rows the decoder emitted before `finish` are not returned.
-        V1CodecLocation::Finish => {
-            return Err(ReleasedGenerationRefusal::Limit("finish-order".to_owned()));
-        }
+        // `finish` refusals come back with the items.
+        V1CodecLocation::Finish => return Err(invariant()),
         V1CodecLocation::Row(row) => row,
     };
-    // The items before the refused row streamed through every edge first.
+    // The items before the refused row streamed through every edge first;
+    // the decoder's `finish` never runs after a row refusal.
     let prefix = match decode(rows.get(..row).unwrap_or_default()) {
-        Ok(prefix) => prefix,
-        Err(V1CodecRefusal::Rejected {
-            location: V1CodecLocation::Finish,
-            ..
-        }) => return Err(ReleasedGenerationRefusal::Limit("finish-order".to_owned())),
+        Ok((prefix, _)) => prefix,
         Err(_) => return Err(invariant()),
     };
     match migrate_released_history(&prefix) {
@@ -756,7 +748,9 @@ fn invariant() -> ReleasedGenerationRefusal {
 /// mode and the v2→v3 edge, then `stop`, in TypeScript's streaming order.
 /// [`migrate_v2_rows`] decodes strictly; where its codec refuses a row, the
 /// recoverable codec drops that row and every later one unless one of them
-/// throws, which only a `turn/end` row or a `session/end-seed` row can do.
+/// throws: the refused row when it is a `session/end-seed` row whose data
+/// is not an object or a `turn/end` row with a seq gap, otherwise the first
+/// later `turn/end` row `decodeEvent` admits, which rethrows the refusal.
 fn migrate_v2(
     header: &Value,
     rows: &[Value],
@@ -766,23 +760,47 @@ fn migrate_v2(
     let migrate =
         |rows: &[Value]| migrate_v2_rows(header, rows, PathPlatform::host(), source_budget);
     let streamed = match migrate(rows) {
-        Err(V2ToV3Refusal::Rejected {
-            location: V2ToV3Location::Row(row),
-            layer: V2ToV3Layer::Codec,
-            ..
-        }) => {
-            let has_type =
-                |row: &Value, kind: &str| row.get("type").is_some_and(|value| value == kind);
-            let throws = rows.get(row).is_none_or(|refused| {
-                has_type(refused, "turn/end") || has_type(refused, "session/end-seed")
-            }) || rows
-                .iter()
-                .skip(row.saturating_add(1))
-                .any(|later| has_type(later, "turn/end"));
-            if throws {
-                return Err(ReleasedGenerationRefusal::Limit(
-                    "v2-codec-recovery".to_owned(),
-                ));
+        Err(
+            refusal @ V2ToV3Refusal::Rejected {
+                location: V2ToV3Location::Row(row),
+                layer: V2ToV3Layer::Codec,
+                ..
+            },
+        ) => {
+            let thrown = match rows
+                .get(row)
+                .and_then(|refused| recoverable_refusal(refused, row, source_budget))
+            {
+                Some(RecoverableRefusal::Thrown | RecoverableRefusal::Gap { turn_end: true }) => {
+                    true
+                }
+                Some(RecoverableRefusal::Caught | RecoverableRefusal::Gap { turn_end: false }) => {
+                    let mut rethrown = false;
+                    for (later, value) in rows.iter().enumerate().skip(row.saturating_add(1)) {
+                        match rethrows_recovery_issue(value, source_budget) {
+                            Ok(true) => {
+                                rethrown = true;
+                                break;
+                            }
+                            Ok(false) => {}
+                            Err(limit) => {
+                                return Err(ReleasedGenerationRefusal::v2(
+                                    V2ToV3Refusal::NativeSubset {
+                                        location: V2ToV3Location::Row(later),
+                                        limit,
+                                    },
+                                ));
+                            }
+                        }
+                    }
+                    rethrown
+                }
+                None => return Err(invariant()),
+            };
+            // Every row before the refused one passed the codec and the
+            // stage, so the refusal itself is what a throw reports.
+            if thrown {
+                return Err(ReleasedGenerationRefusal::v2(refusal));
             }
             match migrate(rows.get(..row).unwrap_or_default()) {
                 Err(
@@ -906,6 +924,51 @@ fn windows_device_or_dot(encoded: &str) -> bool {
                 matches!(number, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9")
             }),
     }
+}
+
+/// `assertStoredIdentity` of the `selected` generation, whose `header` was
+/// read for the requested `id`, encoded as `encoded`: the message of the
+/// `Error` TypeScript throws, or `None` when the header names the selected
+/// path, by spelling or else by `realpath`. A requested id is never empty,
+/// so `generationLogPath` names a path.
+fn stored_identity_mismatch(
+    root: &Path,
+    id: &str,
+    encoded: &str,
+    header: &SessionHeader,
+    selected: &Generation,
+) -> Result<Option<String>, LogFileRefusal> {
+    let path = crate::js_string::from_rust(&selected.path.display().to_string()).into_owned();
+    if header.id != id {
+        return Ok(Some(format!(
+            "corrupt session log \"{path}\": requested id \"{id}\" does not match header id \"{}\"",
+            header.id
+        )));
+    }
+    let current = log_path(root, header.cwd.as_deref(), encoded);
+    let expected = match selected.path.file_name() {
+        Some(name) => current.with_file_name(name),
+        None => current,
+    };
+    if expected == selected.path || same_file(&selected.path, &expected)? {
+        return Ok(None);
+    }
+    let expected = crate::js_string::from_rust(&expected.display().to_string()).into_owned();
+    Ok(Some(format!(
+        "corrupt session log \"{path}\": header id \"{id}\" and cwd identify \"{expected}\""
+    )))
+}
+
+/// `sameFile`: whether both paths resolve to one file, as `realpath`
+/// resolves them; an absent path resolves to none.
+fn same_file(path: &Path, expected: &Path) -> Result<bool, LogFileRefusal> {
+    let resolve = |path: &Path| match fs::canonicalize(path) {
+        Ok(resolved) => Ok(Some(resolved)),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(LogFileRefusal::Io(error)),
+    };
+    let (actual, expected) = (resolve(path)?, resolve(expected)?);
+    Ok(actual.is_some() && actual == expected)
 }
 
 /// The duplicate-id refusal when more than one generation was found.

@@ -3,16 +3,19 @@
 //! test owns and removes. A case seeds files and directories beneath its
 //! root, then runs its steps in order: `create` and `open` start a handle,
 //! `append` and `flush` use it, and `close` drops it. A step names its
-//! handle, `a` unless `handle` says `b`. After each step every file beneath
+//! handle, `a` unless `handle` says `b`. With no handle open, `move-root`
+//! renames the root and `link-root` reaches it through a new symbolic link,
+//! and later steps use that path. After each step every file beneath
 //! the root must have the hand-written text, a `session.lock` file read only
-//! by its size, since Windows refuses to read a locked range, and no other
-//! file may exist. A thrown outcome maps to the refusal Rust claims: the
-//! exact already-owned, already-exists, not-found, duplicate-id,
-//! flat-layout, encoding-mismatch, contiguity, lossless-snapshot, corruption, or
-//! unsupported-migration message, with `{src}` rendered as the root joined
-//! with the step's `src` path and `{srcJson}` as that path spelled by
-//! `JSON.stringify`, or `Unadmitted` for any other throw of a create or
-//! append. A `rust`
+//! by its size, since Windows refuses to read a locked range, and a symbolic
+//! link its target, and no other file may exist. A thrown outcome maps to
+//! the refusal Rust claims: the exact already-owned, already-exists,
+//! not-found, duplicate-id, flat-layout, encoding-mismatch, stored-identity,
+//! contiguity, lossless-snapshot, corruption, or unsupported-migration
+//! message, with `{src}` rendered as the root joined with the step's `src`
+//! path, `{srcJson}` as that path spelled by `JSON.stringify`, and `{dst}`
+//! as the root joined with its `dst` path, or `Unadmitted` for any other
+//! throw of a create or append. A `rust`
 //! override names a native limit, or marks the step outside the model's
 //! domain, which Rust does not run; either ends the case. Every limit must
 //! be named by some case of the table, and every case that applies here must
@@ -32,20 +35,18 @@ use bake_session::{
 use serde_json::{Map, Value};
 
 const SCHEMA: &str = "bake/session-conformance/plain-log-file-cases";
-const ORACLE: &str = "in an owned temporary root holding the seeded entries, run each step through the JSONL backend with compression none on the step's handle, a or b, each its own backend instance over the root: create, a write open, or the open handle's append, flush, or close; after each step list every file beneath the root with its text, an empty session.lock by its size";
+const ORACLE: &str = "in an owned temporary root holding the seeded entries, run each step through the JSONL backend with compression none on the step's handle, a or b, each its own backend instance over the root: create, a write open, or the open handle's append, flush, or close, or, with no handle open, the root renamed or reached through a symbolic link to it; after each step list every file beneath the root with its text, an empty session.lock by its size, and every symbolic link by its target";
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 75;
+const CASE_COUNT: usize = 87;
 const SOURCE_BUDGET: usize = 64;
-const LIMITS: [&str; 9] = [
+const LIMITS: [&str; 7] = [
     "empty-id",
     "encode",
     "seq-value",
     "windows-name",
     "non-utf8-name",
     "newer-generation",
-    "identity",
     "scan",
-    "migration/v2-codec-recovery",
 ];
 const CLASSES: [&str; 8] = [
     "Error",
@@ -119,7 +120,7 @@ fn load() -> Vec<Map<String, Value>> {
         BTreeSet::from(["cases", "history", "oracle", "schema", "version"])
     );
     assert_eq!(table["schema"], SCHEMA);
-    assert_eq!(table["version"], 9);
+    assert_eq!(table["version"], 11);
     assert_eq!(table["oracle"], ORACLE);
     assert!(
         table["history"]
@@ -154,6 +155,7 @@ fn applies(entry: &Map<String, Value>, id: &str) -> bool {
         .any(|platform| match text(platform, id) {
             "posix" => cfg!(not(windows)),
             "linux" => cfg!(target_os = "linux"),
+            "darwin" => cfg!(target_os = "macos"),
             "win32" => cfg!(windows),
             other => panic!("{id}: unknown platform {other}"),
         })
@@ -179,6 +181,17 @@ fn seed(root: &Path, entry: &Value, id: &str) {
         std::fs::write(&path, &*to_rust(text(&entry["text"], id))).expect("seed file");
         return;
     }
+    if let Some(link) = entry.get("link") {
+        assert_eq!(
+            keys(entry),
+            BTreeSet::from(["link", "target"]),
+            "{id}: seed"
+        );
+        let target = text(&entry["target"], id);
+        let path = root.join(text(link, id));
+        symlink(Path::new(target), &path).expect("seed link");
+        return;
+    }
     assert_eq!(
         keys(entry),
         BTreeSet::from(["dir", "rawNameHex"]),
@@ -197,14 +210,20 @@ fn seed(root: &Path, entry: &Value, id: &str) {
 }
 
 /// Every file beneath `root`, by `/`-joined relative path; a `session.lock`
-/// file is listed as empty when its size is 0 and otherwise by its size.
+/// file is listed as empty when its size is 0 and otherwise by its size, and
+/// a symbolic link as `<link to TARGET>`, not followed.
 fn tree(root: &Path) -> BTreeMap<String, String> {
     fn walk(dir: &Path, prefix: &str, files: &mut BTreeMap<String, String>) {
         for entry in std::fs::read_dir(dir).expect("list") {
             let entry = entry.expect("entry");
             let name = from_rust(&entry.file_name().to_string_lossy()).into_owned();
             let relative = format!("{prefix}{name}");
-            if entry.file_type().expect("file type").is_dir() {
+            let kind = entry.file_type().expect("file type");
+            if kind.is_symlink() {
+                let target = std::fs::read_link(entry.path()).expect("link target");
+                let target = from_rust(&target.to_string_lossy()).into_owned();
+                files.insert(relative, format!("<link to {target}>"));
+            } else if kind.is_dir() {
                 walk(&entry.path(), &format!("{relative}/"), files);
             } else if name == LEASE_FILE {
                 let size = entry.metadata().expect("lock metadata").len();
@@ -275,7 +294,6 @@ fn limit_matches(name: &str, refusal: &LogFileRefusal) -> bool {
                 "newer-generation",
                 NativeSubset(LogFileLimit::NewerGeneration)
             )
-            | ("identity", NativeSubset(LogFileLimit::Identity))
             | ("scan", NativeSubset(LogFileLimit::Scan(_)))
     )
 }
@@ -299,6 +317,7 @@ fn expected_kind(step: &str, class: &str, message: &str) -> &'static str {
         {
             "legacy-layout"
         }
+        ("open", "Error") if message.starts_with("corrupt session log ") => "stored-identity",
         ("append", "Error") if message.starts_with("append seq mismatch for ") => "seq-mismatch",
         ("append", "TypeError") if message == NOT_LOSSLESS => "not-lossless",
         ("open", "SessionPersistenceCorruptionError") => "corrupt",
@@ -317,6 +336,7 @@ fn kind(refusal: &LogFileRefusal) -> &'static str {
         LogFileRefusal::Duplicate { .. } => "duplicate",
         LogFileRefusal::EncodingMismatch { .. } => "encoding-mismatch",
         LogFileRefusal::LegacyLayout { .. } => "legacy-layout",
+        LogFileRefusal::StoredIdentity { .. } => "stored-identity",
         LogFileRefusal::Corrupt { .. } => "corrupt",
         LogFileRefusal::Unsupported { .. } => "unsupported",
         LogFileRefusal::Append(AppendRefusal::SeqMismatch { .. }) => "seq-mismatch",
@@ -347,33 +367,74 @@ fn outcome<'a>(step: &'a Map<String, Value>, context: &str) -> Option<(&'a str, 
     }
 }
 
-/// The step's `src` path joined to `root`, which a `{src}` placeholder in
-/// its message renders, and `{srcJson}` as `JSON.stringify` spells it; a
-/// message holds a placeholder exactly when the step names `src`.
-fn rendered_source(
+/// The step's `key` path, `src` or `dst`, joined to `root`, which the
+/// message's `placeholders` render; a message holds one of them exactly
+/// when the step names `key`.
+fn rendered_path(
     root: &Path,
     step: &Map<String, Value>,
     expected: Option<(&str, Option<&str>)>,
+    (key, placeholders): (&str, &[&str]),
     context: &str,
 ) -> Option<String> {
     let placeholder = expected
         .and_then(|(_, message)| message)
-        .is_some_and(|message| message.contains("{src}") || message.contains("{srcJson}"));
-    assert_eq!(placeholder, step.contains_key("src"), "{context}: src");
-    let source = text(step.get("src")?, context);
-    let path = source.split('/').fold(root.to_path_buf(), |path, segment| {
-        path.join(&*to_rust(segment))
-    });
+        .is_some_and(|message| placeholders.iter().any(|held| message.contains(held)));
+    assert_eq!(placeholder, step.contains_key(key), "{context}: {key}");
+    let relative = text(step.get(key)?, context);
+    let path = relative
+        .split('/')
+        .fold(root.to_path_buf(), |path, segment| {
+            path.join(&*to_rust(segment))
+        });
     Some(from_rust(&path.display().to_string()).into_owned())
 }
 
-/// `message` with its `{src}` and `{srcJson}` placeholders rendered, both
-/// in `parse_json`'s spelling, as refusal messages are.
-fn render(message: &str, source: &str) -> String {
+/// `message` with its `{src}`, `{srcJson}`, and `{dst}` placeholders
+/// rendered, all in `parse_json`'s spelling, as refusal messages are.
+fn render(message: &str, source: &str, target: Option<&str>) -> String {
     let spelled = quote(source);
-    message
+    let message = message
         .replace("{srcJson}", &spelled)
-        .replace("{src}", source)
+        .replace("{src}", source);
+    target.map_or_else(
+        || message.clone(),
+        |target| message.replace("{dst}", target),
+    )
+}
+
+/// A symbolic link at `path` to `target`; the cases that need one run on
+/// POSIX only, since Windows needs a privilege to create one.
+#[cfg(unix)]
+fn symlink(target: &Path, path: &Path) -> std::io::Result<()> {
+    std::os::unix::fs::symlink(target, path)
+}
+
+/// No host but a Unix one creates the links these cases need.
+#[cfg(not(unix))]
+fn symlink(target: &Path, path: &Path) -> std::io::Result<()> {
+    Err(std::io::Error::other(format!(
+        "linking {path:?} to {target:?} needs a Unix host"
+    )))
+}
+
+/// `move-root` or `link-root`, run with every handle closed: the root's
+/// new path, a sibling the step names, now holding or linking to it.
+fn moved_root(root: &Path, name: &str, context: &str) -> PathBuf {
+    let base = root.file_name().expect("root name").to_string_lossy();
+    match name {
+        "move-root" => {
+            let next = root.with_file_name(format!("{base}-moved"));
+            std::fs::rename(root, &next).expect("move the root");
+            next
+        }
+        "link-root" => {
+            let next = root.with_file_name(format!("{base}-link"));
+            symlink(root, &next).expect("link the root");
+            next
+        }
+        other => panic!("{context}: {other} is not a root step"),
+    }
 }
 
 /// Every limit a `rust` override of the case names.
@@ -397,6 +458,7 @@ fn run_step(
     let name = text(&step["step"], context);
     let allowed: &[&str] = match name {
         "create" => &[
+            "dst",
             "handle",
             "header",
             "inheritedEventCount",
@@ -406,7 +468,7 @@ fn run_step(
             "tree",
             "ts",
         ],
-        "open" => &["handle", "id", "rust", "src", "step", "tree", "ts"],
+        "open" => &["dst", "handle", "id", "rust", "src", "step", "tree", "ts"],
         "append" => &["events", "handle", "rust", "step", "tree", "ts"],
         "flush" => &["handle", "rust", "step", "tree", "ts"],
         "close" => &["handle", "step", "tree", "ts"],
@@ -500,9 +562,12 @@ fn shared_cases_lay_out_and_write_like_the_typescript_backend() {
         }
         ran += 1;
         let scratch = Scratch::new();
-        let root = scratch.0.as_path();
+        // The root is a child, so `move-root` and `link-root` can name
+        // siblings the scratch directory removes.
+        let mut root = scratch.0.join("root");
+        std::fs::create_dir(&root).expect("create the root");
         for seeded in entry["seed"].as_array().expect("seed") {
-            seed(root, seeded, id);
+            seed(&root, seeded, id);
         }
         // Declared after the scratch directory, so the handles, and the
         // locks Windows would not let the directory be removed under, drop
@@ -513,13 +578,39 @@ fn shared_cases_lay_out_and_write_like_the_typescript_backend() {
             let step = object(step, &context);
             let name = text(&step["step"], &context);
             let expected = outcome(step, &context);
-            let source = rendered_source(root, step, expected, &context);
+            if matches!(name, "move-root" | "link-root") {
+                assert_eq!(
+                    keys(step),
+                    BTreeSet::from(["step", "tree", "ts"]),
+                    "{context}: keys"
+                );
+                assert!(expected.is_none(), "{context}: {name} succeeds");
+                assert!(
+                    handles.values().all(Option::is_none),
+                    "{context}: {name} needs every handle closed"
+                );
+                root = moved_root(&root, name, &context);
+                assert_eq!(
+                    tree(&root),
+                    expected_tree(step, &context),
+                    "{context}: tree"
+                );
+                continue;
+            }
+            let source = rendered_path(
+                &root,
+                step,
+                expected,
+                ("src", &["{src}", "{srcJson}"]),
+                &context,
+            );
+            let target = rendered_path(&root, step, expected, ("dst", &["{dst}"]), &context);
             if let Some(rust) = step.get("rust")
                 && override_limit(rust, &context).is_none()
             {
                 break;
             }
-            let actual = run_step(root, step, &mut handles, &context);
+            let actual = run_step(&root, step, &mut handles, &context);
             if let Some(rust) = step.get("rust") {
                 let limit = override_limit(rust, &context).expect("a limit");
                 let refusal = actual.expect_err(&format!("{context}: a limit refuses"));
@@ -535,16 +626,21 @@ fn shared_cases_lay_out_and_write_like_the_typescript_backend() {
                     let expected_kind = expected_kind(name, class, message);
                     assert_eq!(kind(&refusal), expected_kind, "{context}: {refusal:?}");
                     if !expected_kind.ends_with("unadmitted") {
-                        let message = source
-                            .as_deref()
-                            .map_or_else(|| message.to_owned(), |source| render(message, source));
+                        let message = source.as_deref().map_or_else(
+                            || message.to_owned(),
+                            |source| render(message, source, target.as_deref()),
+                        );
                         assert_eq!(refusal.message(), Some(message.as_str()), "{context}");
                     }
                     refusals.insert(expected_kind);
                 }
                 (expected, actual) => panic!("{context}: expected {expected:?}, got {actual:?}"),
             }
-            assert_eq!(tree(root), expected_tree(step, &context), "{context}: tree");
+            assert_eq!(
+                tree(&root),
+                expected_tree(step, &context),
+                "{context}: tree"
+            );
         }
     }
     assert!(ran > 0);
@@ -567,6 +663,7 @@ fn shared_cases_lay_out_and_write_like_the_typescript_backend() {
             "not-found",
             "not-lossless",
             "seq-mismatch",
+            "stored-identity",
             "unsupported"
         ]),
         "every claimed refusal is witnessed"

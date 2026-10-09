@@ -384,6 +384,85 @@ fn decode_row(row: &Value, index: usize, budget: usize) -> Result<Value, StageEr
     Ok(Value::Object(event))
 }
 
+/// How the released v2 codec's recoverable `decodeRow` treats the first row
+/// that [`migrate_v2_rows`] refuses in its codec layer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RecoverableRefusal {
+    /// `decodeEvent` refused the row, which recovery catches as the issue.
+    Caught,
+    /// The row decoded with a seq gap, which recovery keeps as the issue,
+    /// rethrown at once for a `turn/end` row.
+    Gap { turn_end: bool },
+    /// A `session/end-seed` row's data is not an object, which `decodeRow`
+    /// throws outside the recovery catch.
+    Thrown,
+}
+
+/// [`RecoverableRefusal`] for row `index`, the first row the strict codec
+/// refused. `None` when that codec admits the row.
+pub(crate) fn recoverable_refusal(
+    row: &Value,
+    index: usize,
+    budget: usize,
+) -> Option<RecoverableRefusal> {
+    let row = Deep::new(js_order(clone_value(row)));
+    let turn_end = row.get("type").is_some_and(|kind| kind == "turn/end");
+    match decode_row_envelope(&row, index as u64, budget) {
+        Err(EnvelopeRefusal::Rejected(EnvelopeRejection::SeqGap { .. })) => {
+            Some(RecoverableRefusal::Gap { turn_end })
+        }
+        Err(EnvelopeRefusal::Rejected(EnvelopeRejection::EndSeedDataNotObject)) => {
+            Some(RecoverableRefusal::Thrown)
+        }
+        Err(EnvelopeRefusal::Rejected(_)) => Some(RecoverableRefusal::Caught),
+        // `-0` passes `decodeEvent` and reaches the gap check, as `decode_row` reads it.
+        Err(EnvelopeRefusal::NativeSubset(EnvelopeLimit::NegativeZeroSeq)) if index != 0 => {
+            Some(RecoverableRefusal::Gap { turn_end })
+        }
+        Err(EnvelopeRefusal::NativeSubset(EnvelopeLimit::NegativeZeroSeq))
+            if row["type"] == "session/end-seed" && !row["data"].is_object() =>
+        {
+            Some(RecoverableRefusal::Thrown)
+        }
+        _ => None,
+    }
+}
+
+/// Whether the released v2 codec's recoverable `decodeRow`, holding an
+/// issue, rethrows it at `row`: `decodeEvent` admits the row and its type is
+/// `turn/end`. The gap check does not run once an issue is held. `Err`
+/// names a limit of [`migrate_v2_rows`] where `decodeEvent`'s outcome
+/// depends on a number spelling.
+pub(crate) fn rethrows_recovery_issue(row: &Value, budget: usize) -> Result<bool, String> {
+    if row.get("type").is_none_or(|kind| kind != "turn/end") {
+        return Ok(false);
+    }
+    let row = Deep::new(js_order(clone_value(row)));
+    match decode_row_envelope(&row, 0, budget) {
+        Ok(_)
+        | Err(
+            EnvelopeRefusal::Rejected(
+                EnvelopeRejection::SeqGap { .. } | EnvelopeRejection::EndSeedDataNotObject,
+            )
+            // Only the gap check reads these, and `decodeEvent` passed first.
+            | EnvelopeRefusal::NativeSubset(
+                EnvelopeLimit::NegativeZeroSeq | EnvelopeLimit::SeqDiagnostic,
+            ),
+        ) => Ok(true),
+        // Without `sourceEventSeqs`, only the gap check reads the seq.
+        Err(EnvelopeRefusal::NativeSubset(EnvelopeLimit::FloatLexeme(NumberField::Seq)))
+            if !row
+                .as_object()
+                .is_some_and(|fields| fields.contains_key("sourceEventSeqs")) =>
+        {
+            Ok(true)
+        }
+        Err(EnvelopeRefusal::Rejected(_)) => Ok(false),
+        Err(EnvelopeRefusal::NativeSubset(limit)) => Err(limit_name(limit).to_owned()),
+        Err(EnvelopeRefusal::ExpectedSeqOutOfRange) => Err("row-count".to_owned()),
+    }
+}
+
 /// The codec's exact message. The row is in JavaScript order, so its first
 /// unexpected member is the one TypeScript names, and an unsafe integer seq
 /// renders as JavaScript's nearest double.

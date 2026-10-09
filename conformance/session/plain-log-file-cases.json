@@ -1,7 +1,7 @@
 {
   "schema": "bake/session-conformance/plain-log-file-cases",
-  "version": 9,
-  "oracle": "in an owned temporary root holding the seeded entries, run each step through the JSONL backend with compression none on the step's handle, a or b, each its own backend instance over the root: create, a write open, or the open handle's append, flush, or close; after each step list every file beneath the root with its text, an empty session.lock by its size",
+  "version": 11,
+  "oracle": "in an owned temporary root holding the seeded entries, run each step through the JSONL backend with compression none on the step's handle, a or b, each its own backend instance over the root: create, a write open, or the open handle's append, flush, or close, or, with no handle open, the root renamed or reached through a symbolic link to it; after each step list every file beneath the root with its text, an empty session.lock by its size, and every symbolic link by its target",
   "history": [
     "Version 1: 33 cases, written from the TypeScript sources before either harness ran; both arms passed on their first run.",
     "A Rust negative control that skipped the truncation still passed open-torn-tail-truncated-by-first-append, whose torn tail was a prefix of the row appended after it. Its tail became a longer torn ext/note row, and no outcome changed.",
@@ -12,7 +12,9 @@
     "Version 6: 69 cases. Rust ports TypeScript's encoding-mismatch refusal, so limit-opposite-encoding became encoding-mismatch-at-open with TypeScript's exact message, and a message may hold a {srcJson} placeholder, the step's src path as JSON.stringify spells it, which a create step may also name. Rust lays out Windows names as TypeScript does on POSIX, so limit-windows-name became three POSIX cases, con, nightly., and aux.txt, created and reopened in both arms, and a win32 case for nightly., the spelling a Windows writer can produce, where Rust keeps the windows-name limit. Two cases were added for the root check: the highest Zstd generation is named, and a flat file is refused first. The changed and added expectations were written from the TypeScript sources before either harness ran.",
     "Version 7: 70 cases. Rust reads older-generation rows at any nesting depth, so migrate-v2-deep-tool-schema, a v2 request header whose row nests 207 levels through its MCP tool schema, migrates unchanged in both arms; it was written from the TypeScript sources before either harness ran.",
     "Version 8: 73 cases. Rust ports TypeScript's flat-layout refusal, so the legacy-layout limit is removed: limit-legacy-layout became legacy-layout-flat-file-at-create with TypeScript's exact message, and legacy-layout-before-encoding-mismatch lost its rust override. The root check refuses only a regular file with the flat-layout suffix, as listSessionDirs does, and the id's flat names are probed by opening them, as rejectLegacyFlatArtifact does. session-directory-named-jsonl creates, reopens, and lists a Session directory nightly.jsonl; legacy-probe-finds-session-directory refuses the id nightly beside it at open and create; legacy-layout-file-refused-at-open keeps a flat file refused at open. The changed and added expectations were written from the TypeScript sources before either harness ran.",
-    "Version 9: 75 cases. Rust holds lone surrogates, so limit-row-json-parser, whose lone-surrogate row follows an issue, became migrate-lone-surrogate-row-ignored with no rust override, and migrate-lone-surrogates-kept, written from the TypeScript sources before either harness ran, write-opens a v0 Session whose id and user text hold lone surrogates, laid out as h~D800 and migrated with them written back as JSON.stringify writes them. legacy-layout-noncharacter-path, written from the TypeScript sources before either harness ran, names a flat file holding U+FDD0 in the flat-layout message. legacy-layout-noncharacter-path runs on Linux and Win32 only: macOS CI showed APFS refusing a U+FDD0 file name with EILSEQ."
+    "Version 9: 75 cases. Rust holds lone surrogates, so limit-row-json-parser, whose lone-surrogate row follows an issue, became migrate-lone-surrogate-row-ignored with no rust override, and migrate-lone-surrogates-kept, written from the TypeScript sources before either harness ran, write-opens a v0 Session whose id and user text hold lone surrogates, laid out as h~D800 and migrated with them written back as JSON.stringify writes them. legacy-layout-noncharacter-path, written from the TypeScript sources before either harness ran, names a flat file holding U+FDD0 in the flat-layout message. legacy-layout-noncharacter-path runs on Linux and Win32 only: macOS CI showed APFS refusing a U+FDD0 file name with EILSEQ.",
+    "Version 10: 82 cases. Rust ports TypeScript's stored-identity refusal, so the identity limit is removed: limit-identity became identity-path-mismatch and migrate-identity-path lost its override, each with TypeScript's exact message, in which {dst} is the case root joined with the step's dst path, the path the header's id and cwd name. A selected path the header does not name is admitted when realpath resolves both to one file: identity-case-alias-written, on macOS and Windows, writes a log with cwd /w into the project directory --W-- that a case-insensitive volume keeps for /W and reopens it, identity-case-alias-on-case-sensitive-volume refuses that layout on Linux, identity-requested-id-case-alias refuses a requested id ab in Session directory Ab, identity-requested-id-symlinked-session, on POSIX, refuses it through a link ab to Ab, and identity-symlinked-project-alias, on POSIX, admits a log in project directory --real-- whose header names it through the link --w--. identity-symlinked-root and identity-moved-root reopen a log through a symbolic link to its root and after renaming its root, the link-root and move-root steps; the platform darwin and the link seed were added for them, and a tree lists a symbolic link as <link to target>. The changed and added expectations were written from the TypeScript sources before either harness ran. identity-requested-id-symlinked-session runs on Linux only: macOS CI showed its link ab and target Ab colliding on a case-insensitive volume.",
+    "Version 11: 87 cases. Rust ports the released v2 codec's recovery and runs the v0 and v1 decoder's finish after the rows stream, so the `migration/v2-codec-recovery` limit is removed: limit-v2-codec-recovery lost its rust override and became migrate-v2-codec-gap-rethrown-at-turn-end, with its TypeScript outcome unchanged. migrate-v2-codec-decode-issue-rethrown-at-turn-end, migrate-v2-undecoded-turn-end-issue-kept-until-finish, migrate-v2-end-seed-data-thrown-while-recovering, migrate-v0-seed-length-exceeds-events-at-decoder-finish, and migrate-v0-history-refusal-before-decoder-finish were written from the TypeScript sources before either harness ran."
   ],
   "cases": [
     {
@@ -1838,13 +1840,12 @@
         {
           "step": "open",
           "id": "hist",
+          "src": "--w--/hist/session.jsonl",
+          "dst": "_no-cwd/hist/session.jsonl",
           "ts": {
             "outcome": "thrown",
-            "class": "SessionPersistenceCorruptionError"
-          },
-          "rust": {
-            "outcome": "native-subset",
-            "limit": "identity"
+            "class": "SessionPersistenceCorruptionError",
+            "message": "session \"hist\": stored log is corrupt: Error: corrupt session log \"{src}\": header id \"hist\" and cwd identify \"{dst}\" (raw log: {src})"
           },
           "tree": {
             "--w--/hist/session.jsonl": "{\"type\":\"session\",\"version\":0,\"id\":\"hist\",\"createdAt\":1000,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"request/header\",\"seq\":2,\"time\":1003,\"data\":{\"header\":{\"config\":{\"provider\":\"p\",\"model\":\"m\"},\"system\":\"sys\"},\"reason\":\"initial\"}}\n{\"type\":\"user/message\",\"seq\":3,\"time\":1004,\"data\":{\"role\":\"user\",\"id\":\"u1\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"assistant/message\",\"seq\":4,\"time\":1005,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"a1\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}],\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"}}},\"surfaceOp\":\"append\"}\n{\"type\":\"step/end\",\"seq\":5,\"time\":1006,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":6,\"time\":1007,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n",
@@ -1852,7 +1853,7 @@
           }
         }
       ],
-      "note": "The header has no cwd, so it names the _no-cwd project, and TypeScript compares the paths with realpath."
+      "note": "The header has no cwd, so it names the _no-cwd project, where no file exists; the generation path its id and cwd name, session.jsonl, is in the message."
     },
     {
       "id": "migrate-history-refusal",
@@ -2843,7 +2844,7 @@
       "note": "TypeScript reads the newer header line alone and refuses it, naming the path."
     },
     {
-      "id": "limit-identity",
+      "id": "identity-path-mismatch",
       "seed": [
         {
           "file": "--other--/f1/session.v3.jsonl",
@@ -2854,13 +2855,12 @@
         {
           "step": "open",
           "id": "f1",
+          "src": "--other--/f1/session.v3.jsonl",
+          "dst": "_no-cwd/f1/session.v3.jsonl",
           "ts": {
             "outcome": "thrown",
-            "class": "Error"
-          },
-          "rust": {
-            "outcome": "native-subset",
-            "limit": "identity"
+            "class": "Error",
+            "message": "corrupt session log \"{src}\": header id \"f1\" and cwd identify \"{dst}\""
           },
           "tree": {
             "--other--/f1/session.lock": "",
@@ -2868,7 +2868,493 @@
           }
         }
       ],
-      "note": "The header names _no-cwd, not the project directory holding the log, and no file exists at the path it names; the message names both paths."
+      "note": "The header names _no-cwd, not the project directory holding the log, and no file exists at the path it names, so realpath resolves no alias; the message names both paths."
+    },
+    {
+      "id": "identity-case-alias-written",
+      "platforms": [
+        "darwin",
+        "win32"
+      ],
+      "platformReason": "Only a case-insensitive volume, the default on macOS and Windows, keeps one project directory for the cwd values /W and /w.",
+      "seed": [],
+      "steps": [
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": "c1",
+            "createdAt": 1,
+            "cwd": "/W",
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {}
+        },
+        {
+          "step": "flush",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "--W--/c1/session.lock": "",
+            "--W--/c1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"c1\",\"createdAt\":1,\"cwd\":\"/W\",\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "close",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "--W--/c1/session.lock": "",
+            "--W--/c1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"c1\",\"createdAt\":1,\"cwd\":\"/W\",\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": "c2",
+            "createdAt": 1,
+            "cwd": "/w",
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "--W--/c1/session.lock": "",
+            "--W--/c1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"c1\",\"createdAt\":1,\"cwd\":\"/W\",\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "flush",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "--W--/c1/session.lock": "",
+            "--W--/c1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"c1\",\"createdAt\":1,\"cwd\":\"/W\",\"isSeeded\":false,\"delegationDepth\":0}\n",
+            "--W--/c2/session.lock": "",
+            "--W--/c2/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"c2\",\"createdAt\":1,\"cwd\":\"/w\",\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "close",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "--W--/c1/session.lock": "",
+            "--W--/c1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"c1\",\"createdAt\":1,\"cwd\":\"/W\",\"isSeeded\":false,\"delegationDepth\":0}\n",
+            "--W--/c2/session.lock": "",
+            "--W--/c2/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"c2\",\"createdAt\":1,\"cwd\":\"/w\",\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "open",
+          "id": "c2",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "--W--/c1/session.lock": "",
+            "--W--/c1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"c1\",\"createdAt\":1,\"cwd\":\"/W\",\"isSeeded\":false,\"delegationDepth\":0}\n",
+            "--W--/c2/session.lock": "",
+            "--W--/c2/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"c2\",\"createdAt\":1,\"cwd\":\"/w\",\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": 0,
+              "time": 1,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "--W--/c1/session.lock": "",
+            "--W--/c1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"c1\",\"createdAt\":1,\"cwd\":\"/W\",\"isSeeded\":false,\"delegationDepth\":0}\n",
+            "--W--/c2/session.lock": "",
+            "--W--/c2/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"c2\",\"createdAt\":1,\"cwd\":\"/w\",\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n"
+          }
+        },
+        {
+          "step": "close",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "--W--/c1/session.lock": "",
+            "--W--/c1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"c1\",\"createdAt\":1,\"cwd\":\"/W\",\"isSeeded\":false,\"delegationDepth\":0}\n",
+            "--W--/c2/session.lock": "",
+            "--W--/c2/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"c2\",\"createdAt\":1,\"cwd\":\"/w\",\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n"
+          }
+        }
+      ],
+      "note": "The second create's directory --w-- resolves to --W--, so its log lands there; the write open lists --W--, and realpath resolves the spelling its header names, --w--, to the same file."
+    },
+    {
+      "id": "identity-case-alias-on-case-sensitive-volume",
+      "platforms": [
+        "linux"
+      ],
+      "platformReason": "A case-insensitive volume resolves --w-- to --W--; Linux volumes here are case-sensitive.",
+      "seed": [
+        {
+          "file": "--W--/c2/session.v3.jsonl",
+          "text": "{\"type\":\"session\",\"version\":3,\"id\":\"c2\",\"createdAt\":1,\"cwd\":\"/w\",\"isSeeded\":false,\"delegationDepth\":0}\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "c2",
+          "src": "--W--/c2/session.v3.jsonl",
+          "dst": "--w--/c2/session.v3.jsonl",
+          "ts": {
+            "outcome": "thrown",
+            "class": "Error",
+            "message": "corrupt session log \"{src}\": header id \"c2\" and cwd identify \"{dst}\""
+          },
+          "tree": {
+            "--W--/c2/session.lock": "",
+            "--W--/c2/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"c2\",\"createdAt\":1,\"cwd\":\"/w\",\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        }
+      ],
+      "note": "The layout identity-case-alias-written leaves, read on a case-sensitive volume: no file exists at the path the header names."
+    },
+    {
+      "id": "identity-requested-id-case-alias",
+      "platforms": [
+        "darwin",
+        "win32"
+      ],
+      "platformReason": "Only a case-insensitive volume, the default on macOS and Windows, resolves the Session directory ab to Ab.",
+      "seed": [
+        {
+          "file": "_no-cwd/Ab/session.v3.jsonl",
+          "text": "{\"type\":\"session\",\"version\":3,\"id\":\"Ab\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "ab",
+          "src": "_no-cwd/ab/session.v3.jsonl",
+          "ts": {
+            "outcome": "thrown",
+            "class": "Error",
+            "message": "corrupt session log \"{src}\": requested id \"ab\" does not match header id \"Ab\""
+          },
+          "tree": {
+            "_no-cwd/Ab/session.lock": "",
+            "_no-cwd/Ab/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"Ab\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        }
+      ],
+      "note": "findLog joins the requested id's spelling, so the lock is taken in Ab and the message names the path spelled ab."
+    },
+    {
+      "id": "identity-requested-id-symlinked-session",
+      "platforms": [
+        "linux"
+      ],
+      "platformReason": "Linux only: Windows needs a privilege to create a symbolic link, and a case-insensitive volume, the macOS default, holds the link ab and its target Ab under one name.",
+      "seed": [
+        {
+          "file": "_no-cwd/Ab/session.v3.jsonl",
+          "text": "{\"type\":\"session\",\"version\":3,\"id\":\"Ab\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+        },
+        {
+          "link": "_no-cwd/ab",
+          "target": "Ab"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "ab",
+          "src": "_no-cwd/ab/session.v3.jsonl",
+          "ts": {
+            "outcome": "thrown",
+            "class": "Error",
+            "message": "corrupt session log \"{src}\": requested id \"ab\" does not match header id \"Ab\""
+          },
+          "tree": {
+            "_no-cwd/Ab/session.lock": "",
+            "_no-cwd/Ab/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"Ab\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n",
+            "_no-cwd/ab": "<link to Ab>"
+          }
+        }
+      ],
+      "note": "findLog reads the Session directory ab through its link to Ab, so a current generation's requested-id check refuses on a case-sensitive volume as identity-requested-id-case-alias refuses on a case-insensitive one; the lock is taken through the link."
+    },
+    {
+      "id": "identity-symlinked-project-alias",
+      "platforms": [
+        "posix"
+      ],
+      "platformReason": "Windows needs a privilege to create a symbolic link.",
+      "seed": [
+        {
+          "file": "--real--/c2/session.v3.jsonl",
+          "text": "{\"type\":\"session\",\"version\":3,\"id\":\"c2\",\"createdAt\":1,\"cwd\":\"/w\",\"isSeeded\":false,\"delegationDepth\":0}\n"
+        },
+        {
+          "link": "--w--",
+          "target": "--real--"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "c2",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "--real--/c2/session.lock": "",
+            "--real--/c2/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"c2\",\"createdAt\":1,\"cwd\":\"/w\",\"isSeeded\":false,\"delegationDepth\":0}\n",
+            "--w--": "<link to --real-->"
+          }
+        },
+        {
+          "step": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": 0,
+              "time": 1,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "--real--/c2/session.lock": "",
+            "--real--/c2/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"c2\",\"createdAt\":1,\"cwd\":\"/w\",\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n",
+            "--w--": "<link to --real-->"
+          }
+        },
+        {
+          "step": "close",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "--real--/c2/session.lock": "",
+            "--real--/c2/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"c2\",\"createdAt\":1,\"cwd\":\"/w\",\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n",
+            "--w--": "<link to --real-->"
+          }
+        }
+      ],
+      "note": "A project link is not listed, since only directories are, so the log is selected in --real--; the path its header names runs through the link --w--, and realpath resolves both to one file, as it resolves a case alias on a case-insensitive volume."
+    },
+    {
+      "id": "identity-symlinked-root",
+      "platforms": [
+        "posix"
+      ],
+      "platformReason": "Windows needs a privilege to create a symbolic link.",
+      "seed": [],
+      "steps": [
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": "y1",
+            "createdAt": 1,
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {}
+        },
+        {
+          "step": "flush",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/y1/session.lock": "",
+            "_no-cwd/y1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"y1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "close",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/y1/session.lock": "",
+            "_no-cwd/y1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"y1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "link-root",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/y1/session.lock": "",
+            "_no-cwd/y1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"y1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "open",
+          "id": "y1",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/y1/session.lock": "",
+            "_no-cwd/y1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"y1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": 0,
+              "time": 1,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/y1/session.lock": "",
+            "_no-cwd/y1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"y1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n"
+          }
+        },
+        {
+          "step": "close",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/y1/session.lock": "",
+            "_no-cwd/y1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"y1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n"
+          }
+        }
+      ],
+      "note": "A log written beneath the root opens through a symbolic link to it: both paths are spelled from the configured root, so no realpath is taken."
+    },
+    {
+      "id": "identity-moved-root",
+      "seed": [],
+      "steps": [
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": "y2",
+            "createdAt": 1,
+            "cwd": "/w",
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {}
+        },
+        {
+          "step": "flush",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "--w--/y2/session.lock": "",
+            "--w--/y2/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"y2\",\"createdAt\":1,\"cwd\":\"/w\",\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "close",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "--w--/y2/session.lock": "",
+            "--w--/y2/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"y2\",\"createdAt\":1,\"cwd\":\"/w\",\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "move-root",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "--w--/y2/session.lock": "",
+            "--w--/y2/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"y2\",\"createdAt\":1,\"cwd\":\"/w\",\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "open",
+          "id": "y2",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "--w--/y2/session.lock": "",
+            "--w--/y2/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"y2\",\"createdAt\":1,\"cwd\":\"/w\",\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": 0,
+              "time": 1,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "--w--/y2/session.lock": "",
+            "--w--/y2/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"y2\",\"createdAt\":1,\"cwd\":\"/w\",\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n"
+          }
+        },
+        {
+          "step": "close",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "--w--/y2/session.lock": "",
+            "--w--/y2/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"y2\",\"createdAt\":1,\"cwd\":\"/w\",\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n"
+          }
+        }
+      ],
+      "note": "A log written beneath the root opens after the whole root is renamed: both paths are spelled from the configured root."
     },
     {
       "id": "limit-scan",
@@ -2899,7 +3385,7 @@
       "note": "The scan refuses the header line; TypeScript wraps the refusal with the path."
     },
     {
-      "id": "limit-v2-codec-recovery",
+      "id": "migrate-v2-codec-gap-rethrown-at-turn-end",
       "seed": [
         {
           "file": "_no-cwd/v2v3/session.v2.jsonl",
@@ -2916,17 +3402,143 @@
             "class": "SessionPersistenceCorruptionError",
             "message": "session \"v2v3\": stored log is corrupt: SessionFormatError: released v2 row 1 has seq gap (expected 1, got 5) (raw log: {src})"
           },
-          "rust": {
-            "outcome": "native-subset",
-            "limit": "migration/v2-codec-recovery"
-          },
           "tree": {
             "_no-cwd/v2v3/session.lock": "",
             "_no-cwd/v2v3/session.v2.jsonl": "{\"type\":\"session\",\"version\":2,\"id\":\"v2v3\",\"createdAt\":1700000000000,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1000,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":5,\"time\":1001,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":2,\"time\":1002,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n"
           }
         }
       ],
-      "note": "The turn/end row rethrows the issue."
+      "note": "The step/start row's seq gap is the issue the recoverable codec keeps, and the later turn/end row, which decodes, rethrows it."
+    },
+    {
+      "id": "migrate-v2-codec-decode-issue-rethrown-at-turn-end",
+      "seed": [
+        {
+          "file": "_no-cwd/v2v3/session.v2.jsonl",
+          "text": "{\"type\":\"session\",\"version\":2,\"id\":\"v2v3\",\"createdAt\":1700000000000,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1000,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":2,\"time\":1002,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "v2v3",
+          "src": "_no-cwd/v2v3/session.v2.jsonl",
+          "ts": {
+            "outcome": "thrown",
+            "class": "SessionPersistenceCorruptionError",
+            "message": "session \"v2v3\": stored log is corrupt: SessionFormatError: released v2 row 1 lacks required field time (raw log: {src})"
+          },
+          "tree": {
+            "_no-cwd/v2v3/session.lock": "",
+            "_no-cwd/v2v3/session.v2.jsonl": "{\"type\":\"session\",\"version\":2,\"id\":\"v2v3\",\"createdAt\":1700000000000,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1000,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":2,\"time\":1002,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n"
+          }
+        }
+      ],
+      "note": "decodeEvent refuses the step/start row without time; the recoverable codec keeps that refusal as its issue and the later turn/end row, which decodes, rethrows it."
+    },
+    {
+      "id": "migrate-v2-undecoded-turn-end-issue-kept-until-finish",
+      "seed": [
+        {
+          "file": "_no-cwd/v2v3/session.v2.jsonl",
+          "text": "{\"type\":\"session\",\"version\":2,\"id\":\"v2v3\",\"createdAt\":1700000000000,\"parentSession\":\"parent\",\"isSeeded\":true,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1000,\"data\":{\"turn\":1}}\n{\"type\":\"turn/end\",\"seq\":1,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "v2v3",
+          "src": "_no-cwd/v2v3/session.v2.jsonl",
+          "ts": {
+            "outcome": "thrown",
+            "class": "SessionPersistenceCorruptionError",
+            "message": "session \"v2v3\": stored log is corrupt: SessionFormatError: released v2 seeded Session lacks an inherited end-seed marker (raw log: {src})"
+          },
+          "tree": {
+            "_no-cwd/v2v3/session.lock": "",
+            "_no-cwd/v2v3/session.v2.jsonl": "{\"type\":\"session\",\"version\":2,\"id\":\"v2v3\",\"createdAt\":1700000000000,\"parentSession\":\"parent\",\"isSeeded\":true,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1000,\"data\":{\"turn\":1}}\n{\"type\":\"turn/end\",\"seq\":1,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n"
+          }
+        }
+      ],
+      "note": "decodeEvent refuses the turn/end row without time, so the recoverable codec keeps the issue without rethrowing it and drops the row; the decoder's finish then refuses the seeded Session without its end-seed marker."
+    },
+    {
+      "id": "migrate-v2-end-seed-data-thrown-while-recovering",
+      "seed": [
+        {
+          "file": "_no-cwd/v2v3/session.v2.jsonl",
+          "text": "{\"type\":\"session\",\"version\":2,\"id\":\"v2v3\",\"createdAt\":1700000000000,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1000,\"data\":{\"turn\":1}}\n{\"type\":\"session/end-seed\",\"seq\":1,\"time\":1001,\"data\":\"x\"}\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "v2v3",
+          "src": "_no-cwd/v2v3/session.v2.jsonl",
+          "ts": {
+            "outcome": "thrown",
+            "class": "SessionPersistenceCorruptionError",
+            "message": "session \"v2v3\": stored log is corrupt: SessionFormatError: session/end-seed 1 data must be an object (raw log: {src})"
+          },
+          "tree": {
+            "_no-cwd/v2v3/session.lock": "",
+            "_no-cwd/v2v3/session.v2.jsonl": "{\"type\":\"session\",\"version\":2,\"id\":\"v2v3\",\"createdAt\":1700000000000,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1000,\"data\":{\"turn\":1}}\n{\"type\":\"session/end-seed\",\"seq\":1,\"time\":1001,\"data\":\"x\"}\n"
+          }
+        }
+      ],
+      "note": "decodeRow reads a session/end-seed row's data after its recovery catch, so the recoverable codec throws this refusal at once."
+    },
+    {
+      "id": "migrate-v0-seed-length-exceeds-events-at-decoder-finish",
+      "seed": [
+        {
+          "file": "_no-cwd/hist/session.jsonl",
+          "text": "{\"type\":\"session\",\"version\":0,\"id\":\"hist\",\"createdAt\":1000,\"parentSession\":\"parent\",\"seedLength\":3,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "hist",
+          "src": "_no-cwd/hist/session.jsonl",
+          "ts": {
+            "outcome": "thrown",
+            "class": "SessionPersistenceCorruptionError",
+            "message": "session \"hist\": stored log is corrupt: SessionFormatError: Session inheritedEventCount exceeds its event count (raw log: {src})"
+          },
+          "tree": {
+            "_no-cwd/hist/session.lock": "",
+            "_no-cwd/hist/session.jsonl": "{\"type\":\"session\",\"version\":0,\"id\":\"hist\",\"createdAt\":1000,\"parentSession\":\"parent\",\"seedLength\":3,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n"
+          }
+        }
+      ],
+      "note": "Both rows stream through every format edge, all before the cut, and the decoder's finish, which runs before the chain's, refuses a seedLength beyond the event count."
+    },
+    {
+      "id": "migrate-v0-history-refusal-before-decoder-finish",
+      "seed": [
+        {
+          "file": "_no-cwd/hist/session.jsonl",
+          "text": "{\"type\":\"session\",\"version\":0,\"id\":\"hist\",\"createdAt\":1000,\"parentSession\":\"parent\",\"seedLength\":5,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"mode/set\",\"seq\":1,\"time\":1002,\"data\":{\"mode\":\"plan\"}}\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "hist",
+          "src": "_no-cwd/hist/session.jsonl",
+          "ts": {
+            "outcome": "thrown",
+            "class": "SessionFormatUnsupportedError",
+            "message": "session \"hist\" contains unsupported legacy mode/set event at seq 1; source v0 artifact remains unchanged (raw log: {src})"
+          },
+          "tree": {
+            "_no-cwd/hist/session.lock": "",
+            "_no-cwd/hist/session.jsonl": "{\"type\":\"session\",\"version\":0,\"id\":\"hist\",\"createdAt\":1000,\"parentSession\":\"parent\",\"seedLength\":5,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"mode/set\",\"seq\":1,\"time\":1002,\"data\":{\"mode\":\"plan\"}}\n"
+          }
+        }
+      ],
+      "note": "v0→v1 refuses row 1 while it streams, before the decoder's finish would refuse the seedLength beyond the event count."
     },
     {
       "id": "migrate-lone-surrogate-row-ignored",

@@ -18,9 +18,12 @@
 //! attempt's chunks, and the events after its last chunk, until a later item
 //! or `finish` closes the attempt. A v2→v3 refusal of an event v1→v2 emitted
 //! is located at the item, or `finish`, whose processing emitted it. When
-//! v1→v2 refuses an item after it may already have emitted events for it,
-//! which v2→v3 would have checked first, the outcome is the
-//! `interleaved-emission` limit.
+//! v1→v2 rejects an item, or at `finish`, after it emitted events for it,
+//! such as a closed attempt and its buffered events, an inherited end-seed,
+//! an interrupted `turn/end`, or a `goal/change`, v2→v3 checks those events
+//! first, as TypeScript's chain hands each emitted event to v2→v3 before
+//! v1→v2 continues. A v1→v2 limit makes no claim about that item, so v2→v3
+//! checks only the events emitted before it.
 //!
 //! Its sources are `packages/session/session-format/src/chain.ts` and the
 //! three migrations' `migration.ts`.
@@ -32,7 +35,8 @@ use crate::json_parse::{clone_value, values_equal};
 use crate::v0_to_v1::{V0ToV1Location, V0ToV1Refusal, migrate_v0_to_v1};
 use crate::v1_codec::{DecodedV1Items, DecodedV1Rows, V1Item};
 use crate::v1_to_v2::{
-    StreamedV1ToV2, V1ToV2Limit, V1ToV2Location, V1ToV2Refusal, stream_v1_to_v2_items,
+    RefusedV1ToV2, StreamedV1ToV2, V1ToV2Limit, V1ToV2Location, V1ToV2Refusal,
+    stream_v1_to_v2_items,
 };
 use crate::v1_to_v2_decoded::{
     V1ToV2DecodedClass, V1ToV2DecodedLimit, V1ToV2DecodedRefusal, check_event, first_seq,
@@ -84,11 +88,6 @@ pub enum HistoryLimit {
     /// An event without `time`, which v1→v2 copies into an event it
     /// synthesizes and JSON cannot carry as `undefined`.
     UntimedEvent,
-    /// v1→v2 refuses an item, or at `finish`, after it may already have
-    /// emitted a synthesized end-seed, interrupted `turn/end`, or
-    /// `goal/change` for it, or a pending Assistant attempt and the events
-    /// buffered after it, which v2→v3 would have checked first.
-    InterleavedEmission,
     /// A stage disagreed with what an earlier stage or the decoder proved.
     DecodeInvariant,
     /// A limit of [`migrate_v0_to_v1`], with its name there.
@@ -109,7 +108,6 @@ impl HistoryLimit {
     pub fn name(&self) -> String {
         match self {
             Self::UntimedEvent => "untimed-event".to_owned(),
-            Self::InterleavedEmission => "interleaved-emission".to_owned(),
             Self::DecodeInvariant => "decode-invariant".to_owned(),
             Self::V0ToV1(limit) => format!("v0-to-v1/{limit}"),
             Self::V1ToV2(limit) => format!("v1-to-v2/{}", limit.name()),
@@ -210,7 +208,6 @@ fn from_v0(decoded: &DecodedV1Items) -> Result<MigratedV2, HistoryRefusal> {
     let chain = Chain {
         header: std::mem::take(&mut migrated.header),
         source_cut: migrated.inherited_event_count,
-        is_seeded: decoded.header.get("isSeeded") == Some(&Value::Bool(true)),
         first: FirstStage::V0ToV1,
     };
     chain.read(items, stage_one.map(|(_, refusal)| refusal))
@@ -262,7 +259,6 @@ fn from_v1(decoded: &DecodedV1Items) -> Result<MigratedV2, HistoryRefusal> {
     let chain = Chain {
         header: clone_value(&decoded.header),
         source_cut: decoded.inherited_event_count,
-        is_seeded: decoded.header.get("isSeeded") == Some(&Value::Bool(true)),
         first: FirstStage::V1ToV2Decoded,
     };
     let items = decoded.items.get(..end).unwrap_or_default().to_vec();
@@ -304,7 +300,6 @@ struct Chain {
     header: Value,
     /// The decoded inherited cut, which every prefix keeps.
     source_cut: u64,
-    is_seeded: bool,
     first: FirstStage,
 }
 
@@ -335,36 +330,44 @@ impl Chain {
         // The first v1→v2 refusal in that prefix ends it again.
         let (streamed, refusal) = match self.v1_to_v2(&items) {
             Ok(streamed) => (streamed, stage_one),
-            Err(
-                V1ToV2Refusal::Rejected {
-                    location: V1ToV2Location::Event(index),
-                    ..
-                }
-                | V1ToV2Refusal::NativeSubset {
-                    location: V1ToV2Location::Event(index),
-                    ..
-                },
-            ) if index >= items.len() => return Err(invariant(first_seq(&items, index))),
-            Err(V1ToV2Refusal::Rejected {
-                location: V1ToV2Location::Event(index),
-                message,
+            Err(RefusedV1ToV2 {
+                refusal:
+                    V1ToV2Refusal::Rejected {
+                        location: V1ToV2Location::Event(index),
+                        ..
+                    }
+                    | V1ToV2Refusal::NativeSubset {
+                        location: V1ToV2Location::Event(index),
+                        ..
+                    },
+                ..
+            }) if index >= items.len() => return Err(invariant(first_seq(&items, index))),
+            Err(RefusedV1ToV2 {
+                refusal:
+                    V1ToV2Refusal::Rejected {
+                        location: V1ToV2Location::Event(index),
+                        message,
+                    },
+                emitted,
             }) => {
                 let seq = first_seq(&items, index);
-                let before = self
-                    .v1_to_v2(items.get(..index).unwrap_or_default())
-                    .map_err(|_| invariant(seq))?;
                 let location = HistoryLocation::Event(seq);
-                let refusal = if self.may_have_emitted(&items, index, before.pending) {
-                    native(location, HistoryLimit::InterleavedEmission)
-                } else {
-                    HistoryRefusal::Rejected { location, message }
-                };
                 items.truncate(index);
-                (before, Some(refusal))
+                let before = self.v1_to_v2(&items).map_err(|_| invariant(seq))?;
+                // v2→v3 checked every event v1→v2 emitted before refusing,
+                // those it emitted for this item included.
+                check_logical_v2_prefix(&before.header, &emitted).map_err(|failure| {
+                    self.v2_to_v3_refusal(failure, &items, before.streamed_len, location)
+                })?;
+                return Err(HistoryRefusal::Rejected { location, message });
             }
-            Err(V1ToV2Refusal::NativeSubset {
-                location: V1ToV2Location::Event(index),
-                limit,
+            Err(RefusedV1ToV2 {
+                refusal:
+                    V1ToV2Refusal::NativeSubset {
+                        location: V1ToV2Location::Event(index),
+                        limit,
+                    },
+                ..
             }) => {
                 let seq = first_seq(&items, index);
                 items.truncate(index);
@@ -374,10 +377,12 @@ impl Chain {
             }
             // The header passed v0→v1 or the v1 decoder, and `finish`
             // refusals come back in the streamed result.
-            Err(
-                V1ToV2Refusal::Rejected { location, .. }
-                | V1ToV2Refusal::NativeSubset { location, .. },
-            ) => {
+            Err(RefusedV1ToV2 {
+                refusal:
+                    V1ToV2Refusal::Rejected { location, .. }
+                    | V1ToV2Refusal::NativeSubset { location, .. },
+                ..
+            }) => {
                 let location = match location {
                     V1ToV2Location::Header => HistoryLocation::Header,
                     _ => HistoryLocation::Finish,
@@ -385,41 +390,39 @@ impl Chain {
                 return Err(native(location, HistoryLimit::DecodeInvariant));
             }
         };
-        // v2→v3 over what v1→v2 emitted for that prefix.
+        // v2→v3 over what v1→v2 emitted for that prefix; an event `finish`
+        // emitted is refused at `finish`.
         let streamed_len = streamed.streamed_len;
-        let emitted = streamed.events.get(..streamed_len).unwrap_or_default();
         let checked = |events: &[Value]| {
-            check_logical_v2_prefix(&streamed.header, events)
-                .map_err(|failure| self.v2_to_v3_refusal(failure, &items, streamed_len))
+            check_logical_v2_prefix(&streamed.header, events).map_err(|failure| {
+                self.v2_to_v3_refusal(failure, &items, streamed_len, HistoryLocation::Finish)
+            })
         };
         if let Some(refusal) = refusal {
-            checked(emitted)?;
+            checked(streamed.events.get(..streamed_len).unwrap_or_default())?;
             return Err(refusal);
         }
         match streamed.finished {
-            Ok(_) => migrate_logical_v2(&streamed.header, &streamed.events)
-                .map_err(|failure| self.v2_to_v3_refusal(failure, &items, streamed_len)),
-            Err(refusal) => {
-                checked(emitted)?;
-                // `finish` emits a pending attempt and its buffered events
-                // before it can refuse one of them.
-                Err(match refusal {
-                    V1ToV2Refusal::Rejected { .. } if streamed.pending => {
-                        native(HistoryLocation::Finish, HistoryLimit::InterleavedEmission)
-                    }
-                    V1ToV2Refusal::Rejected { message, .. } => HistoryRefusal::Rejected {
-                        location: HistoryLocation::Finish,
-                        message,
-                    },
-                    V1ToV2Refusal::NativeSubset { limit, .. } => {
-                        native(HistoryLocation::Finish, self.v1_to_v2_limit(limit))
-                    }
+            Ok(_) => migrate_logical_v2(&streamed.header, &streamed.events).map_err(|failure| {
+                self.v2_to_v3_refusal(failure, &items, streamed_len, HistoryLocation::Finish)
+            }),
+            // `finish` emits a pending attempt and its buffered events before
+            // it can refuse one of them, and v2→v3 checks them first.
+            Err(V1ToV2Refusal::Rejected { message, .. }) => {
+                checked(&streamed.events)?;
+                Err(HistoryRefusal::Rejected {
+                    location: HistoryLocation::Finish,
+                    message,
                 })
+            }
+            Err(V1ToV2Refusal::NativeSubset { limit, .. }) => {
+                checked(streamed.events.get(..streamed_len).unwrap_or_default())?;
+                Err(native(HistoryLocation::Finish, self.v1_to_v2_limit(limit)))
             }
         }
     }
 
-    fn v1_to_v2(&self, items: &[V1Item]) -> Result<StreamedV1ToV2, V1ToV2Refusal> {
+    fn v1_to_v2(&self, items: &[V1Item]) -> Result<StreamedV1ToV2, RefusedV1ToV2> {
         stream_v1_to_v2_items(&DecodedV1Items {
             header: clone_value(&self.header),
             inherited_event_count: self.source_cut,
@@ -436,47 +439,16 @@ impl Chain {
         }
     }
 
-    /// Whether v1→v2 may have emitted an event for item `index` before
-    /// refusing it: a pending attempt and the events buffered after it,
-    /// which `pending` reports for the items before `index`; the end-seed
-    /// `ensureTargetCut` synthesizes at the cut; the interrupted `turn/end` a
-    /// `turn/start` right after an inbox splice can close; or a legacy goal
-    /// message's `goal/change`.
-    fn may_have_emitted(&self, items: &[V1Item], index: usize, pending: bool) -> bool {
-        let event_at = |at: usize| match items.get(at) {
-            Some(V1Item::Event(event)) => Some(event),
-            _ => None,
-        };
-        let type_at = |at: usize| event_at(at).and_then(|event| event.get("type"));
-        let event_type = type_at(index).and_then(Value::as_str);
-        let at_cut = self.is_seeded
-            && first_seq(items, index) as u64 == self.source_cut
-            && event_type != Some("session/end-seed");
-        let after_splice = event_type == Some("turn/start")
-            && index
-                .checked_sub(1)
-                .and_then(type_at)
-                .is_some_and(|previous| previous == "agent/inbox/spliced");
-        let goal = event_type == Some("user/message")
-            && event_at(index)
-                .and_then(|event| event.get("data"))
-                .and_then(|data| data.get("source"))
-                .is_some_and(|source| {
-                    source.get("kind") == Some(&Value::from("goal"))
-                        && source.get("change").is_some()
-                });
-        pending || at_cut || after_splice || goal
-    }
-
     /// A v2→v3 refusal over v1→v2 output located at the source item whose
-    /// processing emitted the event it checked. `streamed_len` is the output
-    /// length before v1→v2's `finish`; a refusal of what `finish` emitted is
-    /// at `Finish`.
+    /// processing emitted the event it checked. `streamed_len` is the number
+    /// of events `items` emitted; a refusal of a later event, which `finish`
+    /// or a refused next item emitted, is at `tail`.
     fn v2_to_v3_refusal(
         &self,
         failure: V2ToV3Refusal,
         items: &[V1Item],
         streamed_len: usize,
+        tail: HistoryLocation,
     ) -> HistoryRefusal {
         let (location, refusal) = match failure {
             V2ToV3Refusal::Rejected {
@@ -492,7 +464,8 @@ impl Chain {
                     None => return native(HistoryLocation::Finish, HistoryLimit::DecodeInvariant),
                 }
             }
-            V2ToV3Location::Row(_) | V2ToV3Location::Finish => HistoryLocation::Finish,
+            V2ToV3Location::Row(_) => tail,
+            V2ToV3Location::Finish => HistoryLocation::Finish,
         };
         match refusal {
             Ok(message) => HistoryRefusal::Rejected { location, message },
