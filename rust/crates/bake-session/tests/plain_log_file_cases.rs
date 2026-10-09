@@ -8,7 +8,7 @@
 //! by its size, since Windows refuses to read a locked range, and no other
 //! file may exist. A thrown outcome maps to the refusal Rust claims: the
 //! exact already-owned, already-exists, not-found, duplicate-id,
-//! encoding-mismatch, contiguity, lossless-snapshot, corruption, or
+//! flat-layout, encoding-mismatch, contiguity, lossless-snapshot, corruption, or
 //! unsupported-migration message, with `{src}` rendered as the root joined
 //! with the step's `src` path and `{srcJson}` as that path spelled by
 //! `JSON.stringify`, or `Unadmitted` for any other throw of a create or
@@ -16,7 +16,9 @@
 //! override names a native limit, or marks the step outside the model's
 //! domain, which Rust does not run; either ends the case. Every limit must
 //! be named by some case of the table, and every case that applies here must
-//! witness the limit it names. Nothing here reads TypeScript output.
+//! witness the limit it names. Table strings, file names, and file text are
+//! compared in `parse_json`'s spelling, so a U+FDD0 on disk is doubled.
+//! Nothing here reads TypeScript output.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -25,26 +27,25 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use bake_session::{
     AppendLimit, AppendRefusal, CreateLimit, CreateRefusal, LogFileLimit, LogFileRefusal,
     PlainLogFile,
+    js_string::{from_rust, quote, to_rust},
 };
 use serde_json::{Map, Value};
 
 const SCHEMA: &str = "bake/session-conformance/plain-log-file-cases";
 const ORACLE: &str = "in an owned temporary root holding the seeded entries, run each step through the JSONL backend with compression none on the step's handle, a or b, each its own backend instance over the root: create, a write open, or the open handle's append, flush, or close; after each step list every file beneath the root with its text, an empty session.lock by its size";
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 70;
+const CASE_COUNT: usize = 75;
 const SOURCE_BUDGET: usize = 64;
-const LIMITS: [&str; 11] = [
+const LIMITS: [&str; 9] = [
     "empty-id",
     "encode",
     "seq-value",
     "windows-name",
-    "legacy-layout",
     "non-utf8-name",
     "newer-generation",
     "identity",
     "scan",
     "migration/v2-codec-recovery",
-    "migration/row/json-parser",
 ];
 const CLASSES: [&str; 8] = [
     "Error",
@@ -105,8 +106,10 @@ impl Drop for Scratch {
 }
 
 fn load() -> Vec<Map<String, Value>> {
-    let table: Value = serde_json::from_slice(
-        &std::fs::read(repo_path("conformance/session/plain-log-file-cases.json"))
+    // Ids and expected messages may hold a lone surrogate, which only
+    // `parse_json` reads.
+    let table: Value = bake_session::parse_json(
+        &std::fs::read_to_string(repo_path("conformance/session/plain-log-file-cases.json"))
             .expect("read table"),
     )
     .expect("parse table");
@@ -116,7 +119,7 @@ fn load() -> Vec<Map<String, Value>> {
         BTreeSet::from(["cases", "history", "oracle", "schema", "version"])
     );
     assert_eq!(table["schema"], SCHEMA);
-    assert_eq!(table["version"], 7);
+    assert_eq!(table["version"], 9);
     assert_eq!(table["oracle"], ORACLE);
     assert!(
         table["history"]
@@ -171,9 +174,9 @@ fn seed(root: &Path, entry: &Value, id: &str) {
     let entry = object(entry, id);
     if let Some(file) = entry.get("file") {
         assert_eq!(keys(entry), BTreeSet::from(["file", "text"]), "{id}: seed");
-        let path = root.join(text(file, id));
+        let path = root.join(&*to_rust(text(file, id)));
         std::fs::create_dir_all(path.parent().expect("seed parent")).expect("seed directory");
-        std::fs::write(&path, text(&entry["text"], id)).expect("seed file");
+        std::fs::write(&path, &*to_rust(text(&entry["text"], id))).expect("seed file");
         return;
     }
     assert_eq!(
@@ -199,7 +202,7 @@ fn tree(root: &Path) -> BTreeMap<String, String> {
     fn walk(dir: &Path, prefix: &str, files: &mut BTreeMap<String, String>) {
         for entry in std::fs::read_dir(dir).expect("list") {
             let entry = entry.expect("entry");
-            let name = entry.file_name().to_string_lossy().into_owned();
+            let name = from_rust(&entry.file_name().to_string_lossy()).into_owned();
             let relative = format!("{prefix}{name}");
             if entry.file_type().expect("file type").is_dir() {
                 walk(&entry.path(), &format!("{relative}/"), files);
@@ -213,7 +216,7 @@ fn tree(root: &Path) -> BTreeMap<String, String> {
                 files.insert(relative, text);
             } else {
                 let text = std::fs::read_to_string(entry.path()).expect("UTF-8 file");
-                files.insert(relative, text);
+                files.insert(relative, from_rust(&text).into_owned());
             }
         }
     }
@@ -267,7 +270,6 @@ fn limit_matches(name: &str, refusal: &LogFileRefusal) -> bool {
             "seq-value",
             Append(AppendRefusal::NativeSubset(AppendLimit::SeqValue))
         ) | ("windows-name", NativeSubset(LogFileLimit::WindowsName))
-            | ("legacy-layout", NativeSubset(LogFileLimit::LegacyLayout))
             | ("non-utf8-name", NativeSubset(LogFileLimit::NonUtf8Name))
             | (
                 "newer-generation",
@@ -291,6 +293,12 @@ fn expected_kind(step: &str, class: &str, message: &str) -> &'static str {
         {
             "encoding-mismatch"
         }
+        ("create" | "open", "Error")
+            if message.starts_with("session artifact ")
+                && message.contains(" uses the unsupported flat-file layout; ") =>
+        {
+            "legacy-layout"
+        }
         ("append", "Error") if message.starts_with("append seq mismatch for ") => "seq-mismatch",
         ("append", "TypeError") if message == NOT_LOSSLESS => "not-lossless",
         ("open", "SessionPersistenceCorruptionError") => "corrupt",
@@ -308,6 +316,7 @@ fn kind(refusal: &LogFileRefusal) -> &'static str {
         LogFileRefusal::NotFound { .. } => "not-found",
         LogFileRefusal::Duplicate { .. } => "duplicate",
         LogFileRefusal::EncodingMismatch { .. } => "encoding-mismatch",
+        LogFileRefusal::LegacyLayout { .. } => "legacy-layout",
         LogFileRefusal::Corrupt { .. } => "corrupt",
         LogFileRefusal::Unsupported { .. } => "unsupported",
         LogFileRefusal::Append(AppendRefusal::SeqMismatch { .. }) => "seq-mismatch",
@@ -352,15 +361,16 @@ fn rendered_source(
         .is_some_and(|message| message.contains("{src}") || message.contains("{srcJson}"));
     assert_eq!(placeholder, step.contains_key("src"), "{context}: src");
     let source = text(step.get("src")?, context);
-    let path = source
-        .split('/')
-        .fold(root.to_path_buf(), |path, segment| path.join(segment));
-    Some(path.display().to_string())
+    let path = source.split('/').fold(root.to_path_buf(), |path, segment| {
+        path.join(&*to_rust(segment))
+    });
+    Some(from_rust(&path.display().to_string()).into_owned())
 }
 
-/// `message` with its `{src}` and `{srcJson}` placeholders rendered.
+/// `message` with its `{src}` and `{srcJson}` placeholders rendered, both
+/// in `parse_json`'s spelling, as refusal messages are.
 fn render(message: &str, source: &str) -> String {
-    let spelled = serde_json::to_string(source).expect("a string serializes");
+    let spelled = quote(source);
     message
         .replace("{srcJson}", &spelled)
         .replace("{src}", source)
@@ -553,6 +563,7 @@ fn shared_cases_lay_out_and_write_like_the_typescript_backend() {
             "corrupt",
             "duplicate",
             "encoding-mismatch",
+            "legacy-layout",
             "not-found",
             "not-lossless",
             "seq-mismatch",

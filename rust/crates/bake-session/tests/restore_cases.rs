@@ -3,7 +3,8 @@
 //! case's expected outcome is its `rust` override when present, otherwise the
 //! hand-written restored state the TypeScript `restorePlainLog` helper also
 //! meets, with messages also compared as serialized text, since `Value`
-//! equality ignores member order. An `image/offload` rejection also claims
+//! equality ignores member order, and the request header as the text
+//! `JSON.stringify` writes, array-index keys first. An `image/offload` rejection also claims
 //! TypeScript's exact message. Nothing here reads TypeScript output.
 
 use std::collections::BTreeSet;
@@ -11,7 +12,8 @@ use std::path::PathBuf;
 
 use bake_session::{
     HeaderOrigin, OffloadRejection, PathPlatform, ReplayRefusal, RestoreLimit, RestoreRefusal,
-    RestoredLog, SeedRejection, SessionHeader, Unsupported, replay_requests, restore_plain_log,
+    RestoredLog, SeedRejection, SessionHeader, Unsupported, json_text, replay_requests,
+    restore_plain_log,
 };
 use serde_json::{Map, Value, json};
 
@@ -36,7 +38,7 @@ const LOGS: [(&str, &str, usize); 3] = [
     ),
 ];
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 118;
+const CASE_COUNT: usize = 124;
 const SOURCE_BUDGET: usize = 64;
 /// Cases whose `image/offload` rejection message is compared exactly.
 const OFFLOAD_MESSAGES: usize = 28;
@@ -47,10 +49,9 @@ const UNNAMED_SEQS: [(&str, u64); 4] = [
     ("known-ignorable-tool-update-marker", 14),
     ("known-ignorable-routing-decision-marker", 16),
 ];
-const LIMITS: [(&str, RestoreLimit); 7] = [
+const LIMITS: [(&str, RestoreLimit); 6] = [
     ("number", RestoreLimit::Number),
     ("coordinate", RestoreLimit::Coordinate),
-    ("config-member", RestoreLimit::ConfigMember),
     ("tool-schema", RestoreLimit::ToolSchema),
     ("context", RestoreLimit::Context),
     ("repair", RestoreLimit::Repair),
@@ -157,9 +158,10 @@ fn build(entry: &Map<String, Value>, id: &str) -> (Vec<u8>, Vec<String>) {
     for edit in edits {
         let edit = object(edit, id);
         let line = |key: &str| {
-            let value = text(&edit[key], id);
+            // The table is read with `parse_json`; write its text as real text.
+            let value = bake_session::js_string::to_rust(text(&edit[key], id)).into_owned();
             assert!(!value.contains('\n'), "{id}: {key} holds an LF");
-            value.to_owned()
+            value
         };
         match keys(edit).into_iter().collect::<Vec<_>>().as_slice() {
             ["truncate"] => {
@@ -195,8 +197,10 @@ fn build(entry: &Map<String, Value>, id: &str) -> (Vec<u8>, Vec<String>) {
 }
 
 fn load() -> Vec<Case> {
-    let table: Value = serde_json::from_slice(
-        &std::fs::read(repo_path("conformance/session/restore-cases.json")).expect("read table"),
+    // Expected strings use `parse_json`'s spelling, as restored ones do.
+    let table: Value = bake_session::parse_json(
+        &std::fs::read_to_string(repo_path("conformance/session/restore-cases.json"))
+            .expect("read table"),
     )
     .expect("parse table");
     let table = object(&table, "table");
@@ -205,7 +209,7 @@ fn load() -> Vec<Case> {
         BTreeSet::from(["cases", "history", "logs", "oracle", "schema", "version"])
     );
     assert_eq!(table["schema"], SCHEMA);
-    assert_eq!(table["version"], 4);
+    assert_eq!(table["version"], 6);
     assert!(
         table["history"]
             .as_array()
@@ -231,7 +235,7 @@ fn load() -> Vec<Case> {
             let (log, rows) = build(&entry, &id);
             let rows = rows
                 .iter()
-                .map(|row| serde_json::from_str(row).unwrap_or(Value::Null))
+                .map(|row| bake_session::parse_json(row).unwrap_or(Value::Null))
                 .collect();
             Case {
                 id,
@@ -481,6 +485,12 @@ fn shared_cases_restore_like_the_read_path() {
                     actual["messages"].to_string(),
                     expected["messages"].to_string(),
                     "{id}: member order"
+                );
+                // `JSON.stringify` order: array-index keys first.
+                assert_eq!(
+                    json_text(&actual["requestHeader"]),
+                    json_text(&expected["requestHeader"]),
+                    "{id}: request header text"
                 );
                 // Restoration returns the scanned rows unchanged.
                 let stored = restored.stored().rows();

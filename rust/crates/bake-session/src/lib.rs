@@ -142,6 +142,7 @@ mod goal;
 mod history;
 mod inbox;
 mod js_count;
+pub mod js_string;
 mod json_parse;
 mod json_text;
 mod log_layout;
@@ -282,6 +283,8 @@ const REQUIRED_KEYS: [&str; 6] = [
 const OPTIONAL_KEYS: [&str; 4] = ["cwd", "parentSession", "origin", "agentPreset"];
 
 /// Logical metadata of an admitted current header, as TypeScript's `fromHeaderLine` builds it.
+/// Its strings use [`js_string`]'s spelling of JavaScript strings, so an id
+/// may hold a lone surrogate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionHeader {
     pub id: String,
@@ -353,8 +356,8 @@ pub enum Rejection {
 pub enum SubsetLimit {
     /// Node decodes invalid UTF-8 with replacement characters; this crate does not.
     InvalidUtf8,
-    /// serde_json refused input that is not proven invalid for `JSON.parse`,
-    /// such as lone surrogate escapes, deep nesting, or out-of-range numbers.
+    /// The parser refused input `JSON.parse` admits: a number whose nearest
+    /// double is infinite.
     JsonParser,
     /// A number serde_json stores as a non-negative `f64` decides the outcome:
     /// a fraction or exponent spelling, including `0.0`, or an integer above
@@ -545,7 +548,7 @@ mod tests {
             "/../../../conformance/session/header-cases.json"
         );
         let text = std::fs::read_to_string(path).expect("read header-cases.json");
-        serde_json::from_str(&text).expect("parse header-cases.json")
+        parse_json(&text).expect("parse header-cases.json")
     }
 
     /// Shared cases with `record` text and the given expectation, with the
@@ -587,13 +590,7 @@ mod tests {
                 .collect();
         errors.sort_by_key(|error| *error as u8);
         errors.dedup();
-        assert_eq!(
-            errors,
-            [
-                JsonParseError::LoneSurrogate,
-                JsonParseError::NumberOutOfRange
-            ]
-        );
+        assert_eq!(errors, [JsonParseError::NumberOutOfRange]);
     }
 
     #[test]

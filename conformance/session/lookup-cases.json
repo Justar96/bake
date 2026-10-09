@@ -1,12 +1,13 @@
 {
  "schema": "bake/session-conformance/lookup-cases",
- "version": 4,
+ "version": 5,
  "provenance": "Written from the TypeScript sources of JsonlSessionPersistence open(id, \"read\") (assertUsableRoot, ensureRootEncoding, findLog, resolveGenerationInDirectory, requireStoredLog, readGenerationHeader, decodeStoredLog, assertStoredIdentity) and format.ts encodeSegment and projectKey, before either harness ran. Restored counts reuse the source-authored expectations of restore-cases.json (tool-call-turn, packed-source-references) and zstd-cases.json (torn-checksum). No value was copied from TypeScript or Rust output.",
  "amendments": [
   "After the first TypeScript run: older-generation-only expected a restored migration, but the frozen v0 fixture is refused as unsupported (jsonl.spec.ts \"refuses the frozen pre-step V0 fixture\"); its expectation now claims that refusal, and older-generation-migrates adds the v2 log that jsonl.spec.ts restores (\"restores canonical replacement envelopes\"), with seven events after the migration adds its system head.",
   "Version 2, after code review of the first Rust candidate: cases listed in reviewAdditions were added, with expectations derived from the TypeScript sources before their first run; failure cases gained nativeDiagnostic (the Rust diagnostic operation and the case-relative path it names), native byte-budget failures are marked budget, limited cases gained platformReason, and defaults names the budgets for cases that set none. No earlier expectation changed.",
   "Version 3 adds legacy-named-directory after Windows source review, before its first run. JsonlSessionPersistence exists() opens directories on POSIX and through libuv FILE_FLAG_BACKUP_SEMANTICS on Windows, so the targeted probe refuses the legacy layout. Earlier expectations are unchanged.",
-  "Version 4 routes the Rust lookup of a plain v0, v1, or v2 generation through bake-session's in-memory released-history migration and migrated restoration, as the read open's prepareStoredMigration decodes it without publishing. older-generation-only and older-generation-migrates lose their migration-required Rust expectations. The cases listed in versionFourAdditions were added before their first run, with restored counts and refusal messages taken from the source-authored expectations of migrated-restore-cases.json (v0-clean-turn, v0-seeded-end-seed-at-cut, v1-packed-run-cited, v2-interrupted-tool-calls-get-closers, v2-clean-turn, final-check-v1-uncovered-replacement). After code review of the first candidate, the Rust lookup also migrates a Zstd v0, v1, or v2 generation as decodeStreamingMigration decodes it, so older-generation-zstd loses its migration-required Rust expectation, and older-generation-zstd-v0-torn-tail (older-generation-v0-restores' rows with its last two recovered from a torn final frame), older-generation-zstd-v1-uncommitted-frame, older-generation-zstd-header-frame, and older-generation-zstd-magic-beats-identity were added, with expectations written from generation.ts and zstd.ts before their first run. A refusal message is now matched as a substring by both arms. Earlier expectations are otherwise unchanged."
+  "Version 4 routes the Rust lookup of a plain v0, v1, or v2 generation through bake-session's in-memory released-history migration and migrated restoration, as the read open's prepareStoredMigration decodes it without publishing. older-generation-only and older-generation-migrates lose their migration-required Rust expectations. The cases listed in versionFourAdditions were added before their first run, with restored counts and refusal messages taken from the source-authored expectations of migrated-restore-cases.json (v0-clean-turn, v0-seeded-end-seed-at-cut, v1-packed-run-cited, v2-interrupted-tool-calls-get-closers, v2-clean-turn, final-check-v1-uncovered-replacement). After code review of the first candidate, the Rust lookup also migrates a Zstd v0, v1, or v2 generation as decodeStreamingMigration decodes it, so older-generation-zstd loses its migration-required Rust expectation, and older-generation-zstd-v0-torn-tail (older-generation-v0-restores' rows with its last two recovered from a torn final frame), older-generation-zstd-v1-uncommitted-frame, older-generation-zstd-header-frame, and older-generation-zstd-magic-beats-identity were added, with expectations written from generation.ts and zstd.ts before their first run. A refusal message is now matched as a substring by both arms. Earlier expectations are otherwise unchanged.",
+  "Version 5 adds path-mismatch-noncharacter-project and not-found-noncharacter-id after code review of the lone-surrogates port, before their first run, with expectations written from findLog, assertStoredIdentity, and encodeSegment: a project directory name and a requested id holding U+FDD0, a noncharacter the Rust reader doubles in its spelling of JavaScript strings, are written back once in the record. Both run on Linux and Win32 only: macOS CI showed APFS refusing the U+FDD0 directory name with EILSEQ. Earlier expectations are unchanged."
  ],
  "defaults": {
   "maxBytes": 1048576,
@@ -1675,6 +1676,55 @@
     "reason": "path-mismatch",
     "kind": "invalid",
     "path": "other/a1/session.v3.jsonl"
+   }
+  },
+  {
+   "id": "path-mismatch-noncharacter-project",
+   "platforms": [
+    "linux",
+    "win32"
+   ],
+   "platformReason": "APFS refuses a file name holding the noncharacter U+FDD0 with EILSEQ, so neither arm can lay the case out on macOS.",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a1",
+   "layout": [
+    {
+     "file": "root/other\ufdd0dir/a1/session.v3.jsonl",
+     "log": {
+      "input": "tool-call-turn"
+     }
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "identity",
+    "reason": "path-mismatch",
+    "kind": "invalid",
+    "path": "other\ufdd0dir/a1/session.v3.jsonl"
+   }
+  },
+  {
+   "id": "not-found-noncharacter-id",
+   "platforms": [
+    "linux",
+    "win32"
+   ],
+   "platformReason": "APFS may answer a path holding the noncharacter U+FDD0 with EILSEQ instead of ENOENT, which no case covers yet.",
+   "compression": "none",
+   "root": "root",
+   "sessionId": "a\ufdd0xyz1",
+   "layout": [
+    {
+     "dir": "root"
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "lookup",
+    "reason": "not-found",
+    "kind": "not-found",
+    "path": null
    }
   },
   {

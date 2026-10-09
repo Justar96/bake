@@ -19,7 +19,7 @@ use serde_json::{Map, Value};
 const SCHEMA: &str = "bake/session-conformance/row-encode-cases";
 const ORACLE: &str = "JSON.stringify(toHeaderLine(header, inheritedEventCount)) and eventLine(event) from packages/session/session-persistence-jsonl/src/format.ts; log cases join the lines and scanLog reads them back";
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 98;
+const CASE_COUNT: usize = 101;
 const SOURCE_BUDGET: usize = 64;
 const LIMITS: [&str; 5] = [
     "float-number",
@@ -58,8 +58,10 @@ fn text<'a>(value: &'a Value, context: &str) -> &'a str {
 }
 
 fn load() -> Vec<Map<String, Value>> {
-    let table: Value = serde_json::from_slice(
-        &std::fs::read(repo_path("conformance/session/row-encode-cases.json")).expect("read table"),
+    // Inputs may hold a lone surrogate, which only `parse_json` reads.
+    let table: Value = bake_session::parse_json(
+        &std::fs::read_to_string(repo_path("conformance/session/row-encode-cases.json"))
+            .expect("read table"),
     )
     .expect("parse table");
     let table = object(&table, "table");
@@ -68,7 +70,7 @@ fn load() -> Vec<Map<String, Value>> {
         BTreeSet::from(["cases", "history", "oracle", "schema", "version"])
     );
     assert_eq!(table["schema"], SCHEMA);
-    assert_eq!(table["version"], 2);
+    assert_eq!(table["version"], 3);
     assert_eq!(table["oracle"], ORACLE);
     assert!(
         table["history"]
@@ -116,7 +118,7 @@ fn reads_back(kind: &str, input: &Value, line: &str, id: &str) {
                 .unwrap_or_else(|refusal| panic!("{id}: header reads back, got {refusal:?}"));
         }
         _ => {
-            let row: Value = serde_json::from_str(line).expect("written line parses");
+            let row: Value = bake_session::parse_json(line).expect("written line parses");
             let seq = input["seq"]
                 .as_u64()
                 .expect("written event has a count seq");
@@ -148,7 +150,9 @@ fn check_log(entry: &Map<String, Value>, id: &str) {
         log.push_str(&line);
         log.push('\n');
     }
-    assert_eq!(log, text(&ts["log"], id), "{id}");
+    // The encoders write real text; the table's `log` arrives spelled.
+    let expected = bake_session::js_string::to_rust(text(&ts["log"], id));
+    assert_eq!(log, expected, "{id}");
     let scanned = scan_log(log.as_bytes(), PathPlatform::host(), SOURCE_BUDGET)
         .unwrap_or_else(|refusal| panic!("{id}: log scans, got {refusal:?}"));
     assert_eq!(scanned.committed_bytes(), log.len(), "{id}");
@@ -265,7 +269,10 @@ fn shared_cases_encode_like_the_typescript_writer() {
             }
             None if ts["outcome"] == "encoded" => {
                 let line = actual.unwrap_or_else(|refusal| panic!("{id}: {refusal:?}"));
-                assert_eq!(line, text(&ts["line"], id), "{id}");
+                // The table holds the line as a JavaScript string; the
+                // encoder writes the text itself.
+                let expected = bake_session::js_string::to_rust(text(&ts["line"], id));
+                assert_eq!(line, expected, "{id}");
                 reads_back(kind, input, &line, id);
             }
             None => assert_eq!(actual, Err(EncodeRefusal::Unadmitted), "{id}"),

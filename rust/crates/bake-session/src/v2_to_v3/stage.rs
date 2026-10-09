@@ -276,9 +276,9 @@ impl Stage {
 }
 
 /// `'v2-to-v3-system-'` and the hex SHA-256 of
-/// `JSON.stringify(['session-format-v2-to-v3', id, seq, type])`. serde_json
-/// escapes strings as `JSON.stringify` does: `"`, `\`, the short control
-/// escapes, other controls as lowercase `\u00xx`, nothing else.
+/// `JSON.stringify(['session-format-v2-to-v3', id, seq, type])`, written by
+/// [`crate::json_text`], which escapes a lone surrogate in `id` as
+/// `JSON.stringify` does.
 pub(super) fn system_message_id(session_id: &str, anchor_seq: u64, anchor_type: &str) -> String {
     let identity = Value::Array(vec![
         Value::from(IDENTITY_TAG),
@@ -286,7 +286,7 @@ pub(super) fn system_message_id(session_id: &str, anchor_seq: u64, anchor_type: 
         Value::from(anchor_seq),
         Value::from(anchor_type),
     ]);
-    let digest = Sha256::digest(identity.to_string().as_bytes());
+    let digest = Sha256::digest(crate::json_text(&identity).as_bytes());
     let mut id = String::with_capacity(SYSTEM_ID_PREFIX.len() + 64);
     id.push_str(SYSTEM_ID_PREFIX);
     for byte in digest {

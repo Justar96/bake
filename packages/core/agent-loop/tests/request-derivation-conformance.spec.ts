@@ -24,12 +24,12 @@ const FIXTURE_EXPECTED = 'conformance/runtime/request-reconstruction/tool-call-t
 const LOG_SHA256 = 'a7a8222990ef9f4c4f00a051c019de86d3156ca7f6c3c0d28af4be4cc3fbe657'
 const EXPECTED_SHA256 = '460b031e6fd308bd9ac3fd97834aad64729b2384f0f3e803c424d7502f9dfa02'
 /** Both harnesses pin the table size, so a dropped case fails. */
-const CASE_COUNT = 211
+const CASE_COUNT = 220
 /** Bounds each case's input edits. */
 const MAX_EDITS = 8
 const LIMITS = [
   'number', 'coordinate',
-  'repeated-coordinate', 'config-member', 'tool-schema', 'header', 'codec',
+  'repeated-coordinate', 'tool-schema', 'header', 'codec',
 ]
 const SEED_CHECKS = [
   'lossless-json', 'message-identity', 'message-role', 'message-source', 'message-content', 'model-source', 'tool-source',
@@ -241,11 +241,11 @@ function parseRust(value: unknown, ts: Outcome, context: string): RustOverride {
 function loadTable() {
   const table: unknown = JSON.parse(readFileSync(new URL('conformance/runtime/request-derivation-cases.json', REPO), 'utf8'))
   if (!isObject(table) || sortedKeys(table) !== 'cases,fixture,history,oracle,schema,version'
-    || table.schema !== SCHEMA || table.version !== 5 || table.oracle !== ORACLE || !Array.isArray(table.cases)
+    || table.schema !== SCHEMA || table.version !== 7 || table.oracle !== ORACLE || !Array.isArray(table.cases)
     || !Array.isArray(table.history) || !table.history.every(entry => typeof entry === 'string')
     || !isObject(table.fixture) || sortedKeys(table.fixture) !== 'expected,log'
     || table.fixture.log !== FIXTURE_LOG || table.fixture.expected !== FIXTURE_EXPECTED) {
-    throw new Error('request-derivation-cases.json does not match its version-5 schema')
+    throw new Error('request-derivation-cases.json does not match its version-7 schema')
   }
   const log = readFileSync(new URL(FIXTURE_LOG, REPO))
   const expectedBytes = readFileSync(new URL(FIXTURE_EXPECTED, REPO))

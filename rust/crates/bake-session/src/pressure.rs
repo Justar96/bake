@@ -443,13 +443,10 @@ fn pressure(usage: &Value) -> Result<JsCount, PressureLimit> {
     Ok(input.plus(&read).plus(&write))
 }
 
-/// `.length` of a JavaScript string: UTF-16 code units.
-fn utf16_len(text: &str) -> u64 {
-    text.chars().map(|c| c.len_utf16() as u64).sum()
-}
+use crate::js_string::{quoted_len, utf16_len};
 
 /// `JSON.stringify(value).length`. Member order does not change the length,
-/// a number's text is ASCII, and a restored message holds no lone surrogate.
+/// and a number's text is ASCII.
 fn stringified_len(value: &Value) -> Result<u64, PressureLimit> {
     Ok(values_len(vec![value]))
 }
@@ -496,17 +493,6 @@ fn values_len(mut pending: Vec<&Value>) -> u64 {
         };
     }
     length
-}
-
-fn quoted_len(text: &str) -> u64 {
-    2 + text
-        .chars()
-        .map(|c| match c {
-            '"' | '\\' | '\u{8}' | '\t' | '\n' | '\u{c}' | '\r' => 2,
-            c if c < ' ' => 6,
-            c => c.len_utf16() as u64,
-        })
-        .sum::<u64>()
 }
 
 fn safe(value: i64) -> Option<i64> {

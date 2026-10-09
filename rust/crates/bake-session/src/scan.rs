@@ -184,8 +184,8 @@ impl FinishRejection {
 pub enum ScanLimit {
     /// The record is not UTF-8. Node decodes it with replacement characters.
     InvalidUtf8,
-    /// The parser refused input not proven invalid for `JSON.parse`: a lone
-    /// surrogate escape or a number outside the `f64` range.
+    /// The parser refused input `JSON.parse` admits: a number outside the
+    /// `f64` range. Lone surrogates are kept.
     JsonParser,
     /// A number's integer part has more than 768 digits. serde_json 1.0.151
     /// keeps 768 significant digits and treats any further digit as nonzero

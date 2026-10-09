@@ -19,8 +19,9 @@ const _: () = assert!(CURRENT_SESSION_FORMAT_VERSION == 3);
 /// Encode one string as one safe path segment, as TypeScript's
 /// `encodeSegment` does over UTF-16 code units: ASCII letters, digits, `.`,
 /// `_`, and `-` stay literal, every other unit becomes `~XXXX`, and the whole
-/// segments `.` and `..` are escaped. TypeScript throws for an empty string,
-/// which this returns unchanged.
+/// segments `.` and `..` are escaped. `raw` uses [`crate::js_string`]'s
+/// spelling, so a lone surrogate is one unit and U+FDD0 is `~FDD0`.
+/// TypeScript throws for an empty string, which this returns unchanged.
 pub fn encode_segment(raw: &str) -> String {
     match raw {
         "." => return "~002E".into(),
@@ -28,7 +29,7 @@ pub fn encode_segment(raw: &str) -> String {
         _ => {}
     }
     let mut out = String::with_capacity(raw.len());
-    for unit in raw.encode_utf16() {
+    for unit in crate::js_string::code_units(raw) {
         push_unit(&mut out, unit);
     }
     out
@@ -39,11 +40,12 @@ pub fn encode_segment(raw: &str) -> String {
 /// or escaped as in [`encode_segment`], leading `-` are removed, an empty
 /// result is `root`, and the key keeps its first 251 units between `--` and
 /// `--`. Escapes are ASCII, so the cut can split one. TypeScript throws for
-/// an empty `cwd`, which this spells `--root--`.
+/// an empty `cwd`, which this spells `--root--`. `cwd` uses
+/// [`crate::js_string`]'s spelling.
 pub fn project_key(cwd: &str) -> String {
     let mut readable = String::with_capacity(cwd.len());
     let mut separator_run = false;
-    for unit in cwd.encode_utf16() {
+    for unit in crate::js_string::code_units(cwd) {
         if matches!(unit, 0x2F | 0x5C | 0x3A) {
             if !separator_run {
                 readable.push('-');
@@ -71,6 +73,7 @@ fn push_unit(out: &mut String, unit: u16) {
 /// TypeScript's `logPath(root, cwd, id, 'none')`: the current generation's
 /// plain log of Session `id`, beneath the project directory its `cwd` names
 /// or `_no-cwd`. `None` where TypeScript throws: an empty `id` or `cwd`.
+/// `cwd` and `id` use [`crate::js_string`]'s spelling.
 /// The parts are joined with [`Path::join`], which does not normalize `root`
 /// as Node's `join` does.
 pub fn session_log_path(root: &Path, cwd: Option<&str>, id: &str) -> Option<PathBuf> {

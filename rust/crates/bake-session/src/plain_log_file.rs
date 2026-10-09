@@ -7,11 +7,13 @@
 //!
 //! - [`PlainLogFile::create`] is the backend's `create`: the header must
 //!   encode, then the root is checked as `ensureRootEncoding` checks it,
-//!   which refuses a Session directory holding a canonical generation with
-//!   the `.zstd` suffix by TypeScript's encoding-mismatch message, naming
-//!   the highest such generation, then
-//!   the id must have no canonical generation in any project directory, as
-//!   `findLog` resolves it. Nothing is written.
+//!   which refuses a regular file named `*.jsonl` or `*.jsonl.zstd` in a
+//!   project directory by TypeScript's flat-layout message, and a Session
+//!   directory holding a canonical generation with the `.zstd` suffix by
+//!   TypeScript's encoding-mismatch message, naming the highest such
+//!   generation, then the id must have no canonical generation in any
+//!   project directory, as `findLog` resolves it after probing the id's flat
+//!   names. Nothing is written.
 //! - [`PlainLogFile::open`] is a write `open`: the root check, then `findLog`,
 //!   which must find exactly one project directory holding a canonical
 //!   generation, then the Session directory's write lock, taken before the
@@ -53,10 +55,11 @@
 //! backend instance, so two values of one Session are arbitrated by that
 //! lock alone. Dropping the value is the handle's `close`, which releases
 //! the lock. The refusals TypeScript's `SessionAlreadyExistsError`,
-//! `SessionPersistenceNotFoundError`, and duplicate-id and encoding-mismatch
-//! `Error` carry are returned with their exact messages, as are the
-//! `SessionPersistenceCorruptionError` and `SessionFormatUnsupportedError` a
-//! migration reports, which name the source path.
+//! `SessionPersistenceNotFoundError`, and duplicate-id, flat-layout, and
+//! encoding-mismatch `Error` carry are returned with their exact messages,
+//! as are the `SessionPersistenceCorruptionError` and
+//! `SessionFormatUnsupportedError` a migration reports, which name the
+//! source path.
 //!
 //! An id's directory is named by `encodeSegment` alone, as Node names it on
 //! POSIX, so an id such as `con`, `nightly.`, or `aux.txt` is laid out as
@@ -76,8 +79,8 @@
 //! that `path.resolve` leaves unchanged, with no `.` or `..` component and
 //! no trailing or repeated separator. Node lists a directory in the
 //! filesystem's order, which this model takes as byte order, so where a
-//! root holds more than one entry TypeScript refuses, the one an
-//! encoding-mismatch message names may differ.
+//! root holds more than one entry TypeScript refuses, the one a flat-layout
+//! or encoding-mismatch message names may differ.
 //!
 //! A TypeScript backend instance's in-process write claims and pending
 //! creates, which refuse a second handle of one Session within that
@@ -108,7 +111,6 @@ use serde_json::Value;
 
 use crate::fork::holds_negative_zero;
 use crate::json_parse::{Deep, dismantle};
-use crate::json_text::json_text;
 use crate::log_layout::{CURRENT_LOG_FILENAME, canonical_generation, encode_segment, log_path};
 use crate::released_rows::{ParseStop, parse_released_header, parse_released_rows};
 use crate::write_lease::{LeaseRefusal, WriteLease};
@@ -157,6 +159,14 @@ pub enum LogFileRefusal {
     /// exact message, which names that generation's path. Nothing was
     /// written.
     EncodingMismatch { message: String },
+    /// The flat legacy layout: a project directory holds a regular file
+    /// named `*.jsonl` or `*.jsonl.zstd`, which `listSessionDirs` refuses, or
+    /// `findLog`'s `rejectLegacyFlatArtifact` opened
+    /// `<project>/<encoded id>.jsonl.zstd` or `.jsonl`. That probe opens a
+    /// directory too, so a Session directory `nightly.jsonl` refuses the id
+    /// `nightly`. TypeScript's `legacyLayout` throws a plain `Error` with
+    /// this exact message, which names the path. Nothing was written.
+    LegacyLayout { message: String },
     /// Migrating an older generation found it corrupt; TypeScript throws
     /// `SessionPersistenceCorruptionError` with this exact message, which
     /// names the source path. No file was written.
@@ -188,6 +198,7 @@ impl LogFileRefusal {
             | Self::NotFound { message }
             | Self::Duplicate { message }
             | Self::EncodingMismatch { message }
+            | Self::LegacyLayout { message }
             | Self::Corrupt { message }
             | Self::Unsupported { message } => Some(message),
             Self::Append(refusal) => refusal.message(),
@@ -214,10 +225,6 @@ pub enum LogFileLimit {
     /// Windows would not keep as a directory name. A POSIX path platform
     /// lays such an id out as TypeScript does.
     WindowsName,
-    /// A project directory holds an entry whose name ends in `.jsonl` or
-    /// `.jsonl.zstd`. TypeScript refuses a file named so as the flat legacy
-    /// layout, and probes the id's flat names by opening them.
-    LegacyLayout,
     /// The root or a project directory lists a name that is not UTF-8, which
     /// Node lists with replacement characters and then opens by that spelling.
     NonUtf8Name,
@@ -236,9 +243,9 @@ pub enum LogFileLimit {
     /// this crate does not decide. Nothing was written. The name is one of:
     ///
     /// - `header/<name>` or `row/<name>`: the header or a row is not UTF-8
-    ///   (`invalid-utf8`), holds a lone-surrogate escape or a number beyond
-    ///   the double range, which `JSON.parse` admits and the parser, which
-    ///   reads any nesting depth, refuses (`json-parser`), or a number has
+    ///   (`invalid-utf8`), holds a number beyond the double range, which
+    ///   `JSON.parse` admits and the parser, which reads any nesting depth
+    ///   and keeps lone surrogates, refuses (`json-parser`), or a number has
     ///   more integer digits than
     ///   serde_json rounds as `JSON.parse` does (`number-lexeme`), as
     ///   [`crate::ScanLimit`] describes them; or the header's version or a
@@ -272,7 +279,8 @@ impl PlainLogFile {
     /// The backend's `create(header, { inheritedEventCount })` in `root`.
     /// The header is checked as [`PlainAppendLog::create`] checks it, then
     /// the root, then every project directory for a canonical generation of
-    /// the id. No file or directory is written.
+    /// the id. No file or directory is written. The header's strings use
+    /// [`crate::js_string`]'s spelling, as [`crate::parse_json`] returns them.
     pub fn create(
         root: &Path,
         header: &Value,
@@ -301,7 +309,8 @@ impl PlainLogFile {
 
     /// The backend's write `open(id)` in `root`, scanning the current
     /// generation's bytes with this host's path platform and `source_budget`,
-    /// as [`PlainAppendLog::open`] does.
+    /// as [`PlainAppendLog::open`] does. `id` uses [`crate::js_string`]'s
+    /// spelling: [`crate::js_string::from_rust`] spells an argument.
     pub fn open(root: &Path, id: &str, source_budget: usize) -> Result<Self, LogFileRefusal> {
         if id.is_empty() {
             return Err(LogFileRefusal::NativeSubset(LogFileLimit::EmptyId));
@@ -370,7 +379,8 @@ impl PlainLogFile {
             released_generation_header(&bytes, selected.version, platform).map_err(refusal)?
         {
             if stored.id != id {
-                let path = selected.path.display();
+                let path = selected.path.display().to_string();
+                let path = crate::js_string::from_rust(&path);
                 return Err(refusal(ReleasedGenerationRefusal::Corrupt(format!(
                     "Error: corrupt session log \"{path}\": requested id \"{id}\" \
                      does not match header id \"{}\"",
@@ -517,7 +527,8 @@ pub enum ReleasedGenerationRefusal {
 impl ReleasedGenerationRefusal {
     /// The backend's `generationFailure` translation.
     fn into_refusal(self, id: &str, selected: &Generation) -> LogFileRefusal {
-        let source = selected.path.display();
+        let source = selected.path.display().to_string();
+        let source = crate::js_string::from_rust(&source);
         match self {
             Self::Corrupt(cause) => LogFileRefusal::Corrupt {
                 message: format!(
@@ -907,10 +918,11 @@ fn duplicate(id: &str, found: &[Generation]) -> Option<LogFileRefusal> {
 }
 
 /// One listed entry: its name when it is UTF-8, and whether it is a
-/// directory, symlinks not followed.
+/// directory or a regular file, symlinks not followed.
 struct Entry {
     name: Option<String>,
     is_dir: bool,
+    is_file: bool,
 }
 
 /// The listing of `dir`, UTF-8 names in byte order before the others, or
@@ -924,8 +936,10 @@ fn list(dir: &Path) -> Result<Option<Vec<Entry>>, LogFileRefusal> {
     let mut listed = Vec::new();
     for entry in entries {
         let entry = entry?;
+        let kind = entry.file_type()?;
         listed.push(Entry {
-            is_dir: entry.file_type()?.is_dir(),
+            is_dir: kind.is_dir(),
+            is_file: kind.is_file(),
             name: entry.file_name().into_string().ok(),
         });
     }
@@ -965,14 +979,15 @@ fn find_generations(root: &Path, encoded: &str) -> Result<Vec<Generation>, LogFi
     for project in &projects {
         let project_dir = root.join(project);
         // `listSessionDirs` refuses a flat file before any Session directory
-        // of the project is checked.
+        // of the project is checked; a directory with that suffix is a
+        // Session directory, since it checks `isFile()`.
         let mut sessions = Vec::new();
         for entry in list(&project_dir)?.unwrap_or_default() {
             let Some(name) = entry.name else {
                 return Err(NON_UTF8_NAME);
             };
-            if name.ends_with(".jsonl") || name.ends_with(".jsonl.zstd") {
-                return Err(LogFileRefusal::NativeSubset(LogFileLimit::LegacyLayout));
+            if entry.is_file && (name.ends_with(".jsonl") || name.ends_with(".jsonl.zstd")) {
+                return Err(legacy_layout(&project_dir.join(name)));
             }
             if entry.is_dir {
                 sessions.push(name);
@@ -991,7 +1006,15 @@ fn find_generations(root: &Path, encoded: &str) -> Result<Vec<Generation>, LogFi
     }
     let mut found = Vec::new();
     for project in &projects {
-        let dir = root.join(project).join(encoded);
+        let project_dir = root.join(project);
+        // `rejectLegacyFlatArtifact` probes the id's flat names first.
+        for suffix in [".jsonl.zstd", ".jsonl"] {
+            let path = project_dir.join(format!("{encoded}{suffix}"));
+            if probe_exists(&path)? {
+                return Err(legacy_layout(&path));
+            }
+        }
+        let dir = project_dir.join(encoded);
         let names = utf8_names(&dir)?;
         // `resolveGenerationInDirectory` names the first one it lists.
         if let Some(name) = names
@@ -1014,6 +1037,38 @@ fn find_generations(root: &Path, encoded: &str) -> Result<Vec<Generation>, LogFi
     Ok(found)
 }
 
+/// `exists(path)`: whether `open(path, 'r')` succeeds, following a symlink;
+/// only an absent path is false. libuv opens with `O_RDONLY` on POSIX and
+/// with `FILE_FLAG_BACKUP_SEMANTICS` on Windows (`fs__open` in
+/// `src/win/fs.c`), so a directory exists on both.
+fn probe_exists(path: &Path) -> Result<bool, LogFileRefusal> {
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.custom_flags(0x0200_0000); // FILE_FLAG_BACKUP_SEMANTICS
+    }
+    match options.open(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error.into()),
+    }
+}
+
+/// TypeScript's `legacyLayout(path)`, which spells `path` with
+/// `JSON.stringify`.
+fn legacy_layout(path: &Path) -> LogFileRefusal {
+    let path = path.display().to_string();
+    let spelled = crate::js_string::quote(&crate::js_string::from_rust(&path));
+    LogFileRefusal::LegacyLayout {
+        message: format!(
+            "session artifact {spelled} uses the unsupported flat-file layout; use a separate \
+             root or move it into a project/session directory before loading"
+        ),
+    }
+}
+
 /// The generation a canonical name with the `.zstd` suffix carries,
 /// `parseGenerationLogFilename(name, 'zstd')`.
 fn opposite_generation(name: &str) -> Option<u64> {
@@ -1023,7 +1078,8 @@ fn opposite_generation(name: &str) -> Option<u64> {
 /// TypeScript's `encodingMismatch(path)` of a backend configured for
 /// compression `none`, which spells `path` with `JSON.stringify`.
 fn encoding_mismatch(path: &Path) -> LogFileRefusal {
-    let spelled = json_text(&Value::String(path.display().to_string()));
+    let path = path.display().to_string();
+    let spelled = crate::js_string::quote(&crate::js_string::from_rust(&path));
     LogFileRefusal::EncodingMismatch {
         message: format!(
             "session artifact {spelled} uses .jsonl.zstd, but this backend is configured for \

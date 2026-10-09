@@ -69,7 +69,7 @@ interface Selected { sourcePath: string; sourceVersion: number }
 interface StoredPrefix { tornTruncateTo?: number; recoveredTail: unknown[]; events: unknown[] }
 
 const REPO = new URL('../../../../', import.meta.url)
-const CASE_COUNT = 100
+const CASE_COUNT = 102
 const RESTORED_KEYS = ['outcome', 'path', 'header', 'storedEventCount', 'closerCount', 'messageCount',
   'inheritedEventCount', 'endSeedAppended', 'torn']
 const table = JSON.parse(readFileSync(new URL('conformance/session/lookup-cases.json', REPO), 'utf8')) as Table
@@ -345,7 +345,7 @@ afterAll(async () => {
 describe('shared Session lookup cases', () => {
   it('pins the inputs, the table, and its expectations', () => {
     expect(table.schema).toBe('bake/session-conformance/lookup-cases')
-    expect(table.version).toBe(4)
+    expect(table.version).toBe(5)
     expect(table.defaults).toEqual({ maxBytes: 1048576, maxSourceSeqs: 64, maxEntries: 1024 })
     for (const additions of [table.reviewAdditions, table.versionFourAdditions]) {
       expect(additions.every(id => table.cases.some(entry => entry.id === id))).toBe(true)

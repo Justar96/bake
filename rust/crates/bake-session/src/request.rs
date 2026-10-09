@@ -40,9 +40,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Map, Value};
 
-#[cfg(doc)]
-use crate::json_parse::dismantle;
-use crate::json_parse::{Deep, DeepJson, clone_fields, clone_value, values_equal};
+use crate::json_parse::{Deep, DeepJson, clone_fields, clone_value, dismantle, values_equal};
 use crate::json_text::json_number_text;
 use crate::offload::{Decision, OffloadRejection, Target, Walk, offload_images};
 
@@ -822,7 +820,10 @@ impl Request {
     ///
     /// The members are the latest header's `config` members, then `messages`,
     /// `toolHistory`, `tools` when that header declares tools, and
-    /// `sessionId`. The tool history is the `ToolHistoryProjection` snapshot
+    /// `sessionId`, as `{...header.config, messages, ...}` builds them: a
+    /// `config` member of one of those names keeps its place and takes the
+    /// later value, and a `config` member `tools` stays when the header
+    /// declares none. The tool history is the `ToolHistoryProjection` snapshot
     /// of the prefix. Equal values do not imply equal provider wire bytes or
     /// member order; [`crate::json_text`] of the value is the text
     /// `JSON.stringify` writes for the request TypeScript derives.
@@ -831,8 +832,15 @@ impl Request {
     /// [`crate::dismantle`] rather than recursively.
     pub fn to_json(&self) -> Value {
         let mut request = clone_fields(&self.config);
-        request.insert(
-            "messages".to_owned(),
+        // A `config` member of the same name keeps its place; its copy, of
+        // any depth, is dropped without recursing.
+        let mut set = |key: &str, value: Value| {
+            if let Some(replaced) = request.insert(key.to_owned(), value) {
+                dismantle(replaced);
+            }
+        };
+        set(
+            "messages",
             Value::Array(
                 self.messages
                     .iter()
@@ -841,17 +849,14 @@ impl Request {
                     .collect(),
             ),
         );
-        request.insert(
-            "toolHistory".to_owned(),
+        set(
+            "toolHistory",
             history_json(&self.history_tools, &self.updates),
         );
         if let Some(tools) = &self.tools {
-            request.insert("tools".to_owned(), Value::Array(tools.deep_clone()));
+            set("tools", Value::Array(tools.deep_clone()));
         }
-        request.insert(
-            "sessionId".to_owned(),
-            Value::String(self.session_id.clone()),
-        );
+        set("sessionId", Value::String(self.session_id.clone()));
         Value::Object(request)
     }
 }

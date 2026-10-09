@@ -103,8 +103,8 @@ fn discover(root: &Path, args: &ListArgs) -> Step<Vec<Value>> {
                 "duplicate-id",
                 Kind::Invalid,
                 format!(
-                    "Session {:?} appears in more than one Session directory",
-                    header.id
+                    "Session {} appears in more than one Session directory",
+                    crate::quoted_id(&header.id)
                 ),
                 None,
             ));

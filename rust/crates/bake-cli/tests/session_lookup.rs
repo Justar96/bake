@@ -24,7 +24,7 @@ use serde_json::Value;
 
 /// Process creation dominates; this bounds a hung child, never a result.
 const DEADLINE: Duration = Duration::from_secs(60);
-const CASE_COUNT: usize = 100;
+const CASE_COUNT: usize = 102;
 
 fn repo_path(relative: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -442,7 +442,7 @@ fn lookups_reach_the_shared_tables_stages_and_leave_the_root_unchanged() {
         tables.lookup["schema"],
         "bake/session-conformance/lookup-cases"
     );
-    assert_eq!(tables.lookup["version"], 4);
+    assert_eq!(tables.lookup["version"], 5);
     let cases = tables.lookup["cases"].as_array().unwrap();
     assert_eq!(cases.len(), CASE_COUNT);
     let probe = Scratch::new("probe");
@@ -494,9 +494,9 @@ fn lookups_reach_the_shared_tables_stages_and_leave_the_root_unchanged() {
         ran += 1;
     }
     let expected_runs = if cfg!(target_os = "linux") {
-        96
+        98
     } else if cfg!(windows) {
-        75
+        77
     } else {
         93
     };

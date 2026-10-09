@@ -65,13 +65,20 @@ fn repo_path(relative: &str) -> PathBuf {
 fn read_json(relative: &str) -> Value {
     let text = std::fs::read_to_string(repo_path(relative))
         .unwrap_or_else(|error| panic!("read {relative}: {error}"));
-    serde_json::from_str(&text).unwrap_or_else(|error| panic!("parse {relative}: {error}"))
+    // Tables may hold lone surrogates, which only `parse_json` reads.
+    bake_session::parse_json(&text).unwrap_or_else(|error| panic!("parse {relative}: {error:?}"))
 }
 
 fn text<'a>(value: &'a Value, context: &str) -> &'a str {
     value
         .as_str()
         .unwrap_or_else(|| panic!("{context}: expected a string, got {value}"))
+}
+
+/// A table string as the text it stands for: tables are read with
+/// `parse_json`, so a lone surrogate or U+FDD0 arrives spelled.
+fn raw(value: &Value, context: &str) -> String {
+    bake_session::js_string::to_rust(text(value, context)).into_owned()
 }
 
 fn index(value: &Value, context: &str) -> usize {
@@ -184,7 +191,7 @@ impl Collector {
         let Some(Value::Object(mut header)) = file_text
             .split('\n')
             .next()
-            .and_then(|line| serde_json::from_str::<Value>(line).ok())
+            .and_then(|line| bake_session::parse_json(line).ok())
         else {
             return;
         };
@@ -196,7 +203,8 @@ impl Collector {
 /// A table value that is either a row's text or the row itself.
 fn value_line(value: &Value) -> String {
     match value {
-        Value::String(line) => line.clone(),
+        // A table holds a row's text as a JavaScript string.
+        Value::String(line) => bake_session::js_string::to_rust(line).into_owned(),
         other => json_text(other),
     }
 }
@@ -220,7 +228,7 @@ fn named_log(logs: &Value, name: &str) -> Vec<String> {
             .as_array()
             .unwrap_or_else(|| panic!("{name}: lines"))
             .iter()
-            .map(|line| text(line, name).to_owned())
+            .map(|line| raw(line, name))
             .collect(),
         other => panic!("{name}: unknown log {other}"),
     }
@@ -243,7 +251,7 @@ fn pointer_parent<'a>(root: &'a mut Value, pointer: &str) -> (&'a mut Value, Str
 
 /// A row edited at `pointer`, re-serialized; `None` removes the member.
 fn edit_row(line: &str, pointer: &str, value: Option<&Value>) -> String {
-    let mut row: Value = serde_json::from_str(line).expect("an edited row parses");
+    let mut row: Value = bake_session::parse_json(line).expect("an edited row parses");
     let (parent, key) = pointer_parent(&mut row, pointer);
     match (parent, value) {
         (Value::Array(items), Some(value)) => {
@@ -265,7 +273,7 @@ fn edit_row(line: &str, pointer: &str, value: Option<&Value>) -> String {
         }
         _ => panic!("{pointer}: no container"),
     }
-    serde_json::to_string(&row).expect("a row")
+    bake_session::json_text(&row)
 }
 
 /// Apply the row edits the case tables share to `lines` (header first).
@@ -280,17 +288,17 @@ fn apply_edits(lines: &mut Vec<String>, tail: &mut String, edits: &Value, case: 
         let row = || index(&edit["row"], case) + 1;
         match keys.as_slice() {
             ["truncate"] => lines.truncate(index(&edit["truncate"], case) + 1),
-            ["header"] => lines[0] = text(&edit["header"], case).to_owned(),
+            ["header"] => lines[0] = raw(&edit["header"], case),
             ["append"] => lines.push(value_line(&edit["append"])),
-            ["tail"] => text(&edit["tail"], case).clone_into(tail),
+            ["tail"] => *tail = raw(&edit["tail"], case),
             ["row", "text"] => {
                 let row = row();
-                lines[row] = text(&edit["text"], case).to_owned();
+                lines[row] = raw(&edit["text"], case);
             }
             ["find", "replace", "row"] => {
                 let row = row();
                 lines[row] =
-                    lines[row].replacen(text(&edit["find"], case), text(&edit["replace"], case), 1);
+                    lines[row].replacen(&raw(&edit["find"], case), &raw(&edit["replace"], case), 1);
             }
             ["pointer", "row", "value"] => {
                 let row = row();
@@ -386,10 +394,7 @@ fn request_derivation_cases(table: &Value, collector: &mut Collector) {
         let (mut lines, mut tail) = match &case["log"] {
             Value::String(name) if name == "fixture" => (file_lines(fixture), String::new()),
             Value::Array(lines) => (
-                lines
-                    .iter()
-                    .map(|line| text(line, &id).to_owned())
-                    .collect(),
+                lines.iter().map(|line| raw(line, &id)).collect(),
                 String::new(),
             ),
             other => panic!("{id}: unknown log {other}"),
@@ -403,10 +408,7 @@ fn request_derivation_cases(table: &Value, collector: &mut Collector) {
 fn row_cases(table: &Value, collector: &mut Collector) {
     for case in cases(table) {
         let id = case_id(case);
-        let lines = vec![
-            SYNTHETIC_HEADER.to_owned(),
-            text(&case["row"], &id).to_owned(),
-        ];
+        let lines = vec![SYNTHETIC_HEADER.to_owned(), raw(&case["row"], &id)];
         collector.plain(&id, lines, String::new());
     }
     if let Some(fixture) = table
@@ -483,8 +485,8 @@ fn plain_append_cases(table: &Value, collector: &mut Collector) {
             collector.events(&id, &create["header"], &appended, inherited);
         }
         if let Some(open) = case.get("open") {
-            collector.plain_text(&id, text(open, &id));
-            collector.opened_events(&id, text(open, &id), &appended);
+            collector.plain_text(&id, &raw(open, &id));
+            collector.opened_events(&id, &raw(open, &id), &appended);
         }
     }
 }
@@ -494,7 +496,7 @@ fn plain_log_file_cases(table: &Value, collector: &mut Collector) {
         let id = case_id(case);
         for seed in case["seed"].as_array().expect("seed") {
             if let Some(file_text) = seed.get("text") {
-                collector.plain_text(&id, text(file_text, &id));
+                collector.plain_text(&id, &raw(file_text, &id));
             }
         }
         let steps = case["steps"].as_array().expect("steps");
@@ -518,7 +520,7 @@ fn plain_log_file_cases(table: &Value, collector: &mut Collector) {
                 .iter()
                 .find_map(|seed| seed.get("text"));
             if let Some(file_text) = seeded {
-                collector.opened_events(&id, text(file_text, &id), &appended);
+                collector.opened_events(&id, &raw(file_text, &id), &appended);
             }
         }
     }
@@ -531,20 +533,20 @@ fn layout_cases(table: &Value, collector: &mut Collector) {
         let id = case_id(case);
         for entry in case["layout"].as_array().expect("layout") {
             if let Some(file_text) = entry.get("text") {
-                collector.plain_text(&id, text(file_text, &id));
+                collector.plain_text(&id, &raw(file_text, &id));
             } else if let Some(frames) = entry.get("frames") {
                 let plaintext: String = frames
                     .as_array()
                     .expect("frames")
                     .iter()
-                    .map(|frame| text(frame, &id))
+                    .map(|frame| raw(frame, &id))
                     .collect();
                 collector.plain_text(&id, &plaintext);
             } else if let Some(log) = entry.get("log") {
                 let input = &table["inputs"][text(&log["input"], &id)];
                 let mut lines = file_lines(text(&input["path"], &id));
                 if let Some(header) = log.get("header") {
-                    lines[0] = text(header, &id).to_owned();
+                    lines[0] = raw(header, &id);
                 }
                 let mut tail = String::new();
                 apply_edits(&mut lines, &mut tail, &log["edits"], &id);
@@ -569,11 +571,11 @@ fn log_scan_cases(table: &Value, collector: &mut Collector) {
                 .as_array()
                 .expect("lines")
                 .iter()
-                .map(|line| text(line, &id).to_owned())
+                .map(|line| raw(line, &id))
                 .collect();
             let tail = case
                 .get("tail")
-                .map_or_else(String::new, |tail| text(tail, &id).to_owned());
+                .map_or_else(String::new, |tail| raw(tail, &id));
             collector.plain(&id, lines, tail);
         }
     }
@@ -585,7 +587,7 @@ fn header_cases(table: &Value, collector: &mut Collector) {
         let id = case_id(case);
         let version = case.get("sourceVersion").and_then(Value::as_u64);
         if let Some(record) = case.get("record") {
-            let (lines, tail) = split_text(text(record, &id));
+            let (lines, tail) = split_text(&raw(record, &id));
             collector.plain_at(&id, lines, tail, version);
         } else if let Some(bytes_hex) = case.get("bytesHex") {
             hex_log(collector, &id, text(bytes_hex, &id), version);

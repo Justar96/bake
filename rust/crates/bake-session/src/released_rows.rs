@@ -10,8 +10,8 @@
 //! row `JSON.parse` rejects is the issue: no later row reaches a codec, and a
 //! later row parsing as an object whose `type` is `turn/end` throws the
 //! issue. Rows and the header parse at any nesting depth, as `JSON.parse`
-//! reads them. Where this crate's parser and `JSON.parse` may disagree, at a
-//! lone-surrogate escape or a number beyond the double range, the parse ends
+//! reads them, lone surrogates kept. Where this crate's parser and
+//! `JSON.parse` disagree, at a number beyond the double range, the parse ends
 //! at a named limit instead.
 
 use serde_json::Value;

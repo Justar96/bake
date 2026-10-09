@@ -25,7 +25,7 @@ const REPO = new URL('../../../../', import.meta.url)
 const SCHEMA = 'bake/session-format-conformance/relationships-cases'
 const ORACLE = 'assertReleasedArtifactRelationships({header, inheritedEventCount, events}, extensions) from session-format-v0-to-v1'
 /** Both harnesses pin the table size, so a dropped case fails. */
-const CASE_COUNT = 182
+const CASE_COUNT = 184
 /** Native limits: input outside the precondition, and an inherited member `deepEqualJson` reads through `in`. */
 const LIMITS = ['precondition', 'prototype-member']
 const SURFACE_TYPES = new Set(['user/message', 'assistant/message', 'tool/result'])
@@ -127,9 +127,9 @@ function parseCase(value: unknown): RelationshipCase {
 function loadCases(): RelationshipCase[] {
   const table: unknown = JSON.parse(readFileSync(new URL('conformance/session/relationships-cases.json', REPO), 'utf8'))
   if (!isObject(table) || sortedKeys(table) !== 'cases,history,oracle,schema,version'
-    || table.schema !== SCHEMA || table.version !== 1 || table.oracle !== ORACLE || !Array.isArray(table.cases)
+    || table.schema !== SCHEMA || table.version !== 2 || table.oracle !== ORACLE || !Array.isArray(table.cases)
     || !Array.isArray(table.history) || !table.history.every(entry => typeof entry === 'string')) {
-    throw new Error('relationships-cases.json does not match its version-1 schema')
+    throw new Error('relationships-cases.json does not match its version-2 schema')
   }
   const cases = table.cases.map(parseCase)
   if (new Set(cases.map(entry => entry.id)).size !== cases.length) throw new Error('case ids must be unique')

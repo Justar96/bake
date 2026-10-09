@@ -624,7 +624,7 @@ fn version_label(value: Option<&Value>) -> Option<String> {
 /// and joined, so a key containing a comma can complete an expected list.
 fn sorted_keys(fields: &Map<String, Value>) -> String {
     let mut keys: Vec<&str> = fields.keys().map(String::as_str).collect();
-    keys.sort_by(|left, right| left.encode_utf16().cmp(right.encode_utf16()));
+    keys.sort_by(|left, right| crate::js_string::cmp_code_units(left, right));
     keys.join(",")
 }
 

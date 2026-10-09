@@ -114,15 +114,15 @@ fn array_index(key: &str) -> Option<u32> {
         .filter(|index| canonical && *index != u32::MAX)
 }
 
-/// `JSON.stringify` of a string, which escapes exactly what serde_json does.
-pub(crate) fn quote(text: &str) -> String {
-    Value::from(text).to_string()
-}
+pub(crate) use crate::js_string::quote;
 
 /// `JSON.stringify(value)` concatenated into a message, `undefined` when
 /// absent. Every number prints as JavaScript prints its value.
 pub(crate) fn stringify(value: Option<&Value>) -> String {
-    value.map_or_else(|| "undefined".to_owned(), json_text)
+    value.map_or_else(
+        || "undefined".to_owned(),
+        |value| crate::js_string::from_rust(&json_text(value)).into_owned(),
+    )
 }
 
 /// `releasedV0Record`.

@@ -40,7 +40,10 @@ impl JsCount {
     pub fn plus(&self, other: &Self) -> Self {
         match (self, other) {
             (Self::Number(left), Self::Number(right)) => Self::Number(left + right),
-            _ => Self::String(format!("{}{}", self.to_js_string(), other.to_js_string())),
+            _ => Self::String(crate::js_string::concat(
+                &self.to_js_string(),
+                &other.to_js_string(),
+            )),
         }
     }
 

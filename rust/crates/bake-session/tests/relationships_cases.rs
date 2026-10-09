@@ -17,7 +17,7 @@ use serde_json::{Map, Value};
 const SCHEMA: &str = "bake/session-format-conformance/relationships-cases";
 const ORACLE: &str = "assertReleasedArtifactRelationships({header, inheritedEventCount, events}, extensions) from session-format-v0-to-v1";
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 182;
+const CASE_COUNT: usize = 184;
 const LIMITS: [&str; 2] = ["precondition", "prototype-member"];
 
 #[derive(Debug, PartialEq, Eq)]
@@ -58,8 +58,11 @@ fn text<'a>(value: &'a Value, context: &str) -> &'a str {
         .unwrap_or_else(|| panic!("{context}: expected a string"))
 }
 
+/// A row the table holds as text. The table is read with `parse_json`, so the
+/// text arrives spelled and is parsed as the real text it stands for.
 fn parse_text(value: &Value, context: &str) -> Value {
-    serde_json::from_str(text(value, context)).unwrap_or_else(|error| panic!("{context}: {error}"))
+    bake_session::parse_json(&bake_session::js_string::to_rust(text(value, context)))
+        .unwrap_or_else(|error| panic!("{context}: {error:?}"))
 }
 
 fn index(value: &Value, context: &str) -> u64 {
@@ -131,14 +134,16 @@ fn load() -> Vec<Case> {
     let text_value =
         std::fs::read_to_string(repo_path("conformance/session/relationships-cases.json"))
             .expect("read relationships-cases.json");
-    let table: Value = serde_json::from_str(&text_value).expect("parse relationships-cases.json");
+    // Expected messages use `parse_json`'s spelling, as rejection messages do.
+    let table: Value =
+        bake_session::parse_json(&text_value).expect("parse relationships-cases.json");
     let fields = object(&table, "table");
     assert_eq!(
         keys(fields),
         BTreeSet::from(["schema", "version", "oracle", "history", "cases"])
     );
     assert_eq!(table["schema"], SCHEMA);
-    assert_eq!(table["version"], 1);
+    assert_eq!(table["version"], 2);
     assert_eq!(table["oracle"], ORACLE);
     assert!(
         table["history"]

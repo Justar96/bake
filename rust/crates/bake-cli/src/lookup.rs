@@ -50,7 +50,8 @@ use std::fs::{self, DirEntry};
 use std::io;
 use std::path::{Path, PathBuf};
 
-pub use bake_session::{encode_segment, project_key};
+pub use bake_session::js_string::from_rust;
+use bake_session::{encode_segment, project_key};
 
 use bake_session::{
     CURRENT_SESSION_FORMAT_VERSION, FinalCheckRefusal, HeaderRefusal, MigratedRestoreRefusal,
@@ -121,7 +122,7 @@ pub(crate) fn check_root(spelled: &OsStr, resolved: &Path) -> Step<()> {
             "non-utf8-name",
             format!(
                 "the resolved root {} is not UTF-8, which this preview does not read",
-                resolved.display()
+                from_rust(&resolved.display().to_string())
             ),
         ));
     }
@@ -218,9 +219,11 @@ pub(crate) struct Selected {
 }
 
 impl Selected {
-    /// The root-relative path, with `/` separators.
+    /// The root-relative path, with `/` separators, spelled for a record:
+    /// a listed name may hold U+FDD0.
     pub(crate) fn relative(&self) -> String {
-        format!("{}/{}/{}", self.project, self.session, self.name)
+        let relative = format!("{}/{}/{}", self.project, self.session, self.name);
+        from_rust(&relative).into_owned()
     }
 
     pub(crate) fn path(&self, root: &Path) -> PathBuf {
@@ -314,7 +317,9 @@ impl<'a> Scan<'a> {
         }
     }
 
+    /// `path` is built from listed names, and is spelled here for the record.
     fn mismatch(&self, path: String) -> Stop {
+        let path = from_rust(&path).into_owned();
         refused(
             self.stage,
             "encoding-mismatch",
@@ -332,7 +337,9 @@ impl<'a> Scan<'a> {
         )
     }
 
+    /// `path` is built from listed names, and is spelled here for the record.
     fn legacy(&self, path: String) -> Stop {
+        let path = from_rust(&path).into_owned();
         refused(
             self.stage,
             "legacy-layout",
@@ -371,7 +378,8 @@ impl<'a> Scan<'a> {
                 "duplicate-id",
                 Kind::Invalid,
                 format!(
-                    "Session {id:?} appears in {} project directories",
+                    "Session {} appears in {} project directories",
+                    crate::quoted_id(id),
                     matches.len()
                 ),
                 None,
@@ -519,7 +527,10 @@ fn non_utf8(stage: &'static str, subject: &str) -> Stop {
         stage,
         "non-utf8-name",
         Kind::NativeLimit,
-        format!("{subject} is not named in UTF-8, which this preview does not read"),
+        format!(
+            "{} is not named in UTF-8, which this preview does not read",
+            from_rust(subject)
+        ),
         None,
     )
 }
@@ -619,7 +630,7 @@ pub fn run(args: &InspectArgs, lookup: &LookupArgs) -> Result<(Value, u8), Strin
                     "lookup",
                     "not-found",
                     Kind::NotFound,
-                    format!("no Session {:?} in the root", lookup.id),
+                    format!("no Session {} in the root", crate::quoted_id(&lookup.id)),
                     None,
                 )
             })
@@ -850,8 +861,9 @@ pub(crate) fn check_identity(
             "id-mismatch",
             Kind::Invalid,
             format!(
-                "{relative} has header id {:?}, not the requested {expected:?}",
-                header.id
+                "{relative} has header id {}, not the requested {}",
+                crate::quoted_id(&header.id),
+                crate::quoted_id(expected)
             ),
             Some(relative.to_owned()),
         ));

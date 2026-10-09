@@ -1,13 +1,15 @@
 {
   "schema": "bake/session-conformance/restore-cases",
-  "version": 4,
+  "version": 6,
   "oracle": "restorePlainLog(log) in packages/session/session-persistence-jsonl/tests/restore-conformance.spec.ts: scanLog, validateStoredEvents, interruptedTurnClosers, then Session.fromRestore(..., \"detached\", currentSessionMessageProjections)",
   "history": [
     "Version 1: 57 cases. Rust refused known ignorable rows and image/offload as the native limits ignorable and event-type.",
     "Version 2: Rust restores image/offload with the catalog projection and known ignorable rows. The ignorable and event-type limits are removed and projection added. known-ignorable-hook-result and known-ignorable-user-message lose their rust overrides, and known-ignorable-tool-update and image-offload name restore causes; their version-1 TypeScript outcomes are unchanged. The 42 cases after unknown-type-before-fallback-header were written from the TypeScript sources before either harness ran.",
     "Round 2 of version 2 added 19 cases for the independent review's obligations, written from the TypeScript sources before either harness ran on them.",
     "Version 3: Rust restores every number spelled as JSON.stringify writes its value. usage-fraction and context-fraction lose their rust overrides; their version-2 TypeScript outcomes are unchanged. negative-zero-in-user-message still witnesses the number limit, which remains for spellings no writer produces.",
-    "Version 4: Rust restores payloads of any depth, which it parses, copies, compares, and drops without recursing, and the depth limit is removed. user-message-depth loses its rust override; its version-3 TypeScript outcome is unchanged."
+    "Version 4: Rust restores payloads of any depth, which it parses, copies, compares, and drops without recursing, and the depth limit is removed. user-message-depth loses its rust override; its version-3 TypeScript outcome is unchanged.",
+    "Version 5: 122 cases. Rust carries a request header's config members outside LlmCallConfig through restoration as TypeScript does, and the config-member limit is removed. config-member loses its rust override; its version-4 TypeScript outcome is unchanged. config-object-member, config-index-member, config-proto-member, and config-duplicate-member were written from the TypeScript sources before either harness ran, and both harnesses now also compare the restored request header as JSON.stringify text, so member order, array-index keys first, is checked.",
+    "Version 6: 124 cases. Rust holds lone surrogates. lone-surrogate-user-text, written from the TypeScript sources before either harness ran, restores a user message whose text holds a lone high and a lone low surrogate. noncharacter-user-text, written the same way, restores a user message whose text holds U+FDD0, which the table holds as real text."
   ],
   "logs": {
     "tool-call-turn": "conformance/runtime/request-reconstruction/tool-call-turn/session.jsonl",
@@ -75,6 +77,142 @@
         }
       },
       "production": true
+    },
+    {
+      "id": "lone-surrogate-user-text",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"text\":\"go\"",
+          "replace": "\"text\":\"\\ud83dgo\\udc00\""
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 4545,
+        "storedEventCount": 16,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      },
+      "production": true,
+      "note": "The user text holds a lone high and a lone low surrogate, which restoration keeps in the restored message."
+    },
+    {
+      "id": "noncharacter-user-text",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 5,
+          "find": "\"text\":\"go\"",
+          "replace": "\"text\":\"\ufdd0go\""
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 4536,
+        "storedEventCount": 16,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      },
+      "production": true,
+      "note": "The user text holds U+FDD0, the noncharacter Rust doubles in its spelling of JavaScript strings; the harnesses write the edit as real text, so the log holds it once."
     },
     {
       "id": "dynamic-tools",
@@ -2894,10 +3032,287 @@
           "provider": "mock",
           "model": "mock"
         }
-      },
-      "rust": {
-        "outcome": "native-subset",
-        "limit": "config-member"
+      }
+    },
+    {
+      "id": "config-object-member",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 6,
+          "find": "\"config\":{\"provider\":\"mock\",\"model\":\"mock\"}",
+          "replace": "\"config\":{\"provider\":\"mock\",\"model\":\"mock\",\"routing\":{\"region\":\"eu\",\"weights\":[1,{\"a\":null}]}}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 4584,
+        "storedEventCount": 16,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock",
+            "routing": {
+              "region": "eu",
+              "weights": [
+                1,
+                {
+                  "a": null
+                }
+              ]
+            }
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      }
+    },
+    {
+      "id": "config-index-member",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 6,
+          "find": "\"config\":{\"provider\":\"mock\",\"model\":\"mock\"}",
+          "replace": "\"config\":{\"provider\":\"mock\",\"model\":\"mock\",\"7\":\"seven\",\"10\":[1]}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 4554,
+        "storedEventCount": 16,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "7": "seven",
+            "10": [
+              1
+            ],
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      }
+    },
+    {
+      "id": "config-proto-member",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 6,
+          "find": "\"config\":{\"provider\":\"mock\",\"model\":\"mock\"}",
+          "replace": "\"config\":{\"provider\":\"mock\",\"model\":\"mock\",\"__proto__\":{\"polluted\":true}}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 4563,
+        "storedEventCount": 16,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "provider": "mock",
+            "model": "mock",
+            "__proto__": {
+              "polluted": true
+            }
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
+      }
+    },
+    {
+      "id": "config-duplicate-member",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 6,
+          "find": "\"config\":{\"provider\":\"mock\",\"model\":\"mock\"}",
+          "replace": "\"config\":{\"purpose\":\"a\",\"provider\":\"mock\",\"model\":\"mock\",\"purpose\":\"b\"}"
+        }
+      ],
+      "ts": {
+        "outcome": "restored",
+        "header": {
+          "version": 3,
+          "id": "a1",
+          "createdAt": 1791337579861,
+          "isSeeded": false,
+          "delegationDepth": 0
+        },
+        "inheritedEventCount": 0,
+        "committedBytes": 4561,
+        "storedEventCount": 16,
+        "closers": [],
+        "endSeedAppended": true,
+        "messages": [
+          {
+            "$log": "/4/data/message"
+          },
+          {
+            "$log": "/5/data"
+          },
+          {
+            "$log": "/8/data/message"
+          },
+          {
+            "$log": "/10/data/message"
+          },
+          {
+            "$log": "/13/data/message"
+          }
+        ],
+        "requestHeader": {
+          "config": {
+            "purpose": "b",
+            "provider": "mock",
+            "model": "mock"
+          },
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ]
+        },
+        "toolHistory": {
+          "tools": [
+            {
+              "$log": "/6/data/header/tools/0"
+            }
+          ],
+          "updates": []
+        },
+        "requestContext": {
+          "provider": "mock",
+          "model": "mock"
+        }
       }
     },
     {

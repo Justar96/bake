@@ -68,11 +68,12 @@ fn absolute_root(text: &str) -> Result<&Path, Failure> {
     Ok(root)
 }
 
-fn nonempty_id(text: &str) -> Result<&str, Failure> {
+/// A nonempty id argument, spelled as `bake_session` holds a Session id.
+fn nonempty_id(text: &str) -> Result<String, Failure> {
     if text.is_empty() {
         return Err(Failure::Usage("id must not be empty".to_owned()));
     }
-    Ok(text)
+    Ok(bake_session::js_string::from_rust(text).into_owned())
 }
 
 /// A decimal safe integer with no sign, as the `seq` argument.
@@ -180,9 +181,11 @@ fn run() -> Result<ExitCode, Failure> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     match args.as_slice() {
-        ["hold", root, id] => run_hold(absolute_root(root)?, nonempty_id(id)?),
-        ["hold-open", root, id] => run_hold_open(absolute_root(root)?, nonempty_id(id)?),
-        ["open", root, id, seq] => run_open(absolute_root(root)?, nonempty_id(id)?, safe_seq(seq)?),
+        ["hold", root, id] => run_hold(absolute_root(root)?, &nonempty_id(id)?),
+        ["hold-open", root, id] => run_hold_open(absolute_root(root)?, &nonempty_id(id)?),
+        ["open", root, id, seq] => {
+            run_open(absolute_root(root)?, &nonempty_id(id)?, safe_seq(seq)?)
+        }
         _ => Err(Failure::Usage(
             "expected hold|hold-open <absolute-root> <id>, or open <absolute-root> <id> <seq>"
                 .to_owned(),

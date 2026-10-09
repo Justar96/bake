@@ -1,6 +1,6 @@
 {
   "schema": "bake/session-conformance/plain-log-file-cases",
-  "version": 7,
+  "version": 9,
   "oracle": "in an owned temporary root holding the seeded entries, run each step through the JSONL backend with compression none on the step's handle, a or b, each its own backend instance over the root: create, a write open, or the open handle's append, flush, or close; after each step list every file beneath the root with its text, an empty session.lock by its size",
   "history": [
     "Version 1: 33 cases, written from the TypeScript sources before either harness ran; both arms passed on their first run.",
@@ -10,7 +10,9 @@
     "Version 4: 63 cases. Rust runs the catalog's final check of a migrated log, so outside-domain-final-check became migrate-final-check-turn-order with TypeScript's exact message and no rust override, and 2 cases were added: a final-check refusal of a v0 source and a v2 TOOL_NOT_STARTED repair the final check admits. The changed and added expectations were written from the TypeScript sources before either harness ran. Both arms passed without any expectation change.",
     "Version 5: 64 cases. Rust writes numbers as JSON.stringify writes them, so encode-fraction-written, a fraction in free data, has no Rust limit, and limit-encode now witnesses the encode limit with a source member spelled 0.0; both were written from the TypeScript sources before either harness ran.",
     "Version 6: 69 cases. Rust ports TypeScript's encoding-mismatch refusal, so limit-opposite-encoding became encoding-mismatch-at-open with TypeScript's exact message, and a message may hold a {srcJson} placeholder, the step's src path as JSON.stringify spells it, which a create step may also name. Rust lays out Windows names as TypeScript does on POSIX, so limit-windows-name became three POSIX cases, con, nightly., and aux.txt, created and reopened in both arms, and a win32 case for nightly., the spelling a Windows writer can produce, where Rust keeps the windows-name limit. Two cases were added for the root check: the highest Zstd generation is named, and a flat file is refused first. The changed and added expectations were written from the TypeScript sources before either harness ran.",
-    "Version 7: 70 cases. Rust reads older-generation rows at any nesting depth, so migrate-v2-deep-tool-schema, a v2 request header whose row nests 207 levels through its MCP tool schema, migrates unchanged in both arms; it was written from the TypeScript sources before either harness ran."
+    "Version 7: 70 cases. Rust reads older-generation rows at any nesting depth, so migrate-v2-deep-tool-schema, a v2 request header whose row nests 207 levels through its MCP tool schema, migrates unchanged in both arms; it was written from the TypeScript sources before either harness ran.",
+    "Version 8: 73 cases. Rust ports TypeScript's flat-layout refusal, so the legacy-layout limit is removed: limit-legacy-layout became legacy-layout-flat-file-at-create with TypeScript's exact message, and legacy-layout-before-encoding-mismatch lost its rust override. The root check refuses only a regular file with the flat-layout suffix, as listSessionDirs does, and the id's flat names are probed by opening them, as rejectLegacyFlatArtifact does. session-directory-named-jsonl creates, reopens, and lists a Session directory nightly.jsonl; legacy-probe-finds-session-directory refuses the id nightly beside it at open and create; legacy-layout-file-refused-at-open keeps a flat file refused at open. The changed and added expectations were written from the TypeScript sources before either harness ran.",
+    "Version 9: 75 cases. Rust holds lone surrogates, so limit-row-json-parser, whose lone-surrogate row follows an issue, became migrate-lone-surrogate-row-ignored with no rust override, and migrate-lone-surrogates-kept, written from the TypeScript sources before either harness ran, write-opens a v0 Session whose id and user text hold lone surrogates, laid out as h~D800 and migrated with them written back as JSON.stringify writes them. legacy-layout-noncharacter-path, written from the TypeScript sources before either harness ran, names a flat file holding U+FDD0 in the flat-layout message. legacy-layout-noncharacter-path runs on Linux and Win32 only: macOS CI showed APFS refusing a U+FDD0 file name with EILSEQ."
   ],
   "cases": [
     {
@@ -2154,7 +2156,7 @@
       "note": "Reading seq of null throws an engine TypeError."
     },
     {
-      "id": "limit-legacy-layout",
+      "id": "legacy-layout-flat-file-at-create",
       "seed": [
         {
           "file": "_no-cwd/l1.jsonl",
@@ -2171,20 +2173,18 @@
             "isSeeded": false,
             "delegationDepth": 0
           },
+          "src": "_no-cwd/l1.jsonl",
           "ts": {
             "outcome": "thrown",
-            "class": "Error"
-          },
-          "rust": {
-            "outcome": "native-subset",
-            "limit": "legacy-layout"
+            "class": "Error",
+            "message": "session artifact {srcJson} uses the unsupported flat-file layout; use a separate root or move it into a project/session directory before loading"
           },
           "tree": {
             "_no-cwd/l1.jsonl": "x\n"
           }
         }
       ],
-      "note": "The root check refuses the flat file whatever id is created; its message names the absolute path."
+      "note": "The root check refuses the flat file whatever id is created, naming its absolute path with JSON.stringify."
     },
     {
       "id": "encoding-mismatch-at-open",
@@ -2301,10 +2301,6 @@
             "class": "Error",
             "message": "session artifact {srcJson} uses the unsupported flat-file layout; use a separate root or move it into a project/session directory before loading"
           },
-          "rust": {
-            "outcome": "native-subset",
-            "limit": "legacy-layout"
-          },
           "tree": {
             "_no-cwd/a1/session.v3.jsonl.zstd": "x",
             "_no-cwd/z.jsonl": "x\n"
@@ -2312,6 +2308,216 @@
         }
       ],
       "note": "A project's flat file is refused before any of its Session directories is checked, so the Zstd generation listed first is not named."
+    },
+    {
+      "id": "session-directory-named-jsonl",
+      "seed": [],
+      "steps": [
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": "nightly.jsonl",
+            "createdAt": 1,
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {}
+        },
+        {
+          "step": "flush",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/nightly.jsonl/session.lock": "",
+            "_no-cwd/nightly.jsonl/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"nightly.jsonl\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "close",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/nightly.jsonl/session.lock": "",
+            "_no-cwd/nightly.jsonl/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"nightly.jsonl\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "open",
+          "handle": "b",
+          "id": "nightly.jsonl",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/nightly.jsonl/session.lock": "",
+            "_no-cwd/nightly.jsonl/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"nightly.jsonl\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "close",
+          "handle": "b",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/nightly.jsonl/session.lock": "",
+            "_no-cwd/nightly.jsonl/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"nightly.jsonl\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "create",
+          "handle": "b",
+          "header": {
+            "version": 3,
+            "id": "other",
+            "createdAt": 1,
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/nightly.jsonl/session.lock": "",
+            "_no-cwd/nightly.jsonl/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"nightly.jsonl\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        }
+      ],
+      "note": "encodeSegment keeps the id nightly.jsonl, so the writer creates a Session directory of that name; listSessionDirs refuses only a file with the flat-layout suffix, so a fresh backend's root check, run by its open, admits the directory and reopens the log; that backend's later create of another id reuses the cached root check and witnesses the probe and lookup for that id."
+    },
+    {
+      "id": "legacy-probe-finds-session-directory",
+      "seed": [
+        {
+          "file": "_no-cwd/nightly/session.v3.jsonl",
+          "text": "{\"type\":\"session\",\"version\":3,\"id\":\"nightly\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+        },
+        {
+          "file": "_no-cwd/nightly.jsonl/session.v3.jsonl",
+          "text": "{\"type\":\"session\",\"version\":3,\"id\":\"nightly.jsonl\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "nightly",
+          "src": "_no-cwd/nightly.jsonl",
+          "ts": {
+            "outcome": "thrown",
+            "class": "Error",
+            "message": "session artifact {srcJson} uses the unsupported flat-file layout; use a separate root or move it into a project/session directory before loading"
+          },
+          "tree": {
+            "_no-cwd/nightly.jsonl/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"nightly.jsonl\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n",
+            "_no-cwd/nightly/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"nightly\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": "nightly",
+            "createdAt": 1,
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "src": "_no-cwd/nightly.jsonl",
+          "ts": {
+            "outcome": "thrown",
+            "class": "Error",
+            "message": "session artifact {srcJson} uses the unsupported flat-file layout; use a separate root or move it into a project/session directory before loading"
+          },
+          "tree": {
+            "_no-cwd/nightly.jsonl/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"nightly.jsonl\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n",
+            "_no-cwd/nightly/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"nightly\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "open",
+          "id": "nightly.jsonl",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/nightly.jsonl/session.lock": "",
+            "_no-cwd/nightly.jsonl/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"nightly.jsonl\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n",
+            "_no-cwd/nightly/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"nightly\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        }
+      ],
+      "note": "The root check admits both Session directories, but findLog's rejectLegacyFlatArtifact opens <project>/nightly.jsonl for the id nightly, and open(path, 'r') succeeds on a directory (libuv opens with O_RDONLY on POSIX and FILE_FLAG_BACKUP_SEMANTICS on Windows), so the id nightly is refused at open and at create before any lock is taken, naming the directory's absolute path; the id nightly.jsonl probes nightly.jsonl.jsonl[.zstd] and opens."
+    },
+    {
+      "id": "legacy-layout-file-refused-at-open",
+      "seed": [
+        {
+          "file": "_no-cwd/f1.jsonl",
+          "text": "x\n"
+        },
+        {
+          "file": "_no-cwd/s1/session.v3.jsonl",
+          "text": "{\"type\":\"session\",\"version\":3,\"id\":\"s1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "s1",
+          "src": "_no-cwd/f1.jsonl",
+          "ts": {
+            "outcome": "thrown",
+            "class": "Error",
+            "message": "session artifact {srcJson} uses the unsupported flat-file layout; use a separate root or move it into a project/session directory before loading"
+          },
+          "tree": {
+            "_no-cwd/f1.jsonl": "x\n",
+            "_no-cwd/s1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"s1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        }
+      ],
+      "note": "A regular file with the flat-layout suffix is still refused by the root check, before the id is looked up and before any lock is taken."
+    },
+    {
+      "id": "legacy-layout-noncharacter-path",
+      "platforms": [
+        "linux",
+        "win32"
+      ],
+      "platformReason": "APFS refuses a file name holding the noncharacter U+FDD0 with EILSEQ, so neither arm can lay the case out on macOS.",
+      "seed": [
+        {
+          "file": "_no-cwd/l\ufdd0.jsonl",
+          "text": "x\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": "l3",
+            "createdAt": 1,
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "src": "_no-cwd/l\ufdd0.jsonl",
+          "ts": {
+            "outcome": "thrown",
+            "class": "Error",
+            "message": "session artifact {srcJson} uses the unsupported flat-file layout; use a separate root or move it into a project/session directory before loading"
+          },
+          "tree": {
+            "_no-cwd/l\ufdd0.jsonl": "x\n"
+          }
+        }
+      ],
+      "note": "The flat-layout message spells a path holding U+FDD0 as JSON.stringify does, which writes the noncharacter literally."
     },
     {
       "id": "limit-non-utf8-name",
@@ -2723,7 +2929,7 @@
       "note": "The turn/end row rethrows the issue."
     },
     {
-      "id": "limit-row-json-parser",
+      "id": "migrate-lone-surrogate-row-ignored",
       "seed": [
         {
           "file": "_no-cwd/hist/session.jsonl",
@@ -2737,10 +2943,6 @@
           "ts": {
             "outcome": "ok"
           },
-          "rust": {
-            "outcome": "native-subset",
-            "limit": "migration/row/json-parser"
-          },
           "tree": {
             "_no-cwd/hist/session.jsonl": "{\"type\":\"session\",\"version\":0,\"id\":\"hist\",\"createdAt\":1000,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"request/header\",\"seq\":2,\"time\":1003,\"data\":{\"header\":{\"config\":{\"provider\":\"p\",\"model\":\"m\"},\"system\":\"sys\"},\"reason\":\"initial\"}}\n{\"type\":\"user/message\",\"seq\":3,\"time\":1004,\"data\":{\"role\":\"user\",\"id\":\"u1\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"assistant/message\",\"seq\":4,\"time\":1005,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"a1\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}],\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"}}},\"surfaceOp\":\"append\"}\n{\"type\":\"step/end\",\"seq\":5,\"time\":1006,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":6,\"time\":1007,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\nnot json\n{\"type\":\"x\",\"s\":\"\\ud800\"}\n",
             "_no-cwd/hist/session.lock": "",
@@ -2748,7 +2950,31 @@
           }
         }
       ],
-      "note": "JSON.parse admits the lone surrogate and ignores the row; serde_json refuses it."
+      "note": "JSON.parse admits the lone surrogate; the recoverable codec ignores the row after the issue."
+    },
+    {
+      "id": "migrate-lone-surrogates-kept",
+      "seed": [
+        {
+          "file": "_no-cwd/h~D800/session.jsonl",
+          "text": "{\"type\":\"session\",\"version\":0,\"id\":\"h\\ud800\",\"createdAt\":1000,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"request/header\",\"seq\":2,\"time\":1003,\"data\":{\"header\":{\"config\":{\"provider\":\"p\",\"model\":\"m\"},\"system\":\"sys\"},\"reason\":\"initial\"}}\n{\"type\":\"user/message\",\"seq\":3,\"time\":1004,\"data\":{\"role\":\"user\",\"id\":\"u1\",\"content\":[{\"type\":\"text\",\"text\":\"\\ud83dhi\\udc00\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"assistant/message\",\"seq\":4,\"time\":1005,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"a1\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}],\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"}}},\"surfaceOp\":\"append\"}\n{\"type\":\"step/end\",\"seq\":5,\"time\":1006,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":6,\"time\":1007,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "h\ud800",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/h~D800/session.jsonl": "{\"type\":\"session\",\"version\":0,\"id\":\"h\\ud800\",\"createdAt\":1000,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"request/header\",\"seq\":2,\"time\":1003,\"data\":{\"header\":{\"config\":{\"provider\":\"p\",\"model\":\"m\"},\"system\":\"sys\"},\"reason\":\"initial\"}}\n{\"type\":\"user/message\",\"seq\":3,\"time\":1004,\"data\":{\"role\":\"user\",\"id\":\"u1\",\"content\":[{\"type\":\"text\",\"text\":\"\\ud83dhi\\udc00\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"assistant/message\",\"seq\":4,\"time\":1005,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"a1\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}],\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"}}},\"surfaceOp\":\"append\"}\n{\"type\":\"step/end\",\"seq\":5,\"time\":1006,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":6,\"time\":1007,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n",
+            "_no-cwd/h~D800/session.lock": "",
+            "_no-cwd/h~D800/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"h\\ud800\",\"createdAt\":1000,\"isSeeded\":false,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"system/message\",\"seq\":2,\"time\":1002,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"v2-to-v3-system-29f8f9a3712b2593d3554003071aaba0126fc19fb8bb342b44c0d7c8a144643b\",\"role\":\"system\",\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"content\":[]}},\"surfaceOp\":\"append\"}\n{\"type\":\"system/message\",\"seq\":3,\"time\":1003,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"v2-to-v3-system-cb51c658b715cfc98d820745b987a80b6078e032975bf661009c5c5ce34ca0a9\",\"role\":\"system\",\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"content\":[{\"type\":\"text\",\"text\":\"sys\"}]}},\"surfaceOp\":{\"op\":\"replace\",\"startSeq\":2,\"endSeq\":2},\"sourceEventSeqs\":[2]}\n{\"type\":\"request/header\",\"seq\":4,\"time\":1003,\"data\":{\"header\":{\"config\":{\"provider\":\"p\",\"model\":\"m\"}},\"reason\":\"initial\"}}\n{\"type\":\"user/message\",\"seq\":5,\"time\":1004,\"data\":{\"role\":\"user\",\"id\":\"u1\",\"content\":[{\"type\":\"text\",\"text\":\"\\ud83dhi\\udc00\"}],\"source\":{\"kind\":\"user\"}},\"surfaceOp\":\"append\"}\n{\"type\":\"assistant/message\",\"seq\":6,\"time\":1005,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"a1\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}],\"source\":{\"kind\":\"model\",\"provider\":\"p\",\"model\":\"m\"}},\"stream\":[]},\"surfaceOp\":\"append\"}\n{\"type\":\"step/end\",\"seq\":7,\"time\":1006,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"turn/end\",\"seq\":8,\"time\":1007,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n"
+          }
+        }
+      ],
+      "note": "A Session id holding a lone surrogate lays out as h~D800, and its v0 log migrates with the lone surrogates in the header id, the user text, and the system message ids' digest input written back as JSON.stringify writes them."
     },
     {
       "id": "migrate-final-check-turn-order",

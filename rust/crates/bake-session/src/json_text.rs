@@ -10,7 +10,9 @@
 //! [`json_text`] writes a whole value: object members in JavaScript
 //! enumeration order, array-index keys first, and strings escaped as
 //! `JSON.stringify` escapes them, which is the escaping serde_json applies to
-//! a Rust string.
+//! a Rust string, except that a lone surrogate held in the
+//! [`crate::js_string`] spelling is written as a lowercase `\udxxx` escape and
+//! a doubled U+FDD0 as one literal U+FDD0.
 //!
 //! [`is_writer_spelling`] holds when serde_json stores a number as it stores
 //! the text `JSON.stringify` writes for its value. A released writer produces
@@ -19,6 +21,7 @@
 
 use serde_json::{Map, Number, Value};
 
+use crate::js_string;
 use crate::request::js_members;
 
 /// `JSON.stringify` of a double: `Number::toString` when finite, else `null`.
@@ -150,7 +153,7 @@ fn write_json(root: Piece<'_>, text: &mut String) {
 }
 
 fn write_string(string: &str, text: &mut String) {
-    text.push_str(&Value::String(string.to_owned()).to_string());
+    js_string::push_quoted(text, string);
 }
 
 #[cfg(test)]
