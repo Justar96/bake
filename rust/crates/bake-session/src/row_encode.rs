@@ -25,7 +25,8 @@ use std::collections::HashSet;
 
 use serde_json::{Map, Value};
 
-use crate::v2_to_v3::{quote, stringify};
+use crate::json_text::{is_writer_spelling, json_text};
+use crate::v2_to_v3::quote;
 use crate::v3_row::{Vocabulary, vocabulary};
 use crate::{
     CURRENT_SESSION_FORMAT_VERSION, Count, EnvelopeRejection, MAX_SAFE_INTEGER, PathPlatform,
@@ -48,11 +49,12 @@ pub enum EncodeRefusal {
 /// Input whose TypeScript outcome this encoder does not reproduce.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EncodeLimit {
-    /// A number serde_json holds as neither a safe integer nor a zero: a
-    /// fraction or exponent spelling, or an integer beyond 2^53 − 1. It is
-    /// either read as a count, where JavaScript admits the integral ones, or
-    /// written, where this crate does not reproduce JavaScript's spelling.
-    /// Zeros are written as `0`, as JavaScript writes 0 and -0.
+    /// A number read as a count (a seq, a header count, or a source list
+    /// member) that serde_json holds as an `f64` spelled other than
+    /// `JSON.stringify` writes its value, such as `1.0` or `1e3`, where
+    /// JavaScript admits the integral ones. A count spelled as a writer
+    /// spells it is decided by value, and every number outside a count is
+    /// written as `JSON.stringify` writes it.
     FloatNumber,
     /// The event or header is `null`; TypeScript reads a property of it and
     /// throws a `TypeError`.
@@ -115,8 +117,8 @@ pub fn encode_header_line(
     // `Some(None)` is a count this crate does not decide.
     let counted = |value: Option<&Value>| match value.and_then(count) {
         Some(Count::Safe(number)) => Some(Some(number)),
-        Some(Count::Undecided) => Some(None),
-        None => None,
+        Some(Count::Undecided) if !is_writer_float(value) => Some(None),
+        _ => None,
     };
     let version = counted(fields.get("version"));
     // `toHeaderLine` spreads `delegationDepth ?? 0`, so the member is always present.
@@ -216,8 +218,10 @@ pub fn encode_event_line(event: &Value) -> Result<String, EncodeRefusal> {
     // `assertV3Event` counts every seq, so an invalid one always throws.
     let seq = match fields.get("seq").and_then(count) {
         Some(Count::Safe(seq)) => seq,
-        Some(Count::Undecided) => return limit(EncodeLimit::FloatNumber),
-        None => return unadmitted(),
+        Some(Count::Undecided) if !is_writer_float(fields.get("seq")) => {
+            return limit(EncodeLimit::FloatNumber);
+        }
+        _ => return unadmitted(),
     };
     let Some(Value::String(event_type)) = fields.get("type") else {
         // `assertV3Event` requires a string type.
@@ -250,7 +254,14 @@ pub fn encode_event_line(event: &Value) -> Result<String, EncodeRefusal> {
             | V3RowRefusal::ExpectedSeqOutOfRange,
         ) => return unadmitted(),
     }
-    stringify(Some(&row)).or_else(|_| limit(EncodeLimit::FloatNumber))
+    Ok(json_text(&row))
+}
+
+/// Whether `value` is an `f64` spelled as `JSON.stringify` writes its value:
+/// a fraction or an integer of at least 2^63 in magnitude, which is never a
+/// safe count.
+fn is_writer_float(value: Option<&Value>) -> bool {
+    matches!(value, Some(Value::Number(number)) if is_writer_spelling(number))
 }
 
 /// A surface's logical list, which `assertV3Event` requires to be a
@@ -264,7 +275,11 @@ fn surface_sources(sources: &Value) -> Result<Vec<u64>, EncodeRefusal> {
         return unadmitted();
     }
     let counts: Vec<Option<Count>> = members.iter().map(count).collect();
-    if counts.iter().any(Option::is_none) {
+    if counts.iter().any(Option::is_none)
+        || members.iter().any(|member| {
+            matches!(count(member), Some(Count::Undecided)) && is_writer_float(Some(member))
+        })
+    {
         return unadmitted();
     }
     counts
@@ -289,11 +304,20 @@ fn opaque_sources(sources: &Value, seq: u64) -> Result<Vec<u64>, EncodeRefusal> 
     let mut seqs = Vec::with_capacity(members.len());
     let mut readable = true;
     for member in members {
+        // A writer-spelled fraction or unsafe integer is copied into a list
+        // the strict decoder refuses.
+        let writer_unsafe = || {
+            if is_writer_float(Some(member)) {
+                limit(EncodeLimit::UnreadableRow)
+            } else {
+                limit(EncodeLimit::FloatNumber)
+            }
+        };
         let Some(number) = member.as_i64() else {
-            return limit(EncodeLimit::FloatNumber);
+            return writer_unsafe();
         };
         if number.unsigned_abs() > MAX_SAFE_INTEGER {
-            return limit(EncodeLimit::FloatNumber);
+            return writer_unsafe();
         }
         match u64::try_from(number) {
             Ok(source) if source < seq => seqs.push(source),

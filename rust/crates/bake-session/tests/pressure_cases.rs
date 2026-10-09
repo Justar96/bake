@@ -10,7 +10,7 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use bake_session::{
-    ContextPressureState, PathPlatform, PressureLimit, PressureRefusal, RequestRoute,
+    ContextPressureState, JsCount, PathPlatform, PressureLimit, PressureRefusal, RequestRoute,
     context_pressure, restore_plain_log,
 };
 use serde_json::{Map, Value, json};
@@ -36,7 +36,7 @@ const LOGS: [(&str, &str, usize); 3] = [
     ),
 ];
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 37;
+const CASE_COUNT: usize = 41;
 const SOURCE_BUDGET: usize = 64;
 const LIMITS: [(&str, PressureLimit); 7] = [
     ("number", PressureLimit::Number),
@@ -148,7 +148,7 @@ fn load() -> Vec<Case> {
         BTreeSet::from(["cases", "history", "logs", "oracle", "schema", "version"])
     );
     assert_eq!(table["schema"], SCHEMA);
-    assert_eq!(table["version"], 2);
+    assert_eq!(table["version"], 3);
     assert!(
         table["history"]
             .as_array()
@@ -194,23 +194,29 @@ fn optional(fields: &mut Map<String, Value>, key: &str, value: Option<Value>) {
     }
 }
 
-/// The folded state and its view in the table's form.
+/// A double as `JSON.stringify` writes it, read back.
+fn number(value: f64) -> Value {
+    JsCount::Number(value).to_json()
+}
+
+/// The folded state and its view in the table's form: their
+/// `JSON.stringify` text, read back.
 fn folded_value(state: &ContextPressureState) -> Value {
     let mut fields = Map::new();
     optional(
         &mut fields,
         "contextWindow",
-        state.context_window.map(Value::from),
+        state.context_window.map(number),
     );
     optional(
         &mut fields,
         "sampledContextWindow",
-        state.sampled_context_window.map(Value::from),
+        state.sampled_context_window.map(number),
     );
     optional(
         &mut fields,
         "pressureTokens",
-        state.pressure_tokens.map(Value::from),
+        state.pressure_tokens.as_ref().map(JsCount::to_json),
     );
     optional(
         &mut fields,
@@ -230,15 +236,11 @@ fn folded_value(state: &ContextPressureState) -> Value {
     );
     let view = state.view();
     let mut wire = Map::new();
-    optional(
-        &mut wire,
-        "contextWindow",
-        view.context_window.map(Value::from),
-    );
+    optional(&mut wire, "contextWindow", view.context_window.map(number));
     optional(
         &mut wire,
         "sampledContextWindow",
-        view.sampled_context_window.map(Value::from),
+        view.sampled_context_window.map(number),
     );
     optional(
         &mut wire,
@@ -253,12 +255,12 @@ fn folded_value(state: &ContextPressureState) -> Value {
     optional(
         &mut wire,
         "pressureTokens",
-        view.pressure_tokens.map(Value::from),
+        view.pressure_tokens.as_ref().map(JsCount::to_json),
     );
     optional(
         &mut wire,
         "projectedTokens",
-        view.projected_tokens.map(Value::from),
+        view.projected_tokens.map(number),
     );
     json!({"outcome": "folded", "state": fields, "view": wire})
 }
@@ -336,22 +338,42 @@ fn shared_cases_fold_like_the_context_pressure_projection() {
     assert_eq!(limits, all, "every limit is witnessed");
 }
 
-/// `view` is total over hand-built states: a sum past `i64` saturates and a
-/// negative one floors at 0, as the definition's `Math.max(0, …)` does.
+/// `view` computes in doubles over hand-built states: a sum past 2^53
+/// rounds, a negative one floors at 0 as `Math.max(0, …)` does, and a string
+/// pressure concatenates the surface total before the subtraction.
 #[test]
-fn hand_built_view_saturates() {
+fn hand_built_view_computes_in_doubles() {
     let huge = ContextPressureState {
-        pressure_tokens: Some(i64::MAX),
+        pressure_tokens: Some(JsCount::Number(9_007_199_254_740_992.0)),
         sampled_surface_tokens: Some(0),
         surface_tokens: 1,
         ..Default::default()
     };
-    assert_eq!(huge.view().projected_tokens, Some(i64::MAX));
+    assert_eq!(huge.view().projected_tokens, Some(9_007_199_254_740_992.0));
     let negative = ContextPressureState {
-        pressure_tokens: Some(i64::MIN),
-        sampled_surface_tokens: Some(i64::MAX),
+        pressure_tokens: Some(JsCount::Number(-5.0)),
+        sampled_surface_tokens: Some(1),
         surface_tokens: -1,
         ..Default::default()
     };
-    assert_eq!(negative.view().projected_tokens, Some(0));
+    assert_eq!(negative.view().projected_tokens, Some(0.0));
+    let string = ContextPressureState {
+        pressure_tokens: Some(JsCount::String("12".to_owned())),
+        sampled_surface_tokens: Some(30),
+        surface_tokens: 34,
+        ..Default::default()
+    };
+    // "12" + 34 is "1234".
+    assert_eq!(string.view().projected_tokens, Some(1204.0));
+    let not_a_number = ContextPressureState {
+        pressure_tokens: Some(JsCount::String("x".to_owned())),
+        sampled_surface_tokens: Some(0),
+        ..Default::default()
+    };
+    assert!(
+        not_a_number
+            .view()
+            .projected_tokens
+            .is_some_and(f64::is_nan)
+    );
 }

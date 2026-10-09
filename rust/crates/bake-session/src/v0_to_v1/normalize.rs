@@ -605,7 +605,8 @@ pub(crate) fn assert_event_payload(
     assert_released_payload_semantics(event_type, seq, data, version)
 }
 
-/// `value === 3`, undecided for a non-negative `f64`.
+/// `value === 3`, false for an `f64` a writer spells, which is never
+/// integral below 2^63, and undecided for another non-negative `f64`.
 fn is_three(value: Option<&Value>) -> Checked<bool> {
     let Some(Value::Number(number)) = value else {
         return Ok(false);
@@ -613,7 +614,10 @@ fn is_three(value: Option<&Value>) -> Checked<bool> {
     if let Some(number) = number.as_u64() {
         return Ok(number == 3);
     }
-    if number.is_i64() || number.as_f64().is_some_and(f64::is_sign_negative) {
+    if number.is_i64()
+        || number.as_f64().is_some_and(f64::is_sign_negative)
+        || crate::json_text::is_writer_spelling(number)
+    {
         return Ok(false);
     }
     limit("payload-float-lexeme")

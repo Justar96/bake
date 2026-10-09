@@ -15,15 +15,19 @@
 //!
 //! Numbers: serde_json with `float_roundtrip` holds the double `JSON.parse`
 //! produces, so threshold comparisons on finite numbers are exact. Integer
-//! checks follow the crate's float-lexeme rule instead: an `f64` that is not
-//! negative (or -0 for safe integers) reports a native limit, because the
-//! crate does not claim JavaScript's reading of integral float spellings.
+//! checks decide an `f64` spelled as `JSON.stringify` writes its value
+//! (`is_writer_spelling`) by that value, which is a fraction or lies outside
+//! the integer range serde_json stores exactly, so the check fails as it
+//! fails in TypeScript. Any other non-negative `f64` spelling (or -0 for safe
+//! integers), such as `3.0` or `1e3`, reports a native limit, because no
+//! writer produces it.
 
 use std::collections::HashSet;
 
 use serde_json::{Map, Value};
 
 use super::StageError;
+use crate::json_text::is_writer_spelling;
 use crate::{Count, MAX_SAFE_INTEGER};
 
 pub(crate) type Checked<T = ()> = Result<T, StageError>;
@@ -45,12 +49,19 @@ fn float_lexeme() -> StageError {
     StageError::NativeLimit(FLOAT_LEXEME.to_owned())
 }
 
+/// Whether `value` is a number whose spelling a writer produces. Such an
+/// `f64` is a fraction or an integer at least 2^63 in magnitude, neither of
+/// which is a safe integer or equals a count.
+fn is_writer_float(value: Option<&Value>) -> bool {
+    matches!(value, Some(Value::Number(number)) if is_writer_spelling(number))
+}
+
 /// `sessionFormatCount`.
 pub(crate) fn count(value: Option<&Value>, label: &str) -> Checked<u64> {
     match value.and_then(crate::count) {
         Some(Count::Safe(number)) => Ok(number),
-        Some(Count::Undecided) => Err(float_lexeme()),
-        None => invalid(format!("{label} must be a non-negative safe integer")),
+        Some(Count::Undecided) if !is_writer_float(value) => Err(float_lexeme()),
+        _ => invalid(format!("{label} must be a non-negative safe integer")),
     }
 }
 
@@ -67,7 +78,7 @@ pub(super) fn safe_integer(value: Option<&Value>, label: &str) -> Checked<i64> {
             refused()
         };
     }
-    if number.is_u64() || number.as_f64().is_some_and(is_negative_zero) {
+    if number.is_u64() || number.as_f64().is_some_and(is_negative_zero) || is_writer_float(value) {
         return refused();
     }
     Err(float_lexeme())
@@ -276,6 +287,7 @@ fn literal_value(value: Option<&Value>, allowed: &[Literal], label: &str) -> Che
                     match number.as_f64() {
                         // -0 === 0; a negative never equals a count.
                         Some(number) if number.is_sign_negative() => number == *expected as f64,
+                        _ if is_writer_float(value) => false,
                         _ => return Err(float_lexeme()),
                     }
                 }

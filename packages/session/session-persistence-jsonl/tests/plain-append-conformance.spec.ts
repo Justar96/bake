@@ -32,7 +32,7 @@ const REPO = new URL('../../../../', import.meta.url)
 const SCHEMA = 'bake/session-conformance/plain-append-cases'
 const ORACLE = 'create or write-open a handle of the JSONL backend with compression none in an owned temporary root, apply append and flush in order, and read the log file\'s bytes after each operation; scanLog reads the final bytes back'
 /** Both harnesses pin the table size, so a dropped case fails. */
-const CASE_COUNT = 45
+const CASE_COUNT = 46
 const LIMITS = ['seq-value', 'encode', 'empty-id']
 /** Classes are matched exactly. */
 const CLASSES = new Map<string, abstract new (...args: never[]) => Error>([
@@ -112,9 +112,9 @@ function parseOperation(value: unknown, id: string): Operation {
 function loadTable(): AppendCase[] {
   const table: unknown = JSON.parse(readFileSync(new URL('conformance/session/plain-append-cases.json', REPO), 'utf8'))
   if (!isObject(table) || sortedKeys(table) !== 'cases,history,oracle,schema,version' || table.schema !== SCHEMA
-    || table.version !== 1 || table.oracle !== ORACLE || !Array.isArray(table.cases)
+    || table.version !== 2 || table.oracle !== ORACLE || !Array.isArray(table.cases)
     || !Array.isArray(table.history) || !table.history.every(line => typeof line === 'string')) {
-    throw new Error('plain-append-cases.json does not match its version-1 schema')
+    throw new Error('plain-append-cases.json does not match its version-2 schema')
   }
   return table.cases.map((entry: unknown): AppendCase => {
     if (!isObject(entry) || typeof entry.id !== 'string' || !Array.isArray(entry.ops)) {

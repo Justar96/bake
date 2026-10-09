@@ -28,7 +28,7 @@ const CASE_COUNT: usize = 18;
 const SOURCE_BUDGET: usize = 10_000;
 /// The limit names the table may use, each witnessed. A restoration limit
 /// passes through as `restore/<name>` and is witnessed by the restore table.
-const LIMITS: [&str; 2] = ["encode", "scan"];
+const LIMITS: [&str; 1] = ["scan"];
 const RESTORED_KEYS: [&str; 10] = [
     "outcome",
     "header",
@@ -98,7 +98,7 @@ fn load() -> Vec<Case> {
         BTreeSet::from(["schema", "version", "oracle", "history", "cases"])
     );
     assert_eq!(table["schema"], SCHEMA);
-    assert_eq!(table["version"], 2);
+    assert_eq!(table["version"], 3);
     assert_eq!(table["oracle"], ORACLE);
     assert!(
         table["history"]

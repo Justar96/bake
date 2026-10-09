@@ -299,8 +299,11 @@ pub enum V1CodecLimit {
     PackedFloatLexeme,
     /// A row's expanded `sourceEventSeqs` list would exceed `source_budget`.
     SourceOutputBudget,
-    /// An emitted row retains an integer outside ±(2^53 − 1), which
-    /// `JSON.parse` would round.
+    /// An emitted row retains an integer outside ±(2^53 − 1) spelled other
+    /// than `JSON.stringify` writes its double, such as `9007199254740993`,
+    /// which `JSON.parse` would round. An unsafe integer a writer spells,
+    /// such as `9223372036854776000`, is kept: serde_json stores it as it
+    /// stores the text of the double `JSON.parse` reads.
     UnsafeJsonInteger,
 }
 

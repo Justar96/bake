@@ -21,7 +21,7 @@ const REPO = new URL('../../../../', import.meta.url)
 const SCHEMA = 'bake/session-format-conformance/v1-codec-cases'
 const ORACLE = 'releasedV0SessionFormatCodec or releasedV1SessionFormatCodec .createDecoder(header, recovery), decodeRow for each row into a SessionFormatEventCollector, then finish'
 /** Both harnesses pin the table size, so a dropped case fails. */
-const CASE_COUNT = 140
+const CASE_COUNT = 141
 /**
  * Native limits: a fraction or exponent spelling where TypeScript compares or reads a number, a
  * `String` conversion of an array or object seq, Rust's own source budget, and a retained integer
@@ -108,9 +108,9 @@ function parseCase(value: unknown): CodecCase {
 function loadTable(): CodecCase[] {
   const table: unknown = JSON.parse(readFileSync(new URL('conformance/session/v1-codec-cases.json', REPO), 'utf8'))
   if (!isObject(table) || sortedKeys(table) !== 'cases,history,oracle,schema,version'
-    || table.schema !== SCHEMA || table.version !== 1 || table.oracle !== ORACLE || !Array.isArray(table.cases)
+    || table.schema !== SCHEMA || table.version !== 2 || table.oracle !== ORACLE || !Array.isArray(table.cases)
     || !Array.isArray(table.history) || !table.history.every(entry => typeof entry === 'string')) {
-    throw new Error('v1-codec-cases.json does not match its version-1 schema')
+    throw new Error('v1-codec-cases.json does not match its version-2 schema')
   }
   const cases = table.cases.map(parseCase)
   if (new Set(cases.map(entry => entry.id)).size !== cases.length) throw new Error('case ids must be unique')

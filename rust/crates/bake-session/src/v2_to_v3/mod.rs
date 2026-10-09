@@ -111,10 +111,12 @@ pub enum V2ToV3Refusal {
     /// `seq-diagnostic` for an array or object seq that a gap message would
     /// convert with `String`; `source-output-budget` when an expanded
     /// `sourceEventSeqs` list would exceed `source_budget`; and the
-    /// `payload-float-lexeme` for the frozen payload checks,
+    /// `payload-float-lexeme` for a non-writer number spelling in the
+    /// frozen payload checks,
     /// `object-prototype-type` for inherited JavaScript property names,
     /// `content-kind-diagnostic` for unsupported JSON number rendering, and
-    /// `unsafe-json-integer` for retained integer values outside ±(2^53 − 1).
+    /// `unsafe-json-integer` for retained integer values outside ±(2^53 − 1)
+    /// that are not spelled as `JSON.stringify` writes them.
     /// `canonical-float-lexeme`, `admission-invariant`, and `row-count` guard
     /// invariants that admitted, addressable input cannot reach.
     NativeSubset {
@@ -144,8 +146,9 @@ pub(crate) enum StageError {
 /// read in JavaScript's own-key order, array indices first, which decides
 /// which unexpected key a refusal names and the member order of every output
 /// object. Opaque payload numbers retain their parsed values. After each row
-/// passes codec and migration checks, retained integer values outside the
-/// JavaScript safe range are refused rather than claiming matching precision.
+/// passes codec and migration checks, a retained integer outside the
+/// JavaScript safe range is kept when spelled as `JSON.stringify` writes it
+/// and refused when its digits do not round-trip.
 ///
 /// `platform` decides whether the header's `cwd` is absolute.
 /// `source_budget` caps each row's expanded `sourceEventSeqs` list, which
@@ -306,6 +309,10 @@ fn logical_header(header: &Value) -> Result<(SourceHeader, Value), V2ToV3Refusal
     Ok((source, Value::Object(target)))
 }
 
+/// Whether `value` holds an integer outside ±(2^53 − 1) that is not a writer
+/// spelling. A writer-spelled one is kept as is: printing it with
+/// `json_number_text` and comparing it with another writer spelling both
+/// agree with the double `JSON.parse` reads.
 pub(crate) fn contains_unsafe_integer(value: &Value) -> bool {
     let mut pending = vec![value];
     while let Some(value) = pending.pop() {
@@ -315,7 +322,9 @@ pub(crate) fn contains_unsafe_integer(value: &Value) -> bool {
                     .as_i64()
                     .map(i64::unsigned_abs)
                     .or_else(|| number.as_u64());
-                if magnitude.is_some_and(|value| value > crate::MAX_SAFE_INTEGER) {
+                if magnitude.is_some_and(|value| value > crate::MAX_SAFE_INTEGER)
+                    && !crate::json_text::is_writer_spelling(number)
+                {
                     return true;
                 }
             }

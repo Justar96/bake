@@ -1,9 +1,10 @@
 {
   "schema": "bake/session-conformance/row-encode-cases",
-  "version": 1,
+  "version": 2,
   "oracle": "JSON.stringify(toHeaderLine(header, inheritedEventCount)) and eventLine(event) from packages/session/session-persistence-jsonl/src/format.ts; log cases join the lines and scanLog reads them back",
   "history": [
-    "Version 1: 95 cases, written from the TypeScript sources before either harness ran."
+    "Version 1: 95 cases, written from the TypeScript sources before either harness ran.",
+    "Version 2: 98 cases. The encoder writes numbers as JSON.stringify writes them and decides a count spelled as a writer spells it by value, so fraction-in-data, unsafe-integer-in-data, and header-delegation-depth-fraction lose their Rust limits, and writer-spelled-numbers-in-data, seq-fraction, and header-created-at-fraction are added, written from the TypeScript sources before either harness ran."
   ],
   "cases": [
     {
@@ -388,10 +389,6 @@
         "outcome": "thrown",
         "class": "SessionFormatError",
         "message": "format v2 header delegationDepth must be a non-negative safe integer"
-      },
-      "rust": {
-        "outcome": "native-subset",
-        "limit": "float-number"
       }
     },
     {
@@ -1665,10 +1662,6 @@
       "ts": {
         "outcome": "encoded",
         "line": "{\"type\":\"ext/ratio\",\"seq\":0,\"time\":0,\"data\":{\"ratio\":0.5}}"
-      },
-      "rust": {
-        "outcome": "native-subset",
-        "limit": "float-number"
       }
     },
     {
@@ -1685,10 +1678,6 @@
       "ts": {
         "outcome": "encoded",
         "line": "{\"type\":\"ext/big\",\"seq\":0,\"time\":0,\"data\":{\"big\":9007199254740992}}"
-      },
-      "rust": {
-        "outcome": "native-subset",
-        "limit": "float-number"
       },
       "note": "JSON.parse rounds the integer to the nearest double."
     },
@@ -1848,6 +1837,57 @@
         "outcome": "scanned",
         "log": "{\"type\":\"session\",\"version\":3,\"id\":\"log2\",\"createdAt\":2,\"parentSession\":\"log1\",\"isSeeded\":true,\"delegationDepth\":0}\n{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n{\"type\":\"turn/end\",\"seq\":1,\"time\":2,\"data\":{\"turn\":1}}\n{\"type\":\"session/end-seed\",\"seq\":2,\"time\":3,\"data\":{\"inherited\":true}}\n{\"type\":\"turn/start\",\"seq\":3,\"time\":4,\"data\":{\"turn\":2}}\n",
         "inheritedEventCount": 2
+      }
+    },
+    {
+      "id": "writer-spelled-numbers-in-data",
+      "kind": "event",
+      "event": {
+        "type": "ext/big",
+        "seq": 0,
+        "time": 0,
+        "data": {
+          "big": 9223372036854776000,
+          "huge": 1e+21,
+          "tiny": 1e-7,
+          "negative": -9007199254740992
+        }
+      },
+      "ts": {
+        "outcome": "encoded",
+        "line": "{\"type\":\"ext/big\",\"seq\":0,\"time\":0,\"data\":{\"big\":9223372036854776000,\"huge\":1e+21,\"tiny\":1e-7,\"negative\":-9007199254740992}}"
+      },
+      "note": "Each number is spelled as JSON.stringify writes it, as an MCP schema or provider data may hold it."
+    },
+    {
+      "id": "seq-fraction",
+      "kind": "event",
+      "event": {
+        "type": "turn/start",
+        "seq": 2.5,
+        "time": 0,
+        "data": {}
+      },
+      "ts": {
+        "outcome": "thrown",
+        "class": "SessionFormatError",
+        "message": "format v3 turn/start at seq 2.5 seq must be a non-negative safe integer"
+      }
+    },
+    {
+      "id": "header-created-at-fraction",
+      "kind": "header",
+      "header": {
+        "version": 3,
+        "id": "s96",
+        "createdAt": 1.5,
+        "isSeeded": false,
+        "delegationDepth": 0
+      },
+      "ts": {
+        "outcome": "thrown",
+        "class": "SessionFormatError",
+        "message": "format v2 header createdAt must be a non-negative safe integer"
       }
     }
   ]

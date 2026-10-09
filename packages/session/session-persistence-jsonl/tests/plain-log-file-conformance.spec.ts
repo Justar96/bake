@@ -38,7 +38,7 @@ const REPO = new URL('../../../../', import.meta.url)
 const SCHEMA = 'bake/session-conformance/plain-log-file-cases'
 const ORACLE = 'in an owned temporary root holding the seeded entries, run each step through the JSONL backend with compression none on the step\'s handle, a or b, each its own backend instance over the root: create, a write open, or the open handle\'s append, flush, or close; after each step list every file beneath the root with its text, an empty session.lock by its size'
 /** Both harnesses pin the table size, so a dropped case fails. */
-const CASE_COUNT = 63
+const CASE_COUNT = 64
 const LIMITS = [
   'empty-id', 'encode', 'seq-value', 'windows-name', 'legacy-layout', 'opposite-encoding',
   'non-utf8-name', 'newer-generation', 'identity', 'scan', 'migration/v2-codec-recovery',
@@ -189,9 +189,9 @@ function parseStep(value: unknown, id: string): Step {
 function loadTable(): FileCase[] {
   const table: unknown = JSON.parse(readFileSync(new URL('conformance/session/plain-log-file-cases.json', REPO), 'utf8'))
   if (!isObject(table) || sortedKeys(table) !== 'cases,history,oracle,schema,version' || table.schema !== SCHEMA
-    || table.version !== 4 || table.oracle !== ORACLE || !Array.isArray(table.cases)
+    || table.version !== 5 || table.oracle !== ORACLE || !Array.isArray(table.cases)
     || !Array.isArray(table.history) || !table.history.every(line => typeof line === 'string')) {
-    throw new Error('plain-log-file-cases.json does not match its version-4 schema')
+    throw new Error('plain-log-file-cases.json does not match its version-5 schema')
   }
   return table.cases.map((entry: unknown): FileCase => {
     if (!isObject(entry) || typeof entry.id !== 'string' || !Array.isArray(entry.steps) || !Array.isArray(entry.seed)) {

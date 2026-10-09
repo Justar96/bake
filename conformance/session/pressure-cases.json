@@ -1,10 +1,11 @@
 {
   "schema": "bake/session-conformance/pressure-cases",
-  "version": 2,
+  "version": 3,
   "oracle": "contextPressureProjectionDefinition.init/apply and wire.view in packages/llm/token-meter/src/usage-projection.ts, folded over the events Session.fromRestore holds for each case's parsed rows and their interruptedTurnClosers",
   "history": [
     "Version 1: 36 cases, written from the TypeScript sources before either harness ran.",
-    "Version 2: 37 cases; adds limit-context-window-fraction, a fractional contextWindow, which restoration now admits."
+    "Version 2: 37 cases; adds limit-context-window-fraction, a fractional contextWindow, which restoration now admits.",
+    "Version 3: 41 cases; the fold now sums sampled counts with JavaScript's + and holds the context window as a double, so limit-usage-string-input loses its Rust limit, and usage-string-input-sampled, usage-fraction-input-sampled, context-window-past-safe, and limit-usage-boolean-input are added. A folded state and view are compared as their JSON.stringify text."
   ],
   "logs": {
     "tool-call-turn": "conformance/runtime/request-reconstruction/tool-call-turn/session.jsonl",
@@ -1143,11 +1144,6 @@
           "projectedTokens": 19
         }
       },
-      "rust": {
-        "outcome": "native-subset",
-        "limit": "usage",
-        "seq": 8
-      },
       "note": "Addition concatenates the string, and the message's sample later replaces it."
     },
     {
@@ -1411,6 +1407,174 @@
         "seq": 7
       },
       "note": "A writer spells this window 1000.5, which restoration admits; the next context removes it before any sample."
+    },
+    {
+      "id": "usage-string-input-sampled",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 13,
+          "find": "\"usage\":{\"inputTokens\":10,\"outputTokens\":4},\"stream\"",
+          "replace": "\"usage\":{\"inputTokens\":\"10\",\"outputTokens\":4},\"stream\""
+        }
+      ],
+      "ts": {
+        "outcome": "folded",
+        "state": {
+          "pressureTokens": "1000",
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "surfaceTokens": 59,
+          "sampledSurfaceTokens": 50
+        },
+        "view": {
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "pressureTokens": "1000",
+          "projectedTokens": 100009
+        }
+      },
+      "note": "\"10\" + 0 + 0 is \"1000\"; the view computes \"1000\" + 59 - 50, which is 100009."
+    },
+    {
+      "id": "usage-fraction-input-sampled",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 13,
+          "find": "\"usage\":{\"inputTokens\":10,\"outputTokens\":4},\"stream\"",
+          "replace": "\"usage\":{\"inputTokens\":10.5,\"outputTokens\":4},\"stream\""
+        }
+      ],
+      "ts": {
+        "outcome": "folded",
+        "state": {
+          "pressureTokens": 10.5,
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "surfaceTokens": 59,
+          "sampledSurfaceTokens": 50
+        },
+        "view": {
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "pressureTokens": 10.5,
+          "projectedTokens": 19.5
+        }
+      }
+    },
+    {
+      "id": "context-window-past-safe",
+      "log": "tool-call-turn",
+      "edits": [
+        {
+          "row": 7,
+          "find": "\"data\":{\"provider\":\"mock\",\"model\":\"mock\"}",
+          "replace": "\"data\":{\"provider\":\"mock\",\"model\":\"mock\",\"contextWindow\":18014398509481984}"
+        }
+      ],
+      "ts": {
+        "outcome": "folded",
+        "state": {
+          "contextWindow": 18014398509481984,
+          "sampledContextWindow": 18014398509481984,
+          "pressureTokens": 10,
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "surfaceTokens": 59,
+          "sampledSurfaceTokens": 50
+        },
+        "view": {
+          "contextWindow": 18014398509481984,
+          "sampledContextWindow": 18014398509481984,
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock"
+          },
+          "pressureTokens": 10,
+          "projectedTokens": 19
+        }
+      },
+      "note": "Number.isInteger admits 2^54, which provider discovery can list."
+    },
+    {
+      "id": "limit-usage-boolean-input",
+      "log": "retry-attempt",
+      "edits": [
+        {
+          "row": 8,
+          "find": "\"stream\":[{\"type\":\"chunk\"",
+          "replace": "\"stream\":[{\"type\":\"chunk\",\"time\":1791378812492,\"chunk\":{\"type\":\"usage\",\"usage\":{\"inputTokens\":true,\"outputTokens\":1}}},{\"type\":\"chunk\""
+        }
+      ],
+      "ts": {
+        "outcome": "folded",
+        "state": {
+          "pressureTokens": 10,
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock-b"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock-b"
+          },
+          "surfaceTokens": 25,
+          "sampledSurfaceTokens": 16
+        },
+        "view": {
+          "requestRoute": {
+            "provider": "mock",
+            "model": "mock-b"
+          },
+          "sampledRoute": {
+            "provider": "mock",
+            "model": "mock-b"
+          },
+          "pressureTokens": 10,
+          "projectedTokens": 19
+        }
+      },
+      "note": "Addition reads true as 1; no writer logs a boolean count. The message's sample later replaces it.",
+      "rust": {
+        "outcome": "native-subset",
+        "limit": "usage",
+        "seq": 8
+      }
     }
   ]
 }

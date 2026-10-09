@@ -35,7 +35,7 @@ const LOGS: Record<string, { path: string; sha256: string }> = {
   },
 }
 /** Both harnesses pin the table size, so a dropped case fails. */
-const CASE_COUNT = 34
+const CASE_COUNT = 38
 const LIMITS = ['number', 'usage', 'stream', 'retry']
 
 type State = Parameters<typeof tokenUsageProjectionDefinition.apply>[0]
@@ -114,7 +114,7 @@ function parseEdit(value: unknown, rows: number, id: string): Edit {
 
 function isBuckets(value: unknown): boolean {
   return isObject(value) && sortedKeys(value) === 'cacheReadTokens,cacheWriteTokens,outputTokens,uncachedInputTokens'
-    && Object.values(value).every(Number.isInteger)
+    && Object.values(value).every(slot => slot === null || typeof slot === 'string' || Number.isFinite(slot))
 }
 
 function parseOutcome(value: unknown, id: string): Outcome {
@@ -132,10 +132,10 @@ function parseOutcome(value: unknown, id: string): Outcome {
 function loadTable(): UsageCase[] {
   const table: unknown = JSON.parse(readFileSync(new URL('conformance/session/usage-cases.json', REPO), 'utf8'))
   if (!isObject(table) || sortedKeys(table) !== 'cases,history,logs,oracle,schema,version' || table.schema !== SCHEMA
-    || table.version !== 1 || table.oracle !== ORACLE || !Array.isArray(table.cases)
+    || table.version !== 2 || table.oracle !== ORACLE || !Array.isArray(table.cases)
     || !Array.isArray(table.history) || !table.history.every(isLine)
     || JSON.stringify(table.logs) !== JSON.stringify(Object.fromEntries(Object.entries(LOGS).map(([name, { path }]) => [name, path])))) {
-    throw new Error('usage-cases.json does not match its version-1 schema')
+    throw new Error('usage-cases.json does not match its version-2 schema')
   }
   return table.cases.map((entry: unknown): UsageCase => {
     if (!isObject(entry) || typeof entry.id !== 'string' || typeof entry.log !== 'string' || !Array.isArray(entry.edits)) {
@@ -212,7 +212,8 @@ describe('shared token-usage cases', () => {
         expect(actual.seq).toBe(entry.ts.seq)
         return
       }
-      expect(actual).toStrictEqual(entry.ts)
+      // The state's JSON text is the observable: NaN prints as null.
+      expect(JSON.parse(JSON.stringify(actual))).toStrictEqual(entry.ts)
     })
   }
 })

@@ -35,7 +35,7 @@ const LOGS: [(&str, &str, usize); 3] = [
     ),
 ];
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 34;
+const CASE_COUNT: usize = 38;
 const SOURCE_BUDGET: usize = 64;
 const LIMITS: [(&str, UsageLimit); 4] = [
     ("number", UsageLimit::Number),
@@ -144,7 +144,7 @@ fn load() -> Vec<Case> {
         BTreeSet::from(["cases", "history", "logs", "oracle", "schema", "version"])
     );
     assert_eq!(table["schema"], SCHEMA);
-    assert_eq!(table["version"], 1);
+    assert_eq!(table["version"], 2);
     assert!(
         table["history"]
             .as_array()
@@ -178,24 +178,26 @@ fn load() -> Vec<Case> {
         .collect()
 }
 
-fn buckets_value(buckets: TokenUsageBuckets) -> Value {
+/// Buckets as `JSON.stringify` writes them, read back.
+fn buckets_value(buckets: &TokenUsageBuckets) -> Value {
     json!({
-        "uncachedInputTokens": buckets.uncached_input_tokens,
-        "outputTokens": buckets.output_tokens,
-        "cacheReadTokens": buckets.cache_read_tokens,
-        "cacheWriteTokens": buckets.cache_write_tokens,
+        "uncachedInputTokens": buckets.uncached_input_tokens.to_json(),
+        "outputTokens": buckets.output_tokens.to_json(),
+        "cacheReadTokens": buckets.cache_read_tokens.to_json(),
+        "cacheWriteTokens": buckets.cache_write_tokens.to_json(),
     })
 }
 
-/// The folded state in the table's form.
+/// The folded state in the table's form: its `JSON.stringify` text, read
+/// back.
 fn state_value(state: &TokenUsageState) -> Value {
     json!({
         "outcome": "folded",
-        "totals": buckets_value(state.totals),
-        "last": state.last.map(|last| json!({
+        "totals": buckets_value(&state.totals),
+        "last": state.last.as_ref().map(|last| json!({
             "turn": last.turn,
             "step": last.step,
-            "buckets": buckets_value(last.buckets),
+            "buckets": buckets_value(&last.buckets),
         })),
     })
 }

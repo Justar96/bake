@@ -18,7 +18,7 @@ use serde_json::{Map, Value};
 const SCHEMA: &str = "bake/session-format-conformance/v0-to-v1-cases";
 const ORACLE: &str = "releasedV0SessionFormatCodec.createDecoder(header, recovery) feeding createSessionFormatChain({currentVersion: 1, migrations: [sessionFormatV0ToV1]}).createStream; decoder.finish, then stream.finish";
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 95;
+const CASE_COUNT: usize = 96;
 /// No case reaches the codec's own source budget.
 const SOURCE_BUDGET: usize = 10_000;
 const LIMITS: [&str; 6] = [
@@ -139,7 +139,7 @@ fn load() -> Vec<Case> {
         ])
     );
     assert_eq!(table["schema"], SCHEMA);
-    assert_eq!(table["version"], 1);
+    assert_eq!(table["version"], 2);
     assert_eq!(table["oracle"], ORACLE);
     assert!(
         table["history"]

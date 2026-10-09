@@ -141,6 +141,7 @@ mod generation_header;
 mod goal;
 mod history;
 mod inbox;
+mod js_count;
 mod json_text;
 mod log_layout;
 mod migrated_restore;
@@ -192,6 +193,7 @@ pub use inbox::{
     ConsumedWork, ConsumedWorkCoercion, ConsumedWorkLimit, InboxLimit, InboxRefusal, PendingInbox,
     consumed_work, restored_inbox,
 };
+pub use js_count::JsCount;
 pub use json_text::{json_number_text, json_text};
 pub use log_layout::{encode_segment, project_key, session_log_path};
 pub use migrated_restore::{MigratedRestoreLimit, MigratedRestoreRefusal, restore_migrated};
