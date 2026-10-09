@@ -24,7 +24,7 @@ use serde_json::Value;
 
 /// Process creation dominates; this bounds a hung child, never a result.
 const DEADLINE: Duration = Duration::from_secs(60);
-const CASE_COUNT: usize = 88;
+const CASE_COUNT: usize = 100;
 
 fn repo_path(relative: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -395,7 +395,15 @@ fn check(id: &str, root: &Path, run: &Run, expected: &Value, diagnostic: Option<
             "endSeedAppended": record["repair"]["endSeedAppended"],
             "torn": torn,
         });
-        assert_eq!(&observed, expected, "{id}");
+        // A migrated generation's restored counts are claimed only where a
+        // source test pins them, so only the expected fields are compared.
+        let compared: serde_json::Map<String, Value> = expected
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(|key| (key.clone(), observed[key].clone()))
+            .collect();
+        assert_eq!(&Value::Object(compared), expected, "{id}");
         assert_eq!(record["status"], "restored", "{id}");
         assert!(record["fileBytes"].is_u64(), "{id}");
         return;
@@ -406,16 +414,20 @@ fn check(id: &str, root: &Path, run: &Run, expected: &Value, diagnostic: Option<
     for key in ["stage", "reason", "kind", "path"] {
         assert_eq!(refusal[key], expected[key], "{id}: {key} of {record}");
     }
+    // A message is matched as a substring, as the TypeScript arm matches it,
+    // because the production message names the absolute source path.
     if let Some(message) = expected.get("message") {
-        assert_eq!(&refusal["message"], message, "{id}");
+        let text = refusal["message"].as_str().unwrap();
+        assert!(
+            text.contains(message.as_str().unwrap()),
+            "{id}: {text} lacks {message}"
+        );
     }
-    // Only a selected generation has a path, and only one that exists and
-    // is not refused by its version alone has been read.
+    // Only a selected generation has a path, and only one that exists has
+    // been read.
     let stage = expected["stage"].as_str().unwrap();
     let selected = !matches!(stage, "root" | "layout" | "lookup");
-    let read = selected
-        && expected["reason"] != "migration-required"
-        && root.join(record["path"].as_str().unwrap()).exists();
+    let read = selected && root.join(record["path"].as_str().unwrap()).exists();
     assert_eq!(record["fileBytes"].is_u64(), read, "{id}: {record}");
     assert_eq!(record["path"].is_string(), selected, "{id}: {record}");
 }
@@ -430,7 +442,7 @@ fn lookups_reach_the_shared_tables_stages_and_leave_the_root_unchanged() {
         tables.lookup["schema"],
         "bake/session-conformance/lookup-cases"
     );
-    assert_eq!(tables.lookup["version"], 3);
+    assert_eq!(tables.lookup["version"], 4);
     let cases = tables.lookup["cases"].as_array().unwrap();
     assert_eq!(cases.len(), CASE_COUNT);
     let probe = Scratch::new("probe");
@@ -482,11 +494,11 @@ fn lookups_reach_the_shared_tables_stages_and_leave_the_root_unchanged() {
         ran += 1;
     }
     let expected_runs = if cfg!(target_os = "linux") {
-        84
+        96
     } else if cfg!(windows) {
-        63
+        75
     } else {
-        81
+        93
     };
     assert_eq!(ran, expected_runs);
 }

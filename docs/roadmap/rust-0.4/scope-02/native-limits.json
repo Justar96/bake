@@ -2333,21 +2333,15 @@
   {
    "variants": [],
    "stageNames": [
-    "generation/migration-required"
+    "generation/migration-limit"
    ],
-   "id": "cli-migration-required",
+   "id": "cli-migration-limit",
    "crate": "bake-cli",
-   "cases": [
-    {
-     "table": "session/lookup-cases.json",
-     "name": "generation/migration-required",
-     "count": 2
-    }
-   ],
-   "kind": "format",
+   "cases": [],
+   "kind": "pass-through",
    "classification": "reachable-gap",
-   "evidence": "released v0 and v2 writers produced the older generations the lookup declines to migrate (v0 3efd4b51e0:packages/session/session-persistence-jsonl/src/index.ts:659; v2 81dcacbb44:packages/session/session-persistence-jsonl/src/index.ts:1212), and TypeScript migrates or refuses them",
-   "followUp": "Route bake-cli lookup through bake-session's released-history migration and migrated restoration. Slice: CLI reads of v0-v2 Sessions."
+   "evidence": "passes a migration limit of migrate_released_generation (LogFileLimit::Migration's names), migrate_released_zstd_generation (zstd/stop-order), or restore_migrated (MigratedRestoreLimit) through, and log-file-migration and migrated-restore-restore are reachable gaps",
+   "followUp": "Follows log-file-migration and migrated-restore-restore."
   },
   {
    "variants": [],

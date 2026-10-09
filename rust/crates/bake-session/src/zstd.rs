@@ -1,11 +1,15 @@
-//! Current Zstd log framing and plaintext recovery. Structural validation
+//! Zstd log framing and plaintext recovery, for current-format logs and for
+//! the in-memory migration of released v0 to v2 generations. Structural validation
 //! precedes decoding; complete frames are decoded before their plaintext is
 //! scanned. A torn-frame decoding error discards all output from that frame.
 
 use zstd_safe::{DCtx, InBuffer, OutBuffer};
 
 use crate::scan::LogScanner;
-use crate::{PathPlatform, RestoreRefusal, RestoredLog, StagedLog, TornTail};
+use crate::{
+    MigratedV2, PathPlatform, ReleasedGenerationRefusal, RestoreRefusal, RestoredLog, StagedLog,
+    TornTail, migrate_released_generation,
+};
 
 /// Production Zstd framing or decoding refusals. Offsets are physical bytes
 /// in the compressed input; plaintext scan refusals remain separate.
@@ -131,6 +135,130 @@ pub fn zstd_header_record(
         return Err(RestoreRefusal::Zstd(ZstdRefusal::HeaderFrame));
     }
     Ok(Some(header))
+}
+
+/// The [`ReleasedGenerationRefusal::Limit`] name of
+/// [`released_zstd_plaintext`]'s plaintext budget.
+pub const RELEASED_ZSTD_PLAINTEXT_BUDGET: &str = "zstd/plaintext-budget";
+
+/// The plaintext of a Zstd v0, v1, or v2 generation, decoded as the read
+/// `open`'s `decodeStreamingMigration` decodes it; see
+/// [`released_zstd_plaintext`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReleasedZstdPlaintext {
+    /// The header frame's one record, then the complete records the body
+    /// streamed: every complete frame's plaintext and, when nothing stopped
+    /// it, the complete records recovered from a torn final frame. It is a
+    /// plain log for [`crate::released_generation_header`] and
+    /// [`crate::migrate_released_generation`].
+    pub plaintext: Vec<u8>,
+    /// What TypeScript throws after streaming `plaintext`'s rows: a complete
+    /// body frame that fails to decode, complete frames that end inside a
+    /// record, or this crate's plaintext budget. `None` when the body ended.
+    pub stop: Option<ReleasedGenerationRefusal>,
+}
+
+/// Decode an in-memory Zstd v0, v1, or v2 generation as the read `open`'s
+/// `decodeStreamingMigration` does before and while it streams rows.
+///
+/// The whole file's structural frame scan and the header frame, which must
+/// be exactly one record, are refused here, before the header is read, as
+/// TypeScript throws them; each is [`ReleasedGenerationRefusal::Corrupt`]
+/// with its `String(error)`. The body's own stop is returned with the
+/// records before it, for [`migrate_released_zstd_generation`] to order
+/// after the stored identity check. `max_plaintext_bytes` bounds cumulative
+/// decoder output; exceeding it is the [`RELEASED_ZSTD_PLAINTEXT_BUDGET`]
+/// limit, which TypeScript does not have.
+/// Nothing is read from or written to a file.
+pub fn released_zstd_plaintext(
+    log: &[u8],
+    max_plaintext_bytes: usize,
+) -> Result<ReleasedZstdPlaintext, ReleasedGenerationRefusal> {
+    let corrupt = |refusal: ZstdRefusal| {
+        ReleasedGenerationRefusal::Corrupt(format!("Error: {}", refusal.message()))
+    };
+    let budget = || ReleasedGenerationRefusal::Limit(RELEASED_ZSTD_PLAINTEXT_BUDGET.to_owned());
+    let (frames, torn_start) = scan_frames(log, usize::MAX).map_err(corrupt)?;
+    let Some(first) = frames.first() else {
+        return Err(corrupt(ZstdRefusal::Empty));
+    };
+    let mut used = 0;
+    let mut plaintext = match decode(&log[first.clone()], true, &mut used, max_plaintext_bytes) {
+        Ok(header) => header,
+        Err(DecodeError::Frame) => return Err(corrupt(ZstdRefusal::Frame { start: first.start })),
+        Err(DecodeError::Budget) => return Err(budget()),
+    };
+    if plaintext.is_empty()
+        || plaintext.iter().position(|byte| *byte == b'\n') != Some(plaintext.len() - 1)
+    {
+        return Err(corrupt(ZstdRefusal::HeaderFrame));
+    }
+    // The rows before a stop streamed; a record it cut never did.
+    let stopped = |mut plaintext: Vec<u8>, stop| {
+        let end = plaintext
+            .iter()
+            .rposition(|byte| *byte == b'\n')
+            .map_or(0, |last| last + 1);
+        plaintext.truncate(end);
+        Ok(ReleasedZstdPlaintext {
+            plaintext,
+            stop: Some(stop),
+        })
+    };
+    for frame in &frames[1..] {
+        match decode(&log[frame.clone()], true, &mut used, max_plaintext_bytes) {
+            Ok(decoded) => plaintext.extend_from_slice(&decoded),
+            Err(DecodeError::Frame) => {
+                return stopped(
+                    plaintext,
+                    corrupt(ZstdRefusal::Frame { start: frame.start }),
+                );
+            }
+            Err(DecodeError::Budget) => return stopped(plaintext, budget()),
+        }
+    }
+    if plaintext.last() != Some(&b'\n') {
+        return stopped(plaintext, corrupt(ZstdRefusal::CompleteFramesUncommitted));
+    }
+    if let Some(start) = torn_start {
+        // `decompressZstdPrefix` failing recovers nothing.
+        match decode(&log[start..], false, &mut used, max_plaintext_bytes) {
+            Ok(recovered) => {
+                if let Some(last) = recovered.iter().rposition(|byte| *byte == b'\n') {
+                    plaintext.extend_from_slice(&recovered[..=last]);
+                }
+            }
+            Err(DecodeError::Frame) => {}
+            Err(DecodeError::Budget) => return stopped(plaintext, budget()),
+        }
+    }
+    Ok(ReleasedZstdPlaintext {
+        plaintext,
+        stop: None,
+    })
+}
+
+/// [`crate::migrate_released_generation`] over a decoded Zstd generation
+/// whose header [`crate::released_generation_header`] admitted.
+///
+/// TypeScript throws a body stop after the rows before it streamed, unless
+/// one of those rows threw first. When those rows migrate, the stop is the
+/// outcome; when they are refused, this crate cannot tell a refusal thrown
+/// while streaming from one thrown at `finish`, which the stop precedes, so
+/// that is the `zstd/stop-order` limit.
+pub fn migrate_released_zstd_generation(
+    decoded: &ReleasedZstdPlaintext,
+    source_version: u64,
+    source_budget: usize,
+) -> Result<MigratedV2, ReleasedGenerationRefusal> {
+    let migrated = migrate_released_generation(&decoded.plaintext, source_version, source_budget);
+    match (&decoded.stop, migrated) {
+        (None, migrated) => migrated,
+        (Some(stop), Ok(_)) => Err(stop.clone()),
+        (Some(_), Err(_)) => Err(ReleasedGenerationRefusal::Limit(
+            "zstd/stop-order".to_owned(),
+        )),
+    }
 }
 
 type Frames = (Vec<std::ops::Range<usize>>, Option<usize>);

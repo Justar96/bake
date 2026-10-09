@@ -65,17 +65,19 @@ opening the file.
 
 With --root and --id, the command finds the Session as the JSONL backend
 does: it refuses a root holding the flat legacy layout or the other
-compression, a duplicate or missing id, and another format version, then
+compression, a duplicate or missing id, and a newer format version, then
 reads the newest generation, checks its stored identity, and restores it.
+A format v0, v1, or v2 generation, plain or Zstd, is migrated in memory, as
+the Session read path migrates it, and restored.
 Windows roots and directory names outside the supported path subset are
 native-limit refusals; see rust/README.md.
 
 The command opens only what it reads, read-only, restores the log as the
 Session read path does, and prints one JSON record: counts, the header,
 recovery and closer metadata, but no message or tool content. It does not
-truncate, repair, migrate, or resume the Session, and does not read the Bake
-home, configuration, or credentials. A named file's stored identity is not
-checked.
+truncate, repair, or resume the Session, writes no migrated file, and does
+not read the Bake home, configuration, or credentials. A named file's stored
+identity is not checked.
 
 Exit status: 0 restored, 3 refused log (a JSON record on standard output),
 1 unreadable file or directory or unsupported name, 2 usage error.

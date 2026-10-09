@@ -29,7 +29,10 @@
 //!   new `session.v3.jsonl`, as TypeScript publishes it on POSIX, so a
 //!   failed write, or a process killed before the link, never leaves that
 //!   file. The source is never changed.
-//!   The handle then holds those bytes, opened as a current log.
+//!   The handle then holds those bytes, opened as a current log. The
+//!   in-memory half, the read `open`'s preparation without its publication,
+//!   is [`released_generation_header`] followed by
+//!   [`migrate_released_generation`].
 //! - [`PlainLogFile::append`] and [`PlainLogFile::flush`] run the model's
 //!   operation, then bring the file to the model's bytes, refused operations
 //!   included: a first write creates the Session directory and a new file
@@ -111,10 +114,11 @@ use crate::write_lease::{LeaseRefusal, WriteLease};
 use crate::{
     AppendRefusal, CURRENT_SESSION_FORMAT_VERSION, CreateRefusal, FinalCheckRefusal,
     GenerationHeaderRefusal, HistoryLocation, HistoryRefusal, MigratedV2, PathPlatform,
-    PlainAppendLog, ScanRefusal, SubsetLimit, V1CodecLocation, V1CodecRecovery, V1CodecRefusal,
-    V1CodecVersion, V2ToV3Layer, V2ToV3Location, V2ToV3Refusal, check_transformed_artifact,
-    decode_v0_v1_items, encode_event_line, encode_header_line, first_record,
-    migrate_released_history, migrate_v2_rows, read_generation_header_record, read_header_record,
+    PlainAppendLog, ScanRefusal, SessionHeader, SubsetLimit, V1CodecLocation, V1CodecRecovery,
+    V1CodecRefusal, V1CodecVersion, V2ToV3Layer, V2ToV3Location, V2ToV3Refusal,
+    check_transformed_artifact, decode_v0_v1_items, encode_event_line, encode_header_line,
+    first_record, migrate_released_history, migrate_v2_rows, read_generation_header_record,
+    read_header_record,
 };
 
 /// One write handle of a plain current-format Session log under a root.
@@ -357,66 +361,40 @@ impl PlainLogFile {
     ) -> Result<Self, LogFileRefusal> {
         let bytes = fs::read(&selected.path)?;
         let platform = PathPlatform::host();
-        let refusal = |refused: Refused| refused.into_refusal(id, selected);
-        let Some(record) = first_record(&bytes) else {
-            return Err(refusal(Refused::Corrupt(
-                "Error: empty or header-less session log".to_owned(),
-            )));
-        };
-        let header = parse_released_header(record, selected.version)
-            .map_err(|stop| refusal(Refused::from(stop)))?;
+        let refusal = |refused: ReleasedGenerationRefusal| refused.into_refusal(id, selected);
         // `validateSourceIdentity` checks a header its codec reads, before any row.
-        match read_generation_header_record(record, selected.version, platform) {
-            Ok(Some(stored)) => {
-                if stored.id != id {
-                    let path = selected.path.display();
-                    return Err(refusal(Refused::Corrupt(format!(
-                        "Error: corrupt session log \"{path}\": requested id \"{id}\" \
-                         does not match header id \"{}\"",
-                        stored.id
-                    ))));
-                }
-                let current = selected.path.with_file_name(CURRENT_LOG_FILENAME);
-                if log_path(root, stored.cwd.as_deref(), encoded) != current {
-                    return Err(LogFileRefusal::NativeSubset(LogFileLimit::Identity));
-                }
+        if let Some(stored) =
+            released_generation_header(&bytes, selected.version, platform).map_err(refusal)?
+        {
+            if stored.id != id {
+                let path = selected.path.display();
+                return Err(refusal(ReleasedGenerationRefusal::Corrupt(format!(
+                    "Error: corrupt session log \"{path}\": requested id \"{id}\" \
+                     does not match header id \"{}\"",
+                    stored.id
+                ))));
             }
-            // The codec refuses a header with retired fields.
-            Ok(None) | Err(GenerationHeaderRefusal::Rejected(_)) => {}
-            Err(GenerationHeaderRefusal::Unsupported(_)) => {
-                return Err(refusal(Refused::Limit("decode-invariant".to_owned())));
-            }
-            Err(GenerationHeaderRefusal::NativeSubset(limit)) => {
-                return Err(refusal(Refused::Limit(header_limit(limit).to_owned())));
+            let current = selected.path.with_file_name(CURRENT_LOG_FILENAME);
+            if log_path(root, stored.cwd.as_deref(), encoded) != current {
+                return Err(LogFileRefusal::NativeSubset(LogFileLimit::Identity));
             }
         }
-        let parsed = parse_released_rows(&bytes[record.len()..]);
-        let stop = parsed.stop.map(Refused::from);
-        let migrated = if selected.version == 2 {
-            migrate_v2(&header, &parsed.rows, stop, source_budget)
-        } else {
-            let version = if selected.version == 0 {
-                V1CodecVersion::V0
-            } else {
-                V1CodecVersion::V1
-            };
-            migrate_v0_v1(&header, &parsed.rows, stop, version, source_budget)
-        }
-        .map_err(refusal)?;
+        let migrated = migrate_released_generation(&bytes, selected.version, source_budget)
+            .map_err(refusal)?;
         // The catalog checks the transformed artifact when the chain finishes.
         if let Err(checked) = check_transformed_artifact(&migrated, platform) {
             return Err(refusal(match checked {
                 FinalCheckRefusal::NativeSubset(name) => {
-                    Refused::Limit(format!("final-check/{name}"))
+                    ReleasedGenerationRefusal::Limit(format!("final-check/{name}"))
                 }
-                checked => Refused::Unsupported(
+                checked => ReleasedGenerationRefusal::Unsupported(
                     checked
                         .catalog_message(selected.version)
                         .unwrap_or_default(),
                 ),
             }));
         }
-        let encode = || Refused::Limit("encode".to_owned());
+        let encode = || ReleasedGenerationRefusal::Limit("encode".to_owned());
         let mut text = encode_header_line(&migrated.header, Some(migrated.inherited_event_count))
             .map_err(|_| refusal(encode()))?;
         text.push('\n');
@@ -426,7 +404,7 @@ impl PlainLogFile {
         }
         let bytes = text.into_bytes();
         let log = PlainAppendLog::open(&bytes, platform, source_budget)
-            .map_err(|_| refusal(Refused::Limit("scan".to_owned())))?;
+            .map_err(|_| refusal(ReleasedGenerationRefusal::Limit("scan".to_owned())))?;
         let path = selected.path.with_file_name(CURRENT_LOG_FILENAME);
         publish_new_file(&path, &bytes)?;
         Ok(Self {
@@ -515,19 +493,25 @@ impl PlainLogFile {
     }
 }
 
-/// A migration's refusal before the source path and the requested id are
-/// put in its message.
-enum Refused {
-    /// `SessionPersistenceCorruptionError`, with `String(error)` of the cause.
+/// Why [`released_generation_header`] or [`migrate_released_generation`]
+/// read no migrated Session, before the backend's `generationFailure` puts
+/// the requested id and the source path in its message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReleasedGenerationRefusal {
+    /// TypeScript throws `SessionPersistenceCorruptionError` with the message
+    /// `session "<id>": stored log is corrupt: <cause> (raw log: <source>)`;
+    /// this is the cause, `String(error)` of the underlying error.
     Corrupt(String),
-    /// `SessionFormatUnsupportedError`, with the format edge's or the
-    /// catalog's message.
+    /// TypeScript throws `SessionFormatUnsupportedError` with the message
+    /// `<reason>; source v<N> artifact remains unchanged (raw log:
+    /// <source>)`; this is the format edge's or the catalog's reason.
     Unsupported(String),
-    /// [`LogFileLimit::Migration`], with its name.
+    /// This crate does not decide the TypeScript outcome; the string names
+    /// the limit as [`LogFileLimit::Migration`] names it.
     Limit(String),
 }
 
-impl Refused {
+impl ReleasedGenerationRefusal {
     /// The backend's `generationFailure` translation.
     fn into_refusal(self, id: &str, selected: &Generation) -> LogFileRefusal {
         let source = selected.path.display();
@@ -583,12 +567,89 @@ impl Refused {
     }
 }
 
-impl From<ParseStop> for Refused {
+impl From<ParseStop> for ReleasedGenerationRefusal {
     fn from(stop: ParseStop) -> Self {
         match stop {
             ParseStop::Corrupt(message) => Self::Corrupt(format!("Error: {message}")),
             ParseStop::Limit(name) => Self::Limit(name.to_owned()),
         }
+    }
+}
+
+/// The header of a plain v0, v1, or v2 generation, read as the backend's
+/// `prepareStoredMigration` reads it before any row: framed and parsed as
+/// `decodeStreamingMigration` frames and parses it, then read by the
+/// catalog for `validateSourceIdentity`. `source_version` is the version the
+/// file name selected, and `log` is the whole file.
+///
+/// `Ok(Some(header))` is the migrated header whose stored identity the
+/// caller checks against the requested id and the selected path before
+/// calling [`migrate_released_generation`]; `Ok(None)` is a header the
+/// identity check skips, which the codec refuses. Nothing is read from or
+/// written to a file.
+pub fn released_generation_header(
+    log: &[u8],
+    source_version: u64,
+    platform: PathPlatform,
+) -> Result<Option<SessionHeader>, ReleasedGenerationRefusal> {
+    let Some(record) = first_record(log) else {
+        return Err(ReleasedGenerationRefusal::Corrupt(
+            "Error: empty or header-less session log".to_owned(),
+        ));
+    };
+    parse_released_header(record, source_version)?;
+    match read_generation_header_record(record, source_version, platform) {
+        Ok(stored) => Ok(stored),
+        // The codec refuses a header with retired fields.
+        Err(GenerationHeaderRefusal::Rejected(_)) => Ok(None),
+        Err(GenerationHeaderRefusal::Unsupported(_)) => Err(invariant()),
+        Err(GenerationHeaderRefusal::NativeSubset(limit)) => Err(ReleasedGenerationRefusal::Limit(
+            header_limit(limit).to_owned(),
+        )),
+    }
+}
+
+/// Migrate a plain v0, v1, or v2 generation in memory, as the backend's
+/// `prepareStoredMigration` decodes it after
+/// [`released_generation_header`] admitted its header: the rows are parsed,
+/// decoded by the released codec in recoverable mode, and read through every
+/// format edge to v3, in TypeScript's streaming order, with this host's path
+/// platform and `source_budget` for each expanded `sourceEventSeqs` list.
+///
+/// The catalog's final check is not run; [`crate::restore_migrated`] runs it.
+/// Nothing is read from or written to a file, so the source stays as it was,
+/// as a TypeScript read leaves it. A `source_version` above 2 is the
+/// `decode-invariant` limit.
+pub fn migrate_released_generation(
+    log: &[u8],
+    source_version: u64,
+    source_budget: usize,
+) -> Result<MigratedV2, ReleasedGenerationRefusal> {
+    let Some(record) = first_record(log) else {
+        return Err(ReleasedGenerationRefusal::Corrupt(
+            "Error: empty or header-less session log".to_owned(),
+        ));
+    };
+    let header = parse_released_header(record, source_version)?;
+    let parsed = parse_released_rows(&log[record.len()..]);
+    let stop = parsed.stop.map(ReleasedGenerationRefusal::from);
+    match source_version {
+        2 => migrate_v2(&header, &parsed.rows, stop, source_budget),
+        0 => migrate_v0_v1(
+            &header,
+            &parsed.rows,
+            stop,
+            V1CodecVersion::V0,
+            source_budget,
+        ),
+        1 => migrate_v0_v1(
+            &header,
+            &parsed.rows,
+            stop,
+            V1CodecVersion::V1,
+            source_budget,
+        ),
+        _ => Err(invariant()),
     }
 }
 
@@ -606,10 +667,10 @@ const fn header_limit(limit: SubsetLimit) -> &'static str {
 fn migrate_v0_v1(
     header: &Value,
     rows: &[Value],
-    stop: Option<Refused>,
+    stop: Option<ReleasedGenerationRefusal>,
     version: V1CodecVersion,
     source_budget: usize,
-) -> Result<MigratedV2, Refused> {
+) -> Result<MigratedV2, ReleasedGenerationRefusal> {
     let decode = |rows: &[Value]| {
         decode_v0_v1_items(
             header,
@@ -623,10 +684,12 @@ fn migrate_v0_v1(
     let refusal = match decode(rows) {
         Ok(items) => {
             return match (migrate_released_history(&items), stop) {
-                (Err(refused), _) if !at_finish(&refused) => Err(Refused::history(refused)),
+                (Err(refused), _) if !at_finish(&refused) => {
+                    Err(ReleasedGenerationRefusal::history(refused))
+                }
                 // Every row streamed before the stop, and `finish` runs after it.
                 (_, Some(stop)) => Err(stop),
-                (outcome, None) => outcome.map_err(Refused::history),
+                (outcome, None) => outcome.map_err(ReleasedGenerationRefusal::history),
             };
         }
         Err(refusal) => refusal,
@@ -636,9 +699,11 @@ fn migrate_v0_v1(
         | V1CodecRefusal::NativeSubset { location, .. } => *location,
     };
     let row = match location {
-        V1CodecLocation::Header => return Err(Refused::codec(refusal)),
+        V1CodecLocation::Header => return Err(ReleasedGenerationRefusal::codec(refusal)),
         // The rows the decoder emitted before `finish` are not returned.
-        V1CodecLocation::Finish => return Err(Refused::Limit("finish-order".to_owned())),
+        V1CodecLocation::Finish => {
+            return Err(ReleasedGenerationRefusal::Limit("finish-order".to_owned()));
+        }
         V1CodecLocation::Row(row) => row,
     };
     // The items before the refused row streamed through every edge first.
@@ -647,12 +712,12 @@ fn migrate_v0_v1(
         Err(V1CodecRefusal::Rejected {
             location: V1CodecLocation::Finish,
             ..
-        }) => return Err(Refused::Limit("finish-order".to_owned())),
+        }) => return Err(ReleasedGenerationRefusal::Limit("finish-order".to_owned())),
         Err(_) => return Err(invariant()),
     };
     match migrate_released_history(&prefix) {
-        Err(refused) if !at_finish(&refused) => Err(Refused::history(refused)),
-        _ => Err(Refused::codec(refusal)),
+        Err(refused) if !at_finish(&refused) => Err(ReleasedGenerationRefusal::history(refused)),
+        _ => Err(ReleasedGenerationRefusal::codec(refusal)),
     }
 }
 
@@ -669,8 +734,8 @@ fn at_finish(refusal: &HistoryRefusal) -> bool {
     )
 }
 
-fn invariant() -> Refused {
-    Refused::Limit("decode-invariant".to_owned())
+fn invariant() -> ReleasedGenerationRefusal {
+    ReleasedGenerationRefusal::Limit("decode-invariant".to_owned())
 }
 
 /// A v2 log's parsed `rows` through the released v2 codec in recoverable
@@ -681,9 +746,9 @@ fn invariant() -> Refused {
 fn migrate_v2(
     header: &Value,
     rows: &[Value],
-    stop: Option<Refused>,
+    stop: Option<ReleasedGenerationRefusal>,
     source_budget: usize,
-) -> Result<MigratedV2, Refused> {
+) -> Result<MigratedV2, ReleasedGenerationRefusal> {
     let migrate =
         |rows: &[Value]| migrate_v2_rows(header, rows, PathPlatform::host(), source_budget);
     let streamed = match migrate(rows) {
@@ -701,7 +766,9 @@ fn migrate_v2(
                 .skip(row.saturating_add(1))
                 .any(|later| has_type(later, "turn/end"));
             if throws {
-                return Err(Refused::Limit("v2-codec-recovery".to_owned()));
+                return Err(ReleasedGenerationRefusal::Limit(
+                    "v2-codec-recovery".to_owned(),
+                ));
             }
             match migrate(rows.get(..row).unwrap_or_default()) {
                 Err(
@@ -732,7 +799,7 @@ fn migrate_v2(
     match stop {
         // Every row streamed before the stop, and `finish` runs after it.
         Some(stop) if !before_stop => Err(stop),
-        _ => streamed.map_err(Refused::v2),
+        _ => streamed.map_err(ReleasedGenerationRefusal::v2),
     }
 }
 

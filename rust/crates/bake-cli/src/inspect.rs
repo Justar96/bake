@@ -7,7 +7,8 @@
 //! file by root and id first. Either read is bounded by `--max-bytes` and
 //! refused when the opened file's observed metadata changes while it is read.
 //! This is a diagnostic, not a production reader: it takes no lease and never
-//! truncates, repairs, or migrates the log.
+//! truncates, repairs, or writes the log; the lookup form migrates an older
+//! generation in memory only.
 
 use std::ffi::OsString;
 use std::fs::{File, Metadata, OpenOptions};

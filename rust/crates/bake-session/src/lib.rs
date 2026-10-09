@@ -199,7 +199,10 @@ pub use log_layout::{encode_segment, project_key, session_log_path};
 pub use migrated_restore::{MigratedRestoreLimit, MigratedRestoreRefusal, restore_migrated};
 pub use offload::OffloadRejection;
 pub use plain_append::{AppendLimit, AppendRefusal, CreateLimit, CreateRefusal, PlainAppendLog};
-pub use plain_log_file::{LogFileLimit, LogFileRefusal, PlainLogFile};
+pub use plain_log_file::{
+    LogFileLimit, LogFileRefusal, PlainLogFile, ReleasedGenerationRefusal,
+    migrate_released_generation, released_generation_header,
+};
 pub use pressure::{
     ContextPressureState, ContextPressureView, PressureLimit, PressureRefusal, RequestRoute,
     context_pressure,
@@ -252,7 +255,11 @@ pub use v3_row::{
     Coordinate, Endpoint, EventRejection, StructuralRejection, SystemRecord, V3CodecEvent, V3Limit,
     V3NumberField, V3Rejection, V3RowRefusal, V3Unsupported, decode_v3_row,
 };
-pub use zstd::{ZstdRefusal, restore_zstd_log, stage_zstd_log, zstd_header_record};
+pub use zstd::{
+    RELEASED_ZSTD_PLAINTEXT_BUDGET, ReleasedZstdPlaintext, ZstdRefusal,
+    migrate_released_zstd_generation, released_zstd_plaintext, restore_zstd_log, stage_zstd_log,
+    zstd_header_record,
+};
 
 use serde_json::{Map, Value};
 
