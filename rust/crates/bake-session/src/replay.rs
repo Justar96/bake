@@ -183,17 +183,6 @@ const PROJECTED_TYPES: [&str; 6] = [
     "request/header",
     "request/tool-update",
 ];
-/// The `LlmCallConfig` data members in `packages/llm/llm/src/call-config.ts`.
-/// Request assembly spreads `config` before its own members, so this closed
-/// set also keeps `config` from supplying them.
-const CONFIG_KEYS: [&str; 6] = [
-    "provider",
-    "model",
-    "reasoningEffort",
-    "temperature",
-    "maxTokens",
-    "stop",
-];
 const HEADER_REASONS: [&str; 4] = ["initial", "resume", "change", "series"];
 
 /// Why [`replay_requests`] returned no requests.
@@ -354,8 +343,6 @@ pub enum ReplayLimit {
     /// Two `step/start` rows share a coordinate. Several settlements of one
     /// step are admitted.
     RepeatedCoordinate,
-    /// `config` holds a member outside `LlmCallConfig`.
-    ConfigMember,
     /// `tools` is present but not an array of objects.
     ToolSchema,
 }
@@ -798,7 +785,7 @@ fn tool_result(message: &Value) -> Result<(), SeedRejection> {
 }
 
 /// `assertCurrentLlmShape`'s `request/header` checks, then the subset's
-/// `config` and `tools` qualification.
+/// `tools` qualification. `canonicalHeader` keeps every config member.
 fn request_header(seq: u64, data: &Value) -> Result<Fact, ReplayRefusal> {
     // The codec proved that `data` and `data.header` are objects.
     let header = &data["header"];
@@ -837,12 +824,6 @@ fn request_header(seq: u64, data: &Value) -> Result<Fact, ReplayRefusal> {
         .is_some_and(|marker| *marker != Value::Bool(true))
     {
         return Err(seed(seq, SeedRejection::HeaderStartsSeries));
-    }
-    if config
-        .keys()
-        .any(|key| !CONFIG_KEYS.contains(&key.as_str()))
-    {
-        return Err(limit(seq, ReplayLimit::ConfigMember));
     }
     let tools = match header.get("tools") {
         None => None,

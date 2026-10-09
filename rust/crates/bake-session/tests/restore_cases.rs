@@ -36,7 +36,7 @@ const LOGS: [(&str, &str, usize); 3] = [
     ),
 ];
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 118;
+const CASE_COUNT: usize = 124;
 const SOURCE_BUDGET: usize = 64;
 /// Cases whose `image/offload` rejection message is compared exactly.
 const OFFLOAD_MESSAGES: usize = 28;
@@ -47,10 +47,9 @@ const UNNAMED_SEQS: [(&str, u64); 4] = [
     ("known-ignorable-tool-update-marker", 14),
     ("known-ignorable-routing-decision-marker", 16),
 ];
-const LIMITS: [(&str, RestoreLimit); 7] = [
+const LIMITS: [(&str, RestoreLimit); 6] = [
     ("number", RestoreLimit::Number),
     ("coordinate", RestoreLimit::Coordinate),
-    ("config-member", RestoreLimit::ConfigMember),
     ("tool-schema", RestoreLimit::ToolSchema),
     ("context", RestoreLimit::Context),
     ("repair", RestoreLimit::Repair),
@@ -205,7 +204,7 @@ fn load() -> Vec<Case> {
         BTreeSet::from(["cases", "history", "logs", "oracle", "schema", "version"])
     );
     assert_eq!(table["schema"], SCHEMA);
-    assert_eq!(table["version"], 4);
+    assert_eq!(table["version"], 5);
     assert!(
         table["history"]
             .as_array()

@@ -518,25 +518,6 @@
   },
   {
    "variants": [
-    "ReplayLimit::ConfigMember"
-   ],
-   "stageNames": [],
-   "id": "replay-config-member",
-   "crate": "bake-session",
-   "cases": [
-    {
-     "table": "runtime/request-derivation-cases.json",
-     "name": "config-member",
-     "count": 1
-    }
-   ],
-   "kind": "format",
-   "classification": "undecided",
-   "evidence": "request/header config is the waterfall result or the adapter's prepared config (packages/core/agent-loop/src/agent.ts:590-614), copied unchanged by canonicalHeader (packages/core/session/src/request-header.ts:21-30); no writer step drops members outside LlmCallConfig, and a waterfall listener returning extra members is not ruled out by a run-time check",
-   "followUp": "Decide by auditing the config waterfall listeners and adapter prepareCall results shipped in 0.3 (and v0-v2) for extra members; if any exist, carry unknown config members through derivation."
-  },
-  {
-   "variants": [
     "ReplayLimit::ToolSchema"
    ],
    "stageNames": [],
@@ -601,25 +582,6 @@
    "classification": "unreachable",
    "evidence": "turn and step are integer counters: packages/core/agent-loop/src/agent.ts:307-313 (turn/start) and 325-340 (step/start); settlements and tool calls copy them (agent.ts:452-493, packages/core/agent-loop/src/tool-calls.ts:329). every released writer serializes rows and headers with JSON.stringify: v3 packages/session/session-persistence-jsonl/src/format.ts:322 and index.ts:1208; v2 81dcacbb44:packages/session/session-persistence-jsonl/src/format.ts:321 and index.ts:1212; v1 0bb7bba015:packages/session/session-persistence-jsonl/src/format.ts:350 and index.ts:1026; v0 3efd4b51e0:packages/session/session-persistence-jsonl/src/format.ts:256 and index.ts:659. Number::toString writes an integral double below 1e21 without a fraction or exponent, 0 for -0, and the shortest round-trip digits",
    "followUp": "None."
-  },
-  {
-   "variants": [
-    "RestoreLimit::ConfigMember"
-   ],
-   "stageNames": [],
-   "id": "restore-config-member",
-   "crate": "bake-session",
-   "cases": [
-    {
-     "table": "session/restore-cases.json",
-     "name": "config-member",
-     "count": 1
-    }
-   ],
-   "kind": "format",
-   "classification": "undecided",
-   "evidence": "as replay-config-member: packages/core/agent-loop/src/agent.ts:590-614 and packages/core/session/src/request-header.ts:21-30 copy config without dropping unknown members",
-   "followUp": "Decide with replay-config-member."
   },
   {
    "variants": [
@@ -1902,9 +1864,9 @@
    "crate": "bake-session",
    "cases": [],
    "kind": "pass-through",
-   "classification": "undecided",
-   "evidence": "Passes RestoreLimit through, which includes restore-config-member.",
-   "followUp": "Follows restore-config-member."
+   "classification": "unreachable",
+   "evidence": "Passes RestoreLimit through. Its remaining variants are restore-number, restore-coordinate, restore-tool-schema, restore-context, restore-repair, and restore-projection, each classified unreachable with a writer citation.",
+   "followUp": "None."
   },
   {
    "variants": [
@@ -2313,8 +2275,8 @@
    "cases": [],
    "kind": "pass-through",
    "classification": "reachable-gap",
-   "evidence": "passes a migration limit of migrate_released_generation (LogFileLimit::Migration's names), migrate_released_zstd_generation (zstd/stop-order), or restore_migrated (MigratedRestoreLimit) through, and log-file-migration and migrated-restore-restore are reachable gaps",
-   "followUp": "Follows log-file-migration and migrated-restore-restore."
+   "evidence": "passes a migration limit of migrate_released_generation (LogFileLimit::Migration's names), migrate_released_zstd_generation (zstd/stop-order), or restore_migrated (MigratedRestoreLimit) through, and log-file-migration carries migration-row-json-parser, a reachable gap",
+   "followUp": "Follows log-file-migration."
   },
   {
    "variants": [],

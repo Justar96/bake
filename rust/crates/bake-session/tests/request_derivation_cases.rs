@@ -21,19 +21,17 @@ const ORACLE: &str =
 const FIXTURE_LOG: &str = "conformance/runtime/request-reconstruction/tool-call-turn/session.jsonl";
 const FIXTURE_EXPECTED: &str =
     "conformance/runtime/request-reconstruction/tool-call-turn/expected-requests.json";
-/// The TypeScript spec checks both files' SHA-256; this crate has no hash
-/// dependency, so it pins their sizes.
+/// The TypeScript spec checks both files' SHA-256; Rust pins their sizes.
 const LOG_BYTES: usize = 4533;
 const EXPECTED_BYTES: usize = 2775;
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 211;
+const CASE_COUNT: usize = 217;
 const MAX_EDITS: usize = 8;
 const SOURCE_BUDGET: usize = 64;
-const LIMITS: [&str; 7] = [
+const LIMITS: [&str; 6] = [
     "number",
     "coordinate",
     "repeated-coordinate",
-    "config-member",
     "tool-schema",
     "header",
     "codec",
@@ -41,7 +39,7 @@ const LIMITS: [&str; 7] = [
 /// Causes whose refusal renders TypeScript's exact message, and the number of
 /// cases that check it.
 const EXACT_CAUSES: [&str; 4] = ["codec", "finish", "uncommitted", "seeded"];
-const EXACT_CASES: usize = 15;
+const EXACT_CASES: usize = 16;
 const SEED_CHECKS: [(&str, SeedRejection); 32] = [
     ("lossless-json", SeedRejection::LosslessJson),
     ("message-identity", SeedRejection::MessageIdentity),
@@ -134,7 +132,7 @@ fn table() -> Map<String, Value> {
         BTreeSet::from(["schema", "version", "history", "oracle", "fixture", "cases"])
     );
     assert_eq!(fields["schema"], SCHEMA);
-    assert_eq!(fields["version"], 5);
+    assert_eq!(fields["version"], 6);
     assert!(
         fields["history"]
             .as_array()
@@ -422,7 +420,6 @@ fn classify(refusal: &ReplayRefusal) -> String {
                 ReplayLimit::Number => "number",
                 ReplayLimit::Coordinate => "coordinate",
                 ReplayLimit::RepeatedCoordinate => "repeated-coordinate",
-                ReplayLimit::ConfigMember => "config-member",
                 ReplayLimit::ToolSchema => "tool-schema",
             }
         ),
