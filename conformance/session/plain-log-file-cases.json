@@ -12,7 +12,7 @@
     "Version 6: 69 cases. Rust ports TypeScript's encoding-mismatch refusal, so limit-opposite-encoding became encoding-mismatch-at-open with TypeScript's exact message, and a message may hold a {srcJson} placeholder, the step's src path as JSON.stringify spells it, which a create step may also name. Rust lays out Windows names as TypeScript does on POSIX, so limit-windows-name became three POSIX cases, con, nightly., and aux.txt, created and reopened in both arms, and a win32 case for nightly., the spelling a Windows writer can produce, where Rust keeps the windows-name limit. Two cases were added for the root check: the highest Zstd generation is named, and a flat file is refused first. The changed and added expectations were written from the TypeScript sources before either harness ran.",
     "Version 7: 70 cases. Rust reads older-generation rows at any nesting depth, so migrate-v2-deep-tool-schema, a v2 request header whose row nests 207 levels through its MCP tool schema, migrates unchanged in both arms; it was written from the TypeScript sources before either harness ran.",
     "Version 8: 73 cases. Rust ports TypeScript's flat-layout refusal, so the legacy-layout limit is removed: limit-legacy-layout became legacy-layout-flat-file-at-create with TypeScript's exact message, and legacy-layout-before-encoding-mismatch lost its rust override. The root check refuses only a regular file with the flat-layout suffix, as listSessionDirs does, and the id's flat names are probed by opening them, as rejectLegacyFlatArtifact does. session-directory-named-jsonl creates, reopens, and lists a Session directory nightly.jsonl; legacy-probe-finds-session-directory refuses the id nightly beside it at open and create; legacy-layout-file-refused-at-open keeps a flat file refused at open. The changed and added expectations were written from the TypeScript sources before either harness ran.",
-    "Version 9: 75 cases. Rust holds lone surrogates, so limit-row-json-parser, whose lone-surrogate row follows an issue, became migrate-lone-surrogate-row-ignored with no rust override, and migrate-lone-surrogates-kept, written from the TypeScript sources before either harness ran, write-opens a v0 Session whose id and user text hold lone surrogates, laid out as h~D800 and migrated with them written back as JSON.stringify writes them. legacy-layout-noncharacter-path, written from the TypeScript sources before either harness ran, names a flat file holding U+FDD0 in the flat-layout message."
+    "Version 9: 75 cases. Rust holds lone surrogates, so limit-row-json-parser, whose lone-surrogate row follows an issue, became migrate-lone-surrogate-row-ignored with no rust override, and migrate-lone-surrogates-kept, written from the TypeScript sources before either harness ran, write-opens a v0 Session whose id and user text hold lone surrogates, laid out as h~D800 and migrated with them written back as JSON.stringify writes them. legacy-layout-noncharacter-path, written from the TypeScript sources before either harness ran, names a flat file holding U+FDD0 in the flat-layout message. legacy-layout-noncharacter-path runs on Linux and Win32 only: macOS CI showed APFS refusing a U+FDD0 file name with EILSEQ."
   ],
   "cases": [
     {
@@ -2485,6 +2485,11 @@
     },
     {
       "id": "legacy-layout-noncharacter-path",
+      "platforms": [
+        "linux",
+        "win32"
+      ],
+      "platformReason": "APFS refuses a file name holding the noncharacter U+FDD0 with EILSEQ, so neither arm can lay the case out on macOS.",
       "seed": [
         {
           "file": "_no-cwd/l\ufdd0.jsonl",

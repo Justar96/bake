@@ -498,7 +498,7 @@ fn lookups_reach_the_shared_tables_stages_and_leave_the_root_unchanged() {
     } else if cfg!(windows) {
         77
     } else {
-        95
+        93
     };
     assert_eq!(ran, expected_runs);
 }
