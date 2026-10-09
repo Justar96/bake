@@ -18,7 +18,7 @@ use crate::json_parse::{Deep, clone_fields, clone_value, remove_member, replace_
 use super::dispositions::{self, Lookup};
 use crate::v2_to_v3::{
     Checked, StageError, assert_released_payload_semantics, contains_negative_zero, count, invalid,
-    quote, released_keys, released_record, stringify,
+    quote, released_keys, released_record,
 };
 
 type Record = Map<String, Value>;
@@ -327,42 +327,26 @@ fn normalize_retry(
     let chain = retry_chain(data);
     match data.get("retryId") {
         Some(Value::String(id)) if !id.is_empty() => {
-            if let Some(chain) = chain {
-                retry_ids.insert(chain, id.clone());
-            }
+            retry_ids.insert(chain, id.clone());
             return Ok(event);
         }
         Some(_) => return Ok(event),
         None => {}
     }
-    let reused = chain
-        .as_ref()
-        .and_then(|chain| retry_ids.get(chain))
-        .cloned();
+    let reused = retry_ids.get(&chain).cloned();
     let id = reused.unwrap_or_else(|| format!("legacy-retry:{session_id}:{seq}"));
-    if let Some(chain) = chain {
-        retry_ids.insert(chain, id.clone());
-    }
+    retry_ids.insert(chain, id.clone());
     let mut data = Deep::new(clone_fields(data));
     replace_member(&mut data, "retryId", Value::from(id));
     Ok(with_data(event, data.into_inner()))
 }
 
 /// The `\0`-joined `JSON.stringify` of turn, step, provider, and policy key,
-/// where `join` renders an absent member as the empty string. `None` when a
-/// member holds a number JavaScript may print differently: turn and step
-/// must then fail their count check and provider and policy key their string
-/// check in this event's payload validation, so the key is never consulted.
-fn retry_chain(data: &Record) -> Option<String> {
-    let mut parts = Vec::new();
-    for key in ["turn", "step", "provider", "policyKey"] {
-        let part = match data.get(key) {
-            None => String::new(),
-            Some(value) => stringify(Some(value)).ok()?,
-        };
-        parts.push(part);
-    }
-    Some(parts.join("\0"))
+/// where `join` renders an absent member as the empty string.
+fn retry_chain(data: &Record) -> String {
+    ["turn", "step", "provider", "policyKey"]
+        .map(|key| data.get(key).map(crate::json_text).unwrap_or_default())
+        .join("\0")
 }
 
 fn normalize_compaction(

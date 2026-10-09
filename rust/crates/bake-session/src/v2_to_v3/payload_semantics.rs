@@ -27,7 +27,7 @@ use std::collections::HashSet;
 use serde_json::{Map, Value};
 
 use super::StageError;
-use crate::json_text::is_writer_spelling;
+use crate::json_text::{is_writer_spelling, json_text};
 use crate::{Count, MAX_SAFE_INTEGER};
 
 pub(crate) type Checked<T = ()> = Result<T, StageError>;
@@ -39,8 +39,6 @@ pub(crate) fn invalid<T>(message: String) -> Checked<T> {
 
 /// An integer check met an `f64` other than a negative value or -0.
 const FLOAT_LEXEME: &str = "payload-float-lexeme";
-/// A diagnostic quotes a number whose JavaScript spelling may differ.
-const DIAGNOSTIC_NUMBER: &str = "content-kind-diagnostic";
 /// A pre-v2 user message with a goal source carrying `change`, whose check
 /// compares the content with a `JSON.stringify` rendering of the change.
 const LEGACY_GOAL_MESSAGE: &str = "legacy-goal-message";
@@ -122,89 +120,9 @@ pub(crate) fn quote(text: &str) -> String {
 }
 
 /// `JSON.stringify(value)` concatenated into a message, `undefined` when
-/// absent. A number reports a native limit unless both runtimes print it alike.
-pub(crate) fn stringify(value: Option<&Value>) -> Checked<String> {
-    let Some(value) = value else {
-        return Ok("undefined".to_owned());
-    };
-    let mut text = String::new();
-    write_json(value, &mut text)?;
-    Ok(text)
-}
-
-/// What [`write_json`] writes next.
-enum JsonPiece<'a> {
-    Value(&'a Value),
-    Text(&'static str),
-    Key(&'a str),
-}
-
-/// [`stringify`]'s writer, from an explicit stack so a value nested
-/// arbitrarily deep is written without recursing.
-fn write_json(value: &Value, out: &mut String) -> Checked {
-    let mut pending = vec![JsonPiece::Value(value)];
-    while let Some(piece) = pending.pop() {
-        let value = match piece {
-            JsonPiece::Text(text) => {
-                out.push_str(text);
-                continue;
-            }
-            JsonPiece::Key(key) => {
-                out.push_str(&quote(key));
-                out.push(':');
-                continue;
-            }
-            JsonPiece::Value(value) => value,
-        };
-        match value {
-            Value::Number(number) => {
-                let exact = number
-                    .as_u64()
-                    .filter(|n| *n <= MAX_SAFE_INTEGER)
-                    .map(|n| n.to_string());
-                let exact = exact.or_else(|| {
-                    number
-                        .as_i64()
-                        .filter(|n| n.unsigned_abs() <= MAX_SAFE_INTEGER)
-                        .map(|n| n.to_string())
-                });
-                // JavaScript prints -0 and 0.0 as 0.
-                let exact = exact.or_else(|| {
-                    number
-                        .as_f64()
-                        .filter(|n| *n == 0.0)
-                        .map(|_| "0".to_owned())
-                });
-                let Some(text) = exact else {
-                    return Err(StageError::NativeLimit(DIAGNOSTIC_NUMBER.to_owned()));
-                };
-                out.push_str(&text);
-            }
-            Value::Array(items) => {
-                out.push('[');
-                pending.push(JsonPiece::Text("]"));
-                for (index, item) in items.iter().enumerate().rev() {
-                    pending.push(JsonPiece::Value(item));
-                    if index > 0 {
-                        pending.push(JsonPiece::Text(","));
-                    }
-                }
-            }
-            Value::Object(fields) => {
-                out.push('{');
-                pending.push(JsonPiece::Text("}"));
-                for (index, key) in js_keys(fields).into_iter().enumerate().rev() {
-                    pending.push(JsonPiece::Value(&fields[key]));
-                    pending.push(JsonPiece::Key(key));
-                    if index > 0 {
-                        pending.push(JsonPiece::Text(","));
-                    }
-                }
-            }
-            scalar => out.push_str(&scalar.to_string()),
-        }
-    }
-    Ok(())
+/// absent. Every number prints as JavaScript prints its value.
+pub(crate) fn stringify(value: Option<&Value>) -> String {
+    value.map_or_else(|| "undefined".to_owned(), json_text)
 }
 
 /// `releasedV0Record`.

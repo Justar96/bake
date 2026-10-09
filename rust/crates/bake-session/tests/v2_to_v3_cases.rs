@@ -17,19 +17,18 @@ use serde_json::{Map, Value};
 const SCHEMA: &str = "bake/session-format-conformance/v2-to-v3-cases";
 const ORACLE: &str = "releasedV2SessionFormatCodec.createDecoder(header, 'strict') feeding createSessionFormatChain([sessionFormatV0ToV1, sessionFormatV1ToV2, sessionFormatV2ToV3]).createStream; decoder.finish, then stream.finish";
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 370;
+const CASE_COUNT: usize = 371;
 /// The budget a case without `sourceBudget` runs with; TypeScript has none.
 const DEFAULT_SOURCE_BUDGET: usize = 10_000;
 /// Inherent native limits: a fraction or exponent spelling where TypeScript
 /// reads a count or safe integer, this crate's own source budget, and a V8
 /// `TypeError` text the chain wraps.
-const LIMITS: [&str; 7] = [
+const LIMITS: [&str; 6] = [
     "header-float-lexeme",
     "time-float-lexeme",
     "payload-float-lexeme",
     "source-output-budget",
     "object-prototype-type",
-    "content-kind-diagnostic",
     "unsafe-json-integer",
 ];
 const EVERY_FAMILY: &str = "every-source-event-family";
@@ -204,7 +203,7 @@ fn load() -> Vec<Case> {
         BTreeSet::from(["schema", "version", "oracle", "history", "cases"])
     );
     assert_eq!(table["schema"], SCHEMA);
-    assert_eq!(table["version"], 2);
+    assert_eq!(table["version"], 3);
     assert_eq!(table["oracle"], ORACLE);
     let allowed = BTreeSet::from([
         "id",
