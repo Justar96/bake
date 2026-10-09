@@ -1,6 +1,6 @@
 {
   "schema": "bake/session-conformance/plain-log-file-cases",
-  "version": 5,
+  "version": 6,
   "oracle": "in an owned temporary root holding the seeded entries, run each step through the JSONL backend with compression none on the step's handle, a or b, each its own backend instance over the root: create, a write open, or the open handle's append, flush, or close; after each step list every file beneath the root with its text, an empty session.lock by its size",
   "history": [
     "Version 1: 33 cases, written from the TypeScript sources before either harness ran; both arms passed on their first run.",
@@ -8,7 +8,8 @@
     "Version 2: 55 cases. Rust migrates an older generation at a write open, so the older-generation limit is removed and limit-older-generation became migrate-header-less, with TypeScript's exact message. An open step's message may hold a {src} placeholder for the source path its src field names, and an open step may be marked outside-domain. The 22 added cases and the changed one were written from the TypeScript sources before either harness ran; both arms passed on their first run.",
     "Version 3: 61 cases. Rust takes the write lease as TypeScript does, so trees list session.lock, which both harnesses read only by its size, and a step may name a handle, a or b, each its own backend instance over the root. The 6 added cases and the session.lock entries of the existing trees were written from the TypeScript sources before either harness ran. Both arms passed on their first run.",
     "Version 4: 63 cases. Rust runs the catalog's final check of a migrated log, so outside-domain-final-check became migrate-final-check-turn-order with TypeScript's exact message and no rust override, and 2 cases were added: a final-check refusal of a v0 source and a v2 TOOL_NOT_STARTED repair the final check admits. The changed and added expectations were written from the TypeScript sources before either harness ran. Both arms passed without any expectation change.",
-    "Version 5: 64 cases. Rust writes numbers as JSON.stringify writes them, so encode-fraction-written, a fraction in free data, has no Rust limit, and limit-encode now witnesses the encode limit with a source member spelled 0.0; both were written from the TypeScript sources before either harness ran."
+    "Version 5: 64 cases. Rust writes numbers as JSON.stringify writes them, so encode-fraction-written, a fraction in free data, has no Rust limit, and limit-encode now witnesses the encode limit with a source member spelled 0.0; both were written from the TypeScript sources before either harness ran.",
+    "Version 6: 69 cases. Rust ports TypeScript's encoding-mismatch refusal, so limit-opposite-encoding became encoding-mismatch-at-open with TypeScript's exact message, and a message may hold a {srcJson} placeholder, the step's src path as JSON.stringify spells it, which a create step may also name. Rust lays out Windows names as TypeScript does on POSIX, so limit-windows-name became three POSIX cases, con, nightly., and aux.txt, created and reopened in both arms, and a win32 case for nightly., the spelling a Windows writer can produce, where Rust keeps the windows-name limit. Two cases were added for the root check: the highest Zstd generation is named, and a flat file is refused first. The changed and added expectations were written from the TypeScript sources before either harness ran."
   ],
   "cases": [
     {
@@ -2161,7 +2162,7 @@
       "note": "The root check refuses the flat file whatever id is created; its message names the absolute path."
     },
     {
-      "id": "limit-opposite-encoding",
+      "id": "encoding-mismatch-at-open",
       "seed": [
         {
           "file": "_no-cwd/z1/session.v3.jsonl.zstd",
@@ -2172,20 +2173,120 @@
         {
           "step": "open",
           "id": "z1",
+          "src": "_no-cwd/z1/session.v3.jsonl.zstd",
           "ts": {
             "outcome": "thrown",
-            "class": "Error"
-          },
-          "rust": {
-            "outcome": "native-subset",
-            "limit": "opposite-encoding"
+            "class": "Error",
+            "message": "session artifact {srcJson} uses .jsonl.zstd, but this backend is configured for compression \"none\"; use a separate root or select the matching compression mode"
           },
           "tree": {
             "_no-cwd/z1/session.v3.jsonl.zstd": "x"
           }
         }
       ],
-      "note": "The message names the absolute path."
+      "note": "The root check refuses a Zstd generation before the id is looked up, naming its absolute path with JSON.stringify; no lock is taken."
+    },
+    {
+      "id": "encoding-mismatch-names-highest-generation",
+      "seed": [
+        {
+          "file": "_no-cwd/a1/session.v3.jsonl",
+          "text": "x"
+        },
+        {
+          "file": "_no-cwd/z1/session.jsonl.zstd",
+          "text": "x"
+        },
+        {
+          "file": "_no-cwd/z1/session.v10.jsonl.zstd",
+          "text": "x"
+        },
+        {
+          "file": "_no-cwd/z1/session.v2.jsonl.zstd",
+          "text": "x"
+        }
+      ],
+      "steps": [
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": "n1",
+            "createdAt": 1,
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "src": "_no-cwd/z1/session.v10.jsonl.zstd",
+          "ts": {
+            "outcome": "thrown",
+            "class": "Error",
+            "message": "session artifact {srcJson} uses .jsonl.zstd, but this backend is configured for compression \"none\"; use a separate root or select the matching compression mode"
+          },
+          "tree": {
+            "_no-cwd/a1/session.v3.jsonl": "x",
+            "_no-cwd/z1/session.jsonl.zstd": "x",
+            "_no-cwd/z1/session.v10.jsonl.zstd": "x",
+            "_no-cwd/z1/session.v2.jsonl.zstd": "x"
+          }
+        },
+        {
+          "step": "open",
+          "id": "a1",
+          "src": "_no-cwd/z1/session.v10.jsonl.zstd",
+          "ts": {
+            "outcome": "thrown",
+            "class": "Error",
+            "message": "session artifact {srcJson} uses .jsonl.zstd, but this backend is configured for compression \"none\"; use a separate root or select the matching compression mode"
+          },
+          "tree": {
+            "_no-cwd/a1/session.v3.jsonl": "x",
+            "_no-cwd/z1/session.jsonl.zstd": "x",
+            "_no-cwd/z1/session.v10.jsonl.zstd": "x",
+            "_no-cwd/z1/session.v2.jsonl.zstd": "x"
+          }
+        }
+      ],
+      "note": "Whatever id is created or opened, the root check names the Session directory's highest Zstd generation by its number, v10 before v2."
+    },
+    {
+      "id": "legacy-layout-before-encoding-mismatch",
+      "seed": [
+        {
+          "file": "_no-cwd/a1/session.v3.jsonl.zstd",
+          "text": "x"
+        },
+        {
+          "file": "_no-cwd/z.jsonl",
+          "text": "x\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": "n1",
+            "createdAt": 1,
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "src": "_no-cwd/z.jsonl",
+          "ts": {
+            "outcome": "thrown",
+            "class": "Error",
+            "message": "session artifact {srcJson} uses the unsupported flat-file layout; use a separate root or move it into a project/session directory before loading"
+          },
+          "rust": {
+            "outcome": "native-subset",
+            "limit": "legacy-layout"
+          },
+          "tree": {
+            "_no-cwd/a1/session.v3.jsonl.zstd": "x",
+            "_no-cwd/z.jsonl": "x\n"
+          }
+        }
+      ],
+      "note": "A project's flat file is refused before any of its Session directories is checked, so the Zstd generation listed first is not named."
     },
     {
       "id": "limit-non-utf8-name",
@@ -2223,18 +2324,216 @@
       "note": "Node lists the project directory with a replacement character, and listing that spelling fails with ENOENT."
     },
     {
-      "id": "limit-windows-name",
+      "id": "windows-name-device-on-posix",
       "platforms": [
         "posix"
       ],
-      "platformReason": "Windows reserves the device name CON.",
+      "platformReason": "Windows does not keep a device name or a trailing dot as a directory name; limit-windows-name covers win32.",
       "seed": [],
       "steps": [
         {
           "step": "create",
           "header": {
             "version": 3,
-            "id": "CON",
+            "id": "con",
+            "createdAt": 1,
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {}
+        },
+        {
+          "step": "flush",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/con/session.lock": "",
+            "_no-cwd/con/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"con\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "close",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/con/session.lock": "",
+            "_no-cwd/con/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"con\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "open",
+          "id": "con",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/con/session.lock": "",
+            "_no-cwd/con/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"con\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "close",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/con/session.lock": "",
+            "_no-cwd/con/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"con\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        }
+      ],
+      "note": "A Windows device name is an ordinary directory name on POSIX, created and reopened as any other id."
+    },
+    {
+      "id": "windows-name-trailing-dot-on-posix",
+      "platforms": [
+        "posix"
+      ],
+      "platformReason": "Windows does not keep a device name or a trailing dot as a directory name; limit-windows-name covers win32.",
+      "seed": [],
+      "steps": [
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": "nightly.",
+            "createdAt": 1,
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {}
+        },
+        {
+          "step": "flush",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/nightly./session.lock": "",
+            "_no-cwd/nightly./session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"nightly.\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "close",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/nightly./session.lock": "",
+            "_no-cwd/nightly./session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"nightly.\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "open",
+          "id": "nightly.",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/nightly./session.lock": "",
+            "_no-cwd/nightly./session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"nightly.\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "close",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/nightly./session.lock": "",
+            "_no-cwd/nightly./session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"nightly.\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        }
+      ],
+      "note": "encodeSegment keeps a trailing dot, which POSIX keeps in the directory name."
+    },
+    {
+      "id": "windows-name-device-extension-on-posix",
+      "platforms": [
+        "posix"
+      ],
+      "platformReason": "Windows does not keep a device name or a trailing dot as a directory name; limit-windows-name covers win32.",
+      "seed": [],
+      "steps": [
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": "aux.txt",
+            "createdAt": 1,
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {}
+        },
+        {
+          "step": "flush",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/aux.txt/session.lock": "",
+            "_no-cwd/aux.txt/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"aux.txt\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "close",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/aux.txt/session.lock": "",
+            "_no-cwd/aux.txt/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"aux.txt\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "open",
+          "id": "aux.txt",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/aux.txt/session.lock": "",
+            "_no-cwd/aux.txt/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"aux.txt\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        },
+        {
+          "step": "close",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/aux.txt/session.lock": "",
+            "_no-cwd/aux.txt/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"aux.txt\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        }
+      ],
+      "note": "A device name with an extension is an ordinary directory name on POSIX."
+    },
+    {
+      "id": "limit-windows-name",
+      "platforms": [
+        "win32"
+      ],
+      "platformReason": "Only a Win32 path platform refuses an id ending in a dot.",
+      "seed": [],
+      "steps": [
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": "nightly.",
             "createdAt": 1,
             "isSeeded": false,
             "delegationDepth": 0
@@ -2249,17 +2548,14 @@
           "tree": {}
         },
         {
-          "step": "flush",
+          "step": "close",
           "ts": {
             "outcome": "ok"
           },
-          "tree": {
-            "_no-cwd/CON/session.lock": "",
-            "_no-cwd/CON/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"CON\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
-          }
+          "tree": {}
         }
       ],
-      "note": "Rust refuses a device name on every host; the POSIX backend writes it as any other id."
+      "note": "TypeScript creates an unwritten handle without touching the path; a Windows writer would later write a nightly directory, because Windows strips the trailing dot. Rust refuses the id at create on a Win32 path platform. Device names are refused on Win32 by the plain_log_file unit test."
     },
     {
       "id": "migrate-header-less",

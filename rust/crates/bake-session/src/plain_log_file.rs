@@ -6,7 +6,10 @@
 //! keeps the log file beneath a Session root equal to the model's bytes:
 //!
 //! - [`PlainLogFile::create`] is the backend's `create`: the header must
-//!   encode, then the root is checked as `ensureRootEncoding` checks it, then
+//!   encode, then the root is checked as `ensureRootEncoding` checks it,
+//!   which refuses a Session directory holding a canonical generation with
+//!   the `.zstd` suffix by TypeScript's encoding-mismatch message, naming
+//!   the highest such generation, then
 //!   the id must have no canonical generation in any project directory, as
 //!   `findLog` resolves it. Nothing is written.
 //! - [`PlainLogFile::open`] is a write `open`: the root check, then `findLog`,
@@ -47,10 +50,16 @@
 //! backend instance, so two values of one Session are arbitrated by that
 //! lock alone. Dropping the value is the handle's `close`, which releases
 //! the lock. The refusals TypeScript's `SessionAlreadyExistsError`,
-//! `SessionPersistenceNotFoundError`, and duplicate-id `Error` carry are
-//! returned with their exact messages, as are the
+//! `SessionPersistenceNotFoundError`, and duplicate-id and encoding-mismatch
+//! `Error` carry are returned with their exact messages, as are the
 //! `SessionPersistenceCorruptionError` and `SessionFormatUnsupportedError` a
 //! migration reports, which name the source path.
+//!
+//! An id's directory is named by `encodeSegment` alone, as Node names it on
+//! POSIX, so an id such as `con`, `nightly.`, or `aux.txt` is laid out as
+//! any other. On a Win32 path platform, where Windows would treat such a
+//! name as a device or drop its trailing dot, it is refused as
+//! [`LogFileLimit::WindowsName`].
 //!
 //! A migration's streaming order is recovered from batch stages: a refusal
 //! the codec raises at a row is reported only when reading the rows before
@@ -62,7 +71,10 @@
 //! Paths are spelled from `root` as given, and TypeScript spells them from
 //! `path.resolve(root)`, so the messages are exact only for an absolute root
 //! that `path.resolve` leaves unchanged, with no `.` or `..` component and
-//! no trailing or repeated separator.
+//! no trailing or repeated separator. Node lists a directory in the
+//! filesystem's order, which this model takes as byte order, so where a
+//! root holds more than one entry TypeScript refuses, the one an
+//! encoding-mismatch message names may differ.
 //!
 //! A TypeScript backend instance's in-process write claims and pending
 //! creates, which refuse a second handle of one Session within that
@@ -92,6 +104,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use serde_json::Value;
 
 use crate::fork::holds_negative_zero;
+use crate::json_text::json_text;
 use crate::log_layout::{CURRENT_LOG_FILENAME, canonical_generation, encode_segment, log_path};
 use crate::released_rows::{ParseStop, parse_released_header, parse_released_rows};
 use crate::write_lease::{LeaseRefusal, WriteLease};
@@ -133,6 +146,12 @@ pub enum LogFileRefusal {
     /// Two or more project directories hold a canonical generation of the id;
     /// TypeScript's `findLog` throws a plain `Error` with this exact message.
     Duplicate { message: String },
+    /// A Session directory holds a canonical generation with the `.zstd`
+    /// suffix, which a backend configured for compression `none` does not
+    /// read; TypeScript's `encodingMismatch` throws a plain `Error` with this
+    /// exact message, which names that generation's path. Nothing was
+    /// written.
+    EncodingMismatch { message: String },
     /// Migrating an older generation found it corrupt; TypeScript throws
     /// `SessionPersistenceCorruptionError` with this exact message, which
     /// names the source path. No file was written.
@@ -163,6 +182,7 @@ impl LogFileRefusal {
             | Self::AlreadyExists { message }
             | Self::NotFound { message }
             | Self::Duplicate { message }
+            | Self::EncodingMismatch { message }
             | Self::Corrupt { message }
             | Self::Unsupported { message } => Some(message),
             Self::Append(refusal) => refusal.message(),
@@ -184,17 +204,15 @@ pub enum LogFileLimit {
     /// a root without a project directory and otherwise throws while
     /// encoding it; `create` reports [`crate::CreateLimit::EmptyId`].
     EmptyId,
-    /// The encoded id ends in `.` or names a Windows device, such as `CON`,
-    /// `nul`, or `COM1`, which Windows path normalization would not keep as
-    /// a directory name. It is refused on every host.
+    /// On a Win32 path platform, the encoded id ends in `.` or names a
+    /// Windows device, such as `CON`, `nul`, `aux.txt`, or `COM1`, which
+    /// Windows would not keep as a directory name. A POSIX path platform
+    /// lays such an id out as TypeScript does.
     WindowsName,
     /// A project directory holds an entry whose name ends in `.jsonl` or
     /// `.jsonl.zstd`. TypeScript refuses a file named so as the flat legacy
     /// layout, and probes the id's flat names by opening them.
     LegacyLayout,
-    /// A Session directory holds a canonical generation with the `.zstd`
-    /// suffix, which TypeScript refuses as an encoding mismatch.
-    OppositeEncoding,
     /// The root or a project directory lists a name that is not UTF-8, which
     /// Node lists with replacement characters and then opens by that spelling.
     NonUtf8Name,
@@ -255,7 +273,7 @@ impl PlainLogFile {
     ) -> Result<Self, LogFileRefusal> {
         let log = PlainAppendLog::create(header, inherited_event_count)
             .map_err(LogFileRefusal::Create)?;
-        let encoded = encoded_id(log.id())?;
+        let encoded = encoded_id(log.id(), PathPlatform::host())?;
         let found = find_generations(root, &encoded)?;
         if !found.is_empty() {
             return Err(duplicate(log.id(), &found).unwrap_or_else(|| {
@@ -281,7 +299,7 @@ impl PlainLogFile {
         if id.is_empty() {
             return Err(LogFileRefusal::NativeSubset(LogFileLimit::EmptyId));
         }
-        let encoded = encoded_id(id)?;
+        let encoded = encoded_id(id, PathPlatform::host())?;
         let mut found = find_generations(root, &encoded)?;
         if let Some(refusal) = duplicate(id, &found) {
             return Err(refusal);
@@ -776,10 +794,11 @@ fn acquire_lease(dir: &Path, id: &str) -> Result<WriteLease, LogFileRefusal> {
     })
 }
 
-/// The id's path segment, or the [`LogFileLimit::WindowsName`] limit.
-fn encoded_id(id: &str) -> Result<String, LogFileRefusal> {
+/// The id's path segment, or, on a Win32 path platform, the
+/// [`LogFileLimit::WindowsName`] limit.
+fn encoded_id(id: &str, platform: PathPlatform) -> Result<String, LogFileRefusal> {
     let encoded = encode_segment(id);
-    if windows_device_or_dot(&encoded) {
+    if platform == PathPlatform::Win32 && windows_device_or_dot(&encoded) {
         return Err(LogFileRefusal::NativeSubset(LogFileLimit::WindowsName));
     }
     Ok(encoded)
@@ -875,6 +894,9 @@ fn find_generations(root: &Path, encoded: &str) -> Result<Vec<Generation>, LogFi
     }
     for project in &projects {
         let project_dir = root.join(project);
+        // `listSessionDirs` refuses a flat file before any Session directory
+        // of the project is checked.
+        let mut sessions = Vec::new();
         for entry in list(&project_dir)?.unwrap_or_default() {
             let Some(name) = entry.name else {
                 return Err(NON_UTF8_NAME);
@@ -883,7 +905,17 @@ fn find_generations(root: &Path, encoded: &str) -> Result<Vec<Generation>, LogFi
                 return Err(LogFileRefusal::NativeSubset(LogFileLimit::LegacyLayout));
             }
             if entry.is_dir {
-                refuse_opposite(&utf8_names(&project_dir.join(name))?)?;
+                sessions.push(name);
+            }
+        }
+        for session in sessions {
+            let dir = project_dir.join(session);
+            let highest = utf8_names(&dir)?
+                .into_iter()
+                .filter_map(|name| opposite_generation(&name).map(|version| (version, name)))
+                .max();
+            if let Some((_, name)) = highest {
+                return Err(encoding_mismatch(&dir.join(name)));
             }
         }
     }
@@ -891,7 +923,13 @@ fn find_generations(root: &Path, encoded: &str) -> Result<Vec<Generation>, LogFi
     for project in &projects {
         let dir = root.join(project).join(encoded);
         let names = utf8_names(&dir)?;
-        refuse_opposite(&names)?;
+        // `resolveGenerationInDirectory` names the first one it lists.
+        if let Some(name) = names
+            .iter()
+            .find(|name| opposite_generation(name).is_some())
+        {
+            return Err(encoding_mismatch(&dir.join(name)));
+        }
         let newest = names
             .into_iter()
             .filter_map(|name| canonical_generation(&name).map(|version| (version, name)))
@@ -906,18 +944,22 @@ fn find_generations(root: &Path, encoded: &str) -> Result<Vec<Generation>, LogFi
     Ok(found)
 }
 
-/// The [`LogFileLimit::OppositeEncoding`] limit when a Session directory's
-/// `names` hold a canonical generation with the `.zstd` suffix.
-fn refuse_opposite(names: &[String]) -> Result<(), LogFileRefusal> {
-    let opposite = names.iter().any(|name| {
-        name.strip_suffix(".zstd")
-            .and_then(canonical_generation)
-            .is_some()
-    });
-    if opposite {
-        return Err(LogFileRefusal::NativeSubset(LogFileLimit::OppositeEncoding));
+/// The generation a canonical name with the `.zstd` suffix carries,
+/// `parseGenerationLogFilename(name, 'zstd')`.
+fn opposite_generation(name: &str) -> Option<u64> {
+    name.strip_suffix(".zstd").and_then(canonical_generation)
+}
+
+/// TypeScript's `encodingMismatch(path)` of a backend configured for
+/// compression `none`, which spells `path` with `JSON.stringify`.
+fn encoding_mismatch(path: &Path) -> LogFileRefusal {
+    let spelled = json_text(&Value::String(path.display().to_string()));
+    LogFileRefusal::EncodingMismatch {
+        message: format!(
+            "session artifact {spelled} uses .jsonl.zstd, but this backend is configured for \
+             compression \"none\"; use a separate root or select the matching compression mode"
+        ),
     }
-    Ok(())
 }
 
 /// Create the Session directory and a new log file holding `bytes`.
@@ -956,4 +998,67 @@ fn rewrite_tail(path: &Path, before: &[u8], after: &[u8]) -> io::Result<()> {
     }
     file.seek(SeekFrom::Start(shared as u64))?;
     file.write_all(&after[shared..])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn windows_names_are_refused_on_the_win32_path_platform_only() {
+        for (id, encoded) in [
+            ("con", "con"),
+            ("CON", "CON"),
+            ("nightly.", "nightly."),
+            ("aux.txt", "aux.txt"),
+            ("Nul", "Nul"),
+            ("COM1", "COM1"),
+            ("lpt9.log", "lpt9.log"),
+        ] {
+            assert_eq!(
+                encoded_id(id, PathPlatform::Posix).ok().as_deref(),
+                Some(encoded),
+                "{id}"
+            );
+            assert!(
+                matches!(
+                    encoded_id(id, PathPlatform::Win32),
+                    Err(LogFileRefusal::NativeSubset(LogFileLimit::WindowsName))
+                ),
+                "{id}"
+            );
+        }
+        // A space and `$` are escaped, so `CONIN$` and `con ` are not devices.
+        for (id, encoded) in [
+            ("console", "console"),
+            ("COM0", "COM0"),
+            ("COM10", "COM10"),
+            ("a.con", "a.con"),
+            ("CONIN$", "CONIN~0024"),
+            ("con ", "con~0020"),
+            (".", "~002E"),
+            ("..", "~002E~002E"),
+        ] {
+            for platform in [PathPlatform::Posix, PathPlatform::Win32] {
+                assert_eq!(
+                    encoded_id(id, platform).ok().as_deref(),
+                    Some(encoded),
+                    "{id} {platform:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn encoding_mismatch_spells_the_path_as_json_stringify_does() {
+        let refusal = encoding_mismatch(Path::new("/r/\"q\"/session.v3.jsonl.zstd"));
+        assert_eq!(
+            refusal.message(),
+            Some(
+                "session artifact \"/r/\\\"q\\\"/session.v3.jsonl.zstd\" uses .jsonl.zstd, but \
+                 this backend is configured for compression \"none\"; use a separate root or \
+                 select the matching compression mode"
+            )
+        );
+    }
 }

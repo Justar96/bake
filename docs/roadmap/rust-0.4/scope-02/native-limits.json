@@ -2143,8 +2143,8 @@
    ],
    "kind": "filesystem",
    "classification": "reachable-gap",
-   "evidence": "generated ids end in a UUID or a decimal counter (apps/tui/packages/app/src/session.ts:136; packages/core/session/src/index.ts:1029), but a configured agents[].sessionId is any non-empty string (packages/core/agent-loop/src/index.ts:323, documented at packages/core/agent-loop/README.md:52) and replaces the generated id (packages/core/agent-loop/src/index.ts:385; also v0.1.1:packages/core/agent-loop/src/index.ts:367,429). encodeSegment keeps letters and \".\" literally (packages/session/session-persistence-jsonl/src/format.ts:198-213), so sessionId con or nightly. names such a directory, which the writer creates on POSIX",
-   "followUp": "Match TypeScript on POSIX and refuse only where Node's Windows path handling would differ. Slice: plain log file refusals."
+   "evidence": "The limit fires only on a Win32 path platform (rust/crates/bake-session/src/plain_log_file.rs:799-801); on POSIX a configured agents[].sessionId such as con, nightly., or aux.txt is laid out as TypeScript lays it out. A configured agents[].sessionId is any non-empty string (packages/core/agent-loop/src/index.ts:323, documented at packages/core/agent-loop/README.md:52) and replaces the generated id (packages/core/agent-loop/src/index.ts:385; also v0.1.1:packages/core/agent-loop/src/index.ts:367,429), and encodeSegment keeps letters and \".\" literally (packages/session/session-persistence-jsonl/src/format.ts:198-213). On Windows a trailing dot is reachable: Windows strips it, so a Windows writer with sessionId nightly. creates a nightly directory, and TypeScript reopens it by the same spelling while Rust refuses. A device name such as con or aux.txt likely makes the TypeScript writer itself fail on Windows (not verified on a Windows host)",
+   "followUp": "None: D26 keeps the Win32 refusal (owner decision)."
   },
   {
    "variants": [
@@ -2157,32 +2157,13 @@
     {
      "table": "session/plain-log-file-cases.json",
      "name": "legacy-layout",
-     "count": 1
+     "count": 2
     }
    ],
    "kind": "filesystem",
    "classification": "undecided",
    "evidence": "project directories replaced the flat layout in 4e295221f3 (2026-07-24), before the first archived release (dsh-v0.0.1-rc.1, 2026-08-10), and TypeScript refuses a flat file as unsupported (packages/session/session-persistence-jsonl/src/index.ts:1591); but the limit also covers any entry named *.jsonl in a project directory, and no trace shows whether a released writer leaves such a file there",
    "followUp": "Decide by checking every released writer path that creates files under a project directory; if none, mark unreachable."
-  },
-  {
-   "variants": [
-    "LogFileLimit::OppositeEncoding"
-   ],
-   "stageNames": [],
-   "id": "log-file-opposite-encoding",
-   "crate": "bake-session",
-   "cases": [
-    {
-     "table": "session/plain-log-file-cases.json",
-     "name": "opposite-encoding",
-     "count": 1
-    }
-   ],
-   "kind": "filesystem",
-   "classification": "reachable-gap",
-   "evidence": "a released writer configured for zstd writes .zstd generations (packages/session/session-persistence-jsonl/src/index.ts:1220-1243), and a later run configured for none meets them; TypeScript refuses with an exact encoding-mismatch message (packages/session/session-persistence-jsonl/src/index.ts:1582-1585)",
-   "followUp": "Port TypeScript's refusal message instead of a limit. Slice: plain log file refusals."
   },
   {
    "variants": [
