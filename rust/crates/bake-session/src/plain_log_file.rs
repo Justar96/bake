@@ -20,10 +20,14 @@
 //!   generation is read; every later refusal releases the lock and keeps its
 //!   file. The generation must not be newer than the current one. A current
 //!   generation's bytes are opened as [`PlainAppendLog::open`] opens them,
-//!   and the selected path must be the one the header's id and `cwd` name.
+//!   and, as `assertStoredIdentity` checks it, the header must carry the
+//!   requested id and its id and `cwd` must name the selected path, by
+//!   spelling or else by `realpath`, which resolves a case alias on a
+//!   case-insensitive volume, or a symbolic link, to one file.
 //!   An older generation, format v0, v1, or v2, is migrated as the backend
 //!   prepares and publishes it: its header and rows are parsed, its header
-//!   identity is checked against the requested id and the selected path, its
+//!   identity is checked against the requested id and the selected path as a
+//!   current header's is, its
 //!   rows are decoded by the released codec in recoverable mode and read
 //!   through every format edge to v3, the result passes the catalog's final
 //!   check ([`check_transformed_artifact`]), and it is encoded, written to
@@ -55,8 +59,9 @@
 //! backend instance, so two values of one Session are arbitrated by that
 //! lock alone. Dropping the value is the handle's `close`, which releases
 //! the lock. The refusals TypeScript's `SessionAlreadyExistsError`,
-//! `SessionPersistenceNotFoundError`, and duplicate-id, flat-layout, and
-//! encoding-mismatch `Error` carry are returned with their exact messages,
+//! `SessionPersistenceNotFoundError`, and duplicate-id, flat-layout,
+//! encoding-mismatch, and stored-identity `Error` carry are returned with
+//! their exact messages,
 //! as are the `SessionPersistenceCorruptionError` and
 //! `SessionFormatUnsupportedError` a migration reports, which name the
 //! source path.
@@ -93,9 +98,11 @@
 //! outside this model's domain. So is migrating a log whose v3
 //! result the publication's verifier or `validateStoredEvents` refuses: Rust
 //! writes the migrated file where TypeScript refuses and writes nothing. So
-//! is a path the filesystem refuses, such as one longer than a file or path name may
-//! be, a symlink, or a root another process changes, a lock file removed or
-//! replaced included. Every listing is visited in byte order of its UTF-8
+//! is a path the filesystem refuses, such as one longer than a file or path
+//! name may be, or a root another process changes, a lock file removed or
+//! replaced included. A symbolic link is followed where a path is joined,
+//! never where a directory is listed, as Node's `Dirent.isDirectory` does
+//! not follow one. Every listing is visited in byte order of its UTF-8
 //! names. A migration's
 //! temporary file is removed after a failed write or link, and a failed
 //! removal is reported with that failure; one a killed process leaves is
@@ -167,6 +174,13 @@ pub enum LogFileRefusal {
     /// `nightly`. TypeScript's `legacyLayout` throws a plain `Error` with
     /// this exact message, which names the path. Nothing was written.
     LegacyLayout { message: String },
+    /// A selected current log's header id differs from the requested one,
+    /// or its id and `cwd` name another path than the selected one, which
+    /// `realpath` does not resolve to the same file; TypeScript's
+    /// `assertStoredIdentity` throws a plain `Error` with this exact message,
+    /// which names the selected path, and the other path when the id
+    /// matches. The lock file is kept.
+    StoredIdentity { message: String },
     /// Migrating an older generation found it corrupt; TypeScript throws
     /// `SessionPersistenceCorruptionError` with this exact message, which
     /// names the source path. No file was written.
@@ -199,6 +213,7 @@ impl LogFileRefusal {
             | Self::Duplicate { message }
             | Self::EncodingMismatch { message }
             | Self::LegacyLayout { message }
+            | Self::StoredIdentity { message }
             | Self::Corrupt { message }
             | Self::Unsupported { message } => Some(message),
             Self::Append(refusal) => refusal.message(),
@@ -231,11 +246,6 @@ pub enum LogFileLimit {
     /// The id's highest canonical generation is newer than the current one;
     /// TypeScript reads its header and refuses it.
     NewerGeneration,
-    /// The selected current log's header id differs from the requested one,
-    /// or a selected log's header id and `cwd` name another path than the
-    /// selected one. TypeScript refuses unless `realpath` resolves both paths
-    /// to one file.
-    Identity,
     /// [`PlainAppendLog::open`] refused the stored bytes, which TypeScript
     /// reports with the path of the log in its message.
     Scan(ScanRefusal),
@@ -342,15 +352,13 @@ impl PlainLogFile {
         let platform = PathPlatform::host();
         let log = PlainAppendLog::open(&bytes, platform, source_budget)
             .map_err(|refusal| LogFileRefusal::NativeSubset(LogFileLimit::Scan(refusal)))?;
-        let identity = LogFileRefusal::NativeSubset(LogFileLimit::Identity);
         // The scan admitted this header record, so it decodes again.
-        let Some(Ok(header)) =
-            first_record(&bytes).map(|record| read_header_record(record, platform))
-        else {
-            return Err(identity);
-        };
-        if header.id != id || log_path(root, header.cwd.as_deref(), &encoded) != selected.path {
-            return Err(identity);
+        let header = first_record(&bytes)
+            .map(|record| read_header_record(record, platform))
+            .and_then(Result::ok)
+            .ok_or_else(|| io::Error::other("an opened log's header decodes again"))?;
+        if let Some(cause) = stored_identity_mismatch(root, id, &encoded, &header, &selected)? {
+            return Err(LogFileRefusal::StoredIdentity { message: cause });
         }
         Ok(Self {
             path: selected.path,
@@ -377,20 +385,11 @@ impl PlainLogFile {
         // `validateSourceIdentity` checks a header its codec reads, before any row.
         if let Some(stored) =
             released_generation_header(&bytes, selected.version, platform).map_err(refusal)?
+            && let Some(cause) = stored_identity_mismatch(root, id, encoded, &stored, selected)?
         {
-            if stored.id != id {
-                let path = selected.path.display().to_string();
-                let path = crate::js_string::from_rust(&path);
-                return Err(refusal(ReleasedGenerationRefusal::Corrupt(format!(
-                    "Error: corrupt session log \"{path}\": requested id \"{id}\" \
-                     does not match header id \"{}\"",
-                    stored.id
-                ))));
-            }
-            let current = selected.path.with_file_name(CURRENT_LOG_FILENAME);
-            if log_path(root, stored.cwd.as_deref(), encoded) != current {
-                return Err(LogFileRefusal::NativeSubset(LogFileLimit::Identity));
-            }
+            return Err(refusal(ReleasedGenerationRefusal::Corrupt(format!(
+                "Error: {cause}"
+            ))));
         }
         let migrated = migrate_released_generation(&bytes, selected.version, source_budget)
             .map_err(refusal)?;
@@ -906,6 +905,51 @@ fn windows_device_or_dot(encoded: &str) -> bool {
                 matches!(number, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9")
             }),
     }
+}
+
+/// `assertStoredIdentity` of the `selected` generation, whose `header` was
+/// read for the requested `id`, encoded as `encoded`: the message of the
+/// `Error` TypeScript throws, or `None` when the header names the selected
+/// path, by spelling or else by `realpath`. A requested id is never empty,
+/// so `generationLogPath` names a path.
+fn stored_identity_mismatch(
+    root: &Path,
+    id: &str,
+    encoded: &str,
+    header: &SessionHeader,
+    selected: &Generation,
+) -> Result<Option<String>, LogFileRefusal> {
+    let path = crate::js_string::from_rust(&selected.path.display().to_string()).into_owned();
+    if header.id != id {
+        return Ok(Some(format!(
+            "corrupt session log \"{path}\": requested id \"{id}\" does not match header id \"{}\"",
+            header.id
+        )));
+    }
+    let current = log_path(root, header.cwd.as_deref(), encoded);
+    let expected = match selected.path.file_name() {
+        Some(name) => current.with_file_name(name),
+        None => current,
+    };
+    if expected == selected.path || same_file(&selected.path, &expected)? {
+        return Ok(None);
+    }
+    let expected = crate::js_string::from_rust(&expected.display().to_string()).into_owned();
+    Ok(Some(format!(
+        "corrupt session log \"{path}\": header id \"{id}\" and cwd identify \"{expected}\""
+    )))
+}
+
+/// `sameFile`: whether both paths resolve to one file, as `realpath`
+/// resolves them; an absent path resolves to none.
+fn same_file(path: &Path, expected: &Path) -> Result<bool, LogFileRefusal> {
+    let resolve = |path: &Path| match fs::canonicalize(path) {
+        Ok(resolved) => Ok(Some(resolved)),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(LogFileRefusal::Io(error)),
+    };
+    let (actual, expected) = (resolve(path)?, resolve(expected)?);
+    Ok(actual.is_some() && actual == expected)
 }
 
 /// The duplicate-id refusal when more than one generation was found.

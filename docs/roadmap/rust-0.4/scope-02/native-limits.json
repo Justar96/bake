@@ -2091,25 +2091,6 @@
   },
   {
    "variants": [
-    "LogFileLimit::Identity"
-   ],
-   "stageNames": [],
-   "id": "log-file-identity",
-   "crate": "bake-session",
-   "cases": [
-    {
-     "table": "session/plain-log-file-cases.json",
-     "name": "identity",
-     "count": 2
-    }
-   ],
-   "kind": "filesystem",
-   "classification": "undecided",
-   "evidence": "The writer derives the path from the header's own cwd and id (projectKey and sessionDir, packages/session/session-persistence-jsonl/src/format.ts:224-267), so a fresh log agrees with its header. A read-only scan of the owner's home (93 Zstandard format-3 logs, 40,514 rows; no v0 to v2 log) found all 93 project and Session directory names equal projectKey(cwd) and encodeSegment(id) of their headers, and the root is not a symlink. Untraced: whether a writer on a case-insensitive volume or under a symlinked or renamed root leaves a log whose directory spelling differs from the header",
-   "followUp": "Decide with a case on a case-insensitive volume and a symlinked root."
-  },
-  {
-   "variants": [
     "LogFileLimit::Scan"
    ],
    "stageNames": [],
