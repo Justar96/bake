@@ -11,6 +11,7 @@
 use serde_json::{Map, Value};
 
 use crate::MAX_SAFE_INTEGER;
+use crate::json_parse::{Deep, clone_value};
 use crate::v2_to_v3::contains_negative_zero;
 
 /// Why `push` did not decide a chunk.
@@ -61,10 +62,8 @@ enum StreamRecord {
         args: Vec<String>,
         last_time: i64,
     },
-    Chunk {
-        time: i64,
-        chunk: Value,
-    },
+    /// `chunk` is unchecked log JSON of any depth.
+    Chunk { time: i64, chunk: Deep<Value> },
 }
 
 /// `AssistantStreamAccumulator`.
@@ -103,7 +102,7 @@ impl AssistantStreamAccumulator {
             "block-start" | "block-end" | "usage" | "finish" => {
                 self.records.push(StreamRecord::Chunk {
                     time,
-                    chunk: chunk.clone(),
+                    chunk: Deep::new(clone_value(chunk)),
                 });
                 Ok(())
             }
@@ -171,7 +170,7 @@ impl AssistantStreamAccumulator {
         if id.is_empty() || name.is_some_and(String::is_empty) {
             self.records.push(StreamRecord::Chunk {
                 time,
-                chunk: chunk.clone(),
+                chunk: Deep::new(clone_value(chunk)),
             });
             return Ok(());
         }
@@ -250,7 +249,7 @@ impl AssistantStreamAccumulator {
                     StreamRecord::Chunk { time, chunk } => {
                         durable.insert("type".to_owned(), Value::from("chunk"));
                         durable.insert("time".to_owned(), Value::from(*time));
-                        durable.insert("chunk".to_owned(), chunk.clone());
+                        durable.insert("chunk".to_owned(), clone_value(chunk));
                     }
                 }
                 Value::Object(durable)

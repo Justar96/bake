@@ -18,9 +18,10 @@ use serde_json::{Map, Value};
 use super::StageError;
 use super::payload_semantics::{
     Checked, assert_released_payload_semantics, content_block_fields, count, invalid, js_keys,
-    quote, released_keys, released_record, safe_integer, stringify,
+    lazily, quote, released_keys, released_record, safe_integer, stringify, walk_content_blocks,
 };
 use crate::MAX_SAFE_INTEGER;
+use crate::json_parse::{Deep, clone_value};
 pub(crate) use dispositions::{Lookup, OBJECT_PROTOTYPE_NAMES, lookup};
 
 type Record = Map<String, Value>;
@@ -388,27 +389,68 @@ fn assert_content_kind(kind: Option<&Value>, label: &str) -> Checked {
 }
 
 fn assert_content_kinds(content: Option<&Value>, label: &str) -> Checked {
-    for (index, value) in content_array(content, label)?.iter().enumerate() {
-        assert_content_block(Some(value), &format!("{label}[{index}]"))?;
-    }
-    Ok(())
+    let blocks = content_array(content, label)?;
+    walk_content_blocks(
+        blocks,
+        label,
+        ".content",
+        enter_content_block,
+        leave_content_block,
+    )
 }
 
+/// One block and the `tool-result` content it nests, which
+/// `walk_content_blocks` visits without recursing.
 fn assert_content_block(value: Option<&Value>, label: &str) -> Checked {
-    let block = record(value, label)?;
-    assert_content_kind(block.get("type"), label)?;
+    let Some(value) = value else {
+        return record(None, label).map(drop);
+    };
+    let block_label = || label.to_owned();
+    if let Some(nested) = enter_content_block(value, &block_label)? {
+        walk_content_blocks(
+            nested,
+            &format!("{label}.content"),
+            ".content",
+            enter_content_block,
+            leave_content_block,
+        )?;
+    }
+    leave_content_block(value, &block_label)
+}
+
+/// The checks before a block's nested content: an object of a classified
+/// kind, and a `tool-result` block's content, returned to descend into.
+fn enter_content_block<'a>(
+    value: &'a Value,
+    label: &dyn Fn() -> String,
+) -> Checked<Option<&'a [Value]>> {
+    let block = lazily(label, |label| record(Some(value), label))?;
+    lazily(label, |label| assert_content_kind(block.get("type"), label))?;
+    if block.get("type").and_then(Value::as_str) != Some("tool-result") {
+        return Ok(None);
+    }
+    match block.get("content") {
+        Some(Value::Array(nested)) => Ok(Some(nested)),
+        _ => invalid(format!(
+            "{}.content: invalid message content kind \"tool-result\": content must be an array",
+            label()
+        )),
+    }
+}
+
+/// The checks after a block's nested content.
+fn leave_content_block(value: &Value, label: &dyn Fn() -> String) -> Checked {
+    match value {
+        Value::Object(block) => lazily(label, |label| assert_content_block_fields(block, label)),
+        _ => Ok(()),
+    }
+}
+
+fn assert_content_block_fields(block: &Record, label: &str) -> Checked {
     let kind = block
         .get("type")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    if kind == "tool-result" {
-        if !block.get("content").is_some_and(Value::is_array) {
-            return invalid(format!(
-                "{label}.content: invalid message content kind \"tool-result\": content must be an array"
-            ));
-        }
-        assert_content_kinds(block.get("content"), &format!("{label}.content"))?;
-    }
     if kind == "file" {
         let file = format!("{label} kind \"file\"");
         keys(block, &["type", "attachment"], &[], &file)?;
@@ -436,19 +478,19 @@ fn assert_content_block(value: Option<&Value>, label: &str) -> Checked {
     }
     // The frozen field rules run without revisiting tool-result children; the
     // synthetic `user/message` probe places the block at `content[0]`.
-    let emptied: Option<Record> = (kind == "tool-result").then(|| {
+    let emptied: Option<Deep<Record>> = (kind == "tool-result").then(|| {
         let fields = block.iter().map(|(key, value)| {
             let value = if key == "content" {
                 Value::Array(Vec::new())
             } else {
-                value.clone()
+                clone_value(value)
             };
             (key.clone(), value)
         });
-        fields.collect()
+        Deep::new(fields.collect())
     });
     match content_block_fields(
-        emptied.as_ref().unwrap_or(block),
+        emptied.as_deref().unwrap_or(block),
         "user/message 0 content[0]",
     ) {
         Err(StageError::Invalid(detail)) => invalid(format!(

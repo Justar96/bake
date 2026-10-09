@@ -307,9 +307,9 @@ fn check_consumed_work(
         expected["outcome"], "folded",
         "{id}: a TypeError names its Rust limit"
     );
-    let work = actual.unwrap_or_else(|limit| panic!("{id}: {limit:?}"));
+    let mut work = actual.unwrap_or_else(|limit| panic!("{id}: {limit:?}"));
     let mut actual = json!({"outcome": "folded"});
-    if let Some(end) = work.end {
+    if let Some(end) = work.end.take() {
         actual["end"] = end;
     }
     actual["droppedUnrun"] = work.dropped_unrun.into();

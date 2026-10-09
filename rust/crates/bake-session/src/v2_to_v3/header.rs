@@ -5,6 +5,7 @@ use serde_json::{Map, Value};
 
 use super::StageError;
 use super::js::{count, exact_keys, js_order};
+use crate::json_parse::{Deep, clone_fields};
 use crate::{PathPlatform, is_absolute};
 
 const PHYSICAL: &str = "released v2 physical header";
@@ -40,9 +41,13 @@ pub(super) fn decode(
             "{PHYSICAL} is not lossless JSON"
         )));
     }
-    let Value::Object(fields) = js_order(header.clone()) else {
+    let Value::Object(fields) = header else {
         return Err(StageError::Invalid(format!("{PHYSICAL} must be an object")));
     };
+    let Value::Object(fields) = js_order(Value::Object(clone_fields(fields))) else {
+        unreachable!("js_order keeps an object an object")
+    };
+    let fields = Deep::new(fields);
     physical_keys(&fields)?;
     if fields["type"] != "session" || !is_version_two(&fields["version"])? {
         return Err(StageError::Invalid(
@@ -139,17 +144,26 @@ fn is_version_two(version: &Value) -> Result<bool, StageError> {
     }
 }
 
+/// Whether `value` holds the number -0 at any depth, found from an explicit
+/// stack in document order.
 pub(crate) fn contains_negative_zero(value: &Value) -> bool {
-    match value {
-        Value::Number(number) => {
-            !number.is_i64()
-                && !number.is_u64()
-                && number
-                    .as_f64()
-                    .is_some_and(|number| number == 0.0 && number.is_sign_negative())
+    let mut pending = vec![value];
+    while let Some(value) = pending.pop() {
+        match value {
+            Value::Number(number) => {
+                if !number.is_i64()
+                    && !number.is_u64()
+                    && number
+                        .as_f64()
+                        .is_some_and(|number| number == 0.0 && number.is_sign_negative())
+                {
+                    return true;
+                }
+            }
+            Value::Array(items) => pending.extend(items.iter().rev()),
+            Value::Object(fields) => pending.extend(fields.values().rev()),
+            _ => {}
         }
-        Value::Array(items) => items.iter().any(contains_negative_zero),
-        Value::Object(fields) => fields.values().any(contains_negative_zero),
-        _ => false,
     }
+    false
 }

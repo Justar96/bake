@@ -132,54 +132,77 @@ pub(crate) fn stringify(value: Option<&Value>) -> Checked<String> {
     Ok(text)
 }
 
+/// What [`write_json`] writes next.
+enum JsonPiece<'a> {
+    Value(&'a Value),
+    Text(&'static str),
+    Key(&'a str),
+}
+
+/// [`stringify`]'s writer, from an explicit stack so a value nested
+/// arbitrarily deep is written without recursing.
 fn write_json(value: &Value, out: &mut String) -> Checked {
-    match value {
-        Value::Number(number) => {
-            let exact = number
-                .as_u64()
-                .filter(|n| *n <= MAX_SAFE_INTEGER)
-                .map(|n| n.to_string());
-            let exact = exact.or_else(|| {
-                number
-                    .as_i64()
-                    .filter(|n| n.unsigned_abs() <= MAX_SAFE_INTEGER)
-                    .map(|n| n.to_string())
-            });
-            // JavaScript prints -0 and 0.0 as 0.
-            let exact = exact.or_else(|| {
-                number
-                    .as_f64()
-                    .filter(|n| *n == 0.0)
-                    .map(|_| "0".to_owned())
-            });
-            let Some(text) = exact else {
-                return Err(StageError::NativeLimit(DIAGNOSTIC_NUMBER.to_owned()));
-            };
-            out.push_str(&text);
-        }
-        Value::Array(items) => {
-            out.push('[');
-            for (index, item) in items.iter().enumerate() {
-                if index > 0 {
-                    out.push(',');
-                }
-                write_json(item, out)?;
+    let mut pending = vec![JsonPiece::Value(value)];
+    while let Some(piece) = pending.pop() {
+        let value = match piece {
+            JsonPiece::Text(text) => {
+                out.push_str(text);
+                continue;
             }
-            out.push(']');
-        }
-        Value::Object(fields) => {
-            out.push('{');
-            for (index, key) in js_keys(fields).into_iter().enumerate() {
-                if index > 0 {
-                    out.push(',');
-                }
+            JsonPiece::Key(key) => {
                 out.push_str(&quote(key));
                 out.push(':');
-                write_json(&fields[key], out)?;
+                continue;
             }
-            out.push('}');
+            JsonPiece::Value(value) => value,
+        };
+        match value {
+            Value::Number(number) => {
+                let exact = number
+                    .as_u64()
+                    .filter(|n| *n <= MAX_SAFE_INTEGER)
+                    .map(|n| n.to_string());
+                let exact = exact.or_else(|| {
+                    number
+                        .as_i64()
+                        .filter(|n| n.unsigned_abs() <= MAX_SAFE_INTEGER)
+                        .map(|n| n.to_string())
+                });
+                // JavaScript prints -0 and 0.0 as 0.
+                let exact = exact.or_else(|| {
+                    number
+                        .as_f64()
+                        .filter(|n| *n == 0.0)
+                        .map(|_| "0".to_owned())
+                });
+                let Some(text) = exact else {
+                    return Err(StageError::NativeLimit(DIAGNOSTIC_NUMBER.to_owned()));
+                };
+                out.push_str(&text);
+            }
+            Value::Array(items) => {
+                out.push('[');
+                pending.push(JsonPiece::Text("]"));
+                for (index, item) in items.iter().enumerate().rev() {
+                    pending.push(JsonPiece::Value(item));
+                    if index > 0 {
+                        pending.push(JsonPiece::Text(","));
+                    }
+                }
+            }
+            Value::Object(fields) => {
+                out.push('{');
+                pending.push(JsonPiece::Text("}"));
+                for (index, key) in js_keys(fields).into_iter().enumerate().rev() {
+                    pending.push(JsonPiece::Value(&fields[key]));
+                    pending.push(JsonPiece::Key(key));
+                    if index > 0 {
+                        pending.push(JsonPiece::Text(","));
+                    }
+                }
+            }
+            scalar => out.push_str(&scalar.to_string()),
         }
-        scalar => out.push_str(&scalar.to_string()),
     }
     Ok(())
 }
@@ -774,17 +797,104 @@ fn token_usage(value: Option<&Value>, label: &str) -> Checked {
 }
 
 fn content_blocks(value: Option<&Value>, label: &str) -> Checked {
-    array_value(value, label, content_block)?;
-    Ok(())
+    let Some(Value::Array(blocks)) = value else {
+        return invalid(format!("{label} must be an array"));
+    };
+    walk_content_blocks(
+        blocks,
+        label,
+        " content",
+        |block, label| {
+            let fields = lazily(label, |label| released_record(Some(block), label))?;
+            lazily(label, |label| content_block_head(fields, label))?;
+            if fields.get("type").and_then(Value::as_str) != Some("tool-result") {
+                return Ok(None);
+            }
+            match fields.get("content") {
+                Some(Value::Array(nested)) => Ok(Some(nested)),
+                _ => invalid(format!("{} content must be an array", label())),
+            }
+        },
+        |block, label| match block {
+            Value::Object(fields) => lazily(label, |label| content_block_tail(fields, label)),
+            _ => Ok(()),
+        },
+    )
 }
 
-fn content_block(value: &Value, label: &str) -> Checked {
-    content_block_fields(released_record(Some(value), label)?, label)
+/// Runs `check` with an empty label and formats the real label only when the
+/// check refuses, so a deep `tool-result` chain costs no label per level. The
+/// validators are pure, and whether they refuse never depends on the label.
+pub(super) fn lazily<T>(
+    label: &dyn Fn() -> String,
+    check: impl Fn(&str) -> Checked<T>,
+) -> Checked<T> {
+    match check("") {
+        Ok(value) => Ok(value),
+        Err(_) => check(&label()),
+    }
+}
+
+/// Visits `blocks` and the `tool-result` content they nest in the recursive
+/// validators' depth-first order, from an explicit stack, so a chain of any
+/// depth cannot overflow. `enter` checks a block before its nested content
+/// and returns that content to descend into; `leave` runs after it. Both get
+/// the block's label, `{base}[i]` then `{separator}[j]` per level, built only
+/// when asked for.
+pub(super) fn walk_content_blocks<'a>(
+    blocks: &'a [Value],
+    base: &str,
+    separator: &str,
+    mut enter: impl FnMut(&'a Value, &dyn Fn() -> String) -> Checked<Option<&'a [Value]>>,
+    mut leave: impl FnMut(&'a Value, &dyn Fn() -> String) -> Checked,
+) -> Checked {
+    // Each frame holds one content list and the index of its next block.
+    let mut stack: Vec<(&'a [Value], usize)> = vec![(blocks, 0)];
+    let label_of = |stack: &[(&'a [Value], usize)]| {
+        let mut label = base.to_owned();
+        for (depth, (_, next)) in stack.iter().enumerate() {
+            if depth > 0 {
+                label.push_str(separator);
+            }
+            label.push_str(&format!("[{}]", next.saturating_sub(1)));
+        }
+        label
+    };
+    while let Some(&(members, next)) = stack.last() {
+        let Some(block) = members.get(next) else {
+            stack.pop();
+            if let Some(&(owners, owner_next)) = stack.last()
+                && let Some(owner) = owners.get(owner_next.saturating_sub(1))
+            {
+                leave(owner, &|| label_of(&stack))?;
+            }
+            continue;
+        };
+        if let Some(top) = stack.last_mut() {
+            top.1 = next + 1;
+        }
+        let nested = enter(block, &|| label_of(&stack))?;
+        match nested {
+            Some(nested) => stack.push((nested, 0)),
+            None => leave(block, &|| label_of(&stack))?,
+        }
+    }
+    Ok(())
 }
 
 /// `contentBlockValue` after its object check. Unknown block kinds need only
 /// a non-empty `type`.
 pub(super) fn content_block_fields(block: &Record, label: &str) -> Checked {
+    content_block_head(block, label)?;
+    if block.get("type").and_then(Value::as_str) == Some("tool-result") {
+        content_blocks(block.get("content"), &format!("{label} content"))?;
+    }
+    content_block_tail(block, label)
+}
+
+/// The checks `contentBlockValue` makes before a `tool-result` block's
+/// nested content.
+fn content_block_head(block: &Record, label: &str) -> Checked {
     match block.get("type").and_then(Value::as_str) {
         Some("text" | "reasoning") => {
             released_keys(block, &["type", "text"], &[], label)?;
@@ -808,14 +918,21 @@ pub(super) fn content_block_fields(block: &Record, label: &str) -> Checked {
                 label,
             )?;
             non_empty_string(block.get("toolCallId"), &format!("{label} toolCallId"))?;
-            content_blocks(block.get("content"), &format!("{label} content"))?;
-            if let Some(error) = block.get("isError") {
-                boolean_value(Some(error), &format!("{label} isError"))?;
-            }
         }
         _ => {
             non_empty_string(block.get("type"), &format!("{label} type"))?;
         }
+    }
+    Ok(())
+}
+
+/// The check `contentBlockValue` makes after a `tool-result` block's nested
+/// content.
+fn content_block_tail(block: &Record, label: &str) -> Checked {
+    if block.get("type").and_then(Value::as_str) == Some("tool-result")
+        && let Some(error) = block.get("isError")
+    {
+        boolean_value(Some(error), &format!("{label} isError"))?;
     }
     Ok(())
 }

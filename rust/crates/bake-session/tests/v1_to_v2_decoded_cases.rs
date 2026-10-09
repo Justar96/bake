@@ -284,7 +284,7 @@ fn check(
             difference(&migrated.header, header, "header")
                 .or_else(|| {
                     difference(
-                        &Value::Array(migrated.events),
+                        &Value::Array(migrated.events.clone()),
                         &Value::Array(events.clone()),
                         "events",
                     )

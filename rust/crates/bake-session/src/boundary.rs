@@ -23,7 +23,7 @@
 
 use serde_json::Value;
 
-use crate::json_parse::clone_value;
+use crate::json_parse::{DebugJson, clone_value, dismantle, values_equal};
 use crate::{MAX_SAFE_INTEGER, RestoredLog};
 
 /// Which boundary a step most recently crossed.
@@ -52,10 +52,9 @@ pub struct StepBoundary {
 
 /// `TurnBoundaryProjection` after the closers.
 ///
-/// `last_turn` is a plain `Value`, so this struct's derived `Clone`,
-/// `PartialEq`, and `Debug`, like its drop, recurse once per level that
-/// value nests.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// `last_turn` may nest as deep as its row; this struct's `Drop`, `Clone`,
+/// `PartialEq`, and `Debug` do not recurse over it, so its fields cannot be
+/// moved out; take `last_turn` with [`std::mem::take`].
 pub struct TurnBoundaryState {
     /// The seq of a `turn/start` no `turn/end` has followed. A closer ends
     /// any turn interruptedTurnClosers sees as open, so only a turn whose
@@ -67,6 +66,45 @@ pub struct TurnBoundaryState {
     /// `0` until a `turn/start`, then that event's `data.turn` as logged. It
     /// may nest as deep as its row; drop it with [`crate::dismantle`].
     pub last_turn: Value,
+}
+
+impl Drop for TurnBoundaryState {
+    fn drop(&mut self) {
+        dismantle(std::mem::take(&mut self.last_turn));
+    }
+}
+
+impl Clone for TurnBoundaryState {
+    fn clone(&self) -> Self {
+        Self {
+            open_turn_start_seq: self.open_turn_start_seq,
+            last_step_start_seq: self.last_step_start_seq,
+            last_step_boundary: self.last_step_boundary,
+            last_turn: clone_value(&self.last_turn),
+        }
+    }
+}
+
+impl PartialEq for TurnBoundaryState {
+    fn eq(&self, other: &Self) -> bool {
+        self.open_turn_start_seq == other.open_turn_start_seq
+            && self.last_step_start_seq == other.last_step_start_seq
+            && self.last_step_boundary == other.last_step_boundary
+            && values_equal(&self.last_turn, &other.last_turn)
+    }
+}
+
+impl Eq for TurnBoundaryState {}
+
+impl std::fmt::Debug for TurnBoundaryState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TurnBoundaryState")
+            .field("open_turn_start_seq", &self.open_turn_start_seq)
+            .field("last_step_start_seq", &self.last_step_start_seq)
+            .field("last_step_boundary", &self.last_step_boundary)
+            .field("last_turn", &DebugJson(&self.last_turn))
+            .finish()
+    }
 }
 
 /// Event `seq` needs JavaScript behavior this port does not reproduce;

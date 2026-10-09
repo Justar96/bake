@@ -1,19 +1,16 @@
 //! `bake-rs`: entry point for Bake's native terminal preview.
 
-mod inspect;
-mod list;
-mod lookup;
-mod stat;
-
 use std::ffi::{OsStr, OsString};
 use std::io::{self, IsTerminal, Write};
 use std::process::ExitCode;
 
+use bake_cli::inspect::{
+    self, Encoding, InspectArgs, LookupArgs, MAX_BUDGET, Outcome, Target, parse_count,
+};
+use bake_cli::list::{self, ListArgs};
+use bake_cli::record;
+use bake_cli::stat::{self, StatArgs};
 use bake_tui::PreviewExit;
-use inspect::{Encoding, InspectArgs, LookupArgs, MAX_BUDGET, Outcome, Target, parse_count};
-use list::ListArgs;
-use serde_json::Value;
-use stat::StatArgs;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -550,17 +547,6 @@ fn main() -> ExitCode {
             eprintln!("bake-rs: {message}\n\nRun '{help}' for usage.");
             ExitCode::from(2)
         }
-    }
-}
-
-/// A JSON record and its exit status, or a diagnostic for exit status 1.
-fn record(result: Result<(Value, u8), String>) -> Outcome {
-    match result {
-        Ok((record, status)) => Outcome::Record {
-            json: record.to_string(),
-            status,
-        },
-        Err(message) => Outcome::Failure(message),
     }
 }
 

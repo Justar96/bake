@@ -6,13 +6,15 @@ use serde_json::{Map, Value};
 use super::admission::{Lookup, lookup};
 use super::js::{MAX_SAFE_INTEGER, count, exact_keys, record};
 use super::{SURFACE_TYPES, StageError};
+use crate::json_parse::{Deep, clone_fields, clone_value, replace_member};
 
 const LIMIT: &str = "canonical-float-lexeme";
 const REQUIRED: [&str; 4] = ["type", "seq", "time", "data"];
 
 /// Convert replace endpoints to `startSeq`/`endSeq`, omit empty request
 /// header `tools` and `adapterDefaults`, then validate the V3 event.
-pub(super) fn canonicalize(mut event: Map<String, Value>) -> Result<Value, StageError> {
+pub(super) fn canonicalize(event: Map<String, Value>) -> Result<Value, StageError> {
+    let mut event = Deep::new(event);
     let event_type = event["type"].as_str().unwrap_or_default().to_owned();
     let seq = event["seq"].as_u64().unwrap_or_default();
     let subject = format!("format v2 {event_type} at seq {seq}");
@@ -35,7 +37,7 @@ pub(super) fn canonicalize(mut event: Map<String, Value>) -> Result<Value, Stage
             LIMIT,
         )?;
         let end = count(replace.get("end"), &format!("{subject} replace end"), LIMIT)?;
-        event.insert("surfaceOp".to_owned(), replace_op(start, end));
+        replace_member(&mut event, "surfaceOp", replace_op(start, end));
     }
     if event_type == "request/header" {
         let data = record(
@@ -55,15 +57,15 @@ pub(super) fn canonicalize(mut event: Map<String, Value>) -> Result<Value, Stage
             let canonical: Map<String, Value> = header
                 .iter()
                 .filter(|(key, value)| !empty(key, value))
-                .map(|(key, value)| (key.clone(), value.clone()))
+                .map(|(key, value)| (key.clone(), clone_value(value)))
                 .collect();
-            let mut data = data.clone();
-            data.insert("header".to_owned(), Value::Object(canonical));
-            event.insert("data".to_owned(), Value::Object(data));
+            let mut data = clone_fields(data);
+            replace_member(&mut data, "header", Value::Object(canonical));
+            replace_member(&mut event, "data", Value::Object(data));
         }
     }
     assert_v3_event(&event, &[])?;
-    Ok(Value::Object(event))
+    Ok(Value::Object(event.into_inner()))
 }
 
 /// The canonical V3 replace marker, in TypeScript's member order.

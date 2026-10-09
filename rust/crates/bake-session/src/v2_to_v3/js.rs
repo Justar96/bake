@@ -13,31 +13,38 @@ const MAX_ARRAY_INDEX: u64 = u32::MAX as u64 - 1;
 /// ascending numeric order, then the other keys in insertion order. Values
 /// are unchanged, and serde_json's `preserve_order` already keeps a repeated
 /// key at its first position with its last value, as `JSON.parse` does.
-pub(crate) fn js_order(value: Value) -> Value {
-    match value {
-        Value::Array(items) => Value::Array(items.into_iter().map(js_order).collect()),
-        Value::Object(fields) => {
-            let mut indices = Vec::new();
-            let mut names = Vec::new();
-            for (key, value) in fields {
-                let value = js_order(value);
-                match array_index(&key) {
-                    Some(index) => indices.push((index, key, value)),
-                    None => names.push((key, value)),
+///
+/// Objects are reordered in place from an explicit stack, so a value nested
+/// arbitrarily deep is reordered without recursing.
+pub(crate) fn js_order(mut value: Value) -> Value {
+    let mut pending = vec![&mut value];
+    while let Some(value) = pending.pop() {
+        match value {
+            Value::Array(items) => pending.extend(items.iter_mut()),
+            Value::Object(fields) => {
+                if fields.keys().any(|key| array_index(key).is_some()) {
+                    let mut indices = Vec::new();
+                    let mut names = Vec::new();
+                    for (key, value) in std::mem::take(fields) {
+                        match array_index(&key) {
+                            Some(index) => indices.push((index, key, value)),
+                            None => names.push((key, value)),
+                        }
+                    }
+                    indices.sort_by_key(|(index, _, _)| *index);
+                    for (_, key, value) in indices {
+                        fields.insert(key, value);
+                    }
+                    for (key, value) in names {
+                        fields.insert(key, value);
+                    }
                 }
+                pending.extend(fields.values_mut());
             }
-            indices.sort_by_key(|(index, _, _)| *index);
-            let mut ordered = Map::new();
-            for (_, key, value) in indices {
-                ordered.insert(key, value);
-            }
-            for (key, value) in names {
-                ordered.insert(key, value);
-            }
-            Value::Object(ordered)
+            _ => {}
         }
-        scalar => scalar,
     }
+    value
 }
 
 /// The canonical decimal spelling of an integer below `2^32 - 1`.

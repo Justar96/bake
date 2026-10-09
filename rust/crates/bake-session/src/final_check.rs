@@ -43,6 +43,7 @@
 
 use serde_json::{Map, Value};
 
+use crate::json_parse::{Deep, clone_fields, replace_member};
 use crate::replay::KNOWN_EVENT_TYPES;
 use crate::v2_to_v3::{
     Lookup, StageError, assert_v3_event, exact_keys, is_repair_identity, js_record, lookup, quote,
@@ -153,7 +154,7 @@ pub fn check_transformed_artifact(
     let Some(is_seeded) = released_v3_header(&migrated.header, platform) else {
         return limit("header");
     };
-    let view = system_head_and_view(&migrated.events)?;
+    let view = Deep::new(system_head_and_view(&migrated.events)?);
     validate_released_v2(&view, migrated.inherited_event_count, is_seeded)?;
     let extensions = RelationshipExtensions {
         step_events: vec!["assistant/attempt".to_owned()],
@@ -232,7 +233,7 @@ fn system_head_and_view(events: &[Value]) -> Checked<Vec<Value>> {
     let mut step: Option<(Option<&Value>, Option<&Value>)> = None;
     let mut head: Option<u64> = None;
     let mut has_surface = false;
-    let mut view = Vec::with_capacity(events.len());
+    let mut view = Deep::new(Vec::with_capacity(events.len()));
     for (index, event) in events.iter().enumerate() {
         let seq = u64::try_from(index).unwrap_or(u64::MAX);
         let Some(event) = event.as_object() else {
@@ -306,18 +307,18 @@ fn system_head_and_view(events: &[Value]) -> Checked<Vec<Value>> {
         if surface {
             has_surface = true;
         }
-        let mut projected = relationship_event(event, event_type, seq)?;
+        let mut projected = Deep::new(relationship_event(event, event_type, seq)?);
         if surface && !appended {
             let (start, end) = endpoints(record(operation, "surface replacement")?)?;
             let mut released = Map::new();
             released.insert("op".to_owned(), Value::from("replace"));
             released.insert("start".to_owned(), Value::from(start));
             released.insert("end".to_owned(), Value::from(end));
-            projected.insert("surfaceOp".to_owned(), Value::Object(released));
+            replace_member(&mut projected, "surfaceOp", Value::Object(released));
         }
-        view.push(Value::Object(projected));
+        view.push(Value::Object(projected.into_inner()));
     }
-    Ok(view)
+    Ok(view.into_inner())
 }
 
 /// A surface replacement's `startSeq` and `endSeq`, which `assertV3Event`
@@ -336,7 +337,7 @@ fn endpoints(replace: &Record) -> Checked<(u64, u64)> {
 /// relationship check. Inserting an existing member keeps its position, as
 /// an object spread does.
 fn relationship_event(event: &Record, event_type: &str, seq: u64) -> Checked<Record> {
-    let mut projected = event.clone();
+    let mut projected = Deep::new(clone_fields(event));
     let renamed = match event_type {
         "tool/ptc-dispatch-start" => Some("tool/code-dispatch-start"),
         "tool/ptc-dispatch" => Some("tool/code-dispatch"),
@@ -348,47 +349,48 @@ fn relationship_event(event: &Record, event_type: &str, seq: u64) -> Checked<Rec
     };
     if let Some(renamed) = renamed {
         projected.insert("type".to_owned(), Value::from(renamed));
-        return Ok(projected);
+        return Ok(projected.into_inner());
     }
     if event_type == "system/message" {
         let data = record(event.get("data"), "system data")?;
-        let mut message = record(data.get("message"), "system message")?.clone();
-        message.insert("role".to_owned(), Value::from("user"));
+        let mut message = clone_fields(record(data.get("message"), "system message")?);
+        replace_member(&mut message, "role", Value::from("user"));
         projected.insert("type".to_owned(), Value::from("user/message"));
-        projected.insert("data".to_owned(), Value::Object(message));
-        return Ok(projected);
+        replace_member(&mut projected, "data", Value::Object(message));
+        return Ok(projected.into_inner());
     }
     if event_type != "tool/result" {
-        return Ok(projected);
+        return Ok(projected.into_inner());
     }
     let data = record(event.get("data"), "tool result")?;
     if !data.contains_key("error") {
-        return Ok(projected);
+        return Ok(projected.into_inner());
     }
     let error = record(data.get("error"), "tool error")?;
     if error
         .get("code")
         .is_none_or(|code| code != "TOOL_NOT_STARTED")
     {
-        return Ok(projected);
+        return Ok(projected.into_inner());
     }
     let message = record(data.get("message"), "tool message")?;
     let source = record(message.get("source"), "tool source")?;
     let call_id = source.get("callId");
     if !is_repair_identity(message.get("id"), call_id) {
-        return Ok(projected);
+        return Ok(projected.into_inner());
     }
     // `isRepairIdentity` proved the call id a string.
     let call_id = call_id.and_then(Value::as_str).unwrap_or_default();
-    let mut message = message.clone();
-    message.insert(
-        "id".to_owned(),
+    let mut message = clone_fields(message);
+    replace_member(
+        &mut message,
+        "id",
         Value::from(format!("interrupted-tool-result-{call_id}-{seq}")),
     );
-    let mut data = data.clone();
-    data.insert("message".to_owned(), Value::Object(message));
-    projected.insert("data".to_owned(), Value::Object(data));
-    Ok(projected)
+    let mut data = clone_fields(data);
+    replace_member(&mut data, "message", Value::Object(message));
+    replace_member(&mut projected, "data", Value::Object(data));
+    Ok(projected.into_inner())
 }
 
 /// `validateReleasedV2Artifact(view, 'current', KNOWN_SESSION_EVENT_TYPES)`

@@ -12,6 +12,7 @@ use super::header::SourceHeader;
 use super::js::{count, is_count, record};
 use super::references::remap_event;
 use super::{SURFACE_TYPES, StageError};
+use crate::json_parse::{Deep, clone_fields, clone_value, dismantle, replace_member};
 
 const SYSTEM_PLUGIN: &str = "@deepseek-ai/dsh-system-prompt";
 const SYSTEM_ID_PREFIX: &str = "v2-to-v3-system-";
@@ -34,7 +35,7 @@ pub(super) struct Stage {
     step: Option<(Value, Value)>,
     head: Option<u64>,
     prompt: String,
-    events: Vec<Value>,
+    events: Deep<Vec<Value>>,
 }
 
 impl Stage {
@@ -52,12 +53,13 @@ impl Stage {
             step: None,
             head: None,
             prompt: String::new(),
-            events: Vec::new(),
+            events: Deep::default(),
         }
     }
 
     /// `transformEvent` for one decoded logical event.
     pub(super) fn transform(&mut self, event: Value) -> Result<(), StageError> {
+        let event = Deep::new(event);
         let seq = self.mapping.len() as u64;
         if !dense(event.get("seq"), seq) {
             return Err(StageError::Invalid(
@@ -65,29 +67,36 @@ impl Stage {
             ));
         }
         assert_source_event(&event)?;
-        let Value::Object(event) = event else {
-            return Err(StageError::NativeLimit(INVARIANT.to_owned()));
+        let event = match event.into_inner() {
+            Value::Object(event) => Deep::new(event),
+            other => {
+                dismantle(other);
+                return Err(StageError::NativeLimit(INVARIANT.to_owned()));
+            }
         };
         let Some(Value::String(event_type)) = event.get("type") else {
             return Err(StageError::NativeLimit(INVARIANT.to_owned()));
         };
         let event_type = event_type.clone();
-        let time = event["time"].clone();
+        let time = Deep::new(clone_value(&event["time"]));
         self.observe_message_ids(&event_type, &event)?;
-        let data = record(event.get("data"), &event_type)?.clone();
+        let data = Deep::new(clone_fields(record(event.get("data"), &event_type)?));
         let mut source = event;
         if event_type == "request/header" {
-            let mut header = record(data.get("header"), "request header")?.clone();
+            let mut header = Deep::new(clone_fields(record(data.get("header"), "request header")?));
             let prompt = match header.shift_remove("system") {
                 Some(Value::String(prompt)) => prompt,
-                _ => String::new(),
+                other => {
+                    other.into_iter().for_each(dismantle);
+                    String::new()
+                }
             };
             if prompt != self.prompt {
                 self.emit_system(prompt, seq, &event_type, &time)?;
             }
-            let mut data = data.clone();
-            data.insert("header".to_owned(), Value::Object(header));
-            source.insert("data".to_owned(), Value::Object(data));
+            let mut data = Deep::new(clone_fields(&data));
+            replace_member(&mut data, "header", Value::Object(header.into_inner()));
+            replace_member(&mut source, "data", Value::Object(data.into_inner()));
         }
         if SURFACE_TYPES.contains(&event_type.as_str()) && self.head.is_none() {
             return Err(StageError::Unsupported(
@@ -121,14 +130,14 @@ impl Stage {
                 self.last_foreign_delivery = Some(seq);
             }
         }
-        let target = remap_event(source, seq, self.target_seq, &self.mapping)?;
+        let target = remap_event(source.into_inner(), seq, self.target_seq, &self.mapping)?;
         self.mapping.push(self.target_seq);
         self.target_seq += 1;
         let target = canonicalize(rename_ptc_event(&event_type, target)?)?;
         self.events.push(target);
         match event_type.as_str() {
             "step/start" => {
-                let coordinate = |key: &str| data.get(key).cloned().unwrap_or(Value::Null);
+                let coordinate = |key: &str| data.get(key).map_or(Value::Null, clone_value);
                 self.step = Some((coordinate("turn"), coordinate("step")));
                 if self.head.is_none() {
                     self.emit_system(String::new(), seq, &event_type, &time)?;
@@ -160,7 +169,7 @@ impl Stage {
             "format v3 inherited event count",
             INVARIANT,
         )?;
-        Ok((self.events, target_cut))
+        Ok((self.events.into_inner(), target_cut))
     }
 
     fn observe_message_ids(

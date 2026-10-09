@@ -7,6 +7,7 @@ use serde_json::{Map, Value};
 
 use super::StageError;
 use super::js::{count, record};
+use crate::json_parse::{Deep, clone_fields, replace_member};
 
 const LIMIT: &str = "reference-float-lexeme";
 
@@ -14,51 +15,52 @@ const LIMIT: &str = "reference-float-lexeme";
 /// holds the target seq of every earlier source event, so its length is
 /// `source_seq`.
 pub(super) fn remap_event(
-    mut event: Map<String, Value>,
+    event: Map<String, Value>,
     source_seq: u64,
     target_seq: u64,
     mapping: &[u64],
 ) -> Result<Map<String, Value>, StageError> {
+    let mut event = Deep::new(event);
     let remap = Remap {
         source_seq,
         mapping,
     };
     let event_type = event["type"].as_str().unwrap_or_default().to_owned();
-    let mut data = record(event.get("data"), &event_type)?.clone();
+    let mut data = Deep::new(clone_fields(record(event.get("data"), &event_type)?));
     match event_type.as_str() {
         "command/done" => {
             if let Some(source) = data.get("sourceEventSeq") {
                 let target = remap.one(Some(source))?;
-                data.insert("sourceEventSeq".to_owned(), target);
+                replace_member(&mut data, "sourceEventSeq", target);
             }
         }
         "compaction/summary" | "compaction/prune" => {
             let range = remap.range(data.get("shadowedRange"))?;
             let seqs = remap.list(data.get("shadowedSeqs"))?;
-            data.insert("shadowedRange".to_owned(), range);
-            data.insert("shadowedSeqs".to_owned(), seqs);
+            replace_member(&mut data, "shadowedRange", range);
+            replace_member(&mut data, "shadowedSeqs", seqs);
         }
         "session/title" | "session/title-llm-request" => {
             let seqs = remap.list(data.get("messageSeqs"))?;
-            data.insert("messageSeqs".to_owned(), seqs);
+            replace_member(&mut data, "messageSeqs", seqs);
         }
         _ => {}
     }
     event.insert("seq".to_owned(), Value::from(target_seq));
-    event.insert("data".to_owned(), Value::Object(data));
+    replace_member(&mut event, "data", Value::Object(data.into_inner()));
     if let Some(sources) = event.get("sourceEventSeqs") {
         let sources = remap.list(Some(sources))?;
-        event.insert("sourceEventSeqs".to_owned(), sources);
+        replace_member(&mut event, "sourceEventSeqs", sources);
     }
     match event.get("surfaceOp") {
         None => {}
         Some(operation) if operation == "append" => {}
         Some(operation) => {
             let operation = remap.range(Some(operation))?;
-            event.insert("surfaceOp".to_owned(), operation);
+            replace_member(&mut event, "surfaceOp", operation);
         }
     }
-    Ok(event)
+    Ok(event.into_inner())
 }
 
 struct Remap<'a> {
@@ -94,11 +96,11 @@ impl Remap<'_> {
     }
 
     fn range(&self, value: Option<&Value>) -> Result<Value, StageError> {
-        let mut range = record(value, "sequence range")?.clone();
+        let mut range = Deep::new(clone_fields(record(value, "sequence range")?));
         let start = self.one(range.get("start"))?;
         let end = self.one(range.get("end"))?;
-        range.insert("start".to_owned(), start);
-        range.insert("end".to_owned(), end);
-        Ok(Value::Object(range))
+        replace_member(&mut range, "start", start);
+        replace_member(&mut range, "end", end);
+        Ok(Value::Object(range.into_inner()))
     }
 }

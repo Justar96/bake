@@ -22,18 +22,51 @@ use std::collections::HashSet;
 
 use serde_json::Value;
 
-use crate::json_parse::{Deep, clone_value};
+use crate::json_parse::{DebugJson, Deep, DeepJson, clone_value};
 use crate::{MAX_SAFE_INTEGER, RestoredLog};
 
 /// The pending messages `inboxProjectionDefinition` restores, in list order,
-/// as logged. A message may nest as deep as its log row; drop each with
-/// [`crate::dismantle`] rather than recursively. This struct's derived
-/// `Clone`, `PartialEq`, and `Debug` also recurse once per level a message
-/// nests.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+/// as logged. A message may nest as deep as its log row; this struct's
+/// `Drop`, `Clone`, `PartialEq`, and `Debug` do not recurse over it, so its
+/// fields cannot be moved out; take them with [`std::mem::take`] and drop
+/// each message with [`crate::dismantle`].
+#[derive(Default)]
 pub struct PendingInbox {
     pub next_turn: Vec<Value>,
     pub next_step: Vec<Value>,
+}
+
+impl Drop for PendingInbox {
+    fn drop(&mut self) {
+        drop(Deep::new(std::mem::take(&mut self.next_turn)));
+        drop(Deep::new(std::mem::take(&mut self.next_step)));
+    }
+}
+
+impl Clone for PendingInbox {
+    fn clone(&self) -> Self {
+        Self {
+            next_turn: self.next_turn.deep_clone(),
+            next_step: self.next_step.deep_clone(),
+        }
+    }
+}
+
+impl PartialEq for PendingInbox {
+    fn eq(&self, other: &Self) -> bool {
+        self.next_turn.deep_eq(&other.next_turn) && self.next_step.deep_eq(&other.next_step)
+    }
+}
+
+impl Eq for PendingInbox {}
+
+impl std::fmt::Debug for PendingInbox {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PendingInbox")
+            .field("next_turn", &DebugJson(&self.next_turn))
+            .field("next_step", &DebugJson(&self.next_step))
+            .finish()
+    }
 }
 
 /// Why [`restored_inbox`] restored no pending inbox.
@@ -76,14 +109,45 @@ pub enum InboxLimit {
 
 /// The account `foldConsumedWork` gives of a restored log.
 ///
-/// `end` is a plain `Value`, so this struct's derived `Clone`, `PartialEq`,
-/// and `Debug`, like its drop, recurse once per level that value nests.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// `end` may nest as deep as its log row; this struct's `Drop`, `Clone`,
+/// `PartialEq`, and `Debug` do not recurse over it, so its fields cannot be
+/// moved out; take `end` with [`std::mem::take`].
 pub struct ConsumedWork {
-    /// The latest accounting `turn/end`, as logged or as a closer. It may
-    /// nest as deep as its log row; drop it with [`crate::dismantle`].
+    /// The latest accounting `turn/end`, as logged or as a closer.
     pub end: Option<Value>,
     pub dropped_unrun: bool,
+}
+
+impl Drop for ConsumedWork {
+    fn drop(&mut self) {
+        drop(Deep::new(self.end.take()));
+    }
+}
+
+impl Clone for ConsumedWork {
+    fn clone(&self) -> Self {
+        Self {
+            end: self.end.deep_clone(),
+            dropped_unrun: self.dropped_unrun,
+        }
+    }
+}
+
+impl PartialEq for ConsumedWork {
+    fn eq(&self, other: &Self) -> bool {
+        self.end.deep_eq(&other.end) && self.dropped_unrun == other.dropped_unrun
+    }
+}
+
+impl Eq for ConsumedWork {}
+
+impl std::fmt::Debug for ConsumedWork {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConsumedWork")
+            .field("end", &DebugJson(&self.end))
+            .field("dropped_unrun", &self.dropped_unrun)
+            .finish()
+    }
 }
 
 /// Input on which `foldConsumedWork` throws a `TypeError` or coerces; nothing

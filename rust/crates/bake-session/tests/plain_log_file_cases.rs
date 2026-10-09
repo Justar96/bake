@@ -31,7 +31,7 @@ use serde_json::{Map, Value};
 const SCHEMA: &str = "bake/session-conformance/plain-log-file-cases";
 const ORACLE: &str = "in an owned temporary root holding the seeded entries, run each step through the JSONL backend with compression none on the step's handle, a or b, each its own backend instance over the root: create, a write open, or the open handle's append, flush, or close; after each step list every file beneath the root with its text, an empty session.lock by its size";
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 69;
+const CASE_COUNT: usize = 70;
 const SOURCE_BUDGET: usize = 64;
 const LIMITS: [&str; 11] = [
     "empty-id",
@@ -116,7 +116,7 @@ fn load() -> Vec<Map<String, Value>> {
         BTreeSet::from(["cases", "history", "oracle", "schema", "version"])
     );
     assert_eq!(table["schema"], SCHEMA);
-    assert_eq!(table["version"], 6);
+    assert_eq!(table["version"], 7);
     assert_eq!(table["oracle"], ORACLE);
     assert!(
         table["history"]
