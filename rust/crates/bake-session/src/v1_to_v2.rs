@@ -38,11 +38,11 @@ use std::collections::HashMap;
 
 use serde_json::{Map, Value};
 
-use crate::MAX_SAFE_INTEGER;
 use crate::assistant_stream::{AssistantStreamAccumulator, StreamPushError, safe_gap};
 use crate::json_parse::{
     Deep, clone_fields, clone_value, dismantle, remove_member, replace_member,
 };
+use crate::json_text::{is_writer_spelling, json_number_text};
 use crate::v1_codec::{
     DecodedV1Items, DecodedV1Rows, PackedKind, PackedStreamRecord, ReleasedChunkRun, V1Item,
 };
@@ -187,8 +187,10 @@ pub enum V1ToV2Limit {
     /// array, which `!==` compares by reference.
     UncheckedShape,
     /// A number spelled with a fraction or exponent, or beyond `u64`, where
-    /// TypeScript compares, looks up, adds to, or prints it, including a
-    /// chunk's `time` or `index`.
+    /// TypeScript compares or adds to it, including a chunk's `time` or
+    /// `index`, or a spelling no writer produces, such as `3.0`, that
+    /// TypeScript looks up as a seq. Refusal messages print every number as
+    /// `JSON.stringify` does, so printing never raises it.
     FloatLexeme,
     /// An emitted event would carry a member whose value is `undefined`,
     /// which JSON cannot express: a synthesized event's `time` from an event
@@ -666,7 +668,7 @@ impl<'a> Stage<'a> {
             let turn = record(fields.get("data"))?.get("turn");
             return Err(Failure::Unsupported(format!(
                 "turn/start {} does not close the prior turn",
-                stringify(turn)?
+                stringify(turn)
             )));
         }
         self.assert_source_delivery_marker(event_type, fields, seq)?;
@@ -1178,8 +1180,15 @@ impl<'a> Stage<'a> {
         let Some(Value::Number(number)) = value else {
             return Err(Failure::Limit(V1ToV2Limit::UncheckedShape));
         };
-        let Some(text) = integer_string(number) else {
-            return Err(Failure::Limit(V1ToV2Limit::FloatLexeme));
+        // `Map.get` compares by value: a writer-spelled `f64` is a fraction
+        // or lies beyond every seq, so it misses and prints as JavaScript
+        // prints it; another spelling such as `3.0` might hit, a limit.
+        let text = match integer_string(number) {
+            Some(text) => text,
+            None if is_writer_spelling(number) => {
+                json_number_text(number.as_f64().unwrap_or(f64::NAN))
+            }
+            None => return Err(Failure::Limit(V1ToV2Limit::FloatLexeme)),
         };
         number
             .as_u64()
@@ -1335,37 +1344,10 @@ fn record(value: Option<&Value>) -> Checked<&Map<String, Value>> {
     }
 }
 
-/// `JSON.stringify(value)` in a message, `undefined` when absent. Members
-/// are already in JavaScript order; a number that is not a safe integer
-/// spelled without a fraction or exponent reports a limit. Both the check
-/// and the text keep their own stacks, so a deep value is safe.
-fn stringify(value: Option<&Value>) -> Checked<String> {
-    let Some(value) = value else {
-        return Ok("undefined".to_owned());
-    };
-    let mut pending = vec![value];
-    while let Some(item) = pending.pop() {
-        match item {
-            Value::Number(number) => {
-                let safe = number
-                    .as_u64()
-                    .map(|value| value <= MAX_SAFE_INTEGER)
-                    .or_else(|| {
-                        number
-                            .as_i64()
-                            .map(|value| value.unsigned_abs() <= MAX_SAFE_INTEGER)
-                    })
-                    .unwrap_or(false);
-                if !safe {
-                    return Err(Failure::Limit(V1ToV2Limit::FloatLexeme));
-                }
-            }
-            Value::Array(items) => pending.extend(items),
-            Value::Object(fields) => pending.extend(fields.values()),
-            _ => {}
-        }
-    }
-    Ok(crate::json_text(value))
+/// `JSON.stringify(value)` in a message, `undefined` when absent; every
+/// number prints as JavaScript prints its value.
+fn stringify(value: Option<&Value>) -> String {
+    value.map_or_else(|| "undefined".to_owned(), crate::json_text)
 }
 
 #[cfg(test)]
@@ -1405,15 +1387,13 @@ mod tests {
     }
 
     #[test]
-    fn stringify_prints_safe_integers_and_defers_other_numbers() {
+    fn stringify_prints_every_number_as_javascript_does() {
         assert_eq!(
-            stringify(Some(&serde_json::json!({"b": [1, -2, null], "a": "x"}))).ok(),
-            Some(r#"{"b":[1,-2,null],"a":"x"}"#.to_owned())
+            stringify(Some(&serde_json::json!({"b": [1, -2, null], "a": "x"}))),
+            r#"{"b":[1,-2,null],"a":"x"}"#
         );
-        assert_eq!(stringify(None).ok(), Some("undefined".to_owned()));
-        assert!(matches!(
-            stringify(Some(&serde_json::json!([1.5]))),
-            Err(Failure::Limit(V1ToV2Limit::FloatLexeme))
-        ));
+        assert_eq!(stringify(None), "undefined");
+        let value: Value = serde_json::from_str("[1.5,1e21,5e-7,2.0,-0]").expect("JSON");
+        assert_eq!(stringify(Some(&value)), "[1.5,1e+21,5e-7,2,0]");
     }
 }

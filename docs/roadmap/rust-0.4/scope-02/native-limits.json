@@ -49,9 +49,9 @@
     }
    ],
    "kind": "format",
-   "classification": "undecided",
-   "evidence": "headers are written by toHeaderLine through JSON.stringify (packages/session/session-persistence-jsonl/src/index.ts:1208) from a header whose createdAt is Date.now() (packages/core/session/src/index.ts:151) and whose version is SESSION_FORMAT_VERSION = 3 (packages/core/session/src/types.ts:89). Neither the current nor the older-generation header parser has a nesting bound, the header is flat, and JSON.stringify writes only finite doubles. A lone surrogate can still be escaped into id or cwd: cwd comes from process.cwd() (packages/bundle/headless/src/index.ts:445), and a Windows directory name may hold an unpaired surrogate. D21 keeps escaped lone surrogates as limits until their reachability is settled",
-   "followUp": "Settle lone-surrogate reachability for cwd on Windows (D21); if reachable, port lone-surrogate escapes in the header parser."
+   "classification": "reachable-gap",
+   "evidence": "A configured agents[].sessionId is any non-empty string (packages/core/agent-loop/src/index.ts:323) that replaces the generated id (packages/core/agent-loop/src/index.ts:385), and encodeSegment is documented to encode lone surrogates injectively for exactly this reason (packages/session/session-persistence-jsonl/src/format.ts:188-192); JSON.stringify escapes the lone half into the header id ([W5](#writer-anchors)). A Windows cwd with an unpaired surrogate is a second, unverified path (packages/bundle/headless/src/index.ts:445). Neither header parser has a nesting bound, and JSON.stringify writes only finite doubles. A read-only scan of the owner's home (93 Zstandard format-3 logs, 40,514 rows; no v0 to v2 log) found no header with a surrogate escape",
+   "followUp": "Port lone-surrogate strings in the header parser with scan-json-parser."
   },
   {
    "variants": [
@@ -295,9 +295,9 @@
     }
    ],
    "kind": "format",
-   "classification": "undecided",
-   "evidence": "The current-format scan and the older-generation migrations' row/json-parser stage parse rows with an iterative parser that has no nesting bound (rust/crates/bake-session/src/json_parse.rs), so ScanLimit::JsonParser and row/json-parser refuse only lone-surrogate escapes, which a Rust string cannot hold and D21 leaves undecided as header-json-parser does, and numbers outside the f64 range, which are unreachable because JSON.stringify writes only finite doubles. The scan, row, and header spellings share that one lone-surrogate and out-of-range question. Three of the scan's four cases are lone surrogates, and the plain-log-file case limit-row-json-parser witnesses row/json-parser with a lone surrogate in an ignored v0 row",
-   "followUp": "Settle lone-surrogate reachability with header-json-parser (D21); if reachable, port lone-surrogate escapes in the row parser."
+   "classification": "reachable-gap",
+   "evidence": "A released writer puts a lone surrogate in a row: boundContextSummary cuts a notice summary with slice(0, 119) on UTF-16 code units (packages/llm/llm/src/message.ts:121-124), which splits a surrogate pair, and tool-goal passes it the goal objective (packages/goal/tool-goal/src/index.ts:353) into a deferred user/message source; every Bake tag from v0.1.1 and the v0 to v2 writers carry both (3efd4b51e0:packages/llm/llm/src/message.ts:124, 3efd4b51e0:packages/goal/tool-goal/src/index.ts:321; 81dcacbb44:packages/goal/tool-goal/src/index.ts:321). Session.append's snapshot keeps strings as they are (packages/util/values/src/index.ts:177-180), and JSON.stringify writes the lone half as a \\udXXX escape ([W1](#writer-anchors)), which Node's JSON.parse reads back as a lone surrogate the TypeScript reader keeps. The Rust parser refuses it (rust/crates/bake-session/src/json_parse.rs), so the scan and the older-generation row parser refuse a log TypeScript reads. Numbers outside the f64 range stay unreachable: JSON.stringify writes only finite doubles. A read-only scan of the owner's home (93 Zstandard format-3 logs, 40,514 rows; no v0 to v2 log) found no surrogate escape in any row (8 escaped-backslash literals in 2 rows) and no row failing UTF-8 decoding",
+   "followUp": "Port lone-surrogate strings in the row parser and the values that hold them (section: Reachable gaps)."
   },
   {
    "variants": [
@@ -520,9 +520,9 @@
     }
    ],
    "kind": "format",
-   "classification": "undecided",
-   "evidence": "request/header config is the waterfall result or the adapter's prepared config (packages/core/agent-loop/src/agent.ts:590-614), copied unchanged by canonicalHeader (packages/core/session/src/request-header.ts:21-30); no writer step drops members outside LlmCallConfig, and a waterfall listener returning extra members is not ruled out by a run-time check",
-   "followUp": "Decide by auditing the config waterfall listeners and adapter prepareCall results shipped in 0.3 (and v0-v2) for extra members; if any exist, carry unknown config members through derivation."
+   "classification": "reachable-gap",
+   "evidence": "A plugin's agent/request waterfall listener is typed to return LlmCallConfig (packages/core/agent/src/runtime-types.ts:363), and a structurally typed object with extra members satisfies it; the loop logs the waterfall result or the adapter's prepared config (packages/core/agent-loop/src/agent.ts:590-614), and canonicalHeader copies it unchanged (packages/core/session/src/request-header.ts:21-30), so a documented-API plugin writes a config member outside LlmCallConfig. The only shipped listener spreads the resolved config and adds only provider, model, and reasoningEffort (packages/core/agent/src/model-selection.ts:91-106), and the seed holds only route, reasoningEffort, and maxTokens (packages/core/agent-loop/src/agent.ts:579-587). A read-only scan of the owner's home (93 Zstandard format-3 logs, 40,514 rows; no v0 to v2 log) found no config member outside LlmCallConfig in 113 request/header rows",
+   "followUp": "Carry unknown config members through request derivation as TypeScript does (section: Reachable gaps)."
   },
   {
    "variants": [
@@ -606,9 +606,9 @@
     }
    ],
    "kind": "format",
-   "classification": "undecided",
-   "evidence": "as replay-config-member: packages/core/agent-loop/src/agent.ts:590-614 and packages/core/session/src/request-header.ts:21-30 copy config without dropping unknown members",
-   "followUp": "Decide with replay-config-member."
+   "classification": "reachable-gap",
+   "evidence": "As replay-config-member: packages/core/agent/src/runtime-types.ts:363 and packages/core/agent-loop/src/agent.ts:590-614 admit and log extra config members, which packages/core/session/src/request-header.ts:21-30 copies",
+   "followUp": "Port with replay-config-member."
   },
   {
    "variants": [
@@ -1007,8 +1007,8 @@
    ],
    "kind": "format",
    "classification": "undecided",
-   "evidence": "String counts are ported. The limit keeps a non-object sample, which the stream invariant and the accumulator never write (packages/llm/llm/src/assistant-stream.ts:170-172), and a count that is neither a number nor a string. pi-ai 1.0.0 parseChunkUsage (node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js:1160-1180) keeps completion_tokens || 0, so any truthy wire value such as true reaches outputTokens, and mapUsage keeps cacheRead and cacheWrite only when > 0 (packages/llm/llm-pi-ai/src/stream.ts:25-33), which true and [5] pass; whether a provider sends such a value is not traced",
-   "followUp": "Decide whether a supported provider can send a boolean or array token count; if one can, extend JsCount with JavaScript's + and ToNumber for it."
+   "evidence": "String counts are ported. A non-object sample is never written (packages/llm/llm/src/assistant-stream.ts:170-172). pi-ai keeps a wire boolean or array: completion_tokens || 0 and the cached-token ?? chain copy it (node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js:1161-1177), and mapUsage's cacheRead > 0 passes true and [5] (packages/llm/llm-pi-ai/src/stream.ts:25-33), so such a count reaches the log if a provider sends it. A read-only scan of the owner's home (93 Zstandard format-3 logs, 40,514 rows; no v0 to v2 log) found 68,001 usage members, every one a number",
+   "followUp": "Owner decision on the D21 domain: whether a provider that violates its own documented integer usage schema counts as a writer; if it does, extend JsCount with + and ToNumber for booleans and arrays."
   },
   {
    "variants": [
@@ -1083,7 +1083,7 @@
    ],
    "kind": "format",
    "classification": "undecided",
-   "evidence": "As usage-usage: string counts are ported; a boolean or array count that pi-ai 1.0.0 parseChunkUsage (node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js:1160-1180) and mapUsage (packages/llm/llm-pi-ai/src/stream.ts:25-33) may pass is not traced",
+   "evidence": "As usage-usage: string counts are ported, and a boolean or array count reaches the log only if a provider sends one (packages/llm/llm-pi-ai/src/stream.ts:25-33)",
    "followUp": "Decide with usage-usage."
   },
   {
@@ -1238,7 +1238,7 @@
    ],
    "kind": "format",
    "classification": "undecided",
-   "evidence": "the limit covers members of the wrong kind that the frozen relationship validator casts, and objects it compares by reference. Its input is a migrated v0-v2 artifact; no per-member producer audit of the v0-v2 writers (3efd4b51e0, 0bb7bba015, 81dcacbb44) exists yet",
+   "evidence": "the limit covers members of the wrong kind that the frozen relationship validator casts, and objects it compares by reference. Its input is a migrated v0-v2 artifact; no per-member producer audit of the v0-v2 writers (3efd4b51e0, 0bb7bba015, 81dcacbb44) exists yet. The scanned home holds no v0 to v2 log, so real logs give no evidence",
    "followUp": "Decide by tracing each cast member in the relationship validator to its v0-v2 producer, or by scanning real v0-v2 logs."
   },
   {
@@ -1257,8 +1257,8 @@
    ],
    "kind": "format",
    "classification": "undecided",
-   "evidence": "PTC arguments are model-produced JSON, so an own __proto__ member holding {} is plausible input, but whether Session.append keeps it as an own member depends on how snapshotJsonValue assigns keys (packages/util/values/src/index.ts:125-200), which is not yet traced",
-   "followUp": "Decide by checking whether the lossless snapshot keeps an own __proto__ member in PTC dispatch arguments; if it does, port the in-operator semantics."
+   "evidence": "Session.append's snapshot defines each member with Object.defineProperty (packages/util/values/src/index.ts:135-140), so an own __proto__ member in model-produced PTC arguments survives into the log. The limit needs a dispatch-start and a dispatch whose arguments differ by that member; untraced: whether a v0 to v2 PTC runtime writes the two from different argument objects",
+   "followUp": "Decide by tracing how the v0 to v2 PTC runtime builds tool/code-dispatch-start and tool/code-dispatch arguments (3efd4b51e0, 0bb7bba015, 81dcacbb44)."
   },
   {
    "variants": [
@@ -1472,9 +1472,9 @@
     }
    ],
    "kind": "format",
-   "classification": "undecided",
-   "evidence": "first-party types are namespaced names (packages/core/session/src/known-event-types.ts), but Session.append accepts any plugin type string (packages/core/session/src/index.ts:722), and no registration check is known to refuse a type named after an Object.prototype member such as constructor",
-   "followUp": "Decide by finding (or ruling out) an event-type name check in the 0.3 and v0-v2 plugin APIs."
+   "classification": "reachable-gap",
+   "evidence": "Plugins extend the event vocabulary by declaration merging (3efd4b51e0:packages/core/session/README.md:12), append takes any SessionEventMap key (3efd4b51e0:packages/core/session/src/index.ts:668-671), and the only name check is set membership for surface eligibility (3efd4b51e0:packages/core/session/src/surface.ts:22-34), so a v0 to v2 plugin that declares an event named constructor or toString writes it; format 3 rejected registration of event names too (packages/core/session/src/known-event-types.ts:15-20). D21 lists an Object.prototype event type among the permitted limits on the premise that no writer produces one; this trace contradicts that premise. TypeScript refuses such a log too, but only through a V8 TypeError: required is not iterable in v0 to v1 (conformance/session/v0-to-v1-cases.json:97) and v1 to v2 decoding (conformance/session/v1-to-v2-decoded-cases.json:28), and Cannot read properties of undefined (reading 'find') in v2 to v3 (conformance/session/v2-to-v3-cases.json:104), so both arms refuse and only the message differs. A read-only scan of the owner's home (93 Zstandard format-3 logs, 40,514 rows; no v0 to v2 log) found no Object.prototype type and no type outside KNOWN_SESSION_EVENT_TYPES",
+   "followUp": "Owner decision: record in D21 that a plugin-declared Object.prototype event name is refused as a native limit under D21's TypeError clause, since TypeScript's outcome is a V8 TypeError that AGENTS.md forbids reproducing (section: Reachable gaps)."
   },
   {
    "variants": [],
@@ -1545,25 +1545,6 @@
    "classification": "unreachable",
    "evidence": "a replacement start is the seq of an earlier surface node, which Session.append checks through surfaceManager.validateNext (3efd4b51e0:packages/core/session/src/index.ts:698). every released writer serializes rows and headers with JSON.stringify: v3 packages/session/session-persistence-jsonl/src/format.ts:322 and index.ts:1208; v2 81dcacbb44:packages/session/session-persistence-jsonl/src/format.ts:321 and index.ts:1212; v1 0bb7bba015:packages/session/session-persistence-jsonl/src/format.ts:350 and index.ts:1026; v0 3efd4b51e0:packages/session/session-persistence-jsonl/src/format.ts:256 and index.ts:659. Number::toString writes an integral double below 1e21 without a fraction or exponent, 0 for -0, and the shortest round-trip digits",
    "followUp": "None."
-  },
-  {
-   "variants": [],
-   "stageNames": [
-    "v2-to-v3/content-kind-diagnostic"
-   ],
-   "id": "content-kind-diagnostic",
-   "crate": "bake-session",
-   "cases": [
-    {
-     "table": "session/v2-to-v3-cases.json",
-     "name": "content-kind-diagnostic",
-     "count": 1
-    }
-   ],
-   "kind": "format",
-   "classification": "undecided",
-   "evidence": "the limit fires while printing a refused value with JSON.stringify (rust/crates/bake-session/src/v2_to_v3/payload_semantics.rs:113-147); whether a released v2 log reaches that refusal holding a fraction is not traced",
-   "followUp": "Remove rather than decide: print with json_number_text, which reproduces JSON.stringify for every double, so the diagnostic needs no limit."
   },
   {
    "variants": [
@@ -1660,7 +1641,7 @@
    ],
    "kind": "format",
    "classification": "undecided",
-   "evidence": "the 21 cases cover many members the stage casts; most are typed producer output, but no per-member trace to the v0 and v1 producers (3efd4b51e0, 0bb7bba015) has been made",
+   "evidence": "the 21 cases cover many members the stage casts; most are typed producer output, but no per-member trace to the v0 and v1 producers (3efd4b51e0, 0bb7bba015) has been made. The scanned home holds no v0 or v1 log",
    "followUp": "Decide per member: list the members the stage casts, trace each to its v0 and v1 producer, and split any reachable one into its own limit or port."
   },
   {
@@ -1674,7 +1655,7 @@
     {
      "table": "session/v1-to-v2-cases.json",
      "name": "float-lexeme",
-     "count": 8
+     "count": 7
     },
     {
      "table": "session/v1-to-v2-decoded-cases.json",
@@ -1688,9 +1669,9 @@
     }
    ],
    "kind": "format",
-   "classification": "undecided",
-   "evidence": "chunk time and index are unreachable (Session.append assigns seq from the log length and time from Date.now(): packages/core/session/src/index.ts:751-752; 3efd4b51e0:packages/core/session/src/index.ts:693-694; 0bb7bba015:...:684-685; 81dcacbb44:...:702-703; 0bb7bba015:packages/llm/llm/src/invariant.ts:15-18), but the limit also fires when a refusal message prints a value with JSON.stringify (rust/crates/bake-session/src/v1_to_v2.rs:1162,1235,1330), whose reachability is not traced",
-   "followUp": "Print refused values with json_number_text, which removes the printing half; the counted half is then unreachable."
+   "classification": "unreachable",
+   "evidence": "Refusal messages print every number as JSON.stringify does (rust/crates/bake-session/src/v1_to_v2.rs:1347-1349), and a writer-spelled reference prints in a targets-consumed refusal (v1_to_v2.rs:1184-1190). The limit keeps only counted reads of non-writer spellings: chunk time and index (W3; 0bb7bba015:packages/llm/llm/src/invariant.ts:15-18), turn and step compared as coordinates (0bb7bba015:packages/core/agent-loop/src/agent.ts:383), the delivery marker's sessionFormatVersion, which is the header's integer version (0bb7bba015:packages/session/session-log-deepseek/src/index.ts:160-163), and a reference spelled like 3.0. [W1](#writer-anchors)",
+   "followUp": "None."
   },
   {
    "variants": [
@@ -1730,8 +1711,8 @@
    "crate": "bake-session",
    "cases": [],
    "kind": "pass-through",
-   "classification": "undecided",
-   "evidence": "Passes the payload check's named limits through; its cases are counted under payload-float-lexeme (unreachable), object-prototype-type (undecided), and legacy-goal-message (unreachable).",
+   "classification": "reachable-gap",
+   "evidence": "Passes the payload check's named limits through; its cases are counted under payload-float-lexeme (unreachable), object-prototype-type (a reachable gap), and legacy-goal-message (unreachable).",
    "followUp": "Follows object-prototype-type."
   },
   {
@@ -1744,8 +1725,8 @@
    "cases": [],
    "kind": "pass-through",
    "classification": "undecided",
-   "evidence": "Passes V1ToV2Limit through; its cases are counted under the v1-to-v2 rows, two of which are undecided.",
-   "followUp": "Follows v1-to-v2-unchecked-shape and v1-to-v2-float-lexeme."
+   "evidence": "Passes V1ToV2Limit through; its cases are counted under the v1-to-v2 rows, of which v1-to-v2-unchecked-shape is undecided.",
+   "followUp": "Follows v1-to-v2-unchecked-shape."
   },
   {
    "variants": [
@@ -1782,7 +1763,7 @@
    ],
    "kind": "format",
    "classification": "undecided",
-   "evidence": "the limit fires where v1-to-v2 refuses an item after it may already have emitted synthesized events. Released logs do reach migration refusals (session/lookup-cases.json released-v0-real-shapes is refused as unsupported), so a writer-produced log may reach this order; no trace shows which refusals follow an emission",
+   "evidence": "the limit fires where v1-to-v2 refuses an item after it may already have emitted synthesized events. Released logs do reach migration refusals (session/lookup-cases.json released-v0-real-shapes is refused as unsupported), so a writer-produced log may reach this order; no trace shows which refusals follow an emission. The scanned home holds no v0 or v1 log",
    "followUp": "Decide by listing the v1-to-v2 refusals that can follow a synthesized emission and checking them against released v0 and v1 shapes; port the interleaving if one is reachable."
   },
   {
@@ -1794,8 +1775,8 @@
    "crate": "bake-session",
    "cases": [],
    "kind": "pass-through",
-   "classification": "undecided",
-   "evidence": "Passes the v0-to-v1 named limits through, object-prototype-type (undecided) among them. Its witnessed case is counted under legacy-goal-message.",
+   "classification": "reachable-gap",
+   "evidence": "Passes the v0-to-v1 named limits through, object-prototype-type (a reachable gap) among them. Its witnessed case is counted under legacy-goal-message.",
    "followUp": "Follows object-prototype-type."
   },
   {
@@ -1808,8 +1789,8 @@
    "cases": [],
    "kind": "pass-through",
    "classification": "undecided",
-   "evidence": "Passes V1ToV2Limit through; see the v1-to-v2 rows.",
-   "followUp": "Follows the v1-to-v2 rows."
+   "evidence": "Passes V1ToV2Limit through; see the v1-to-v2 rows, of which v1-to-v2-unchecked-shape is undecided.",
+   "followUp": "Follows v1-to-v2-unchecked-shape."
   },
   {
    "variants": [
@@ -1820,8 +1801,8 @@
    "crate": "bake-session",
    "cases": [],
    "kind": "pass-through",
-   "classification": "undecided",
-   "evidence": "Passes V1ToV2DecodedLimit through, which includes object-prototype-type (undecided).",
+   "classification": "reachable-gap",
+   "evidence": "Passes V1ToV2DecodedLimit through, which includes object-prototype-type, a reachable gap.",
    "followUp": "Follows object-prototype-type."
   },
   {
@@ -1833,9 +1814,9 @@
    "crate": "bake-session",
    "cases": [],
    "kind": "pass-through",
-   "classification": "undecided",
-   "evidence": "Passes the v2-to-v3 named limits through, which include object-prototype-type and content-kind-diagnostic (undecided).",
-   "followUp": "Follows object-prototype-type and content-kind-diagnostic."
+   "classification": "reachable-gap",
+   "evidence": "Passes the v2-to-v3 named limits through, which include object-prototype-type, a reachable gap.",
+   "followUp": "Follows object-prototype-type."
   },
   {
    "variants": [
@@ -1891,8 +1872,8 @@
    "crate": "bake-session",
    "cases": [],
    "kind": "pass-through",
-   "classification": "undecided",
-   "evidence": "Passes RestoreLimit through, which includes restore-config-member.",
+   "classification": "reachable-gap",
+   "evidence": "Passes RestoreLimit through, which includes restore-config-member, a reachable gap.",
    "followUp": "Follows restore-config-member."
   },
   {
@@ -2123,9 +2104,9 @@
     }
    ],
    "kind": "filesystem",
-   "classification": "undecided",
-   "evidence": "project directories replaced the flat layout in 4e295221f3 (2026-07-24), before the first archived release (dsh-v0.0.1-rc.1, 2026-08-10), and TypeScript refuses a flat file as unsupported (packages/session/session-persistence-jsonl/src/index.ts:1591); but the limit also covers any entry named *.jsonl in a project directory, and no trace shows whether a released writer leaves such a file there",
-   "followUp": "Decide by checking every released writer path that creates files under a project directory; if none, mark unreachable."
+   "classification": "reachable-gap",
+   "evidence": "TypeScript refuses only a file named *.jsonl or *.jsonl.zstd in a project directory (entry.isFile(), packages/session/session-persistence-jsonl/src/index.ts:1518-1520), and probes the id's flat names (index.ts:1545-1550); Rust refuses any entry with that suffix, directories included (rust/crates/bake-session/src/plain_log_file.rs:974-975). A configured agents[].sessionId such as nightly.jsonl (packages/core/agent-loop/src/index.ts:323,385) keeps its letters and dots through encodeSegment (packages/session/session-persistence-jsonl/src/format.ts:198-213), so the writer creates a Session directory named nightly.jsonl (format.ts:266), and Rust then refuses every log of that project. No released writer creates a file in a project directory: materialization writes its temporary file beside the final log in the Session directory (index.ts:1099-1101,1191). A read-only scan of the owner's home (93 Zstandard format-3 logs, 40,514 rows; no v0 to v2 log) found no non-directory entry in any project directory",
+   "followUp": "Refuse only files with the flat-layout suffix when listing, as listSessionDirs does, and keep findLog's flat-name probe (rejectLegacyFlatArtifact, packages/session/session-persistence-jsonl/src/index.ts:1408,1539-1551), whose exists() opens the path (index.ts:1596-1600) and so also finds a directory on POSIX; a directory nightly.jsonl beside a Session nightly still refuses lookup of id nightly (section: Reachable gaps)."
   },
   {
    "variants": [
@@ -2181,8 +2162,8 @@
    ],
    "kind": "filesystem",
    "classification": "undecided",
-   "evidence": "the writer derives the path from the header's own cwd and id (sessionDir and generationLogPath, packages/session/session-persistence-jsonl/src/format.ts:266,279), so a fresh log agrees with its header; whether symlinked roots or case-insensitive filesystems make a released log fail the spelled-path comparison is not traced",
-   "followUp": "Decide with a case on a symlinked root and on a case-insensitive volume."
+   "evidence": "The writer derives the path from the header's own cwd and id (projectKey and sessionDir, packages/session/session-persistence-jsonl/src/format.ts:224-267), so a fresh log agrees with its header. A read-only scan of the owner's home (93 Zstandard format-3 logs, 40,514 rows; no v0 to v2 log) found all 93 project and Session directory names equal projectKey(cwd) and encodeSegment(id) of their headers, and the root is not a symlink. Untraced: whether a writer on a case-insensitive volume or under a symlinked or renamed root leaves a log whose directory spelling differs from the header",
+   "followUp": "Decide with a case on a case-insensitive volume and a symlinked root."
   },
   {
    "variants": [
@@ -2199,8 +2180,8 @@
     }
    ],
    "kind": "pass-through",
-   "classification": "undecided",
-   "evidence": "Passes ScanRefusal through, whose only unsettled limit is scan-json-parser, undecided; the witnessed case is a scan limit on stored bytes.",
+   "classification": "reachable-gap",
+   "evidence": "Passes ScanRefusal through, which includes scan-json-parser, a reachable gap; the witnessed case is a scan limit on stored bytes.",
    "followUp": "Follows scan-json-parser."
   },
   {
@@ -2228,8 +2209,8 @@
     }
    ],
    "kind": "pass-through",
-   "classification": "undecided",
-   "evidence": "Passes migration limits through. Its row/json-parser name follows scan-json-parser, undecided, since older-generation rows now parse at any depth; its encode name now meets only encode-float-number's unreachable spellings. finish-order and v2-codec-recovery depend on rows a writer may or may not produce and are not traced",
+   "classification": "reachable-gap",
+   "evidence": "Passes migration limits through. Its row/json-parser name is scan-json-parser's lone-surrogate refusal, reachable in v0 to v2 rows (3efd4b51e0:packages/llm/llm/src/message.ts:124); its encode name meets only encode-float-number's unreachable spellings. finish-order and v2-codec-recovery depend on rows a writer may or may not produce and are not traced",
    "followUp": "Follows scan-json-parser; trace finish-order and v2-codec-recovery separately."
   },
   {
@@ -2301,8 +2282,8 @@
    "crate": "bake-cli",
    "cases": [],
    "kind": "pass-through",
-   "classification": "undecided",
-   "evidence": "passes a migration limit of migrate_released_generation (LogFileLimit::Migration's names), migrate_released_zstd_generation (zstd/stop-order), or restore_migrated (MigratedRestoreLimit) through, and log-file-migration and migrated-restore-restore are undecided",
+   "classification": "reachable-gap",
+   "evidence": "Passes a migration limit of `migrate_released_generation` (`LogFileLimit::Migration`'s names), `migrate_released_zstd_generation` (`zstd/stop-order`), or `restore_migrated` (`MigratedRestoreLimit`) through; log-file-migration and migrated-restore-restore are reachable gaps",
    "followUp": "Follows log-file-migration and migrated-restore-restore."
   },
   {

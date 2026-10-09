@@ -25,12 +25,12 @@ const REPO = new URL('../../../../', import.meta.url)
 const SCHEMA = 'bake/session-format-conformance/v2-to-v3-cases'
 const ORACLE = "releasedV2SessionFormatCodec.createDecoder(header, 'strict') feeding createSessionFormatChain([sessionFormatV0ToV1, sessionFormatV1ToV2, sessionFormatV2ToV3]).createStream; decoder.finish, then stream.finish"
 /** Both harnesses pin the table size, so a dropped case fails. */
-const CASE_COUNT = 370
+const CASE_COUNT = 371
 /**
  * Inherent native limits: a fraction or exponent spelling where TypeScript reads a count or
  * safe integer, Rust's own source budget, and a V8 TypeError text the chain wraps.
  */
-const LIMITS = ['header-float-lexeme', 'time-float-lexeme', 'payload-float-lexeme', 'source-output-budget', 'object-prototype-type', 'content-kind-diagnostic', 'unsafe-json-integer']
+const LIMITS = ['header-float-lexeme', 'time-float-lexeme', 'payload-float-lexeme', 'source-output-budget', 'object-prototype-type', 'unsafe-json-integer']
 /** Event types the migration admits beyond the released v2 dispositions. */
 const FEEDBACK_TYPES = ['feedback/message-put', 'feedback/message-delete']
 const EVERY_FAMILY = 'every-source-event-family'
@@ -108,9 +108,9 @@ function parseCase(value: unknown): MigrationCase {
 function loadTable(): MigrationCase[] {
   const table: unknown = JSON.parse(readFileSync(new URL('conformance/session/v2-to-v3-cases.json', REPO), 'utf8'))
   if (!isObject(table) || sortedKeys(table) !== 'cases,history,oracle,schema,version'
-    || table.schema !== SCHEMA || table.version !== 2 || table.oracle !== ORACLE || !Array.isArray(table.cases)
+    || table.schema !== SCHEMA || table.version !== 3 || table.oracle !== ORACLE || !Array.isArray(table.cases)
     || !Array.isArray(table.history) || !table.history.every(entry => typeof entry === 'string')) {
-    throw new Error('v2-to-v3-cases.json does not match its version-2 schema')
+    throw new Error('v2-to-v3-cases.json does not match its version-3 schema')
   }
   const cases = table.cases.map(parseCase)
   if (new Set(cases.map(entry => entry.id)).size !== cases.length) throw new Error('case ids must be unique')

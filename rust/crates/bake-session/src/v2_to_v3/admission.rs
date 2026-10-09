@@ -384,7 +384,7 @@ fn assert_content_kind(kind: Option<&Value>, label: &str) -> Checked {
     }
     unsupported(format!(
         "{label}: cannot safely transform unclassified message content kind {}",
-        stringify(kind)?
+        stringify(kind)
     ))
 }
 

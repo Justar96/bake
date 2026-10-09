@@ -37,7 +37,7 @@ pub(crate) use header::contains_negative_zero;
 pub(crate) use js::{exact_keys, integer_string, js_order, record as js_record};
 pub(crate) use payload_semantics::{
     Checked, assert_released_payload_semantics, count, invalid, quote, released_keys,
-    released_record, stringify,
+    released_record,
 };
 use stage::Stage;
 
@@ -115,8 +115,7 @@ pub enum V2ToV3Refusal {
     /// `sourceEventSeqs` list would exceed `source_budget`; and the
     /// `payload-float-lexeme` for a non-writer number spelling in the
     /// frozen payload checks,
-    /// `object-prototype-type` for inherited JavaScript property names,
-    /// `content-kind-diagnostic` for unsupported JSON number rendering, and
+    /// `object-prototype-type` for inherited JavaScript property names, and
     /// `unsafe-json-integer` for retained integer values outside ±(2^53 − 1)
     /// that are not spelled as `JSON.stringify` writes them.
     /// `canonical-float-lexeme`, `admission-invariant`, and `row-count` guard

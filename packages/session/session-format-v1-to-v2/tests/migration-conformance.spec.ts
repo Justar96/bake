@@ -31,7 +31,7 @@ const REPO = new URL('../../../../', import.meta.url)
 const SCHEMA = 'bake/session-format-conformance/v1-to-v2-cases'
 const ORACLE = "sessionFormatV1ToV2.migrateHeader and assertReleasedV2Header over a strict releasedV0SessionFormatCodec or releasedV1SessionFormatCodec decode, then createStage({ sourceKind: 'transformed' }), transformEvent for each decoded event into a SessionFormatEventCollector, then finish"
 /** Both harnesses pin the table size, so a dropped case fails. */
-const CASE_COUNT = 180
+const CASE_COUNT = 182
 /**
  * Native limits: a chunk the stream accumulator refuses, a non-string event type, a value the stage
  * casts without checking, a fraction or exponent spelling the stage compares or the accumulator
@@ -120,10 +120,10 @@ interface Table {
 function loadTable(): Table {
   const table: unknown = JSON.parse(readFileSync(new URL('conformance/session/v1-to-v2-cases.json', REPO), 'utf8'))
   if (!isObject(table) || sortedKeys(table) !== 'cases,history,oracle,schema,version,vocabulary'
-    || table.schema !== SCHEMA || table.version !== 2 || table.oracle !== ORACLE || !Array.isArray(table.cases)
+    || table.schema !== SCHEMA || table.version !== 3 || table.oracle !== ORACLE || !Array.isArray(table.cases)
     || !Array.isArray(table.history) || !table.history.every(entry => typeof entry === 'string')
     || !isObject(table.vocabulary) || sortedKeys(table.vocabulary) !== 'objectPrototypeNames,releasedV0EventTypes') {
-    throw new Error('v1-to-v2-cases.json does not match its version-2 schema')
+    throw new Error('v1-to-v2-cases.json does not match its version-3 schema')
   }
   const cases = table.cases.map(parseCase)
   if (new Set(cases.map(entry => entry.id)).size !== cases.length) throw new Error('case ids must be unique')
