@@ -27,6 +27,7 @@ mod normalize;
 use serde_json::Value;
 
 use crate::DecodedV1Rows;
+use crate::json_parse::{Deep, clone_fields};
 use crate::v2_to_v3::StageError;
 use normalize::{LegacyState, TYPE_COERCION, normalize_event};
 pub(crate) use normalize::{assert_event_payload, has_released_v0_disposition};
@@ -38,7 +39,6 @@ const DECODE_INVARIANT: &str = "decode-invariant";
 const SEQ_FLOAT_LEXEME: &str = "seq-float-lexeme";
 
 /// A migrated v0 Session's logical v1 header, events, and inherited cut.
-#[derive(Debug, Clone, PartialEq)]
 pub struct MigratedV1 {
     /// The decoded header with `version` 1 in its place.
     pub header: Value,
@@ -47,6 +47,8 @@ pub struct MigratedV1 {
     /// The decoded inherited cut, unchanged.
     pub inherited_event_count: u64,
 }
+
+crate::json_parse::deep_session_parts!(MigratedV1);
 
 /// Where a refusal was raised.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -113,11 +115,11 @@ pub fn migrate_v0_to_v1(decoded: &DecodedV1Rows) -> Result<MigratedV1, V0ToV1Ref
     if source_header.get("version").and_then(Value::as_u64) != Some(0) {
         return Err(header_limit());
     }
-    let mut header = source_header.clone();
+    let mut header = clone_fields(source_header);
     header.insert("version".to_owned(), Value::from(1));
     let has_parent = source_header.contains_key("parentSession");
     let mut state = LegacyState::default();
-    let mut events = Vec::with_capacity(decoded.events.len());
+    let mut events = Deep::new(Vec::with_capacity(decoded.events.len()));
     for (index, event) in decoded.events.iter().enumerate() {
         let location = V0ToV1Location::Event(index);
         let native = |limit: &str| V0ToV1Refusal::NativeSubset {
@@ -135,8 +137,9 @@ pub fn migrate_v0_to_v1(decoded: &DecodedV1Rows) -> Result<MigratedV1, V0ToV1Ref
         if !event.get("type").is_some_and(Value::is_string) {
             return Err(native(TYPE_COERCION));
         }
-        let normalized = normalize_event(event.clone(), seq, session_id, &mut state)
+        let normalized = normalize_event(clone_fields(event), seq, session_id, &mut state)
             .map_err(|error| refusal(location, error))?;
+        let normalized = Deep::new(normalized);
         let inherited = has_parent && seq < decoded.inherited_event_count;
         if is_wrong_session_marker(&normalized, session_id) && !inherited {
             return Err(refusal(
@@ -146,11 +149,11 @@ pub fn migrate_v0_to_v1(decoded: &DecodedV1Rows) -> Result<MigratedV1, V0ToV1Ref
                 ),
             ));
         }
-        events.push(Value::Object(normalized));
+        events.push(Value::Object(normalized.into_inner()));
     }
     Ok(MigratedV1 {
         header: Value::Object(header),
-        events,
+        events: events.into_inner(),
         inherited_event_count: decoded.inherited_event_count,
     })
 }

@@ -27,6 +27,8 @@
 
 use serde_json::Value;
 
+use crate::json_parse::{clone_value, values_equal};
+
 use crate::v0_to_v1::{V0ToV1Location, V0ToV1Refusal, migrate_v0_to_v1};
 use crate::v1_codec::{DecodedV1Items, DecodedV1Rows, V1Item};
 use crate::v1_to_v2::{
@@ -143,12 +145,12 @@ pub fn migrate_released_history(decoded: &DecodedV1Items) -> Result<MigratedV2, 
 /// expanded events and each run member must come out unchanged.
 fn from_v0(decoded: &DecodedV1Items) -> Result<MigratedV2, HistoryRefusal> {
     let rows = DecodedV1Rows {
-        header: decoded.header.clone(),
+        header: clone_value(&decoded.header),
         inherited_event_count: decoded.inherited_event_count,
         events: expand(&decoded.items),
     };
     // Step one: the first v0→v1 refusal ends the prefix the later stages see.
-    let (migrated, stage_one) = match migrate_v0_to_v1(&rows) {
+    let (mut migrated, stage_one) = match migrate_v0_to_v1(&rows) {
         Ok(migrated) => (migrated, None),
         Err(refusal) => {
             let (seq, refusal) = match v0_to_v1_refusal(refusal) {
@@ -156,9 +158,15 @@ fn from_v0(decoded: &DecodedV1Items) -> Result<MigratedV2, HistoryRefusal> {
                 (None, refusal) => return Err(refusal),
             };
             let prefix = DecodedV1Rows {
-                header: rows.header.clone(),
+                header: clone_value(&rows.header),
                 inherited_event_count: rows.inherited_event_count,
-                events: rows.events.get(..seq).unwrap_or_default().to_vec(),
+                events: rows
+                    .events
+                    .get(..seq)
+                    .unwrap_or_default()
+                    .iter()
+                    .map(clone_value)
+                    .collect(),
             };
             let migrated = migrate_v0_to_v1(&prefix).map_err(|_| invariant(seq))?;
             (migrated, Some((seq, refusal)))
@@ -174,7 +182,7 @@ fn from_v0(decoded: &DecodedV1Items) -> Result<MigratedV2, HistoryRefusal> {
         match item {
             V1Item::Event(_) => {
                 let event = migrated.events.get(seq).ok_or_else(|| invariant(seq))?;
-                items.push(V1Item::Event(event.clone()));
+                items.push(V1Item::Event(clone_value(event)));
                 seq += 1;
             }
             V1Item::AssistantChunkRun(run) => {
@@ -183,7 +191,15 @@ fn from_v0(decoded: &DecodedV1Items) -> Result<MigratedV2, HistoryRefusal> {
                     .and_then(|count| seq.checked_add(count))
                     .filter(|next| *next <= end)
                     .ok_or_else(|| invariant(seq))?;
-                if migrated.events.get(seq..next) != Some(run.expand().as_slice()) {
+                let expanded = run.expand();
+                let unchanged = migrated.events.get(seq..next).is_some_and(|events| {
+                    events.len() == expanded.len()
+                        && events
+                            .iter()
+                            .zip(&expanded)
+                            .all(|(left, right)| values_equal(left, right))
+                });
+                if !unchanged {
                     return Err(invariant(seq));
                 }
                 items.push(item.clone());
@@ -192,7 +208,7 @@ fn from_v0(decoded: &DecodedV1Items) -> Result<MigratedV2, HistoryRefusal> {
         }
     }
     let chain = Chain {
-        header: migrated.header,
+        header: std::mem::take(&mut migrated.header),
         source_cut: migrated.inherited_event_count,
         is_seeded: decoded.header.get("isSeeded") == Some(&Value::Bool(true)),
         first: FirstStage::V0ToV1,
@@ -244,7 +260,7 @@ fn from_v1(decoded: &DecodedV1Items) -> Result<MigratedV2, HistoryRefusal> {
         .as_ref()
         .map_or(decoded.items.len(), |(index, _)| *index);
     let chain = Chain {
-        header: decoded.header.clone(),
+        header: clone_value(&decoded.header),
         source_cut: decoded.inherited_event_count,
         is_seeded: decoded.header.get("isSeeded") == Some(&Value::Bool(true)),
         first: FirstStage::V1ToV2Decoded,
@@ -405,7 +421,7 @@ impl Chain {
 
     fn v1_to_v2(&self, items: &[V1Item]) -> Result<StreamedV1ToV2, V1ToV2Refusal> {
         stream_v1_to_v2_items(&DecodedV1Items {
-            header: self.header.clone(),
+            header: clone_value(&self.header),
             inherited_event_count: self.source_cut,
             items: items.to_vec(),
         })
@@ -508,7 +524,7 @@ fn expand(items: &[V1Item]) -> Vec<Value> {
     let mut events = Vec::new();
     for item in items {
         match item {
-            V1Item::Event(event) => events.push(event.clone()),
+            V1Item::Event(event) => events.push(clone_value(event)),
             V1Item::AssistantChunkRun(run) => events.extend(run.expand()),
         }
     }

@@ -13,6 +13,7 @@
 
 use serde_json::{Map, Value};
 
+use crate::json_parse::{DebugJson, Deep, clone_fields, clone_value, dismantle, values_equal};
 use crate::v2_to_v3::{contains_negative_zero, contains_unsafe_integer, integer_string, js_order};
 use crate::{MAX_SAFE_INTEGER, PathPlatform, is_absolute};
 
@@ -54,7 +55,6 @@ pub enum V1CodecRecovery {
 }
 
 /// A decoded released v0 or v1 Session.
-#[derive(Debug, Clone, PartialEq)]
 pub struct DecodedV1Rows {
     /// The logical header, without `type`, with `isSeeded` recording whether
     /// `seedLength` was present, in the codec's member order.
@@ -67,8 +67,9 @@ pub struct DecodedV1Rows {
     pub events: Vec<Value>,
 }
 
+crate::json_parse::deep_session_parts!(DecodedV1Rows);
+
 /// A decoded released v0 or v1 Session with its packed rows kept as runs.
-#[derive(Debug, Clone, PartialEq)]
 pub struct DecodedV1Items {
     /// As [`DecodedV1Rows::header`].
     pub header: Value,
@@ -79,13 +80,82 @@ pub struct DecodedV1Items {
     pub items: Vec<V1Item>,
 }
 
+impl Drop for DecodedV1Items {
+    fn drop(&mut self) {
+        dismantle(std::mem::take(&mut self.header));
+    }
+}
+
+impl Clone for DecodedV1Items {
+    fn clone(&self) -> Self {
+        Self {
+            header: clone_value(&self.header),
+            inherited_event_count: self.inherited_event_count,
+            items: self.items.clone(),
+        }
+    }
+}
+
+impl PartialEq for DecodedV1Items {
+    fn eq(&self, other: &Self) -> bool {
+        values_equal(&self.header, &other.header)
+            && self.inherited_event_count == other.inherited_event_count
+            && self.items == other.items
+    }
+}
+
+impl std::fmt::Debug for DecodedV1Items {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DecodedV1Items")
+            .field("header", &DebugJson(&self.header))
+            .field("inherited_event_count", &self.inherited_event_count)
+            .field("items", &self.items)
+            .finish()
+    }
+}
+
 /// One emitted row.
-#[derive(Debug, Clone, PartialEq)]
 pub enum V1Item {
     /// An ordinary row, as [`DecodedV1Rows::events`] holds it.
     Event(Value),
     /// A packed Assistant chunk row.
     AssistantChunkRun(ReleasedChunkRun),
+}
+
+impl Drop for V1Item {
+    fn drop(&mut self) {
+        if let Self::Event(event) = self {
+            dismantle(std::mem::take(event));
+        }
+    }
+}
+
+impl Clone for V1Item {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Event(event) => Self::Event(clone_value(event)),
+            Self::AssistantChunkRun(run) => Self::AssistantChunkRun(run.clone()),
+        }
+    }
+}
+
+impl PartialEq for V1Item {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Event(left), Self::Event(right)) => values_equal(left, right),
+            (Self::AssistantChunkRun(left), Self::AssistantChunkRun(right)) => left == right,
+            _ => false,
+        }
+    }
+}
+
+impl std::fmt::Debug for V1Item {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Event(event) => f.debug_tuple("Event").field(&DebugJson(event)).finish(),
+            Self::AssistantChunkRun(run) => f.debug_tuple("AssistantChunkRun").field(run).finish(),
+        }
+    }
 }
 
 /// `ReleasedAssistantChunkRun`: a packed row's compact stream record and the
@@ -338,16 +408,16 @@ pub fn decode_v0_v1_rows(
     platform: PathPlatform,
     source_budget: usize,
 ) -> Result<DecodedV1Rows, V1CodecRefusal> {
-    let decoded = decode_v0_v1_items(header, rows, version, recovery, platform, source_budget)?;
+    let mut decoded = decode_v0_v1_items(header, rows, version, recovery, platform, source_budget)?;
     let mut events = Vec::new();
-    for item in decoded.items {
-        match item {
-            V1Item::Event(event) => events.push(event),
+    for mut item in std::mem::take(&mut decoded.items) {
+        match &mut item {
+            V1Item::Event(event) => events.push(std::mem::take(event)),
             V1Item::AssistantChunkRun(run) => events.extend(run.expand()),
         }
     }
     Ok(DecodedV1Rows {
-        header: decoded.header,
+        header: std::mem::take(&mut decoded.header),
         inherited_event_count: decoded.inherited_event_count,
         events,
     })
@@ -379,20 +449,23 @@ pub fn decode_v0_v1_items(
         let location = V1CodecLocation::Row(index);
         let rejected = |message: String| V1CodecRefusal::Rejected { location, message };
         let native = |limit| V1CodecRefusal::NativeSubset { location, limit };
-        let row = js_order(row.clone());
+        let row = Deep::new(js_order(clone_value(row)));
         if let Some(issue) = &issue {
             // Every later row is still decoded, but only one decoding as a
             // `turn/end` event rethrows; any other outcome drops the row.
             if row.get("type").and_then(Value::as_str) == Some("turn/end") {
-                match decode_event(row, index, source_budget) {
-                    Ok(_) => return Err(rejected(issue.clone())),
+                match decode_event(row.into_inner(), index, source_budget) {
+                    Ok(event) => {
+                        dismantle(event);
+                        return Err(rejected(issue.clone()));
+                    }
                     Err(Failure::Invalid(_)) => {}
                     Err(Failure::Limit(limit)) => return Err(native(limit)),
                 }
             }
             continue;
         }
-        let item = match decode_item(row, index, source_budget) {
+        let item = match decode_item(row.into_inner(), index, source_budget) {
             Ok(item) => item,
             Err(Failure::Limit(limit)) => return Err(native(limit)),
             Err(Failure::Invalid(message)) if recoverable => {
@@ -465,11 +538,15 @@ fn decode_header(
     if contains_negative_zero(header) {
         return Err(Failure::Invalid(format!("{physical} is not lossless JSON")));
     }
-    let Value::Object(fields) = js_order(header.clone()) else {
+    let Value::Object(fields) = header else {
         return Err(Failure::Invalid(format!(
             "{physical} must be a JSON object"
         )));
     };
+    let Value::Object(fields) = js_order(Value::Object(clone_fields(fields))) else {
+        unreachable!("js_order keeps an object an object")
+    };
+    let fields = Deep::new(fields);
     exact_keys(&fields, &HEADER_REQUIRED, &HEADER_OPTIONAL, &physical)?;
     if fields["type"] != "session" || !is_version(&fields["version"], version)? {
         return Err(Failure::Invalid(format!(
@@ -655,7 +732,8 @@ fn seq_gap(seq: Option<&Value>, expected: u64) -> Result<Option<String>, V1Codec
 }
 
 fn decode_item(row: Value, index: usize, budget: usize) -> Result<V1Item, Failure> {
-    let Value::Object(fields) = &row else {
+    let row = Deep::new(row);
+    let Value::Object(fields) = &*row else {
         return Err(Failure::Invalid(format!(
             "released Session row {index} must be a JSON object"
         )));
@@ -664,16 +742,17 @@ fn decode_item(row: Value, index: usize, budget: usize) -> Result<V1Item, Failur
         Some(Value::String(tag)) if PACKED_TAGS.contains(&tag.as_str()) => {
             decode_packed_run(fields, tag, index)
         }
-        _ => decode_event(row, index, budget).map(V1Item::Event),
+        _ => decode_event(row.into_inner(), index, budget).map(V1Item::Event),
     }
 }
 
 /// `decodeEvent`: the row itself, with `sourceEventSeqs` expanded in place,
 /// as the codec's spread replaces a member at its position.
 fn decode_event(row: Value, index: usize, budget: usize) -> Result<Value, Failure> {
-    let Value::Object(mut fields) = row else {
+    let Value::Object(fields) = row else {
         unreachable!("only object rows reach decodeEvent")
     };
+    let mut fields = Deep::new(fields);
     if let Some(sources) = fields.get("sourceEventSeqs") {
         let seq = count(
             fields.get("seq"),
@@ -681,12 +760,13 @@ fn decode_event(row: Value, index: usize, budget: usize) -> Result<Value, Failur
             V1CodecLimit::SeqFloatLexeme,
         )?;
         let expanded = decode_seq_ranges(sources, seq, budget)?;
+        // The replaced member decoded as a list of counts, so it is shallow.
         fields.insert(
             "sourceEventSeqs".to_owned(),
             Value::Array(expanded.into_iter().map(Value::from).collect()),
         );
     }
-    Ok(Value::Object(fields))
+    Ok(Value::Object(fields.into_inner()))
 }
 
 /// `decodeSeqRanges` with at most `max_entries` members.

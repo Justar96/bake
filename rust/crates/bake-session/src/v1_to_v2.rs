@@ -40,6 +40,9 @@ use serde_json::{Map, Value};
 
 use crate::MAX_SAFE_INTEGER;
 use crate::assistant_stream::{AssistantStreamAccumulator, StreamPushError, safe_gap};
+use crate::json_parse::{
+    Deep, clone_fields, clone_value, dismantle, remove_member, replace_member,
+};
 use crate::v1_codec::{
     DecodedV1Items, DecodedV1Rows, PackedKind, PackedStreamRecord, ReleasedChunkRun, V1Item,
 };
@@ -124,7 +127,6 @@ const OBJECT_PROTOTYPE_NAMES: [&str; 12] = [
 ];
 
 /// A v1 Session migrated to v2 by the transformed stage.
-#[derive(Debug, Clone, PartialEq)]
 pub struct MigratedV1ToV2 {
     /// The logical v2 header: the v1 header with `version` 2 in place.
     pub header: Value,
@@ -133,6 +135,8 @@ pub struct MigratedV1ToV2 {
     /// The number of target events inherited from the parent Session.
     pub inherited_event_count: u64,
 }
+
+crate::json_parse::deep_session_parts!(MigratedV1ToV2);
 
 /// Where a refusal was raised.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -241,7 +245,7 @@ pub fn migrate_v1_to_v2_transformed_items(
     let inherited_event_count = streamed.finished?;
     Ok(MigratedV1ToV2 {
         header: streamed.header,
-        events: streamed.events,
+        events: streamed.events.into_inner(),
         inherited_event_count,
     })
 }
@@ -254,7 +258,7 @@ pub(crate) struct StreamedV1ToV2 {
     pub(crate) header: Value,
     /// Every event the stage emitted: the first `streamed_len` before
     /// `finish`, then what `finish` emitted, up to a refusal there.
-    pub(crate) events: Vec<Value>,
+    pub(crate) events: Deep<Vec<Value>>,
     /// The number of events emitted before `finish`.
     pub(crate) streamed_len: usize,
     /// Whether an Assistant attempt, with any events buffered after its last
@@ -295,7 +299,7 @@ fn migrate<'a>(
     let inherited_event_count = streamed.finished?;
     Ok(MigratedV1ToV2 {
         header: streamed.header,
-        events: streamed.events,
+        events: streamed.events.into_inner(),
         inherited_event_count,
     })
 }
@@ -314,7 +318,7 @@ fn stream<'a>(
             });
         }
     };
-    let mut target_header = header.clone();
+    let mut target_header = clone_fields(header);
     target_header.insert("version".to_owned(), Value::from(2));
     let mut stage = Stage::new(header, inherited_event_count);
     // The decoded seq of the next event: the codec checked that each event's
@@ -360,15 +364,15 @@ enum OpenTurn {
     /// `null`.
     Closed,
     /// The `turn` member of the opening `turn/start`, `None` when absent.
-    Open(Option<Value>),
+    Open(Deep<Option<Value>>),
 }
 
 /// `StreamingAttempt` and its `AttemptGroup`: the chunks of one Assistant
 /// attempt so far, and the events buffered after its last chunk.
 struct PendingAttempt {
     /// `turn` and `step` of the attempt's first chunk, `None` when absent.
-    turn: Option<Value>,
-    step: Option<Value>,
+    turn: Deep<Option<Value>>,
+    step: Deep<Option<Value>>,
     /// `spans` as `(firstSeq, eventCount)`.
     spans: Vec<(u64, u64)>,
     /// `stream`: the records flushed so far.
@@ -379,26 +383,26 @@ struct PendingAttempt {
     last_chunk_seq: u64,
     /// The last chunk's `time`, a safe integer the accumulator admitted or
     /// a run's `lastTime`.
-    last_chunk_time: Value,
+    last_chunk_time: Deep<Value>,
     terminal: bool,
     /// `afterLastChunk`: each buffered event's index and members.
-    after_last_chunk: Vec<(u64, Map<String, Value>)>,
+    after_last_chunk: Deep<Vec<(u64, Map<String, Value>)>>,
 }
 
 impl PendingAttempt {
     /// `attemptGroup(turn, step)` with no chunk yet.
     fn new(turn: Option<Value>, step: Option<Value>, seq: u64) -> Self {
         Self {
-            turn,
-            step,
+            turn: Deep::new(turn),
+            step: Deep::new(step),
             spans: Vec::new(),
             stream: Vec::new(),
             accumulator: None,
             chunk_count: 0,
             last_chunk_seq: seq,
-            last_chunk_time: Value::Null,
+            last_chunk_time: Deep::new(Value::Null),
             terminal: false,
-            after_last_chunk: Vec::new(),
+            after_last_chunk: Deep::default(),
         }
     }
 
@@ -425,7 +429,7 @@ impl PendingAttempt {
         }
         self.chunk_count = self.chunk_count.saturating_add(event_count);
         self.last_chunk_seq = first_seq.saturating_add(event_count).saturating_sub(1);
-        self.last_chunk_time = time;
+        self.last_chunk_time = Deep::new(time);
     }
 
     /// `flushAccumulator`: append the accumulator's records to the stream.
@@ -462,9 +466,11 @@ impl PendingAttempt {
 
     /// `attemptEvent`: the `assistant/attempt` at the last chunk's seq and time.
     fn attempt_event(&mut self) -> Checked<Map<String, Value>> {
-        let (Some(turn), Some(step)) = (self.turn.clone(), self.step.clone()) else {
+        // Decide before copying: a dropped copy of a deep coordinate recurses.
+        let (Some(turn), Some(step)) = (self.turn.as_ref(), self.step.as_ref()) else {
             return Err(Failure::Limit(V1ToV2Limit::UndefinedMember));
         };
+        let (turn, step) = (clone_value(turn), clone_value(step));
         let mut data = Map::new();
         data.insert("turn".to_owned(), turn);
         data.insert("step".to_owned(), step);
@@ -485,8 +491,9 @@ enum StreamEntry {
         record: PackedStreamRecord,
         last_time: i64,
     },
-    /// A raw `chunk` record, which never merges.
-    Chunk(Value),
+    /// A raw `chunk` record, which never merges; its chunk is unchecked log
+    /// JSON of any depth.
+    Chunk(Deep<Value>),
 }
 
 impl StreamEntry {
@@ -494,13 +501,13 @@ impl StreamEntry {
     /// is not a packed record is the accumulator's raw `chunk` record.
     fn from_snapshot(record: Value) -> Self {
         let Value::Object(fields) = &record else {
-            return Self::Chunk(record);
+            return Self::Chunk(Deep::new(record));
         };
         let kind = match fields.get("type").and_then(Value::as_str) {
             Some("text-chunks") => PackedKind::Text,
             Some("reasoning-chunks") => PackedKind::Reasoning,
             Some("tool-call-chunks") => PackedKind::ToolCall,
-            _ => return Self::Chunk(record),
+            _ => return Self::Chunk(Deep::new(record)),
         };
         let strings = |key: &str| -> Option<Vec<String>> {
             fields
@@ -547,13 +554,13 @@ impl StreamEntry {
             };
             Some(Self::Packed { record, last_time })
         })();
-        packed.unwrap_or(Self::Chunk(record))
+        packed.unwrap_or_else(|| Self::Chunk(Deep::new(record)))
     }
 
     fn into_value(self) -> Value {
         match self {
             Self::Packed { record, .. } => record.to_value(),
-            Self::Chunk(record) => record,
+            Self::Chunk(record) => record.into_inner(),
         }
     }
 }
@@ -606,9 +613,9 @@ struct Stage<'a> {
     target_seq: u64,
     target_cut: Option<u64>,
     /// `lastTime`, `None` when an event had no `time`.
-    last_time: Option<Value>,
+    last_time: Deep<Option<Value>>,
     pending: Option<PendingAttempt>,
-    output: Vec<Value>,
+    output: Deep<Vec<Value>>,
 }
 
 impl<'a> Stage<'a> {
@@ -624,9 +631,9 @@ impl<'a> Stage<'a> {
             previous: None,
             target_seq: 0,
             target_cut: if is_seeded { None } else { Some(0) },
-            last_time: header.get("createdAt").cloned(),
+            last_time: Deep::new(header.get("createdAt").map(clone_value)),
             pending: None,
-            output: Vec::new(),
+            output: Deep::default(),
         }
     }
 
@@ -649,7 +656,9 @@ impl<'a> Stage<'a> {
                 Value::from(event_type)
             )));
         }
-        let interrupted = self.legacy_interrupted_turn(event_type, fields, seq)?;
+        let interrupted = self
+            .legacy_interrupted_turn(event_type, fields, seq)?
+            .map(Deep::new);
         if event_type == "turn/start"
             && matches!(self.open_turn, OpenTurn::Open(_))
             && interrupted.is_none()
@@ -662,16 +671,16 @@ impl<'a> Stage<'a> {
         }
         self.assert_source_delivery_marker(event_type, fields, seq)?;
         self.observe_legacy_turn(event_type, fields, event)?;
-        self.last_time = fields.get("time").cloned();
+        self.last_time = Deep::new(fields.get("time").map(clone_value));
         if let Some(interrupted) = interrupted {
             self.finish_attempt()?;
-            self.emit_generated(seq, interrupted)?;
+            self.emit_generated(seq, interrupted.into_inner())?;
         }
         if let Some(LegacyGoalSplit { change, message }) =
             split_legacy_goal_change(event_type, fields, seq)?
         {
-            self.emit_generated(seq, change)?;
-            return self.emit_source(seq, message, fields.get("time"));
+            self.emit_generated(seq, change.into_inner())?;
+            return self.emit_source(seq, message.into_inner(), fields.get("time"));
         }
         match event_type {
             "assistant/chunk" => self.transform_chunk(fields, seq),
@@ -679,14 +688,14 @@ impl<'a> Stage<'a> {
             // `closesAttempt`.
             "turn/end" | "step/end" | "llm/retry" | "llm/retry-started" => {
                 self.finish_attempt()?;
-                self.emit_source(seq, fields.clone(), fields.get("time"))
+                self.emit_source(seq, clone_fields(fields), fields.get("time"))
             }
             _ => match &mut self.pending {
                 Some(pending) => {
-                    pending.after_last_chunk.push((seq, fields.clone()));
+                    pending.after_last_chunk.push((seq, clone_fields(fields)));
                     Ok(())
                 }
-                None => self.emit_source(seq, fields.clone(), fields.get("time")),
+                None => self.emit_source(seq, clone_fields(fields), fields.get("time")),
             },
         }
     }
@@ -707,9 +716,9 @@ impl<'a> Stage<'a> {
             }
         }
         let source_cut = self.source_cut;
-        let pending = self
-            .pending
-            .get_or_insert_with(|| PendingAttempt::new(turn.cloned(), step.cloned(), seq));
+        let pending = self.pending.get_or_insert_with(|| {
+            PendingAttempt::new(turn.map(clone_value), step.map(clone_value), seq)
+        });
         pending.assert_cut(source_cut, seq)?;
         let chunk = data.get("chunk");
         pending
@@ -723,7 +732,7 @@ impl<'a> Stage<'a> {
                 })
             })?;
         // `push` admitted the time, so it is present.
-        pending.record_span(seq, 1, fields.get("time").cloned().unwrap_or(Value::Null));
+        pending.record_span(seq, 1, fields.get("time").map_or(Value::Null, clone_value));
         if chunk.and_then(|chunk| chunk.get("type")) == Some(&Value::from("finish")) {
             pending.terminal = true;
         }
@@ -733,7 +742,7 @@ impl<'a> Stage<'a> {
     /// `transformReleasedRun` for a packed Assistant chunk row.
     fn transform_run(&mut self, run: &ReleasedChunkRun) -> Checked<()> {
         self.previous = None;
-        self.last_time = Some(Value::from(run.last_time()));
+        self.last_time = Deep::new(Some(Value::from(run.last_time())));
         let turn = Value::from(run.turn());
         let step = Value::from(run.step());
         if let Some(pending) = &self.pending {
@@ -789,9 +798,10 @@ impl<'a> Stage<'a> {
         self.emit_buffered(buffered)
     }
 
-    fn emit_buffered(&mut self, buffered: Vec<(u64, Map<String, Value>)>) -> Checked<()> {
-        for (seq, fields) in buffered {
-            let time = fields.get("time").cloned();
+    fn emit_buffered(&mut self, mut buffered: Deep<Vec<(u64, Map<String, Value>)>>) -> Checked<()> {
+        buffered.reverse();
+        while let Some((seq, fields)) = buffered.pop() {
+            let time = Deep::new(fields.get("time").map(clone_value));
             self.emit_source(seq, fields, time.as_ref())?;
         }
         Ok(())
@@ -813,7 +823,7 @@ impl<'a> Stage<'a> {
         }
         let turn = record(fields.get("data"))?.get("turn");
         // `openTurn + 1` adds a number only when the open turn is one.
-        let next = match open_turn {
+        let next = match &**open_turn {
             Some(Value::Number(number)) => match (number.as_u64(), number.as_i64()) {
                 (Some(value), _) => i128::from(value) + 1,
                 (None, Some(value)) => i128::from(value) + 1,
@@ -847,7 +857,10 @@ impl<'a> Stage<'a> {
         let mut reason = Map::new();
         reason.insert("kind".to_owned(), Value::from("interrupted"));
         let mut data = Map::new();
-        data.insert("turn".to_owned(), open_turn.clone().unwrap_or(Value::Null));
+        data.insert(
+            "turn".to_owned(),
+            open_turn.as_ref().map_or(Value::Null, clone_value),
+        );
         data.insert("reason".to_owned(), Value::Object(reason));
         Ok(Some(generated(
             "turn/end",
@@ -895,7 +908,7 @@ impl<'a> Stage<'a> {
             "turn/start" => {
                 self.open_turn = match record(fields.get("data"))?.get("turn") {
                     Some(Value::Null) => OpenTurn::Closed,
-                    turn => OpenTurn::Open(turn.cloned()),
+                    turn => OpenTurn::Open(Deep::new(turn.map(clone_value))),
                 };
                 self.open_step = false;
             }
@@ -948,29 +961,30 @@ impl<'a> Stage<'a> {
             )));
         };
         pending.assert_cut(self.source_cut, seq)?;
-        let stream = pending.take_stream();
+        let stream = Deep::new(pending.take_stream());
         self.emit_buffered(pending.after_last_chunk)?;
-        self.emit_source(seq, message_event(fields, data, stream), time)
+        self.emit_source(seq, message_event(fields, data, stream.into_inner()), time)
     }
 
     /// `emitSource`. `time` is the source event's own.
     fn emit_source(
         &mut self,
         seq: u64,
-        mut source: Map<String, Value>,
+        source: Map<String, Value>,
         time: Option<&Value>,
     ) -> Checked<()> {
+        let mut source = Deep::new(source);
         let event_type = source
             .get("type")
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_owned();
         if self.is_seeded && seq == self.source_cut && event_type == "session/end-seed" {
-            source.insert("data".to_owned(), inherited_marker());
+            replace_member(&mut source, "data", inherited_marker());
         }
         self.ensure_target_cut(seq, time, &event_type)?;
         self.mapping.insert(seq, self.target_seq);
-        let event = self.remap_references(source, &event_type, seq)?;
+        let event = self.remap_references(source.into_inner(), &event_type, seq)?;
         self.output.push(event);
         self.target_seq += 1;
         Ok(())
@@ -978,13 +992,14 @@ impl<'a> Stage<'a> {
 
     /// `emitGenerated`.
     fn emit_generated(&mut self, origin: u64, event: Map<String, Value>) -> Checked<()> {
+        let event = Deep::new(event);
         let event_type = event
             .get("type")
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_owned();
         self.ensure_target_cut(origin, event.get("time"), &event_type)?;
-        let event = self.remap_references(event, &event_type, origin)?;
+        let event = self.remap_references(event.into_inner(), &event_type, origin)?;
         self.output.push(event);
         self.target_seq += 1;
         Ok(())
@@ -1039,22 +1054,24 @@ impl<'a> Stage<'a> {
     /// and `surfaceOp` mapped and moved last. `seq` labels refusals.
     fn remap_references(
         &self,
-        mut event: Map<String, Value>,
+        event: Map<String, Value>,
         event_type: &str,
         seq: u64,
     ) -> Checked<Value> {
-        let sources = event.shift_remove("sourceEventSeqs");
-        let surface = event.shift_remove("surfaceOp");
-        let sources = match sources {
+        let mut event = Deep::new(event);
+        let sources = Deep::new(event.shift_remove("sourceEventSeqs"));
+        let surface = Deep::new(event.shift_remove("surfaceOp"));
+        let sources = match &*sources {
             None => None,
             Some(sources) => {
-                Some(self.map_list(Some(&sources), &format!("{event_type} {seq} sources"))?)
+                Some(self.map_list(Some(sources), &format!("{event_type} {seq} sources"))?)
             }
         };
-        let operation = match surface {
+        let operation = match surface.into_inner() {
             None => None,
             Some(Value::String(text)) if text == "append" => Some(Value::String(text)),
             Some(Value::Object(replacement)) => {
+                let replacement = Deep::new(replacement);
                 let start = self.map_one(
                     replacement.get("start"),
                     &format!("{event_type} {seq} surface start"),
@@ -1069,21 +1086,24 @@ impl<'a> Stage<'a> {
                 operation.insert("end".to_owned(), Value::from(end));
                 Some(Value::Object(operation))
             }
-            Some(_) => return Err(Failure::Limit(V1ToV2Limit::UncheckedShape)),
+            Some(other) => {
+                dismantle(other);
+                return Err(Failure::Limit(V1ToV2Limit::UncheckedShape));
+            }
         };
         let data = self.remap_payload_references(event_type, seq, event.get("data"))?;
         event.insert("seq".to_owned(), Value::from(self.target_seq));
         let Some(data) = data else {
             return Err(Failure::Limit(V1ToV2Limit::UndefinedMember));
         };
-        event.insert("data".to_owned(), data);
+        replace_member(&mut event, "data", data);
         if let Some(sources) = sources {
             event.insert("sourceEventSeqs".to_owned(), sources);
         }
         if let Some(operation) = operation {
             event.insert("surfaceOp".to_owned(), operation);
         }
-        Ok(Value::Object(event))
+        Ok(Value::Object(event.into_inner()))
     }
 
     /// `remapPayloadReferences`. `None` stands for an absent `data`.
@@ -1098,15 +1118,15 @@ impl<'a> Stage<'a> {
             | "compaction/prune"
             | "compaction/summary"
             | "session/title"
-            | "session/title-llm-request" => record(data)?.clone(),
-            _ => return Ok(data.cloned()),
+            | "session/title-llm-request" => Deep::new(clone_fields(record(data)?)),
+            _ => return Ok(data.map(clone_value)),
         };
         match event_type {
             "command/done" => {
                 if let Some(source) = remapped.get("sourceEventSeq") {
                     let mapped =
                         self.map_one(Some(source), &format!("command/done {seq} sourceEventSeq"))?;
-                    remapped.insert("sourceEventSeq".to_owned(), Value::from(mapped));
+                    replace_member(&mut remapped, "sourceEventSeq", Value::from(mapped));
                 }
             }
             "compaction/prune" | "compaction/summary" => {
@@ -1126,18 +1146,18 @@ impl<'a> Stage<'a> {
                 let mut range = Map::new();
                 range.insert("start".to_owned(), Value::from(start));
                 range.insert("end".to_owned(), Value::from(end));
-                remapped.insert("shadowedRange".to_owned(), Value::Object(range));
-                remapped.insert("shadowedSeqs".to_owned(), seqs);
+                replace_member(&mut remapped, "shadowedRange", Value::Object(range));
+                replace_member(&mut remapped, "shadowedSeqs", seqs);
             }
             _ => {
                 let seqs = self.map_list(
                     remapped.get("messageSeqs"),
                     &format!("{event_type} {seq} messageSeqs"),
                 )?;
-                remapped.insert("messageSeqs".to_owned(), seqs);
+                replace_member(&mut remapped, "messageSeqs", seqs);
             }
         }
-        Ok(Some(Value::Object(remapped)))
+        Ok(Some(Value::Object(remapped.into_inner())))
     }
 
     /// `mapList` over `numberArray(value)`.
@@ -1206,11 +1226,11 @@ fn message_event(
     data: &Map<String, Value>,
     stream: Vec<Value>,
 ) -> Map<String, Value> {
-    let mut message = fields.clone();
-    message.shift_remove("sourceEventSeqs");
-    let mut message_data = data.clone();
-    message_data.insert("stream".to_owned(), Value::Array(stream));
-    message.insert("data".to_owned(), Value::Object(message_data));
+    let mut message = clone_fields(fields);
+    remove_member(&mut message, "sourceEventSeqs");
+    let mut message_data = clone_fields(data);
+    replace_member(&mut message_data, "stream", Value::Array(stream));
+    replace_member(&mut message, "data", Value::Object(message_data));
     message
 }
 
@@ -1241,8 +1261,8 @@ fn same_coordinate(left: Option<&Value>, right: Option<&Value>) -> Checked<bool>
 
 /// The two events a legacy goal message becomes.
 struct LegacyGoalSplit {
-    change: Map<String, Value>,
-    message: Map<String, Value>,
+    change: Deep<Map<String, Value>>,
+    message: Deep<Map<String, Value>>,
 }
 
 /// `splitLegacyGoalChange`: a goal-sourced `user/message` carrying its
@@ -1263,15 +1283,23 @@ fn split_legacy_goal_change(
     if source.get("kind") != Some(&Value::from("goal")) {
         return Ok(None);
     }
-    let change = generated("goal/change", seq, fields.get("time"), change.clone())?;
+    let change = Deep::new(generated(
+        "goal/change",
+        seq,
+        fields.get("time"),
+        clone_value(change),
+    )?);
     let mut plugin = Map::new();
     plugin.insert("kind".to_owned(), Value::from("plugin"));
     plugin.insert("plugin".to_owned(), Value::from("goal"));
-    let mut message_data = data.clone();
-    message_data.insert("source".to_owned(), Value::Object(plugin));
-    let mut message = fields.clone();
-    message.insert("data".to_owned(), Value::Object(message_data));
-    Ok(Some(LegacyGoalSplit { change, message }))
+    let mut message_data = clone_fields(data);
+    replace_member(&mut message_data, "source", Value::Object(plugin));
+    let mut message = clone_fields(fields);
+    replace_member(&mut message, "data", Value::Object(message_data));
+    Ok(Some(LegacyGoalSplit {
+        change,
+        message: Deep::new(message),
+    }))
 }
 
 /// An event the stage builds as `{ type, seq, time, data }`.
@@ -1282,12 +1310,13 @@ fn generated(
     data: Value,
 ) -> Checked<Map<String, Value>> {
     let Some(time) = time else {
+        dismantle(data);
         return Err(Failure::Limit(V1ToV2Limit::UndefinedMember));
     };
     let mut event = Map::new();
     event.insert("type".to_owned(), Value::from(event_type));
     event.insert("seq".to_owned(), Value::from(seq));
-    event.insert("time".to_owned(), time.clone());
+    event.insert("time".to_owned(), clone_value(time));
     event.insert("data".to_owned(), data);
     Ok(event)
 }
@@ -1308,7 +1337,8 @@ fn record(value: Option<&Value>) -> Checked<&Map<String, Value>> {
 
 /// `JSON.stringify(value)` in a message, `undefined` when absent. Members
 /// are already in JavaScript order; a number that is not a safe integer
-/// spelled without a fraction or exponent reports a limit.
+/// spelled without a fraction or exponent reports a limit. Both the check
+/// and the text keep their own stacks, so a deep value is safe.
 fn stringify(value: Option<&Value>) -> Checked<String> {
     let Some(value) = value else {
         return Ok("undefined".to_owned());
@@ -1335,7 +1365,7 @@ fn stringify(value: Option<&Value>) -> Checked<String> {
             _ => {}
         }
     }
-    Ok(value.to_string())
+    Ok(crate::json_text(value))
 }
 
 #[cfg(test)]

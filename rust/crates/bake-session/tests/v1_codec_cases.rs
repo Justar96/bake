@@ -288,7 +288,7 @@ fn check(
             difference(&decoded.header, header, "header")
                 .or_else(|| {
                     difference(
-                        &Value::Array(decoded.events),
+                        &Value::Array(decoded.events.clone()),
                         &Value::Array(events.clone()),
                         "events",
                     )

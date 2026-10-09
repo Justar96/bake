@@ -40,9 +40,6 @@ pub enum JsonParseError {
     LoneSurrogate,
     /// A number's nearest double is infinite.
     NumberOutOfRange,
-    /// A container opened at the nesting bound the older-generation
-    /// migrations keep; [`parse_json`] never returns it.
-    DepthLimit,
 }
 
 impl JsonParseError {
@@ -51,9 +48,6 @@ impl JsonParseError {
         matches!(self, Self::Syntax)
     }
 }
-
-/// serde_json's nesting bound, kept for the released-generation migrations.
-pub(crate) const MIGRATION_PARSE_DEPTH: usize = 128;
 
 /// An open container and, for an object, the key its next value takes.
 enum Frame {
@@ -68,18 +62,9 @@ enum Frame {
 /// drop a result that may be deep with [`dismantle`], and do not clone,
 /// compare, format, or serialize it with those derived traits.
 pub fn parse_json(text: &str) -> Result<Value, JsonParseError> {
-    parse_json_within(text, usize::MAX)
-}
-
-/// [`parse_json`], refusing with [`JsonParseError::DepthLimit`] where the
-/// container opened at nesting level `max_depth`, counted from 1, starts.
-/// serde_json's own bound is `max_depth` 128, which the released-generation
-/// migrations keep because their transforms recurse.
-pub(crate) fn parse_json_within(text: &str, max_depth: usize) -> Result<Value, JsonParseError> {
     let mut parser = Parser {
         bytes: text.as_bytes(),
         index: 0,
-        max_depth,
     };
     let mut stack: Vec<Frame> = Vec::new();
     let result = parser.document(&mut stack);
@@ -95,7 +80,6 @@ pub(crate) fn parse_json_within(text: &str, max_depth: usize) -> Result<Value, J
 struct Parser<'a> {
     bytes: &'a [u8],
     index: usize,
-    max_depth: usize,
 }
 
 impl Parser<'_> {
@@ -125,9 +109,6 @@ impl Parser<'_> {
         'open: loop {
             self.skip_whitespace();
             let open = self.peek();
-            if matches!(open, Some(b'[' | b'{')) && stack.len() - base + 1 >= self.max_depth {
-                return Err(JsonParseError::DepthLimit);
-            }
             let mut value = match open.ok_or(JsonParseError::Syntax)? {
                 b'[' => {
                     self.index += 1;
@@ -429,6 +410,20 @@ pub(crate) fn dismantle_fields(fields: Map<String, Value>) {
     dismantle(Value::Object(fields));
 }
 
+/// `fields.insert(key, value)`, dismantling the value it replaces.
+pub(crate) fn replace_member(fields: &mut Map<String, Value>, key: &str, value: Value) {
+    if let Some(previous) = fields.insert(key.to_owned(), value) {
+        dismantle(previous);
+    }
+}
+
+/// `fields.shift_remove(key)`, dismantling the removed value.
+pub(crate) fn remove_member(fields: &mut Map<String, Value>, key: &str) {
+    if let Some(previous) = fields.shift_remove(key) {
+        dismantle(previous);
+    }
+}
+
 /// A container being copied and the source children still to copy.
 enum CopyFrame<'a> {
     Array(Vec<Value>, std::slice::Iter<'a, Value>),
@@ -600,6 +595,55 @@ impl DeepJson for Map<String, Value> {
     }
 }
 
+impl DeepJson for Option<Value> {
+    fn into_values(self, out: &mut Vec<Value>) {
+        out.extend(self);
+    }
+
+    fn deep_clone(&self) -> Self {
+        self.as_ref().map(clone_value)
+    }
+
+    fn deep_eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Some(left), Some(right)) => values_equal(left, right),
+            (left, right) => left.is_none() && right.is_none(),
+        }
+    }
+
+    fn deep_debug(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Some(value) => {
+                f.write_str("Some(")?;
+                value.deep_debug(f)?;
+                f.write_str(")")
+            }
+            None => f.write_str("None"),
+        }
+    }
+}
+
+/// An object's members with the position or seq they were found at.
+impl DeepJson for (u64, Map<String, Value>) {
+    fn into_values(self, out: &mut Vec<Value>) {
+        out.push(Value::Object(self.1));
+    }
+
+    fn deep_clone(&self) -> Self {
+        (self.0, clone_fields(&self.1))
+    }
+
+    fn deep_eq(&self, other: &Self) -> bool {
+        self.0 == other.0 && fields_equal(&self.1, &other.1)
+    }
+
+    fn deep_debug(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "({}, ", self.0)?;
+        self.1.deep_debug(f)?;
+        f.write_str(")")
+    }
+}
+
 impl<T: DeepJson> DeepJson for Vec<T> {
     fn into_values(self, out: &mut Vec<Value>) {
         for item in self {
@@ -645,6 +689,11 @@ impl<T: DeepJson> Deep<T> {
     /// The JSON, in a `const` context.
     pub(crate) const fn as_inner(&self) -> &T {
         &self.0
+    }
+
+    /// The JSON itself, which the caller now drops or keeps.
+    pub(crate) fn into_inner(mut self) -> T {
+        std::mem::take(&mut self.0)
     }
 }
 
@@ -711,6 +760,73 @@ impl<T: DeepJson> std::ops::DerefMut for Deep<T> {
     }
 }
 
+/// [`DeepJson::deep_debug`] as a `Debug` value, for a field of a manual
+/// `Debug` implementation.
+pub(crate) struct DebugJson<'a, T: DeepJson>(pub(crate) &'a T);
+
+impl<T: DeepJson> std::fmt::Debug for DebugJson<'_, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.deep_debug(f)
+    }
+}
+
+/// `Drop`, `Clone`, `PartialEq`, and `Debug` for a public migration result
+/// whose `header: Value`, `events: Vec<Value>`, and
+/// `inherited_event_count: u64` hold rows a parse may have nested
+/// arbitrarily deep; none of them recurses over that nesting. `Debug` writes
+/// the JSON as [`crate::json_text`] does.
+macro_rules! deep_session_parts {
+    ($name:ident) => {
+        impl Drop for $name {
+            fn drop(&mut self) {
+                $crate::json_parse::dismantle(std::mem::take(&mut self.header));
+                std::mem::take(&mut self.events)
+                    .into_iter()
+                    .for_each($crate::json_parse::dismantle);
+            }
+        }
+
+        impl Clone for $name {
+            fn clone(&self) -> Self {
+                Self {
+                    header: $crate::json_parse::clone_value(&self.header),
+                    events: self
+                        .events
+                        .iter()
+                        .map($crate::json_parse::clone_value)
+                        .collect(),
+                    inherited_event_count: self.inherited_event_count,
+                }
+            }
+        }
+
+        impl PartialEq for $name {
+            fn eq(&self, other: &Self) -> bool {
+                self.inherited_event_count == other.inherited_event_count
+                    && $crate::json_parse::values_equal(&self.header, &other.header)
+                    && self.events.len() == other.events.len()
+                    && self
+                        .events
+                        .iter()
+                        .zip(&other.events)
+                        .all(|(left, right)| $crate::json_parse::values_equal(left, right))
+            }
+        }
+
+        impl std::fmt::Debug for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.debug_struct(stringify!($name))
+                    .field("header", &$crate::json_parse::DebugJson(&self.header))
+                    .field("events", &$crate::json_parse::DebugJson(&self.events))
+                    .field("inherited_event_count", &self.inherited_event_count)
+                    .finish()
+            }
+        }
+    };
+}
+
+pub(crate) use deep_session_parts;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -745,7 +861,6 @@ mod tests {
             match code {
                 code if SERDE_SYNTAX_ERRORS.contains(&code) => JsonParseError::Syntax,
                 "number out of range" => JsonParseError::NumberOutOfRange,
-                "recursion limit exceeded" => JsonParseError::DepthLimit,
                 "lone leading surrogate in hex escape" | "unexpected end of hex escape" => {
                     JsonParseError::LoneSurrogate
                 }
@@ -755,8 +870,8 @@ mod tests {
     }
 
     /// Same value, member order, and number representation, or the same refusal.
-    fn assert_matches_serde(text: &str, max_depth: usize) {
-        let ours = parse_json_within(text, max_depth);
+    fn assert_matches_serde(text: &str) {
+        let ours = parse_json(text);
         let theirs = serde_outcome(text);
         match (&ours, &theirs) {
             (Ok(ours), Ok(theirs)) => assert_eq!(
@@ -769,7 +884,7 @@ mod tests {
     }
 
     #[test]
-    fn values_and_refusals_match_serde_json_below_its_depth_bound() {
+    fn values_and_refusals_match_serde_json() {
         let cases = [
             "",
             " ",
@@ -873,17 +988,17 @@ mod tests {
             "[}, 1e400]",
         ];
         for text in cases {
-            assert_matches_serde(text, MIGRATION_PARSE_DEPTH);
+            assert_matches_serde(text);
         }
         let long_fraction = format!("0.{}1", "0".repeat(800));
         let long_integer = format!("1{}", "0".repeat(700));
-        assert_matches_serde(&long_fraction, MIGRATION_PARSE_DEPTH);
-        assert_matches_serde(&long_integer, MIGRATION_PARSE_DEPTH);
+        assert_matches_serde(&long_fraction);
+        assert_matches_serde(&long_integer);
     }
 
     #[test]
-    fn the_migration_bound_is_serde_json_recursion_limit() {
-        for depth in [126, 127, 128, 129] {
+    fn values_match_serde_json_below_its_recursion_limit() {
+        for depth in [126, 127] {
             for (open, close) in [("[", "]"), ("{\"a\":", "}")] {
                 let empty = if open == "[" { "[]" } else { "{}" };
                 let text = format!(
@@ -891,10 +1006,9 @@ mod tests {
                     open.repeat(depth - 1),
                     close.repeat(depth - 1)
                 );
-                assert_matches_serde(&text, MIGRATION_PARSE_DEPTH);
-                // A later syntax error does not outrun the bound.
+                assert_matches_serde(&text);
                 let torn = format!("{}{empty}", open.repeat(depth - 1));
-                assert_matches_serde(&torn, MIGRATION_PARSE_DEPTH);
+                assert_matches_serde(&torn);
             }
         }
         let deep = format!("{}{}", "[".repeat(200), "]".repeat(200));

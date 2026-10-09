@@ -9,14 +9,14 @@
 //! bytes after the last LF are a torn tail that is never parsed. The first
 //! row `JSON.parse` rejects is the issue: no later row reaches a codec, and a
 //! later row parsing as an object whose `type` is `turn/end` throws the
-//! issue. Where this crate's parser and `JSON.parse` may disagree, the parse
-//! ends at a named limit instead. The migrations copy and compare rows
-//! recursively, so these rows keep serde_json's former 128-level nesting
-//! bound as part of that limit.
+//! issue. Rows and the header parse at any nesting depth, as `JSON.parse`
+//! reads them. Where this crate's parser and `JSON.parse` may disagree, at a
+//! lone-surrogate escape or a number beyond the double range, the parse ends
+//! at a named limit instead.
 
 use serde_json::Value;
 
-use crate::json_parse::{MIGRATION_PARSE_DEPTH, parse_json_within};
+use crate::json_parse::{Deep, parse_json};
 use crate::scan::long_integer_part;
 use crate::{Count, count};
 
@@ -34,7 +34,7 @@ pub(crate) enum ParseStop {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ReleasedRows {
     /// Rows that reach the format codec, in order, numbered from 0.
-    pub(crate) rows: Vec<Value>,
+    pub(crate) rows: Deep<Vec<Value>>,
     /// What ends the read after `rows` have been decoded and migrated: a
     /// `turn/end` row after the issue, or a limit. Every refusal raised
     /// while decoding or migrating `rows` comes first.
@@ -49,8 +49,8 @@ pub(crate) fn parse_released_header(
 ) -> Result<Value, ParseStop> {
     let body = record.strip_suffix(b"\n").unwrap_or(record);
     let text = std::str::from_utf8(body).map_err(|_| ParseStop::Limit("header/invalid-utf8"))?;
-    let value: Value = match parse_json_within(text, MIGRATION_PARSE_DEPTH) {
-        Ok(value) => value,
+    let value = match parse_json(text) {
+        Ok(value) => Deep::new(value),
         Err(error) if error.is_syntax() => {
             return Err(ParseStop::Corrupt(
                 "corrupt session log: header line is not valid JSON".to_owned(),
@@ -61,7 +61,7 @@ pub(crate) fn parse_released_header(
     if long_integer_part(text) {
         return Err(ParseStop::Limit("header/number-lexeme"));
     }
-    let Value::Object(fields) = &value else {
+    let Value::Object(fields) = &*value else {
         return Err(ParseStop::Corrupt(
             "corrupt session log: first line is not a JSON object".to_owned(),
         ));
@@ -77,14 +77,14 @@ pub(crate) fn parse_released_header(
                  but its header identifies v{version}"
             )))
         }
-        Some(Count::Safe(_)) => Ok(value),
+        Some(Count::Safe(_)) => Ok(value.into_inner()),
     }
 }
 
 /// Parse the rows of `body`, every byte of the log after the header record.
 /// The bytes after its last LF are dropped unparsed.
 pub(crate) fn parse_released_rows(body: &[u8]) -> ReleasedRows {
-    let mut rows = Vec::new();
+    let mut rows = Deep::default();
     let Some(last) = body.iter().rposition(|byte| *byte == b'\n') else {
         return ReleasedRows { rows, stop: None };
     };
@@ -95,8 +95,8 @@ pub(crate) fn parse_released_rows(body: &[u8]) -> ReleasedRows {
             // Node decodes the record with replacement characters.
             return limit(rows, "row/invalid-utf8");
         };
-        let row: Value = match parse_json_within(text, MIGRATION_PARSE_DEPTH) {
-            Ok(row) => row,
+        let row = match parse_json(text) {
+            Ok(row) => Deep::new(row),
             Err(error) if error.is_syntax() => {
                 issue.get_or_insert(number);
                 continue;
@@ -116,12 +116,12 @@ pub(crate) fn parse_released_rows(body: &[u8]) -> ReleasedRows {
         if long_integer_part(text) {
             return limit(rows, "row/number-lexeme");
         }
-        rows.push(row);
+        rows.push(row.into_inner());
     }
     ReleasedRows { rows, stop: None }
 }
 
-fn limit(rows: Vec<Value>, name: &'static str) -> ReleasedRows {
+fn limit(rows: Deep<Vec<Value>>, name: &'static str) -> ReleasedRows {
     ReleasedRows {
         rows,
         stop: Some(ParseStop::Limit(name)),
@@ -135,7 +135,7 @@ mod tests {
     #[test]
     fn rows_end_at_the_last_lf_and_the_first_issue() {
         let parsed = parse_released_rows(b"{\"a\":1}\nnot json\n{\"type\":\"x\"}\n");
-        assert_eq!(parsed.rows, [serde_json::json!({"a": 1})]);
+        assert_eq!(*parsed.rows, [serde_json::json!({"a": 1})]);
         assert_eq!(parsed.stop, None);
         let parsed = parse_released_rows(b"\n{\"type\":\"turn/end\"}\n");
         assert!(parsed.rows.is_empty());
@@ -145,9 +145,9 @@ mod tests {
                 "corrupt session log: row 1 is not valid JSON".to_owned()
             ))
         );
-        assert_eq!(parse_released_rows(b"").rows, Vec::<Value>::new());
+        assert!(parse_released_rows(b"").rows.is_empty());
         let torn = parse_released_rows(b"{\"a\":1}\n{\"type\":\"turn/end\"}");
-        assert_eq!(torn.rows, [serde_json::json!({"a": 1})]);
+        assert_eq!(*torn.rows, [serde_json::json!({"a": 1})]);
         assert_eq!(torn.stop, None);
     }
 }

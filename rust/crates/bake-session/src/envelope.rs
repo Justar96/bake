@@ -16,6 +16,7 @@
 
 use serde_json::{Map, Value};
 
+use crate::json_parse::{DebugJson, values_equal};
 use crate::source_event_seqs::{
     SourceEventSeqsLimit, SourceEventSeqsRefusal, SourceEventSeqsRejection,
     decode_source_event_seqs,
@@ -25,8 +26,10 @@ const MAX_SAFE_INTEGER: u64 = (1 << 53) - 1;
 const OPTIONAL_KEYS: [&str; 3] = ["ignorable", "sourceEventSeqs", "surfaceOp"];
 
 /// An envelope the released v2 decoder emits. It is metadata over borrowed
-/// row values, not an admitted current-format event.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// row values, not an admitted current-format event. Its `Debug` and
+/// `PartialEq` do not recurse over the borrowed values, which a parse may
+/// have nested arbitrarily deep.
+#[derive(Clone)]
 pub struct UnadmittedEnvelope<'a> {
     /// Any string, including types the current format does not know.
     pub event_type: &'a str,
@@ -43,6 +46,37 @@ pub struct UnadmittedEnvelope<'a> {
     pub surface_op: Option<&'a Value>,
     /// The row's value, unvalidated and not projected.
     pub data: &'a Value,
+}
+
+impl PartialEq for UnadmittedEnvelope<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.event_type == other.event_type
+            && self.seq == other.seq
+            && self.time == other.time
+            && self.ignorable == other.ignorable
+            && self.source_event_seqs == other.source_event_seqs
+            && match (self.surface_op, other.surface_op) {
+                (Some(left), Some(right)) => values_equal(left, right),
+                (left, right) => left.is_none() && right.is_none(),
+            }
+            && values_equal(self.data, other.data)
+    }
+}
+
+impl Eq for UnadmittedEnvelope<'_> {}
+
+impl std::fmt::Debug for UnadmittedEnvelope<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UnadmittedEnvelope")
+            .field("event_type", &self.event_type)
+            .field("seq", &self.seq)
+            .field("time", &self.time)
+            .field("ignorable", &self.ignorable)
+            .field("source_event_seqs", &self.source_event_seqs)
+            .field("surface_op", &self.surface_op.map(DebugJson))
+            .field("data", &DebugJson(self.data))
+            .finish()
+    }
 }
 
 /// Why a row's envelope was not decoded.

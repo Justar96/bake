@@ -35,7 +35,7 @@
 
 use serde_json::Value;
 
-use crate::json_parse::clone_value;
+use crate::json_parse::{DebugJson, Deep, DeepJson, clone_value, dismantle, values_equal};
 use crate::{
     InboxRefusal, PendingInbox, RestoredLog, SubagentCatalogEntry, SubagentCatalogRefusal,
     restored_inbox, subagent_catalog,
@@ -43,11 +43,9 @@ use crate::{
 
 /// The unfinished work [`unfinished_work`] reads from a restored log.
 ///
-/// The tools' steps, the compaction's data, and the inbox's messages are
-/// plain `Value`s that may nest as deep as their rows. Dropping this struct
-/// drops them recursively, and its derived `Clone`, `PartialEq`, and `Debug`
-/// recurse over them too; take them out and drop each with
-/// [`crate::dismantle`] when they may be deep.
+/// The tools' steps, the compaction's data, and the inbox's messages may
+/// nest as deep as their rows; their types drop, clone, compare, and format
+/// them without recursing.
 #[derive(Debug, Clone, PartialEq)]
 pub struct UnfinishedWork {
     /// The turn the closers end, or `None` when the last turn ended.
@@ -73,19 +71,55 @@ pub struct OpenTurn {
 
 /// One tool call an interrupted turn left without a result.
 ///
-/// `step` is a plain `Value`, so this struct's derived `Clone`, `PartialEq`,
-/// and `Debug`, like its drop, recurse once per level that value nests.
-#[derive(Debug, Clone, PartialEq)]
+/// `step` may nest as deep as its row; this struct's `Drop`, `Clone`,
+/// `PartialEq`, and `Debug` do not recurse over it, so its fields cannot be
+/// moved out; take them with [`std::mem::take`].
 pub struct PendingToolCall {
     pub call_id: String,
     /// The seq of the synthetic `tool/result` closer that ends the call.
     pub closer_seq: u64,
     /// The requesting Assistant row's `step`, as logged; `None` when absent.
-    /// It may nest as deep as its row; drop it with [`crate::dismantle`].
     pub step: Option<Value>,
     /// The seq of the recorded `tool/call`, or `None` when the call was never
     /// recorded as started.
     pub call_seq: Option<u64>,
+}
+
+impl Drop for PendingToolCall {
+    fn drop(&mut self) {
+        drop(Deep::new(self.step.take()));
+    }
+}
+
+impl Clone for PendingToolCall {
+    fn clone(&self) -> Self {
+        Self {
+            call_id: self.call_id.clone(),
+            closer_seq: self.closer_seq,
+            step: self.step.deep_clone(),
+            call_seq: self.call_seq,
+        }
+    }
+}
+
+impl PartialEq for PendingToolCall {
+    fn eq(&self, other: &Self) -> bool {
+        self.call_id == other.call_id
+            && self.closer_seq == other.closer_seq
+            && self.step.deep_eq(&other.step)
+            && self.call_seq == other.call_seq
+    }
+}
+
+impl std::fmt::Debug for PendingToolCall {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PendingToolCall")
+            .field("call_id", &self.call_id)
+            .field("closer_seq", &self.closer_seq)
+            .field("step", &DebugJson(&self.step))
+            .field("call_seq", &self.call_seq)
+            .finish()
+    }
 }
 
 impl PendingToolCall {
@@ -101,14 +135,43 @@ impl PendingToolCall {
 
 /// A `compaction/start` whose bracket is still open.
 ///
-/// `data` is a plain `Value`, so this struct's derived `Clone`, `PartialEq`,
-/// and `Debug`, like its drop, recurse once per level that value nests.
-#[derive(Debug, Clone, PartialEq)]
+/// `data` may nest as deep as its row; this struct's `Drop`, `Clone`,
+/// `PartialEq`, and `Debug` do not recurse over it, so its fields cannot be
+/// moved out; take `data` with [`std::mem::take`].
 pub struct OpenCompaction {
     pub start_seq: u64,
-    /// The start's `data`, as logged. It may nest as deep as its row; drop
-    /// it with [`crate::dismantle`].
+    /// The start's `data`, as logged.
     pub data: Value,
+}
+
+impl Drop for OpenCompaction {
+    fn drop(&mut self) {
+        dismantle(std::mem::take(&mut self.data));
+    }
+}
+
+impl Clone for OpenCompaction {
+    fn clone(&self) -> Self {
+        Self {
+            start_seq: self.start_seq,
+            data: clone_value(&self.data),
+        }
+    }
+}
+
+impl PartialEq for OpenCompaction {
+    fn eq(&self, other: &Self) -> bool {
+        self.start_seq == other.start_seq && values_equal(&self.data, &other.data)
+    }
+}
+
+impl std::fmt::Debug for OpenCompaction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OpenCompaction")
+            .field("start_seq", &self.start_seq)
+            .field("data", &DebugJson(&self.data))
+            .finish()
+    }
 }
 
 /// Project a restored log's unfinished work, before the end seed Session

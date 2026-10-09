@@ -13,6 +13,8 @@ use std::collections::HashMap;
 
 use serde_json::{Map, Value};
 
+use crate::json_parse::{Deep, clone_fields, clone_value, remove_member, replace_member};
+
 use super::dispositions::{self, Lookup};
 use crate::v2_to_v3::{
     Checked, StageError, assert_released_payload_semantics, contains_negative_zero, count, invalid,
@@ -20,6 +22,8 @@ use crate::v2_to_v3::{
 };
 
 type Record = Map<String, Value>;
+/// An event being rewritten, dropped without recursing when a stage refuses it.
+type Event = Deep<Record>;
 
 /// The legacy Assistant message member, `provenance`.
 const LEGACY_ASSISTANT_SOURCE_KEY: &str = "provenance";
@@ -60,8 +64,9 @@ fn event_type(event: &Record) -> &str {
         .unwrap_or_default()
 }
 
-fn with_data(mut event: Record, data: Record) -> Record {
-    event.insert("data".to_owned(), Value::Object(data));
+/// `event` with `data` in place of its `data` member, which is dismantled.
+fn with_data(mut event: Event, data: Record) -> Event {
+    replace_member(&mut event, "data", Value::Object(data));
     event
 }
 
@@ -83,7 +88,7 @@ pub(super) fn normalize_event(
     session_id: &str,
     state: &mut LegacyState,
 ) -> Checked<Record> {
-    let named = rename_compaction_type(event);
+    let named = rename_compaction_type(Deep::new(event));
     assert_supported_type(&named, seq, session_id)?;
     let start = normalize_turn_start(named, seq, session_id)?;
     let end = normalize_turn_end(start, seq, session_id)?;
@@ -99,10 +104,10 @@ pub(super) fn normalize_event(
     if let Some(id) = event_message_id(&message, &current_type, seq)? {
         state.message_ids.insert(seq, id);
     }
-    Ok(message)
+    Ok(message.into_inner())
 }
 
-fn rename_compaction_type(mut event: Record) -> Record {
+fn rename_compaction_type(mut event: Event) -> Event {
     let renamed = match event_type(&event) {
         "compact/start" => "compaction/start",
         "compact/summary" => "compaction/summary",
@@ -134,7 +139,7 @@ fn assert_supported_type(event: &Record, seq: u64, session_id: &str) -> Checked 
     Ok(())
 }
 
-fn normalize_turn_start(event: Record, seq: u64, session_id: &str) -> Checked<Record> {
+fn normalize_turn_start(event: Event, seq: u64, session_id: &str) -> Checked<Event> {
     if event_type(&event) != "turn/start" {
         return Ok(event);
     }
@@ -158,7 +163,7 @@ fn normalize_turn_start(event: Record, seq: u64, session_id: &str) -> Checked<Re
     Ok(with_data(event, current))
 }
 
-fn normalize_turn_end(event: Record, seq: u64, session_id: &str) -> Checked<Record> {
+fn normalize_turn_end(event: Event, seq: u64, session_id: &str) -> Checked<Event> {
     if event_type(&event) != "turn/end" {
         return Ok(event);
     }
@@ -199,9 +204,9 @@ fn normalize_turn_end(event: Record, seq: u64, session_id: &str) -> Checked<Reco
         }
         _ => return Ok(event),
     };
-    let mut data = data.clone();
-    data.insert("reason".to_owned(), Value::Object(current));
-    Ok(with_data(event, data))
+    let mut data = Deep::new(clone_fields(data));
+    replace_member(&mut data, "reason", Value::Object(current));
+    Ok(with_data(event, data.into_inner()))
 }
 
 fn abort_reason(cause: &str) -> Record {
@@ -234,7 +239,7 @@ fn legacy_error_reason(reason: &Record, seq: u64, session_id: &str) -> Checked<R
         {
             return Err(malformed_legacy(session_id, "turn/end", seq));
         }
-        current.insert("error".to_owned(), failure.clone());
+        current.insert("error".to_owned(), clone_value(failure));
         return Ok(current);
     }
     released_keys(
@@ -258,7 +263,7 @@ fn legacy_error_reason(reason: &Record, seq: u64, session_id: &str) -> Checked<R
     Ok(current)
 }
 
-fn normalize_request_header(event: Record, seq: u64, session_id: &str) -> Checked<Record> {
+fn normalize_request_header(event: Event, seq: u64, session_id: &str) -> Checked<Event> {
     if event_type(&event) != "request/header" {
         return Ok(event);
     }
@@ -273,14 +278,14 @@ fn normalize_request_header(event: Record, seq: u64, session_id: &str) -> Checke
             quote(session_id)
         )));
     }
-    let mut current = header.clone();
-    current.shift_remove("messagePrefix");
-    let mut data = data.clone();
-    data.insert("header".to_owned(), Value::Object(current));
-    Ok(with_data(event, data))
+    let mut current = clone_fields(header);
+    remove_member(&mut current, "messagePrefix");
+    let mut data = Deep::new(clone_fields(data));
+    replace_member(&mut data, "header", Value::Object(current));
+    Ok(with_data(event, data.into_inner()))
 }
 
-fn normalize_steering(mut event: Record, seq: u64, session_id: &str) -> Checked<Record> {
+fn normalize_steering(mut event: Event, seq: u64, session_id: &str) -> Checked<Event> {
     if event_type(&event) != "steering/message" {
         return Ok(event);
     }
@@ -290,30 +295,31 @@ fn normalize_steering(mut event: Record, seq: u64, session_id: &str) -> Checked<
     if let Some(wrapped) = data.get("message") {
         released_keys(data, &["turn", "message"], &[], &label)?;
         count(data.get("turn"), &turn_label)?;
-        let wrapped = wrapped.clone();
+        let wrapped = clone_value(wrapped);
         event.insert("type".to_owned(), Value::from("user/message"));
-        event.insert("data".to_owned(), wrapped);
+        replace_member(&mut event, "data", wrapped);
         return Ok(event);
     }
     released_keys(data, &["turn", "content", "source"], &[], &label)?;
     count(data.get("turn"), &turn_label)?;
-    let mut message = data.clone();
-    message.shift_remove("turn");
-    message.insert(
-        "id".to_owned(),
+    let mut message = clone_fields(data);
+    remove_member(&mut message, "turn");
+    replace_member(
+        &mut message,
+        "id",
         Value::from(legacy_message_id(session_id, seq)),
     );
-    message.insert("role".to_owned(), Value::from("user"));
+    replace_member(&mut message, "role", Value::from("user"));
     event.insert("type".to_owned(), Value::from("user/message"));
     Ok(with_data(event, message))
 }
 
 fn normalize_retry(
-    event: Record,
+    event: Event,
     seq: u64,
     session_id: &str,
     retry_ids: &mut HashMap<String, String>,
-) -> Checked<Record> {
+) -> Checked<Event> {
     if event_type(&event) != "llm/retry" {
         return Ok(event);
     }
@@ -337,9 +343,9 @@ fn normalize_retry(
     if let Some(chain) = chain {
         retry_ids.insert(chain, id.clone());
     }
-    let mut data = data.clone();
-    data.insert("retryId".to_owned(), Value::from(id));
-    Ok(with_data(event, data))
+    let mut data = Deep::new(clone_fields(data));
+    replace_member(&mut data, "retryId", Value::from(id));
+    Ok(with_data(event, data.into_inner()))
 }
 
 /// The `\0`-joined `JSON.stringify` of turn, step, provider, and policy key,
@@ -360,11 +366,11 @@ fn retry_chain(data: &Record) -> Option<String> {
 }
 
 fn normalize_compaction(
-    event: Record,
+    event: Event,
     seq: u64,
     session_id: &str,
     state: &mut LegacyState,
-) -> Checked<Record> {
+) -> Checked<Event> {
     let current = event_type(&event).to_owned();
     if current == "session/end-seed" {
         state.compaction_id = None;
@@ -382,9 +388,9 @@ fn normalize_compaction(
         }
         let id = format!("legacy-compaction:{session_id}:{seq}");
         state.compaction_id = Some(id.clone());
-        let mut data = data.clone();
-        data.insert("compactionId".to_owned(), Value::from(id));
-        return Ok(with_data(event, data));
+        let mut data = Deep::new(clone_fields(data));
+        replace_member(&mut data, "compactionId", Value::from(id));
+        return Ok(with_data(event, data.into_inner()));
     }
     let Some(compaction_id) = state.compaction_id.clone() else {
         return Ok(event);
@@ -394,9 +400,9 @@ fn normalize_compaction(
         let normalized = if data.contains_key("compactionId") {
             event
         } else {
-            let mut data = data.clone();
-            data.insert("compactionId".to_owned(), Value::from(compaction_id));
-            with_data(event, data)
+            let mut data = Deep::new(clone_fields(data));
+            replace_member(&mut data, "compactionId", Value::from(compaction_id));
+            with_data(event, data.into_inner())
         };
         if current == "compaction/end" {
             state.compaction_id = None;
@@ -416,19 +422,19 @@ fn normalize_compaction(
     {
         return Ok(event);
     }
-    let mut source = source.clone();
-    source.insert("compactionId".to_owned(), Value::from(compaction_id));
-    let mut data = data.clone();
-    data.insert("source".to_owned(), Value::Object(source));
-    Ok(with_data(event, data))
+    let mut source = clone_fields(source);
+    replace_member(&mut source, "compactionId", Value::from(compaction_id));
+    let mut data = Deep::new(clone_fields(data));
+    replace_member(&mut data, "source", Value::Object(source));
+    Ok(with_data(event, data.into_inner()))
 }
 
 fn normalize_message(
-    event: Record,
+    event: Event,
     seq: u64,
     session_id: &str,
     message_ids: &HashMap<u64, String>,
-) -> Checked<Record> {
+) -> Checked<Event> {
     let current = event_type(&event).to_owned();
     let data = data_record(&event, &format!("{current} {seq} data"))?;
     match current.as_str() {
@@ -441,13 +447,14 @@ fn normalize_message(
             {
                 return Ok(event);
             }
-            let mut data = data.clone();
-            data.insert(
-                "id".to_owned(),
+            let mut data = Deep::new(clone_fields(data));
+            replace_member(
+                &mut data,
+                "id",
                 Value::from(legacy_message_id(session_id, seq)),
             );
-            data.insert("role".to_owned(), Value::from("user"));
-            Ok(with_data(event, data))
+            replace_member(&mut data, "role", Value::from("user"));
+            Ok(with_data(event, data.into_inner()))
         }
         "assistant/message" => {
             if data.contains_key("message")
@@ -456,25 +463,26 @@ fn normalize_message(
             {
                 return Ok(event);
             }
-            let mut data = data.clone();
-            let content = data.shift_remove("content").unwrap_or(Value::Null);
-            let mut source = released_record(
+            let mut data = Deep::new(clone_fields(data));
+            // `content` stays in `Deep` so a refused legacy source drops it
+            // without recursing.
+            let content = Deep::new(data.shift_remove("content").unwrap_or(Value::Null));
+            let mut source = clone_fields(released_record(
                 data.get(LEGACY_ASSISTANT_SOURCE_KEY),
                 &format!("assistant/message {seq} legacy source"),
-            )?
-            .clone();
-            data.shift_remove(LEGACY_ASSISTANT_SOURCE_KEY);
-            source.insert("kind".to_owned(), Value::from("model"));
+            )?);
+            remove_member(&mut data, LEGACY_ASSISTANT_SOURCE_KEY);
+            replace_member(&mut source, "kind", Value::from("model"));
             let mut message = Record::new();
             message.insert(
                 "id".to_owned(),
                 Value::from(legacy_message_id(session_id, seq)),
             );
             message.insert("role".to_owned(), Value::from("assistant"));
-            message.insert("content".to_owned(), content);
+            message.insert("content".to_owned(), content.into_inner());
             message.insert("source".to_owned(), Value::Object(source));
-            data.insert("message".to_owned(), Value::Object(message));
-            Ok(with_data(event, data))
+            replace_member(&mut data, "message", Value::Object(message));
+            Ok(with_data(event, data.into_inner()))
         }
         "tool/result" => {
             if data.contains_key("message")
@@ -503,7 +511,7 @@ fn normalize_message(
             let mut block = Record::new();
             block.insert("type".to_owned(), Value::from("tool-result"));
             block.insert("toolCallId".to_owned(), Value::from(call_id.as_str()));
-            block.insert("content".to_owned(), content.clone());
+            block.insert("content".to_owned(), clone_value(content));
             block.insert("isError".to_owned(), Value::Bool(*is_error));
             let mut source = Record::new();
             source.insert("kind".to_owned(), Value::from("tool"));
@@ -516,11 +524,11 @@ fn normalize_message(
                 Value::Array(vec![Value::Object(block)]),
             );
             message.insert("source".to_owned(), Value::Object(source));
-            let mut rest = data.clone();
+            let mut rest = clone_fields(data);
             for key in ["callId", "content", "isError"] {
-                rest.shift_remove(key);
+                remove_member(&mut rest, key);
             }
-            rest.insert("message".to_owned(), Value::Object(message));
+            replace_member(&mut rest, "message", Value::Object(message));
             Ok(with_data(event, rest))
         }
         _ => Ok(event),

@@ -28,6 +28,7 @@ use crate::PathPlatform;
 use crate::envelope::{
     EnvelopeLimit, EnvelopeRefusal, EnvelopeRejection, NumberField, decode_row_envelope,
 };
+use crate::json_parse::{Deep, clone_fields, clone_value, replace_member};
 use crate::source_event_seqs::SourceEventSeqsLimit;
 pub(crate) use admission::{Lookup, OBJECT_PROTOTYPE_NAMES, is_repair_identity, lookup};
 pub(crate) use canonical::{assert_v3_event, safe_integer as v3_safe_integer};
@@ -59,7 +60,6 @@ const ENVELOPE_KEYS: [&str; 7] = [
 ];
 
 /// A migrated v2 Session's logical v3 header, events, and inherited cut.
-#[derive(Debug, Clone, PartialEq)]
 pub struct MigratedV2 {
     /// The logical v3 header, without `type`: `version` 3 and the released v2
     /// fields in codec order, with an `agentPreset` of `code` renamed `ptc`.
@@ -69,6 +69,8 @@ pub struct MigratedV2 {
     /// The number of target events inherited from the parent Session.
     pub inherited_event_count: u64,
 }
+
+crate::json_parse::deep_session_parts!(MigratedV2);
 
 /// Where a refusal was raised.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -244,7 +246,7 @@ fn transform_logical_events(
     let mut stage = Stage::new(source);
     for (index, event) in events.iter().enumerate() {
         stage
-            .transform(event.clone())
+            .transform(clone_value(event))
             .map_err(|error| migration(V2ToV3Location::Row(index), error))?;
     }
     Ok(stage)
@@ -293,7 +295,7 @@ fn logical_header(header: &Value) -> Result<(SourceHeader, Value), V2ToV3Refusal
     {
         return Err(invariant());
     }
-    let mut target = fields.clone();
+    let mut target = clone_fields(fields);
     target.insert("version".to_owned(), Value::from(3_u64));
     if target
         .get("agentPreset")
@@ -339,7 +341,7 @@ pub(crate) fn contains_unsafe_integer(value: &Value) -> bool {
 /// The codec's `decodeRow` for row `index`, after `index` admitted rows:
 /// the logical event, with `sourceEventSeqs` expanded in place.
 fn decode_row(row: &Value, index: usize, budget: usize) -> Result<Value, StageError> {
-    let row = js_order(row.clone());
+    let row = Deep::new(js_order(clone_value(row)));
     let expected = index as u64;
     let sources = match decode_row_envelope(&row, expected, budget) {
         Ok(envelope) => envelope.source_event_seqs,
@@ -369,13 +371,14 @@ fn decode_row(row: &Value, index: usize, budget: usize) -> Result<Value, StageEr
             return Err(StageError::NativeLimit("row-count".to_owned()));
         }
     };
-    let Value::Object(mut event) = row else {
+    let Value::Object(mut event) = row.into_inner() else {
         unreachable!("an admitted envelope is an object")
     };
     if let Some(sources) = sources {
         // Replacing a member keeps its position, as the codec's spread does.
-        event.insert(
-            "sourceEventSeqs".to_owned(),
+        replace_member(
+            &mut event,
+            "sourceEventSeqs",
             Value::Array(sources.into_iter().map(Value::from).collect()),
         );
     }

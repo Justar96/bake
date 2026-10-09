@@ -107,6 +107,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use serde_json::Value;
 
 use crate::fork::holds_negative_zero;
+use crate::json_parse::{Deep, dismantle};
 use crate::json_text::json_text;
 use crate::log_layout::{CURRENT_LOG_FILENAME, canonical_generation, encode_segment, log_path};
 use crate::released_rows::{ParseStop, parse_released_header, parse_released_rows};
@@ -235,8 +236,10 @@ pub enum LogFileLimit {
     /// this crate does not decide. Nothing was written. The name is one of:
     ///
     /// - `header/<name>` or `row/<name>`: the header or a row is not UTF-8
-    ///   (`invalid-utf8`), serde_json refuses what `JSON.parse` may admit
-    ///   (`json-parser`), or a number has more integer digits than
+    ///   (`invalid-utf8`), holds a lone-surrogate escape or a number beyond
+    ///   the double range, which `JSON.parse` admits and the parser, which
+    ///   reads any nesting depth, refuses (`json-parser`), or a number has
+    ///   more integer digits than
     ///   serde_json rounds as `JSON.parse` does (`number-lexeme`), as
     ///   [`crate::ScanLimit`] describes them; or the header's version or a
     ///   count is held as a float (`float-lexeme`) or its identity check
@@ -597,7 +600,7 @@ pub fn released_generation_header(
             "Error: empty or header-less session log".to_owned(),
         ));
     };
-    parse_released_header(record, source_version)?;
+    dismantle(parse_released_header(record, source_version)?);
     match read_generation_header_record(record, source_version, platform) {
         Ok(stored) => Ok(stored),
         // The codec refuses a header with retired fields.
@@ -630,7 +633,7 @@ pub fn migrate_released_generation(
             "Error: empty or header-less session log".to_owned(),
         ));
     };
-    let header = parse_released_header(record, source_version)?;
+    let header = Deep::new(parse_released_header(record, source_version)?);
     let parsed = parse_released_rows(&log[record.len()..]);
     let stop = parsed.stop.map(ReleasedGenerationRefusal::from);
     match source_version {
