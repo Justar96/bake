@@ -445,25 +445,6 @@
   },
   {
    "variants": [
-    "ReplayLimit::EventType"
-   ],
-   "stageNames": [],
-   "id": "replay-event-type",
-   "crate": "bake-session",
-   "cases": [
-    {
-     "table": "runtime/request-derivation-cases.json",
-     "name": "event-type",
-     "count": 3
-    }
-   ],
-   "kind": "format",
-   "classification": "reachable-gap",
-   "evidence": "Session.append accepts any type a plugin merges into SessionEventMap, and documents ignorable unknown records (packages/core/session/src/index.ts:697-701,722), so a 0.3 profile plugin logs types outside the 60 known ones. Restoration of an unseeded log appends a session/end-seed that later appends persist (packages/core/session/src/index.ts:619-620), so a resumed plain log holds the type this limit refuses",
-   "followUp": "Retire replay_requests, which ports a test helper, in favor of restore_plain_log with replay_restored_requests; or admit ignorable unknown types and session/end-seed as the helper does. Slice: request derivation over resumed and plugin logs."
-  },
-  {
-   "variants": [
     "ReplayLimit::Number"
    ],
    "stageNames": [],

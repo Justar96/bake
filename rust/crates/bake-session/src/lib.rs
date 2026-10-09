@@ -1,8 +1,8 @@
 //! Development-only Session format primitives: one current-format header
 //! record, one event's `sourceEventSeqs` field, one event row's envelope, one
 //! strict V3 codec row decode, a scan of a plain current-format log, and
-//! request derivation over unseeded, plain current-format logs of known event
-//! types, and restoration of a plain current-format log.
+//! request derivation over unseeded, plain current-format logs of any event
+//! type, and restoration of a plain current-format log.
 //!
 //! [`read_header_record`] decodes the first physical record of a current
 //! (format 3) Session log into its logical header metadata, or refuses it with

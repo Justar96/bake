@@ -16,9 +16,12 @@
 //! lifecycles, compaction records, and restoration's stricter
 //! protected-first-head rules, so it accepts an unknown required event type
 //! and some logs restoration refuses. Requests derived here therefore carry no
-//! restoration claim. This subset admits the 60 known event types other than
-//! `session/end-seed`, with or without `ignorable`, which Session construction
-//! ignores on a known type except to refuse it on a tool update. The helper
+//! restoration claim. Every event type is admitted, as Session construction
+//! admits it: the 60 known types, `session/end-seed` included, with or without
+//! `ignorable`, which Session construction ignores on a known type except to
+//! refuse it on a tool update; and any other type, such as a plugin's, as a
+//! log-only record. `surfaceOpOf` leaves an unknown `ignorable` row opaque
+//! and refuses either surface marker on an unknown required one. The helper
 //! constructs its Session without message projections, so an `image/offload`
 //! row in a checked prefix refuses the log after its marker check, however
 //! valid its decision.
@@ -28,10 +31,9 @@
 //! 1. [`scan_log`], with its documented refusal and native-limit contracts.
 //! 2. Uncommitted trailing bytes, including any record after the first issue
 //!    and a torn tail, then a seeded header or a nonzero inherited cut.
-//! 3. Event-type qualification of every row, and the step and settlement
-//!    coordinates. Each step yields one request per settlement with its
-//!    coordinate. Both `assistant/message` and `assistant/attempt` supply
-//!    cutoffs, including interrupted messages.
+//! 3. The step and settlement coordinates of every row. Each step yields one
+//!    request per settlement with its coordinate. Both `assistant/message`
+//!    and `assistant/attempt` supply cutoffs, including interrupted messages.
 //! 4. Each prefix that ends before a settlement: per event, the -0 check that
 //!    is exactly the lossless snapshot for scan-admitted rows, number and
 //!    depth qualification of projected payloads, the Session construction
@@ -168,8 +170,6 @@ pub(crate) const KNOWN_EVENT_TYPES: [&str; 60] = [
     "web/deepseek-search-llm-request",
     "workspace/changes",
 ];
-/// The known type this subset still refuses: it belongs to seeded logs.
-const EXCLUDED_TYPE: &str = "session/end-seed";
 /// The types whose payload a request can carry. Their payloads keep the
 /// number spelling and depth qualification.
 const PROJECTED_TYPES: [&str; 6] = [
@@ -342,9 +342,6 @@ pub enum SeedRejection {
 /// Input this subset does not derive, whatever TypeScript does with it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReplayLimit {
-    /// A row type outside the 60 known types, required or ignorable, or the
-    /// known `session/end-seed`, which belongs to seeded logs.
-    EventType,
     /// A projected prefix payload, that of a surface message, request header,
     /// or tool update, holds a number not spelled as `JSON.stringify` writes
     /// its value: -0, an integral value written with a fraction or exponent
@@ -403,10 +400,6 @@ pub fn replay_requests(
     for event in &events {
         let envelope = event.envelope();
         let seq = envelope.seq;
-        if !KNOWN_EVENT_TYPES.contains(&envelope.event_type) || envelope.event_type == EXCLUDED_TYPE
-        {
-            return Err(limit(seq, ReplayLimit::EventType));
-        }
         if !matches!(
             envelope.event_type,
             "step/start" | "assistant/message" | "assistant/attempt"
@@ -545,8 +538,10 @@ fn lossless(seq: u64, row: &Value) -> Result<(), ReplayRefusal> {
 /// Admit one event to Session construction: qualify a projected payload, run
 /// the Session construction checks the codec leaves, and convert it to a fact.
 /// It takes no lossless snapshot, which only replay's prefix loop takes. A row of an
-/// unknown type reaches it only when `ignorable`, and is opaque, as
-/// `surfaceOpOf` leaves it; a known type is checked whether or not it is
+/// unknown type is log-only: opaque when `ignorable`, as `surfaceOpOf` leaves
+/// it, and otherwise refused if it carries either surface marker, which the
+/// codec admits on an opaque type. Restoration refuses an unknown required
+/// type before admission. A known type is checked whether or not it is
 /// `ignorable`. An `image/offload` decision is read, not judged: whether it
 /// applies depends on the fold's projections and history. Restoration also
 /// admits its synthetic closers, which the codec never saw; they are appends
@@ -616,7 +611,9 @@ pub(crate) fn admit(envelope: &UnadmittedEnvelope<'_>) -> Result<Fact, ReplayRef
             settlement(seq, data)?;
             Ok(Fact::LogOnly)
         }
-        event_type if !KNOWN_EVENT_TYPES.contains(&event_type) => Ok(Fact::LogOnly),
+        event_type if !KNOWN_EVENT_TYPES.contains(&event_type) && envelope.ignorable => {
+            Ok(Fact::LogOnly)
+        }
         _ => {
             non_surface_marker(envelope).map_err(|rejection| seed(seq, rejection))?;
             Ok(Fact::LogOnly)
@@ -651,9 +648,10 @@ pub(crate) fn adopt(envelope: &UnadmittedEnvelope<'_>) -> Result<(), SeedRejecti
     }
 }
 
-/// `surfaceOpOf`'s refusal of either marker on a known type that is not
-/// surface-eligible. The codec already refuses both on every such type it
-/// knows, so only its opaque known types can reach this check.
+/// `surfaceOpOf`'s refusal of either marker on a type that is not
+/// surface-eligible, unless it is unknown and `ignorable`. The codec already
+/// refuses both on every non-surface type it knows, so only its opaque types,
+/// known or not, can reach this check.
 fn non_surface_marker(envelope: &UnadmittedEnvelope<'_>) -> Result<(), SeedRejection> {
     if envelope.surface_op.is_some() || envelope.source_event_seqs.is_some() {
         return Err(SeedRejection::NonSurfaceMarker);
