@@ -8,7 +8,7 @@
 //! by its size, since Windows refuses to read a locked range, and no other
 //! file may exist. A thrown outcome maps to the refusal Rust claims: the
 //! exact already-owned, already-exists, not-found, duplicate-id,
-//! encoding-mismatch, contiguity, lossless-snapshot, corruption, or
+//! flat-layout, encoding-mismatch, contiguity, lossless-snapshot, corruption, or
 //! unsupported-migration message, with `{src}` rendered as the root joined
 //! with the step's `src` path and `{srcJson}` as that path spelled by
 //! `JSON.stringify`, or `Unadmitted` for any other throw of a create or
@@ -31,14 +31,13 @@ use serde_json::{Map, Value};
 const SCHEMA: &str = "bake/session-conformance/plain-log-file-cases";
 const ORACLE: &str = "in an owned temporary root holding the seeded entries, run each step through the JSONL backend with compression none on the step's handle, a or b, each its own backend instance over the root: create, a write open, or the open handle's append, flush, or close; after each step list every file beneath the root with its text, an empty session.lock by its size";
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 70;
+const CASE_COUNT: usize = 73;
 const SOURCE_BUDGET: usize = 64;
-const LIMITS: [&str; 11] = [
+const LIMITS: [&str; 10] = [
     "empty-id",
     "encode",
     "seq-value",
     "windows-name",
-    "legacy-layout",
     "non-utf8-name",
     "newer-generation",
     "identity",
@@ -116,7 +115,7 @@ fn load() -> Vec<Map<String, Value>> {
         BTreeSet::from(["cases", "history", "oracle", "schema", "version"])
     );
     assert_eq!(table["schema"], SCHEMA);
-    assert_eq!(table["version"], 7);
+    assert_eq!(table["version"], 8);
     assert_eq!(table["oracle"], ORACLE);
     assert!(
         table["history"]
@@ -267,7 +266,6 @@ fn limit_matches(name: &str, refusal: &LogFileRefusal) -> bool {
             "seq-value",
             Append(AppendRefusal::NativeSubset(AppendLimit::SeqValue))
         ) | ("windows-name", NativeSubset(LogFileLimit::WindowsName))
-            | ("legacy-layout", NativeSubset(LogFileLimit::LegacyLayout))
             | ("non-utf8-name", NativeSubset(LogFileLimit::NonUtf8Name))
             | (
                 "newer-generation",
@@ -291,6 +289,12 @@ fn expected_kind(step: &str, class: &str, message: &str) -> &'static str {
         {
             "encoding-mismatch"
         }
+        ("create" | "open", "Error")
+            if message.starts_with("session artifact ")
+                && message.contains(" uses the unsupported flat-file layout; ") =>
+        {
+            "legacy-layout"
+        }
         ("append", "Error") if message.starts_with("append seq mismatch for ") => "seq-mismatch",
         ("append", "TypeError") if message == NOT_LOSSLESS => "not-lossless",
         ("open", "SessionPersistenceCorruptionError") => "corrupt",
@@ -308,6 +312,7 @@ fn kind(refusal: &LogFileRefusal) -> &'static str {
         LogFileRefusal::NotFound { .. } => "not-found",
         LogFileRefusal::Duplicate { .. } => "duplicate",
         LogFileRefusal::EncodingMismatch { .. } => "encoding-mismatch",
+        LogFileRefusal::LegacyLayout { .. } => "legacy-layout",
         LogFileRefusal::Corrupt { .. } => "corrupt",
         LogFileRefusal::Unsupported { .. } => "unsupported",
         LogFileRefusal::Append(AppendRefusal::SeqMismatch { .. }) => "seq-mismatch",
@@ -553,6 +558,7 @@ fn shared_cases_lay_out_and_write_like_the_typescript_backend() {
             "corrupt",
             "duplicate",
             "encoding-mismatch",
+            "legacy-layout",
             "not-found",
             "not-lossless",
             "seq-mismatch",

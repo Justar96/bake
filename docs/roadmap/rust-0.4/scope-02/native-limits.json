@@ -2091,25 +2091,6 @@
   },
   {
    "variants": [
-    "LogFileLimit::LegacyLayout"
-   ],
-   "stageNames": [],
-   "id": "log-file-legacy-layout",
-   "crate": "bake-session",
-   "cases": [
-    {
-     "table": "session/plain-log-file-cases.json",
-     "name": "legacy-layout",
-     "count": 2
-    }
-   ],
-   "kind": "filesystem",
-   "classification": "reachable-gap",
-   "evidence": "TypeScript refuses only a file named *.jsonl or *.jsonl.zstd in a project directory (entry.isFile(), packages/session/session-persistence-jsonl/src/index.ts:1518-1520), and probes the id's flat names (index.ts:1545-1550); Rust refuses any entry with that suffix, directories included (rust/crates/bake-session/src/plain_log_file.rs:974-975). A configured agents[].sessionId such as nightly.jsonl (packages/core/agent-loop/src/index.ts:323,385) keeps its letters and dots through encodeSegment (packages/session/session-persistence-jsonl/src/format.ts:198-213), so the writer creates a Session directory named nightly.jsonl (format.ts:266), and Rust then refuses every log of that project. No released writer creates a file in a project directory: materialization writes its temporary file beside the final log in the Session directory (index.ts:1099-1101,1191). A read-only scan of the owner's home (93 Zstandard format-3 logs, 40,514 rows; no v0 to v2 log) found no non-directory entry in any project directory",
-   "followUp": "Refuse only files with the flat-layout suffix when listing, as listSessionDirs does, and keep findLog's flat-name probe (rejectLegacyFlatArtifact, packages/session/session-persistence-jsonl/src/index.ts:1408,1539-1551), whose exists() opens the path (index.ts:1596-1600) and so also finds a directory on POSIX; a directory nightly.jsonl beside a Session nightly still refuses lookup of id nightly (section: Reachable gaps)."
-  },
-  {
-   "variants": [
     "LogFileLimit::NonUtf8Name"
    ],
    "stageNames": [],
