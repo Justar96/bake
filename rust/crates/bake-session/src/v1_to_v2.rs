@@ -22,8 +22,8 @@
 //! and checks the cut only across the run's own seqs, so its result can
 //! differ from the expanded one. A chain feeds the stage's output to v2→v3
 //! as it is emitted, so the crate-private `stream_v1_to_v2_items` also
-//! keeps the output emitted before `finish` and whether an attempt was still
-//! pending then.
+//! keeps the output emitted before `finish`, and when it refuses an item,
+//! the output emitted before the refusal, that item's own included.
 //!
 //! An attempt's stream is a list of records with their last times. Each
 //! `assistant/chunk` event goes through the attempt's
@@ -243,7 +243,7 @@ pub fn migrate_v1_to_v2_transformed(
 pub fn migrate_v1_to_v2_transformed_items(
     decoded: &DecodedV1Items,
 ) -> Result<MigratedV1ToV2, V1ToV2Refusal> {
-    let streamed = stream_v1_to_v2_items(decoded)?;
+    let streamed = stream_v1_to_v2_items(decoded).map_err(|refused| refused.refusal)?;
     let inherited_event_count = streamed.finished?;
     Ok(MigratedV1ToV2 {
         header: streamed.header,
@@ -263,22 +263,28 @@ pub(crate) struct StreamedV1ToV2 {
     pub(crate) events: Deep<Vec<Value>>,
     /// The number of events emitted before `finish`.
     pub(crate) streamed_len: usize,
-    /// Whether an Assistant attempt, with any events buffered after its last
-    /// chunk, was still pending after the last item: the next item or
-    /// `finish` may emit it before refusing.
-    pub(crate) pending: bool,
     /// `finish`: the inherited cut, or its refusal at
     /// [`V1ToV2Location::Finish`].
     pub(crate) finished: Result<u64, V1ToV2Refusal>,
 }
 
+/// A header or item refusal of [`stream_v1_to_v2_items`].
+pub(crate) struct RefusedV1ToV2 {
+    pub(crate) refusal: V1ToV2Refusal,
+    /// Every event the stage emitted before it refused, in order: those for
+    /// the items before the refused one, then those it emitted for that item
+    /// before refusing it, such as a closed attempt, its buffered events, or
+    /// a synthesized end-seed, interrupted `turn/end`, or `goal/change`.
+    pub(crate) emitted: Deep<Vec<Value>>,
+}
+
 /// The transformed stage over `decoded`'s items, as
 /// [`migrate_v1_to_v2_transformed_items`] runs it, keeping what was streamed
 /// before `finish` and whether `finish` refused. A header or item refusal is
-/// returned as is.
+/// returned with what was emitted before it.
 pub(crate) fn stream_v1_to_v2_items(
     decoded: &DecodedV1Items,
-) -> Result<StreamedV1ToV2, V1ToV2Refusal> {
+) -> Result<StreamedV1ToV2, RefusedV1ToV2> {
     let items = decoded.items.iter().map(|item| match item {
         V1Item::Event(event) => Source::Event(event),
         V1Item::AssistantChunkRun(run) => Source::Run(run),
@@ -297,7 +303,8 @@ fn migrate<'a>(
     inherited_event_count: u64,
     items: impl Iterator<Item = Source<'a>>,
 ) -> Result<MigratedV1ToV2, V1ToV2Refusal> {
-    let streamed = stream(header, inherited_event_count, items)?;
+    let streamed =
+        stream(header, inherited_event_count, items).map_err(|refused| refused.refusal)?;
     let inherited_event_count = streamed.finished?;
     Ok(MigratedV1ToV2 {
         header: streamed.header,
@@ -310,13 +317,16 @@ fn stream<'a>(
     header: &'a Value,
     inherited_event_count: u64,
     items: impl Iterator<Item = Source<'a>>,
-) -> Result<StreamedV1ToV2, V1ToV2Refusal> {
+) -> Result<StreamedV1ToV2, RefusedV1ToV2> {
     let header = match header {
         Value::Object(fields) if fields.get("version").and_then(Value::as_u64) == Some(1) => fields,
         _ => {
-            return Err(V1ToV2Refusal::Rejected {
-                location: V1ToV2Location::Header,
-                message: "expected format v1 header".to_owned(),
+            return Err(RefusedV1ToV2 {
+                refusal: V1ToV2Refusal::Rejected {
+                    location: V1ToV2Location::Header,
+                    message: "expected format v1 header".to_owned(),
+                },
+                emitted: Deep::default(),
             });
         }
     };
@@ -327,7 +337,7 @@ fn stream<'a>(
     // `seq` and each run's `firstSeq` is the count of events before it.
     let mut seq: u64 = 0;
     for (index, item) in items.enumerate() {
-        match item {
+        let result = match item {
             Source::Event(event) => {
                 let result = stage.transform(seq, event);
                 seq = seq.saturating_add(1);
@@ -337,11 +347,15 @@ fn stream<'a>(
                 seq = seq.saturating_add(run.event_count());
                 stage.transform_run(run)
             }
+        };
+        if let Err(failure) = result {
+            return Err(RefusedV1ToV2 {
+                refusal: refusal(V1ToV2Location::Event(index), failure),
+                emitted: std::mem::take(&mut stage.output),
+            });
         }
-        .map_err(|failure| refusal(V1ToV2Location::Event(index), failure))?;
     }
     let streamed_len = stage.output.len();
-    let pending = stage.pending.is_some();
     let finished = stage
         .finish()
         .map_err(|failure| refusal(V1ToV2Location::Finish, failure));
@@ -349,7 +363,6 @@ fn stream<'a>(
         header: Value::Object(target_header),
         events: stage.output,
         streamed_len,
-        pending,
         finished,
     })
 }

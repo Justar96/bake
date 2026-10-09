@@ -19,16 +19,12 @@ use serde_json::{Map, Value};
 const SCHEMA: &str = "bake/session-format-conformance/history-cases";
 const ORACLE: &str = "releasedV0SessionFormatCodec.createDecoder(header, 'strict') or releasedV1SessionFormatCodec feeding createSessionFormatChain({currentVersion: 3, migrations: [sessionFormatV0ToV1, sessionFormatV1ToV2, sessionFormatV2ToV3]}).createStream; decoder.finish, then stream.finish";
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 59;
+const CASE_COUNT: usize = 60;
 /// The decoder's source budget; no case comes near it.
 const SOURCE_BUDGET: usize = 10_000;
 /// The limit names the table may use, each witnessed. Other stage limits
 /// pass through under their stage's prefix and are witnessed by that stage's table.
-const LIMITS: [&str; 3] = [
-    "untimed-event",
-    "interleaved-emission",
-    "v0-to-v1/legacy-goal-message",
-];
+const LIMITS: [&str; 2] = ["untimed-event", "v0-to-v1/legacy-goal-message"];
 
 /// What a run must return.
 #[derive(Debug)]
@@ -134,7 +130,7 @@ fn load() -> Vec<Case> {
         BTreeSet::from(["schema", "version", "oracle", "history", "cases"])
     );
     assert_eq!(table["schema"], SCHEMA);
-    assert_eq!(table["version"], 2);
+    assert_eq!(table["version"], 3);
     assert_eq!(table["oracle"], ORACLE);
     assert!(
         table["history"]

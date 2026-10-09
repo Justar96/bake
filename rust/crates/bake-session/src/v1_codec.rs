@@ -439,6 +439,30 @@ pub fn decode_v0_v1_items(
     platform: PathPlatform,
     source_budget: usize,
 ) -> Result<DecodedV1Items, V1CodecRefusal> {
+    match decode_v0_v1_items_before_finish(
+        header,
+        rows,
+        version,
+        recovery,
+        platform,
+        source_budget,
+    )? {
+        (decoded, None) => Ok(decoded),
+        (_, Some(finish)) => Err(finish),
+    }
+}
+
+/// [`decode_v0_v1_items`] up to the decoder's `finish`: the items every row
+/// emitted, with the refusal `finish` then raises, if any. TypeScript streams
+/// those items through the later stages before `finish` runs.
+pub(crate) fn decode_v0_v1_items_before_finish(
+    header: &Value,
+    rows: &[Value],
+    version: V1CodecVersion,
+    recovery: V1CodecRecovery,
+    platform: PathPlatform,
+    source_budget: usize,
+) -> Result<(DecodedV1Items, Option<V1CodecRefusal>), V1CodecRefusal> {
     let (header, inherited_event_count) = decode_header(header, version.number(), platform)
         .map_err(|failure| refusal(V1CodecLocation::Header, failure))?;
     let recoverable = recovery == V1CodecRecovery::Recoverable;
@@ -505,17 +529,16 @@ pub fn decode_v0_v1_items(
         }
         items.push(item);
     }
-    if inherited_event_count > event_count {
-        return Err(V1CodecRefusal::Rejected {
-            location: V1CodecLocation::Finish,
-            message: "Session inheritedEventCount exceeds its event count".to_owned(),
-        });
-    }
-    Ok(DecodedV1Items {
+    let finish = (inherited_event_count > event_count).then(|| V1CodecRefusal::Rejected {
+        location: V1CodecLocation::Finish,
+        message: "Session inheritedEventCount exceeds its event count".to_owned(),
+    });
+    let decoded = DecodedV1Items {
         header,
         inherited_event_count,
         items,
-    })
+    };
+    Ok((decoded, finish))
 }
 
 fn refusal(location: V1CodecLocation, failure: Failure) -> V1CodecRefusal {

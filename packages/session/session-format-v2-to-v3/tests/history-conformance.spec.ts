@@ -34,13 +34,9 @@ const REPO = new URL('../../../../', import.meta.url)
 const SCHEMA = 'bake/session-format-conformance/history-cases'
 const ORACLE = "releasedV0SessionFormatCodec.createDecoder(header, 'strict') or releasedV1SessionFormatCodec feeding createSessionFormatChain({currentVersion: 3, migrations: [sessionFormatV0ToV1, sessionFormatV1ToV2, sessionFormatV2ToV3]}).createStream; decoder.finish, then stream.finish"
 /** Both harnesses pin the table size, so a dropped case fails. */
-const CASE_COUNT = 59
-/**
- * Native limits: an event without `time`; a v1→v2 refusal after it may have emitted into v2→v3,
- * including while an Assistant attempt is pending; and one v0→v1 limit passing through under its
- * stage's prefix.
- */
-const LIMITS = ['untimed-event', 'interleaved-emission', 'v0-to-v1/legacy-goal-message']
+const CASE_COUNT = 60
+/** Native limits: an event without `time`, and one v0→v1 limit passing through under its stage's prefix. */
+const LIMITS = ['untimed-event', 'v0-to-v1/legacy-goal-message']
 
 type At = 'header' | 'finish' | number
 type Outcome =
@@ -113,9 +109,9 @@ function parseCase(value: unknown): HistoryCase {
 function loadTable(): HistoryCase[] {
   const table: unknown = JSON.parse(readFileSync(new URL('conformance/session/history-cases.json', REPO), 'utf8'))
   if (!isObject(table) || sortedKeys(table) !== 'cases,history,oracle,schema,version'
-    || table.schema !== SCHEMA || table.version !== 2 || table.oracle !== ORACLE || !Array.isArray(table.cases)
+    || table.schema !== SCHEMA || table.version !== 3 || table.oracle !== ORACLE || !Array.isArray(table.cases)
     || !Array.isArray(table.history) || !table.history.every(entry => typeof entry === 'string')) {
-    throw new Error('history-cases.json does not match its version-2 schema')
+    throw new Error('history-cases.json does not match its version-3 schema')
   }
   const cases = table.cases.map(parseCase)
   if (new Set(cases.map(entry => entry.id)).size !== cases.length) throw new Error('case ids must be unique')

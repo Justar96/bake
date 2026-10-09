@@ -1199,9 +1199,9 @@
     }
    ],
    "kind": "format",
-   "classification": "undecided",
-   "evidence": "the limit covers members of the wrong kind that the frozen relationship validator casts, and objects it compares by reference. Its input is a migrated v0-v2 artifact; no per-member producer audit of the v0-v2 writers (3efd4b51e0, 0bb7bba015, 81dcacbb44) exists yet. The scanned home holds no v0 to v2 log, so real logs give no evidence",
-   "followUp": "Decide by tracing each cast member in the relationship validator to its v0-v2 producer, or by scanning real v0-v2 logs."
+   "classification": "unreachable",
+   "evidence": "No input reaches it, so no writer can: the only production caller runs it over the v2→v3 migration's output (rust/crates/bake-session/src/final_check.rs:164), and that migration first runs assertEvent(event, 2) on every source event (packages/session/session-format-v2-to-v3/src/migration.ts:46; rust/crates/bake-session/src/v2_to_v3/admission.rs:155), whose assertReleasedPayloadSemantics (packages/session/session-format-v2-to-v3/src/payload.ts:71) refuses every member the relationship check casts when it has the wrong kind: callIds, tool-call ids and names, PTC dispatch ids and names, commandIds, compactionIds, sourceCommandIds, retryIds, policyKeys, and providers are non-empty strings, tool/call and tool-call arguments are strings, turn, step, and retry are counts (packages/session/session-format-v0-to-v1/src/payload-validation.ts:62-77,119-140,251-266), request/header carries header and config objects (payload-validation.ts:799-809), message content is an array of object blocks and a tool-result block's content an array (payload-validation.ts:431-460,481-509), messageSeqs and shadowedSeqs are arrays of earlier counts with a shadowedRange object (payload-validation.ts:184-200,384-398,831-840), and surfaceOp is \"append\" or a replace object (payload.ts:58-59; packages/session/session-format-v0-to-v1/src/validation.ts:176). Every member === compares is therefore a string, a count, or null, never two objects, and a delivery marker's sessionId is compared only at sessionFormatVersion 3, which the migration refuses (migration.ts:65). The migration builds the v3 header and numbers its events densely, so final-check/header and final-check/precondition are not reached (rust/crates/bake-session/src/final_check.rs:30-39)",
+   "followUp": "None."
   },
   {
    "variants": [
@@ -1218,9 +1218,9 @@
     }
    ],
    "kind": "format",
-   "classification": "undecided",
-   "evidence": "Session.append's snapshot defines each member with Object.defineProperty (packages/util/values/src/index.ts:135-140), so an own __proto__ member in model-produced PTC arguments survives into the log. The limit needs a dispatch-start and a dispatch whose arguments differ by that member; untraced: whether a v0 to v2 PTC runtime writes the two from different argument objects",
-   "followUp": "Decide by tracing how the v0 to v2 PTC runtime builds tool/code-dispatch-start and tool/code-dispatch arguments (3efd4b51e0, 0bb7bba015, 81dcacbb44)."
+   "classification": "unreachable",
+   "evidence": "The limit needs a tool/code-dispatch-start and its tool/code-dispatch whose arguments differ by an own __proto__ member. The only v0 to v2 producer, the run_code binding, logs both from the same detached snapshot: jsonNormalizeArgs takes `logged` once per call (3efd4b51e0:packages/core/tools/src/ptc.ts:160,467) and both appends pass `arguments: normalized.logged` (3efd4b51e0:packages/core/tools/src/ptc.ts:517,539), which nothing else reads or mutates; ptc.ts and packages/util/values/src/index.ts are unchanged at 0bb7bba015 and 81dcacbb44. Session.append snapshots each copy with the same walk (3efd4b51e0:packages/util/values/src/index.ts:129), so the two logged arguments have the same members, and deepEqualJson finds every key of one in the other as an own key",
+   "followUp": "None."
   },
   {
    "variants": [
@@ -1602,9 +1602,9 @@
     }
    ],
    "kind": "format",
-   "classification": "undecided",
-   "evidence": "the 21 cases cover many members the stage casts; most are typed producer output, but no per-member trace to the v0 and v1 producers (3efd4b51e0, 0bb7bba015) has been made. The scanned home holds no v0 or v1 log",
-   "followUp": "Decide per member: list the members the stage casts, trace each to its v0 and v1 producer, and split any reachable one into its own limit or port."
+   "classification": "unreachable",
+   "evidence": "Production feeds the stage only checked events. A v1 file takes the decoded stage, which runs assertReleasedEventPayload(event, 1) on every released event but assistant/chunk before transforming it (packages/session/session-format-v1-to-v2/src/migration.ts:95-104; rust/crates/bake-session/src/v1_to_v2_decoded.rs:180), and a v0 file reaches it through v0→v1, which runs assertReleasedEventPayload(message, 0) on the same events (packages/session/session-format-v0-to-v1/src/migration.ts:99; rust/crates/bake-session/src/v0_to_v1/normalize.rs:597); the payload check refuses every data member the stage casts in its wrong kind, as the 16 data-shape cases witness, before the stage reads it. The members left unchecked are the envelope's surfaceOp and an assistant/chunk's data, turn, and step, and no v0 or v1 writer writes them in a wrong kind: Session.append runs surfaceManager.validateNext (3efd4b51e0:packages/core/session/src/index.ts:698; 0bb7bba015:packages/core/session/src/index.ts:689), whose surfaceOpOf admits only \"append\" or a replace object with count start and end (3efd4b51e0:packages/core/session/src/surface.ts:175-218, unchanged at 0bb7bba015), and the agent appends assistant/chunk as { turn, step, chunk } with turn = phase.turn + 1 and step = phase.step + 1 (3efd4b51e0:packages/core/agent-loop/src/agent.ts:262,274,368; 0bb7bba015:packages/core/agent-loop/src/agent.ts:266,278,383). sourceEventSeqs is the codec's expanded list (packages/session/session-format-v0-to-v1/src/codec.ts:193-197,297-298)",
+   "followUp": "None."
   },
   {
    "variants": [
@@ -1686,9 +1686,9 @@
    "crate": "bake-session",
    "cases": [],
    "kind": "pass-through",
-   "classification": "undecided",
-   "evidence": "Passes V1ToV2Limit through; its cases are counted under the v1-to-v2 rows, of which v1-to-v2-unchecked-shape is undecided.",
-   "followUp": "Follows v1-to-v2-unchecked-shape."
+   "classification": "unreachable",
+   "evidence": "Passes V1ToV2Limit through; its cases are counted under the v1-to-v2 rows, which are all unreachable.",
+   "followUp": "None."
   },
   {
    "variants": [
@@ -1708,25 +1708,6 @@
    "classification": "unreachable",
    "evidence": "Session.append assigns seq from the log length and time from Date.now(): packages/core/session/src/index.ts:751-752; 3efd4b51e0:packages/core/session/src/index.ts:693-694; 0bb7bba015:...:684-685; 81dcacbb44:...:702-703",
    "followUp": "None."
-  },
-  {
-   "variants": [
-    "HistoryLimit::InterleavedEmission"
-   ],
-   "stageNames": [],
-   "id": "history-interleaved-emission",
-   "crate": "bake-session",
-   "cases": [
-    {
-     "table": "session/history-cases.json",
-     "name": "interleaved-emission",
-     "count": 6
-    }
-   ],
-   "kind": "format",
-   "classification": "undecided",
-   "evidence": "the limit fires where v1-to-v2 refuses an item after it may already have emitted synthesized events. Released logs do reach migration refusals (session/lookup-cases.json released-v0-real-shapes is refused as unsupported), so a writer-produced log may reach this order; no trace shows which refusals follow an emission. The scanned home holds no v0 or v1 log",
-   "followUp": "Decide by listing the v1-to-v2 refusals that can follow a synthesized emission and checking them against released v0 and v1 shapes; port the interleaving if one is reachable."
   },
   {
    "variants": [
@@ -1750,9 +1731,9 @@
    "crate": "bake-session",
    "cases": [],
    "kind": "pass-through",
-   "classification": "undecided",
-   "evidence": "Passes V1ToV2Limit through; see the v1-to-v2 rows, of which v1-to-v2-unchecked-shape is undecided.",
-   "followUp": "Follows v1-to-v2-unchecked-shape."
+   "classification": "unreachable",
+   "evidence": "Passes V1ToV2Limit through; see the v1-to-v2 rows, which are all unreachable.",
+   "followUp": "None."
   },
   {
    "variants": [
@@ -2114,23 +2095,15 @@
    ],
    "stageNames": [
     "migration/encode",
-    "migration/scan",
-    "migration/finish-order",
-    "migration/v2-codec-recovery"
+    "migration/scan"
    ],
    "id": "log-file-migration",
    "crate": "bake-session",
-   "cases": [
-    {
-     "table": "session/plain-log-file-cases.json",
-     "name": "migration/v2-codec-recovery",
-     "count": 1
-    }
-   ],
+   "cases": [],
    "kind": "pass-through",
-   "classification": "undecided",
-   "evidence": "Passes migration limits through. Its row/json-parser name, scan-json-parser's refusal, now refuses only out-of-range numbers no writer stores, and its encode name meets only encode-float-number's unreachable spellings. finish-order and v2-codec-recovery depend on rows a writer may or may not produce and are not traced",
-   "followUp": "Trace finish-order and v2-codec-recovery against the v0 to v2 writers."
+   "classification": "reachable-gap",
+   "evidence": "Passes migration limits through. Its own names are unreachable: row/json-parser, scan-json-parser's refusal, refuses only out-of-range numbers no writer stores, and encode meets only encode-float-number's unreachable spellings. The recovery port removed finish-order and v2-codec-recovery: the v0 and v1 decoder's finish now runs after the decoded rows stream through every edge, and the released v2 codec's recovery is ported, rethrowing its issue at the first later turn/end row decodeEvent admits. Through its history/<name> names it passes object-prototype-type, a reachable gap D28 accepts",
+   "followUp": "Follows object-prototype-type."
   },
   {
    "variants": [],
@@ -2202,8 +2175,8 @@
    "cases": [],
    "kind": "pass-through",
    "classification": "undecided",
-   "evidence": "Passes a migration limit of `migrate_released_generation` (`LogFileLimit::Migration`'s names), `migrate_released_zstd_generation` (`zstd/stop-order`), or `restore_migrated` (`MigratedRestoreLimit`) through; log-file-migration is undecided, and migrated-restore-restore is unreachable",
-   "followUp": "Follows log-file-migration."
+   "evidence": "Passes a migration limit of `migrate_released_generation` (`LogFileLimit::Migration`'s names), `migrate_released_zstd_generation` (`zstd/stop-order`), or `restore_migrated` (`MigratedRestoreLimit`) through; log-file-migration is a reachable gap only through object-prototype-type, which D28 accepts, and migrated-restore-restore is unreachable. `zstd/stop-order`, where a Zstd body stop follows rows whose migration is refused, is untraced: no row classifies it and no case witnesses it",
+   "followUp": "Decide zstd/stop-order: trace whether a v0 to v2 writer leaves a Zstd body stop (a corrupt or uncommitted complete frame) after rows, or port the order by passing the body stop to the plain migration as its parse stop."
   },
   {
    "variants": [],

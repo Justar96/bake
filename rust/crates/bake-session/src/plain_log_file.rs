@@ -120,15 +120,16 @@ use crate::fork::holds_negative_zero;
 use crate::json_parse::{Deep, dismantle};
 use crate::log_layout::{CURRENT_LOG_FILENAME, canonical_generation, encode_segment, log_path};
 use crate::released_rows::{ParseStop, parse_released_header, parse_released_rows};
+use crate::v1_codec::decode_v0_v1_items_before_finish;
+use crate::v2_to_v3::{RecoverableRefusal, recoverable_refusal, rethrows_recovery_issue};
 use crate::write_lease::{LeaseRefusal, WriteLease};
 use crate::{
     AppendRefusal, CURRENT_SESSION_FORMAT_VERSION, CreateRefusal, FinalCheckRefusal,
     GenerationHeaderRefusal, HistoryLocation, HistoryRefusal, MigratedV2, PathPlatform,
     PlainAppendLog, ScanRefusal, SessionHeader, SubsetLimit, V1CodecLocation, V1CodecRecovery,
     V1CodecRefusal, V1CodecVersion, V2ToV3Layer, V2ToV3Location, V2ToV3Refusal,
-    check_transformed_artifact, decode_v0_v1_items, encode_event_line, encode_header_line,
-    first_record, migrate_released_history, migrate_v2_rows, read_generation_header_record,
-    read_header_record,
+    check_transformed_artifact, encode_event_line, encode_header_line, first_record,
+    migrate_released_history, migrate_v2_rows, read_generation_header_record, read_header_record,
 };
 
 /// One write handle of a plain current-format Session log under a root.
@@ -262,14 +263,9 @@ pub enum LogFileLimit {
     ///   count is held as a float (`float-lexeme`) or its identity check
     ///   reports `version-diagnostic`.
     /// - `codec/<name>`, `history/<name>`, `v2-to-v3/<name>`, or
-    ///   `final-check/<name>`: a limit of [`decode_v0_v1_items`],
+    ///   `final-check/<name>`: a limit of [`decode_v0_v1_items`](crate::decode_v0_v1_items),
     ///   [`migrate_released_history`], [`migrate_v2_rows`], or
     ///   [`check_transformed_artifact`], under its name there.
-    /// - `finish-order`: the v0 or v1 codec's `finish` refuses rows that the
-    ///   later stages, or an earlier stop, must see first.
-    /// - `v2-codec-recovery`: the v2 codec refuses a `turn/end` or
-    ///   `session/end-seed` row, or a row before a later `turn/end`, whose
-    ///   recoverable outcome depends on which check refused it.
     /// - `decode-invariant`: a rerun over a prefix disagrees with the first
     ///   run.
     /// - `encode` or `scan`: the migrated log reaches a native limit of this
@@ -685,7 +681,7 @@ fn migrate_v0_v1(
     source_budget: usize,
 ) -> Result<MigratedV2, ReleasedGenerationRefusal> {
     let decode = |rows: &[Value]| {
-        decode_v0_v1_items(
+        decode_v0_v1_items_before_finish(
             header,
             rows,
             version,
@@ -695,14 +691,16 @@ fn migrate_v0_v1(
         )
     };
     let refusal = match decode(rows) {
-        Ok(items) => {
-            return match (migrate_released_history(&items), stop) {
-                (Err(refused), _) if !at_finish(&refused) => {
+        Ok((items, finish)) => {
+            return match (migrate_released_history(&items), stop, finish) {
+                (Err(refused), _, _) if !at_finish(&refused) => {
                     Err(ReleasedGenerationRefusal::history(refused))
                 }
                 // Every row streamed before the stop, and `finish` runs after it.
-                (_, Some(stop)) => Err(stop),
-                (outcome, None) => outcome.map_err(ReleasedGenerationRefusal::history),
+                (_, Some(stop), _) => Err(stop),
+                // The decoder's `finish` runs before the chain's.
+                (_, None, Some(finish)) => Err(ReleasedGenerationRefusal::codec(finish)),
+                (outcome, None, None) => outcome.map_err(ReleasedGenerationRefusal::history),
             };
         }
         Err(refusal) => refusal,
@@ -713,19 +711,14 @@ fn migrate_v0_v1(
     };
     let row = match location {
         V1CodecLocation::Header => return Err(ReleasedGenerationRefusal::codec(refusal)),
-        // The rows the decoder emitted before `finish` are not returned.
-        V1CodecLocation::Finish => {
-            return Err(ReleasedGenerationRefusal::Limit("finish-order".to_owned()));
-        }
+        // `finish` refusals come back with the items.
+        V1CodecLocation::Finish => return Err(invariant()),
         V1CodecLocation::Row(row) => row,
     };
-    // The items before the refused row streamed through every edge first.
+    // The items before the refused row streamed through every edge first;
+    // the decoder's `finish` never runs after a row refusal.
     let prefix = match decode(rows.get(..row).unwrap_or_default()) {
-        Ok(prefix) => prefix,
-        Err(V1CodecRefusal::Rejected {
-            location: V1CodecLocation::Finish,
-            ..
-        }) => return Err(ReleasedGenerationRefusal::Limit("finish-order".to_owned())),
+        Ok((prefix, _)) => prefix,
         Err(_) => return Err(invariant()),
     };
     match migrate_released_history(&prefix) {
@@ -755,7 +748,9 @@ fn invariant() -> ReleasedGenerationRefusal {
 /// mode and the v2→v3 edge, then `stop`, in TypeScript's streaming order.
 /// [`migrate_v2_rows`] decodes strictly; where its codec refuses a row, the
 /// recoverable codec drops that row and every later one unless one of them
-/// throws, which only a `turn/end` row or a `session/end-seed` row can do.
+/// throws: the refused row when it is a `session/end-seed` row whose data
+/// is not an object or a `turn/end` row with a seq gap, otherwise the first
+/// later `turn/end` row `decodeEvent` admits, which rethrows the refusal.
 fn migrate_v2(
     header: &Value,
     rows: &[Value],
@@ -765,23 +760,47 @@ fn migrate_v2(
     let migrate =
         |rows: &[Value]| migrate_v2_rows(header, rows, PathPlatform::host(), source_budget);
     let streamed = match migrate(rows) {
-        Err(V2ToV3Refusal::Rejected {
-            location: V2ToV3Location::Row(row),
-            layer: V2ToV3Layer::Codec,
-            ..
-        }) => {
-            let has_type =
-                |row: &Value, kind: &str| row.get("type").is_some_and(|value| value == kind);
-            let throws = rows.get(row).is_none_or(|refused| {
-                has_type(refused, "turn/end") || has_type(refused, "session/end-seed")
-            }) || rows
-                .iter()
-                .skip(row.saturating_add(1))
-                .any(|later| has_type(later, "turn/end"));
-            if throws {
-                return Err(ReleasedGenerationRefusal::Limit(
-                    "v2-codec-recovery".to_owned(),
-                ));
+        Err(
+            refusal @ V2ToV3Refusal::Rejected {
+                location: V2ToV3Location::Row(row),
+                layer: V2ToV3Layer::Codec,
+                ..
+            },
+        ) => {
+            let thrown = match rows
+                .get(row)
+                .and_then(|refused| recoverable_refusal(refused, row, source_budget))
+            {
+                Some(RecoverableRefusal::Thrown | RecoverableRefusal::Gap { turn_end: true }) => {
+                    true
+                }
+                Some(RecoverableRefusal::Caught | RecoverableRefusal::Gap { turn_end: false }) => {
+                    let mut rethrown = false;
+                    for (later, value) in rows.iter().enumerate().skip(row.saturating_add(1)) {
+                        match rethrows_recovery_issue(value, source_budget) {
+                            Ok(true) => {
+                                rethrown = true;
+                                break;
+                            }
+                            Ok(false) => {}
+                            Err(limit) => {
+                                return Err(ReleasedGenerationRefusal::v2(
+                                    V2ToV3Refusal::NativeSubset {
+                                        location: V2ToV3Location::Row(later),
+                                        limit,
+                                    },
+                                ));
+                            }
+                        }
+                    }
+                    rethrown
+                }
+                None => return Err(invariant()),
+            };
+            // Every row before the refused one passed the codec and the
+            // stage, so the refusal itself is what a throw reports.
+            if thrown {
+                return Err(ReleasedGenerationRefusal::v2(refusal));
             }
             match migrate(rows.get(..row).unwrap_or_default()) {
                 Err(
