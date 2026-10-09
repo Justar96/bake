@@ -634,6 +634,20 @@ pub fn migrate_released_generation(
     source_version: u64,
     source_budget: usize,
 ) -> Result<MigratedV2, ReleasedGenerationRefusal> {
+    migrate_released_generation_before_stop(log, source_version, source_budget, None)
+}
+
+/// [`migrate_released_generation`] over the rows a stream delivered before
+/// `body_stop`, which it throws after them: the parse stop of `log`'s own
+/// rows, which come first, or else `body_stop` takes the parse stop's place,
+/// after every row-time refusal and before the decoders' and the chain's
+/// `finish`.
+pub(crate) fn migrate_released_generation_before_stop(
+    log: &[u8],
+    source_version: u64,
+    source_budget: usize,
+    body_stop: Option<ReleasedGenerationRefusal>,
+) -> Result<MigratedV2, ReleasedGenerationRefusal> {
     let Some(record) = first_record(log) else {
         return Err(ReleasedGenerationRefusal::Corrupt(
             "Error: empty or header-less session log".to_owned(),
@@ -641,7 +655,10 @@ pub fn migrate_released_generation(
     };
     let header = Deep::new(parse_released_header(record, source_version)?);
     let parsed = parse_released_rows(&log[record.len()..]);
-    let stop = parsed.stop.map(ReleasedGenerationRefusal::from);
+    let stop = parsed
+        .stop
+        .map(ReleasedGenerationRefusal::from)
+        .or(body_stop);
     match source_version {
         2 => migrate_v2(&header, &parsed.rows, stop, source_budget),
         0 => migrate_v0_v1(

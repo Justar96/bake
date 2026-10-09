@@ -8,7 +8,7 @@ use zstd_safe::{DCtx, InBuffer, OutBuffer};
 use crate::scan::LogScanner;
 use crate::{
     MigratedV2, PathPlatform, ReleasedGenerationRefusal, RestoreRefusal, RestoredLog, StagedLog,
-    TornTail, migrate_released_generation,
+    TornTail, plain_log_file::migrate_released_generation_before_stop,
 };
 
 /// Production Zstd framing or decoding refusals. Offsets are physical bytes
@@ -241,24 +241,21 @@ pub fn released_zstd_plaintext(
 /// [`crate::migrate_released_generation`] over a decoded Zstd generation
 /// whose header [`crate::released_generation_header`] admitted.
 ///
-/// TypeScript throws a body stop after the rows before it streamed, unless
-/// one of those rows threw first. When those rows migrate, the stop is the
-/// outcome; when they are refused, this crate cannot tell a refusal thrown
-/// while streaming from one thrown at `finish`, which the stop precedes, so
-/// that is the `zstd/stop-order` limit.
+/// TypeScript's `decodeStreamingMigration` throws a body stop after the rows
+/// before it streamed and before the decoders' and the chain's `finish`, so
+/// the stop is the plain migration's parse stop: a refusal thrown while
+/// those rows stream wins, and the stop wins over a `finish` refusal.
 pub fn migrate_released_zstd_generation(
     decoded: &ReleasedZstdPlaintext,
     source_version: u64,
     source_budget: usize,
 ) -> Result<MigratedV2, ReleasedGenerationRefusal> {
-    let migrated = migrate_released_generation(&decoded.plaintext, source_version, source_budget);
-    match (&decoded.stop, migrated) {
-        (None, migrated) => migrated,
-        (Some(stop), Ok(_)) => Err(stop.clone()),
-        (Some(_), Err(_)) => Err(ReleasedGenerationRefusal::Limit(
-            "zstd/stop-order".to_owned(),
-        )),
-    }
+    migrate_released_generation_before_stop(
+        &decoded.plaintext,
+        source_version,
+        source_budget,
+        decoded.stop.clone(),
+    )
 }
 
 type Frames = (Vec<std::ops::Range<usize>>, Option<usize>);

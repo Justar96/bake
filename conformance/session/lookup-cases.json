@@ -1,13 +1,14 @@
 {
  "schema": "bake/session-conformance/lookup-cases",
- "version": 5,
+ "version": 6,
  "provenance": "Written from the TypeScript sources of JsonlSessionPersistence open(id, \"read\") (assertUsableRoot, ensureRootEncoding, findLog, resolveGenerationInDirectory, requireStoredLog, readGenerationHeader, decodeStoredLog, assertStoredIdentity) and format.ts encodeSegment and projectKey, before either harness ran. Restored counts reuse the source-authored expectations of restore-cases.json (tool-call-turn, packed-source-references) and zstd-cases.json (torn-checksum). No value was copied from TypeScript or Rust output.",
  "amendments": [
   "After the first TypeScript run: older-generation-only expected a restored migration, but the frozen v0 fixture is refused as unsupported (jsonl.spec.ts \"refuses the frozen pre-step V0 fixture\"); its expectation now claims that refusal, and older-generation-migrates adds the v2 log that jsonl.spec.ts restores (\"restores canonical replacement envelopes\"), with seven events after the migration adds its system head.",
   "Version 2, after code review of the first Rust candidate: cases listed in reviewAdditions were added, with expectations derived from the TypeScript sources before their first run; failure cases gained nativeDiagnostic (the Rust diagnostic operation and the case-relative path it names), native byte-budget failures are marked budget, limited cases gained platformReason, and defaults names the budgets for cases that set none. No earlier expectation changed.",
   "Version 3 adds legacy-named-directory after Windows source review, before its first run. JsonlSessionPersistence exists() opens directories on POSIX and through libuv FILE_FLAG_BACKUP_SEMANTICS on Windows, so the targeted probe refuses the legacy layout. Earlier expectations are unchanged.",
   "Version 4 routes the Rust lookup of a plain v0, v1, or v2 generation through bake-session's in-memory released-history migration and migrated restoration, as the read open's prepareStoredMigration decodes it without publishing. older-generation-only and older-generation-migrates lose their migration-required Rust expectations. The cases listed in versionFourAdditions were added before their first run, with restored counts and refusal messages taken from the source-authored expectations of migrated-restore-cases.json (v0-clean-turn, v0-seeded-end-seed-at-cut, v1-packed-run-cited, v2-interrupted-tool-calls-get-closers, v2-clean-turn, final-check-v1-uncovered-replacement). After code review of the first candidate, the Rust lookup also migrates a Zstd v0, v1, or v2 generation as decodeStreamingMigration decodes it, so older-generation-zstd loses its migration-required Rust expectation, and older-generation-zstd-v0-torn-tail (older-generation-v0-restores' rows with its last two recovered from a torn final frame), older-generation-zstd-v1-uncommitted-frame, older-generation-zstd-header-frame, and older-generation-zstd-magic-beats-identity were added, with expectations written from generation.ts and zstd.ts before their first run. A refusal message is now matched as a substring by both arms. Earlier expectations are otherwise unchanged.",
-  "Version 5 adds path-mismatch-noncharacter-project and not-found-noncharacter-id after code review of the lone-surrogates port, before their first run, with expectations written from findLog, assertStoredIdentity, and encodeSegment: a project directory name and a requested id holding U+FDD0, a noncharacter the Rust reader doubles in its spelling of JavaScript strings, are written back once in the record. Both run on Linux and Win32 only: macOS CI showed APFS refusing the U+FDD0 directory name with EILSEQ. Earlier expectations are unchanged."
+  "Version 5 adds path-mismatch-noncharacter-project and not-found-noncharacter-id after code review of the lone-surrogates port, before their first run, with expectations written from findLog, assertStoredIdentity, and encodeSegment: a project directory name and a requested id holding U+FDD0, a noncharacter the Rust reader doubles in its spelling of JavaScript strings, are written back once in the record. Both run on Linux and Win32 only: macOS CI showed APFS refusing the U+FDD0 directory name with EILSEQ. Earlier expectations are unchanged.",
+  "Version 6 removes the Rust `zstd/stop-order` limit: a Zstd body stop, a complete frame that fails to decode or complete frames that end inside a record, is now the plain migration's parse stop, so a refusal thrown while the rows before it stream wins and the stop wins over the decoders' and the chain's finish, as decodeStreamingMigration throws them. older-generation-zstd-v0-row-refusal-before-corrupt-frame, older-generation-zstd-v0-corrupt-frame-before-refusals, older-generation-zstd-v2-uncommitted-frame-before-finish-refusal, and older-generation-zstd-v2-row-refusal-before-corrupt-frame were added before either harness ran, with expectations written from generation.ts (decodeStreamingMigration, MigratingJsonlRows, assertCompleteFramesEndOnRecord), zstd-private-decoder.ts and zstd-public-decoder.ts, and the source-authored refusals of plain-log-file-cases.json (migrate-v0-history-refusal-before-decoder-finish, migrate-v0-seed-length-exceeds-events-at-decoder-finish, migrate-v2-undecoded-turn-end-issue-kept-until-finish, migrate-v2-end-seed-data-thrown-while-recovering). Each corrupt frame in appendHex is a raw-block frame with the content-checksum flag and a zero checksum. Earlier expectations are unchanged."
  ],
  "defaults": {
   "maxBytes": 1048576,
@@ -3057,6 +3058,102 @@
     "reason": "legacy-layout",
     "kind": "invalid",
     "path": "_no-cwd/a1.jsonl"
+   }
+  },
+  {
+   "id": "older-generation-zstd-v0-row-refusal-before-corrupt-frame",
+   "compression": "zstd",
+   "root": "root",
+   "sessionId": "hist",
+   "layout": [
+    {
+     "file": "root/_no-cwd/hist/session.jsonl.zstd",
+     "frames": [
+      "{\"type\":\"session\",\"version\":0,\"id\":\"hist\",\"createdAt\":1000,\"delegationDepth\":0}\n",
+      "{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"mode/set\",\"seq\":1,\"time\":1002,\"data\":{\"mode\":\"plan\"}}\n"
+     ],
+     "appendHex": "28b52ffd04381902007b2274797065223a22737465702f656e64222c22736571223a322c2274696d65223a313030332c2264617461223a7b227475726e223a312c2273746570223a317d7d0a00000000"
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "generation",
+    "reason": null,
+    "kind": "unsupported",
+    "path": "_no-cwd/hist/session.jsonl.zstd",
+    "message": "session \"hist\" contains unsupported legacy mode/set event at seq 1; source v0 artifact remains unchanged (raw log: "
+   }
+  },
+  {
+   "id": "older-generation-zstd-v0-corrupt-frame-before-refusals",
+   "compression": "zstd",
+   "root": "root",
+   "sessionId": "hist",
+   "layout": [
+    {
+     "file": "root/_no-cwd/hist/session.jsonl.zstd",
+     "frames": [
+      "{\"type\":\"session\",\"version\":0,\"id\":\"hist\",\"createdAt\":1000,\"parentSession\":\"parent\",\"seedLength\":5,\"delegationDepth\":0}\n",
+      "{\"type\":\"turn/start\",\"seq\":0,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":1,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n"
+     ],
+     "appendHex": "28b52ffd04381902007b2274797065223a22737465702f656e64222c22736571223a322c2274696d65223a313030332c2264617461223a7b227475726e223a312c2273746570223a317d7d0a0000000028b52ffd0038f901007b2274797065223a226d6f64652f736574222c22736571223a332c2274696d65223a313030342c2264617461223a7b226d6f6465223a22706c616e227d7d0a"
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "generation",
+    "reason": null,
+    "kind": "invalid",
+    "path": "_no-cwd/hist/session.jsonl.zstd",
+    "message": "session \"hist\": stored log is corrupt: Error: corrupt Zstandard session log: frame at byte 267 failed validation (raw log: "
+   }
+  },
+  {
+   "id": "older-generation-zstd-v2-uncommitted-frame-before-finish-refusal",
+   "compression": "zstd",
+   "root": "root",
+   "sessionId": "v2v3",
+   "layout": [
+    {
+     "file": "root/_no-cwd/v2v3/session.v2.jsonl.zstd",
+     "frames": [
+      "{\"type\":\"session\",\"version\":2,\"id\":\"v2v3\",\"createdAt\":1700000000000,\"parentSession\":\"parent\",\"isSeeded\":true,\"delegationDepth\":0}\n",
+      "{\"type\":\"turn/start\",\"seq\":0,\"time\":1000,\"data\":{\"turn\":1}}\n{\"type\":\"turn/end\",\"seq\":1,\"time\":1001,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}"
+     ],
+     "appendHex": ""
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "generation",
+    "reason": null,
+    "kind": "invalid",
+    "path": "_no-cwd/v2v3/session.v2.jsonl.zstd",
+    "message": "session \"v2v3\": stored log is corrupt: Error: corrupt Zstandard session log: complete frame contains a torn JSONL record (raw log: "
+   }
+  },
+  {
+   "id": "older-generation-zstd-v2-row-refusal-before-corrupt-frame",
+   "compression": "zstd",
+   "root": "root",
+   "sessionId": "v2v3",
+   "layout": [
+    {
+     "file": "root/_no-cwd/v2v3/session.v2.jsonl.zstd",
+     "frames": [
+      "{\"type\":\"session\",\"version\":2,\"id\":\"v2v3\",\"createdAt\":1700000000000,\"isSeeded\":false,\"delegationDepth\":0}\n",
+      "{\"type\":\"turn/start\",\"seq\":0,\"time\":1000,\"data\":{\"turn\":1}}\n{\"type\":\"session/end-seed\",\"seq\":1,\"time\":1001,\"data\":\"x\"}\n"
+     ],
+     "appendHex": "28b52ffd0438c102007b2274797065223a227475726e2f656e64222c22736571223a322c2274696d65223a313030322c2264617461223a7b227475726e223a312c22726561736f6e223a7b226b696e64223a22636f6d706c65746564227d7d7d0a00000000"
+    }
+   ],
+   "ts": {
+    "outcome": "refused",
+    "stage": "generation",
+    "reason": null,
+    "kind": "invalid",
+    "path": "_no-cwd/v2v3/session.v2.jsonl.zstd",
+    "message": "session \"v2v3\": stored log is corrupt: SessionFormatError: session/end-seed 1 data must be an object (raw log: "
    }
   }
  ],
