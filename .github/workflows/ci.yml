@@ -131,6 +131,11 @@ jobs:
       - name: Install the pinned Rust toolchain
         working-directory: rust
         run: rustup toolchain install --no-self-update
+      # Reuse dependency builds across runs; the Windows job otherwise spends
+      # most of its 20 minutes compiling the workspace twice (clippy and test).
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
       # The cross-runtime lease check in the native group runs the built Node
       # libraries and flock addon beside the Rust probe, in both directions.
       - run: bun run build:runtime
@@ -145,6 +150,14 @@ jobs:
           packages/session/session-format-v2-to-v3/tests/v2-to-v3-migration-conformance.spec.ts
           packages/subagent/subagent/tests/projection-conformance.spec.ts
           packages/subagent/subagent/tests/catalog-conformance.spec.ts
+      # Per-binary test durations, kept on success to watch the job's budget.
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: rust-log-${{ matrix.os }}
+          path: .preflight/rust.log
+          if-no-files-found: ignore
+          include-hidden-files: true
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
