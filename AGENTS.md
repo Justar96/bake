@@ -69,15 +69,13 @@ Run the checks relevant to your change while you work, and `bun run preflight` b
 
 ## Rust 0.4 port
 
-The [roadmap](docs/roadmap/rust-0.4/README.md) and its [support register](docs/roadmap/rust-0.4/scope-00/support.md#decision-register) own the port's decisions; the [Pi-first scope plan](docs/roadmap/rust-0.4/pi-first-plan.md) governs scopes 04 to 17 where older scope text still assumes 0.3 parity.
+The [roadmap](docs/roadmap/rust-0.4/README.md) and its [support register](docs/roadmap/rust-0.4/scope-00/support.md#decision-register) own the port's decisions; the [Pi-first scope plan](docs/roadmap/rust-0.4/pi-first-plan.md) governs every scope where older scope text still assumes 0.3 parity or compatibility.
 
-- Port primarily from Pi's latest official release (D22). Re-check the release when a scope starts, record the Pi revision and files a PR adapts, and keep Pi's MIT notice. Port Bake's TypeScript only where the plan, a decision, or a retained contract needs it, and name its source.
-- Four Bake contracts are retained: the CLIProxyAPI provider route, reading existing Session logs, Session format 3 for new writes, and the model-visible surface (tool names, schemas, results, prompts, and repair text). Bake's sandbox, approvals, and permission presets are kept (D24). Changing what the model sees needs a paired eval record.
-- Prove equivalence with a shared JSON case table under `conformance/`, read by a Rust test under `rust/crates/<crate>/tests/` and a vitest spec in the owning TypeScript package. Write expectations from the TypeScript source before running either arm, pin the case count and schema version in both, and run negative controls that you observe failing. Extend a committed table only with a version bump and a history line.
-- The TypeScript arm calls production code. Do not change TypeScript product source to make it testable; a 0.3 change lands on `develop` first.
-- Refuse only what [D21](docs/roadmap/rust-0.4/scope-00/support.md#decision-register) permits, as a named native limit that a case witnesses; never guess a result JavaScript decides by coercion or a `TypeError`. A spelling a released writer produces must be ported, not refused. Rust code never panics on untrusted input.
-- With each change to a Rust public API, update the `rust/README.md` crate row and test paragraph, the roadmap Dev Note, and the `conformance/README.md` section, which goes before `## Runner contract` with a contents line. Then run `bun run gen-rust-migration-inventory`, `verify-rust-migration-inventory`, and `bun run doc-sync`.
-- `bun run typecheck` does not compile `packages/**/tests`; type-check a new spec with a temporary tsconfig and delete it. Declare every workspace package a spec imports in that package's `devDependencies` and update `bun.lock`, because hoisting hides a missing declaration.
+- 0.4 is a new binary that users install; it does not migrate or interoperate with a TypeScript install (D32). It writes and reads Pi's session format and does not read, migrate, or lock Bake Session logs of any format. Do not add TypeScript-compatibility code, cross-runtime checks, or conformance tables against the TypeScript runtime.
+- Port primarily from Pi's latest official release (D22). Re-check the release when a scope starts, record the Pi revision and files a PR adapts, keep Pi's MIT notice, and port Pi's tests with its code. Port Bake's TypeScript only where the plan, a decision, or a retained contract needs it, and name its source.
+- Three Bake contracts are retained: the CLIProxyAPI provider route, Bake's sandbox, approvals, and permission presets (D24), and the `~/.bake` home (`BAKE_HOME`, then `DSH_HOME`) with its existing settings and credentials read as D25 describes. Tools, schemas, results, prompts, and repair text follow Pi.
+- Prove a retained contract with fixture tests derived from its TypeScript source, which you cite; the TypeScript arm stays in TypeScript tests and never changes product source. Rust code never panics on untrusted input.
+- With each change to a Rust public API, update the `rust/README.md` crate row and test paragraph and the roadmap Dev Note, then run `bun run gen-rust-migration-inventory`, `verify-rust-migration-inventory`, and `bun run doc-sync`.
 
 ## Evals
 
