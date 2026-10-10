@@ -43,6 +43,7 @@ Compare TypeScript and Rust using controlled fixtures and independently checked 
 - [Prefix restoration cases](#prefix-restoration-cases)
 - [Released relationship cases](#released-relationship-cases)
 - [Cross-runtime write lease](#cross-runtime-write-lease)
+- [Cross-runtime resume](#cross-runtime-resume)
 - [Restored request derivation cases](#restored-request-derivation-cases)
 - [Prompt admission cases](#prompt-admission-cases)
 - [Unfinished-work cases](#unfinished-work-cases)
@@ -986,7 +987,7 @@ Apart from `title-request-noncharacter-text`, lone surrogates are outside these 
 
 ## Cross-runtime write lease
 
-The [cross-runtime lease spec](../packages/session/session-persistence-jsonl/tests/lease.cross-runtime.spec.ts) contends one Session's `session.lock` between real Rust and Node processes. The Rust side is `bake-session-lease-probe`, a development-only binary in [`bake-conformance`](../rust/crates/bake-conformance/src/bin/bake-session-lease-probe.rs) that drives one public `PlainLogFile` per process: `hold` creates a Session with no `cwd`, appends seqs 0 and 1, and keeps the handle; `hold-open` write-opens an existing log and keeps it; `open` write-opens a log and appends one event at a given seq. A holder prints a JSON readiness line, releases on the stdin line `release` or at EOF, and installs no signal handler, so killing it skips `Drop`. A refused `open` exits 3 with `SessionAlreadyOwnedError`'s message; any other refusal exits 1, so it never counts as ownership. The TypeScript side is the production `JsonlSessionPersistence` with `compression: 'none'`, in the spec and in a [Node holder](../packages/session/session-persistence-jsonl/tests/fixtures/lease-cross-runtime-holder.mjs) that loads the built libraries.
+The [cross-runtime lease spec](../packages/session/session-persistence-jsonl/tests/lease.cross-runtime.spec.ts) contends one Session's `session.lock` between real Rust and Node processes. The Rust side is `bake-session-lease-probe`, a development-only binary in [`bake-conformance`](../rust/crates/bake-conformance/src/bin/bake-session-lease-probe.rs) that drives one public `PlainLogFile` per process: `hold` creates a Session with no `cwd`, appends seqs 0 and 1, and keeps the handle; `hold-open` write-opens an existing log and keeps it; `open` write-opens a log and appends one event at a given seq. A holder prints a JSON readiness line, releases on the stdin line `release` or at EOF, and installs no signal handler, so killing it skips `Drop`. A refused `open` exits 3 with `SessionAlreadyOwnedError`'s message; any other refusal exits 1, so it never counts as ownership, and prints TypeScript's exact message when Rust claims one. The [cross-runtime resume](#cross-runtime-resume) check uses the probe's two tearing commands. The TypeScript side is the production `JsonlSessionPersistence` with `compression: 'none'`, in the spec and in a [Node holder](../packages/session/session-persistence-jsonl/tests/fixtures/lease-cross-runtime-holder.mjs) that loads the built libraries.
 
 ```sh
 (cd rust && cargo build --locked -p bake-conformance)
@@ -994,7 +995,7 @@ bun run build:runtime
 bun run test:rust:lease
 ```
 
-Without a probe the spec skips itself, so the ordinary runtime suite needs no Cargo. The runtime suite's setup clears every `BAKE_*` name in its workers, so `BAKE_RUST_LEASE_PROBE` alone does not reach the spec; use the launcher, with `--probe <path>` for another build, or set `DSH_RUST_LEASE_PROBE` to an absolute probe path for a direct `bun run test:runtime` of the spec. A name that points at a missing or unusable probe fails the spec. The launcher sets both names for its Node child only, gives its children a private temporary directory that it removes after they settle, and builds nothing: it exits 2 when the probe or the built Node libraries are missing. A Vitest exit of 0 is not enough: the launcher reads Vitest's JSON report and fails unless it lists exactly the spec's nine cases, all passed, except that on Windows the two POSIX-only cases below must be skipped. On cancellation it stops the whole test process tree, its process group on POSIX and its tree through `taskkill` on Windows, and exits 130 or 143. The native preflight group runs it after both builds pass, on Linux, macOS, and Windows in CI. These scenarios run on every platform:
+Without a probe the spec skips itself, so the ordinary runtime suite needs no Cargo. The runtime suite's setup clears every `BAKE_*` name in its workers, so `BAKE_RUST_LEASE_PROBE` alone does not reach the spec; use the launcher, with `--probe <path>` for another build, or set `DSH_RUST_LEASE_PROBE` to an absolute probe path for a direct `bun run test:runtime` of the spec. A name that points at a missing or unusable probe fails the spec. The launcher sets both names for its Node child only, gives its children a private temporary directory that it removes after they settle, and builds nothing: it exits 2 when the probe or the built Node libraries are missing. The launcher runs this spec and the [cross-runtime resume](#cross-runtime-resume) spec in one Vitest run. A Vitest exit of 0 is not enough: the launcher reads Vitest's JSON report and fails unless it lists exactly the two files, this spec's nine cases and the resume spec's seven, each under its suite, all passed, except that on Windows the two POSIX-only cases below must be skipped. On cancellation it stops the whole test process tree, its process group on POSIX and its tree through `taskkill` on Windows, and exits 130 or 143. The native preflight group runs it after both builds pass, on Linux, macOS, and Windows in CI. These scenarios run on every platform:
 
 - a live Rust holder refuses a TypeScript write `open` with `SessionAlreadyOwnedError` and its exact message, while a TypeScript read still returns the log;
 - a live TypeScript holder, a Node holder process or a write handle in the spec's own process, refuses a Rust `open`, which exits 3 with the same exact message;
@@ -1004,7 +1005,37 @@ Without a probe the spec skips itself, so the ordinary runtime suite needs no Ca
 
 Every refused write `open` leaves the log's bytes unchanged, every takeover follows a refusal observed against the same holder, and the final log reads back through TypeScript with seqs 0, 1, and 2. On POSIX a holder of either runtime stopped with `SIGSTOP`, which `ps` reports as stopped, still refuses the other runtime until it is killed and reaped, after which the other runtime takes over. Windows skips only those two cases, so a stopped holder's exclusion is not shown there; its live idle holders still cover both lock ranges, the whole file Rust locks and the first byte TypeScript locks.
 
-The check covers process-level exclusion only. A TypeScript backend instance's in-process write claims, Zstd logs, fsync and directory sync, rollback after a failed write, a migration's publication under contention, the catalog's final check, and `validateStoredEvents` at open are not exercised, nor are older TypeScript releases. Two Rust processes contend in the probe's own Cargo tests. This evidence closes no roadmap scope.
+The check covers process-level exclusion only. A TypeScript backend instance's in-process write claims, Zstd logs, fsync and directory sync, rollback after a failed write, a migration's publication under contention, the catalog's final check, and `validateStoredEvents` at open are not exercised here, nor are older TypeScript releases; the resume check covers torn tails, Zstd refusal, and migrations without contention. Two Rust processes contend in the probe's own Cargo tests. This evidence closes no roadmap scope.
+
+## Cross-runtime resume
+
+The [cross-runtime resume spec](../packages/session/session-persistence-jsonl/tests/resume.cross-runtime.spec.ts) has one runtime resume a Session log the other wrote, left torn, or migrated, across real processes over one root, for D31. It runs beside the [cross-runtime write lease](#cross-runtime-write-lease) spec under the same launcher, opt-in, probe, and report check, and needs the same two builds:
+
+```sh
+(cd rust && cargo build --locked -p bake-conformance)
+bun run build:runtime
+bun run test:rust:lease
+```
+
+A writer killed mid-append is a real process killed while its write is cut short. The probe's `tear-create <root> <id> <bytes>` creates a Session as `hold` does and `tear-append <root> <id> <seq> <bytes>` write-opens one and appends seqs `seq` and `seq + 1`, both through the hidden `storage_io` seam that stores the handle's writes only up to `bytes` bytes in all. At the cut the probe prints `{"state":"torn"}` and never returns, so it keeps the write lock and runs no cleanup until the spec kills it. The TypeScript side is a [Node writer](../packages/session/session-persistence-jsonl/tests/fixtures/resume-cross-runtime-writer.mjs) that loads the built libraries, creates a Session with seqs 0 and 1 under compression `none` or `zstd`, and on the stdin line `tear` appends seqs 2 and 3. It replaces `FileHandle.prototype.writeFile`, which the backend appends a batch through, so that write stores its first `bytes` bytes and never settles, and prints the whole buffer the backend asked to append. The backend's own code runs unchanged.
+
+Expected bytes are TypeScript's: an event row is `JSON.stringify` of the event and an LF, as the backend writes it, and a migrated log is the one TypeScript's own migration writes from the same source in another root. Every final log is read back through a fresh TypeScript backend. Every case lists its Session directory at the end, so any file either runtime leaves outside its design fails it, and every older generation is hashed before and after. The seven cases run on every platform:
+
+- a TypeScript writer killed 40 bytes into its append, past the point where its row and the row Rust appends differ, holds the lock until its death, so a Rust `open` exits 3 with the log unchanged; then a TypeScript read returns seqs 0 and 1, Rust truncates the fragment and appends seq 2, and TypeScript appends seq 3, each to TypeScript's exact bytes;
+- a Zstd log a killed TypeScript writer left torn is refused by a Rust `open` with the exact message a TypeScript backend configured for compression `none` throws, every byte kept, and TypeScript's Zstd backend then reads seqs 0 and 1, appends seqs 2 and 3 after the committed frames, and reads all four back;
+- a Rust writer killed 5 bytes into the second row of its append refuses a TypeScript write `open` as owned until its death; then TypeScript reads the complete row as seq 2, drops the fragment, and appends seq 3, and Rust appends seq 4, each to the exact bytes;
+- a Rust writer killed 30 bytes into publishing a new Session leaves only its `session.v3.jsonl.<pid>-<n>.tmp` file and the lock file; TypeScript then reports the Session not found, creates it beside that file, and Rust resumes it, the temporary file left unchanged as Rust leaves it by design;
+- the released `v0-clean-turn`, `v1-packed-run-cited`, and `v2-clean-turn` sources of the [migrated restoration cases](#migrated-restoration-cases), each seeded as its canonical generation in three roots: TypeScript migrates and appends one row in the first, Rust migrates and appends it in the second, and TypeScript migrates and Rust appends it in the third. All three end with the same v3 bytes and the same events read through TypeScript, the source unchanged, and nothing beside the source, the v3 log, and the lock file.
+
+These negative controls were observed failing and then restored byte for byte:
+
+- the probe's `open` appending its row at time 9 instead of 3 fails every resume case but the Zstd one;
+- Rust keeping the bytes of a torn tail its rows differ from, by taking the shared prefix as the shorter length, fails the TypeScript torn-tail case;
+- Rust leaving a published file's temporary link fails the Rust torn-tail case and the three migrations;
+- TypeScript's torn-tail repair skipping its truncation fails the Rust torn-tail case and the Zstd case;
+- the probe adding a character to a refusal's message fails the Zstd case.
+
+Rust writes no Zstd log and write-opens none: its refusal is the encoding-mismatch message, which TypeScript also throws. The cases do not cover a torn Zstd tail read by Rust, a seeded or `cwd` Session, a migration's publication interrupted mid-write, contention during a migration, a full disk or a permission failure, or any released TypeScript tag, which D31 leaves out until scope 00 fixes the rollback support set. This evidence closes no roadmap scope.
 
 ## Prefix restoration cases
 

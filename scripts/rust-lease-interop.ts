@@ -1,10 +1,10 @@
 #!/usr/bin/env bun
 /**
- * Runs the cross-runtime Session write-lease spec under Node against the
- * built Rust lease probe, and accepts the run only when Vitest's JSON report
- * shows every expected case ran.
+ * Runs the cross-runtime Session write-lease and resume specs under Node
+ * against the built Rust lease probe, and accepts the run only when Vitest's
+ * JSON report shows every expected case of both ran.
  *
- * The spec skips itself unless `BAKE_RUST_LEASE_PROBE` or its
+ * The specs skip themselves unless `BAKE_RUST_LEASE_PROBE` or its
  * `DSH_RUST_LEASE_PROBE` spelling names the probe. The runtime suite's setup
  * clears every `BAKE_*` name, so the launcher sets both for its child only.
  * It never builds the probe or the Node libraries; a missing artifact fails
@@ -15,8 +15,8 @@
  * The launcher owns one private temporary directory for the report and for
  * its children's `TMPDIR`, `TMP`, and `TEMP`, and removes it after they
  * settle. On POSIX each child runs in its own process group, so cancellation
- * and the final reap reach the holders Vitest starts; on Windows cancellation
- * terminates the child's process tree with `taskkill /T /F`.
+ * and the final reap reach the holders and writers Vitest starts; on Windows
+ * cancellation terminates the child's process tree with `taskkill /T /F`.
  *
  * Usage: `bun scripts/rust-lease-interop.ts [--probe <path>]`
  */
@@ -30,10 +30,8 @@ import { isDeepStrictEqual, parseArgs } from 'node:util'
 const ROOT = resolve(import.meta.dir, '..')
 const PACKAGE = join(ROOT, 'packages/session/session-persistence-jsonl')
 const POSIX = process.platform !== 'win32'
-/** The focused spec, relative to the repository root. */
-export const SPEC = 'packages/session/session-persistence-jsonl/tests/lease.cross-runtime.spec.ts'
 export const DEFAULT_PROBE = join(ROOT, 'rust/target/debug', `bake-session-lease-probe${POSIX ? '' : '.exe'}`)
-/** Built packages the spec's Node holder imports, resolved as that holder resolves them. */
+/** Built packages the specs' Node holder and writer import, resolved as they resolve them. */
 const BUILT_IMPORTS = ['@deepseek-ai/cordis', 'bake-session', 'bake-session-persistence', 'bake-session-persistence-jsonl'] as const
 /** Budget for the built-library import check, which loads a few modules and the flock addon. */
 const IMPORT_CHECK_MS = 30_000
@@ -43,65 +41,113 @@ const STOP_GRACE_MS = 10_000
 const REAP_MS = 5_000
 const STDERR_LIMIT = 16 * 1024
 
-/** The spec's suite title when it runs, as opposed to its opt-in skip title. */
-export const SUITE = 'cross-runtime write lease'
-/** Cases Windows skips, having no `SIGSTOP`; every other platform must pass them. */
-export const POSIX_ONLY_CASES = [
+/** One spec the launcher runs: its path, its suite title when it runs, and the cases it must report. */
+export interface InteropSpec {
+  /** The spec, relative to the repository root. */
+  readonly spec: string
+  /** The spec's suite title when it runs, as opposed to its opt-in skip title. */
+  readonly suite: string
+  /** Every case the spec must report, each exactly once. A renamed case must be renamed here too. */
+  readonly cases: readonly string[]
+  /** Cases Windows skips, having no `SIGSTOP`; every other platform must pass them. */
+  readonly posixOnly: readonly string[]
+}
+
+const LEASE_POSIX_ONLY = [
   'a stopped Rust holder still refuses TypeScript, and only its death permits takeover (POSIX only)',
   'a stopped Node holder still refuses Rust, and only its death permits takeover (POSIX only)',
 ] as const
-/** Every case the spec must report, each exactly once. A renamed case must be renamed here too. */
-export const EXPECTED_CASES = [
-  'a live Rust holder refuses a TypeScript writer with the exact owned error while reads continue, and its crash permits TypeScript takeover',
-  'a Rust holder\'s graceful release permits a TypeScript writer to append seq 2',
-  'a live Node holder refuses a Rust writer with exit 3 and the exact message, and its crash permits Rust takeover',
-  'a Node holder\'s graceful release permits a Rust writer to append seq 2',
-  'an in-process TypeScript write handle refuses a Rust writer, and its close permits Rust takeover',
-  'a Rust hold-open of a TypeScript-created log refuses TypeScript, and its release permits TypeScript takeover',
-  'a Rust hold-open of a TypeScript-created log refuses TypeScript, and its crash permits TypeScript takeover',
-  ...POSIX_ONLY_CASES,
-] as const
+
+/** Write-lease exclusion and takeover between the runtimes. */
+export const LEASE_SPEC: InteropSpec = {
+  spec: 'packages/session/session-persistence-jsonl/tests/lease.cross-runtime.spec.ts',
+  suite: 'cross-runtime write lease',
+  cases: [
+    'a live Rust holder refuses a TypeScript writer with the exact owned error while reads continue, and its crash permits TypeScript takeover',
+    'a Rust holder\'s graceful release permits a TypeScript writer to append seq 2',
+    'a live Node holder refuses a Rust writer with exit 3 and the exact message, and its crash permits Rust takeover',
+    'a Node holder\'s graceful release permits a Rust writer to append seq 2',
+    'an in-process TypeScript write handle refuses a Rust writer, and its close permits Rust takeover',
+    'a Rust hold-open of a TypeScript-created log refuses TypeScript, and its release permits TypeScript takeover',
+    'a Rust hold-open of a TypeScript-created log refuses TypeScript, and its crash permits TypeScript takeover',
+    ...LEASE_POSIX_ONLY,
+  ],
+  posixOnly: LEASE_POSIX_ONLY,
+}
+
+/** One runtime resuming a log the other wrote, left torn, or migrated (D31). */
+export const RESUME_SPEC: InteropSpec = {
+  spec: 'packages/session/session-persistence-jsonl/tests/resume.cross-runtime.spec.ts',
+  suite: 'cross-runtime resume',
+  cases: [
+    'a TypeScript writer killed mid-append leaves a torn tail that Rust truncates and resumes, to the bytes TypeScript reads back',
+    'a Zstd log a killed TypeScript writer left torn is refused by Rust with TypeScript\'s own message and kept byte for byte, and TypeScript resumes it',
+    'a Rust writer killed mid-append leaves a torn tail that TypeScript truncates and resumes, to the bytes Rust resumes after',
+    'a Rust writer killed while publishing a new Session leaves only its temporary file, beside which TypeScript creates the Session and Rust resumes it',
+    'a v0 log migrated by Rust or by TypeScript resumes in the other runtime to the same bytes, its source unchanged',
+    'a v1 log migrated by Rust or by TypeScript resumes in the other runtime to the same bytes, its source unchanged',
+    'a v2 log migrated by Rust or by TypeScript resumes in the other runtime to the same bytes, its source unchanged',
+  ],
+  posixOnly: [],
+}
+
+/** The specs one run covers, in the order Vitest is given them. */
+export const SPECS: readonly InteropSpec[] = [LEASE_SPEC, RESUME_SPEC]
 
 const record = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
 
-/**
- * Why a Vitest JSON report does not show a complete run of the spec on
- * `platform`: one file, exactly the {@link EXPECTED_CASES} under {@link SUITE},
- * every case passed except the {@link POSIX_ONLY_CASES} on Windows, which
- * must be skipped, and totals that agree.
- * @returns the problems found, empty when the report is acceptable.
- */
-export function reportProblems(report: unknown, platform: NodeJS.Platform): string[] {
-  if (!record(report)) return ['the report is not a JSON object']
+/** Why one test file's entry does not show a complete run of `plan` on `platform`. */
+function fileProblems(file: Record<string, unknown>, plan: InteropSpec, windows: boolean): string[] {
   const problems: string[] = []
-  const windows = platform === 'win32'
-  const files = report['testResults']
-  if (!Array.isArray(files) || files.length !== 1 || !record(files[0])) return [`the report must hold exactly one test file, got ${Array.isArray(files) ? files.length : 'none'}`]
-  const file = files[0]
-  const name = typeof file['name'] === 'string' ? file['name'].replaceAll('\\', '/') : ''
-  if (!name.endsWith(`/${SPEC}`)) problems.push(`the report's test file is ${JSON.stringify(file['name'])}, not ${SPEC}`)
-  if (file['status'] !== 'passed') problems.push(`the test file's status is ${JSON.stringify(file['status'])}`)
+  if (file['status'] !== 'passed') problems.push(`${plan.spec}: the test file's status is ${JSON.stringify(file['status'])}`)
   const cases = file['assertionResults']
-  if (!Array.isArray(cases)) return [...problems, 'the test file lists no cases']
-  const expected = new Set<string>(EXPECTED_CASES)
-  const posixOnly = new Set<string>(POSIX_ONLY_CASES)
+  if (!Array.isArray(cases)) return [...problems, `${plan.spec}: the test file lists no cases`]
+  const expected = new Set<string>(plan.cases)
+  const posixOnly = new Set<string>(plan.posixOnly)
   const seen = new Set<string>()
   for (const entry of cases) {
-    if (!record(entry) || typeof entry['title'] !== 'string') { problems.push('a case has no title'); continue }
+    if (!record(entry) || typeof entry['title'] !== 'string') { problems.push(`${plan.spec}: a case has no title`); continue }
     const title = entry['title']
     const status = entry['status']
     if (seen.has(title)) problems.push(`case reported more than once: ${title}`)
     seen.add(title)
     if (!expected.has(title)) problems.push(`unexpected case (${String(status)}): ${title}`)
-    if (!isDeepStrictEqual(entry['ancestorTitles'], [SUITE])) problems.push(`case outside the "${SUITE}" suite: ${JSON.stringify(entry['ancestorTitles'])} ${title}`)
+    if (!isDeepStrictEqual(entry['ancestorTitles'], [plan.suite])) problems.push(`case outside the "${plan.suite}" suite: ${JSON.stringify(entry['ancestorTitles'])} ${title}`)
     const skippable = windows && posixOnly.has(title)
     const ok = skippable ? status === 'skipped' || status === 'pending' : status === 'passed'
     if (!ok) problems.push(`case ${String(status)}, expected ${skippable ? 'skipped' : 'passed'}: ${title}`)
   }
-  for (const title of EXPECTED_CASES) if (!seen.has(title)) problems.push(`case missing from the report: ${title}`)
-  const skipped = windows ? POSIX_ONLY_CASES.length : 0
+  for (const title of plan.cases) if (!seen.has(title)) problems.push(`case missing from the report: ${title}`)
+  return problems
+}
+
+/**
+ * Why a Vitest JSON report does not show a complete run of `specs` on
+ * `platform`: one file per spec, each with exactly its cases under its suite,
+ * every case passed except each spec's POSIX-only cases on Windows, which
+ * must be skipped, and totals that agree.
+ * @returns the problems found, empty when the report is acceptable.
+ */
+export function reportProblems(report: unknown, platform: NodeJS.Platform, specs: readonly InteropSpec[] = SPECS): string[] {
+  if (!record(report)) return ['the report is not a JSON object']
+  const problems: string[] = []
+  const windows = platform === 'win32'
+  const files = report['testResults']
+  if (!Array.isArray(files) || files.length !== specs.length || !files.every(record)) {
+    return [`the report must hold exactly ${specs.length} test files, got ${Array.isArray(files) ? files.length : 'none'}`]
+  }
+  const unmatched = [...files]
+  for (const plan of specs) {
+    const index = unmatched.findIndex(file => typeof file['name'] === 'string' && file['name'].replaceAll('\\', '/').endsWith(`/${plan.spec}`))
+    const [file] = index < 0 ? [] : unmatched.splice(index, 1)
+    if (file === undefined) { problems.push(`the report has no test file ${plan.spec}`); continue }
+    problems.push(...fileProblems(file, plan, windows))
+  }
+  for (const file of unmatched) problems.push(`the report's test file ${JSON.stringify(file['name'])} is not an interop spec`)
+  const total = specs.reduce((sum, plan) => sum + plan.cases.length, 0)
+  const skipped = windows ? specs.reduce((sum, plan) => sum + plan.posixOnly.length, 0) : 0
   const totals = {
-    numTotalTests: EXPECTED_CASES.length, numPassedTests: EXPECTED_CASES.length - skipped,
+    numTotalTests: total, numPassedTests: total - skipped,
     numPendingTests: skipped, numFailedTests: 0, numTodoTests: 0, success: true,
   }
   for (const [key, value] of Object.entries(totals)) {
@@ -247,9 +293,9 @@ async function requireBuiltLibraries(cancellation: Cancellation, env: NodeJS.Pro
   }
 }
 
-/** Run the focused spec under Node with the probe selected for that child alone, then check its report. */
-async function runSpec(cancellation: Cancellation, env: NodeJS.ProcessEnv, reportPath: string): Promise<number> {
-  const argv = ['node', join(ROOT, 'node_modules/vitest/vitest.mjs'), 'run', SPEC,
+/** Run the focused specs under Node with the probe selected for that child alone, then check its report. */
+async function runSpecs(cancellation: Cancellation, env: NodeJS.ProcessEnv, reportPath: string): Promise<number> {
+  const argv = ['node', join(ROOT, 'node_modules/vitest/vitest.mjs'), 'run', ...SPECS.map(plan => plan.spec),
     '--reporter=default', '--reporter=json', `--outputFile.json=${reportPath}`] as const
   const result = await cancellation.run(new OwnedTree(argv, ROOT, env, ['ignore', 'inherit', 'inherit']))
   if (cancellation.signal !== undefined) return 1
@@ -274,7 +320,7 @@ async function runSpec(cancellation: Cancellation, env: NodeJS.ProcessEnv, repor
 
 const HELP = `usage: bun scripts/rust-lease-interop.ts [--probe <path>]
 
-Run ${SPEC}
+Run ${SPECS.map(plan => plan.spec).join('\nand ')}
 under Node against the built Rust lease probe, and require Vitest's JSON
 report to show every expected case passed (on Windows, the two POSIX-only
 stopped-holder cases skipped). Build the probe with
@@ -308,7 +354,7 @@ async function main(argv: readonly string[]): Promise<number> {
     const env = { ...process.env, TMPDIR: temp, TMP: temp, TEMP: temp }
     if (cancellation.signal === undefined) await requireBuiltLibraries(cancellation, env)
     code = cancellation.signal === undefined
-      ? await runSpec(cancellation, { ...env, BAKE_RUST_LEASE_PROBE: probe, DSH_RUST_LEASE_PROBE: probe }, join(run, 'report.json'))
+      ? await runSpecs(cancellation, { ...env, BAKE_RUST_LEASE_PROBE: probe, DSH_RUST_LEASE_PROBE: probe }, join(run, 'report.json'))
       : 1
   } catch (error) {
     // A setup problem exits 2; anything else, such as a process group that

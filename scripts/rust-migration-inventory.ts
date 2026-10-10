@@ -142,7 +142,7 @@ const PACKAGE_OVERRIDES: Readonly<Record<string, Partial<Rule>>> = {
 
 /** Tests outside any workspace package, by area; the first matching prefix wins. */
 const TEST_AREAS: readonly (Rule & { readonly id: string; readonly prefixes: readonly string[] })[] = [
-  { id: 'scripts:lease-interop', prefixes: ['scripts/rust-lease-interop.'], scopes: ['03'], disposition: 'reuse-oracle', reason: 'Requires complete cross-runtime Session writer-lease evidence, with only the platform-specific stopped-holder skips.' },
+  { id: 'scripts:lease-interop', prefixes: ['scripts/rust-lease-interop.'], scopes: ['03'], disposition: 'reuse-oracle', reason: 'Requires complete cross-runtime Session writer-lease and resume evidence, with only the platform-specific stopped-holder skips.' },
   { id: 'scripts:conformance', prefixes: ['scripts/rust-conformance/'], scopes: ['01'], disposition: 'reuse-oracle', reason: 'Synthetic comparison fixtures and observation checks qualify the migration harness, not runtime parity.' },
   { id: 'scripts:qualification-ledger', prefixes: ['scripts/rust-migration-ledger.'], scopes: ['01', '17'], disposition: 'reuse-oracle', reason: 'Evidence record integrity is separate from accepting a migration scope or release.' },
   { id: 'scripts:migration', prefixes: ['scripts/rust-migration-'], scopes: ['00'], disposition: 'replace-tooling', reason: 'Scope-00 migration bookkeeping; retired with the TypeScript oracle in scope 17.' },
