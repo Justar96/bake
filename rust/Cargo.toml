@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/bake-ai",
     "crates/bake-cli",
     "crates/bake-conformance",
     "crates/bake-tui",
@@ -15,6 +16,7 @@ license = "MIT"
 publish = false
 
 [workspace.dependencies]
+bake-ai = { path = "crates/bake-ai" }
 bake-tui = { path = "crates/bake-tui" }
 bake-tui-view = { path = "crates/bake-tui-view" }
 ratatui = { version = "=0.30.2", default-features = false, features = ["crossterm"] }
@@ -27,4 +29,9 @@ unicode-segmentation = "=1.13.3"
 unicode-width = "=0.2.2"
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = { version = "=1.0.151", features = ["float_roundtrip", "preserve_order"] }
-sha2 = { version = "=0.10.9", default-features = false }
+# The `bake-ai` provider runtime: Tokio for tasks and timers, reqwest over
+# rustls (ring, webpki roots) for HTTP/1.1 with chunked streaming bodies, and
+# regex for Pi's provider error classifiers. No native TLS or OpenSSL.
+tokio = { version = "=1.53.1", default-features = false }
+reqwest = { version = "=0.12.28", default-features = false, features = ["rustls-tls"] }
+regex = { version = "=1.13.1", default-features = false, features = ["std", "unicode-case", "unicode-perl"] }
