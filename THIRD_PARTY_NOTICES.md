@@ -223,6 +223,17 @@ Direct dependencies of the `pyproject.toml` manifests, plus `uv` as the developm
 | [`pytest`](https://github.com/pytest-dev/pytest) | MIT | test-only |
 | [`uv`](https://github.com/astral-sh/uv) | MIT / Apache-2.0 | development workflow tool |
 
+## Ported source (`rust/crates/bake-ai`)
+
+The Rust `bake-ai` crate ports code from these MIT-licensed projects. Its [`NOTICE`](rust/crates/bake-ai/NOTICE) file reproduces both license texts, and its module documentation names each source file.
+
+| Project | Ported revision | License |
+| --- | --- | --- |
+| [Pi](https://github.com/earendil-works/pi) `packages/ai`, Copyright (c) 2025 Mario Zechner | v1.1.0 (`abe508e1b89912adde45528136c3221eb69acdd7`) | MIT |
+| [partial-json](https://github.com/promplate/partial-json-parser-js), Copyright (c) 2023 Promplate Dev Team | 0.1.7 | MIT |
+
+The crate's Cargo dependencies are locked in [`rust/Cargo.lock`](rust/Cargo.lock) and keep their own licenses.
+
 ## Adapted designs
 
 Earlier terminal turn header revisions included a Braille port (`GLYPH_PULSE`) of the "Glyph Pulse" loader (`dotm-square-9`) from [dot-matrix](https://dotmatrix.zzzzshawn.cloud) ([source](https://github.com/zzzzshawn/matrix)), copyright (c) 2026 dot-matrix contributors, all rights reserved. That adaptation is covered by the project's custom license, which permits use in commercial and non-commercial products and prohibits, without written permission, publishing or distributing its components as standalone reusable components or as part of another component library, and selling or sublicensing them as a standalone offering. Bake's MIT license does not cover this adaptation; do not extract it into a reusable component or library.
