@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/bake-agent",
     "crates/bake-ai",
     "crates/bake-cli",
     "crates/bake-conformance",
@@ -16,6 +17,7 @@ license = "MIT"
 publish = false
 
 [workspace.dependencies]
+bake-agent = { path = "crates/bake-agent" }
 bake-ai = { path = "crates/bake-ai" }
 bake-tui = { path = "crates/bake-tui" }
 bake-tui-view = { path = "crates/bake-tui-view" }
