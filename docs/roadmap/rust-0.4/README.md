@@ -92,8 +92,8 @@ The effort bands are relative: **M** is a bounded subsystem; **L** spans multipl
 |---|---|---|---|---|
 | 00 | Approved support decisions and frozen comparison baseline | L | Complete behavior inventory and repeatable TypeScript oracle | In progress |
 | 01 | Rust workspace and conformance drivers | M | Native test executable and deliberately failing comparator controls | In progress: workspace, preview, [synthetic comparison harness](../../../conformance/README.md), and [native eval fixture adapter](../../../evals/README.md#native-fixture-adapter); [qualification ledger](ledger/README.md) records partial evidence; three [runtime request fixtures](../../../conformance/README.md#runtime-request-reconstruction) are captured; Rust replay and live native arm remain open |
-| 02 | Session types and pure projections | L | Historical replay and reconstructed-request equivalence | Planned |
-| 03 | Persistence, migrations, locking, and queries | XL | Cross-runtime reads/writes, crash recovery, writer exclusion | Planned |
+| 02 | Session types and pure projections | L | Pi's session entry tree and context rebuild ([D32](scope-00/support.md#decision-register)) | Planned |
+| 03 | Persistence, locking, and queries | XL | Pi's session files, crash recovery, writer exclusion ([D32](scope-00/support.md#decision-register)) | Planned |
 | 04 | Host processes and sandbox enforcement | XL | Real denied effects and process-tree quiescence on each OS | Planned |
 | 05 | Configuration, composition, credentials, and lifetime ownership | XL | Configuration precedence, scoped cleanup, login/storage parity | Planned |
 | 06 | Provider-neutral streaming and failures | L | Stream assembly, cancellation, retry, and usage equivalence | Planned |
@@ -315,6 +315,8 @@ During coexistence, run the current Bake gates for affected TypeScript paths and
 - The 0.3 maintenance owner, support window, fix-forward procedure, and post-cutover release rules are published.
 
 ## Dev Note
+
+**No TypeScript user migration (2026-10-10, [D32](scope-00/support.md#decision-register)).** 0.4 is a new binary that users install; it neither migrates nor interoperates with a 0.3 TypeScript install. It writes Pi's session format and keeps three Bake contracts: the CLIProxyAPI route, the sandbox and permissions, and the `~/.bake` home with its existing settings and credentials. The Bake Session readers, migrations, writer, and TypeScript conformance harnesses described below are removed in a follow-up change, and scopes 02 and 03 port Pi's session manager instead ([plan](pi-first-plan.md#scope-plan)).
 
 **Port source changed on 2026-10-09 ([D22](scope-00/support.md#decision-register)).** Pi is now the primary source and Bake's TypeScript runtime a selective reference. The [Pi-first scope plan](pi-first-plan.md) re-plans scopes 04 to 17 around Pi's loop, session services, providers, and tools within the retained contracts, pins Pi v1.1.0 and a main revision, and records D24 (keep Bake's sandbox and permissions) and D25 (import the CLIProxyAPI route and default model read-only). The landed scope 02 and 03 groundwork below reads and writes Session format 3, which D22 and [D23](scope-00/support.md#decision-register) keep.
 
