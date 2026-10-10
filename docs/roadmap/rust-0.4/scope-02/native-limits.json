@@ -2108,6 +2108,25 @@
   {
    "variants": [],
    "stageNames": [
+    "migration/target-tail"
+   ],
+   "id": "log-file-migration-target-tail",
+   "crate": "bake-session",
+   "cases": [
+    {
+     "table": "session/migration-publication-cases.json",
+     "name": "migration/target-tail",
+     "count": 1
+    }
+   ],
+   "kind": "filesystem",
+   "classification": "unreachable",
+   "evidence": "Only a writer outside the Session directory's write lock publishes the migrated target and appends to it while another writer migrates: every released Bake writer takes the lock before it reads a selected generation or publishes a migration and selects the generation again under it (packages/session/session-persistence-jsonl/src/index.ts:364-371 and requireStoredLog at 491-492; v0.1.1:packages/session/session-persistence-jsonl/src/index.ts:368-375 and 495-496), as Rust's PlainLogFile::open does, so a target a lock-holding writer published before the lock was taken is opened, not migrated over and before its first append or materialization (index.ts:316-319, 873-883), and the v0 to v2 writers never write session.v3.jsonl. A target that exists before findLog runs is selected as the current generation and never migrated over (index.ts:1364-1397), and a case-insensitive alias is refused as noncanonical before its bytes are read (generation.ts:848-860). The Rust model refuses because TypeScript would accept the target and append after bytes its handle never read (index.ts:1242-1257)",
+   "followUp": "None."
+  },
+  {
+   "variants": [],
+   "stageNames": [
     "header/header-budget"
    ],
    "id": "cli-header-budget",

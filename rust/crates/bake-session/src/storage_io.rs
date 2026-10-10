@@ -31,8 +31,11 @@
 //! - Reads recovery depends on: [`StorageIo::read`] of a whole log,
 //!   [`StorageIo::read_dir`] of a root, project, or Session directory,
 //!   [`StorageIo::canonicalize`] for the stored-identity check,
-//!   [`StorageIo::probe`] for the flat-layout probe, and
-//!   [`StorageIo::stat_dir`] for the Win32 directory walk.
+//!   [`StorageIo::probe`] for the flat-layout probe,
+//!   [`StorageIo::stat_dir`] for the Win32 directory walk, and
+//!   [`StorageIo::stat`], the [`FileStat`] a migration compares, as
+//!   TypeScript's `readStableSnapshot`, source check, and
+//!   `inspectExpectedCurrent` compare a `stat` or `lstat`.
 //!
 //! Closing a file and releasing a lock are not operations: they are what the
 //! kernel does when a process dies, so a crashed handle's files may still be
@@ -77,6 +80,7 @@ pub enum StorageOp {
     Canonicalize,
     Probe,
     StatDir,
+    Stat,
 }
 
 /// One listed directory entry, symbolic links not followed.
@@ -85,6 +89,92 @@ pub struct ListedEntry {
     pub name: OsString,
     pub is_dir: bool,
     pub is_file: bool,
+}
+
+/// What kind of entry [`StorageIo::stat`] found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileKind {
+    File,
+    Dir,
+    /// A symbolic link, which only a `stat` that does not follow links
+    /// reports.
+    Symlink,
+    /// Anything else: a FIFO, socket, or device.
+    Other,
+}
+
+/// The stat identity TypeScript compares with `identity()` in
+/// `generation.ts`: its `dev`, `ino`, `size`, `mtimeNs`, and `ctimeNs`.
+///
+/// On Unix every field is the one Node reads. On Windows stable std reads
+/// neither the volume serial number, the file index, nor the change time,
+/// so `dev` and `ino` are 0, `mtime_ns` is the last write time and
+/// `ctime_ns` the creation time, each in 100 ns units: a change that keeps
+/// the size and both times, which Node would still see through the file
+/// index or the change time, is not seen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FileIdentity {
+    pub dev: u64,
+    pub ino: u64,
+    pub size: u64,
+    pub mtime_ns: i128,
+    pub ctime_ns: i128,
+}
+
+/// What [`StorageIo::stat`] reports of one path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FileStat {
+    pub kind: FileKind,
+    pub identity: FileIdentity,
+}
+
+impl FileStat {
+    /// The stat of `metadata`, as [`RealIo::stat`] reads it.
+    pub fn of(metadata: &fs::Metadata) -> Self {
+        let kind = metadata.file_type();
+        let kind = if kind.is_symlink() {
+            FileKind::Symlink
+        } else if kind.is_file() {
+            FileKind::File
+        } else if kind.is_dir() {
+            FileKind::Dir
+        } else {
+            FileKind::Other
+        };
+        #[cfg(unix)]
+        let identity = {
+            use std::os::unix::fs::MetadataExt;
+            let nanos =
+                |seconds: i64, nanos: i64| i128::from(seconds) * 1_000_000_000 + i128::from(nanos);
+            FileIdentity {
+                dev: metadata.dev(),
+                ino: metadata.ino(),
+                size: metadata.size(),
+                mtime_ns: nanos(metadata.mtime(), metadata.mtime_nsec()),
+                ctime_ns: nanos(metadata.ctime(), metadata.ctime_nsec()),
+            }
+        };
+        #[cfg(windows)]
+        let identity = {
+            use std::os::windows::fs::MetadataExt;
+            FileIdentity {
+                dev: 0,
+                ino: 0,
+                size: metadata.file_size(),
+                mtime_ns: i128::from(metadata.last_write_time()),
+                ctime_ns: i128::from(metadata.creation_time()),
+            }
+        };
+        #[cfg(not(any(unix, windows)))]
+        let identity = FileIdentity {
+            dev: 0,
+            ino: 0,
+            size: metadata.len(),
+            mtime_ns: 0,
+            ctime_ns: 0,
+        };
+        Self { kind, identity }
+    }
 }
 
 /// Why [`StorageIo::try_lock`] took no lock.
@@ -144,6 +234,9 @@ pub trait StorageIo: Debug + Send + Sync {
     /// `stat(path).isDirectory()`, following a symbolic link; `None` when
     /// `path` is absent.
     fn stat_dir(&self, path: &Path) -> io::Result<Option<bool>>;
+    /// `stat(path)` when `follow` is set, following a symbolic link, or
+    /// `lstat(path)` otherwise; an absent path is an error, as in Node.
+    fn stat(&self, path: &Path, follow: bool) -> io::Result<FileStat>;
     /// The platform whose write sequence the writer issues; see the module
     /// comment.
     fn write_platform(&self) -> PathPlatform {
@@ -333,6 +426,15 @@ impl StorageIo for RealIo {
             Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
             Err(error) => Err(error),
         }
+    }
+
+    fn stat(&self, path: &Path, follow: bool) -> io::Result<FileStat> {
+        let metadata = if follow {
+            fs::metadata(path)?
+        } else {
+            fs::symlink_metadata(path)?
+        };
+        Ok(FileStat::of(&metadata))
     }
 }
 

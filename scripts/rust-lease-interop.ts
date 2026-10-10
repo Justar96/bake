@@ -49,7 +49,10 @@ export interface InteropSpec {
   readonly suite: string
   /** Every case the spec must report, each exactly once. A renamed case must be renamed here too. */
   readonly cases: readonly string[]
-  /** Cases Windows skips, having no `SIGSTOP`; every other platform must pass them. */
+  /**
+   * Cases Windows skips, having no `SIGSTOP`, mode-based directory permissions,
+   * or link-then-remove publication; every other platform must pass them.
+   */
   readonly posixOnly: readonly string[]
 }
 
@@ -75,7 +78,18 @@ export const LEASE_SPEC: InteropSpec = {
   posixOnly: LEASE_POSIX_ONLY,
 }
 
-/** One runtime resuming a log the other wrote, left torn, or migrated (D31). */
+const RESUME_POSIX_ONLY = [
+  'a Rust writer killed after linking its migrated log leaves the temporary file as its second link, and TypeScript then Rust resume the log (POSIX only)',
+  'a TypeScript writer killed after linking its migrated log leaves the temporary file as its second link, and Rust then TypeScript resume the log (POSIX only)',
+  'a stopped Rust migration still refuses TypeScript, and only its death lets TypeScript migrate (POSIX only)',
+  'a stopped TypeScript migration still refuses Rust, and only its death lets Rust migrate (POSIX only)',
+  'a read-only Session directory refuses both runtimes\' migrations with a permission error and leaves the tree unchanged (POSIX only)',
+] as const
+
+/**
+ * One runtime resuming a log the other wrote, left torn, or migrated (D31),
+ * and migrations that compete, are killed, or are refused alike.
+ */
 export const RESUME_SPEC: InteropSpec = {
   spec: 'packages/session/session-persistence-jsonl/tests/resume.cross-runtime.spec.ts',
   suite: 'cross-runtime resume',
@@ -87,8 +101,17 @@ export const RESUME_SPEC: InteropSpec = {
     'a v0 log migrated by Rust or by TypeScript resumes in the other runtime to the same bytes, its source unchanged',
     'a v1 log migrated by Rust or by TypeScript resumes in the other runtime to the same bytes, its source unchanged',
     'a v2 log migrated by Rust or by TypeScript resumes in the other runtime to the same bytes, its source unchanged',
+    'the runtimes migrate one v0 log concurrently: a Rust migration paused before publication holds the lock, TypeScript is refused, and both resume the one target TypeScript\'s migration writes, its source unchanged',
+    'the runtimes migrate one v0 log concurrently: a TypeScript migration paused before publication holds the lock, Rust is refused, and both resume the one target TypeScript\'s migration writes, its source unchanged',
+    'the runtimes migrate one v1 log concurrently: a Rust migration paused before publication holds the lock, TypeScript is refused, and both resume the one target TypeScript\'s migration writes, its source unchanged',
+    'the runtimes migrate one v1 log concurrently: a TypeScript migration paused before publication holds the lock, Rust is refused, and both resume the one target TypeScript\'s migration writes, its source unchanged',
+    'the runtimes migrate one v2 log concurrently: a Rust migration paused before publication holds the lock, TypeScript is refused, and both resume the one target TypeScript\'s migration writes, its source unchanged',
+    'the runtimes migrate one v2 log concurrently: a TypeScript migration paused before publication holds the lock, Rust is refused, and both resume the one target TypeScript\'s migration writes, its source unchanged',
+    'a Rust writer killed while writing its migration temporary file leaves only that file, beside which TypeScript migrates and Rust resumes',
+    'a TypeScript writer killed while writing its migration temporary file leaves only that file, beside which Rust migrates and TypeScript resumes',
+    ...RESUME_POSIX_ONLY,
   ],
-  posixOnly: [],
+  posixOnly: RESUME_POSIX_ONLY,
 }
 
 /** The specs one run covers, in the order Vitest is given them. */
@@ -322,8 +345,8 @@ const HELP = `usage: bun scripts/rust-lease-interop.ts [--probe <path>]
 
 Run ${SPECS.map(plan => plan.spec).join('\nand ')}
 under Node against the built Rust lease probe, and require Vitest's JSON
-report to show every expected case passed (on Windows, the two POSIX-only
-stopped-holder cases skipped). Build the probe with
+report to show every expected case passed (on Windows, the POSIX-only
+cases skipped). Build the probe with
 \`cd rust && cargo build --locked -p bake-conformance\` and the Node libraries
 with \`bun run build:runtime\` first; this script builds neither.
 

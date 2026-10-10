@@ -76,7 +76,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use bake_session::storage_io::{ListedEntry, LockFailure, RealIo, StorageIo, StorageOp};
+use bake_session::storage_io::{FileStat, ListedEntry, LockFailure, RealIo, StorageIo, StorageOp};
 use bake_session::{
     LogFileRefusal, PathPlatform, PlainLogFile,
     js_string::{from_rust, to_rust},
@@ -618,6 +618,10 @@ impl StorageIo for FaultIo {
 
     fn stat_dir(&self, path: &Path) -> io::Result<Option<bool>> {
         self.run(StorageOp::StatDir, || RealIo.stat_dir(path), |_| {})
+    }
+
+    fn stat(&self, path: &Path, follow: bool) -> io::Result<FileStat> {
+        self.run(StorageOp::Stat, || RealIo.stat(path, follow), |_| {})
     }
 
     fn write_platform(&self) -> PathPlatform {
@@ -1462,7 +1466,30 @@ fn failure_sweep(cases: &[Case], scenario: &Scenario, platform: PathPlatform) ->
         }
     }
     // A failure, its retry, and a crash or power cut at every later point.
-    for index in 0..ops.len() {
+    // A failed `stat` of a migration leaves the disk state a failure of the
+    // operation beside it leaves: the read before or after it, the
+    // read-back of the temporary file, or the directory sync after the
+    // link, each of which removes the temporary file as it does. The retry
+    // is a new write `open` of that state, so its later points are swept
+    // there. Likewise a failed read-only operation directly followed by
+    // another, such as the second `findLog` under the lock, leaves the disk
+    // state and refusal path a failure of the next one leaves, so only the
+    // last of such a run is swept.
+    let read_only = |op: &StorageOp| {
+        matches!(
+            op,
+            StorageOp::Read
+                | StorageOp::ReadDir
+                | StorageOp::Canonicalize
+                | StorageOp::Probe
+                | StorageOp::StatDir
+                | StorageOp::Stat
+        )
+    };
+    for (index, op) in ops.iter().enumerate() {
+        if *op == StorageOp::Stat || read_only(op) && ops.get(index + 1).is_some_and(read_only) {
+            continue;
+        }
         let mut faults = vec![Fault::Fail(Failure::Eio)];
         if let Some(bytes) = writes.get(&index) {
             faults.push(Fault::TornFail {

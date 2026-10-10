@@ -18,14 +18,18 @@
 //!   which must find exactly one project directory holding a canonical
 //!   generation, then the Session directory's write lock, taken before the
 //!   generation is read; every later refusal releases the lock and keeps its
-//!   file. The generation must not be newer than the current one. A current
+//!   file. Under the lock `findLog` runs again, as `requireStoredLog` runs
+//!   it, so a generation another writer published or removed before the
+//!   lock was taken is the one opened. The generation must not be newer than the current one. A current
 //!   generation's bytes are opened as [`PlainAppendLog::open`] opens them,
 //!   and, as `assertStoredIdentity` checks it, the header must carry the
 //!   requested id and its id and `cwd` must name the selected path, by
 //!   spelling or else by `realpath`, which resolves a case alias on a
 //!   case-insensitive volume, or a symbolic link, to one file.
 //!   An older generation, format v0, v1, or v2, is migrated as the backend
-//!   prepares and publishes it: its header and rows are parsed, its header
+//!   prepares and publishes it: it is read as `readStableSnapshot` reads
+//!   it, between two stats that must agree, its header and rows are parsed,
+//!   its header
 //!   identity is checked against the requested id and the selected path as a
 //!   current header's is, its
 //!   rows are decoded by the released codec in recoverable mode and read
@@ -33,10 +37,21 @@
 //!   check ([`check_transformed_artifact`]), and it is encoded, written to
 //!   a synced `session.migration.<token>.jsonl.tmp` beside the source, and
 //!   published as a new `session.v3.jsonl` as TypeScript's
-//!   `publishPreparedMigration` publishes it: by hard link and a sync of the
-//!   Session directory on POSIX, by a write-through move on Win32, so a
-//!   failed write, or a process killed before the publication, never leaves
-//!   that file. The source is never changed.
+//!   `publishPreparedMigration` publishes it: the temporary file is read back
+//!   and must hold the encoded bytes, the source must still have the stat
+//!   identity its read saw, or the open is refused with
+//!   `JsonlGenerationSourceChangedError`'s message, and the file is then
+//!   published by hard link and a sync of the Session directory on POSIX,
+//!   by a write-through move on Win32, so a failed write, or a process
+//!   killed before the publication, never leaves that file. When another
+//!   writer published `session.v3.jsonl` first, it is inspected as
+//!   `inspectExpectedCurrent` and the prefix verifier inspect it: a file
+//!   holding exactly the migrated bytes is accepted and opened; a case
+//!   alias, a symbolic link, a file that is not regular, or one shorter than
+//!   or different from the migrated bytes is refused with
+//!   `JsonlGenerationTargetConflictError`'s reason in TypeScript's
+//!   corruption message; and one that holds more is refused as
+//!   [`LogFileLimit::Migration`] `target-tail`. The source is never changed.
 //!   The handle then holds those bytes, opened as a current log. The
 //!   in-memory half, the read `open`'s preparation without its publication,
 //!   is [`released_generation_header`] followed by
@@ -70,9 +85,9 @@
 //! `SessionPersistenceNotFoundError`, and duplicate-id, flat-layout,
 //! encoding-mismatch, and stored-identity `Error` carry are returned with
 //! their exact messages,
-//! as are the `SessionPersistenceCorruptionError` and
-//! `SessionFormatUnsupportedError` a migration reports, which name the
-//! source path.
+//! as are the `SessionPersistenceCorruptionError`,
+//! `SessionFormatUnsupportedError`, and `JsonlGenerationSourceChangedError` a
+//! migration reports, which name the source path.
 //!
 //! An id's directory is named by `encodeSegment` alone, as Node names it on
 //! POSIX, so an id such as `con`, `nightly.`, or `aux.txt` is laid out as
@@ -99,13 +114,19 @@
 //! creates, which refuse a second handle of one Session within that
 //! instance, are not modelled; exclusion between a Rust value and a
 //! TypeScript handle is tested between processes only, with uncompressed
-//! logs, as the `write_lease` module describes. The publication's verifier,
-//! file modes, Zstd
+//! logs, as the `write_lease` module describes. The publication verifier's
+//! decoding and checks of the staged file, which the encoded bytes passed
+//! here as a current log already, file modes, Zstd
 //! compression, and the `validateStoredEvents` check of an opened log are
 //! not modelled. Opening a log TypeScript's validation refuses is
 //! outside this model's domain. So is migrating a log whose v3
 //! result the publication's verifier or `validateStoredEvents` refuses: Rust
-//! writes the migrated file where TypeScript refuses and writes nothing. So
+//! writes the migrated file where TypeScript refuses and writes nothing.
+//! A staged file that reads back changed, which only another process can
+//! cause, and a failure TypeScript's verifier worker reports with Node's
+//! own message, are I/O failures here, with no TypeScript message claimed.
+//! On Windows the source's stat identity lacks the file index and change
+//! time Node compares, as [`crate::storage_io::FileIdentity`] describes. So
 //! is a path the filesystem refuses, such as one longer than a file or path
 //! name may be, or a root another process changes, a lock file removed or
 //! replaced included. A symbolic link is followed where a path is joined,
@@ -152,7 +173,7 @@ use crate::fork::holds_negative_zero;
 use crate::json_parse::{Deep, dismantle};
 use crate::log_layout::{CURRENT_LOG_FILENAME, canonical_generation, encode_segment, log_path};
 use crate::released_rows::{ParseStop, parse_released_header, parse_released_rows};
-use crate::storage_io::{RealIo, StorageIo};
+use crate::storage_io::{FileIdentity, FileKind, RealIo, StorageIo};
 use crate::v1_codec::decode_v0_v1_items_before_finish;
 use crate::v2_to_v3::{RecoverableRefusal, recoverable_refusal, rethrows_recovery_issue};
 use crate::write_lease::{LeaseRefusal, WriteLease};
@@ -219,10 +240,16 @@ pub enum LogFileRefusal {
     /// which names the selected path, and the other path when the id
     /// matches. The lock file is kept.
     StoredIdentity { message: String },
-    /// Migrating an older generation found it corrupt; TypeScript throws
-    /// `SessionPersistenceCorruptionError` with this exact message, which
-    /// names the source path. No file was written.
+    /// Migrating an older generation found it corrupt, or found its
+    /// publication target already taken by a file it does not accept;
+    /// TypeScript throws `SessionPersistenceCorruptionError` with this exact
+    /// message, which names the source path. No file was written.
     Corrupt { message: String },
+    /// The older generation a write `open` migrated changed between its read
+    /// and the publication of its migrated successor; TypeScript throws
+    /// `JsonlGenerationSourceChangedError` with this exact message, which
+    /// names the source path. No file was written.
+    SourceChanged { message: String },
     /// A format edge, or the catalog's final check of the migrated log,
     /// refused to migrate an older generation; TypeScript throws
     /// `SessionFormatUnsupportedError` with this exact message, which names
@@ -253,6 +280,7 @@ impl LogFileRefusal {
             | Self::LegacyLayout { message }
             | Self::StoredIdentity { message }
             | Self::Corrupt { message }
+            | Self::SourceChanged { message }
             | Self::Unsupported { message } => Some(message),
             Self::Append(refusal) => refusal.message(),
             Self::Create(_) | Self::NativeSubset(_) | Self::Io(_) => None,
@@ -309,6 +337,13 @@ pub enum LogFileLimit {
     ///   crate's encoder, such as a number with a fraction that TypeScript
     ///   writes, or its encoded bytes do not open as [`PlainAppendLog::open`]
     ///   opens a current log. TypeScript may migrate such a log.
+    /// - `target-tail`: another writer published the migrated log first and
+    ///   appended to it, so the file begins with the migrated bytes and
+    ///   holds more. TypeScript accepts it and opens the handle at the
+    ///   migrated events, appending after bytes its handle never read; the
+    ///   model, which holds the file's bytes, refuses instead. Only a writer
+    ///   outside the write lock reaches it. The file is kept, and the
+    ///   temporary file removed, as TypeScript leaves them.
     Migration(String),
 }
 
@@ -402,6 +437,17 @@ impl PlainLogFile {
             .parent()
             .ok_or_else(|| io::Error::other("a Session log path has a directory"))?;
         let lease = acquire_lease(&*io, dir, id)?;
+        // `requireStoredLog` selects again under the lock: a writer that held
+        // it may have published or removed a generation since the first look.
+        let mut found = find_generations(&*io, root, &encoded)?;
+        if let Some(refusal) = duplicate(id, &found) {
+            return Err(refusal);
+        }
+        let Some(selected) = found.pop() else {
+            return Err(LogFileRefusal::NotFound {
+                message: format!("session \"{id}\" not found"),
+            });
+        };
         if selected.version < CURRENT_SESSION_FORMAT_VERSION {
             return Self::migrate(io, root, id, &encoded, &selected, lease, source_budget);
         }
@@ -442,7 +488,7 @@ impl PlainLogFile {
         lease: WriteLease,
         source_budget: usize,
     ) -> Result<Self, LogFileRefusal> {
-        let bytes = io.read(&selected.path)?;
+        let (bytes, source_identity) = read_stable(&*io, &selected.path)?;
         let platform = PathPlatform::host();
         let refusal = |refused: ReleasedGenerationRefusal| refused.into_refusal(id, selected);
         // `validateSourceIdentity` checks a header its codec reads, before any row.
@@ -482,7 +528,29 @@ impl PlainLogFile {
         let log = PlainAppendLog::open(&bytes, platform, source_budget)
             .map_err(|_| refusal(ReleasedGenerationRefusal::Limit("scan".to_owned())))?;
         let path = selected.path.with_file_name(CURRENT_LOG_FILENAME);
-        publish_migration(&*io, &path, &bytes)?;
+        let spelled =
+            |path: &Path| crate::js_string::from_rust(&path.display().to_string()).into_owned();
+        publish_migration(&*io, &selected.path, source_identity, &path, &bytes).map_err(
+            |failure| match failure {
+                PublishRefusal::Io(error) => LogFileRefusal::Io(error),
+                PublishRefusal::TargetConflict(reason) => {
+                    refusal(ReleasedGenerationRefusal::Corrupt(format!(
+                        "JsonlGenerationTargetConflictError: current session generation \
+                         already exists at \"{}\": {reason}",
+                        spelled(&path)
+                    )))
+                }
+                PublishRefusal::SourceChanged => LogFileRefusal::SourceChanged {
+                    message: format!(
+                        "historical session generation changed during migration: \"{}\"",
+                        spelled(&selected.path)
+                    ),
+                },
+                PublishRefusal::TargetTail => {
+                    refusal(ReleasedGenerationRefusal::Limit("target-tail".to_owned()))
+                }
+            },
+        )?;
         Ok(Self {
             io,
             path,
@@ -1004,14 +1072,83 @@ fn remove_temporary(io: &dyn StorageIo, staged: &Path, error: io::Error) -> io::
     }
 }
 
-/// `publishPreparedMigration` without its verifier and source check: write
-/// `bytes` to a synced `session.migration.<token>.jsonl.tmp` beside `path`,
-/// then publish it at `path`. On POSIX that is a hard link, which fails if
-/// `path` exists, then a sync of the directory and the removal of the
-/// temporary file, whose failure is ignored; on Win32 it is a write-through
-/// move. A failed write, sync, link, or move removes the temporary file and
-/// never leaves a partial file at `path`.
-fn publish_migration(io: &dyn StorageIo, path: &Path, bytes: &[u8]) -> io::Result<()> {
+/// One stable revision of the file at `path` and the identity that proved
+/// it stable, as TypeScript's `readStableSnapshot` reads a migration source:
+/// a stat, the read, and a stat, retried once when the two stats differ;
+/// when they differ again, the bytes up to the first stat's size and that
+/// stat's identity, which the source check then compares.
+fn read_stable(io: &dyn StorageIo, path: &Path) -> io::Result<(Vec<u8>, FileIdentity)> {
+    let mut before = io.stat(path, true)?.identity;
+    let mut attempt = 0;
+    loop {
+        let mut bytes = io.read(path)?;
+        let after = io.stat(path, true)?.identity;
+        if before == after {
+            return Ok((bytes, after));
+        }
+        if attempt == 1 {
+            // `subarray(0, size)` clamps to the bytes read.
+            let size = usize::try_from(before.size).unwrap_or(usize::MAX);
+            bytes.truncate(size);
+            return Ok((bytes, before));
+        }
+        attempt += 1;
+        before = after;
+    }
+}
+
+/// Why [`publish_migration`] published nothing the handle can hold.
+enum PublishRefusal {
+    /// A filesystem operation failed; no TypeScript message is claimed.
+    Io(io::Error),
+    /// The target already exists and is not accepted; this is the reason
+    /// TypeScript's `JsonlGenerationTargetConflictError` carries.
+    TargetConflict(String),
+    /// The source's stat identity changed since its stable read.
+    SourceChanged,
+    /// The target begins with the migrated bytes and holds more; see
+    /// [`LogFileLimit::Migration`].
+    TargetTail,
+}
+
+impl From<io::Error> for PublishRefusal {
+    fn from(error: io::Error) -> Self {
+        Self::Io(error)
+    }
+}
+
+/// `publishPreparedMigration`: write `bytes` to a synced
+/// `session.migration.<token>.jsonl.tmp` beside `path`, verify it, check
+/// that `source` still has the `source_identity` its stable read saw, then
+/// publish the temporary file at `path`, by a hard link and a sync of the
+/// directory on POSIX or a write-through move on Win32, neither of which
+/// replaces an existing file.
+///
+/// TypeScript's verifier decodes the temporary file in a worker and
+/// compares its bytes and digest with the ones written. Here the encoded
+/// bytes already opened as a current log, so the file is read back and
+/// compared with them; a difference, which only another process can make,
+/// is an I/O failure. A changed source is
+/// [`PublishRefusal::SourceChanged`].
+///
+/// When `path` already exists, another writer published first, and the
+/// existing file is inspected as `inspectExpectedCurrent` and the prefix
+/// verifier inspect it: see [`accept_existing_target`]. An accepted target
+/// is the published log.
+///
+/// After a POSIX publication the temporary file is removed, and a failed
+/// removal is ignored; the new log is then stat'ed, as TypeScript stats it
+/// for its revision, and a failed stat fails the operation with the log
+/// published. Every other failure removes the temporary file, reporting a
+/// failed removal with the failure, and never leaves a partial file at
+/// `path`.
+fn publish_migration(
+    io: &dyn StorageIo,
+    source: &Path,
+    source_identity: FileIdentity,
+    path: &Path,
+    bytes: &[u8],
+) -> Result<(), PublishRefusal> {
     let dir = parent(path)?;
     let staged = write_synced_temp(io, dir, "session.migration.", ".jsonl.tmp", bytes).map_err(
         |failure| match failure.staged {
@@ -1019,16 +1156,129 @@ fn publish_migration(io: &dyn StorageIo, path: &Path, bytes: &[u8]) -> io::Resul
             None => failure.error,
         },
     )?;
-    if io.write_platform() == PathPlatform::Win32 {
-        return io
-            .rename_new(&staged, path)
-            .map_err(|error| remove_temporary(io, &staged, error));
+    let published = (|| {
+        if io.read(&staged)? != bytes {
+            return Err(PublishRefusal::Io(io::Error::other(
+                "staged session generation changed during verification",
+            )));
+        }
+        if io.stat(source, true)?.identity != source_identity {
+            return Err(PublishRefusal::SourceChanged);
+        }
+        let outcome = if io.write_platform() == PathPlatform::Win32 {
+            io.rename_new(&staged, path)
+        } else {
+            io.hard_link(&staged, path)
+        };
+        match outcome {
+            Ok(()) => {
+                if io.write_platform() != PathPlatform::Win32 {
+                    io.sync_dir(dir)?;
+                }
+                Ok(true)
+            }
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => {
+                accept_existing_target(io, path, bytes).map(|()| false)
+            }
+            Err(error) => Err(error.into()),
+        }
+    })();
+    match published {
+        // `path` holds the bytes; a leftover temporary is never a generation.
+        Ok(true) => {
+            if io.write_platform() != PathPlatform::Win32 {
+                let _ = io.remove_file(&staged);
+            }
+            io.stat(path, true)?;
+            Ok(())
+        }
+        Ok(false) => {
+            let _ = io.remove_file(&staged);
+            Ok(())
+        }
+        Err(PublishRefusal::TargetTail) => {
+            // TypeScript accepts the target and removes the temporary file.
+            let _ = io.remove_file(&staged);
+            Err(PublishRefusal::TargetTail)
+        }
+        Err(PublishRefusal::Io(error)) => Err(remove_temporary(io, &staged, error).into()),
+        Err(refusal) => match io.remove_file(&staged) {
+            Err(cleanup) if cleanup.kind() != ErrorKind::NotFound => {
+                Err(PublishRefusal::Io(io::Error::new(
+                    cleanup.kind(),
+                    format!(
+                        "failed to remove temporary \"{}\" after an earlier failure: {cleanup}",
+                        staged.display()
+                    ),
+                )))
+            }
+            _ => Err(refusal),
+        },
     }
-    if let Err(error) = io.hard_link(&staged, path).and_then(|()| io.sync_dir(dir)) {
-        return Err(remove_temporary(io, &staged, error));
+}
+
+/// `inspectExpectedCurrent` and the prefix verifier of a target another
+/// writer published first at `path`, in TypeScript's order: the Session
+/// directory is listed, and a missing canonical name with an entry whose
+/// `toLowerCase()` matches it, which a case-insensitive volume resolves the
+/// name to, is refused; then a symbolic link or a file that is not regular
+/// is refused, by `lstat`; then the file is read and must begin with
+/// `bytes`, the migrated log. An equal file is accepted; a longer one is
+/// [`PublishRefusal::TargetTail`]. Each refusal's reason is TypeScript's
+/// exact message. A failed listing, `lstat`, or read is an I/O failure:
+/// TypeScript passes the first two through and reports the verifier's with
+/// Node's own message, which is not claimed.
+fn accept_existing_target(
+    io: &dyn StorageIo,
+    path: &Path,
+    bytes: &[u8],
+) -> Result<(), PublishRefusal> {
+    let dir = parent(path)?;
+    let expected = path
+        .file_name()
+        .ok_or_else(|| io::Error::other("a Session log path has a file name"))?;
+    let listed = io
+        .read_dir(dir)?
+        .ok_or_else(|| io::Error::from(ErrorKind::NotFound))?;
+    if !listed.iter().any(|entry| entry.name == expected) {
+        let lower = expected.to_string_lossy().to_lowercase();
+        if let Some(alias) = listed
+            .iter()
+            .find(|entry| entry.name.to_string_lossy().to_lowercase() == lower)
+        {
+            let alias = crate::js_string::from_rust(&alias.name.to_string_lossy()).into_owned();
+            return Err(PublishRefusal::TargetConflict(format!(
+                "target resolves to noncanonical directory entry \"{alias}\""
+            )));
+        }
     }
-    // `path` holds the bytes; a leftover temporary is never a generation.
-    let _ = io.remove_file(&staged);
+    match io.stat(path, false)?.kind {
+        FileKind::File => {}
+        FileKind::Symlink => {
+            return Err(PublishRefusal::TargetConflict(
+                "target is a symbolic link".to_owned(),
+            ));
+        }
+        FileKind::Dir | FileKind::Other => {
+            return Err(PublishRefusal::TargetConflict(
+                "target is a non-regular file".to_owned(),
+            ));
+        }
+    }
+    let target = io.read(path)?;
+    if target.len() < bytes.len() {
+        return Err(PublishRefusal::TargetConflict(
+            "target bytes are shorter than the migrated generation".to_owned(),
+        ));
+    }
+    if !target.starts_with(bytes) {
+        return Err(PublishRefusal::TargetConflict(
+            "target bytes do not begin with the migrated generation".to_owned(),
+        ));
+    }
+    if target.len() > bytes.len() {
+        return Err(PublishRefusal::TargetTail);
+    }
     Ok(())
 }
 

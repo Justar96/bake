@@ -667,6 +667,10 @@ const TABLES: &[(&str, Coverage)] = &[
         Coverage::Logs(released_row_cases),
     ),
     (
+        "session/migration-publication-cases.json",
+        Coverage::Logs(plain_log_file_cases),
+    ),
+    (
         "session/number-cases.json",
         Coverage::NoLogs("number lexemes and doubles, not Session logs"),
     ),
