@@ -31,22 +31,27 @@
 //!   rows are decoded by the released codec in recoverable mode and read
 //!   through every format edge to v3, the result passes the catalog's final
 //!   check ([`check_transformed_artifact`]), and it is encoded, written to
-//!   a temporary file beside the source, and published by hard link as a
-//!   new `session.v3.jsonl`, as TypeScript publishes it on POSIX, so a
-//!   failed write, or a process killed before the link, never leaves that
-//!   file. The source is never changed.
+//!   a synced `session.migration.<token>.jsonl.tmp` beside the source, and
+//!   published as a new `session.v3.jsonl` as TypeScript's
+//!   `publishPreparedMigration` publishes it: by hard link and a sync of the
+//!   Session directory on POSIX, by a write-through move on Win32, so a
+//!   failed write, or a process killed before the publication, never leaves
+//!   that file. The source is never changed.
 //!   The handle then holds those bytes, opened as a current log. The
 //!   in-memory half, the read `open`'s preparation without its publication,
 //!   is [`released_generation_header`] followed by
 //!   [`migrate_released_generation`].
 //! - [`PlainLogFile::append`] and [`PlainLogFile::flush`] run the model's
-//!   operation, then bring the file to the model's bytes, refused operations
-//!   included: a first write creates the Session directory and publishes a
-//!   new file holding every byte, written to a `session.v3.jsonl.<token>.tmp`
-//!   beside it and hard-linked into place as TypeScript's `materialize`
-//!   publishes it on POSIX, so a failed write or a killed process never
-//!   leaves a partial log; a later write truncates the file to the bytes it
-//!   shares with the model and writes the rest. A created handle first takes
+//!   operation, then bring the file to the model's bytes in TypeScript's
+//!   steps, refused operations included: a first write publishes a new file
+//!   holding every byte as `materialize` does, written to a synced
+//!   `session.v3.jsonl.<token>.tmp` beside it and hard-linked into place
+//!   after the root, project, and Session directories are created and their
+//!   parents synced on POSIX, or moved into place with write-through on
+//!   Win32, so a failed write or a killed process never leaves a partial
+//!   log; a later write first truncates and syncs a torn tail, as
+//!   `truncateTornTail` does, then appends and syncs the batch's rows, as
+//!   `appendLines` does. A created handle first takes
 //!   the write lock, creating the Session directory, at its first flush or
 //!   its first batch that is neither empty nor refused for -0, before the
 //!   batch's contiguity check, as TypeScript's `ensureLease` does. The
@@ -94,8 +99,8 @@
 //! creates, which refuse a second handle of one Session within that
 //! instance, are not modelled; exclusion between a Rust value and a
 //! TypeScript handle is tested between processes only, with uncompressed
-//! logs, as the `write_lease` module describes. Fsync and directory sync, the
-//! publication's verifier, file modes, Zstd
+//! logs, as the `write_lease` module describes. The publication's verifier,
+//! file modes, Zstd
 //! compression, and the `validateStoredEvents` check of an opened log are
 //! not modelled. Opening a log TypeScript's validation refuses is
 //! outside this model's domain. So is migrating a log whose v3
@@ -106,16 +111,32 @@
 //! replaced included. A symbolic link is followed where a path is joined,
 //! never where a directory is listed, as Node's `Dirent.isDirectory` does
 //! not follow one. Every listing is visited in byte order of its UTF-8
-//! names. A published file's
-//! temporary file is removed after a failed write or link, and a failed
-//! removal is reported with that failure; one a killed process leaves is
-//! not a generation, and a failed removal after the link, which leaves a
-//! second link of the published file, is ignored, as TypeScript ignores it.
-//! A failed write of a later `append` or `flush` truncates the file back to
-//! the bytes it shared with the model, as TypeScript's `rollbackAppend`
-//! restores the size before its append, though a torn tail's bytes the new
-//! rows share stay until the next write; every later operation on the value
-//! then fails, where a TypeScript handle stays usable and retries the batch.
+//! names.
+//!
+//! Every sync TypeScript issues is issued in its order: a file's bytes
+//! before its publication or after an append, a truncated tail, or a
+//! rollback, and on POSIX the parent of each directory `materialize`
+//! creates and the directory a log is linked into. Windows syncs no
+//! directory: its moves are write-through, and the directories the write
+//! lock created are only checked, as `ensureDurableDirectoryWin32` checks
+//! existing ones. The seam's write platform selects the POSIX or Win32
+//! sequence, the host's in production.
+//!
+//! A failure leaves the value usable, as a TypeScript handle stays: the
+//! model keeps every step that landed, so the same `append` or `flush`
+//! retries the rest. A temporary file whose write or sync failed in
+//! `materialize` is left, as TypeScript leaves it, while a migration's is
+//! removed, and a failed removal is reported with the failure; one a killed
+//! process leaves is not a generation, and a failed removal after the link,
+//! which leaves a second link of the published file, is ignored, as
+//! TypeScript ignores it. A link whose directory sync then fails leaves the
+//! log published while the handle stays unwritten, so its retry is refused
+//! as TypeScript's `rejectExistingLog` refuses it. A failed append write or
+//! sync truncates the file back to its size before the append and syncs
+//! it, as `rollbackAppend` does, so a retry does not write the batch twice.
+//! When that rollback fails too, TypeScript's retry would append after the
+//! bytes left behind, which the model does not hold, so every later
+//! operation on the value fails instead.
 //!
 //! Every filesystem operation goes through the hidden `storage_io` seam,
 //! which is the real filesystem except in the fault-injection tests.
@@ -154,7 +175,9 @@ pub struct PlainLogFile {
     /// The Session directory's write lock, held from a write `open` or from
     /// a created handle's first write on.
     lease: Option<WriteLease>,
-    failed: bool,
+    /// A failed append's rollback failed too, so the file holds bytes the
+    /// model does not; every later operation is refused.
+    diverged: bool,
 }
 
 /// Why an operation of [`PlainLogFile`] was refused.
@@ -337,7 +360,7 @@ impl PlainLogFile {
             path: log_path(root, cwd, &encoded),
             log,
             lease: None,
-            failed: false,
+            diverged: false,
         })
     }
 
@@ -403,7 +426,7 @@ impl PlainLogFile {
             path: selected.path,
             log,
             lease: Some(lease),
-            failed: false,
+            diverged: false,
         })
     }
 
@@ -459,13 +482,13 @@ impl PlainLogFile {
         let log = PlainAppendLog::open(&bytes, platform, source_budget)
             .map_err(|_| refusal(ReleasedGenerationRefusal::Limit("scan".to_owned())))?;
         let path = selected.path.with_file_name(CURRENT_LOG_FILENAME);
-        publish_new_file(&*io, &path, "session.migration.", &bytes)?;
+        publish_migration(&*io, &path, &bytes)?;
         Ok(Self {
             io,
             path,
             log,
             lease: Some(lease),
-            failed: false,
+            diverged: false,
         })
     }
 
@@ -480,70 +503,91 @@ impl PlainLogFile {
     }
 
     /// The handle's `append`, as [`PlainAppendLog::append`] runs it, with the
-    /// file then brought to the model's bytes, even when the batch is refused
-    /// after a torn tail was truncated. A created handle takes the write lock
-    /// at its first batch that is neither empty nor refused for -0, before
-    /// the contiguity check, as TypeScript's `ensureLease` does.
+    /// file brought to the model's bytes in TypeScript's steps: a pending
+    /// torn tail is truncated and synced, as `truncateTornTail` does, even
+    /// when the batch is then refused for its encoding, and the batch's rows
+    /// are appended and synced, as `appendLines` does. A created handle
+    /// takes the write lock at its first batch that is neither empty nor
+    /// refused for -0, before the contiguity check, as TypeScript's
+    /// `ensureLease` does, and its first rows publish a new file. A failed
+    /// step leaves the handle usable, as a TypeScript handle stays: the model
+    /// keeps every step that landed, so a later `append` of the same batch
+    /// retries what did not.
     pub fn append(&mut self, events: &[Value]) -> Result<(), LogFileRefusal> {
         self.check_usable()?;
         if !events.is_empty() && !events.iter().any(holds_negative_zero) {
             self.ensure_lease()?;
         }
-        let before = self.log.bytes().map(<[u8]>::to_vec);
-        let outcome = self.log.append(events);
-        self.sync(before.as_deref())?;
+        let mut next = self.log.clone();
+        let outcome = next.append(events);
+        if let Some(offset) = self.log.torn_truncate_to()
+            && next.torn_truncate_to().is_none()
+        {
+            truncate_torn_tail(&*self.io, &self.path, offset)?;
+            self.log.truncate_torn_tail();
+        }
+        self.write(next)?;
         outcome.map_err(LogFileRefusal::Append)
     }
 
     /// The handle's `flush`: an unwritten log takes the write lock, then its
-    /// file is created holding the header line alone; a written one is left
-    /// as it is.
+    /// file is published holding the header line alone; a written one is
+    /// left as it is. A failed publication leaves the log unwritten, so a
+    /// later `flush` publishes again.
     pub fn flush(&mut self) -> Result<(), LogFileRefusal> {
         self.check_usable()?;
-        if self.log.bytes().is_none() {
-            self.ensure_lease()?;
+        if self.log.bytes().is_some() {
+            return Ok(());
         }
-        let before = self.log.bytes().map(<[u8]>::to_vec);
-        self.log.flush();
-        self.sync(before.as_deref())
+        self.ensure_lease()?;
+        let mut next = self.log.clone();
+        next.flush();
+        self.write(next)
     }
 
     /// Take the Session directory's write lock unless it is held. A refusal
     /// leaves the handle usable, so a later operation tries again.
     fn ensure_lease(&mut self) -> Result<(), LogFileRefusal> {
         if self.lease.is_none() {
-            let dir = self
-                .path
-                .parent()
-                .ok_or_else(|| io::Error::other("a Session log path has a directory"))?;
+            let dir = parent(&self.path)?;
             self.lease = Some(acquire_lease(&*self.io, dir, self.log.id())?);
         }
         Ok(())
     }
 
     fn check_usable(&self) -> Result<(), LogFileRefusal> {
-        if self.failed {
+        if self.diverged {
             return Err(LogFileRefusal::Io(io::Error::other(
-                "an earlier write to this Session log failed",
+                "a failed append to this Session log could not be rolled back",
             )));
         }
         Ok(())
     }
 
-    /// Write the difference between `before`, the bytes the file holds, and
-    /// the model's bytes now. A failure marks the value failed.
-    fn sync(&mut self, before: Option<&[u8]>) -> Result<(), LogFileRefusal> {
-        let Some(after) = self.log.bytes() else {
-            return Ok(());
-        };
-        let written = match before {
-            None => create_log_file(&*self.io, &self.path, after),
-            Some(before) => rewrite_tail(&*self.io, &self.path, before, after),
-        };
-        written.map_err(|error| {
-            self.failed = true;
-            LogFileRefusal::Io(error)
-        })
+    /// Bring the file from the model's bytes to `next`'s, then hold `next`:
+    /// publish a first write, or append the rows `next` adds. A failure keeps
+    /// the model, as TypeScript's handle keeps its cursor and `materialized`
+    /// flag; a failed rollback marks the value diverged.
+    fn write(&mut self, next: PlainAppendLog) -> Result<(), LogFileRefusal> {
+        match (self.log.bytes(), next.bytes()) {
+            (None, Some(after)) => materialize(&*self.io, &self.path, self.log.id(), after)?,
+            (Some(before), Some(after)) if after.len() > before.len() => {
+                let Some(rows) = after.strip_prefix(before) else {
+                    return Err(LogFileRefusal::Io(io::Error::other(
+                        "an appended log does not extend the bytes before it",
+                    )));
+                };
+                append_rows(&*self.io, &self.path, before.len(), rows).map_err(|failure| {
+                    if failure.diverged {
+                        self.diverged = true;
+                    }
+                    LogFileRefusal::Io(failure.error)
+                })?;
+            }
+            _ => {}
+        }
+        self.log = next;
+        Ok(())
     }
 }
 
@@ -898,46 +942,110 @@ fn migrate_v2(
     }
 }
 
-/// Publish `bytes` as a new file at `path`, whose directory exists: write
-/// them to a new `<prefix><token>.tmp` beside it, which is never a canonical
-/// generation, then hard-link that file to `path`, which fails if `path`
-/// exists, and remove it. A write or link failure removes the temporary file
-/// and never leaves a file at `path`; a failed removal is reported with the
-/// failure that made the file disposable. A process killed before the link
-/// leaves at most the temporary file, and one killed after it leaves `path`
-/// whole.
-fn publish_new_file(io: &dyn StorageIo, path: &Path, prefix: &str, bytes: &[u8]) -> io::Result<()> {
+/// A temporary file a failed [`write_synced_temp`] left, and the failure.
+struct StageFailure {
+    staged: Option<PathBuf>,
+    error: io::Error,
+}
+
+/// Write `bytes` to a new `<prefix><token><suffix>` in `dir` and sync it,
+/// as TypeScript's `writeSyncedTempFile` and the migration's
+/// `writeSyncedTemp` do. A failure after the file was created leaves it,
+/// named in the [`StageFailure`].
+fn write_synced_temp(
+    io: &dyn StorageIo,
+    dir: &Path,
+    prefix: &str,
+    suffix: &str,
+    bytes: &[u8],
+) -> Result<PathBuf, StageFailure> {
     static NEXT_TOKEN: AtomicU64 = AtomicU64::new(0);
-    let dir = path
-        .parent()
-        .ok_or_else(|| io::Error::other("a Session log path has a directory"))?;
     let (staged, mut file) = loop {
         let token = NEXT_TOKEN.fetch_add(1, Ordering::Relaxed);
-        let staged = dir.join(format!("{prefix}{}-{token}.tmp", std::process::id()));
+        let staged = dir.join(format!("{prefix}{}-{token}{suffix}", std::process::id()));
         match io.create_new(&staged) {
             Ok(file) => break (staged, file),
             Err(error) if error.kind() == ErrorKind::AlreadyExists => {}
-            Err(error) => return Err(error),
+            Err(error) => {
+                return Err(StageFailure {
+                    staged: None,
+                    error,
+                });
+            }
         }
     };
-    let written = io.write_at(&mut file, 0, bytes);
-    // Windows removes and links only a file no handle holds open.
+    let written = io
+        .write_at(&mut file, 0, bytes)
+        .and_then(|()| io.sync_file(&file, &staged));
+    // Windows removes, links, and moves only a file no handle holds open.
     drop(file);
-    if let Err(error) = written.and_then(|()| io.hard_link(&staged, path)) {
-        return Err(match io.remove_file(&staged) {
-            Ok(()) => error,
-            Err(cleanup) => io::Error::new(
-                error.kind(),
-                format!(
-                    "{error}; failed to remove temporary \"{}\": {cleanup}",
-                    staged.display()
-                ),
+    match written {
+        Ok(()) => Ok(staged),
+        Err(error) => Err(StageFailure {
+            staged: Some(staged),
+            error,
+        }),
+    }
+}
+
+/// Remove a temporary file that `error` made disposable; a failed removal
+/// is reported with `error`, and an absent file is no failure.
+fn remove_temporary(io: &dyn StorageIo, staged: &Path, error: io::Error) -> io::Error {
+    match io.remove_file(staged) {
+        Ok(()) => error,
+        Err(cleanup) if cleanup.kind() == ErrorKind::NotFound => error,
+        Err(cleanup) => io::Error::new(
+            error.kind(),
+            format!(
+                "{error}; failed to remove temporary \"{}\": {cleanup}",
+                staged.display()
             ),
-        });
+        ),
+    }
+}
+
+/// `publishPreparedMigration` without its verifier and source check: write
+/// `bytes` to a synced `session.migration.<token>.jsonl.tmp` beside `path`,
+/// then publish it at `path`. On POSIX that is a hard link, which fails if
+/// `path` exists, then a sync of the directory and the removal of the
+/// temporary file, whose failure is ignored; on Win32 it is a write-through
+/// move. A failed write, sync, link, or move removes the temporary file and
+/// never leaves a partial file at `path`.
+fn publish_migration(io: &dyn StorageIo, path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let dir = parent(path)?;
+    let staged = write_synced_temp(io, dir, "session.migration.", ".jsonl.tmp", bytes).map_err(
+        |failure| match failure.staged {
+            Some(staged) => remove_temporary(io, &staged, failure.error),
+            None => failure.error,
+        },
+    )?;
+    if io.write_platform() == PathPlatform::Win32 {
+        return io
+            .rename_new(&staged, path)
+            .map_err(|error| remove_temporary(io, &staged, error));
+    }
+    if let Err(error) = io.hard_link(&staged, path).and_then(|()| io.sync_dir(dir)) {
+        return Err(remove_temporary(io, &staged, error));
     }
     // `path` holds the bytes; a leftover temporary is never a generation.
     let _ = io.remove_file(&staged);
     Ok(())
+}
+
+/// The directory of a path the writer spelled, which always has one.
+fn parent(path: &Path) -> io::Result<&Path> {
+    path.parent()
+        .ok_or_else(|| io::Error::other("a Session path has a parent directory"))
+}
+
+/// Node's `dirname`: `.` for a single relative component, and a root for
+/// itself.
+fn dirname(path: &Path) -> &Path {
+    match path.parent() {
+        Some(parent) if parent.as_os_str().is_empty() => Path::new("."),
+        Some(parent) => parent,
+        None => path,
+    }
 }
 
 /// The write lock of the Session directory `dir`, or TypeScript's
@@ -1186,53 +1294,178 @@ fn encoding_mismatch(path: &Path) -> LogFileRefusal {
     }
 }
 
-/// Create the Session directory and publish a new log file holding `bytes`,
-/// as TypeScript's `materialize` does: written to a
-/// `session.v3.jsonl.<token>.tmp` beside it, then linked into place, so a
-/// failed write or a killed process never leaves a partial log.
-fn create_log_file(io: &dyn StorageIo, path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let dir = path
-        .parent()
-        .ok_or_else(|| io::Error::other("a Session log path has a directory"))?;
-    io.create_dir_all(dir)?;
+/// TypeScript's `materialize` of a new log file at `path` holding `bytes`,
+/// in the seam's write platform's sequence. POSIX (`materializePosix`)
+/// creates the root, project, and Session directories, syncing each one's
+/// parent after it, refuses a Session directory that already holds a
+/// canonical generation (`rejectExistingLog`), writes and syncs a
+/// `session.v3.jsonl.<token>.tmp` beside the log, hard-links it into place,
+/// which fails if the log exists, syncs the Session directory, and removes
+/// the temporary file, ignoring a failure. Win32 (`materializeWin32`) walks
+/// each of those directories with `ensureDurableDirectoryWin32`, runs the
+/// same check, writes the same temporary file, and moves it into place with
+/// write-through. A failed temporary write or sync leaves that file, as
+/// TypeScript's does; a failed link or move removes it. A failure never
+/// leaves a partial log.
+fn materialize(
+    io: &dyn StorageIo,
+    path: &Path,
+    id: &str,
+    bytes: &[u8],
+) -> Result<(), LogFileRefusal> {
+    let dir = parent(path)?;
+    let project = parent(dir)?;
+    let root = parent(project)?;
+    let win32 = io.write_platform() == PathPlatform::Win32;
+    if win32 {
+        for target in [root, project, dir] {
+            ensure_durable_directory_win32(io, target)?;
+        }
+    } else {
+        for (created, synced) in [(root, dirname(root)), (project, root), (dir, project)] {
+            io.create_dir_all(created)?;
+            io.sync_dir(synced)?;
+        }
+    }
+    reject_existing_log(io, dir, id)?;
     let name = path
         .file_name()
         .ok_or_else(|| io::Error::other("a Session log path has a file name"))?;
     let prefix = format!("{}.", name.to_string_lossy());
-    publish_new_file(io, path, &prefix, bytes)
+    let staged =
+        write_synced_temp(io, dir, &prefix, ".tmp", bytes).map_err(|failure| failure.error)?;
+    if win32 {
+        return io
+            .rename_new(&staged, path)
+            .map_err(|error| LogFileRefusal::Io(remove_temporary(io, &staged, error)));
+    }
+    io.hard_link(&staged, path)
+        .map_err(|error| remove_temporary(io, &staged, error))?;
+    // The log is published, and a failed directory sync leaves the temporary
+    // link, as TypeScript removes it only after that sync.
+    io.sync_dir(dir)?;
+    let _ = io.remove_file(&staged);
+    Ok(())
 }
 
-/// Bring a file holding `before` to `after`: truncate it to their common
-/// prefix, then write the rest of `after` there. A failed write truncates
-/// the file to that prefix again, as TypeScript's `rollbackAppend` restores
-/// the size before its append; a failed rollback is reported with the write
-/// failure.
-fn rewrite_tail(io: &dyn StorageIo, path: &Path, before: &[u8], after: &[u8]) -> io::Result<()> {
-    let shared = before
+/// `rejectExistingLog`: `resolveGenerationInDirectory(dir)`, which refuses
+/// a Zstd generation with the encoding-mismatch message and finds the
+/// highest canonical one, whose presence refuses the publication with
+/// TypeScript's `Error` message, carried here without a claimed class. A
+/// failed directory sync after an earlier link reaches it on a retry.
+fn reject_existing_log(io: &dyn StorageIo, dir: &Path, id: &str) -> Result<(), LogFileRefusal> {
+    let names = utf8_names(io, dir)?;
+    if let Some(name) = names
         .iter()
-        .zip(after)
-        .take_while(|(old, new)| old == new)
-        .count();
-    if shared == before.len() && shared == after.len() {
-        return Ok(());
+        .find(|name| opposite_generation(name).is_some())
+    {
+        return Err(encoding_mismatch(&dir.join(name)));
     }
-    let mut file = io.open_write(path)?;
+    if names
+        .iter()
+        .any(|name| canonical_generation(name).is_some())
+    {
+        return Err(LogFileRefusal::Io(io::Error::other(format!(
+            "refusing to materialize \"{id}\": a log already exists on disk (open it instead)"
+        ))));
+    }
+    Ok(())
+}
+
+/// `ensureDurableDirectoryWin32(target)` for a directory the write lock has
+/// already created: every ancestor from the filesystem root down, and
+/// `target`, is checked with `stat` to be a directory. TypeScript creates a
+/// missing one under a staging name and moves it into place; here none is
+/// missing unless another process changed the root, which is outside the
+/// domain, so a missing one fails.
+fn ensure_durable_directory_win32(io: &dyn StorageIo, target: &Path) -> io::Result<()> {
+    let mut walk: Vec<&Path> = target
+        .ancestors()
+        .filter(|ancestor| !ancestor.as_os_str().is_empty())
+        .collect();
+    walk.reverse();
+    for path in walk {
+        match io.stat_dir(path)? {
+            Some(true) => {}
+            Some(false) => {
+                return Err(io::Error::new(
+                    ErrorKind::NotADirectory,
+                    format!("path exists but is not a directory: {}", path.display()),
+                ));
+            }
+            None => {
+                return Err(io::Error::new(
+                    ErrorKind::NotFound,
+                    format!("a Session directory is missing: {}", path.display()),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// TypeScript's `repair` for `truncateTornTail`: `truncate(path, offset)`,
+/// then open the log again and sync it.
+fn truncate_torn_tail(io: &dyn StorageIo, path: &Path, offset: usize) -> io::Result<()> {
+    let file = io.open_write(path)?;
     // A byte count of an in-memory buffer fits in u64.
-    let shared_len = shared as u64;
-    if shared < before.len() {
-        io.set_len(&file, shared_len)?;
-    }
-    io.write_at(&mut file, shared_len, &after[shared..])
-        .map_err(|error| match io.set_len(&file, shared_len) {
-            Ok(()) => error,
-            Err(rollback) => io::Error::new(
+    io.set_len(&file, offset as u64)?;
+    drop(file);
+    let file = io.open_write(path)?;
+    io.sync_file(&file, path)
+}
+
+/// Why [`append_rows`] failed: the error, and whether its rollback failed
+/// too, leaving bytes after `before`.
+struct AppendFailure {
+    error: io::Error,
+    diverged: bool,
+}
+
+/// TypeScript's `appendLines` of `rows` to a file holding `before` bytes:
+/// write and sync them; a failed write or sync then reopens the file,
+/// truncates it to `before`, and syncs it, as `rollbackAppend` does, so the
+/// retried batch is not written twice. A failed rollback is reported with
+/// the failure.
+fn append_rows(
+    io: &dyn StorageIo,
+    path: &Path,
+    before: usize,
+    rows: &[u8],
+) -> Result<(), AppendFailure> {
+    // A byte count of an in-memory buffer fits in u64.
+    let before = before as u64;
+    let mut file = io.open_write(path).map_err(|error| AppendFailure {
+        error,
+        diverged: false,
+    })?;
+    let written = io
+        .write_at(&mut file, before, rows)
+        .and_then(|()| io.sync_file(&file, path));
+    drop(file);
+    let Err(error) = written else {
+        return Ok(());
+    };
+    let rollback = io.open_write(path).and_then(|file| {
+        io.set_len(&file, before)?;
+        io.sync_file(&file, path)
+    });
+    Err(match rollback {
+        Ok(()) => AppendFailure {
+            error,
+            diverged: false,
+        },
+        Err(rollback) => AppendFailure {
+            error: io::Error::new(
                 error.kind(),
                 format!(
                     "{error}; failed to roll back \"{}\": {rollback}",
                     path.display()
                 ),
             ),
-        })
+            diverged: true,
+        },
+    })
 }
 
 #[cfg(test)]
@@ -1282,6 +1515,24 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn the_win32_directory_walk_checks_every_ancestor() {
+        let root =
+            std::env::temp_dir().join(format!("bake-session-win32-walk-{}", std::process::id()));
+        let dir = root.join("project").join("session");
+        std::fs::create_dir_all(&dir).expect("create the walked directories");
+        std::fs::write(root.join("file"), "").expect("create a file");
+        let walk = |path: &Path| ensure_durable_directory_win32(&RealIo, path);
+        assert!(walk(&dir).is_ok());
+        let kind = |path: &Path| walk(path).map_err(|error| error.kind()).err();
+        assert_eq!(kind(&root.join("missing")), Some(ErrorKind::NotFound));
+        assert_eq!(
+            kind(&root.join("file").join("below")),
+            Some(ErrorKind::NotADirectory)
+        );
+        std::fs::remove_dir_all(&root).expect("remove the walked directories");
     }
 
     #[test]
