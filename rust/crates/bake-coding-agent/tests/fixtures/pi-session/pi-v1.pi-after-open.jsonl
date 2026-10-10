@@ -1,0 +1,8 @@
+{"type":"session","id":"legacy-v1","timestamp":"2025-12-09T00:53:29.825Z","cwd":"/golden/project","provider":"anthropic","modelId":"claude-opus-4-5","thinkingLevel":"off","version":3}
+{"type":"message","timestamp":"2025-12-09T00:53:30.000Z","message":{"role":"user","content":[{"type":"text","text":"old question"}],"timestamp":1765241610000},"id":"8aba2423","parentId":null}
+{"type":"message","timestamp":"2025-12-09T00:53:31.000Z","message":{"role":"assistant","content":[{"type":"text","text":"old answer"}],"api":"anthropic-messages","provider":"anthropic","model":"claude-opus-4-5","usage":{"input":1,"output":1,"cacheRead":0,"cacheWrite":0,"totalTokens":2,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"stop","timestamp":1765241611000},"id":"bfc0aa2e","parentId":"8aba2423"}
+{"type":"thinking_level_change","timestamp":"2025-12-09T00:53:32.000Z","thinkingLevel":"medium","id":"590b1a86","parentId":"bfc0aa2e"}
+{"type":"message","timestamp":"2025-12-09T00:53:33.000Z","message":{"role":"user","content":"kept question","timestamp":1765241613000},"id":"fa3e52d3","parentId":"590b1a86"}
+{"type":"compaction","timestamp":"2025-12-09T00:53:34.000Z","summary":"The old exchange.","tokensBefore":50000,"id":"1580a293","parentId":"fa3e52d3","firstKeptEntryId":"fa3e52d3"}
+{"type":"message","timestamp":"2025-12-09T00:53:35.000Z","message":{"role":"custom","customType":"hook","content":"from a hook","display":true,"timestamp":1765241615000},"id":"18f15e89","parentId":"1580a293"}
+{"type":"message","timestamp":"2025-12-09T00:53:36.000Z","message":{"role":"user","content":"latest","timestamp":1765241616000},"id":"b1a8fe80","parentId":"18f15e89"}

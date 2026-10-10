@@ -68,6 +68,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "bake-coding-agent"
+version = "0.4.0-dev"
+dependencies = [
+ "bake-ai",
+ "getrandom 0.2.17",
+ "indexmap",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "bake-conformance"
 version = "0.4.0-dev"
 dependencies = [

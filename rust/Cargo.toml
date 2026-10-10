@@ -4,6 +4,7 @@ members = [
     "crates/bake-agent",
     "crates/bake-ai",
     "crates/bake-cli",
+    "crates/bake-coding-agent",
     "crates/bake-conformance",
     "crates/bake-tui",
     "crates/bake-tui-view",
@@ -19,6 +20,7 @@ publish = false
 [workspace.dependencies]
 bake-agent = { path = "crates/bake-agent" }
 bake-ai = { path = "crates/bake-ai" }
+bake-coding-agent = { path = "crates/bake-coding-agent" }
 bake-tui = { path = "crates/bake-tui" }
 bake-tui-view = { path = "crates/bake-tui-view" }
 ratatui = { version = "=0.30.2", default-features = false, features = ["crossterm"] }
@@ -37,3 +39,8 @@ serde_json = { version = "=1.0.151", features = ["float_roundtrip", "preserve_or
 tokio = { version = "=1.53.1", default-features = false }
 reqwest = { version = "=0.12.28", default-features = false, features = ["rustls-tls"] }
 regex = { version = "=1.13.1", default-features = false, features = ["std", "unicode-case", "unicode-perl"] }
+# The `bake-coding-agent` session store: OS randomness for Pi's session and
+# entry ids, and an insertion-ordered map for its JavaScript `Map` indexes.
+# Both versions are the ones the lock already carries for ring and serde_json.
+getrandom = { version = "=0.2.17", default-features = false }
+indexmap = { version = "=2.14.2", default-features = false, features = ["std"] }
