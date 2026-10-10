@@ -234,6 +234,14 @@ The Rust `bake-ai` crate ports code from these MIT-licensed projects. Its [`NOTI
 
 The crate's Cargo dependencies are locked in [`rust/Cargo.lock`](rust/Cargo.lock) and keep their own licenses.
 
+## Ported source (`rust/crates/bake-agent`)
+
+The Rust `bake-agent` crate ports Pi's agent loop and stateful agent, and the tool-argument validation of Pi's `ai` package. Its [`NOTICE`](rust/crates/bake-agent/NOTICE) file reproduces the license text, and its module documentation names each source file.
+
+| Project | Ported revision | License |
+| --- | --- | --- |
+| [Pi](https://github.com/earendil-works/pi) `packages/agent` and `packages/ai/src/utils/validation.ts`, Copyright (c) 2025 Mario Zechner | v1.1.0 (`abe508e1b89912adde45528136c3221eb69acdd7`) | MIT |
+
 ## Adapted designs
 
 Earlier terminal turn header revisions included a Braille port (`GLYPH_PULSE`) of the "Glyph Pulse" loader (`dotm-square-9`) from [dot-matrix](https://dotmatrix.zzzzshawn.cloud) ([source](https://github.com/zzzzshawn/matrix)), copyright (c) 2026 dot-matrix contributors, all rights reserved. That adaptation is covered by the project's custom license, which permits use in commercial and non-commercial products and prohibits, without written permission, publishing or distributing its components as standalone reusable components or as part of another component library, and selling or sublicensing them as a standalone offering. Bake's MIT license does not cover this adaptation; do not extract it into a reusable component or library.
