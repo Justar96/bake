@@ -121,6 +121,14 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      # Defender scans every file the fault sweeps and Cargo create, which
+      # makes small-file I/O several times slower than on the other hosts.
+      - name: Exclude the workspace and temp directory from Defender
+        if: runner.os == 'Windows'
+        # An image without Defender has nothing to exclude.
+        continue-on-error: true
+        shell: pwsh
+        run: Add-MpPreference -ExclusionPath "$env:GITHUB_WORKSPACE", "$env:RUNNER_TEMP", "$env:TEMP", "$env:USERPROFILE\.cargo"
       - uses: actions/setup-node@v4
         with:
           node-version: 24
