@@ -39,7 +39,7 @@ Each result names its owner and the commands that observed it. Explain the units
 
 ## Recorded evidence
 
-The scope 01 records cover PR #57's fake native eval arm and synthetic comparison harness, then the runtime request fixture. The scope 02 records cover the Session model groundwork in `bake-session`, then its follow-up after the writer-spelling, classification, layout, lookup, and parser ports, which supersedes it, then a second follow-up after the migration-depth, limit-settling, lone-surrogate, identity, and codec-recovery ports, which supersedes the first. The scope 03 record covers the Session header reader groundwork. Every record is partial or failed; none closes a scope.
+The scope 01 records cover PR #57's fake native eval arm and synthetic comparison harness, then the runtime request fixture. The scope 02 records cover the Session model groundwork in `bake-session`, then its follow-up after the writer-spelling, classification, layout, lookup, and parser ports, which supersedes it, then a second follow-up after the migration-depth, limit-settling, lone-surrogate, identity, and codec-recovery ports, which supersedes the first. The scope 03 record covers the Session header reader groundwork. Every record is partial or failed; none closes a scope. [D32](../scope-00/support.md#decision-register) retired the subject of the scope 02 and 03 records: the `bake-session` crate, the `bake-rs session` diagnostics, the conformance tables, and the cross-runtime checks they qualify are deleted, and the records stay unchanged as history, so their file links may name removed paths.
 
 | Attempt | Observed outcome |
 |---|---|

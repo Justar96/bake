@@ -26,7 +26,7 @@ When a change needs another that has not landed, stack them instead of waiting o
 The [Rust 0.4 port](docs/roadmap/rust-0.4/README.md) develops on `rust/0.4.0`, a long-lived branch cut from `develop`, so its pull requests run the checks that cover them without the whole TypeScript matrix.
 
 - Start Rust port work from an up-to-date `origin/rust/0.4.0` and open its pull request against it, or against a stack whose bottom targets it.
-- CI runs the native job (Cargo checks, the Rust PTY scenarios, and the TypeScript/Rust comparison fixtures) on Linux, macOS, and Windows. TypeScript checks run on Linux only: none when the pull request changes only `rust/`, `scripts/rust-conformance/`, or `scripts/rust-preview-pty.ts`; the static half when the rest is Markdown; and both preflight parts otherwise. [`scripts/ci-scope.ts`](scripts/ci-scope.ts) makes the choice and states it in the run summary.
+- CI runs the native job (Cargo checks, the Rust PTY scenarios, and the compiled eval fixture arm) on Linux, macOS, and Windows. TypeScript checks run on Linux only: none when the pull request changes only `rust/` or `scripts/rust-preview-pty.ts`; the static half when the rest is Markdown; and both preflight parts otherwise. [`scripts/ci-scope.ts`](scripts/ci-scope.ts) makes the choice and states it in the run summary.
 - Still run `bun run preflight` before opening the pull request.
 - Bring the line into `develop` through a pull request from `rust/0.4.0`, merged with a merge commit; it runs every job on every platform. Bring 0.3 fixes forward through a pull request from `develop` into `rust/0.4.0`. Fixes for 0.3 land on `develop` first.
 

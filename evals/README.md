@@ -11,6 +11,7 @@ evals/agent-loop/
   scenarios.ts    each scenario's prompt, fixture, success predicate, request floor and cap
   composition.ts  each arm's overlay rows, read from its own checkout, and the rendered-prompt check
   run.test.ts     keyless checks of actual Bake and pi launches, configuration, and test cleanup
+  launch.ts       owned child launches for the native fixture adapter
   native-fixture.ts  keyless executable adapter for the existing ordinary_edit fixture
   native-smoke.ts    compiled Rust fake-arm checks for the native preflight gate
   metrics.ts      loop-shape metrics from a sample's event stream
@@ -143,11 +144,11 @@ The `bake-eval-fake-arm` binary makes a fixed edit; it has no agent or model imp
 
 [`native-fixture.ts`](agent-loop/native-fixture.ts) exports `runNativeFixture` for trusted single-process executables. It sends the existing scenario prompt as UTF-8 on stdin, launches in a private workspace with private home and temporary directories, then calls the existing evaluator predicate after the process closes. The arm and the `node test.cjs` check receive a minimal environment. Success requires unchanged evaluator-owned tests, a passing check, exit 0, and no process fault; stdout is bounded diagnostic output and cannot establish success. The adapter removes its private root before returning, including on failure.
 
-Only `ordinary_edit` is supported. Invalid arguments, unsupported scenarios, and a missing executable fail before creating a workspace. The conformance driver's launcher owns cancellation, timeouts, stream limits, POSIX group termination, and Windows direct-child termination. It does not stop descendants after a normal parent exit or contain a hostile executable. The fixture adapter is development tooling: live `EVAL_ARMS`, model routes, token accounting, session logs, composition parity, and committed eval records keep their existing behavior. The [qualification ledger](../docs/roadmap/rust-0.4/ledger/README.md) records partial fixture evidence and the corrected macOS CI failure. A real native model arm remains open work.
+Only `ordinary_edit` is supported. Invalid arguments, unsupported scenarios, and a missing executable fail before creating a workspace. [`launch.ts`](agent-loop/launch.ts) owns cancellation, timeouts, stream limits, POSIX group termination, and Windows direct-child termination. It does not stop descendants after a normal parent exit or contain a hostile executable. The fixture adapter is development tooling: live `EVAL_ARMS`, model routes, token accounting, session logs, composition parity, and committed eval records keep their existing behavior. The [qualification ledger](../docs/roadmap/rust-0.4/ledger/README.md) records partial fixture evidence and the corrected macOS CI failure. A real native model arm remains open work.
 
 The fixture check executes arm-editable code and resolves `node` through the host's command search path, so the check and that path must also be trusted. Its existing synchronous five-second timeout follows the arm's budget, including after cancellation, and blocks other callbacks in the driver while it runs. This adapter does not qualify hostile-check containment or strict end-to-end deadlines.
 
-Run the adapter's script-arm tests with `bun test --timeout=30000 evals/agent-loop/native-fixture.test.ts`. They cover tampering, unsuccessful processes, cancellation, timeouts, overflow, environment isolation, and cleanup. The ordinary `evals-unit` gate runs them on Linux and macOS; the compiled-arm smoke supplies the Windows fixture evidence. The launch TypeScript project also checks the adapter and smoke command.
+Run the adapter's script-arm tests with `bun test --timeout=30000 evals/agent-loop/launch.test.ts evals/agent-loop/native-fixture.test.ts`. They cover tampering, unsuccessful processes, cancellation, timeouts, overflow, environment isolation, and cleanup. The ordinary `evals-unit` gate runs them on Linux and macOS; the compiled-arm smoke supplies the Windows fixture evidence. The launch TypeScript project also checks the adapter and smoke command.
 
 ## Comparing with pi
 

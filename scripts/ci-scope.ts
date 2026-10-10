@@ -28,7 +28,7 @@ const TRUNKS = new Set(['develop', 'main'])
 const MAX_STACK = 20
 
 /** Paths the native job alone checks: the Cargo workspace and its drivers. */
-const RUST_ONLY = /^(?:rust\/|scripts\/rust-conformance\/|scripts\/rust-preview-pty\.ts$)/u
+const RUST_ONLY = /^(?:rust\/|scripts\/rust-preview-pty\.ts$)/u
 
 /** Files the static checks cover: links, the roadmap ledger, and the changelog. */
 const MARKDOWN = /\.md$/u

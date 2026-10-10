@@ -4,7 +4,7 @@
 
 This page re-plans roadmap scopes 02 to 17 around [D22](scope-00/support.md#decision-register) and [D32](scope-00/support.md#decision-register): the Rust implementation is ported primarily from Pi's latest official source, Bake's TypeScript runtime is ported selectively, and 0.4 is a new binary with no migration from a TypeScript install. For each scope it names the Pi owners to port, the Bake behavior that must survive, and the exit evidence that replaces 0.3 parity.
 
-**Status: plan, 2026-10-09; D32 applied 2026-10-10.** Nothing here is implemented. The [scope specifications](README.md#scope-specifications) still hold the 0.3-parity text for scopes 02 to 17. Where they conflict with this page, this page governs, and each scope's first PR replaces its specification text.
+**Status: plan, 2026-10-09; D32 applied 2026-10-10.** Nothing here is implemented. The [scope specifications](README.md#scope-specifications) for scopes 02 and 03 follow this page; those for scopes 04 to 17 still hold the 0.3-parity text. Where they conflict with this page, this page governs, and each scope's first PR replaces its specification text.
 
 ## Table of Contents
 

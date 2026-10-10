@@ -46,43 +46,25 @@ describe('preflight', () => {
     expect(() => parseOptions(['--base'])).toThrow(/needs a value/u)
   })
 
-  it('checks the Rust workspace before its PTY and comparison scenarios and excludes them from --fast', () => {
-    expect(selected(['--only', 'native'])).toEqual(['rust', 'rust-pty', 'rust-conformance', 'rust-eval', 'rust-lease'])
+  it('checks the Rust workspace before its PTY and eval scenarios and excludes them from --fast', () => {
+    expect(selected(['--only', 'native'])).toEqual(['rust', 'rust-pty', 'rust-eval'])
     expect(selected(['--fast', '--only', 'native'])).toEqual([])
     expect(STEPS.find(step => step.name === 'rust')?.command?.(parseOptions([]), scope([])))
       .toEqual(['bun', 'run', 'check:rust'])
     expect(STEPS.find(step => step.name === 'rust-pty')?.command?.(parseOptions([]), scope([])))
       .toEqual(process.platform === 'win32' ? { skip: 'native ConPTY scenarios are not implemented' } : ['bun', 'run', 'test:rust:pty'])
-    expect(STEPS.find(step => step.name === 'rust-conformance')?.command?.(parseOptions([]), scope([])))
-      .toEqual(['bun', 'run', 'test:rust:conformance'])
     expect(STEPS.find(step => step.name === 'rust-eval')?.command?.(parseOptions([]), scope([])))
       .toEqual(['bun', 'run', 'test:rust:eval'])
-    expect(STEPS.find(step => step.name === 'rust-lease')?.command?.(parseOptions([]), scope([])))
-      .toEqual(['bun', 'run', 'test:rust:lease'])
   })
 
   it('blocks artifact checks after their own build fails, without blocking the other workspace', () => {
-    for (const step of STEPS.filter(entry => ['e2e', 'rust-pty', 'rust-conformance', 'rust-eval'].includes(entry.name))) {
+    for (const step of STEPS.filter(entry => ['e2e', 'rust-pty', 'rust-eval'].includes(entry.name))) {
       const owner = step.name === 'e2e' ? 'build' : 'rust'
       const other = owner === 'rust' ? 'build' : 'rust'
       expect(failedBuild(step, new Map([[owner, { outcome: 'fail' }], [other, { outcome: 'pass' }]]))).toBe(owner)
       expect(failedBuild(step, new Map([[owner, { outcome: 'pass' }], [other, { outcome: 'fail' }]]))).toBeUndefined()
       expect(failedBuild(step, new Map())).toBeUndefined()
     }
-  })
-
-  it('runs the cross-runtime lease check only when both the Rust and the Node builds pass', () => {
-    const step = STEPS.find(entry => entry.name === 'rust-lease')
-    expect(step).toBeDefined()
-    if (step === undefined) return
-    expect(step.needsBuild).toBe(true)
-    expect(selected(['--fast'])).not.toContain('rust-lease')
-    const results = (rust: 'pass' | 'fail', build: 'pass' | 'fail') => new Map([['rust', { outcome: rust }], ['build', { outcome: build }]])
-    expect(failedBuild(step, results('fail', 'pass'))).toBe('rust')
-    expect(failedBuild(step, results('pass', 'fail'))).toBe('build')
-    expect(failedBuild(step, results('fail', 'fail'))).toBeDefined()
-    expect(failedBuild(step, results('pass', 'pass'))).toBeUndefined()
-    expect(failedBuild(step, new Map())).toBeUndefined()
   })
 
   it('runs the runtime tests the change reaches, all of them when the change can move any, or none', () => {

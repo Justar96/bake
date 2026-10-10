@@ -5,7 +5,7 @@
  * model, proxy, or session log is involved, and nothing here measures
  * requests, tokens, or usage.
  *
- * Process ownership belongs to the conformance driver's `launch()`: timeout,
+ * Process ownership belongs to `launch()` in `launch.ts`: timeout,
  * output caps, cancellation, and stopping the child. Arms are trusted single
  * processes. The private root and minimal environment keep runs apart; they
  * do not contain a hostile executable, and a descendant that outlives a
@@ -15,7 +15,7 @@ import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { childEnvironment, launch, MAX_TIMEOUT_MS, type Launch } from '../../scripts/rust-conformance/driver.ts'
+import { childEnvironment, launch, MAX_TIMEOUT_MS, type Launch } from './launch.ts'
 import { fixture, prompts, validate, type Verdict } from './scenarios.ts'
 
 /** Scenarios whose verdict rests only on the exit code and evaluator-observed files. */
