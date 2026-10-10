@@ -70,6 +70,8 @@ pub fn sessions_dir(home: &Path) -> PathBuf {
 mod tests {
     use super::*;
 
+    // Only the Unix tests build environments from absolute POSIX paths.
+    #[cfg(unix)]
     fn env<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<OsString> + 'a {
         move |name| {
             pairs
