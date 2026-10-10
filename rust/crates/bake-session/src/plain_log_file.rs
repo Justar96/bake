@@ -1,9 +1,12 @@
-//! Development-only plain current-format Session log on disk, laid out and
-//! written as TypeScript's JSONL backend with `compression: 'none'` lays out
-//! and writes it.
+//! Development-only current-format Session log on disk, laid out and
+//! written as TypeScript's JSONL backend lays out and writes it with
+//! `compression: 'none'`, or, through [`LogCompression::Zstd`], with its
+//! default `compression: 'zstd'`.
 //!
 //! A [`PlainLogFile`] wraps a [`PlainAppendLog`] model of one write handle and
-//! keeps the log file beneath a Session root equal to the model's bytes:
+//! keeps the log file beneath a Session root equal to the model's bytes, or,
+//! for a Zstd root, to the frames TypeScript writes for them; the Zstd
+//! differences are listed after the plain write path:
 //!
 //! - [`PlainLogFile::create`] is the backend's `create`: the header must
 //!   encode, then the root is checked as `ensureRootEncoding` checks it,
@@ -71,8 +74,47 @@
 //!   its first batch that is neither empty nor refused for -0, before the
 //!   batch's contiguity check, as TypeScript's `ensureLease` does. The
 //!   opposite-encoding check TypeScript repeats before that lock is not
-//!   repeated: a Zstd log written after `create`, by a process outside this
-//!   model, is outside the domain.
+//!   repeated: a log of the other encoding written after `create`, by a
+//!   process outside this model, is outside the domain.
+//!
+//! A Zstd root ([`PlainLogFile::create_compressed`] and
+//! [`PlainLogFile::open_compressed`]) differs only where TypeScript's
+//! `compression: 'zstd'` does:
+//!
+//! - The log is `session.v3.jsonl.zstd`, and an older generation
+//!   `session.jsonl.zstd` or `session.vN.jsonl.zstd`. The root check and
+//!   `findLog` refuse a plain canonical generation, as the other encoding,
+//!   with the encoding-mismatch message, which then names `.jsonl` and
+//!   compression `"zstd"`; a plain root refuses a Zstd one as before.
+//! - Every write is frames [`crate::compress_zstd_frame`] compresses, equal
+//!   to Node's byte for byte: a first write publishes the header line as one
+//!   frame and its rows, when any, as another, as `encodeMaterialization`
+//!   does, and each later batch appends one frame, as `encodeEventBatch` and
+//!   `appendLines` do, with the same syncs, publication, and rollback.
+//! - A write `open` decodes the frames as `readZstdPrefix` does, at most the
+//!   compression's `max_plaintext_bytes` of plaintext, or refuses with
+//!   [`LogFileRefusal::NativePlaintextBudget`]. A structural, checksum, or
+//!   header-frame failure, or complete frames that end inside a record, is
+//!   refused with TypeScript's `SessionPersistenceCorruptionError` message,
+//!   which names the log, after the lock is taken. A torn final frame keeps
+//!   its offset, and its complete rows are recovered into the cursor; the
+//!   first batch that passes the contiguity check truncates and syncs the
+//!   torn frame, then appends those rows, encoded as `eventLines` encodes the
+//!   decoded events, as one frame of their own, as `persistContiguous`
+//!   rewrites `recoveredTail`, and only then encodes and appends its own
+//!   frame. A flush, an empty batch, or a refused contiguity check leaves the
+//!   torn frame. A recovered row the row encoder refuses refuses every later
+//!   batch after the truncation as `Unadmitted`, as TypeScript's rewrite
+//!   throws, or, for an encoder limit, refuses it with that limit before the
+//!   truncation.
+//! - An older Zstd generation is decoded as `decodeStreamingMigration`
+//!   decodes it ([`crate::released_zstd_plaintext`]), within the same
+//!   `max_plaintext_bytes`, past which it is refused with
+//!   [`LogFileRefusal::NativePlaintextBudget`], migrated as a plain one
+//!   is, and published as `session.v3.jsonl.zstd`, the header line as one
+//!   frame and every row as one more, through a synced
+//!   `session.migration.<token>.jsonl.zstd.tmp`, as `writeSyncedTemp` names
+//!   it.
 //!
 //! The write lock is an exclusive kernel lock on the `session.lock` file in
 //! the Session directory, which is created and never removed, as
@@ -113,12 +155,11 @@
 //! A TypeScript backend instance's in-process write claims and pending
 //! creates, which refuse a second handle of one Session within that
 //! instance, are not modelled; exclusion between a Rust value and a
-//! TypeScript handle is tested between processes only, with uncompressed
-//! logs, as the `write_lease` module describes. The publication verifier's
-//! decoding and checks of the staged file, which the encoded bytes passed
-//! here as a current log already, file modes, Zstd
-//! compression, and the `validateStoredEvents` check of an opened log are
-//! not modelled. Opening a log TypeScript's validation refuses is
+//! TypeScript handle is tested between processes only, as the `write_lease`
+//! module describes. The publication verifier's decoding and checks of the
+//! staged file, which the encoded bytes passed here as a current log already,
+//! file modes, and the `validateStoredEvents` check of an opened log are not
+//! modelled. Opening a log TypeScript's validation refuses is
 //! outside this model's domain. So is migrating a log whose v3
 //! result the publication's verifier or `validateStoredEvents` refuses: Rust
 //! writes the migrated file where TypeScript refuses and writes nothing.
@@ -177,16 +218,19 @@ use crate::storage_io::{FileIdentity, FileKind, RealIo, StorageIo};
 use crate::v1_codec::decode_v0_v1_items_before_finish;
 use crate::v2_to_v3::{RecoverableRefusal, recoverable_refusal, rethrows_recovery_issue};
 use crate::write_lease::{LeaseRefusal, WriteLease};
+use crate::zstd::{compress_zstd_frame, stage_zstd_plaintext};
 use crate::{
-    AppendRefusal, CURRENT_SESSION_FORMAT_VERSION, CreateRefusal, FinalCheckRefusal,
+    AppendRefusal, CURRENT_SESSION_FORMAT_VERSION, CreateRefusal, EncodeRefusal, FinalCheckRefusal,
     GenerationHeaderRefusal, HistoryLocation, HistoryRefusal, MigratedV2, PathPlatform,
-    PlainAppendLog, ScanRefusal, SessionHeader, SubsetLimit, V1CodecLocation, V1CodecRecovery,
-    V1CodecRefusal, V1CodecVersion, V2ToV3Layer, V2ToV3Location, V2ToV3Refusal,
-    check_transformed_artifact, encode_event_line, encode_header_line, first_record,
-    migrate_released_history, migrate_v2_rows, read_generation_header_record, read_header_record,
+    PlainAppendLog, RELEASED_ZSTD_PLAINTEXT_BUDGET, RestoreRefusal, ScanRefusal, SessionHeader,
+    SubsetLimit, V1CodecLocation, V1CodecRecovery, V1CodecRefusal, V1CodecVersion, V2ToV3Layer,
+    V2ToV3Location, V2ToV3Refusal, check_transformed_artifact, encode_event_line,
+    encode_header_line, first_record, migrate_released_history, migrate_v2_rows,
+    read_generation_header_record, read_header_record, released_zstd_plaintext,
 };
 
-/// One write handle of a plain current-format Session log under a root.
+/// One write handle of a current-format Session log under a root, plain or
+/// Zstd.
 #[derive(Debug)]
 pub struct PlainLogFile {
     /// Every filesystem operation of the handle goes through this seam.
@@ -199,6 +243,107 @@ pub struct PlainLogFile {
     /// A failed append's rollback failed too, so the file holds bytes the
     /// model does not; every later operation is refused.
     diverged: bool,
+    /// The frames of a log the handle writes with Zstd compression, `None`
+    /// for a plain log.
+    zstd: Option<ZstdFile>,
+}
+
+/// The physical encoding of a Session root's logs, as the backend's
+/// `compression` setting selects it. TypeScript's default is
+/// [`LogCompression::Zstd`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogCompression {
+    /// `compression: 'none'`: `session.v3.jsonl`, the JSONL text itself.
+    None,
+    /// `compression: 'zstd'`: `session.v3.jsonl.zstd`, the header line as
+    /// one checksummed frame and each appended batch as one more. A write
+    /// `open` decodes at most `max_plaintext_bytes` of plaintext, of the
+    /// current log or of an older Zstd generation it migrates, a bound
+    /// TypeScript does not have; `create` reads nothing. A production caller
+    /// sizes the budget from the log it opens, or passes `usize::MAX` for
+    /// TypeScript's unbounded read.
+    Zstd { max_plaintext_bytes: usize },
+}
+
+impl LogCompression {
+    /// The suffix a canonical generation name carries after `.jsonl`.
+    const fn suffix(self) -> &'static str {
+        match self {
+            Self::None => "",
+            Self::Zstd { .. } => ".zstd",
+        }
+    }
+
+    /// The other encoding's suffix, which `encodingMismatch` names.
+    const fn opposite_log_suffix(self) -> &'static str {
+        match self {
+            Self::None => ".jsonl.zstd",
+            Self::Zstd { .. } => ".jsonl",
+        }
+    }
+
+    /// `JSON.stringify` of the configured compression's name.
+    const fn quoted_name(self) -> &'static str {
+        match self {
+            Self::None => "\"none\"",
+            Self::Zstd { .. } => "\"zstd\"",
+        }
+    }
+
+    /// `parseGenerationLogFilename(name, compression)`.
+    fn generation(self, name: &str) -> Option<u64> {
+        match self {
+            Self::None => canonical_generation(name),
+            Self::Zstd { .. } => name.strip_suffix(".zstd").and_then(canonical_generation),
+        }
+    }
+
+    /// The canonical generation of the other encoding.
+    fn opposite_generation(self, name: &str) -> Option<u64> {
+        match self {
+            Self::None => name.strip_suffix(".zstd").and_then(canonical_generation),
+            Self::Zstd { .. } => canonical_generation(name),
+        }
+    }
+
+    /// The current generation's name, `session.v3.jsonl` plus the suffix.
+    fn current_log_name(self) -> String {
+        format!("{CURRENT_LOG_FILENAME}{}", self.suffix())
+    }
+
+    /// The stored bytes of a log whose JSONL text is `text`: the text itself,
+    /// or its header line as one frame and its rows, when any, as another,
+    /// as `encodeMaterialization` and the migration's `writeSyncedTemp`
+    /// write them.
+    fn encode(self, text: &[u8]) -> io::Result<Vec<u8>> {
+        if self == Self::None {
+            return Ok(text.to_vec());
+        }
+        let header = first_record(text).unwrap_or(text);
+        let mut frames = compress_zstd_frame(header)?;
+        let rows = &text[header.len()..];
+        if !rows.is_empty() {
+            frames.extend(compress_zstd_frame(rows)?);
+        }
+        Ok(frames)
+    }
+}
+
+/// The physical side of a Zstd log: the frames the file holds and the torn
+/// final frame a write `open` found, which the first appended batch repairs.
+#[derive(Debug, Clone)]
+struct ZstdFile {
+    /// [`LogCompression::Zstd`]'s bound, kept for [`PlainLogFile::compression`].
+    max_plaintext_bytes: usize,
+    /// The file's bytes, empty before the first write publishes it.
+    frames: Vec<u8>,
+    /// `tornTruncateTo`: where the torn final frame starts.
+    torn_truncate_to: Option<usize>,
+    /// `recoveredTail`: the rows the torn frame held, encoded as
+    /// `eventLines` writes them and each ending in LF, which the first
+    /// appended batch writes as a frame of their own after the truncation.
+    /// `None` once written or when no frame was torn.
+    recovered_tail: Option<Result<String, EncodeRefusal>>,
 }
 
 /// Why an operation of [`PlainLogFile`] was refused.
@@ -219,10 +364,11 @@ pub enum LogFileRefusal {
     /// Two or more project directories hold a canonical generation of the id;
     /// TypeScript's `findLog` throws a plain `Error` with this exact message.
     Duplicate { message: String },
-    /// A Session directory holds a canonical generation with the `.zstd`
-    /// suffix, which a backend configured for compression `none` does not
-    /// read; TypeScript's `encodingMismatch` throws a plain `Error` with this
-    /// exact message, which names that generation's path. Nothing was
+    /// A Session directory holds a canonical generation of the other
+    /// encoding, one with the `.zstd` suffix for compression `none` or one
+    /// without it for compression `zstd`, which the configured backend does
+    /// not read; TypeScript's `encodingMismatch` throws a plain `Error` with
+    /// this exact message, which names that generation's path. Nothing was
     /// written.
     EncodingMismatch { message: String },
     /// The flat legacy layout: a project directory holds a regular file
@@ -241,9 +387,10 @@ pub enum LogFileRefusal {
     /// matches. The lock file is kept.
     StoredIdentity { message: String },
     /// Migrating an older generation found it corrupt, or found its
-    /// publication target already taken by a file it does not accept;
+    /// publication target already taken by a file it does not accept, or a
+    /// write `open` of a current Zstd log found its frames corrupt;
     /// TypeScript throws `SessionPersistenceCorruptionError` with this exact
-    /// message, which names the source path. No file was written.
+    /// message, which names the source or log path. No file was written.
     Corrupt { message: String },
     /// The older generation a write `open` migrated changed between its read
     /// and the publication of its migrated successor; TypeScript throws
@@ -263,6 +410,10 @@ pub enum LogFileRefusal {
     /// This crate does not reproduce the TypeScript outcome; nothing is
     /// claimed about it, and the file is as the refused operation left it.
     NativeSubset(LogFileLimit),
+    /// A write `open` of a current Zstd log, or of an older Zstd generation
+    /// it would migrate, would decode more than [`LogCompression::Zstd`]'s
+    /// `max_plaintext_bytes`, a bound TypeScript does not have. Nothing is claimed, and no file was written.
+    NativePlaintextBudget { max_plaintext_bytes: usize },
     /// Reading or writing the root failed here. No TypeScript outcome is
     /// claimed.
     Io(io::Error),
@@ -283,7 +434,10 @@ impl LogFileRefusal {
             | Self::SourceChanged { message }
             | Self::Unsupported { message } => Some(message),
             Self::Append(refusal) => refusal.message(),
-            Self::Create(_) | Self::NativeSubset(_) | Self::Io(_) => None,
+            Self::Create(_)
+            | Self::NativeSubset(_)
+            | Self::NativePlaintextBudget { .. }
+            | Self::Io(_) => None,
         }
     }
 }
@@ -377,10 +531,49 @@ impl PlainLogFile {
         header: &Value,
         inherited_event_count: Option<u64>,
     ) -> Result<Self, LogFileRefusal> {
+        Self::create_compressed_with_io(
+            io,
+            root,
+            header,
+            inherited_event_count,
+            LogCompression::None,
+        )
+    }
+
+    /// [`PlainLogFile::create`] in a root whose backend is configured for
+    /// `compression`: a Zstd root refuses a plain generation where a plain
+    /// one refuses a Zstd generation, and the handle writes
+    /// `session.v3.jsonl.zstd` in frames, as TypeScript's default
+    /// configuration does.
+    pub fn create_compressed(
+        root: &Path,
+        header: &Value,
+        inherited_event_count: Option<u64>,
+        compression: LogCompression,
+    ) -> Result<Self, LogFileRefusal> {
+        Self::create_compressed_with_io(
+            Arc::new(RealIo),
+            root,
+            header,
+            inherited_event_count,
+            compression,
+        )
+    }
+
+    /// [`PlainLogFile::create_compressed`] with every filesystem operation
+    /// of the handle made through `io`; see [`crate::storage_io`].
+    #[doc(hidden)]
+    pub fn create_compressed_with_io(
+        io: Arc<dyn StorageIo>,
+        root: &Path,
+        header: &Value,
+        inherited_event_count: Option<u64>,
+        compression: LogCompression,
+    ) -> Result<Self, LogFileRefusal> {
         let log = PlainAppendLog::create(header, inherited_event_count)
             .map_err(LogFileRefusal::Create)?;
         let encoded = encoded_id(log.id(), PathPlatform::host())?;
-        let found = find_generations(&*io, root, &encoded)?;
+        let found = find_generations(&*io, root, &encoded, compression)?;
         if !found.is_empty() {
             return Err(duplicate(log.id(), &found).unwrap_or_else(|| {
                 LogFileRefusal::AlreadyExists {
@@ -390,12 +583,14 @@ impl PlainLogFile {
         }
         // The encoder admits only an absent `cwd` or an absolute string.
         let cwd = header.get("cwd").and_then(Value::as_str);
+        let path = log_path(root, cwd, &encoded).with_file_name(compression.current_log_name());
         Ok(Self {
             io,
-            path: log_path(root, cwd, &encoded),
+            path,
             log,
             lease: None,
             diverged: false,
+            zstd: zstd_file(compression, Vec::new(), None, None),
         })
     }
 
@@ -417,11 +612,42 @@ impl PlainLogFile {
         id: &str,
         source_budget: usize,
     ) -> Result<Self, LogFileRefusal> {
+        Self::open_compressed_with_io(io, root, id, source_budget, LogCompression::None)
+    }
+
+    /// [`PlainLogFile::open`] in a root whose backend is configured for
+    /// `compression`. A current Zstd log is decoded as `readZstdPrefix`
+    /// decodes it: a frame or header frame that fails, or complete frames
+    /// that end inside a record, are refused with TypeScript's corruption
+    /// message, and a torn final frame's complete rows are recovered, so the
+    /// first appended batch truncates the torn frame and writes them as a
+    /// frame of their own before its own frame. An older generation of
+    /// either encoding is migrated to a current one of `compression`, as
+    /// TypeScript's backend migrates it.
+    pub fn open_compressed(
+        root: &Path,
+        id: &str,
+        source_budget: usize,
+        compression: LogCompression,
+    ) -> Result<Self, LogFileRefusal> {
+        Self::open_compressed_with_io(Arc::new(RealIo), root, id, source_budget, compression)
+    }
+
+    /// [`PlainLogFile::open_compressed`] with every filesystem operation of
+    /// the handle made through `io`; see [`crate::storage_io`].
+    #[doc(hidden)]
+    pub fn open_compressed_with_io(
+        io: Arc<dyn StorageIo>,
+        root: &Path,
+        id: &str,
+        source_budget: usize,
+        compression: LogCompression,
+    ) -> Result<Self, LogFileRefusal> {
         if id.is_empty() {
             return Err(LogFileRefusal::NativeSubset(LogFileLimit::EmptyId));
         }
         let encoded = encoded_id(id, PathPlatform::host())?;
-        let mut found = find_generations(&*io, root, &encoded)?;
+        let mut found = find_generations(&*io, root, &encoded, compression)?;
         if let Some(refusal) = duplicate(id, &found) {
             return Err(refusal);
         }
@@ -439,7 +665,7 @@ impl PlainLogFile {
         let lease = acquire_lease(&*io, dir, id)?;
         // `requireStoredLog` selects again under the lock: a writer that held
         // it may have published or removed a generation since the first look.
-        let mut found = find_generations(&*io, root, &encoded)?;
+        let mut found = find_generations(&*io, root, &encoded, compression)?;
         if let Some(refusal) = duplicate(id, &found) {
             return Err(refusal);
         }
@@ -449,17 +675,43 @@ impl PlainLogFile {
             });
         };
         if selected.version < CURRENT_SESSION_FORMAT_VERSION {
-            return Self::migrate(io, root, id, &encoded, &selected, lease, source_budget);
+            return Self::migrate(
+                io,
+                root,
+                id,
+                &encoded,
+                &selected,
+                lease,
+                source_budget,
+                compression,
+            );
         }
         if selected.version > CURRENT_SESSION_FORMAT_VERSION {
             return Err(LogFileRefusal::NativeSubset(LogFileLimit::NewerGeneration));
         }
         let bytes = io.read(&selected.path)?;
         let platform = PathPlatform::host();
-        let log = PlainAppendLog::open(&bytes, platform, source_budget)
-            .map_err(|refusal| LogFileRefusal::NativeSubset(LogFileLimit::Scan(refusal)))?;
+        let (log, zstd) = match compression {
+            LogCompression::None => (
+                PlainAppendLog::open(&bytes, platform, source_budget)
+                    .map_err(|refusal| LogFileRefusal::NativeSubset(LogFileLimit::Scan(refusal)))?,
+                None,
+            ),
+            LogCompression::Zstd {
+                max_plaintext_bytes,
+            } => open_zstd(
+                bytes,
+                id,
+                &selected.path,
+                source_budget,
+                max_plaintext_bytes,
+            )?,
+        };
+        let bytes = log
+            .bytes()
+            .ok_or_else(|| io::Error::other("an opened log holds bytes"))?;
         // The scan admitted this header record, so it decodes again.
-        let header = first_record(&bytes)
+        let header = first_record(bytes)
             .map(|record| read_header_record(record, platform))
             .and_then(Result::ok)
             .ok_or_else(|| io::Error::other("an opened log's header decodes again"))?;
@@ -473,12 +725,16 @@ impl PlainLogFile {
             log,
             lease: Some(lease),
             diverged: false,
+            zstd,
         })
     }
 
     /// The write `open` of an older generation: `prepareStoredMigration`,
     /// then `publishStoredMigration`, which writes the encoded v3 log beside
-    /// the unchanged source before the handle holds it.
+    /// the unchanged source before the handle holds it. A Zstd source is
+    /// decoded as `decodeStreamingMigration` decodes it, and the v3 log is
+    /// written in `compression`'s encoding.
+    #[allow(clippy::too_many_arguments)]
     fn migrate(
         io: Arc<dyn StorageIo>,
         root: &Path,
@@ -487,10 +743,33 @@ impl PlainLogFile {
         selected: &Generation,
         lease: WriteLease,
         source_budget: usize,
+        compression: LogCompression,
     ) -> Result<Self, LogFileRefusal> {
         let (bytes, source_identity) = read_stable(&*io, &selected.path)?;
         let platform = PathPlatform::host();
         let refusal = |refused: ReleasedGenerationRefusal| refused.into_refusal(id, selected);
+        let (bytes, body_stop) = match compression {
+            LogCompression::None => (bytes, None),
+            LogCompression::Zstd {
+                max_plaintext_bytes,
+            } => {
+                // The budget is the current log's: one refusal for both paths.
+                let decoded =
+                    released_zstd_plaintext(&bytes, max_plaintext_bytes).map_err(|refused| {
+                        match refused {
+                            ReleasedGenerationRefusal::Limit(name)
+                                if name == RELEASED_ZSTD_PLAINTEXT_BUDGET =>
+                            {
+                                LogFileRefusal::NativePlaintextBudget {
+                                    max_plaintext_bytes,
+                                }
+                            }
+                            refused => refusal(refused),
+                        }
+                    })?;
+                (decoded.plaintext, decoded.stop)
+            }
+        };
         // `validateSourceIdentity` checks a header its codec reads, before any row.
         if let Some(stored) =
             released_generation_header(&bytes, selected.version, platform).map_err(refusal)?
@@ -501,8 +780,13 @@ impl PlainLogFile {
                 "Error: {cause}"
             ))));
         }
-        let migrated = migrate_released_generation(&bytes, selected.version, source_budget)
-            .map_err(refusal)?;
+        let migrated = migrate_released_generation_before_stop(
+            &bytes,
+            selected.version,
+            source_budget,
+            body_stop,
+        )
+        .map_err(refusal)?;
         // The catalog checks the transformed artifact when the chain finishes.
         if let Err(checked) = check_transformed_artifact(&migrated, platform) {
             return Err(refusal(match checked {
@@ -527,10 +811,11 @@ impl PlainLogFile {
         let bytes = text.into_bytes();
         let log = PlainAppendLog::open(&bytes, platform, source_budget)
             .map_err(|_| refusal(ReleasedGenerationRefusal::Limit("scan".to_owned())))?;
-        let path = selected.path.with_file_name(CURRENT_LOG_FILENAME);
+        let path = selected.path.with_file_name(compression.current_log_name());
+        let stored = compression.encode(&bytes)?;
         let spelled =
             |path: &Path| crate::js_string::from_rust(&path.display().to_string()).into_owned();
-        publish_migration(&*io, &selected.path, source_identity, &path, &bytes).map_err(
+        publish_migration(&*io, &selected.path, source_identity, &path, &stored).map_err(
             |failure| match failure {
                 PublishRefusal::Io(error) => LogFileRefusal::Io(error),
                 PublishRefusal::TargetConflict(reason) => {
@@ -557,6 +842,7 @@ impl PlainLogFile {
             log,
             lease: Some(lease),
             diverged: false,
+            zstd: zstd_file(compression, stored, None, None),
         })
     }
 
@@ -565,9 +851,31 @@ impl PlainLogFile {
         &self.path
     }
 
-    /// The model of the handle and the bytes the file holds.
+    /// The model of the handle and the bytes the file holds. For a Zstd log
+    /// they are the JSONL text its frames decode to once a pending recovered
+    /// tail is written; [`PlainLogFile::stored_bytes`] holds the frames.
     pub const fn log(&self) -> &PlainAppendLog {
         &self.log
+    }
+
+    /// The encoding the handle writes.
+    pub const fn compression(&self) -> LogCompression {
+        match &self.zstd {
+            None => LogCompression::None,
+            Some(zstd) => LogCompression::Zstd {
+                max_plaintext_bytes: zstd.max_plaintext_bytes,
+            },
+        }
+    }
+
+    /// The bytes the file holds, or `None` while no file was written: the
+    /// model's bytes for a plain log, the frames for a Zstd log.
+    pub fn stored_bytes(&self) -> Option<&[u8]> {
+        match (&self.zstd, self.log.bytes()) {
+            (_, None) => None,
+            (None, bytes) => bytes,
+            (Some(zstd), Some(_)) => Some(&zstd.frames),
+        }
     }
 
     /// The handle's `append`, as [`PlainAppendLog::append`] runs it, with the
@@ -581,6 +889,14 @@ impl PlainLogFile {
     /// step leaves the handle usable, as a TypeScript handle stays: the model
     /// keeps every step that landed, so a later `append` of the same batch
     /// retries what did not.
+    ///
+    /// A Zstd log appends each batch as one frame. After the contiguity check
+    /// its pending torn frame is truncated and synced, then the rows a write
+    /// `open` recovered from that frame are appended as a frame of their own,
+    /// as `persistContiguous` rewrites `recoveredTail`, before the batch is
+    /// encoded; a recovered row that does not encode refuses every batch
+    /// after the truncation as `Unadmitted`, or with its native limit before
+    /// it.
     pub fn append(&mut self, events: &[Value]) -> Result<(), LogFileRefusal> {
         self.check_usable()?;
         if !events.is_empty() && !events.iter().any(holds_negative_zero) {
@@ -588,7 +904,12 @@ impl PlainLogFile {
         }
         let mut next = self.log.clone();
         let outcome = next.append(events);
-        if let Some(offset) = self.log.torn_truncate_to()
+        if self.zstd.is_some() {
+            // The contiguity check passed, and the batch was not empty.
+            if !events.is_empty() && matches!(outcome, Ok(()) | Err(AppendRefusal::Unadmitted)) {
+                self.repair_zstd_tail()?;
+            }
+        } else if let Some(offset) = self.log.torn_truncate_to()
             && next.torn_truncate_to().is_none()
         {
             truncate_torn_tail(&*self.io, &self.path, offset)?;
@@ -596,6 +917,47 @@ impl PlainLogFile {
         }
         self.write(next)?;
         outcome.map_err(LogFileRefusal::Append)
+    }
+
+    /// `persistContiguous`'s repair of a torn Zstd frame: truncate it, then
+    /// write the rows recovered from it as one frame, each step cleared once
+    /// it lands so a failed one is retried by the next batch.
+    fn repair_zstd_tail(&mut self) -> Result<(), LogFileRefusal> {
+        let Some(zstd) = &mut self.zstd else {
+            return Ok(());
+        };
+        // A native limit claims nothing, so it refuses before the repair.
+        if let Some(Err(EncodeRefusal::NativeSubset(limit))) = &zstd.recovered_tail {
+            return Err(LogFileRefusal::Append(AppendRefusal::NativeSubset(
+                crate::AppendLimit::Encode(*limit),
+            )));
+        }
+        if let Some(offset) = zstd.torn_truncate_to {
+            truncate_torn_tail(&*self.io, &self.path, offset)?;
+            zstd.frames.truncate(offset);
+            zstd.torn_truncate_to = None;
+        }
+        match &zstd.recovered_tail {
+            None => {}
+            Some(Err(_)) => {
+                return Err(LogFileRefusal::Append(AppendRefusal::Unadmitted));
+            }
+            Some(Ok(rows)) if rows.is_empty() => zstd.recovered_tail = None,
+            Some(Ok(rows)) => {
+                let frame = compress_zstd_frame(rows.as_bytes())?;
+                append_rows(&*self.io, &self.path, zstd.frames.len(), &frame).map_err(
+                    |failure| {
+                        if failure.diverged {
+                            self.diverged = true;
+                        }
+                        LogFileRefusal::Io(failure.error)
+                    },
+                )?;
+                zstd.frames.extend_from_slice(&frame);
+                zstd.recovered_tail = None;
+            }
+        }
+        Ok(())
     }
 
     /// The handle's `flush`: an unwritten log takes the write lock, then its
@@ -637,20 +999,34 @@ impl PlainLogFile {
     /// the model, as TypeScript's handle keeps its cursor and `materialized`
     /// flag; a failed rollback marks the value diverged.
     fn write(&mut self, next: PlainAppendLog) -> Result<(), LogFileRefusal> {
+        let compression = self.compression();
         match (self.log.bytes(), next.bytes()) {
-            (None, Some(after)) => materialize(&*self.io, &self.path, self.log.id(), after)?,
+            (None, Some(after)) => {
+                let stored = compression.encode(after)?;
+                materialize(&*self.io, &self.path, self.log.id(), &stored, compression)?;
+                if let Some(zstd) = &mut self.zstd {
+                    zstd.frames = stored;
+                }
+            }
             (Some(before), Some(after)) if after.len() > before.len() => {
                 let Some(rows) = after.strip_prefix(before) else {
                     return Err(LogFileRefusal::Io(io::Error::other(
                         "an appended log does not extend the bytes before it",
                     )));
                 };
-                append_rows(&*self.io, &self.path, before.len(), rows).map_err(|failure| {
+                let (offset, content) = match &self.zstd {
+                    None => (before.len(), rows.to_vec()),
+                    Some(zstd) => (zstd.frames.len(), compress_zstd_frame(rows)?),
+                };
+                append_rows(&*self.io, &self.path, offset, &content).map_err(|failure| {
                     if failure.diverged {
                         self.diverged = true;
                     }
                     LogFileRefusal::Io(failure.error)
                 })?;
+                if let Some(zstd) = &mut self.zstd {
+                    zstd.frames.extend_from_slice(&content);
+                }
             }
             _ => {}
         }
@@ -1150,7 +1526,8 @@ fn publish_migration(
     bytes: &[u8],
 ) -> Result<(), PublishRefusal> {
     let dir = parent(path)?;
-    let staged = write_synced_temp(io, dir, "session.migration.", ".jsonl.tmp", bytes).map_err(
+    let temp_suffix = migration_temp_suffix(path);
+    let staged = write_synced_temp(io, dir, "session.migration.", temp_suffix, bytes).map_err(
         |failure| match failure.staged {
             Some(staged) => remove_temporary(io, &staged, failure.error),
             None => failure.error,
@@ -1298,6 +1675,130 @@ fn dirname(path: &Path) -> &Path {
     }
 }
 
+/// The Zstd side of a handle of `compression` whose file holds `frames`.
+fn zstd_file(
+    compression: LogCompression,
+    frames: Vec<u8>,
+    torn_truncate_to: Option<usize>,
+    recovered_tail: Option<Result<String, EncodeRefusal>>,
+) -> Option<ZstdFile> {
+    match compression {
+        LogCompression::None => None,
+        LogCompression::Zstd {
+            max_plaintext_bytes,
+        } => Some(ZstdFile {
+            max_plaintext_bytes,
+            frames,
+            torn_truncate_to,
+            recovered_tail,
+        }),
+    }
+}
+
+/// `readZstdPrefix` of a current Zstd log's `frames` at `path`, for a write
+/// `open` of `id`: the model of its JSONL text, with the rows a torn final
+/// frame recovered written as `eventLines` would rewrite them, and the
+/// physical repair the first appended batch makes.
+fn open_zstd(
+    frames: Vec<u8>,
+    id: &str,
+    path: &Path,
+    source_budget: usize,
+    max_plaintext_bytes: usize,
+) -> Result<(PlainAppendLog, Option<ZstdFile>), LogFileRefusal> {
+    let platform = PathPlatform::host();
+    let staged =
+        match stage_zstd_plaintext(&frames, platform, source_budget, max_plaintext_bytes, true) {
+            Ok(staged) => staged,
+            Err(RestoreRefusal::Zstd(refusal)) => {
+                let path = crate::js_string::from_rust(&path.display().to_string()).into_owned();
+                return Err(LogFileRefusal::Corrupt {
+                    message: format!(
+                        "session \"{id}\": stored log is corrupt: Error: {} (raw log: {path})",
+                        refusal.message()
+                    ),
+                });
+            }
+            Err(RestoreRefusal::Scan(refusal)) => {
+                return Err(LogFileRefusal::NativeSubset(LogFileLimit::Scan(refusal)));
+            }
+            Err(RestoreRefusal::NativePlaintextBudget {
+                max_plaintext_bytes,
+            }) => {
+                return Err(LogFileRefusal::NativePlaintextBudget {
+                    max_plaintext_bytes,
+                });
+            }
+            Err(_) => {
+                return Err(LogFileRefusal::Io(io::Error::other(
+                    "a staged Zstd log refuses only while it is framed, decoded, or scanned",
+                )));
+            }
+        };
+    let scanned = staged.staged.scanned();
+    let committed = &staged.plaintext[..scanned.committed_bytes().min(staged.plaintext.len())];
+    let torn = staged.staged.torn_tail();
+    let recovered = torn.map(|tail| {
+        scanned
+            .rows()
+            .iter()
+            .zip(scanned.events())
+            .skip(tail.recovered_from)
+            .map(|(row, event)| {
+                let event = logical_event(row, event.envelope().source_event_seqs.as_deref());
+                let line = encode_event_line(&event);
+                dismantle(event);
+                line.map(|line| line + "\n")
+            })
+            .collect::<Result<String, EncodeRefusal>>()
+    });
+    let text = match &recovered {
+        Some(Ok(rows)) => [&staged.plaintext[..staged.complete], rows.as_bytes()].concat(),
+        _ => committed.to_vec(),
+    };
+    let log = PlainAppendLog::open(&text, platform, source_budget)
+        .map_err(|refusal| LogFileRefusal::NativeSubset(LogFileLimit::Scan(refusal)))?;
+    let max = max_plaintext_bytes;
+    let zstd = zstd_file(
+        LogCompression::Zstd {
+            max_plaintext_bytes: max,
+        },
+        frames,
+        torn.map(|tail| tail.truncate_to),
+        recovered,
+    );
+    Ok((log, zstd))
+}
+
+/// The event a decoded row stands for, as TypeScript's codec returns it:
+/// the row's members in their order, with `sourceEventSeqs` expanded.
+fn logical_event(row: &Value, expanded: Option<&[u64]>) -> Value {
+    let mut event = crate::json_parse::clone_value(row);
+    if let (Value::Object(members), Some(seqs)) = (&mut event, expanded)
+        && let Some(list) = members.get_mut("sourceEventSeqs")
+    {
+        let ranges = std::mem::replace(
+            list,
+            Value::Array(seqs.iter().map(|seq| Value::from(*seq)).collect()),
+        );
+        dismantle(ranges);
+    }
+    event
+}
+
+/// The temporary suffix `writeSyncedTemp` gives a migration staged for the
+/// current log at `path`: `.jsonl.tmp`, or `.jsonl.zstd.tmp` for a Zstd log.
+fn migration_temp_suffix(path: &Path) -> &'static str {
+    if path
+        .extension()
+        .is_some_and(|extension| extension == "zstd")
+    {
+        ".jsonl.zstd.tmp"
+    } else {
+        ".jsonl.tmp"
+    }
+}
+
 /// The write lock of the Session directory `dir`, or TypeScript's
 /// `SessionAlreadyOwnedError` refusal for `id`.
 fn acquire_lease(io: &dyn StorageIo, dir: &Path, id: &str) -> Result<WriteLease, LogFileRefusal> {
@@ -1439,6 +1940,7 @@ fn find_generations(
     io: &dyn StorageIo,
     root: &Path,
     encoded: &str,
+    compression: LogCompression,
 ) -> Result<Vec<Generation>, LogFileRefusal> {
     let mut projects = Vec::new();
     for entry in list(io, root)?.unwrap_or_default() {
@@ -1472,10 +1974,14 @@ fn find_generations(
             let dir = project_dir.join(session);
             let highest = utf8_names(io, &dir)?
                 .into_iter()
-                .filter_map(|name| opposite_generation(&name).map(|version| (version, name)))
+                .filter_map(|name| {
+                    compression
+                        .opposite_generation(&name)
+                        .map(|version| (version, name))
+                })
                 .max();
             if let Some((_, name)) = highest {
-                return Err(encoding_mismatch(&dir.join(name)));
+                return Err(encoding_mismatch(&dir.join(name), compression));
             }
         }
     }
@@ -1494,13 +2000,13 @@ fn find_generations(
         // `resolveGenerationInDirectory` names the first one it lists.
         if let Some(name) = names
             .iter()
-            .find(|name| opposite_generation(name).is_some())
+            .find(|name| compression.opposite_generation(name).is_some())
         {
-            return Err(encoding_mismatch(&dir.join(name)));
+            return Err(encoding_mismatch(&dir.join(name), compression));
         }
         let newest = names
             .into_iter()
-            .filter_map(|name| canonical_generation(&name).map(|version| (version, name)))
+            .filter_map(|name| compression.generation(&name).map(|version| (version, name)))
             .max();
         if let Some((version, name)) = newest {
             found.push(Generation {
@@ -1525,21 +2031,17 @@ fn legacy_layout(path: &Path) -> LogFileRefusal {
     }
 }
 
-/// The generation a canonical name with the `.zstd` suffix carries,
-/// `parseGenerationLogFilename(name, 'zstd')`.
-fn opposite_generation(name: &str) -> Option<u64> {
-    name.strip_suffix(".zstd").and_then(canonical_generation)
-}
-
 /// TypeScript's `encodingMismatch(path)` of a backend configured for
-/// compression `none`, which spells `path` with `JSON.stringify`.
-fn encoding_mismatch(path: &Path) -> LogFileRefusal {
+/// `compression`, which spells `path` with `JSON.stringify`.
+fn encoding_mismatch(path: &Path, compression: LogCompression) -> LogFileRefusal {
     let path = path.display().to_string();
     let spelled = crate::js_string::quote(&crate::js_string::from_rust(&path));
     LogFileRefusal::EncodingMismatch {
         message: format!(
-            "session artifact {spelled} uses .jsonl.zstd, but this backend is configured for \
-             compression \"none\"; use a separate root or select the matching compression mode"
+            "session artifact {spelled} uses {}, but this backend is configured for \
+             compression {}; use a separate root or select the matching compression mode",
+            compression.opposite_log_suffix(),
+            compression.quoted_name()
         ),
     }
 }
@@ -1548,8 +2050,9 @@ fn encoding_mismatch(path: &Path) -> LogFileRefusal {
 /// in the seam's write platform's sequence. POSIX (`materializePosix`)
 /// creates the root, project, and Session directories, syncing each one's
 /// parent after it, refuses a Session directory that already holds a
-/// canonical generation (`rejectExistingLog`), writes and syncs a
-/// `session.v3.jsonl.<token>.tmp` beside the log, hard-links it into place,
+/// canonical generation of `compression` (`rejectExistingLog`), or one of
+/// the other encoding with the encoding-mismatch message, writes and syncs
+/// a `<log name>.<token>.tmp` beside the log, hard-links it into place,
 /// which fails if the log exists, syncs the Session directory, and removes
 /// the temporary file, ignoring a failure. Win32 (`materializeWin32`) walks
 /// each of those directories with `ensureDurableDirectoryWin32`, runs the
@@ -1562,6 +2065,7 @@ fn materialize(
     path: &Path,
     id: &str,
     bytes: &[u8],
+    compression: LogCompression,
 ) -> Result<(), LogFileRefusal> {
     let dir = parent(path)?;
     let project = parent(dir)?;
@@ -1577,7 +2081,7 @@ fn materialize(
             io.sync_dir(synced)?;
         }
     }
-    reject_existing_log(io, dir, id)?;
+    reject_existing_log(io, dir, id, compression)?;
     let name = path
         .file_name()
         .ok_or_else(|| io::Error::other("a Session log path has a file name"))?;
@@ -1603,17 +2107,22 @@ fn materialize(
 /// highest canonical one, whose presence refuses the publication with
 /// TypeScript's `Error` message, carried here without a claimed class. A
 /// failed directory sync after an earlier link reaches it on a retry.
-fn reject_existing_log(io: &dyn StorageIo, dir: &Path, id: &str) -> Result<(), LogFileRefusal> {
+fn reject_existing_log(
+    io: &dyn StorageIo,
+    dir: &Path,
+    id: &str,
+    compression: LogCompression,
+) -> Result<(), LogFileRefusal> {
     let names = utf8_names(io, dir)?;
     if let Some(name) = names
         .iter()
-        .find(|name| opposite_generation(name).is_some())
+        .find(|name| compression.opposite_generation(name).is_some())
     {
-        return Err(encoding_mismatch(&dir.join(name)));
+        return Err(encoding_mismatch(&dir.join(name), compression));
     }
     if names
         .iter()
-        .any(|name| canonical_generation(name).is_some())
+        .any(|name| compression.generation(name).is_some())
     {
         return Err(LogFileRefusal::Io(io::Error::other(format!(
             "refusing to materialize \"{id}\": a log already exists on disk (open it instead)"
@@ -1787,7 +2296,10 @@ mod tests {
 
     #[test]
     fn encoding_mismatch_spells_the_path_as_json_stringify_does() {
-        let refusal = encoding_mismatch(Path::new("/r/\"q\"/session.v3.jsonl.zstd"));
+        let refusal = encoding_mismatch(
+            Path::new("/r/\"q\"/session.v3.jsonl.zstd"),
+            LogCompression::None,
+        );
         assert_eq!(
             refusal.message(),
             Some(

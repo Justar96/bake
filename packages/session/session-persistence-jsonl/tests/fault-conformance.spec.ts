@@ -1,18 +1,20 @@
 /**
  * Runs the shared cases in `conformance/session/fault-cases.json` through the
- * real JSONL backend with `compression: 'none'`, each in its own temporary
- * root. Each case seeds the files a crashed or failed Session writer left:
- * a file with its text, or a second hard link of a seeded file, which a
+ * real JSONL backend with the case's `compression`, `'none'` unless it names
+ * `'zstd'`, each in its own temporary root. Each case seeds the files a
+ * crashed or failed Session writer left: a file with its text or its bytes
+ * as hex, or a second hard link of a seeded file, which a
  * crash between publishing a log and removing its temporary file leaves.
  * Its steps then reopen the Session on one handle: a write `open`, `create`,
  * and the handle's `append`, `flush`, and `close`. After each step every
- * file beneath the root must have the expected text, a `session.lock` file
+ * file beneath the root must have the expected text, or `<hex BYTES>` when
+ * its bytes are not UTF-8, a `session.lock` file
  * read only by its size, and no other file may exist.
  *
  * The states come from the Rust fault-injection sweep in
  * `rust/crates/bake-session/tests/fault_cases.rs`, which crashes, fails,
- * or cuts the power to the development writer `PlainLogFile` at every
- * storage operation of its POSIX and Win32 write sequences, retries each
+ * or cuts the power to the development writer `PlainLogFile`, plain or
+ * Zstd, at every storage operation of its POSIX and Win32 write sequences, retries each
  * failed action, and checks that each state it leaves is a case here, then
  * runs that case's steps on the crashed root. TypeScript's own fault
  * behavior stays in its persistence specs (D30); this table compares the
@@ -33,13 +35,14 @@ import JsonlSessionPersistence from '../src/index.ts'
 
 const REPO = new URL('../../../../', import.meta.url)
 const SCHEMA = 'bake/session-conformance/fault-cases'
-const ORACLE = 'in an owned temporary root holding the seeded files, a state a crashed or failed Session writer leaves, run each step through the JSONL backend with compression none on one handle: a write open, create, or the open handle\'s append, flush, or close; after each step list every file beneath the root with its text and an empty session.lock by its size'
+const ORACLE = 'in an owned temporary root holding the seeded files, a state a crashed or failed Session writer leaves, run each step through the JSONL backend with the case\'s compression, none unless it names zstd, on one handle: a write open, create, or the open handle\'s append, flush, or close; after each step list every file beneath the root with its text, or <hex BYTES> when its bytes are not UTF-8, and an empty session.lock by its size'
 /** Both harnesses pin the table size, so a dropped case fails. */
-const CASE_COUNT = 72
+const CASE_COUNT = 137
 const LEASE_FILE = 'session.lock'
 const SCENARIOS = [
   'create-flush', 'create-append', 'create-flush-appends', 'open-append', 'open-torn-append',
   'migrate-v0', 'migrate-v1', 'migrate-v2',
+  'zstd-create-flush-appends', 'zstd-create-append', 'zstd-open-append', 'zstd-open-torn-append', 'zstd-migrate-v2',
 ]
 /** Classes are matched exactly. */
 const CLASSES = new Map<string, abstract new (...args: never[]) => Error>([
@@ -48,7 +51,7 @@ const CLASSES = new Map<string, abstract new (...args: never[]) => Error>([
 ])
 
 type Outcome = { outcome: 'ok' } | { outcome: 'thrown'; class: string; message: string }
-type Seed = { file: string; text: string } | { file: string; hardLinkTo: string }
+type Seed = { file: string; text: string } | { file: string; hex: string } | { file: string; hardLinkTo: string }
 type Tree = Record<string, string>
 type Step =
   | { step: 'open'; id: string; ts: Outcome; tree: Tree }
@@ -58,6 +61,7 @@ type Step =
 
 interface FaultCase {
   id: string
+  compression: 'none' | 'zstd'
   scenarios: string[]
   seed: Seed[]
   steps: Step[]
@@ -100,6 +104,8 @@ function parseTree(value: unknown, id: string): Tree {
 function parseSeed(value: unknown, id: string): Seed {
   if (isObject(value) && sortedKeys(value) === 'file,text' && typeof value.file === 'string'
     && typeof value.text === 'string') return { file: value.file, text: value.text }
+  if (isObject(value) && sortedKeys(value) === 'file,hex' && typeof value.file === 'string'
+    && typeof value.hex === 'string' && /^(?:[0-9a-f]{2})*$/u.test(value.hex)) return { file: value.file, hex: value.hex }
   if (isObject(value) && sortedKeys(value) === 'file,hardLinkTo' && typeof value.file === 'string'
     && typeof value.hardLinkTo === 'string') return { file: value.file, hardLinkTo: value.hardLinkTo }
   throw new Error(`${id}: invalid seed ${JSON.stringify(value)}`)
@@ -129,7 +135,7 @@ function parseStep(value: unknown, id: string): Step {
 function loadTable(): FaultCase[] {
   const table: unknown = JSON.parse(readFileSync(new URL('conformance/session/fault-cases.json', REPO), 'utf8'))
   if (!isObject(table) || sortedKeys(table) !== 'cases,history,oracle,schema,version'
-    || table.schema !== SCHEMA || table.version !== 2 || table.oracle !== ORACLE
+    || table.schema !== SCHEMA || table.version !== 3 || table.oracle !== ORACLE
     || !Array.isArray(table.history) || !table.history.every(line => typeof line === 'string')
     || !Array.isArray(table.cases)) {
     throw new Error('fault-cases.json: unexpected table envelope')
@@ -140,13 +146,15 @@ function loadTable(): FaultCase[] {
       throw new Error(`invalid case ${JSON.stringify(entry)}`)
     }
     const { id } = entry
-    const unknown = Object.keys(entry).filter(key => !['id', 'scenarios', 'seed', 'steps', 'note'].includes(key))
+    const unknown = Object.keys(entry).filter(key => !['id', 'compression', 'scenarios', 'seed', 'steps', 'note'].includes(key))
     if (unknown.length > 0) throw new Error(`${id}: unknown keys ${unknown.join()}`)
+    if (entry.compression !== undefined && entry.compression !== 'zstd') throw new Error(`${id}: invalid compression`)
     if (entry.scenarios.length === 0 || !entry.scenarios.every(name => SCENARIOS.includes(name as string))) {
       throw new Error(`${id}: invalid scenarios`)
     }
     return {
       id,
+      compression: entry.compression === 'zstd' ? 'zstd' : 'none',
       scenarios: entry.scenarios as string[],
       seed: entry.seed.map(seed => parseSeed(seed, id)),
       steps: entry.steps.map(step => parseStep(step, id)),
@@ -169,10 +177,10 @@ async function outcome(run: () => Promise<void>): Promise<Outcome> {
 
 async function seedRoot(root: string, seeds: readonly Seed[]): Promise<void> {
   for (const seed of seeds) {
-    if ('text' in seed) {
+    if ('text' in seed || 'hex' in seed) {
       const path = join(root, seed.file)
       await mkdir(dirname(path), { recursive: true })
-      await writeFile(path, seed.text)
+      await writeFile(path, 'hex' in seed ? Buffer.from(seed.hex, 'hex') : seed.text)
     }
   }
   for (const seed of seeds) {
@@ -180,9 +188,13 @@ async function seedRoot(root: string, seeds: readonly Seed[]): Promise<void> {
   }
 }
 
-/** Every file beneath `root`, by `/`-joined relative path; a `session.lock` by its size. */
+/**
+ * Every file beneath `root`, by `/`-joined relative path, its text or
+ * `<hex BYTES>` when its bytes are not UTF-8; a `session.lock` by its size.
+ */
 async function readTree(root: string): Promise<Tree> {
   const files: Tree = {}
+  const utf8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
   async function walk(dir: string, prefix: string): Promise<void> {
     for (const entry of await readdir(dir, { withFileTypes: true })) {
       const path = dir + sep + entry.name
@@ -193,7 +205,12 @@ async function readTree(root: string): Promise<Tree> {
         const { size } = await stat(path)
         files[relative] = size === 0 ? '' : `<${size} bytes>`
       } else {
-        files[relative] = await readFile(path, 'utf8')
+        const bytes = await readFile(path)
+        try {
+          files[relative] = utf8.decode(bytes)
+        } catch {
+          files[relative] = `<hex ${bytes.toString('hex')}>`
+        }
       }
     }
   }
@@ -213,6 +230,14 @@ afterAll(async () => {
 })
 
 describe('shared fault cases', () => {
+  // The Zstd cases' frames are Node's bytes for the libzstd version the
+  // Zstd frame table names; another version fails here by name first.
+  it('run on the libzstd the Zstd frames were recorded with', () => {
+    const frames: unknown = JSON.parse(readFileSync(new URL('conformance/session/zstd-frame-cases.json', REPO), 'utf8'))
+    const libzstd = typeof frames === 'object' && frames !== null && 'libzstd' in frames ? frames.libzstd : undefined
+    expect(process.versions.zstd).toBe(libzstd)
+  })
+
   it('pin the table and name every scenario', () => {
     expect(cases).toHaveLength(CASE_COUNT)
     expect(new Set(cases.map(entry => entry.id)).size).toBe(CASE_COUNT)
@@ -232,7 +257,7 @@ describe('shared fault cases', () => {
       let handle: SessionHandle | undefined
       try {
         await seedRoot(caseRoot, entry.seed)
-        await ctx.plugin(JsonlSessionPersistence, { root: caseRoot, compression: 'none' })
+        await ctx.plugin(JsonlSessionPersistence, { root: caseRoot, compression: entry.compression })
         for (const [index, step] of entry.steps.entries()) {
           const context = `step ${index} ${step.step}`
           let actual: Outcome

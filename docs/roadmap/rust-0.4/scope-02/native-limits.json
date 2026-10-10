@@ -2029,7 +2029,7 @@
    ],
    "kind": "filesystem",
    "classification": "reachable-gap",
-   "evidence": "The limit fires only on a Win32 path platform (rust/crates/bake-session/src/plain_log_file.rs:917-919); on POSIX a configured agents[].sessionId such as con, nightly., or aux.txt is laid out as TypeScript lays it out. A configured agents[].sessionId is any non-empty string (packages/core/agent-loop/src/index.ts:323, documented at packages/core/agent-loop/README.md:52) and replaces the generated id (packages/core/agent-loop/src/index.ts:385; also v0.1.1:packages/core/agent-loop/src/index.ts:367,429), and encodeSegment keeps letters and \".\" literally (packages/session/session-persistence-jsonl/src/format.ts:198-213). On Windows a trailing dot is reachable: Windows strips it, so a Windows writer with sessionId nightly. creates a nightly directory, and TypeScript reopens it by the same spelling while Rust refuses. A device name such as con or aux.txt likely makes the TypeScript writer itself fail on Windows (not verified on a Windows host)",
+   "evidence": "The limit fires only on a Win32 path platform (rust/crates/bake-session/src/plain_log_file.rs:1566-1568); on POSIX a configured agents[].sessionId such as con, nightly., or aux.txt is laid out as TypeScript lays it out. A configured agents[].sessionId is any non-empty string (packages/core/agent-loop/src/index.ts:323, documented at packages/core/agent-loop/README.md:52) and replaces the generated id (packages/core/agent-loop/src/index.ts:385; also v0.1.1:packages/core/agent-loop/src/index.ts:367,429), and encodeSegment keeps letters and \".\" literally (packages/session/session-persistence-jsonl/src/format.ts:198-213). On Windows a trailing dot is reachable: Windows strips it, so a Windows writer with sessionId nightly. creates a nightly directory, and TypeScript reopens it by the same spelling while Rust refuses. A device name such as con or aux.txt likely makes the TypeScript writer itself fail on Windows (not verified on a Windows host)",
    "followUp": "None: D26 keeps the Win32 refusal (owner decision)."
   },
   {
@@ -2123,6 +2123,19 @@
    "classification": "unreachable",
    "evidence": "Only a writer outside the Session directory's write lock publishes the migrated target and appends to it while another writer migrates: every released Bake writer takes the lock before it reads a selected generation or publishes a migration and selects the generation again under it (packages/session/session-persistence-jsonl/src/index.ts:364-371 and requireStoredLog at 491-492; v0.1.1:packages/session/session-persistence-jsonl/src/index.ts:368-375 and 495-496), as Rust's PlainLogFile::open does, so a target a lock-holding writer published before the lock was taken is opened, not migrated over and before its first append or materialization (index.ts:316-319, 873-883), and the v0 to v2 writers never write session.v3.jsonl. A target that exists before findLog runs is selected as the current generation and never migrated over (index.ts:1364-1397), and a case-insensitive alias is refused as noncanonical before its bytes are read (generation.ts:848-860). The Rust model refuses because TypeScript would accept the target and append after bytes its handle never read (index.ts:1242-1257)",
    "followUp": "None."
+  },
+  {
+   "variants": [],
+   "stageNames": [
+    "zstd/plaintext-budget"
+   ],
+   "id": "zstd-plaintext-budget",
+   "crate": "bake-session",
+   "cases": [],
+   "kind": "resource",
+   "classification": "unreachable",
+   "evidence": "The cumulative decoded-plaintext budget of a Zstd log, a caller-chosen budget, not a spelling: the limit fires only when the caller's budget is below the log's size. Budgets reach 2^53 - 1 (rust/crates/bake-cli/src/inspect.rs:27), and no writer-produced log exceeds that, because every seq is a safe count (packages/session/session-format-v2-to-v3/src/payload.ts:278). TypeScript has no such bound. It is a refusal rather than a limit-enum variant: RestoreRefusal::NativePlaintextBudget (rust/crates/bake-session/src/restore.rs:159) for the readers, LogFileRefusal::NativePlaintextBudget (rust/crates/bake-session/src/plain_log_file.rs:388) for a write open of a current Zstd log or of an older Zstd generation it migrates, and the zstd/plaintext-budget name of released_zstd_plaintext (rust/crates/bake-session/src/zstd.rs:238), which the write open reports as that same refusal. bake-cli passes it through as its --max-bytes budget (cli-session-limit). Only Rust tests witness it, since TypeScript has no counterpart",
+   "followUp": "None: LogCompression::Zstd's documentation tells production callers to size the budget from the log or pass usize::MAX."
   },
   {
    "variants": [],

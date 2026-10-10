@@ -5,8 +5,12 @@
 //! `append` and `flush` use it, and `close` drops it. A step names its
 //! handle, `a` unless `handle` says `b`. With no handle open, `move-root`
 //! renames the root and `link-root` reaches it through a new symbolic link,
-//! and later steps use that path. After each step every file beneath
-//! the root must have the hand-written text, a `session.lock` file read only
+//! and later steps use that path. A case naming `compression` `zstd` runs
+//! its create and open steps with `LogCompression::Zstd`, as the TypeScript
+//! backend is configured with `compression: 'zstd'`, and a seed may give a
+//! file's bytes as `hex`. After each step every file beneath
+//! the root must have the hand-written text, or `<hex BYTES>` when its bytes
+//! are not UTF-8, a `session.lock` file read only
 //! by its size, since Windows refuses to read a locked range, and a symbolic
 //! link its target, and no other file may exist. A thrown outcome maps to
 //! the refusal Rust claims: the exact already-owned, already-exists,
@@ -28,16 +32,18 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use bake_session::{
-    AppendLimit, AppendRefusal, CreateLimit, CreateRefusal, LogFileLimit, LogFileRefusal,
-    PlainLogFile,
+    AppendLimit, AppendRefusal, CreateLimit, CreateRefusal, LogCompression, LogFileLimit,
+    LogFileRefusal, PlainLogFile,
     js_string::{from_rust, quote, to_rust},
 };
 use serde_json::{Map, Value};
 
 const SCHEMA: &str = "bake/session-conformance/plain-log-file-cases";
-const ORACLE: &str = "in an owned temporary root holding the seeded entries, run each step through the JSONL backend with compression none on the step's handle, a or b, each its own backend instance over the root: create, a write open, or the open handle's append, flush, or close, or, with no handle open, the root renamed or reached through a symbolic link to it; after each step list every file beneath the root with its text, an empty session.lock by its size, and every symbolic link by its target";
+const ORACLE: &str = "in an owned temporary root holding the seeded entries, run each step through the JSONL backend with the case's compression, none unless it names zstd, on the step's handle, a or b, each its own backend instance over the root: create, a write open, or the open handle's append, flush, or close, or, with no handle open, the root renamed or reached through a symbolic link to it; after each step list every file beneath the root with its text, or <hex BYTES> when its bytes are not UTF-8, an empty session.lock by its size, and every symbolic link by its target";
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 87;
+const CASE_COUNT: usize = 109;
+/// The Zstd cases' plaintext bound, far above any case's log.
+const MAX_PLAINTEXT_BYTES: usize = 1 << 20;
 const SOURCE_BUDGET: usize = 64;
 const LIMITS: [&str; 7] = [
     "empty-id",
@@ -120,7 +126,7 @@ fn load() -> Vec<Map<String, Value>> {
         BTreeSet::from(["cases", "history", "oracle", "schema", "version"])
     );
     assert_eq!(table["schema"], SCHEMA);
-    assert_eq!(table["version"], 11);
+    assert_eq!(table["version"], 12);
     assert_eq!(table["oracle"], ORACLE);
     assert!(
         table["history"]
@@ -172,13 +178,35 @@ fn hex(text: &str) -> Vec<u8> {
         .collect()
 }
 
+fn to_hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// The case's `compression`: `zstd`, or none when absent.
+fn compression(entry: &Map<String, Value>, id: &str) -> LogCompression {
+    match entry.get("compression") {
+        None => LogCompression::None,
+        Some(value) => {
+            assert_eq!(text(value, id), "zstd", "{id}: compression");
+            LogCompression::Zstd {
+                max_plaintext_bytes: MAX_PLAINTEXT_BYTES,
+            }
+        }
+    }
+}
+
 fn seed(root: &Path, entry: &Value, id: &str) {
     let entry = object(entry, id);
     if let Some(file) = entry.get("file") {
-        assert_eq!(keys(entry), BTreeSet::from(["file", "text"]), "{id}: seed");
         let path = root.join(&*to_rust(text(file, id)));
         std::fs::create_dir_all(path.parent().expect("seed parent")).expect("seed directory");
-        std::fs::write(&path, &*to_rust(text(&entry["text"], id))).expect("seed file");
+        if let Some(bytes) = entry.get("hex") {
+            assert_eq!(keys(entry), BTreeSet::from(["file", "hex"]), "{id}: seed");
+            std::fs::write(&path, hex(text(bytes, id))).expect("seed file");
+        } else {
+            assert_eq!(keys(entry), BTreeSet::from(["file", "text"]), "{id}: seed");
+            std::fs::write(&path, &*to_rust(text(&entry["text"], id))).expect("seed file");
+        }
         return;
     }
     if let Some(link) = entry.get("link") {
@@ -209,7 +237,8 @@ fn seed(root: &Path, entry: &Value, id: &str) {
     panic!("{id}: raw names {raw:?} need a Unix host");
 }
 
-/// Every file beneath `root`, by `/`-joined relative path; a `session.lock`
+/// Every file beneath `root`, by `/`-joined relative path, its text or
+/// `<hex BYTES>` when it is not UTF-8; a `session.lock`
 /// file is listed as empty when its size is 0 and otherwise by its size, and
 /// a symbolic link as `<link to TARGET>`, not followed.
 fn tree(root: &Path) -> BTreeMap<String, String> {
@@ -234,8 +263,12 @@ fn tree(root: &Path) -> BTreeMap<String, String> {
                 };
                 files.insert(relative, text);
             } else {
-                let text = std::fs::read_to_string(entry.path()).expect("UTF-8 file");
-                files.insert(relative, from_rust(&text).into_owned());
+                let bytes = std::fs::read(entry.path()).expect("read a file");
+                let text = match String::from_utf8(bytes) {
+                    Ok(text) => from_rust(&text).into_owned(),
+                    Err(bytes) => format!("<hex {}>", to_hex(bytes.as_bytes())),
+                };
+                files.insert(relative, text);
             }
         }
     }
@@ -453,6 +486,7 @@ fn run_step(
     root: &Path,
     step: &Map<String, Value>,
     handles: &mut BTreeMap<&'static str, Option<PlainLogFile>>,
+    compression: LogCompression,
     context: &str,
 ) -> Result<(), LogFileRefusal> {
     let name = text(&step["step"], context);
@@ -491,9 +525,14 @@ fn run_step(
                 let count = step
                     .get("inheritedEventCount")
                     .map(|count| count.as_u64().expect("count"));
-                PlainLogFile::create(root, &step["header"], count)
+                PlainLogFile::create_compressed(root, &step["header"], count, compression)
             } else {
-                PlainLogFile::open(root, text(&step["id"], context), SOURCE_BUDGET)
+                PlainLogFile::open_compressed(
+                    root,
+                    text(&step["id"], context),
+                    SOURCE_BUDGET,
+                    compression,
+                )
             };
             *handle = Some(opened?);
             Ok(())
@@ -544,6 +583,7 @@ fn shared_cases_lay_out_and_write_like_the_typescript_backend() {
         let id = text(&entry["id"], "case id");
         assert!(
             keys(entry).is_subset(&BTreeSet::from([
+                "compression",
                 "id",
                 "platforms",
                 "platformReason",
@@ -561,6 +601,7 @@ fn shared_cases_lay_out_and_write_like_the_typescript_backend() {
             continue;
         }
         ran += 1;
+        let compression = compression(entry, id);
         let scratch = Scratch::new();
         // The root is a child, so `move-root` and `link-root` can name
         // siblings the scratch directory removes.
@@ -610,7 +651,7 @@ fn shared_cases_lay_out_and_write_like_the_typescript_backend() {
             {
                 break;
             }
-            let actual = run_step(&root, step, &mut handles, &context);
+            let actual = run_step(&root, step, &mut handles, compression, &context);
             if let Some(rust) = step.get("rust") {
                 let limit = override_limit(rust, &context).expect("a limit");
                 let refusal = actual.expect_err(&format!("{context}: a limit refuses"));
@@ -668,4 +709,74 @@ fn shared_cases_lay_out_and_write_like_the_typescript_backend() {
         ]),
         "every claimed refusal is witnessed"
     );
+}
+
+/// A write `open` of a Zstd log refuses to decode more plaintext than its
+/// bound, a native limit TypeScript does not have, and writes nothing; the
+/// whole plaintext is within an exact bound.
+#[test]
+fn a_zstd_open_refuses_past_its_plaintext_budget() {
+    let scratch = Scratch::new();
+    let header = serde_json::json!({
+        "version": 3, "id": "b1", "createdAt": 1, "isSeeded": false, "delegationDepth": 0
+    });
+    let mut file =
+        PlainLogFile::create_compressed(&scratch.0, &header, None, zstd(1)).expect("create");
+    let event = serde_json::json!({"type": "turn/start", "seq": 0, "time": 1, "data": {"turn": 1}});
+    file.append(&[event]).expect("append");
+    let plaintext = file.log().bytes().expect("written").len();
+    let stored = file.stored_bytes().expect("written").to_vec();
+    drop(file);
+    let before = tree(&scratch.0);
+    let refused =
+        PlainLogFile::open_compressed(&scratch.0, "b1", SOURCE_BUDGET, zstd(plaintext - 1))
+            .expect_err("past the bound");
+    assert!(
+        matches!(refused, LogFileRefusal::NativePlaintextBudget { max_plaintext_bytes } if max_plaintext_bytes == plaintext - 1),
+        "{refused:?}"
+    );
+    assert_eq!(refused.message(), None);
+    assert_eq!(tree(&scratch.0), before);
+    let opened = PlainLogFile::open_compressed(&scratch.0, "b1", SOURCE_BUDGET, zstd(plaintext))
+        .expect("an exact bound");
+    assert_eq!(opened.stored_bytes(), Some(stored.as_slice()));
+    assert_eq!(opened.compression(), zstd(plaintext));
+    drop(opened);
+
+    // An older Zstd generation is decoded within the same budget and refused
+    // the same way before anything is written.
+    let scratch = Scratch::new();
+    let id = "zstd-migrate-v2-seeded";
+    let case = load()
+        .into_iter()
+        .find(|entry| entry["id"] == id)
+        .expect("the seeded Zstd v2 case");
+    for entry in case["seed"].as_array().expect("seed") {
+        seed(&scratch.0, entry, id);
+    }
+    let before = tree(&scratch.0);
+    let refused = PlainLogFile::open_compressed(&scratch.0, "v2v3", SOURCE_BUDGET, zstd(1))
+        .expect_err("past the bound");
+    assert!(
+        matches!(
+            refused,
+            LogFileRefusal::NativePlaintextBudget {
+                max_plaintext_bytes: 1
+            }
+        ),
+        "{refused:?}"
+    );
+    assert_eq!(refused.message(), None);
+    let mut after = tree(&scratch.0);
+    // The lock is taken before the source is read, as on the current path.
+    after.remove("_no-cwd/v2v3/session.lock");
+    assert_eq!(after, before);
+    PlainLogFile::open_compressed(&scratch.0, "v2v3", SOURCE_BUDGET, zstd(MAX_PLAINTEXT_BYTES))
+        .expect("within the bound");
+}
+
+const fn zstd(max_plaintext_bytes: usize) -> LogCompression {
+    LogCompression::Zstd {
+        max_plaintext_bytes,
+    }
 }

@@ -1,13 +1,15 @@
 /**
  * Runs the shared cases in `conformance/session/plain-log-file-cases.json`
- * that apply to this host through the real JSONL backend with
- * `compression: 'none'`, each in its own temporary root. A case seeds files
+ * that apply to this host through the real JSONL backend with the case's
+ * `compression`, `'none'` unless it names `'zstd'`, each in its own
+ * temporary root. A case seeds files, its text or its bytes as hex,
  * and directories, then runs its steps in order: `create` and a write `open`
  * start a handle, and `append`, `flush`, and `close` use it. A step names its
  * handle, `a` unless `handle` says `b`, and each handle is a separate backend
  * instance in its own Context over the same root, so only the kernel write
  * lock arbitrates between them. After each step every file beneath the root
- * must have the expected text, a `session.lock` file read only by its size,
+ * must have the expected text, or `<hex BYTES>` when its bytes are not
+ * UTF-8, a `session.lock` file read only by its size,
  * since Windows refuses to read a locked range, and a symbolic link by its
  * target, and no other file may exist; directories are not compared. With
  * no handle open, `move-root` renames the root and `link-root` reaches it
@@ -41,9 +43,9 @@ import JsonlSessionPersistence from '../src/index.ts'
 
 const REPO = new URL('../../../../', import.meta.url)
 const SCHEMA = 'bake/session-conformance/plain-log-file-cases'
-const ORACLE = 'in an owned temporary root holding the seeded entries, run each step through the JSONL backend with compression none on the step\'s handle, a or b, each its own backend instance over the root: create, a write open, or the open handle\'s append, flush, or close, or, with no handle open, the root renamed or reached through a symbolic link to it; after each step list every file beneath the root with its text, an empty session.lock by its size, and every symbolic link by its target'
+const ORACLE = 'in an owned temporary root holding the seeded entries, run each step through the JSONL backend with the case\'s compression, none unless it names zstd, on the step\'s handle, a or b, each its own backend instance over the root: create, a write open, or the open handle\'s append, flush, or close, or, with no handle open, the root renamed or reached through a symbolic link to it; after each step list every file beneath the root with its text, or <hex BYTES> when its bytes are not UTF-8, an empty session.lock by its size, and every symbolic link by its target'
 /** Both harnesses pin the table size, so a dropped case fails. */
-const CASE_COUNT = 87
+const CASE_COUNT = 109
 const LIMITS = [
   'empty-id', 'encode', 'seq-value', 'windows-name', 'non-utf8-name', 'newer-generation', 'scan',
 ]
@@ -66,7 +68,11 @@ const CLASSES = new Map<string, abstract new (...args: never[]) => Error>([
 type Platform = 'posix' | 'linux' | 'darwin' | 'win32'
 const PLATFORMS: readonly string[] = ['posix', 'linux', 'darwin', 'win32']
 type Outcome = { outcome: 'ok' } | { outcome: 'thrown'; class: string; message?: string }
-type Seed = { file: string; text: string } | { dir: string; rawNameHex: string } | { link: string; target: string }
+type Seed =
+  | { file: string; text: string }
+  | { file: string; hex: string }
+  | { dir: string; rawNameHex: string }
+  | { link: string; target: string }
 type Tree = Record<string, string>
 type Handle = typeof HANDLES[number]
 type Step = { handle: Handle } & (
@@ -79,6 +85,7 @@ type Step = { handle: Handle } & (
 
 interface FileCase {
   id: string
+  compression: 'none' | 'zstd'
   platforms?: Platform[]
   seed: Seed[]
   steps: Step[]
@@ -135,6 +142,8 @@ function parseTree(value: unknown, id: string): Tree {
 function parseSeed(value: unknown, id: string): Seed {
   if (isObject(value) && sortedKeys(value) === 'file,text' && typeof value.file === 'string'
     && typeof value.text === 'string') return { file: value.file, text: value.text }
+  if (isObject(value) && sortedKeys(value) === 'file,hex' && typeof value.file === 'string'
+    && typeof value.hex === 'string' && /^(?:[0-9a-f]{2})*$/u.test(value.hex)) return { file: value.file, hex: value.hex }
   if (isObject(value) && sortedKeys(value) === 'dir,rawNameHex' && typeof value.dir === 'string'
     && typeof value.rawNameHex === 'string' && /^(?:[0-9a-f]{2})+$/u.test(value.rawNameHex)) {
     return { dir: value.dir, rawNameHex: value.rawNameHex }
@@ -210,17 +219,18 @@ function parseStep(value: unknown, id: string): Step {
 function loadTable(): FileCase[] {
   const table: unknown = JSON.parse(readFileSync(new URL('conformance/session/plain-log-file-cases.json', REPO), 'utf8'))
   if (!isObject(table) || sortedKeys(table) !== 'cases,history,oracle,schema,version' || table.schema !== SCHEMA
-    || table.version !== 11 || table.oracle !== ORACLE || !Array.isArray(table.cases)
+    || table.version !== 12 || table.oracle !== ORACLE || !Array.isArray(table.cases)
     || !Array.isArray(table.history) || !table.history.every(line => typeof line === 'string')) {
-    throw new Error('plain-log-file-cases.json does not match its version-11 schema')
+    throw new Error('plain-log-file-cases.json does not match its version-12 schema')
   }
   return table.cases.map((entry: unknown): FileCase => {
     if (!isObject(entry) || typeof entry.id !== 'string' || !Array.isArray(entry.steps) || !Array.isArray(entry.seed)) {
       throw new Error(`invalid case ${JSON.stringify(entry)}`)
     }
     const { id } = entry
-    const unknown = Object.keys(entry).filter(key => !['id', 'platforms', 'platformReason', 'seed', 'steps', 'note'].includes(key))
+    const unknown = Object.keys(entry).filter(key => !['id', 'compression', 'platforms', 'platformReason', 'seed', 'steps', 'note'].includes(key))
     if (unknown.length > 0) throw new Error(`${id}: unknown keys ${unknown.join()}`)
+    if (entry.compression !== undefined && entry.compression !== 'zstd') throw new Error(`${id}: invalid compression`)
     if (entry.note !== undefined && typeof entry.note !== 'string') throw new Error(`${id}: invalid note`)
     if ((entry.platforms === undefined) !== (entry.platformReason === undefined)
       || (entry.platformReason !== undefined && typeof entry.platformReason !== 'string')
@@ -244,6 +254,7 @@ function loadTable(): FileCase[] {
     }
     return {
       id,
+      compression: entry.compression === 'zstd' ? 'zstd' : 'none',
       ...(entry.platforms === undefined ? {} : { platforms: entry.platforms as Platform[] }),
       seed: entry.seed.map(seed => parseSeed(seed, id)),
       steps,
@@ -301,7 +312,7 @@ async function seedRoot(root: string, seeds: readonly Seed[]): Promise<void> {
     if ('file' in seed) {
       const path = join(root, seed.file)
       await mkdir(dirname(path), { recursive: true })
-      await writeFile(path, seed.text)
+      await writeFile(path, 'hex' in seed ? Buffer.from(seed.hex, 'hex') : seed.text)
     } else if ('link' in seed) {
       const path = join(root, seed.link)
       await mkdir(dirname(path), { recursive: true })
@@ -315,13 +326,15 @@ async function seedRoot(root: string, seeds: readonly Seed[]): Promise<void> {
 }
 
 /**
- * Every file beneath `root`, by `/`-joined relative path; a `session.lock`
+ * Every file beneath `root`, by `/`-joined relative path, its text or
+ * `<hex BYTES>` when its bytes are not UTF-8; a `session.lock`
  * file is listed as empty when its size is 0 and otherwise by its size, and
  * a symbolic link as `<link to TARGET>`, not followed. Listing by bytes
  * reaches a directory whose name is not UTF-8.
  */
 async function readTree(root: string): Promise<Tree> {
   const files: Tree = {}
+  const utf8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
   async function walk(dir: Buffer, prefix: string): Promise<void> {
     for (const entry of await readdir(dir, { withFileTypes: true, encoding: 'buffer' })) {
       const path = Buffer.concat([dir, Buffer.from(sep), entry.name])
@@ -334,7 +347,12 @@ async function readTree(root: string): Promise<Tree> {
         const { size } = await stat(path)
         files[relative] = size === 0 ? '' : `<${size} bytes>`
       } else {
-        files[relative] = await readFile(path, 'utf8')
+        const bytes = await readFile(path)
+        try {
+          files[relative] = utf8.decode(bytes)
+        } catch {
+          files[relative] = `<hex ${bytes.toString('hex')}>`
+        }
       }
     }
   }
@@ -354,6 +372,14 @@ afterAll(async () => {
 })
 
 describe('shared plain-log file cases', () => {
+  // The Zstd cases' frames are Node's bytes for the libzstd version the
+  // Zstd frame table names; another version fails here by name first.
+  it('run on the libzstd the Zstd frames were recorded with', () => {
+    const frames: unknown = JSON.parse(readFileSync(new URL('conformance/session/zstd-frame-cases.json', REPO), 'utf8'))
+    const libzstd = typeof frames === 'object' && frames !== null && 'libzstd' in frames ? frames.libzstd : undefined
+    expect(process.versions.zstd).toBe(libzstd)
+  })
+
   it('pin the table and name every limit and class', () => {
     expect(cases).toHaveLength(CASE_COUNT)
     expect(new Set(cases.map(entry => entry.id)).size).toBe(CASE_COUNT)
@@ -394,7 +420,7 @@ describe('shared plain-log file cases', () => {
       const plugBackends = async (): Promise<void> => {
         contexts = new Map(HANDLES.map(label => [label, new Context()]))
         for (const ctx of contexts.values()) {
-          await ctx.plugin(JsonlSessionPersistence, { root: caseRoot, compression: 'none' })
+          await ctx.plugin(JsonlSessionPersistence, { root: caseRoot, compression: entry.compression })
         }
       }
       const handles = new Map<Handle, SessionHandle>()

@@ -3,7 +3,8 @@
  * `bake-session` writer, over one shared root and real independent
  * processes (D31): TypeScript writes and Rust resumes, Rust writes and
  * TypeScript resumes, each after the writer was killed mid-append, and an
- * older generation migrated by either runtime and resumed by the other.
+ * older generation migrated by either runtime and resumed by the other, in
+ * a plain root and in a Zstd root, TypeScript's default.
  * Migrations also compete: one runtime's migration pauses after it read
  * and migrated the source and before it publishes, holding the write lock,
  * while the other runtime is refused, reads the unpublished migration, and
@@ -18,8 +19,10 @@
  * `fixtures/migration-cross-runtime-writer.mjs`.
  *
  * Expected bytes are TypeScript's: each event row is `JSON.stringify` of the
- * event and an LF, as the backend writes it, and a migrated log is the one
- * TypeScript's own migration writes from the same source in another root.
+ * event and an LF, as the backend writes it, each Zstd batch is the frame
+ * the backend's own `compressZstdFrame` writes for its rows, and a migrated
+ * log is the one TypeScript's own migration writes from the same source in
+ * another root.
  * Every final log is read back through a fresh TypeScript backend, every
  * older generation is hashed before and after, and every Session directory
  * is listed at the end, so a file either runtime leaves outside its design
@@ -47,6 +50,7 @@ import { SessionAlreadyOwnedError, SessionPersistenceNotFoundError } from 'bake-
 import type { SessionPersistence } from 'bake-session-persistence'
 import JsonlSessionPersistence from 'bake-session-persistence-jsonl'
 import { LEASE_FILENAME } from '../src/lease.ts'
+import { compressZstdFrame } from '../src/zstd.ts'
 
 /** The probe path, or `undefined` when the suite is not opted in. */
 const PROBE = process.env.BAKE_RUST_LEASE_PROBE ?? process.env.DSH_RUST_LEASE_PROBE
@@ -391,6 +395,78 @@ interface TornWriter { readonly writer: Child; readonly committed: Buffer; reado
 
 interface MigratedCase { readonly id: string; readonly version: number; readonly header: string; readonly rows: readonly string[] }
 
+const zstdLog = (root: string, id: string): string => `${plainLog(root, id)}.zstd`
+/** The frame TypeScript writes for one batch's rows, or a header line. */
+const frame = (text: string): Promise<Buffer> => compressZstdFrame(text)
+
+/** The probe's `zstd-open` must append `seq` and report every stored seq. */
+async function rustZstdResume(at: Area, id: string, seq: number): Promise<void> {
+  const { exit, output, child } = await runProbe(at, ['zstd-open', at.root, id, String(seq)])
+  expect(exit, child.describe()).toEqual({ code: 0, signal: null })
+  expect(output).toEqual({ outcome: 'opened', seqs: Array.from({ length: seq + 1 }, (_, index) => index) })
+}
+
+/** The probe's `zstd-open` must be refused as owned, leaving every non-lock byte unchanged. */
+async function expectRustZstdOwned(at: Area, id: string): Promise<void> {
+  const before = await snapshot(at.root)
+  const { exit, output, child } = await runProbe(at, ['zstd-open', at.root, id, '2'])
+  expect(exit, child.describe()).toEqual({ code: 3, signal: null })
+  expect(output).toEqual({ outcome: 'owned', message: `session "${id}" is already owned by an active write handle` })
+  expect(await snapshot(at.root)).toEqual(before)
+}
+
+/** Create the Zstd Session through the probe's `zstd-hold`, then release it gracefully. */
+async function rustZstdCreate(at: Area, id: string): Promise<void> {
+  const holder = new Child('probe zstd-hold', PROBE!, ['zstd-hold', at.root, id], at, 'pipe')
+  expect(await holder.nextJson(), holder.describe()).toEqual({ state: 'holding' })
+  holder.send('release')
+  expect(await holder.nextJson(), holder.describe()).toEqual({ state: 'released' })
+  expect(await holder.closed(), holder.describe()).toEqual({ code: 0, signal: null })
+  expect(holder.rest(), holder.describe()).toEqual({ stdout: '', stderr: '' })
+}
+
+/**
+ * The released source `caseId` as a Zstd writer of its version stores it,
+ * its header and its rows each one frame, migrated and resumed as
+ * {@link migratedResume} does in a plain root, in Zstd roots.
+ */
+async function migratedZstdResume(caseId: string): Promise<void> {
+  const source = releasedSource(caseId)
+  const headerEnd = source.text.indexOf('\n') + 1
+  const bytes = Buffer.concat([await frame(source.text.slice(0, headerEnd)), await frame(source.text.slice(headerEnd))])
+  const name = `${source.version === 0 ? 'session.jsonl' : `session.v${source.version}.jsonl`}.zstd`
+  const seed = async (root: string): Promise<void> => {
+    await mkdir(sessionDir(root, source.id), { recursive: true })
+    await writeFile(join(sessionDir(root, source.id), name), bytes)
+  }
+  const oracle = await area()
+  await seed(oracle.root)
+  await tsResume(oracle.root, source.id, [], 'zstd')
+  const migrated = await readFile(zstdLog(oracle.root, source.id))
+  const next = (await readEvents(oracle.root, source.id, 'zstd')).length
+  await tsResume(oracle.root, source.id, [turnStart(next, 3, 2)], 'zstd')
+  const expected = Buffer.concat([migrated, await frame(probeRow(next))])
+  expect(await readFile(zstdLog(oracle.root, source.id))).toEqual(expected)
+
+  const rustFirst = await area()
+  await seed(rustFirst.root)
+  await rustZstdResume(rustFirst, source.id, next)
+
+  const tsFirst = await area()
+  await seed(tsFirst.root)
+  await tsResume(tsFirst.root, source.id, [], 'zstd')
+  expect(await readFile(zstdLog(tsFirst.root, source.id))).toEqual(migrated)
+  await rustZstdResume(tsFirst, source.id, next)
+
+  const oracleEvents = await readEvents(oracle.root, source.id, 'zstd')
+  for (const at of [oracle, rustFirst, tsFirst]) {
+    expect(await readFile(zstdLog(at.root, source.id))).toEqual(expected)
+    expect(await readEvents(at.root, source.id, 'zstd')).toEqual(oracleEvents)
+    expect(sha256(await readFile(join(sessionDir(at.root, source.id), name)))).toBe(sha256(bytes))
+    await expectTree(at.root, source.id, [LEASE_FILENAME, name, 'session.v3.jsonl.zstd'])
+  }
+}
+
 /** A released v0, v1, or v2 source, by case id from the committed migrated restoration table. */
 function releasedSource(caseId: string): { id: string; version: number; text: string } {
   const table = JSON.parse(readFileSync(MIGRATED_CASES, 'utf8')) as { cases: MigratedCase[] }
@@ -639,26 +715,66 @@ suite(title, () => {
     await expectTree(at.root, id, [LEASE_FILENAME, 'session.v3.jsonl'])
   })
 
-  it('a Zstd log a killed TypeScript writer left torn is refused by Rust with TypeScript\'s own message and kept byte for byte, and TypeScript resumes it', async () => {
+  it('a Zstd log a killed TypeScript writer left torn inside a frame is resumed by Rust, which truncates the frame and appends its own, to the bytes TypeScript reads back', async () => {
     const at = await area()
     const id = 'xrt-ts-zstd'
     const tear = 10
-    const { writer, committed } = await tsTear(at, id, 'zstd', tear)
+    const { writer, committed, content } = await tsTear(at, id, 'zstd', tear)
+    expect(committed).toEqual(Buffer.concat([await frame(HEADER.replace('<id>', id)), await frame(rows(...FIRST_TURN))]))
+    expect(content).toEqual(await frame(rows(turnStart(2, 7, 2), turnEnd(3, 8, 2))))
+    await expectRustZstdOwned(at, id)
     await writer.crash()
-    const before = await snapshot(at.root)
-    // TypeScript configured as Rust is, for compression none, is the oracle.
-    const refusal = await tsOpenError(at.root, id, 'none')
-    expect(refusal).toBeInstanceOf(Error)
-    expect(await snapshot(at.root)).toEqual(before)
-    const { exit, output, child } = await runProbe(at, ['open', at.root, id, '2'])
-    expect(exit, child.describe()).toEqual({ code: 1, signal: null })
-    expect(output).toEqual({ outcome: 'refused', message: (refusal as Error).message })
-    expect(await snapshot(at.root)).toEqual(before)
+    // Ten bytes of a frame recover no row.
     expect(await readSeqs(at.root, id, 'zstd')).toEqual([0, 1])
-    await tsResume(at.root, id, [turnStart(2, 5, 2), turnEnd(3, 6, 2)], 'zstd')
-    const final = await readFile(`${plainLog(at.root, id)}.zstd`)
-    expect(final.subarray(0, committed.length)).toEqual(committed)
+    await rustZstdResume(at, id, 2)
+    expect(await readFile(zstdLog(at.root, id))).toEqual(Buffer.concat([committed, await frame(probeRow(2))]))
+    await tsResume(at.root, id, [turnEnd(3, 5, 2)], 'zstd')
+    const resumed = Buffer.concat([committed, await frame(probeRow(2)), await frame(rows(turnEnd(3, 5, 2)))])
+    expect(await readFile(zstdLog(at.root, id))).toEqual(resumed)
     expect(await readSeqs(at.root, id, 'zstd')).toEqual([0, 1, 2, 3])
+    await expectTree(at.root, id, [LEASE_FILENAME, 'session.v3.jsonl.zstd'])
+  })
+
+  it('a torn TypeScript Zstd frame whose rows are complete is recovered by Rust, which rewrites them as one frame before its own, to the bytes TypeScript reads back', async () => {
+    const at = await area()
+    const id = 'xrt-ts-zstd-rows'
+    const torn = await frame(rows(turnStart(2, 7, 2), turnEnd(3, 8, 2)))
+    // Every byte but the checksum's last two: the frame's rows decode.
+    const tear = torn.length - 2
+    const { writer, committed, content } = await tsTear(at, id, 'zstd', tear)
+    expect(content).toEqual(torn)
+    await writer.crash()
+    expect(await readSeqs(at.root, id, 'zstd')).toEqual([0, 1, 2, 3])
+    await rustZstdResume(at, id, 4)
+    const resumed = Buffer.concat([committed, torn, await frame(probeRow(4))])
+    expect(await readFile(zstdLog(at.root, id))).toEqual(resumed)
+    await tsResume(at.root, id, [turnEnd(5, 5, 3)], 'zstd')
+    expect(await readFile(zstdLog(at.root, id))).toEqual(Buffer.concat([resumed, await frame(rows(turnEnd(5, 5, 3)))]))
+    expect(await readSeqs(at.root, id, 'zstd')).toEqual([0, 1, 2, 3, 4, 5])
+    await expectTree(at.root, id, [LEASE_FILENAME, 'session.v3.jsonl.zstd'])
+  })
+
+  it('a Rust Zstd writer killed mid-append leaves a torn frame whose rows TypeScript recovers and resumes, to the bytes Rust resumes after', async () => {
+    const at = await area()
+    const id = 'xrt-rust-zstd'
+    await rustZstdCreate(at, id)
+    const committed = await readFile(zstdLog(at.root, id))
+    expect(committed).toEqual(Buffer.concat([await frame(HEADER.replace('<id>', id)), await frame(rows(...FIRST_TURN))]))
+    const torn = await frame(rows(turnStart(2, 3, 2), turnEnd(3, 4, 2)))
+    const tear = torn.length - 2
+    const writer = await rustTear(at, ['zstd-tear-append', at.root, id, '2', String(tear)])
+    expect(await readFile(zstdLog(at.root, id))).toEqual(Buffer.concat([committed, torn.subarray(0, tear)]))
+    const before = await snapshot(at.root)
+    expect(await tsOpenError(at.root, id, 'zstd')).toBeInstanceOf(SessionAlreadyOwnedError)
+    expect(await snapshot(at.root)).toEqual(before)
+    await writer.crash()
+    expect(await readSeqs(at.root, id, 'zstd')).toEqual([0, 1, 2, 3])
+    await tsResume(at.root, id, [turnStart(4, 5, 3)], 'zstd')
+    const resumed = Buffer.concat([committed, torn, await frame(rows(turnStart(4, 5, 3)))])
+    expect(await readFile(zstdLog(at.root, id))).toEqual(resumed)
+    await rustZstdResume(at, id, 5)
+    expect(await readFile(zstdLog(at.root, id))).toEqual(Buffer.concat([resumed, await frame(probeRow(5))]))
+    expect(await readSeqs(at.root, id, 'zstd')).toEqual([0, 1, 2, 3, 4, 5])
     await expectTree(at.root, id, [LEASE_FILENAME, 'session.v3.jsonl.zstd'])
   })
 
@@ -770,4 +886,8 @@ suite(title, () => {
     expect(await readFile(plainLog(at.root, source.id), 'utf8')).toBe(migrated + probeRow(next))
     await expectTree(at.root, source.id, [LEASE_FILENAME, seeded.name, 'session.v3.jsonl'])
   })
+
+  it('a Zstd v0 log migrated by Rust or by TypeScript resumes in the other runtime to the same frames, its source unchanged', () => migratedZstdResume('v0-clean-turn'))
+
+  it('a Zstd v2 log migrated by Rust or by TypeScript resumes in the other runtime to the same frames, its source unchanged', () => migratedZstdResume('v2-clean-turn'))
 })

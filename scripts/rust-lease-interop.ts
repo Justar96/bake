@@ -95,7 +95,9 @@ export const RESUME_SPEC: InteropSpec = {
   suite: 'cross-runtime resume',
   cases: [
     'a TypeScript writer killed mid-append leaves a torn tail that Rust truncates and resumes, to the bytes TypeScript reads back',
-    'a Zstd log a killed TypeScript writer left torn is refused by Rust with TypeScript\'s own message and kept byte for byte, and TypeScript resumes it',
+    'a Zstd log a killed TypeScript writer left torn inside a frame is resumed by Rust, which truncates the frame and appends its own, to the bytes TypeScript reads back',
+    'a torn TypeScript Zstd frame whose rows are complete is recovered by Rust, which rewrites them as one frame before its own, to the bytes TypeScript reads back',
+    'a Rust Zstd writer killed mid-append leaves a torn frame whose rows TypeScript recovers and resumes, to the bytes Rust resumes after',
     'a Rust writer killed mid-append leaves a torn tail that TypeScript truncates and resumes, to the bytes Rust resumes after',
     'a Rust writer killed while publishing a new Session leaves only its temporary file, beside which TypeScript creates the Session and Rust resumes it',
     'a v0 log migrated by Rust or by TypeScript resumes in the other runtime to the same bytes, its source unchanged',
@@ -110,6 +112,8 @@ export const RESUME_SPEC: InteropSpec = {
     'a Rust writer killed while writing its migration temporary file leaves only that file, beside which TypeScript migrates and Rust resumes',
     'a TypeScript writer killed while writing its migration temporary file leaves only that file, beside which Rust migrates and TypeScript resumes',
     ...RESUME_POSIX_ONLY,
+    'a Zstd v0 log migrated by Rust or by TypeScript resumes in the other runtime to the same frames, its source unchanged',
+    'a Zstd v2 log migrated by Rust or by TypeScript resumes in the other runtime to the same frames, its source unchanged',
   ],
   posixOnly: RESUME_POSIX_ONLY,
 }

@@ -56,21 +56,21 @@ describe('rust lease interop report guard', () => {
     expect(specTitles(LEASE_SPEC).sort()).toEqual([...LEASE_SPEC.cases].sort())
   })
 
-  it('pins the resume spec\'s cases: twenty, five of them POSIX-only, matching the spec source', () => {
-    expect(RESUME_SPEC.cases).toHaveLength(20)
-    expect(new Set(RESUME_SPEC.cases).size).toBe(20)
+  it('pins the resume spec\'s cases: twenty-four, five of them POSIX-only, matching the spec source', () => {
+    expect(RESUME_SPEC.cases).toHaveLength(24)
+    expect(new Set(RESUME_SPEC.cases).size).toBe(24)
     expect(RESUME_SPEC.posixOnly).toHaveLength(5)
     for (const title of RESUME_SPEC.posixOnly) expect(RESUME_SPEC.cases).toContain(title)
     expect(specTitles(RESUME_SPEC).sort()).toEqual([...RESUME_SPEC.cases].sort())
     expect(SPECS).toEqual([LEASE_SPEC, RESUME_SPEC])
   })
 
-  it('accepts all twenty-nine passing on Linux and macOS', () => {
+  it('accepts all thirty-three passing on Linux and macOS', () => {
     expect(reportProblems(report(allPassed), 'linux')).toEqual([])
     expect(reportProblems(report(allPassed), 'darwin')).toEqual([])
   })
 
-  it('accepts twenty-two passing and the seven POSIX-only cases skipped or pending on Windows', () => {
+  it('accepts twenty-six passing and the seven POSIX-only cases skipped or pending on Windows', () => {
     expect(reportProblems(report(windowsRun, resumeWindows), 'win32')).toEqual([])
     const pending = LEASE_SPEC.cases.map(title => [title, posixOnly.has(title) ? 'pending' : 'passed'] as const)
     const resumePending = RESUME_SPEC.cases.map(title => [title, resumePosixOnly.has(title) ? 'pending' : 'passed'] as const)

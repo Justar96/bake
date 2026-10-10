@@ -78,22 +78,29 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use bake_session::storage_io::{FileStat, ListedEntry, LockFailure, RealIo, StorageIo, StorageOp};
 use bake_session::{
-    LogFileRefusal, PathPlatform, PlainLogFile,
+    LogCompression, LogFileRefusal, PathPlatform, PlainLogFile, compress_zstd_frame,
     js_string::{from_rust, to_rust},
 };
 use serde_json::{Map, Value, json};
 
 const SCHEMA: &str = "bake/session-conformance/fault-cases";
-const ORACLE: &str = "in an owned temporary root holding the seeded files, a state a crashed or failed Session writer leaves, run each step through the JSONL backend with compression none on one handle: a write open, create, or the open handle's append, flush, or close; after each step list every file beneath the root with its text and an empty session.lock by its size";
-const VERSION: u64 = 2;
+const ORACLE: &str = "in an owned temporary root holding the seeded files, a state a crashed or failed Session writer leaves, run each step through the JSONL backend with the case's compression, none unless it names zstd, on one handle: a write open, create, or the open handle's append, flush, or close; after each step list every file beneath the root with its text, or <hex BYTES> when its bytes are not UTF-8, and an empty session.lock by its size";
+const VERSION: u64 = 3;
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 72;
+const CASE_COUNT: usize = 137;
 const SOURCE_BUDGET: usize = 64;
+/// The Zstd scenarios' plaintext bound, far above any of their logs.
+const ZSTD: LogCompression = LogCompression::Zstd {
+    max_plaintext_bytes: 1 << 20,
+};
 const LEASE_FILE: &str = "session.lock";
 /// The temporary files' prefixes and suffixes, which TypeScript's
-/// `materialize` and migration publication name.
-const TEMPORARIES: [(&str, &str); 2] = [
+/// `materialize` and migration publication name; a Zstd log's come first,
+/// so a plain prefix never claims them.
+const TEMPORARIES: [(&str, &str); 4] = [
+    ("session.v3.jsonl.zstd.", ".tmp"),
     ("session.v3.jsonl.", ".tmp"),
+    ("session.migration.", ".jsonl.zstd.tmp"),
     ("session.migration.", ".jsonl.tmp"),
 ];
 const PLATFORMS: [PathPlatform; 2] = [PathPlatform::Posix, PathPlatform::Win32];
@@ -661,12 +668,54 @@ enum Action {
     Flush,
 }
 
-/// A write scenario: the files it seeds and the actions it runs.
+/// A write scenario: the files it seeds, their bytes, and the actions it
+/// runs with its compression.
 #[derive(Debug)]
 struct Scenario {
     name: &'static str,
-    seed: Vec<(&'static str, String)>,
+    compression: LogCompression,
+    seed: Vec<(&'static str, Vec<u8>)>,
     actions: Vec<Action>,
+}
+
+/// A file's listing: its text, or `<hex BYTES>` when it is not UTF-8.
+fn listing(bytes: Vec<u8>) -> String {
+    match String::from_utf8(bytes) {
+        Ok(text) => from_rust(&text).into_owned(),
+        Err(bytes) => format!(
+            "<hex {}>",
+            bytes
+                .as_bytes()
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        ),
+    }
+}
+
+/// The bytes a [`listing`] stands for.
+fn listed_bytes(listed: &str) -> Vec<u8> {
+    match listed
+        .strip_prefix("<hex ")
+        .and_then(|rest| rest.strip_suffix('>'))
+    {
+        Some(digits) => (0..digits.len())
+            .step_by(2)
+            .map(|index| u8::from_str_radix(&digits[index..index + 2], 16).expect("hex"))
+            .collect(),
+        None => to_rust(listed).as_bytes().to_vec(),
+    }
+}
+
+/// `text`, a plain log, as a Zstd writer stores it: the header line as one
+/// frame and the rows, when any, as another.
+fn zstd_log(text: &str) -> Vec<u8> {
+    let header_end = text.find('\n').expect("a header line") + 1;
+    let mut frames = compress_zstd_frame(&text.as_bytes()[..header_end]).expect("frame");
+    if header_end < text.len() {
+        frames.extend(compress_zstd_frame(&text.as_bytes()[header_end..]).expect("frame"));
+    }
+    frames
 }
 
 fn header(id: &str) -> Value {
@@ -718,14 +767,22 @@ fn scenarios() -> Vec<Scenario> {
     let stored = format!("{}{}", header_line("w"), line(&turn_start(0, 1)));
     let torn = format!(
         "{stored}{{\"type\":\"ext/note\",\"seq\":1,\"time\":2,\"ignorable\":true,\"data\":{{\"text\":\"torn"
-    );
+    )
+    .into_bytes();
+    // A torn final frame missing two checksum bytes, which recovers its row.
+    let recovered = compress_zstd_frame(line(&turn_end(1, 1)).as_bytes()).expect("frame");
+    let zstd_torn = [zstd_log(&stored), recovered[..recovered.len() - 2].to_vec()].concat();
+    let zstd_stored = zstd_log(&stored);
+    let stored = stored.into_bytes();
     let mut list = vec![
         Scenario {
+            compression: LogCompression::None,
             name: "create-flush",
             seed: vec![],
             actions: vec![Action::Create(header("w")), Action::Flush],
         },
         Scenario {
+            compression: LogCompression::None,
             name: "create-append",
             seed: vec![],
             actions: vec![
@@ -734,6 +791,7 @@ fn scenarios() -> Vec<Scenario> {
             ],
         },
         Scenario {
+            compression: LogCompression::None,
             name: "create-flush-appends",
             seed: vec![],
             actions: vec![
@@ -745,6 +803,7 @@ fn scenarios() -> Vec<Scenario> {
             ],
         },
         Scenario {
+            compression: LogCompression::None,
             name: "open-append",
             seed: vec![("_no-cwd/w/session.v3.jsonl", stored)],
             actions: vec![
@@ -753,21 +812,79 @@ fn scenarios() -> Vec<Scenario> {
             ],
         },
         Scenario {
+            compression: LogCompression::None,
             name: "open-torn-append",
             seed: vec![("_no-cwd/w/session.v3.jsonl", torn)],
             actions: vec![Action::Open("w"), Action::Append(vec![turn_end(1, 1)])],
         },
+        Scenario {
+            compression: ZSTD,
+            name: "zstd-create-flush-appends",
+            seed: vec![],
+            actions: vec![
+                Action::Create(header("w")),
+                Action::Flush,
+                Action::Append(vec![turn_start(0, 1)]),
+                Action::Append(vec![turn_end(1, 1)]),
+            ],
+        },
+        Scenario {
+            compression: ZSTD,
+            name: "zstd-create-append",
+            seed: vec![],
+            actions: vec![
+                Action::Create(header("w")),
+                Action::Append(vec![turn_start(0, 1), turn_end(1, 1)]),
+            ],
+        },
+        Scenario {
+            compression: ZSTD,
+            name: "zstd-open-append",
+            seed: vec![("_no-cwd/w/session.v3.jsonl.zstd", zstd_stored)],
+            actions: vec![
+                Action::Open("w"),
+                Action::Append(vec![turn_end(1, 1), turn_start(2, 2)]),
+            ],
+        },
+        Scenario {
+            compression: ZSTD,
+            name: "zstd-open-torn-append",
+            seed: vec![("_no-cwd/w/session.v3.jsonl.zstd", zstd_torn)],
+            actions: vec![Action::Open("w"), Action::Append(vec![turn_start(2, 2)])],
+        },
     ];
-    for (name, case, id) in [
-        ("migrate-v0", "migrate-v0-packed-run", "hist"),
-        ("migrate-v1", "migrate-v1-packed-run", "hist"),
-        ("migrate-v2", "migrate-v2-seeded", "v2v3"),
+    for (name, case, id, compression) in [
+        (
+            "migrate-v0",
+            "migrate-v0-packed-run",
+            "hist",
+            LogCompression::None,
+        ),
+        (
+            "migrate-v1",
+            "migrate-v1-packed-run",
+            "hist",
+            LogCompression::None,
+        ),
+        (
+            "migrate-v2",
+            "migrate-v2-seeded",
+            "v2v3",
+            LogCompression::None,
+        ),
+        ("zstd-migrate-v2", "migrate-v2-seeded", "v2v3", ZSTD),
     ] {
         let (file, text) = released_seed(case);
+        let (file, bytes) = if compression == LogCompression::None {
+            (file, to_rust(&text).as_bytes().to_vec())
+        } else {
+            (format!("{file}.zstd"), zstd_log(&to_rust(&text)))
+        };
         let file: &'static str = Box::leak(file.into_boxed_str());
         list.push(Scenario {
             name,
-            seed: vec![(file, text)],
+            compression,
+            seed: vec![(file, bytes)],
             actions: vec![Action::Open(id), Action::Flush],
         });
     }
@@ -804,12 +921,22 @@ fn run_actions(
     let mut ran = Ran::default();
     for action in &scenario.actions {
         let mut attempt = || match action {
-            Action::Create(header) => {
-                PlainLogFile::create_with_io(shared.clone(), root, header, None)
-                    .map(|created| handle = Some(created))
-            }
-            Action::Open(id) => PlainLogFile::open_with_io(shared.clone(), root, id, SOURCE_BUDGET)
-                .map(|opened| handle = Some(opened)),
+            Action::Create(header) => PlainLogFile::create_compressed_with_io(
+                shared.clone(),
+                root,
+                header,
+                None,
+                scenario.compression,
+            )
+            .map(|created| handle = Some(created)),
+            Action::Open(id) => PlainLogFile::open_compressed_with_io(
+                shared.clone(),
+                root,
+                id,
+                SOURCE_BUDGET,
+                scenario.compression,
+            )
+            .map(|opened| handle = Some(opened)),
             Action::Append(events) => handle.as_mut().expect("a handle").append(events),
             Action::Flush => handle.as_mut().expect("a handle").flush(),
         };
@@ -836,25 +963,22 @@ fn run_actions(
 }
 
 fn seed_root(root: &Path, scenario: &Scenario) {
-    for (file, text) in &scenario.seed {
+    for (file, bytes) in &scenario.seed {
         let path = root.join(&*to_rust(file));
         std::fs::create_dir_all(path.parent().expect("seed parent")).expect("seed directory");
-        std::fs::write(&path, &*to_rust(text)).expect("seed file");
+        std::fs::write(&path, bytes).expect("seed file");
     }
 }
 
 /// Every seeded older generation must be byte-identical; the current
 /// generation a scenario seeds is the log it appends to.
 fn check_sources(root: &Path, scenario: &Scenario, context: &str) {
-    for (file, text) in &scenario.seed {
-        if file.ends_with("/session.v3.jsonl") {
+    for (file, seeded) in &scenario.seed {
+        if file.ends_with("/session.v3.jsonl") || file.ends_with("/session.v3.jsonl.zstd") {
             continue;
         }
         let bytes = std::fs::read(root.join(&*to_rust(file))).expect("source generation");
-        assert!(
-            bytes == to_rust(text).as_bytes(),
-            "{context}: source {file} changed"
-        );
+        assert!(bytes == *seeded, "{context}: source {file} changed");
     }
 }
 
@@ -895,26 +1019,24 @@ fn snapshot(root: &Path) -> (BTreeMap<String, String>, BTreeMap<PathBuf, String>
                 entry.file_type().expect("file type").is_dir(),
             ));
         }
-        // Temporaries are numbered by prefix in their creation order.
-        let mut temporaries: BTreeMap<&str, Vec<(u64, String, String)>> = BTreeMap::new();
+        // Temporaries are numbered by kind in their creation order.
+        // Each kind's temporaries: creation order, token, and name.
+        type Found = Vec<(u64, String, String)>;
+        let mut temporaries: BTreeMap<(&str, &str), Found> = BTreeMap::new();
         for (raw, is_dir) in &listed {
             let name = from_rust(&raw.to_string_lossy()).into_owned();
-            if !is_dir && let Some((temp_prefix, token, _)) = temporary_parts(&name) {
+            if !is_dir && let Some((temp_prefix, token, suffix)) = temporary_parts(&name) {
                 let (order, token) = token_order(token);
-                temporaries
-                    .entry(temp_prefix)
-                    .or_default()
-                    .push((order, token, name.clone()));
+                temporaries.entry((temp_prefix, suffix)).or_default().push((
+                    order,
+                    token,
+                    name.clone(),
+                ));
             }
         }
         let mut renamed = BTreeMap::new();
-        for (temp_prefix, mut found) in temporaries {
+        for ((temp_prefix, suffix), mut found) in temporaries {
             found.sort();
-            let suffix = TEMPORARIES
-                .iter()
-                .find(|(known, _)| *known == temp_prefix)
-                .map(|(_, suffix)| *suffix)
-                .expect("a known prefix");
             for (index, (_, _, name)) in found.into_iter().enumerate() {
                 renamed.insert(name, format!("{temp_prefix}{index:012}{suffix}"));
             }
@@ -940,8 +1062,7 @@ fn snapshot(root: &Path) -> (BTreeMap<String, String>, BTreeMap<PathBuf, String>
                     format!("<{size} bytes>")
                 }
             } else {
-                let text = std::fs::read_to_string(&path).expect("UTF-8 file");
-                from_rust(&text).into_owned()
+                listing(std::fs::read(&path).expect("read a file"))
             };
             let normalized = renamed.get(&name).cloned().unwrap_or(name);
             let key = format!("{prefix}{normalized}");
@@ -987,6 +1108,7 @@ fn state(root: &Path, io: &FaultIo) -> State {
 
 struct Case {
     id: String,
+    compression: LogCompression,
     scenarios: Vec<String>,
     /// Each seeded file's text and its hard-linked groups.
     seed: State,
@@ -1046,8 +1168,16 @@ fn load() -> Vec<Case> {
         .map(|entry| {
             let entry = object(entry, "case");
             let id = text(&entry["id"], "case id").to_owned();
-            let allowed = BTreeSet::from(["id", "note", "scenarios", "seed", "steps"]);
+            let allowed =
+                BTreeSet::from(["compression", "id", "note", "scenarios", "seed", "steps"]);
             assert!(keys(entry).is_subset(&allowed), "{id}: keys");
+            let compression = match entry.get("compression") {
+                None => LogCompression::None,
+                Some(name) => {
+                    assert_eq!(text(name, &id), "zstd", "{id}: compression");
+                    ZSTD
+                }
+            };
             let scenarios = entry["scenarios"]
                 .as_array()
                 .expect("scenarios")
@@ -1062,6 +1192,9 @@ fn load() -> Vec<Case> {
                 if let Some(target) = file.get("hardLinkTo") {
                     assert_eq!(keys(file), BTreeSet::from(["file", "hardLinkTo"]), "{id}");
                     links.insert(path, text(target, &id).to_owned());
+                } else if let Some(bytes) = file.get("hex") {
+                    assert_eq!(keys(file), BTreeSet::from(["file", "hex"]), "{id}: seed");
+                    files.insert(path, format!("<hex {}>", text(bytes, &id)));
                 } else {
                     assert_eq!(keys(file), BTreeSet::from(["file", "text"]), "{id}: seed");
                     files.insert(path, text(&file["text"], &id).to_owned());
@@ -1083,6 +1216,7 @@ fn load() -> Vec<Case> {
                 .collect();
             Case {
                 id,
+                compression,
                 scenarios,
                 seed: State {
                     files,
@@ -1144,10 +1278,17 @@ fn run_case(case: &Case, root: &Path, strictness: Strictness) {
         let context = format!("{} step {index}", case.id);
         let name = text(&step["step"], &context);
         let outcome = match name {
-            "open" => PlainLogFile::open(root, text(&step["id"], &context), SOURCE_BUDGET)
-                .map(|opened| handle = Some(opened)),
-            "create" => PlainLogFile::create(root, &step["header"], None)
-                .map(|created| handle = Some(created)),
+            "open" => PlainLogFile::open_compressed(
+                root,
+                text(&step["id"], &context),
+                SOURCE_BUDGET,
+                case.compression,
+            )
+            .map(|opened| handle = Some(opened)),
+            "create" => {
+                PlainLogFile::create_compressed(root, &step["header"], None, case.compression)
+                    .map(|created| handle = Some(created))
+            }
             "append" => handle
                 .as_mut()
                 .expect("a handle")
@@ -1447,7 +1588,12 @@ fn failure_sweep(cases: &[Case], scenario: &Scenario, platform: PathPlatform) ->
             }
             // The failed action's retry, and every later action.
             let (ran, state) = faulted_run(cases, scenario, platform, &failed, true, &mut reached);
-            if sync_after_link(ops, index) && scenario.name.starts_with("create") {
+            if sync_after_link(ops, index)
+                && scenario
+                    .name
+                    .trim_start_matches("zstd-")
+                    .starts_with("create")
+            {
                 assert!(
                     ran.last
                         .as_ref()
@@ -1689,8 +1835,11 @@ fn full_torn_write_sweep() {
                     let rows =
                         |cut: usize| bytes[..cut].iter().filter(|&&byte| byte == b'\n').count();
                     let ends_line = keep > 0 && bytes[keep - 1] == b'\n';
+                    // A torn frame's rows are counted only by decoding it,
+                    // so a Zstd log append compares the open alone.
+                    let plain_log = scenario.compression == LogCompression::None;
                     let strictness = if temporary_write(&ops, index)
-                        || (!ends_line && rows(keep) == rows(bytes.len() / 2))
+                        || (plain_log && !ends_line && rows(keep) == rows(bytes.len() / 2))
                     {
                         Strictness::FinalLog
                     } else {
@@ -1706,7 +1855,7 @@ fn full_torn_write_sweep() {
 /// Whether `name` is a canonical plain generation's name.
 fn canonical_generation_name(name: &str) -> bool {
     matches!(
-        name,
+        name.strip_suffix(".zstd").unwrap_or(name),
         "session.jsonl" | "session.v1.jsonl" | "session.v2.jsonl" | "session.v3.jsonl"
     )
 }
@@ -1721,7 +1870,7 @@ fn shared_cases_reopen_like_the_typescript_backend() {
             }
             let path = scratch.0.join(&*to_rust(file));
             std::fs::create_dir_all(path.parent().expect("seed parent")).expect("seed dir");
-            std::fs::write(&path, &*to_rust(file_text)).expect("seed file");
+            std::fs::write(&path, listed_bytes(file_text)).expect("seed file");
         }
         for (link, target) in &case.links {
             std::fs::hard_link(

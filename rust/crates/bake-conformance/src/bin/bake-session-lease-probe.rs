@@ -44,6 +44,12 @@
 //!   budget counts the migration's temporary file first, and a budget below
 //!   its size leaves a writer killed while writing it.
 //!
+//! - `zstd-hold`, `zstd-open`, and `zstd-tear-append`, with the arguments of
+//!   `hold`, `open`, and `tear-append`, do the same in a root configured for
+//!   Zstd compression, as TypeScript's default backend is: the handle writes
+//!   `session.v3.jsonl.zstd`, and `zstd-open` reports the seqs its frames
+//!   decode to.
+//!
 //! A holder releases on the exact stdin line `release`, printing
 //! `{"state":"released"}` after the handle is dropped, and on stdin EOF
 //! silently; both exit 0. Any other stdin input is a fixture error. No
@@ -61,7 +67,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use bake_session::storage_io::{FileStat, ListedEntry, LockFailure, RealIo, StorageIo};
-use bake_session::{LogFileRefusal, PathPlatform, PlainLogFile, json_text, scan_log};
+use bake_session::{
+    LogCompression, LogFileRefusal, PathPlatform, PlainLogFile, json_text, restore_zstd_log,
+    scan_log,
+};
 use serde_json::{Value, json};
 
 /// Bounds each expanded `sourceEventSeqs` field, as the Session tests do.
@@ -71,6 +80,11 @@ const MAX_SAFE_INTEGER: u64 = (1 << 53) - 1;
 /// The longest stdin line a holder reads, LF included.
 const MAX_COMMAND_BYTES: u64 = 64;
 const OWNED_EXIT: u8 = 3;
+/// The Zstd commands' plaintext bound, far above any log they write.
+const MAX_PLAINTEXT_BYTES: usize = 1 << 26;
+const ZSTD: LogCompression = LogCompression::Zstd {
+    max_plaintext_bytes: MAX_PLAINTEXT_BYTES,
+};
 
 enum Failure {
     /// Bad arguments or stdin protocol; exit 2.
@@ -322,8 +336,21 @@ fn run_tear_create(root: &Path, id: &str, bytes: u64) -> Result<ExitCode, Failur
 }
 
 fn run_tear_append(root: &Path, id: &str, seq: u64, bytes: u64) -> Result<ExitCode, Failure> {
-    let mut handle = PlainLogFile::open_with_io(tear_io(bytes), root, id, SOURCE_BUDGET)
+    let handle = PlainLogFile::open_with_io(tear_io(bytes), root, id, SOURCE_BUDGET)
         .map_err(|error| refused("open", &error))?;
+    tear_append(handle, seq)
+}
+
+fn run_zstd_tear_append(root: &Path, id: &str, seq: u64, bytes: u64) -> Result<ExitCode, Failure> {
+    let handle =
+        PlainLogFile::open_compressed_with_io(tear_io(bytes), root, id, SOURCE_BUDGET, ZSTD)
+            .map_err(|error| refused("open", &error))?;
+    tear_append(handle, seq)
+}
+
+/// Append `turn/start` at `seq` and `turn/end` after it through a tearing
+/// handle, which never returns once its writes reach the budget.
+fn tear_append(mut handle: PlainLogFile, seq: u64) -> Result<ExitCode, Failure> {
     let events = [
         json!({ "type": "turn/start", "seq": seq, "time": 3, "data": { "turn": 2 } }),
         json!({
@@ -373,6 +400,72 @@ fn run_hold(root: &Path, id: &str) -> Result<ExitCode, Failure> {
         .append(&first_turn())
         .map_err(|error| refused("append", &error))?;
     hold(handle)?;
+    Ok(ExitCode::SUCCESS)
+}
+
+fn run_zstd_hold(root: &Path, id: &str) -> Result<ExitCode, Failure> {
+    let header = json!({ "version": 3, "id": id, "createdAt": 1000, "isSeeded": false });
+    let mut handle = PlainLogFile::create_compressed(root, &header, None, ZSTD)
+        .map_err(|error| refused("create", &error))?;
+    handle
+        .append(&first_turn())
+        .map_err(|error| refused("append", &error))?;
+    hold(handle)?;
+    Ok(ExitCode::SUCCESS)
+}
+
+/// `open` in a Zstd root: the seqs are those the written frames decode to,
+/// which must hold no torn frame.
+fn run_zstd_open(root: &Path, id: &str, seq: u64) -> Result<ExitCode, Failure> {
+    let mut handle = match PlainLogFile::open_compressed(root, id, SOURCE_BUDGET, ZSTD) {
+        Ok(handle) => handle,
+        Err(LogFileRefusal::AlreadyOwned { message }) => {
+            print_line(&json!({ "outcome": "owned", "message": message }))?;
+            return Ok(ExitCode::from(OWNED_EXIT));
+        }
+        Err(error) => {
+            let Some(message) = error.message() else {
+                return Err(refused("open", &error));
+            };
+            print_text(&json_text(
+                &json!({ "outcome": "refused", "message": message }),
+            ))?;
+            return Ok(ExitCode::FAILURE);
+        }
+    };
+    let event = json!({ "type": "turn/start", "seq": seq, "time": 3, "data": { "turn": 2 } });
+    handle
+        .append(&[event])
+        .map_err(|error| refused("append", &error))?;
+    let path = handle.path().to_owned();
+    drop(handle);
+    let bytes = std::fs::read(&path)?;
+    let restored = restore_zstd_log(
+        &bytes,
+        PathPlatform::host(),
+        SOURCE_BUDGET,
+        MAX_PLAINTEXT_BYTES,
+    )
+    .map_err(|error| Failure::Operation(format!("restore of the written log failed: {error:?}")))?;
+    if restored.torn().is_some() {
+        return Err(Failure::Operation(
+            "the written log ends in a torn frame".to_owned(),
+        ));
+    }
+    let seqs = restored
+        .stored()
+        .rows()
+        .iter()
+        .map(|row| row.get("seq").and_then(Value::as_u64))
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(|| Failure::Operation("a stored row has no integer seq".to_owned()))?;
+    if seqs.last() != Some(&seq) {
+        return Err(Failure::Operation(format!(
+            "the written log ends at {:?}, not seq {seq}",
+            seqs.last()
+        )));
+    }
+    print_line(&json!({ "outcome": "opened", "seqs": seqs }))?;
     Ok(ExitCode::SUCCESS)
 }
 
@@ -461,6 +554,22 @@ fn run() -> Result<ExitCode, Failure> {
     match args.as_slice() {
         ["hold", root, id] => run_hold(absolute_root(root)?, &nonempty_id(id)?),
         ["hold-open", root, id] => run_hold_open(absolute_root(root)?, &nonempty_id(id)?),
+        ["zstd-hold", root, id] => run_zstd_hold(absolute_root(root)?, &nonempty_id(id)?),
+        ["zstd-open", root, id, seq] => {
+            run_zstd_open(absolute_root(root)?, &nonempty_id(id)?, safe_seq(seq)?)
+        }
+        ["zstd-tear-append", root, id, seq, bytes] => {
+            let seq = safe_seq(seq)?;
+            if seq >= MAX_SAFE_INTEGER {
+                return Err(Failure::Usage(format!("seq {seq} has no next safe seq")));
+            }
+            run_zstd_tear_append(
+                absolute_root(root)?,
+                &nonempty_id(id)?,
+                seq,
+                tear_budget(bytes)?,
+            )
+        }
         ["open", root, id, seq] => {
             run_open(absolute_root(root)?, &nonempty_id(id)?, safe_seq(seq)?)
         }
@@ -474,7 +583,12 @@ fn run() -> Result<ExitCode, Failure> {
                     )));
                 }
             };
-            run_pause_migrate(absolute_root(root)?, &nonempty_id(id)?, pause, safe_seq(seq)?)
+            run_pause_migrate(
+                absolute_root(root)?,
+                &nonempty_id(id)?,
+                pause,
+                safe_seq(seq)?,
+            )
         }
         ["tear-create", root, id, bytes] => {
             run_tear_create(absolute_root(root)?, &nonempty_id(id)?, tear_budget(bytes)?)
@@ -492,9 +606,11 @@ fn run() -> Result<ExitCode, Failure> {
             )
         }
         _ => Err(Failure::Usage(
-            "expected hold|hold-open <absolute-root> <id>, open <absolute-root> <id> <seq>, \
-             pause-migrate <absolute-root> <id> <publish|unlink> <seq>, tear-create <absolute-root> <id> <bytes>, or \
-             tear-append <absolute-root> <id> <seq> <bytes>"
+            "expected hold|hold-open|zstd-hold <absolute-root> <id>, \
+             open|zstd-open <absolute-root> <id> <seq>, \
+             pause-migrate <absolute-root> <id> <publish|unlink> <seq>, \
+             tear-create <absolute-root> <id> <bytes>, or \
+             tear-append|zstd-tear-append <absolute-root> <id> <seq> <bytes>"
                 .to_owned(),
         )),
     }
