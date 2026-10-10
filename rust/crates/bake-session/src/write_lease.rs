@@ -12,6 +12,10 @@
 //! while held, then locked with `LockFileEx`. std locks the whole file where
 //! TypeScript locks its first byte; the ranges overlap.
 //!
+//! The seam's write platform, the host's in production, picks the POSIX
+//! sequence with its relock check or the Win32 single attempt, so a
+//! fault-injection test sweeps either on any host.
+//!
 //! The lock file's operations go through the `storage_io` seam. A holder
 //! that dies leaves the file and its lock to the kernel, which releases the
 //! lock when it closes the file; the fault-injection tests drop a crashed
@@ -28,13 +32,14 @@ use std::fs::File;
 use std::io;
 use std::path::Path;
 
+use crate::PathPlatform;
 use crate::storage_io::{LockFailure, StorageIo};
 
 /// Base name of the lock file in a Session directory.
 const LEASE_FILENAME: &str = "session.lock";
 
-/// How many times Unix relocks after the lock path was replaced.
-#[cfg(unix)]
+/// How many times the POSIX sequence relocks after the lock path was
+/// replaced.
 const ATTEMPTS: usize = 3;
 
 /// A held write lock; dropping it releases the lock and keeps the file.
@@ -64,39 +69,32 @@ impl WriteLease {
     /// Lock `dir/session.lock` through `io`, creating `dir` and the file when
     /// absent.
     pub(crate) fn acquire(io: &dyn StorageIo, dir: &Path) -> Result<Self, LeaseRefusal> {
+        if cfg!(not(any(unix, windows))) {
+            return Err(LeaseRefusal::Io(io::Error::from(
+                io::ErrorKind::Unsupported,
+            )));
+        }
         io.create_dir_all(dir)?;
         let path = dir.join(LEASE_FILENAME);
-        #[cfg(unix)]
-        {
-            for _ in 0..ATTEMPTS {
-                let file = io.open_lock(&path)?;
-                lock(io, &file)?;
-                if io.lock_is_current(&file, &path)? {
-                    return Ok(Self { file });
-                }
-                // The locked inode is no longer at the path; dropping the
-                // file releases its lock before the next attempt.
-            }
-            Err(LeaseRefusal::AlreadyOwned)
-        }
-        #[cfg(windows)]
-        {
+        if io.write_platform() == PathPlatform::Win32 {
             let file = io.open_lock(&path)?;
             lock(io, &file)?;
-            Ok(Self { file })
+            return Ok(Self { file });
         }
-        #[cfg(not(any(unix, windows)))]
-        {
-            let _ = path;
-            Err(LeaseRefusal::Io(io::Error::from(
-                io::ErrorKind::Unsupported,
-            )))
+        for _ in 0..ATTEMPTS {
+            let file = io.open_lock(&path)?;
+            lock(io, &file)?;
+            if io.lock_is_current(&file, &path)? {
+                return Ok(Self { file });
+            }
+            // The locked inode is no longer at the path; dropping the file
+            // releases its lock before the next attempt.
         }
+        Err(LeaseRefusal::AlreadyOwned)
     }
 }
 
 /// Take `file`'s exclusive lock without blocking.
-#[cfg(any(unix, windows))]
 fn lock(io: &dyn StorageIo, file: &File) -> Result<(), LeaseRefusal> {
     match io.try_lock(file) {
         Ok(()) => Ok(()),

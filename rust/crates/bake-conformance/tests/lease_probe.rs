@@ -287,8 +287,15 @@ fn hold_open_excludes_until_killed() {
 fn other_refusals_are_not_ownership() {
     let root = TempRoot::new("refusals");
     let (code, lines, stderr) = run(&["open", root.arg(), "s", "0"]);
-    assert_eq!((code, lines.len()), (Some(1), 0));
-    assert!(stderr.contains("not found"), "stderr: {stderr}");
+    assert_eq!(code, Some(1), "stderr: {stderr}");
+    assert_eq!(
+        lines,
+        [format!(
+            "{}\n",
+            json!({ "outcome": "refused", "message": "session \"s\" not found" })
+        )]
+    );
+    assert_eq!(stderr, "");
 
     let mut creator = holder("hold", &root);
     let (status, _) = creator.finish();
@@ -337,6 +344,13 @@ fn wrong_arguments_exit_2_without_stdout() {
         &["open", root.arg(), "s", "2.0"],
         &["open", root.arg(), "s", "9007199254740992"],
         &["release", root.arg(), "s"],
+        &["tear-create", root.arg(), "s"],
+        &["tear-create", root.arg(), "s", "0"],
+        &["tear-create", relative, "s", "1"],
+        &["tear-append", root.arg(), "s", "2"],
+        &["tear-append", root.arg(), "s", "2", "0"],
+        &["tear-append", root.arg(), "s", "9007199254740991", "1"],
+        &["tear-append", relative, "s", "2", "1"],
     ];
     for args in cases {
         let (code, lines, stderr) = run(args);
@@ -346,4 +360,77 @@ fn wrong_arguments_exit_2_without_stdout() {
     }
     let entries = fs::read_dir(&root.0).unwrap().count();
     assert_eq!(entries, 0, "a usage error wrote under the root");
+}
+
+/// Await a tearing writer's `torn` line; it then holds the lock until killed.
+fn torn(args: &[&str]) -> Probe {
+    let probe = Probe::spawn(args, true);
+    assert_eq!(probe.json_line(), json!({ "state": "torn" }));
+    probe
+}
+
+#[test]
+fn tear_append_stores_its_budget_and_holds_the_lock_until_killed() {
+    let root = TempRoot::new("tear-append");
+    let mut creator = holder("hold", &root);
+    let (status, _) = creator.finish();
+    assert!(status.success());
+    let seq3 = "{\"type\":\"turn/end\",\"seq\":3,\"time\":4,\"data\":{\"turn\":2,\"reason\":{\"kind\":\"completed\"}}}\n";
+    let budget = SEQ2.len() + 5;
+    let mut writer = torn(&["tear-append", root.arg(), "s", "2", &budget.to_string()]);
+    assert_eq!(
+        root.log_text(),
+        [HEADER, SEQ0, SEQ1, SEQ2, &seq3[..5]].concat()
+    );
+    assert_refused(&root);
+    writer.kill();
+    // The complete row is kept and the fragment truncated before seq 3.
+    let (code, lines, stderr) = run(&["open", root.arg(), "s", "3"]);
+    assert_eq!(code, Some(0), "stderr: {stderr}");
+    assert_eq!(
+        lines,
+        [format!(
+            "{}\n",
+            json!({ "outcome": "opened", "seqs": [0, 1, 2, 3] })
+        )]
+    );
+}
+
+#[test]
+fn tear_create_leaves_only_its_temporary_file() {
+    let root = TempRoot::new("tear-create");
+    let mut writer = torn(&["tear-create", root.arg(), "s", "30"]);
+    let dir = root.0.join("_no-cwd").join("s");
+    let mut names: Vec<String> = fs::read_dir(&dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .collect();
+    names.sort();
+    assert_eq!(names.len(), 2, "{names:?}");
+    assert_eq!(names[0], "session.lock");
+    let staged = &names[1];
+    assert!(
+        staged.starts_with("session.v3.jsonl.") && staged.ends_with(".tmp"),
+        "{staged}"
+    );
+    assert_eq!(fs::read_to_string(dir.join(staged)).unwrap(), HEADER[..30]);
+    writer.kill();
+    let (code, lines, _) = run(&["open", root.arg(), "s", "0"]);
+    assert_eq!(code, Some(1));
+    assert_eq!(
+        lines,
+        [format!(
+            "{}\n",
+            json!({ "outcome": "refused", "message": "session \"s\" not found" })
+        )]
+    );
+}
+
+#[test]
+fn writes_within_the_tear_budget_are_a_fixture_error() {
+    let root = TempRoot::new("untorn");
+    let (code, lines, stderr) = run(&["tear-create", root.arg(), "s", "100000"]);
+    assert_eq!(code, Some(2), "stderr: {stderr}");
+    assert!(lines.is_empty());
+    assert!(stderr.contains("within the tear budget"), "{stderr}");
 }

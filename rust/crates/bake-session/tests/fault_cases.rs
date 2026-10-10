@@ -3,30 +3,55 @@
 //! states in `conformance/session/fault-cases.json`.
 //!
 //! `FaultIo` wraps the real filesystem and counts every `StorageIo` operation.
-//! It can fail operation `i` with a disk-full, permission, or I/O error, tear
-//! a write at `i` so only the first half of its bytes reach the file, or crash
-//! at `i`: operation `i` does not run (or, torn, runs half of its write) and
-//! every later operation fails, so no cleanup reaches the disk. A crashed
+//! It runs either write sequence on any host: POSIX, with directory syncs and
+//! hard-link publication, or Win32, with write-through moves and no directory
+//! sync, as the seam's write platform selects. It can fail operation `i` with
+//! a disk-full, permission, or I/O error, tear a write at `i` so only the
+//! first half of its bytes reach the file, crash at `i`, so operation `i`
+//! does not run (or, torn, runs half of its write) and every later operation
+//! fails and no cleanup reaches the disk, or cut the power at `i`. A crashed
 //! handle is then dropped, which closes its files and releases its lock as
 //! the kernel does when a process dies; the writer has no drop-time writes.
 //!
-//! Each write scenario runs once fault-free to count its operations, then, in
-//! a fresh root each time, with a crash at every operation index and a torn
-//! crash at every write. After each run every older generation the scenario
-//! seeded must be byte-identical, and the root's files, a temporary file's
-//! random token normalized, must be the seed of a case in the table whose
-//! `scenarios` list it. That case's steps, whose outcomes and trees were
-//! written from the TypeScript backend's sources and which the TypeScript
-//! spec `fault-conformance.spec.ts` asserts against the backend over the same
-//! seeded files, then run through the real filesystem on the crashed root
-//! itself: the reopen takes the write lock, so a lock a crashed holder kept
-//! fails it. Every case must be reached by its scenario, so the table holds
-//! exactly the reachable states. The error-path sweep fails each operation of
-//! each scenario once with each error kind, and tears each write at half with
-//! each error kind: the operation must report the error, the sources must be
-//! unchanged, and the root must hold a table state that some crash without a
-//! torn write also leaves, so a failed write is rolled back. A failed removal
-//! of a temporary file already linked into place is swallowed instead.
+//! A power cut keeps only what a sync made durable. `FaultIo` mirrors the
+//! namespace beneath the root, files and directories as nodes so a hard link
+//! shares its file's node, and records what each sync makes durable: a file
+//! sync its file's bytes, a POSIX directory sync the directory's entries,
+//! and a Win32 write-through move the moved entry. The seeded files are
+//! durable. After a power cut the root is rebuilt from durable entries
+//! alone: an entry whose directory's entries were never synced is gone, and
+//! a file holds the bytes its last sync saw, none if it was never synced.
+//! `FaultIo` records syncs in that model and does not sync the real files.
+//!
+//! Each write scenario runs once fault-free on each platform to count its
+//! operations, then, in a fresh root each time, with a crash, a power cut,
+//! and, at a write, a crash tearing it at half, at every operation index.
+//! After each run every older generation the scenario seeded must be
+//! byte-identical, and the root's files, a temporary file's random token
+//! normalized in creation order, and its hard links must be the seed of a
+//! case in the table whose `scenarios` list it. That case's steps, whose
+//! outcomes and trees were written from the TypeScript backend's sources and
+//! which the TypeScript spec `fault-conformance.spec.ts` asserts against the
+//! backend over the same seeded files, then run through the real filesystem
+//! on the crashed root itself: the reopen takes the write lock, so a lock a
+//! crashed holder kept fails it. Every case must be reached, so the table
+//! holds exactly the reachable states.
+//!
+//! The error-path sweep fails each operation of each scenario once with each
+//! error kind, and tears each write at half with each error kind: the
+//! operation must report the error, the sources must be unchanged, and the
+//! root must hold a state that some crash without a torn write also leaves,
+//! or, for a torn temporary file, which a failed write leaves as TypeScript
+//! leaves it, the state the torn crash at that write leaves; so a failed
+//! append write is rolled back. A failed removal of a temporary file already
+//! linked into place is swallowed instead. Each failed action is then
+//! retried once, as a TypeScript caller retries a rejected batch, and the
+//! scenario goes on: it must end with the fault-free run's logs, beside any
+//! temporary file the failure left, except where a failed directory sync
+//! after the link left the log published, which TypeScript's retry then
+//! refuses to publish again. Each failure with an I/O error is also followed
+//! by its retry and a crash or power cut at every later operation, and each
+//! of those states must be a case too.
 //!
 //! The `#[ignore]`d full sweep also tears every write at every byte count:
 //! it checks the sources and that only the lock, canonical generations, and
@@ -44,6 +69,7 @@
 //! appended to it as a JSON line, the input a new table version starts from.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::ffi::OsString;
 use std::fs::File;
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
@@ -52,19 +78,25 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use bake_session::storage_io::{ListedEntry, LockFailure, RealIo, StorageIo, StorageOp};
 use bake_session::{
-    LogFileRefusal, PlainLogFile,
+    LogFileRefusal, PathPlatform, PlainLogFile,
     js_string::{from_rust, to_rust},
 };
 use serde_json::{Map, Value, json};
 
 const SCHEMA: &str = "bake/session-conformance/fault-cases";
 const ORACLE: &str = "in an owned temporary root holding the seeded files, a state a crashed or failed Session writer leaves, run each step through the JSONL backend with compression none on one handle: a write open, create, or the open handle's append, flush, or close; after each step list every file beneath the root with its text and an empty session.lock by its size";
+const VERSION: u64 = 2;
 /// Both harnesses pin the table size, so a dropped case fails.
-const CASE_COUNT: usize = 42;
+const CASE_COUNT: usize = 72;
 const SOURCE_BUDGET: usize = 64;
 const LEASE_FILE: &str = "session.lock";
-/// The token a temporary file's name is normalized to.
-const TOKEN: &str = "000000000000";
+/// The temporary files' prefixes and suffixes, which TypeScript's
+/// `materialize` and migration publication name.
+const TEMPORARIES: [(&str, &str); 2] = [
+    ("session.v3.jsonl.", ".tmp"),
+    ("session.migration.", ".jsonl.tmp"),
+];
+const PLATFORMS: [PathPlatform; 2] = [PathPlatform::Posix, PathPlatform::Win32];
 const CLASSES: [&str; 2] = [
     "SessionPersistenceNotFoundError",
     "SessionPersistenceCorruptionError",
@@ -109,11 +141,228 @@ enum Fault {
     /// A write stores its first `keep` bytes, then it and every later
     /// operation fail.
     TornCrash { keep: usize },
+    /// A crash, after which the root keeps only what a sync made durable.
+    PowerCut,
     /// The operation does not run and reports the error; later ones run.
     Fail(Failure),
     /// A write stores its first `keep` bytes and reports the error; later
     /// operations run.
     TornFail { keep: usize, failure: Failure },
+}
+
+/// The faults of one run, by operation index.
+type Plan = BTreeMap<usize, Fault>;
+
+/// A node of the mirrored namespace: a file or a directory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Node {
+    id: usize,
+    dir: bool,
+}
+
+/// The namespace beneath the root and what syncs made durable of it.
+#[derive(Debug, Default)]
+struct Shadow {
+    root: PathBuf,
+    next: usize,
+    /// Each current path's node; the root is node 0.
+    names: BTreeMap<PathBuf, Node>,
+    /// Each directory node's entries a sync or a write-through move made
+    /// durable; a directory absent here has none.
+    durable_entries: BTreeMap<usize, BTreeMap<OsString, Node>>,
+    /// Each file node's bytes a sync made durable; a file absent here has
+    /// none.
+    durable_bytes: BTreeMap<usize, Vec<u8>>,
+}
+
+impl Shadow {
+    /// The namespace of the seeded `root`, all of it durable.
+    fn seeded(root: &Path) -> Self {
+        let mut shadow = Self {
+            root: root.to_path_buf(),
+            next: 1,
+            ..Self::default()
+        };
+        let root_node = Node { id: 0, dir: true };
+        shadow.names.insert(root.to_path_buf(), root_node);
+        let mut stack = vec![root.to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            let dir_node = shadow.names[&dir];
+            let mut entries = BTreeMap::new();
+            for entry in std::fs::read_dir(&dir).expect("list seed") {
+                let entry = entry.expect("seed entry");
+                let is_dir = entry.file_type().expect("seed type").is_dir();
+                let node = shadow.node(is_dir);
+                shadow.names.insert(entry.path(), node);
+                entries.insert(entry.file_name(), node);
+                if is_dir {
+                    stack.push(entry.path());
+                } else {
+                    let bytes = std::fs::read(entry.path()).expect("seed bytes");
+                    shadow.durable_bytes.insert(node.id, bytes);
+                }
+            }
+            shadow.durable_entries.insert(dir_node.id, entries);
+        }
+        shadow
+    }
+
+    fn node(&mut self, dir: bool) -> Node {
+        let id = self.next;
+        self.next += 1;
+        Node { id, dir }
+    }
+
+    fn inside(&self, path: &Path) -> bool {
+        path.starts_with(&self.root)
+    }
+
+    fn created_dirs(&mut self, dir: &Path) {
+        if !self.inside(dir) {
+            return;
+        }
+        let mut missing: Vec<PathBuf> = dir
+            .ancestors()
+            .take_while(|ancestor| *ancestor != self.root)
+            .filter(|ancestor| !self.names.contains_key(*ancestor))
+            .map(Path::to_path_buf)
+            .collect();
+        missing.reverse();
+        for path in missing {
+            let node = self.node(true);
+            self.names.insert(path, node);
+        }
+    }
+
+    fn created_file(&mut self, path: &Path) {
+        if self.inside(path) && !self.names.contains_key(path) {
+            let node = self.node(false);
+            self.names.insert(path.to_path_buf(), node);
+        }
+    }
+
+    fn linked(&mut self, original: &Path, link: &Path) {
+        if let Some(node) = self.names.get(original).copied() {
+            self.names.insert(link.to_path_buf(), node);
+        }
+    }
+
+    fn removed(&mut self, path: &Path) {
+        self.names.remove(path);
+    }
+
+    /// A write-through move, which flushes NTFS's metadata journal: the
+    /// move and every namespace change before it are durable at once.
+    fn moved(&mut self, from: &Path, to: &Path) {
+        let moved: Vec<(PathBuf, Node)> = self
+            .names
+            .iter()
+            .filter(|(path, _)| path.starts_with(from))
+            .map(|(path, node)| (path.clone(), *node))
+            .collect();
+        for (path, node) in moved {
+            self.names.remove(&path);
+            let rest = path.strip_prefix(from).expect("a moved path");
+            let target = if rest.as_os_str().is_empty() {
+                to.to_path_buf()
+            } else {
+                to.join(rest)
+            };
+            self.names.insert(target, node);
+        }
+        let dirs: Vec<PathBuf> = self
+            .names
+            .iter()
+            .filter(|(_, node)| node.dir)
+            .map(|(path, _)| path.clone())
+            .collect();
+        for dir in dirs {
+            self.synced_dir(&dir);
+        }
+    }
+
+    fn synced_file(&mut self, path: &Path) {
+        if let Some(node) = self.names.get(path).copied() {
+            let bytes = std::fs::read(path).expect("read a synced file");
+            self.durable_bytes.insert(node.id, bytes);
+        }
+    }
+
+    fn synced_dir(&mut self, dir: &Path) {
+        let Some(node) = self.names.get(dir).copied() else {
+            return;
+        };
+        let entries = self
+            .names
+            .iter()
+            .filter(|(path, _)| path.parent() == Some(dir))
+            .map(|(path, node)| {
+                (
+                    path.file_name().expect("an entry name").to_os_string(),
+                    *node,
+                )
+            })
+            .collect();
+        self.durable_entries.insert(node.id, entries);
+    }
+
+    /// The nodes of the current namespace that have more than one path,
+    /// each group relative to the root.
+    fn link_groups(&self) -> Vec<Vec<PathBuf>> {
+        let mut groups: BTreeMap<usize, Vec<PathBuf>> = BTreeMap::new();
+        for (path, node) in &self.names {
+            if !node.dir {
+                let relative = path.strip_prefix(&self.root).expect("inside the root");
+                groups
+                    .entry(node.id)
+                    .or_default()
+                    .push(relative.to_path_buf());
+            }
+        }
+        groups
+            .into_values()
+            .filter(|paths| paths.len() > 1)
+            .collect()
+    }
+
+    /// Replace the root's contents with what survives a power cut, and
+    /// mirror that namespace.
+    fn power_loss(&mut self) {
+        for entry in std::fs::read_dir(&self.root).expect("list the root") {
+            let path = entry.expect("root entry").path();
+            if path.is_dir() {
+                std::fs::remove_dir_all(&path).expect("clear a directory");
+            } else {
+                std::fs::remove_file(&path).expect("clear a file");
+            }
+        }
+        let mut names = BTreeMap::new();
+        names.insert(self.root.clone(), Node { id: 0, dir: true });
+        let mut first_path: BTreeMap<usize, PathBuf> = BTreeMap::new();
+        let mut stack = vec![(self.root.clone(), 0usize)];
+        while let Some((dir, id)) = stack.pop() {
+            let entries = self.durable_entries.get(&id).cloned().unwrap_or_default();
+            for (name, node) in entries {
+                let path = dir.join(&name);
+                names.insert(path.clone(), node);
+                if node.dir {
+                    std::fs::create_dir(&path).expect("rebuild a directory");
+                    stack.push((path, node.id));
+                } else if let Some(original) = first_path.get(&node.id) {
+                    std::fs::hard_link(original, &path).expect("rebuild a link");
+                } else {
+                    let bytes = self
+                        .durable_bytes
+                        .get(&node.id)
+                        .cloned()
+                        .unwrap_or_default();
+                    std::fs::write(&path, bytes).expect("rebuild a file");
+                    first_path.insert(node.id, path);
+                }
+            }
+        }
+        self.names = names;
+    }
 }
 
 #[derive(Debug, Default)]
@@ -122,12 +371,15 @@ struct FaultState {
     /// The bytes of each write, by operation index.
     writes: BTreeMap<usize, Vec<u8>>,
     crashed: bool,
+    power_cut: bool,
+    shadow: Shadow,
 }
 
-/// The real filesystem with one deterministic fault at operation `at`.
+/// The real filesystem with deterministic faults and a durability model.
 #[derive(Debug)]
 struct FaultIo {
-    fault: Option<(usize, Fault)>,
+    platform: PathPlatform,
+    plan: Plan,
     state: Mutex<FaultState>,
 }
 
@@ -143,10 +395,15 @@ fn crashed() -> io::Error {
 }
 
 impl FaultIo {
-    fn new(fault: Option<(usize, Fault)>) -> Arc<Self> {
+    /// Faults over the seeded `root`, whose files are durable.
+    fn new(platform: PathPlatform, plan: Plan, root: &Path) -> Arc<Self> {
         Arc::new(Self {
-            fault,
-            state: Mutex::new(FaultState::default()),
+            platform,
+            plan,
+            state: Mutex::new(FaultState {
+                shadow: Shadow::seeded(root),
+                ..FaultState::default()
+            }),
         })
     }
 
@@ -162,6 +419,10 @@ impl FaultIo {
         self.state().writes.clone()
     }
 
+    fn crashed(&self) -> bool {
+        self.state().crashed
+    }
+
     fn gate(&self, op: StorageOp, written: Option<&[u8]>) -> Gate {
         let mut state = self.state();
         let index = state.ops.len();
@@ -172,61 +433,89 @@ impl FaultIo {
         if state.crashed {
             return Gate::Fail(crashed());
         }
-        let Some((at, fault)) = self.fault else {
+        let Some(fault) = self.plan.get(&index).copied() else {
             return Gate::Run;
         };
-        if at != index {
-            return Gate::Run;
-        }
+        let torn = |keep: usize, error: io::Error| {
+            if written.is_some() {
+                Gate::Torn { keep, error }
+            } else {
+                Gate::Fail(error)
+            }
+        };
         match fault {
             Fault::Crash => {
                 state.crashed = true;
                 Gate::Fail(crashed())
             }
+            Fault::PowerCut => {
+                state.crashed = true;
+                state.power_cut = true;
+                Gate::Fail(crashed())
+            }
             Fault::TornCrash { keep } => {
                 state.crashed = true;
-                if written.is_some() {
-                    Gate::Torn {
-                        keep,
-                        error: crashed(),
-                    }
-                } else {
-                    Gate::Fail(crashed())
-                }
+                torn(keep, crashed())
             }
             Fault::Fail(failure) => Gate::Fail(failure.error()),
-            Fault::TornFail { keep, failure } => {
-                if written.is_some() {
-                    Gate::Torn {
-                        keep,
-                        error: failure.error(),
-                    }
-                } else {
-                    Gate::Fail(failure.error())
-                }
-            }
+            Fault::TornFail { keep, failure } => torn(keep, failure.error()),
         }
     }
 
-    fn run<T>(&self, op: StorageOp, real: impl FnOnce() -> io::Result<T>) -> io::Result<T> {
+    /// Run `real` under the plan, then record its effect in the model.
+    fn run<T>(
+        &self,
+        op: StorageOp,
+        real: impl FnOnce() -> io::Result<T>,
+        mirror: impl FnOnce(&mut Shadow),
+    ) -> io::Result<T> {
         match self.gate(op, None) {
-            Gate::Run => real(),
+            Gate::Run => {
+                let value = real()?;
+                mirror(&mut self.state().shadow);
+                Ok(value)
+            }
             Gate::Fail(error) | Gate::Torn { error, .. } => Err(error),
         }
+    }
+
+    /// After a power cut, rebuild the root from what was durable; a cut
+    /// planned after the last operation cuts the finished run.
+    fn finish(&self) {
+        let mut state = self.state();
+        let after_last = self
+            .plan
+            .iter()
+            .any(|(&index, &fault)| fault == Fault::PowerCut && index >= state.ops.len());
+        if state.power_cut || after_last {
+            state.shadow.power_loss();
+        }
+    }
+
+    fn link_groups(&self) -> Vec<Vec<PathBuf>> {
+        self.state().shadow.link_groups()
     }
 }
 
 impl StorageIo for FaultIo {
     fn create_dir_all(&self, dir: &Path) -> io::Result<()> {
-        self.run(StorageOp::CreateDir, || RealIo.create_dir_all(dir))
+        self.run(
+            StorageOp::CreateDir,
+            || RealIo.create_dir_all(dir),
+            |shadow| shadow.created_dirs(dir),
+        )
     }
 
     fn create_new(&self, path: &Path) -> io::Result<File> {
-        self.run(StorageOp::CreateNew, || RealIo.create_new(path))
+        self.run(
+            StorageOp::CreateNew,
+            || RealIo.create_new(path),
+            |shadow| shadow.created_file(path),
+        )
     }
 
     fn open_write(&self, path: &Path) -> io::Result<File> {
-        self.run(StorageOp::OpenWrite, || RealIo.open_write(path))
+        self.run(StorageOp::OpenWrite, || RealIo.open_write(path), |_| {})
     }
 
     fn write_at(&self, file: &mut File, offset: u64, bytes: &[u8]) -> io::Result<()> {
@@ -241,19 +530,55 @@ impl StorageIo for FaultIo {
     }
 
     fn set_len(&self, file: &File, len: u64) -> io::Result<()> {
-        self.run(StorageOp::SetLen, || RealIo.set_len(file, len))
+        self.run(StorageOp::SetLen, || RealIo.set_len(file, len), |_| {})
     }
 
     fn hard_link(&self, original: &Path, link: &Path) -> io::Result<()> {
-        self.run(StorageOp::HardLink, || RealIo.hard_link(original, link))
+        self.run(
+            StorageOp::HardLink,
+            || RealIo.hard_link(original, link),
+            |shadow| shadow.linked(original, link),
+        )
+    }
+
+    fn rename_new(&self, from: &Path, to: &Path) -> io::Result<()> {
+        self.run(
+            StorageOp::RenameNew,
+            || RealIo.rename_new(from, to),
+            |shadow| shadow.moved(from, to),
+        )
     }
 
     fn remove_file(&self, path: &Path) -> io::Result<()> {
-        self.run(StorageOp::RemoveFile, || RealIo.remove_file(path))
+        self.run(
+            StorageOp::RemoveFile,
+            || RealIo.remove_file(path),
+            |shadow| shadow.removed(path),
+        )
+    }
+
+    fn sync_file(&self, _file: &File, path: &Path) -> io::Result<()> {
+        self.run(
+            StorageOp::SyncFile,
+            || Ok(()),
+            |shadow| shadow.synced_file(path),
+        )
+    }
+
+    fn sync_dir(&self, dir: &Path) -> io::Result<()> {
+        self.run(
+            StorageOp::SyncDir,
+            || Ok(()),
+            |shadow| shadow.synced_dir(dir),
+        )
     }
 
     fn open_lock(&self, path: &Path) -> io::Result<File> {
-        self.run(StorageOp::OpenLock, || RealIo.open_lock(path))
+        self.run(
+            StorageOp::OpenLock,
+            || RealIo.open_lock(path),
+            |shadow| shadow.created_file(path),
+        )
     }
 
     fn try_lock(&self, file: &File) -> Result<(), LockFailure> {
@@ -264,25 +589,39 @@ impl StorageIo for FaultIo {
     }
 
     fn lock_is_current(&self, held: &File, path: &Path) -> io::Result<bool> {
-        self.run(StorageOp::LockIsCurrent, || {
-            RealIo.lock_is_current(held, path)
-        })
+        self.run(
+            StorageOp::LockIsCurrent,
+            || RealIo.lock_is_current(held, path),
+            |_| {},
+        )
     }
 
     fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
-        self.run(StorageOp::Read, || RealIo.read(path))
+        self.run(StorageOp::Read, || RealIo.read(path), |_| {})
     }
 
     fn read_dir(&self, dir: &Path) -> io::Result<Option<Vec<ListedEntry>>> {
-        self.run(StorageOp::ReadDir, || RealIo.read_dir(dir))
+        self.run(StorageOp::ReadDir, || RealIo.read_dir(dir), |_| {})
     }
 
     fn canonicalize(&self, path: &Path) -> io::Result<Option<PathBuf>> {
-        self.run(StorageOp::Canonicalize, || RealIo.canonicalize(path))
+        self.run(
+            StorageOp::Canonicalize,
+            || RealIo.canonicalize(path),
+            |_| {},
+        )
     }
 
     fn probe(&self, path: &Path) -> io::Result<bool> {
-        self.run(StorageOp::Probe, || RealIo.probe(path))
+        self.run(StorageOp::Probe, || RealIo.probe(path), |_| {})
+    }
+
+    fn stat_dir(&self, path: &Path) -> io::Result<Option<bool>> {
+        self.run(StorageOp::StatDir, || RealIo.stat_dir(path), |_| {})
+    }
+
+    fn write_platform(&self) -> PathPlatform {
+        self.platform
     }
 }
 
@@ -431,13 +770,36 @@ fn scenarios() -> Vec<Scenario> {
     list
 }
 
+/// How a scenario's actions ended.
+#[derive(Debug, Default)]
+struct Ran {
+    /// The first refusal.
+    first: Option<LogFileRefusal>,
+    /// The refusal that stopped the actions, as text.
+    last: Option<String>,
+    /// Whether every action, or its retry, succeeded.
+    completed: bool,
+    /// When recorded, the operation count and the logs after each action
+    /// that succeeded: what a power cut from then on must keep.
+    acknowledged: Vec<(usize, BTreeMap<String, String>)>,
+}
+
 /// Run the scenario's actions through `io` until one fails, then drop the
-/// handle as a dead process would. The first refusal is returned.
-fn run_actions(io: &Arc<FaultIo>, root: &Path, scenario: &Scenario) -> Option<LogFileRefusal> {
+/// handle as a dead process would. With `retry`, a failed action is run once
+/// more unless the process crashed, as a TypeScript caller retries a
+/// rejected operation, and the scenario goes on when the retry succeeds.
+fn run_actions(
+    io: &Arc<FaultIo>,
+    root: &Path,
+    scenario: &Scenario,
+    retry: bool,
+    record: bool,
+) -> Ran {
     let shared: Arc<dyn StorageIo> = io.clone();
     let mut handle: Option<PlainLogFile> = None;
+    let mut ran = Ran::default();
     for action in &scenario.actions {
-        let outcome = match action {
+        let mut attempt = || match action {
             Action::Create(header) => {
                 PlainLogFile::create_with_io(shared.clone(), root, header, None)
                     .map(|created| handle = Some(created))
@@ -447,11 +809,26 @@ fn run_actions(io: &Arc<FaultIo>, root: &Path, scenario: &Scenario) -> Option<Lo
             Action::Append(events) => handle.as_mut().expect("a handle").append(events),
             Action::Flush => handle.as_mut().expect("a handle").flush(),
         };
+        let mut outcome = attempt();
+        if retry && !io.crashed() && outcome.is_err() {
+            ran.first = ran.first.or(outcome.err());
+            outcome = attempt();
+        }
         if let Err(refusal) = outcome {
-            return Some(refusal);
+            ran.last = Some(refusal.to_string_lossy());
+            ran.first = ran.first.or(Some(refusal));
+            drop(handle);
+            io.finish();
+            return ran;
+        }
+        if record {
+            ran.acknowledged.push((io.ops().len(), logs(tree(root))));
         }
     }
-    None
+    ran.completed = true;
+    drop(handle);
+    io.finish();
+    ran
 }
 
 fn seed_root(root: &Path, scenario: &Scenario) {
@@ -477,51 +854,128 @@ fn check_sources(root: &Path, scenario: &Scenario, context: &str) {
     }
 }
 
-/// A temporary file's name with its random token normalized, or `None` for
-/// any other name.
-fn normalized_temporary(name: &str) -> Option<String> {
-    let token_of = |prefix: &str| {
+/// A temporary file's prefix, token, and suffix, or `None` for any other
+/// name.
+fn temporary_parts(name: &str) -> Option<(&'static str, &str, &'static str)> {
+    TEMPORARIES.into_iter().find_map(|(prefix, suffix)| {
         name.strip_prefix(prefix)
-            .and_then(|rest| rest.strip_suffix(".tmp"))
+            .and_then(|rest| rest.strip_suffix(suffix))
             .filter(|token| !token.is_empty() && !token.contains('/'))
-            .map(|_| format!("{prefix}{TOKEN}.tmp"))
-    };
-    token_of("session.v3.jsonl.").or_else(|| token_of("session.migration."))
+            .map(|token| (prefix, token, suffix))
+    })
 }
 
-/// Every file beneath `root`, a `session.lock` by its size and a temporary
-/// file under its normalized name.
-fn tree(root: &Path) -> BTreeMap<String, String> {
-    fn walk(dir: &Path, prefix: &str, files: &mut BTreeMap<String, String>) {
+/// The creation order of a token: Rust's `<pid>-<counter>` by its counter,
+/// a normalized token by its number.
+fn token_order(token: &str) -> (u64, String) {
+    let counter = token.rsplit('-').next().unwrap_or(token);
+    (counter.parse().unwrap_or(u64::MAX), token.to_owned())
+}
+
+/// Every file beneath `root`, a `session.lock` by its size and each
+/// temporary file under its normalized name, and the normalized relative
+/// path of every listed file.
+fn snapshot(root: &Path) -> (BTreeMap<String, String>, BTreeMap<PathBuf, String>) {
+    fn walk(
+        dir: &Path,
+        relative: &Path,
+        prefix: &str,
+        files: &mut BTreeMap<String, String>,
+        names: &mut BTreeMap<PathBuf, String>,
+    ) {
+        let mut listed = Vec::new();
         for entry in std::fs::read_dir(dir).expect("list") {
             let entry = entry.expect("entry");
-            let name = from_rust(&entry.file_name().to_string_lossy()).into_owned();
-            let kind = entry.file_type().expect("file type");
-            if kind.is_dir() {
-                walk(&entry.path(), &format!("{prefix}{name}/"), files);
+            listed.push((
+                entry.file_name(),
+                entry.file_type().expect("file type").is_dir(),
+            ));
+        }
+        // Temporaries are numbered by prefix in their creation order.
+        let mut temporaries: BTreeMap<&str, Vec<(u64, String, String)>> = BTreeMap::new();
+        for (raw, is_dir) in &listed {
+            let name = from_rust(&raw.to_string_lossy()).into_owned();
+            if !is_dir && let Some((temp_prefix, token, _)) = temporary_parts(&name) {
+                let (order, token) = token_order(token);
+                temporaries
+                    .entry(temp_prefix)
+                    .or_default()
+                    .push((order, token, name.clone()));
+            }
+        }
+        let mut renamed = BTreeMap::new();
+        for (temp_prefix, mut found) in temporaries {
+            found.sort();
+            let suffix = TEMPORARIES
+                .iter()
+                .find(|(known, _)| *known == temp_prefix)
+                .map(|(_, suffix)| *suffix)
+                .expect("a known prefix");
+            for (index, (_, _, name)) in found.into_iter().enumerate() {
+                renamed.insert(name, format!("{temp_prefix}{index:012}{suffix}"));
+            }
+        }
+        for (raw, is_dir) in listed {
+            let name = from_rust(&raw.to_string_lossy()).into_owned();
+            let path = dir.join(&raw);
+            if is_dir {
+                walk(
+                    &path,
+                    &relative.join(&raw),
+                    &format!("{prefix}{name}/"),
+                    files,
+                    names,
+                );
                 continue;
             }
             let text = if name == LEASE_FILE {
-                let size = entry.metadata().expect("lock metadata").len();
+                let size = std::fs::metadata(&path).expect("lock metadata").len();
                 if size == 0 {
                     String::new()
                 } else {
                     format!("<{size} bytes>")
                 }
             } else {
-                let text = std::fs::read_to_string(entry.path()).expect("UTF-8 file");
+                let text = std::fs::read_to_string(&path).expect("UTF-8 file");
                 from_rust(&text).into_owned()
             };
-            let name = normalized_temporary(&name).unwrap_or(name);
-            assert!(
-                files.insert(format!("{prefix}{name}"), text).is_none(),
-                "two temporaries in one directory"
-            );
+            let normalized = renamed.get(&name).cloned().unwrap_or(name);
+            let key = format!("{prefix}{normalized}");
+            names.insert(relative.join(&raw), key.clone());
+            files.insert(key, text);
         }
     }
     let mut files = BTreeMap::new();
-    walk(root, "", &mut files);
-    files
+    let mut names = BTreeMap::new();
+    walk(root, Path::new(""), "", &mut files, &mut names);
+    (files, names)
+}
+
+fn tree(root: &Path) -> BTreeMap<String, String> {
+    snapshot(root).0
+}
+
+/// A state a run leaves: its files and its hard-linked groups of them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct State {
+    files: BTreeMap<String, String>,
+    links: BTreeSet<BTreeSet<String>>,
+}
+
+/// The state of a root `io` ran over.
+fn state(root: &Path, io: &FaultIo) -> State {
+    let (files, names) = snapshot(root);
+    let links = io
+        .link_groups()
+        .into_iter()
+        .map(|group| {
+            group
+                .iter()
+                .map(|path| names.get(path).expect("a linked file is listed").clone())
+                .collect()
+        })
+        .collect();
+    State { files, links }
 }
 
 // ---------------------------------------------------------------------------
@@ -530,8 +984,8 @@ fn tree(root: &Path) -> BTreeMap<String, String> {
 struct Case {
     id: String,
     scenarios: Vec<String>,
-    /// Each seeded file's text, a hard link's that of the file it links.
-    seed: BTreeMap<String, String>,
+    /// Each seeded file's text and its hard-linked groups.
+    seed: State,
     /// Seeded hard links and the seeded files they link.
     links: BTreeMap<String, String>,
     steps: Vec<Map<String, Value>>,
@@ -572,7 +1026,7 @@ fn load() -> Vec<Case> {
         BTreeSet::from(["cases", "history", "oracle", "schema", "version"])
     );
     assert_eq!(table["schema"], SCHEMA);
-    assert_eq!(table["version"], 1);
+    assert_eq!(table["version"], VERSION);
     assert_eq!(table["oracle"], ORACLE);
     assert!(
         table["history"]
@@ -596,7 +1050,7 @@ fn load() -> Vec<Case> {
                 .iter()
                 .map(|name| text(name, &id).to_owned())
                 .collect();
-            let mut seed = BTreeMap::new();
+            let mut files = BTreeMap::new();
             let mut links = BTreeMap::new();
             for file in entry["seed"].as_array().expect("seed") {
                 let file = object(file, &id);
@@ -606,12 +1060,16 @@ fn load() -> Vec<Case> {
                     links.insert(path, text(target, &id).to_owned());
                 } else {
                     assert_eq!(keys(file), BTreeSet::from(["file", "text"]), "{id}: seed");
-                    seed.insert(path, text(&file["text"], &id).to_owned());
+                    files.insert(path, text(&file["text"], &id).to_owned());
                 }
             }
+            let mut groups: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
             for (link, target) in &links {
-                let target_text = seed.get(target).expect("a seeded link target").clone();
-                seed.insert(link.clone(), target_text);
+                let target_text = files.get(target).expect("a seeded link target").clone();
+                files.insert(link.clone(), target_text);
+                let group = groups.entry(target.clone()).or_default();
+                group.insert(target.clone());
+                group.insert(link.clone());
             }
             let steps = entry["steps"]
                 .as_array()
@@ -622,7 +1080,10 @@ fn load() -> Vec<Case> {
             Case {
                 id,
                 scenarios,
-                seed,
+                seed: State {
+                    files,
+                    links: groups.into_values().collect(),
+                },
                 links,
                 steps,
             }
@@ -656,10 +1117,18 @@ enum Strictness {
     OpenOnly,
 }
 
+/// `tree` without the lock and temporary files: the logs.
+fn logs(tree: BTreeMap<String, String>) -> BTreeMap<String, String> {
+    without_temporaries(tree)
+        .into_iter()
+        .filter(|(name, _)| !name.ends_with(&format!("/{LEASE_FILE}")))
+        .collect()
+}
+
 /// `tree` without temporary files.
 fn without_temporaries(tree: BTreeMap<String, String>) -> BTreeMap<String, String> {
     tree.into_iter()
-        .filter(|(name, _)| !name.ends_with(&format!(".{TOKEN}.tmp")))
+        .filter(|(name, _)| temporary_parts(name.rsplit('/').next().unwrap_or_default()).is_none())
         .collect()
 }
 
@@ -720,199 +1189,422 @@ fn run_case(case: &Case, root: &Path, strictness: Strictness) {
 }
 
 /// The table case whose seed is `state` among those naming `scenario`.
-fn state_case<'a>(
-    cases: &'a [Case],
-    scenario: &str,
-    state: &BTreeMap<String, String>,
-) -> Option<&'a Case> {
+fn state_case<'a>(cases: &'a [Case], scenario: &str, state: &State) -> Option<&'a Case> {
     cases
         .iter()
         .find(|case| case.scenarios.iter().any(|name| name == scenario) && case.seed == *state)
 }
 
-fn dump_unknown(scenario: &str, context: &str, state: &BTreeMap<String, String>) -> String {
-    format!(
-        "{context}: scenario {scenario} reached a state no case seeds: {}",
-        serde_json::to_string(state).expect("state")
-    )
+/// The states a sweep reached, the cases they matched, and the states no
+/// case seeds.
+#[derive(Debug, Default)]
+struct Reached {
+    /// Each reached case's id and the scenario that reached it.
+    cases: BTreeSet<(String, String)>,
+    unknown: Vec<String>,
 }
 
-/// One run of `scenario` with `fault` in a fresh root: the sources must be
+impl Reached {
+    fn merge(&mut self, other: Self) {
+        self.cases.extend(other.cases);
+        self.unknown.extend(other.unknown);
+    }
+}
+
+/// One run of `scenario` under `plan` in a fresh root: the sources must be
 /// unchanged and the state a case of the scenario, whose steps then run over
-/// that root. Returns the first refusal and the state.
+/// that root. Returns how the actions ended and the state.
 fn faulted_run(
     cases: &[Case],
     scenario: &Scenario,
-    fault: Option<(usize, Fault)>,
-    reached: &mut BTreeSet<String>,
-    unknown: &mut Vec<String>,
-) -> (Option<LogFileRefusal>, BTreeMap<String, String>) {
+    platform: PathPlatform,
+    plan: &Plan,
+    retry: bool,
+    reached: &mut Reached,
+) -> (Ran, State) {
     let scratch = Scratch::new();
     seed_root(&scratch.0, scenario);
-    let io = FaultIo::new(fault);
-    let refusal = run_actions(&io, &scratch.0, scenario);
-    let context = format!("{} {fault:?}", scenario.name);
+    let io = FaultIo::new(platform, plan.clone(), &scratch.0);
+    let ran = run_actions(&io, &scratch.0, scenario, retry, false);
+    let context = format!("{} {platform:?} {plan:?} retry {retry}", scenario.name);
     check_sources(&scratch.0, scenario, &context);
-    let state = tree(&scratch.0);
+    let state = state(&scratch.0, &io);
     match state_case(cases, scenario.name, &state) {
         Some(case) => {
-            reached.insert(case.id.clone());
+            reached
+                .cases
+                .insert((case.id.clone(), scenario.name.to_owned()));
             run_case(case, &scratch.0, Strictness::Exact);
         }
         None => {
+            let links: Vec<&BTreeSet<String>> = state.links.iter().collect();
+            let line = json!({
+                "scenario": scenario.name,
+                "platform": format!("{platform:?}"),
+                "fault": format!("{plan:?} retry {retry}"),
+                "state": state.files,
+                "links": links,
+            });
             if let Ok(path) = std::env::var("BAKE_FAULT_DUMP") {
                 use std::io::Write;
+                static DUMP: Mutex<()> = Mutex::new(());
+                let _serial = DUMP.lock().unwrap_or_else(PoisonError::into_inner);
                 let mut file = std::fs::OpenOptions::new()
                     .append(true)
                     .create(true)
                     .open(path)
                     .expect("dump");
-                writeln!(
-                    file,
-                    "{}",
-                    json!({"scenario": scenario.name, "fault": format!("{fault:?}"), "state": state})
-                )
-                .expect("dump");
+                writeln!(file, "{line}").expect("dump");
             }
-            unknown.push(dump_unknown(scenario.name, &context, &state));
+            reached.unknown.push(format!(
+                "{context}: scenario {} reached a state no case seeds: {line}",
+                scenario.name
+            ));
         }
     }
-    (refusal, state)
+    (ran, state)
 }
 
-/// The fault-free run's operations and the bytes of its writes.
-fn count(scenario: &Scenario) -> (Vec<StorageOp>, BTreeMap<usize, Vec<u8>>) {
+/// A run's operations, the bytes of its writes, and its state.
+struct Counted {
+    ops: Vec<StorageOp>,
+    writes: BTreeMap<usize, Vec<u8>>,
+    ran: Ran,
+    state: State,
+}
+
+/// Run `scenario` under `plan` without checking the state against the table.
+fn count(scenario: &Scenario, platform: PathPlatform, plan: &Plan, retry: bool) -> Counted {
     let scratch = Scratch::new();
     seed_root(&scratch.0, scenario);
-    let io = FaultIo::new(None);
-    let refusal = run_actions(&io, &scratch.0, scenario);
-    assert!(refusal.is_none(), "{}: {refusal:?}", scenario.name);
-    (io.ops(), io.writes())
+    let io = FaultIo::new(platform, plan.clone(), &scratch.0);
+    let ran = run_actions(&io, &scratch.0, scenario, retry, plan.is_empty());
+    let state = state(&scratch.0, &io);
+    Counted {
+        ops: io.ops(),
+        writes: io.writes(),
+        ran,
+        state,
+    }
+}
+
+/// The fault-free run, which must succeed.
+fn clean(scenario: &Scenario, platform: PathPlatform) -> Counted {
+    let counted = count(scenario, platform, &Plan::new(), false);
+    assert!(
+        counted.ran.completed,
+        "{} {platform:?}: {:?}",
+        scenario.name, counted.ran.first
+    );
+    counted
 }
 
 /// Whether operation `index` removes a temporary file already linked into
-/// place.
+/// place, after the link and the directory sync that follows it.
 fn published_temporary_removal(ops: &[StorageOp], index: usize) -> bool {
-    ops[index] == StorageOp::RemoveFile && index > 0 && ops[index - 1] == StorageOp::HardLink
+    ops[index] == StorageOp::RemoveFile
+        && ops[..index]
+            .iter()
+            .rev()
+            .find(|op| **op != StorageOp::SyncDir)
+            == Some(&StorageOp::HardLink)
 }
 
-#[test]
-fn every_crash_point_leaves_a_state_typescript_reopens_alike() {
-    let cases = load();
-    let mut reached = BTreeSet::new();
-    let mut unknown = Vec::new();
-    for scenario in scenarios() {
-        let (ops, writes) = count(&scenario);
-        assert!(
-            ops.contains(&StorageOp::TryLock),
-            "{}: no lock taken",
+/// Whether write `index` writes a temporary file.
+fn temporary_write(ops: &[StorageOp], index: usize) -> bool {
+    ops[index] == StorageOp::WriteAt && index > 0 && ops[index - 1] == StorageOp::CreateNew
+}
+
+/// Whether operation `index` syncs a directory a log was just linked into,
+/// so a failure there leaves that log published.
+fn sync_after_link(ops: &[StorageOp], index: usize) -> bool {
+    ops[index] == StorageOp::SyncDir && index > 0 && ops[index - 1] == StorageOp::HardLink
+}
+
+fn plan(index: usize, fault: Fault) -> Plan {
+    Plan::from([(index, fault)])
+}
+
+/// Every crash point, torn crash, and power cut of `scenario` on `platform`.
+fn crash_sweep(cases: &[Case], scenario: &Scenario, platform: PathPlatform) -> Reached {
+    let mut reached = Reached::default();
+    let Counted {
+        ops, writes, ran, ..
+    } = clean(scenario, platform);
+    // Every operation that returned keeps its logs through a power cut.
+    for (boundary, acknowledged) in &ran.acknowledged {
+        let (_, state) = faulted_run(
+            cases,
+            scenario,
+            platform,
+            &plan(*boundary, Fault::PowerCut),
+            false,
+            &mut reached,
+        );
+        assert_eq!(
+            &logs(state.files),
+            acknowledged,
+            "{} {platform:?}: a power cut at {boundary} lost an acknowledged write",
             scenario.name
         );
-        for index in 0..=ops.len() {
-            let (refusal, _) = faulted_run(
-                &cases,
-                &scenario,
-                Some((index, Fault::Crash)),
+    }
+    assert!(
+        ops.contains(&StorageOp::TryLock),
+        "{} {platform:?}: no lock taken",
+        scenario.name
+    );
+    for index in 0..=ops.len() {
+        for fault in [Fault::Crash, Fault::PowerCut] {
+            let (ran, _) = faulted_run(
+                cases,
+                scenario,
+                platform,
+                &plan(index, fault),
+                false,
                 &mut reached,
-                &mut unknown,
             );
             // A crash at the removal of a published temporary is swallowed,
             // as TypeScript swallows a failed removal there, and only a
             // later operation reports it.
             if index == ops.len() || !published_temporary_removal(&ops, index) {
                 assert_eq!(
-                    refusal.is_some(),
+                    ran.first.is_some(),
                     index < ops.len(),
-                    "{} {index}",
+                    "{} {platform:?} {index} {fault:?}",
                     scenario.name
                 );
             }
-            if let Some(bytes) = writes.get(&index) {
-                faulted_run(
-                    &cases,
-                    &scenario,
-                    Some((
-                        index,
-                        Fault::TornCrash {
-                            keep: bytes.len() / 2,
-                        },
-                    )),
-                    &mut reached,
-                    &mut unknown,
+        }
+        if let Some(bytes) = writes.get(&index) {
+            let fault = Fault::TornCrash {
+                keep: bytes.len() / 2,
+            };
+            faulted_run(
+                cases,
+                scenario,
+                platform,
+                &plan(index, fault),
+                false,
+                &mut reached,
+            );
+        }
+    }
+    reached
+}
+
+/// Every failed operation of `scenario` on `platform`; see the module
+/// comment.
+fn failure_sweep(cases: &[Case], scenario: &Scenario, platform: PathPlatform) -> Reached {
+    let mut reached = Reached::default();
+    let fault_free = clean(scenario, platform);
+    let (ops, writes) = (&fault_free.ops, &fault_free.writes);
+    let crash_states: Vec<State> = (0..=ops.len())
+        .map(|index| count(scenario, platform, &plan(index, Fault::Crash), false).state)
+        .collect();
+    for index in 0..ops.len() {
+        let mut faults: Vec<Fault> = Failure::ALL.into_iter().map(Fault::Fail).collect();
+        if let Some(bytes) = writes.get(&index) {
+            for failure in Failure::ALL {
+                faults.push(Fault::TornFail {
+                    keep: bytes.len() / 2,
+                    failure,
+                });
+            }
+        }
+        for fault in faults {
+            let context = format!("{} {platform:?} {index} {fault:?}", scenario.name);
+            let failed = plan(index, fault);
+            let (ran, state) = faulted_run(cases, scenario, platform, &failed, false, &mut reached);
+            // A failed removal of a published temporary is swallowed, as
+            // TypeScript's is, and the run goes on with that second link.
+            if published_temporary_removal(ops, index) {
+                assert!(ran.completed, "{context}: {:?}", ran.first);
+            } else {
+                let torn_temporary =
+                    matches!(fault, Fault::TornFail { .. }) && temporary_write(ops, index);
+                let allowed = crash_states.contains(&state)
+                    || torn_temporary && {
+                        let keep = writes[&index].len() / 2;
+                        state
+                            == count(
+                                scenario,
+                                platform,
+                                &plan(index, Fault::TornCrash { keep }),
+                                false,
+                            )
+                            .state
+                    };
+                assert!(allowed, "{context}: a state no crash leaves: {state:?}");
+                assert!(
+                    matches!(ran.first, Some(LogFileRefusal::Io(_))),
+                    "{context}: {:?}",
+                    ran.first
                 );
+            }
+            // The failed action's retry, and every later action.
+            let (ran, state) = faulted_run(cases, scenario, platform, &failed, true, &mut reached);
+            if sync_after_link(ops, index) && scenario.name.starts_with("create") {
+                assert!(
+                    ran.last
+                        .as_ref()
+                        .is_some_and(|last| last.contains("refusing to materialize")),
+                    "{context}: {:?}",
+                    ran.last
+                );
+                continue;
+            }
+            assert!(ran.completed, "{context}: the retry failed: {:?}", ran.last);
+            assert_eq!(
+                without_temporaries(state.files),
+                without_temporaries(fault_free.state.files.clone()),
+                "{context}: the retried run's logs"
+            );
+        }
+    }
+    // A failure, its retry, and a crash or power cut at every later point.
+    for index in 0..ops.len() {
+        let mut faults = vec![Fault::Fail(Failure::Eio)];
+        if let Some(bytes) = writes.get(&index) {
+            faults.push(Fault::TornFail {
+                keep: bytes.len() / 2,
+                failure: Failure::Eio,
+            });
+        }
+        for fault in faults {
+            let failed = plan(index, fault);
+            let total = count(scenario, platform, &failed, true).ops.len();
+            for later in index + 1..=total {
+                for cut in [Fault::Crash, Fault::PowerCut] {
+                    let mut both = failed.clone();
+                    both.insert(later, cut);
+                    faulted_run(cases, scenario, platform, &both, true, &mut reached);
+                }
             }
         }
     }
-    assert!(unknown.is_empty(), "{}", unknown.join("\n"));
-    let all: BTreeSet<String> = cases.iter().map(|case| case.id.clone()).collect();
-    let unreached: Vec<&String> = all.difference(&reached).collect();
+    reached
+}
+
+/// Run `sweep` over every scenario and platform, in parallel.
+fn sweep_all(sweep: fn(&[Case], &Scenario, PathPlatform) -> Reached) -> Reached {
+    let cases = load();
+    let scenarios = scenarios();
+    let jobs: Vec<(&Scenario, PathPlatform)> = scenarios
+        .iter()
+        .flat_map(|scenario| PLATFORMS.map(|platform| (scenario, platform)))
+        .collect();
+    let mut reached = Reached::default();
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = jobs
+            .iter()
+            .map(|&(scenario, platform)| {
+                let cases = &cases;
+                scope.spawn(move || sweep(cases, scenario, platform))
+            })
+            .collect();
+        for handle in handles {
+            reached.merge(handle.join().expect("a sweep thread"));
+        }
+    });
+    reached
+}
+
+#[test]
+fn every_crash_point_leaves_a_state_typescript_reopens_alike() {
+    let mut reached = sweep_all(crash_sweep);
+    reached.merge(sweep_all(failure_sweep));
+    assert!(reached.unknown.is_empty(), "{}", reached.unknown.join("\n"));
+    let all: BTreeSet<(String, String)> = load()
+        .into_iter()
+        .flat_map(|case| {
+            case.scenarios
+                .into_iter()
+                .map(move |scenario| (case.id.clone(), scenario))
+        })
+        .collect();
+    let unreached: Vec<&(String, String)> = all.difference(&reached.cases).collect();
     assert!(
         unreached.is_empty(),
-        "cases no crash or failure reaches: {unreached:?}"
+        "cases a listed scenario does not reach: {unreached:?}"
     );
 }
 
-/// A failed operation reports its error and leaves a state a crash at some
-/// operation, without a torn write, also leaves: a failed publication removes
-/// its temporary file, and a failed append write is rolled back, as
-/// TypeScript's `rollbackAppend` does, so no torn bytes of the batch remain.
+/// When a failed append's rollback fails too, the file holds bytes the
+/// model does not, which TypeScript's retry would append after; the value
+/// refuses every later operation instead.
 #[test]
-fn every_failed_operation_reports_and_leaves_a_table_state() {
-    let cases = load();
-    let mut reached = BTreeSet::new();
-    let mut unknown = Vec::new();
-    for scenario in scenarios() {
-        let (ops, writes) = count(&scenario);
-        let clean: Vec<BTreeMap<String, String>> = (0..=ops.len())
-            .map(|index| {
-                faulted_run(
-                    &cases,
-                    &scenario,
-                    Some((index, Fault::Crash)),
-                    &mut reached,
-                    &mut unknown,
-                )
-                .1
-            })
-            .collect();
-        for index in 0..ops.len() {
-            let mut faults: Vec<Fault> = Failure::ALL.into_iter().map(Fault::Fail).collect();
-            if let Some(bytes) = writes.get(&index) {
-                for failure in Failure::ALL {
-                    faults.push(Fault::TornFail {
-                        keep: bytes.len() / 2,
-                        failure,
-                    });
-                }
-            }
-            for fault in faults {
-                let (refusal, state) = faulted_run(
-                    &cases,
-                    &scenario,
-                    Some((index, fault)),
-                    &mut reached,
-                    &mut unknown,
-                );
-                // A failed removal of a published temporary is swallowed, as
-                // TypeScript's is, and the run goes on with that second link.
-                if published_temporary_removal(&ops, index) {
-                    assert!(refusal.is_none(), "{} {index}: {refusal:?}", scenario.name);
-                    continue;
-                }
-                assert!(
-                    clean.contains(&state),
-                    "{} {index} {fault:?}: a state no untorn crash leaves: {state:?}",
-                    scenario.name
-                );
-                assert!(
-                    matches!(refusal, Some(LogFileRefusal::Io(_))),
-                    "{} {index} {fault:?}: {refusal:?}",
-                    scenario.name
-                );
-            }
+fn a_failed_rollback_refuses_every_later_operation() {
+    let scenario = scenarios()
+        .into_iter()
+        .find(|scenario| scenario.name == "open-append")
+        .expect("open-append");
+    for platform in PLATFORMS {
+        let Counted { writes, .. } = clean(&scenario, platform);
+        let (&write, bytes) = writes.iter().last().expect("the append write");
+        // The faulted run fails the write, then the rollback opens the file
+        // (`write + 1`) and truncates it (`write + 2`); the clean run has no
+        // rollback, so the index is counted from the faulted sequence.
+        let truncate = write + 2;
+        let scratch = Scratch::new();
+        seed_root(&scratch.0, &scenario);
+        let keep = bytes.len() / 2;
+        let both = Plan::from([
+            (
+                write,
+                Fault::TornFail {
+                    keep,
+                    failure: Failure::Eio,
+                },
+            ),
+            (truncate, Fault::Fail(Failure::Eio)),
+        ]);
+        let io = FaultIo::new(platform, both, &scratch.0);
+        let shared: Arc<dyn StorageIo> = io.clone();
+        let mut handle =
+            PlainLogFile::open_with_io(shared, &scratch.0, "w", SOURCE_BUDGET).expect("open");
+        let Action::Append(events) = &scenario.actions[1] else {
+            panic!("an append");
+        };
+        let failed = handle.append(events).expect_err("the torn append");
+        assert!(
+            failed.to_string_lossy().contains("failed to roll back"),
+            "{platform:?}: {failed:?}"
+        );
+        assert_eq!(
+            io.ops().get(truncate),
+            Some(&StorageOp::SetLen),
+            "{platform:?}: the second fault lands on the rollback's truncation"
+        );
+        for retried in [handle.append(events), handle.flush()] {
+            let refusal = retried.expect_err("a diverged value refuses");
+            assert!(
+                refusal
+                    .to_string_lossy()
+                    .contains("could not be rolled back"),
+                "{platform:?}: {refusal:?}"
+            );
+        }
+        let log = std::fs::read(scratch.0.join("_no-cwd/w/session.v3.jsonl")).expect("log");
+        let (_, stored) = &scenario.seed[0];
+        assert_eq!(
+            log.len(),
+            stored.len() + keep,
+            "{platform:?}: the torn rows stay"
+        );
+    }
+}
+
+trait RefusalText {
+    fn to_string_lossy(&self) -> String;
+}
+
+impl RefusalText for LogFileRefusal {
+    fn to_string_lossy(&self) -> String {
+        match self {
+            LogFileRefusal::Io(error) => error.to_string(),
+            other => format!("{other:?}"),
         }
     }
-    assert!(unknown.is_empty(), "{}", unknown.join("\n"));
 }
 
 /// Every write torn at every byte count, crashing; see the module comment.
@@ -921,56 +1613,67 @@ fn every_failed_operation_reports_and_leaves_a_table_state() {
 fn full_torn_write_sweep() {
     let cases = load();
     for scenario in scenarios() {
-        let (ops, writes) = count(&scenario);
-        for (&index, bytes) in &writes {
-            let half = run_torn(&scenario, index, bytes.len() / 2);
-            let reference = state_case(&cases, scenario.name, &half)
-                .unwrap_or_else(|| panic!("{} {index}: the half-torn state", scenario.name));
-            for keep in 0..bytes.len() {
-                let scratch = Scratch::new();
-                seed_root(&scratch.0, &scenario);
-                let io = FaultIo::new(Some((index, Fault::TornCrash { keep })));
-                run_actions(&io, &scratch.0, &scenario);
-                let context = format!("{} {index} keep {keep} of {:?}", scenario.name, ops[index]);
-                check_sources(&scratch.0, &scenario, &context);
-                for name in tree(&scratch.0).keys() {
-                    let base = name.rsplit('/').next().unwrap_or_default();
-                    assert!(
-                        base == LEASE_FILE
-                            || base.ends_with(&format!(".{TOKEN}.tmp"))
-                            || canonical_generation_name(base),
-                        "{context}: stray {name}"
+        for platform in PLATFORMS {
+            let Counted { ops, writes, .. } = clean(&scenario, platform);
+            for (&index, bytes) in &writes {
+                let half = count(
+                    &scenario,
+                    platform,
+                    &plan(
+                        index,
+                        Fault::TornCrash {
+                            keep: bytes.len() / 2,
+                        },
+                    ),
+                    false,
+                )
+                .state;
+                let reference = state_case(&cases, scenario.name, &half).unwrap_or_else(|| {
+                    panic!(
+                        "{} {platform:?} {index}: the half-torn state",
+                        scenario.name
+                    )
+                });
+                for keep in 0..bytes.len() {
+                    let scratch = Scratch::new();
+                    seed_root(&scratch.0, &scenario);
+                    let io =
+                        FaultIo::new(platform, plan(index, Fault::TornCrash { keep }), &scratch.0);
+                    run_actions(&io, &scratch.0, &scenario, false, false);
+                    let context = format!(
+                        "{} {platform:?} {index} keep {keep} of {:?}",
+                        scenario.name, ops[index]
                     );
-                }
-                // A torn temporary is never read, so any cut reopens as the
-                // half cut does. A torn log append reopens alike only when
-                // the cut leaves as many whole rows as the half cut, and not
-                // at a line end, which TypeScript's scan reads as no torn tail.
-                let publication = index > 0 && ops[index - 1] == StorageOp::CreateNew;
-                let rows = |cut: usize| bytes[..cut].iter().filter(|&&byte| byte == b'\n').count();
-                let ends_line = keep > 0 && bytes[keep - 1] == b'\n';
-                let strictness =
-                    if publication || (!ends_line && rows(keep) == rows(bytes.len() / 2)) {
+                    check_sources(&scratch.0, &scenario, &context);
+                    for name in tree(&scratch.0).keys() {
+                        let base = name.rsplit('/').next().unwrap_or_default();
+                        assert!(
+                            base == LEASE_FILE
+                                || temporary_parts(base).is_some()
+                                || canonical_generation_name(base),
+                            "{context}: stray {name}"
+                        );
+                    }
+                    // A torn temporary is never read, so any cut reopens as
+                    // the half cut does. A torn log append reopens alike only
+                    // when the cut leaves as many whole rows as the half cut,
+                    // and not at a line end, which TypeScript's scan reads as
+                    // no torn tail.
+                    let rows =
+                        |cut: usize| bytes[..cut].iter().filter(|&&byte| byte == b'\n').count();
+                    let ends_line = keep > 0 && bytes[keep - 1] == b'\n';
+                    let strictness = if temporary_write(&ops, index)
+                        || (!ends_line && rows(keep) == rows(bytes.len() / 2))
+                    {
                         Strictness::FinalLog
                     } else {
                         Strictness::OpenOnly
                     };
-                run_case(reference, &scratch.0, strictness);
+                    run_case(reference, &scratch.0, strictness);
+                }
             }
         }
     }
-}
-
-/// The state `scenario` leaves when write `index` is torn at `keep` bytes.
-fn run_torn(scenario: &Scenario, index: usize, keep: usize) -> BTreeMap<String, String> {
-    let scratch = Scratch::new();
-    seed_root(&scratch.0, scenario);
-    run_actions(
-        &FaultIo::new(Some((index, Fault::TornCrash { keep }))),
-        &scratch.0,
-        scenario,
-    );
-    tree(&scratch.0)
 }
 
 /// Whether `name` is a canonical plain generation's name.
@@ -985,7 +1688,7 @@ fn canonical_generation_name(name: &str) -> bool {
 fn shared_cases_reopen_like_the_typescript_backend() {
     for case in load() {
         let scratch = Scratch::new();
-        for (file, file_text) in &case.seed {
+        for (file, file_text) in &case.seed.files {
             if case.links.contains_key(file) {
                 continue;
             }
@@ -1002,4 +1705,37 @@ fn shared_cases_reopen_like_the_typescript_backend() {
         }
         run_case(&case, &scratch.0, Strictness::Exact);
     }
+}
+
+/// On Windows the write sequence's publication is a real `MoveFileExW`
+/// with write-through, which refuses an existing destination, and a
+/// published log leaves no temporary file.
+#[cfg(windows)]
+#[test]
+fn windows_publication_moves_without_replacing() {
+    let scratch = Scratch::new();
+    let (from, to) = (scratch.0.join("from.tmp"), scratch.0.join("to"));
+    std::fs::write(&from, "staged").expect("stage");
+    std::fs::write(&to, "kept").expect("target");
+    let refused = RealIo
+        .rename_new(&from, &to)
+        .expect_err("an existing target");
+    assert_eq!(refused.kind(), ErrorKind::AlreadyExists);
+    assert_eq!(std::fs::read_to_string(&to).expect("target"), "kept");
+    std::fs::remove_file(&to).expect("clear the target");
+    RealIo.rename_new(&from, &to).expect("move");
+    assert_eq!(std::fs::read_to_string(&to).expect("moved"), "staged");
+    assert!(!from.exists());
+
+    let root = Scratch::new();
+    let mut handle = PlainLogFile::create(&root.0, &header("w"), None).expect("create");
+    handle.flush().expect("flush");
+    drop(handle);
+    assert_eq!(
+        tree(&root.0),
+        BTreeMap::from([
+            ("_no-cwd/w/session.lock".to_owned(), String::new()),
+            ("_no-cwd/w/session.v3.jsonl".to_owned(), header_line("w")),
+        ])
+    );
 }

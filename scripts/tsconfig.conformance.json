@@ -21,6 +21,7 @@
     "../packages/session/session-persistence-jsonl/tests/restore-conformance.spec.ts",
     "../packages/session/session-persistence-jsonl/tests/lookup-conformance.spec.ts",
     "../packages/session/session-persistence-jsonl/tests/lease.cross-runtime.spec.ts",
+    "../packages/session/session-persistence-jsonl/tests/resume.cross-runtime.spec.ts",
     "../packages/session/session-persistence-jsonl/tests/generation-header-conformance.spec.ts",
     "../packages/session/session-persistence-jsonl/tests/stat-conformance.spec.ts",
     "../packages/session/session-persistence-jsonl/tests/list-conformance.spec.ts",

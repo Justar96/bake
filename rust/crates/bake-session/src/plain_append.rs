@@ -288,8 +288,19 @@ impl PlainAppendLog {
         }
     }
 
+    /// The committed offset of a torn tail the next appended batch
+    /// truncates, or `None`.
+    pub(crate) fn torn_truncate_to(&self) -> Option<usize> {
+        match &self.storage {
+            Storage::Pending { .. } => None,
+            Storage::Materialized {
+                torn_truncate_to, ..
+            } => *torn_truncate_to,
+        }
+    }
+
     /// `truncateTornTail`: drop the bytes after the committed offset once.
-    fn truncate_torn_tail(&mut self) {
+    pub(crate) fn truncate_torn_tail(&mut self) {
         if let Storage::Materialized {
             bytes,
             torn_truncate_to,

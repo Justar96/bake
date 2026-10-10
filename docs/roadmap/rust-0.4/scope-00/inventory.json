@@ -286,7 +286,7 @@
       "reason": "Cordis composition, configuration, and package-invariant gates over TypeScript packages; native composition needs its own validation."
     },
     "scripts:lease-interop": {
-      "reason": "Requires complete cross-runtime Session writer-lease evidence, with only the platform-specific stopped-holder skips."
+      "reason": "Requires complete cross-runtime Session writer-lease and resume evidence, with only the platform-specific stopped-holder skips."
     },
     "scripts:migration": {
       "reason": "Scope-00 migration bookkeeping; retired with the TypeScript oracle in scope 17."
@@ -1128,6 +1128,7 @@
     {"path":"packages/session/session-persistence-jsonl/tests/plain-log-file-conformance.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-persistence-jsonl","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
     {"path":"packages/session/session-persistence-jsonl/tests/prefix-restore-conformance.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-persistence-jsonl","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
     {"path":"packages/session/session-persistence-jsonl/tests/restore-conformance.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-persistence-jsonl","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
+    {"path":"packages/session/session-persistence-jsonl/tests/resume.cross-runtime.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-persistence-jsonl","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
     {"path":"packages/session/session-persistence-jsonl/tests/row-encode-conformance.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-persistence-jsonl","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
     {"path":"packages/session/session-persistence-jsonl/tests/stat-conformance.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-persistence-jsonl","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},
     {"path":"packages/session/session-persistence-jsonl/tests/v2-ptc-migration.spec.ts","lane":"vitest-runtime","owner":"packages/session/session-persistence-jsonl","scopes":["02","03"],"disposition":"reuse-oracle","basis":"packages/session"},

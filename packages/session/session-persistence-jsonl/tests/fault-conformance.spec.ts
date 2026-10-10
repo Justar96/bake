@@ -10,12 +10,13 @@
  * read only by its size, and no other file may exist.
  *
  * The states come from the Rust fault-injection sweep in
- * `rust/crates/bake-session/tests/fault_cases.rs`, which crashes or fails
- * the development writer `PlainLogFile` at every storage operation and
- * checks that each state it leaves is a case here, then runs that case's
- * steps on the crashed root. TypeScript's own fault behavior stays in its
- * persistence specs (D30); this table compares the runtimes only through
- * on-disk outcomes. The spec reads only the table.
+ * `rust/crates/bake-session/tests/fault_cases.rs`, which crashes, fails,
+ * or cuts the power to the development writer `PlainLogFile` at every
+ * storage operation of its POSIX and Win32 write sequences, retries each
+ * failed action, and checks that each state it leaves is a case here, then
+ * runs that case's steps on the crashed root. TypeScript's own fault
+ * behavior stays in its persistence specs (D30); this table compares the
+ * runtimes only through on-disk outcomes. The spec reads only the table.
  */
 
 import { readFileSync } from 'node:fs'
@@ -34,7 +35,7 @@ const REPO = new URL('../../../../', import.meta.url)
 const SCHEMA = 'bake/session-conformance/fault-cases'
 const ORACLE = 'in an owned temporary root holding the seeded files, a state a crashed or failed Session writer leaves, run each step through the JSONL backend with compression none on one handle: a write open, create, or the open handle\'s append, flush, or close; after each step list every file beneath the root with its text and an empty session.lock by its size'
 /** Both harnesses pin the table size, so a dropped case fails. */
-const CASE_COUNT = 42
+const CASE_COUNT = 72
 const LEASE_FILE = 'session.lock'
 const SCENARIOS = [
   'create-flush', 'create-append', 'create-flush-appends', 'open-append', 'open-torn-append',
@@ -128,7 +129,7 @@ function parseStep(value: unknown, id: string): Step {
 function loadTable(): FaultCase[] {
   const table: unknown = JSON.parse(readFileSync(new URL('conformance/session/fault-cases.json', REPO), 'utf8'))
   if (!isObject(table) || sortedKeys(table) !== 'cases,history,oracle,schema,version'
-    || table.schema !== SCHEMA || table.version !== 1 || table.oracle !== ORACLE
+    || table.schema !== SCHEMA || table.version !== 2 || table.oracle !== ORACLE
     || !Array.isArray(table.history) || !table.history.every(line => typeof line === 'string')
     || !Array.isArray(table.cases)) {
     throw new Error('fault-cases.json: unexpected table envelope')
