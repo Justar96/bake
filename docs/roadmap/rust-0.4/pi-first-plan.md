@@ -83,7 +83,7 @@ Not retained: the Desktop contract (D9), CLI flags and exits, and the settings a
 | 16 Distribution, update, and rollback | None; Pi's package manager stays excluded by [D5](scope-00/support.md#decision-register) | Updater, signing, and channels ([D14](scope-00/support.md#decision-register)) | Signed install, update from 0.3, and rollback on all five targets; 0.3 still opens 0.4's sessions |
 | 17 Qualification and cutover | `evals` as a reference for the eval runner | Paired eval procedure and the ledger | Retained-contract evidence complete; evals recorded; cutover rehearsal |
 
-Scopes 02 and 03 continue as planned. Their remaining work is scope acceptance through the evidence ledger, and the scope 03 fault-injection and cross-runtime harnesses.
+Scopes 02 and 03 continue as planned. Their remaining work is scope acceptance through the evidence ledger, and scope 03's query, cache, and indexing; its fault-injection and cross-runtime harnesses are built and recorded in the ledger.
 
 ## Owner decisions
 
