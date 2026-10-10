@@ -39,9 +39,9 @@ export interface SessionFixtureLayout {
 
 /** Request-reconstruction captures, each kept as the raw log one run wrote. */
 const REQUEST_RECONSTRUCTION_LOGS: ReadonlySet<string> = new Set([
-  'conformance/runtime/request-reconstruction/tool-call-turn/session.jsonl',
-  'conformance/runtime/request-reconstruction/dynamic-tools/session.jsonl',
-  'conformance/runtime/request-reconstruction/retry-attempt/session.jsonl',
+  'packages/core/agent-loop/tests/fixtures/request-reconstruction/tool-call-turn/session.v3.jsonl',
+  'packages/core/agent-loop/tests/fixtures/request-reconstruction/dynamic-tools/session.v3.jsonl',
+  'packages/core/agent-loop/tests/fixtures/request-reconstruction/retry-attempt/session.v3.jsonl',
 ])
 
 /**

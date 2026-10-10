@@ -8,6 +8,6 @@
     "rewriteRelativeImportExtensions": false,
     "types": ["node", "bun"]
   },
-  "include": ["agent-loop/arms.ts", "agent-loop/run.test.ts", "agent-loop/native-fixture.ts", "agent-loop/native-fixture.test.ts", "agent-loop/native-smoke.ts"],
+  "include": ["agent-loop/arms.ts", "agent-loop/launch.ts", "agent-loop/launch.test.ts", "agent-loop/run.test.ts", "agent-loop/native-fixture.ts", "agent-loop/native-fixture.test.ts", "agent-loop/native-smoke.ts"],
   "references": [{ "path": "../packages/compaction/compaction-basic" }]
 }

@@ -64,8 +64,8 @@ export interface Step {
   readonly summary: string
   /** Whether the step reads build output, and is skipped under `--fast`. */
   readonly needsBuild?: boolean
-  /** Builds that own this step's artifacts; defaults to the TypeScript `build` step. */
-  readonly buildStep?: BuildStep | readonly BuildStep[]
+  /** The build that owns this step's artifacts; defaults to the TypeScript `build` step. */
+  readonly buildStep?: BuildStep
   /** A command to run, or undefined with a reason to skip it for this run. */
   readonly command?: (options: Options, scope: Scope) => readonly string[] | { readonly skip: string }
   /** A check done in-process instead of a command. */
@@ -288,31 +288,20 @@ export const STEPS: readonly Step[] = [
       : bun('run', 'test:rust:pty'),
   },
   {
-    name: 'rust-conformance', phase: 'e2e', group: 'native', needsBuild: true, buildStep: 'rust',
-    summary: 'synthetic TypeScript/Rust comparison fixtures and observed file effects',
-    command: () => bun('run', 'test:rust:conformance'),
-  },
-  {
     name: 'rust-eval', phase: 'e2e', group: 'native', needsBuild: true, buildStep: 'rust',
     summary: 'compiled Rust eval fixture arm and independent tamper rejection',
     command: () => bun('run', 'test:rust:eval'),
-  },
-  {
-    name: 'rust-lease', phase: 'e2e', group: 'native', needsBuild: true, buildStep: ['rust', 'build'],
-    summary: 'Rust and TypeScript Session writers exclude each other and take over across real processes',
-    // The built Rust probe and the built Node libraries are both peers here.
-    command: () => bun('run', 'test:rust:lease'),
   },
 ]
 
 /**
  * A failed artifact producer prevents a dependent check from testing an older build.
- * @returns the first of the step's builds that failed, or undefined.
+ * @returns the step's build when it failed, or undefined.
  */
 export function failedBuild(step: Step, results: ReadonlyMap<string, Pick<Result, 'outcome'>>): BuildStep | undefined {
   if (step.needsBuild !== true || step.phase === 'build') return undefined
-  const builds: readonly BuildStep[] = typeof step.buildStep === 'string' ? [step.buildStep] : step.buildStep ?? ['build']
-  return builds.find(build => results.get(build)?.outcome === 'fail')
+  const build = step.buildStep ?? 'build'
+  return results.get(build)?.outcome === 'fail' ? build : undefined
 }
 
 /** Parse the command line. */

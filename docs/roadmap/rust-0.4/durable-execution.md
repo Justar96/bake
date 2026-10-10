@@ -4,7 +4,7 @@
 
 Shape the native runtime so that every unit of agent work (a model request, a tool call, a compaction, a child agent, a background job) is an owned, typed task whose start, progress, and outcome are recoverable from the Session log. This page takes the task-and-scheduler model of Pi Durable as a design reference and applies it inside Bake's retained contracts: Session format 3 ([D4](scope-00/support.md#decision-register)), one serialized owner per agent, and reconstructable model requests. It adds internal structure and crash-recovery proofs to scopes 03 and 05–13. Changes the model or a released reader could observe are listed separately as post-0.4.0 candidates, each needing its own decision and paired eval.
 
-**Status: proposed direction, 2026-10-08.** Nothing here is implemented or qualified, and it changes no support decision. [D22](scope-00/support.md#decision-register) made Pi the primary port source while keeping Session format 3 and the model-visible surface, so the constraints below still hold. Pi Durable's storage, API, and entry kinds are not adopted by this page.
+**Status: proposed direction, 2026-10-08.** Nothing here is implemented or qualified, and it changes no support decision. [D22](scope-00/support.md#decision-register) made Pi the primary port source while keeping Session format 3 and the model-visible surface; [D32](scope-00/support.md#decision-register) has since replaced Bake's Session format with Pi's session format, so read "Session log" below as that file. Pi Durable's storage, API, and entry kinds are not adopted by this page.
 
 ## Table of Contents
 
@@ -101,7 +101,7 @@ Each of these changes what the model sees, what a released reader must understan
 
 ## Non-goals
 
-- No SQLite, Pi Durable JSONL, or other new storage backend. Bake's generations, leases, and Session format remain the only storage.
+- No SQLite, Pi Durable JSONL, or other new storage backend. Pi's session files, with the writer exclusion scope 03 adds, remain the only storage.
 - No general scheduler that bypasses the agent owner. Concurrency stays bounded work that returns results to the owner, and only the owner commits.
 - No multi-writer or multi-process execution of one Session; the writer lease still excludes a second process.
 - No change to tool names, schemas, results, or recovery messages in 0.4.0.

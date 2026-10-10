@@ -1,1 +1,0 @@
-{"schema":"bake/synthetic-conformance/input","version":1,"prompts":[],"events":[],"permissions":[{"id":"escape","path":"../escape.txt","decision":"allow"}],"writes":[]}

@@ -3,7 +3,6 @@ resolver = "3"
 members = [
     "crates/bake-cli",
     "crates/bake-conformance",
-    "crates/bake-session",
     "crates/bake-tui",
     "crates/bake-tui-view",
 ]
@@ -16,7 +15,6 @@ license = "MIT"
 publish = false
 
 [workspace.dependencies]
-bake-session = { path = "crates/bake-session" }
 bake-tui = { path = "crates/bake-tui" }
 bake-tui-view = { path = "crates/bake-tui-view" }
 ratatui = { version = "=0.30.2", default-features = false, features = ["crossterm"] }

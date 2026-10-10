@@ -6,8 +6,7 @@ const pull = (baseRef: string, headRef = 'feat/x', sameRepository = true): Event
 
 describe('typeScriptNeed', () => {
   it('asks nothing of Rust sources and their drivers', () => {
-    expect(typeScriptNeed(['rust/crates/bake-tui/src/port.rs', 'rust/Cargo.lock', 'scripts/rust-preview-pty.ts',
-      'scripts/rust-conformance/driver.ts'])).toBe('none')
+    expect(typeScriptNeed(['rust/crates/bake-tui/src/port.rs', 'rust/Cargo.lock', 'scripts/rust-preview-pty.ts'])).toBe('none')
   })
 
   it('asks the static half of Markdown, wherever it is', () => {
@@ -15,7 +14,7 @@ describe('typeScriptNeed', () => {
   })
 
   it('asks everything of any other file, and of an empty list', () => {
-    expect(typeScriptNeed(['rust/src/a.rs', 'conformance/session/cases.json'])).toBe('full')
+    expect(typeScriptNeed(['rust/src/a.rs', 'evals/agent-loop/launch.ts'])).toBe('full')
     expect(typeScriptNeed(['scripts/rust-migration-ledger.ts'])).toBe('full')
     expect(typeScriptNeed(['docs/roadmap/rust-0.4/scope-00/inventory.json'])).toBe('full')
     expect(typeScriptNeed([])).toBe('full')

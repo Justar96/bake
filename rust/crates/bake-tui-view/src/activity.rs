@@ -110,7 +110,7 @@ pub fn format_elapsed(elapsed: Duration) -> String {
 
 /// Brightness from 0 to 1 of each of `len` graphemes at `elapsed`. A band
 /// enters from the left, crosses the word one grapheme per [`BEAT`], leaves
-/// on the right, and the word rests unlit for [`REST`] beats.
+/// on the right, and the word rests unlit for `REST` beats.
 pub fn shimmer(len: usize, elapsed: Duration) -> Vec<f32> {
     let period = len + 2 * FALLOFF + REST;
     let beat = (elapsed.as_millis() / BEAT.as_millis()) as usize % period;
