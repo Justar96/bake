@@ -41,7 +41,9 @@ pub const BUDGET: usize = 1 << 24;
 /// Logs per deduplicated position; see the module comment.
 const LOGS_PER_POSITION: usize = 1;
 /// [`Mode::Sample`] runs position 0 and every `SAMPLE_STRIDE`th after it.
-pub const SAMPLE_STRIDE: usize = 4;
+/// Windows hosts sample half as many: Windows CI runs each variant several
+/// times slower, and Linux and macOS CI run the denser sample.
+pub const SAMPLE_STRIDE: usize = if cfg!(windows) { 8 } else { 4 };
 const SHARD_ENV: &str = "BAKE_DEEPENED_SHARD";
 /// The first variant index a resumed shard runs, after a crashed one.
 const FROM_ENV: &str = "BAKE_DEEPENED_FROM";

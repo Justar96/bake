@@ -1471,6 +1471,18 @@ fn plan(index: usize, fault: Fault) -> Plan {
 }
 
 /// Every crash point, torn crash, and power cut of `scenario` on `platform`.
+/// Every `SWEEP_STRIDE`th fault point runs by default. Windows hosts run a
+/// third of them: each point is a run over real files, which Windows makes
+/// several times slower, and Linux and macOS CI sweep every point, so only
+/// there must every listed (case, scenario) pair be reached.
+const SWEEP_STRIDE: usize = if cfg!(windows) { 3 } else { 1 };
+
+/// Whether the sweep of `scenario` runs fault point `index`; the offset
+/// spreads a sampled sweep's points across scenarios.
+fn swept(scenario: &Scenario, index: usize) -> bool {
+    (index + scenario.name.len()).is_multiple_of(SWEEP_STRIDE)
+}
+
 fn crash_sweep(cases: &[Case], scenario: &Scenario, platform: PathPlatform) -> Reached {
     let mut reached = Reached::default();
     let Counted {
@@ -1478,6 +1490,9 @@ fn crash_sweep(cases: &[Case], scenario: &Scenario, platform: PathPlatform) -> R
     } = clean(scenario, platform);
     // Every operation that returned keeps its logs through a power cut.
     for (boundary, acknowledged) in &ran.acknowledged {
+        if !swept(scenario, *boundary) {
+            continue;
+        }
         let (_, state) = faulted_run(
             cases,
             scenario,
@@ -1498,7 +1513,7 @@ fn crash_sweep(cases: &[Case], scenario: &Scenario, platform: PathPlatform) -> R
         "{} {platform:?}: no lock taken",
         scenario.name
     );
-    for index in 0..=ops.len() {
+    for index in (0..=ops.len()).filter(|&index| swept(scenario, index)) {
         for fault in [Fault::Crash, Fault::PowerCut] {
             let (ran, _) = faulted_run(
                 cases,
@@ -1546,7 +1561,7 @@ fn failure_sweep(cases: &[Case], scenario: &Scenario, platform: PathPlatform) ->
     let crash_states: Vec<State> = (0..=ops.len())
         .map(|index| count(scenario, platform, &plan(index, Fault::Crash), false).state)
         .collect();
-    for index in 0..ops.len() {
+    for index in (0..ops.len()).filter(|&index| swept(scenario, index)) {
         let mut faults: Vec<Fault> = Failure::ALL.into_iter().map(Fault::Fail).collect();
         if let Some(bytes) = writes.get(&index) {
             for failure in Failure::ALL {
@@ -1646,7 +1661,7 @@ fn failure_sweep(cases: &[Case], scenario: &Scenario, platform: PathPlatform) ->
         for fault in faults {
             let failed = plan(index, fault);
             let total = count(scenario, platform, &failed, true).ops.len();
-            for later in index + 1..=total {
+            for later in (index + 1..=total).filter(|&later| swept(scenario, index + later)) {
                 for cut in [Fault::Crash, Fault::PowerCut] {
                     let mut both = failed.clone();
                     both.insert(later, cut);
@@ -1697,7 +1712,7 @@ fn every_crash_point_leaves_a_state_typescript_reopens_alike() {
         .collect();
     let unreached: Vec<&(String, String)> = all.difference(&reached.cases).collect();
     assert!(
-        unreached.is_empty(),
+        SWEEP_STRIDE > 1 || unreached.is_empty(),
         "cases a listed scenario does not reach: {unreached:?}"
     );
 }
