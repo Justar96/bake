@@ -230,6 +230,16 @@ impl StagedLog {
         Self { stored, torn }
     }
 
+    /// The scan's result, recovered rows included.
+    pub(crate) const fn scanned(&self) -> &ScannedLog {
+        &self.stored
+    }
+
+    /// The torn tail's physical offset and the first recovered row.
+    pub(crate) const fn torn_tail(&self) -> Option<TornTail> {
+        self.torn
+    }
+
     /// The scanned header's logical metadata.
     pub const fn header(&self) -> &SessionHeader {
         self.stored.header()

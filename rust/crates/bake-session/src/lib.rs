@@ -115,7 +115,10 @@
 //! [`PlainLogFile`] keeps such a log on disk beneath a Session root, at the
 //! path [`session_log_path`] spells from [`encode_segment`] and
 //! [`project_key`]: it creates, or finds and opens, a Session's current plain
-//! log as the backend's `create` and write `open` do, refusing an existing,
+//! log, or with [`LogCompression::Zstd`] its Zstd log, written in frames
+//! [`compress_zstd_frame`] compresses to Node's exact bytes, with a torn
+//! final frame's complete rows recovered and rewritten as TypeScript does,
+//! as the backend's `create` and write `open` do, refusing an existing,
 //! missing, or duplicated id with TypeScript's message, and writes the
 //! model's bytes after each append or flush. It holds the Session
 //! directory's `session.lock` kernel write lock from a write `open`, or from
@@ -123,7 +126,7 @@
 //! another handle holds with TypeScript's already-owned message; that lock
 //! excludes and is excluded by a TypeScript writer in another process, which
 //! `bun run test:rust:lease` checks. A write
-//! `open` of a plain v0, v1, or v2 log migrates it as the backend does,
+//! `open` of a v0, v1, or v2 log of the root's encoding migrates it as the backend does,
 //! through the recoverable released codec and every format edge, writing the
 //! encoded v3 log beside the unchanged source, or refuses with TypeScript's
 //! corruption or unsupported-migration message, the final check's refusals
@@ -205,7 +208,7 @@ pub use migrated_restore::{MigratedRestoreLimit, MigratedRestoreRefusal, restore
 pub use offload::OffloadRejection;
 pub use plain_append::{AppendLimit, AppendRefusal, CreateLimit, CreateRefusal, PlainAppendLog};
 pub use plain_log_file::{
-    LogFileLimit, LogFileRefusal, PlainLogFile, ReleasedGenerationRefusal,
+    LogCompression, LogFileLimit, LogFileRefusal, PlainLogFile, ReleasedGenerationRefusal,
     migrate_released_generation, released_generation_header,
 };
 pub use pressure::{
@@ -261,7 +264,7 @@ pub use v3_row::{
     V3NumberField, V3Rejection, V3RowRefusal, V3Unsupported, decode_v3_row,
 };
 pub use zstd::{
-    RELEASED_ZSTD_PLAINTEXT_BUDGET, ReleasedZstdPlaintext, ZstdRefusal,
+    RELEASED_ZSTD_PLAINTEXT_BUDGET, ReleasedZstdPlaintext, ZstdRefusal, compress_zstd_frame,
     migrate_released_zstd_generation, released_zstd_plaintext, restore_zstd_log, stage_zstd_log,
     zstd_header_record,
 };

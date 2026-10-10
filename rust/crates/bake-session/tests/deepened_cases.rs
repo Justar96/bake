@@ -27,20 +27,20 @@
 mod deepened;
 
 use bake_session::{
-    PathPlatform, PlainAppendLog, PlainLogFile, PromptDecision, RelationshipExtensions,
-    RestoredLog, V1CodecRecovery, V1CodecVersion, V1Item, check_released_relationships,
-    check_transformed_artifact, consumed_work, content_generation, context_pressure,
-    decode_row_envelope, decode_source_event_seqs, decode_v0_v1_items, decode_v0_v1_rows,
-    decode_v3_row, dismantle, encode_event_line, encode_header_line, first_record, fork_seed,
-    goal_projection, json_text, migrate_released_generation, migrate_released_history,
-    migrate_released_zstd_generation, migrate_v0_to_v1, migrate_v1_to_v2_decoded,
-    migrate_v1_to_v2_transformed, migrate_v1_to_v2_transformed_items, migrate_v2_rows, parse_json,
-    read_generation_header_record, read_header_record, released_generation_header,
-    released_zstd_plaintext, replay_requests, replay_restored_requests, restore_migrated,
-    restore_plain_log, restore_zstd_log, restored_inbox, scan_log, session_log_path, session_title,
-    stage_plain_log, stage_zstd_log, starts_request_series, subagent_catalog, subagent_identity,
-    subagent_timing, system_prompt_commits, token_usage, tools_changed, turn_boundary,
-    unfinished_work, zstd_header_record,
+    LogCompression, PathPlatform, PlainAppendLog, PlainLogFile, PromptDecision,
+    RelationshipExtensions, RestoredLog, V1CodecRecovery, V1CodecVersion, V1Item,
+    check_released_relationships, check_transformed_artifact, consumed_work, content_generation,
+    context_pressure, decode_row_envelope, decode_source_event_seqs, decode_v0_v1_items,
+    decode_v0_v1_rows, decode_v3_row, dismantle, encode_event_line, encode_header_line,
+    first_record, fork_seed, goal_projection, json_text, migrate_released_generation,
+    migrate_released_history, migrate_released_zstd_generation, migrate_v0_to_v1,
+    migrate_v1_to_v2_decoded, migrate_v1_to_v2_transformed, migrate_v1_to_v2_transformed_items,
+    migrate_v2_rows, parse_json, read_generation_header_record, read_header_record,
+    released_generation_header, released_zstd_plaintext, replay_requests, replay_restored_requests,
+    restore_migrated, restore_plain_log, restore_zstd_log, restored_inbox, scan_log,
+    session_log_path, session_title, stage_plain_log, stage_zstd_log, starts_request_series,
+    subagent_catalog, subagent_identity, subagent_timing, system_prompt_commits, token_usage,
+    tools_changed, turn_boundary, unfinished_work, zstd_header_record,
 };
 use deepened::{
     BUDGET, Form, Identity, Mode, STACK, Tally, inspect, inspect_twin, log_bytes, nested,
@@ -431,7 +431,10 @@ impl Runner {
     }
 
     /// The log written beneath a Session root as `version`'s writer names
-    /// it, opened for writing, appended to, and flushed.
+    /// it, opened for writing, appended to, and flushed; then the same log
+    /// framed as a Zstd writer frames it, its body frame torn by its last
+    /// byte so the rows before it are recovered, opened, appended to, and
+    /// flushed in a Zstd root.
     fn file(
         &mut self,
         bytes: &[u8],
@@ -461,6 +464,30 @@ impl Runner {
         }
         let opened = self.call("PlainLogFile::open", || {
             PlainLogFile::open(&root, &identity.id, BUDGET)
+        });
+        match opened {
+            Ok(file) => self.file_writes(file, std::slice::from_ref(deep_event)),
+            Err(refusal) => {
+                std::hint::black_box(refusal.message());
+                inspect(refusal);
+            }
+        }
+        std::fs::remove_dir_all(&root).expect("remove the variant's Session root");
+        let mut framed = zstd_bytes(bytes);
+        if first_record(bytes).is_some_and(|record| record.len() < bytes.len()) {
+            framed.pop();
+        }
+        if std::fs::create_dir_all(directory).is_err()
+            || std::fs::write(directory.join(format!("{name}.zstd")), framed).is_err()
+        {
+            let _ = std::fs::remove_dir_all(&root);
+            return;
+        }
+        let compression = LogCompression::Zstd {
+            max_plaintext_bytes: BUDGET,
+        };
+        let opened = self.call("PlainLogFile::open_compressed", || {
+            PlainLogFile::open_compressed(&root, &identity.id, BUDGET, compression)
         });
         match opened {
             Ok(file) => self.file_writes(file, std::slice::from_ref(deep_event)),
@@ -596,6 +623,7 @@ const ACCEPTED_ENTRIES: &[&str] = &[
     "PlainAppendLog::open",
     "PlainAppendLog::append",
     "PlainLogFile::open",
+    "PlainLogFile::open_compressed",
     "PlainLogFile::append",
     "PlainLogFile::flush",
     "PlainAppendLog::create",

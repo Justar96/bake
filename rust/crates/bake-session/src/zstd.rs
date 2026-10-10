@@ -2,8 +2,21 @@
 //! the in-memory migration of released v0 to v2 generations. Structural validation
 //! precedes decoding; complete frames are decoded before their plaintext is
 //! scanned. A torn-frame decoding error discards all output from that frame.
+//!
+//! [`compress_zstd_frame`] writes one frame as TypeScript's
+//! `compressZstdFrame` does, byte for byte: Node's asynchronous
+//! `zstdCompress` with only `ZSTD_c_checksumFlag` set streams its input with
+//! `ZSTD_e_continue` and ends the frame with an empty `ZSTD_e_end` call, so
+//! the frame records no content size, its window descriptor is the one the
+//! default level 3 chooses for an unknown size, and a 32-bit checksum ends
+//! it. The vendored libzstd is 1.5.7, the version Node 22.19.0, 24.21.0,
+//! and 26.10.0 bundle; the Zstd frame table names it, and both of its arms
+//! check it.
 
-use zstd_safe::{DCtx, InBuffer, OutBuffer};
+use std::io;
+
+use zstd_safe::{CCtx, CParameter, DCtx, InBuffer, OutBuffer};
+use zstd_sys::ZSTD_EndDirective;
 
 use crate::scan::LogScanner;
 use crate::{
@@ -68,6 +81,29 @@ pub fn stage_zstd_log(
     source_budget: usize,
     max_plaintext_bytes: usize,
 ) -> Result<StagedLog, RestoreRefusal> {
+    stage_zstd_plaintext(log, platform, source_budget, max_plaintext_bytes, false)
+        .map(|staged| staged.staged)
+}
+
+/// [`stage_zstd_log`] with, when asked to keep it, the plaintext its
+/// scanner read: the header frame's, every complete frame's, and what the
+/// torn final frame recovered.
+pub(crate) struct StagedZstd {
+    pub(crate) staged: StagedLog,
+    /// Empty unless [`stage_zstd_plaintext`] was asked to keep it, so a
+    /// reader holds no second copy of the plaintext.
+    pub(crate) plaintext: Vec<u8>,
+    /// The bytes the header and complete frames decoded to.
+    pub(crate) complete: usize,
+}
+
+pub(crate) fn stage_zstd_plaintext(
+    log: &[u8],
+    platform: PathPlatform,
+    source_budget: usize,
+    max_plaintext_bytes: usize,
+    keep_plaintext: bool,
+) -> Result<StagedZstd, RestoreRefusal> {
     use RestoreRefusal::Zstd;
     let (frames, torn_start) = scan_frames(log, usize::MAX).map_err(Zstd)?;
     let Some(first) = frames.first() else {
@@ -82,10 +118,16 @@ pub fn stage_zstd_log(
     }
     let mut scanner =
         LogScanner::new(&header, platform, source_budget).map_err(RestoreRefusal::Scan)?;
+    let mut complete = header.len();
+    let mut text = if keep_plaintext { header } else { Vec::new() };
     for frame in &frames[1..] {
         let plaintext = decode(&log[frame.clone()], true, &mut used, max_plaintext_bytes)
             .map_err(|error| error.at(frame.start, max_plaintext_bytes))?;
         scanner.feed(&plaintext).map_err(RestoreRefusal::Scan)?;
+        complete += plaintext.len();
+        if keep_plaintext {
+            text.extend_from_slice(&plaintext);
+        }
     }
     let (input_bytes, committed_bytes, recovered_from) = scanner.checkpoint();
     if input_bytes != committed_bytes {
@@ -93,7 +135,12 @@ pub fn stage_zstd_log(
     }
     let torn = if let Some(truncate_to) = torn_start {
         match decode(&log[truncate_to..], false, &mut used, max_plaintext_bytes) {
-            Ok(plaintext) => scanner.feed(&plaintext).map_err(RestoreRefusal::Scan)?,
+            Ok(plaintext) => {
+                scanner.feed(&plaintext).map_err(RestoreRefusal::Scan)?;
+                if keep_plaintext {
+                    text.extend_from_slice(&plaintext);
+                }
+            }
             Err(DecodeError::Frame) => {}
             Err(DecodeError::Budget) => {
                 return Err(RestoreRefusal::NativePlaintextBudget {
@@ -108,10 +155,59 @@ pub fn stage_zstd_log(
     } else {
         None
     };
-    Ok(StagedLog::new(
-        scanner.finish().map_err(RestoreRefusal::Scan)?,
-        torn,
-    ))
+    Ok(StagedZstd {
+        staged: StagedLog::new(scanner.finish().map_err(RestoreRefusal::Scan)?, torn),
+        plaintext: text,
+        complete,
+    })
+}
+
+/// Node's zlib output chunk, `Z_DEFAULT_CHUNK`, which `zstdCompress` uses.
+const NODE_CHUNK: usize = 16 * 1024;
+
+/// One independently decodable, checksummed Zstd frame of `plaintext`,
+/// byte for byte as TypeScript's `compressZstdFrame` and the migration's
+/// streamed `createZstdCompress` write it; see the module comment. Fails
+/// only when libzstd cannot allocate or reports an error.
+pub fn compress_zstd_frame(plaintext: &[u8]) -> io::Result<Vec<u8>> {
+    let failed = |code: usize| {
+        io::Error::other(format!(
+            "zstd compression failed: {}",
+            zstd_safe::get_error_name(code)
+        ))
+    };
+    let mut context =
+        CCtx::try_create().ok_or_else(|| io::Error::other("zstd context allocation failed"))?;
+    context
+        .set_parameter(CParameter::ChecksumFlag(true))
+        .map_err(failed)?;
+    let mut frame = Vec::new();
+    let mut scratch = vec![0u8; NODE_CHUNK];
+    // Node writes the whole input with `ZSTD_e_continue` while its output
+    // chunk fills, then ends the frame with an empty `ZSTD_e_end` input.
+    for (input, directive) in [
+        (plaintext, ZSTD_EndDirective::ZSTD_e_continue),
+        (&[][..], ZSTD_EndDirective::ZSTD_e_end),
+    ] {
+        let mut input = InBuffer::around(input);
+        loop {
+            let mut output = OutBuffer::around(&mut scratch[..]);
+            let remaining = context
+                .compress_stream2(&mut output, &mut input, directive)
+                .map_err(failed)?;
+            let written = output.pos();
+            frame.extend_from_slice(&scratch[..written]);
+            let drained = input.pos() == input.src.len();
+            let done = match directive {
+                ZSTD_EndDirective::ZSTD_e_end => remaining == 0,
+                _ => drained && written < NODE_CHUNK,
+            };
+            if done {
+                break;
+            }
+        }
+    }
+    Ok(frame)
 }
 
 /// The first frame's plaintext, as TypeScript's `readFirstZstdLine` reads a

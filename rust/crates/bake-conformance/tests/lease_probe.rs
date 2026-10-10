@@ -26,6 +26,11 @@ const HEADER: &str = "{\"type\":\"session\",\"version\":3,\"id\":\"s\",\"created
 const SEQ0: &str = "{\"type\":\"turn/start\",\"seq\":0,\"time\":1,\"data\":{\"turn\":1}}\n";
 const SEQ1: &str = "{\"type\":\"turn/end\",\"seq\":1,\"time\":2,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"completed\"}}}\n";
 const SEQ2: &str = "{\"type\":\"turn/start\",\"seq\":2,\"time\":3,\"data\":{\"turn\":2}}\n";
+/// A released v2 Session `v2v3` and the v3 log TypeScript migrates it to,
+/// from `conformance/session/fault-cases.json`.
+const V2_SOURCE: &str = "{\"type\":\"session\",\"version\":2,\"id\":\"v2v3\",\"createdAt\":1700000000000,\"isSeeded\":true,\"delegationDepth\":0,\"parentSession\":\"parent\"}\n{\"type\":\"session/end-seed\",\"seq\":0,\"time\":1000,\"data\":{\"inherited\":true}}\n{\"type\":\"turn/start\",\"seq\":1,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":2,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n";
+const V2_MIGRATED: &str = "{\"type\":\"session\",\"version\":3,\"id\":\"v2v3\",\"createdAt\":1700000000000,\"parentSession\":\"parent\",\"isSeeded\":true,\"delegationDepth\":0}\n{\"type\":\"session/end-seed\",\"seq\":0,\"time\":1000,\"data\":{\"inherited\":true}}\n{\"type\":\"turn/start\",\"seq\":1,\"time\":1001,\"data\":{\"turn\":1}}\n{\"type\":\"step/start\",\"seq\":2,\"time\":1002,\"data\":{\"turn\":1,\"step\":1}}\n{\"type\":\"system/message\",\"seq\":3,\"time\":1002,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"id\":\"v2-to-v3-system-e12c67eac0ceb4f8c38adb1b85eab50b81369336240a868e62caaccf738872f7\",\"role\":\"system\",\"source\":{\"kind\":\"plugin\",\"plugin\":\"@deepseek-ai/dsh-system-prompt\"},\"content\":[]}},\"surfaceOp\":\"append\"}\n";
+const V2_SEQ4: &str = "{\"type\":\"turn/start\",\"seq\":4,\"time\":3,\"data\":{\"turn\":2}}\n";
 
 /// A private directory removed on drop; exclusive creation retries on a stale
 /// name. Declare it before any probe so every probe is reaped first.
@@ -63,6 +68,24 @@ impl TempRoot {
     fn log_text(&self) -> String {
         fs::read_to_string(self.log()).expect("the log is readable")
     }
+
+    /// The Session directory of `v2v3`, seeded with its v2 source.
+    fn seed_v2(&self) -> PathBuf {
+        let dir = self.0.join("_no-cwd").join("v2v3");
+        fs::create_dir_all(&dir).expect("the Session directory is created");
+        fs::write(dir.join("session.v2.jsonl"), V2_SOURCE).expect("the source is seeded");
+        dir
+    }
+}
+
+/// The names `dir` lists, sorted.
+fn names(dir: &Path) -> Vec<String> {
+    let mut names: Vec<String> = fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .collect();
+    names.sort();
+    names
 }
 
 impl Drop for TempRoot {
@@ -433,4 +456,76 @@ fn writes_within_the_tear_budget_are_a_fixture_error() {
     assert_eq!(code, Some(2), "stderr: {stderr}");
     assert!(lines.is_empty());
     assert!(stderr.contains("within the tear budget"), "{stderr}");
+}
+
+#[test]
+fn pause_migrate_holds_the_lock_before_publishing_until_resumed() {
+    let root = TempRoot::new("pause-publish");
+    let dir = root.seed_v2();
+    let mut paused = Probe::spawn(&["pause-migrate", root.arg(), "v2v3", "publish", "4"], true);
+    assert_eq!(paused.json_line(), json!({ "state": "paused" }));
+    assert_eq!(names(&dir), ["session.lock", "session.v2.jsonl"]);
+    let (code, lines, _) = run(&["open", root.arg(), "v2v3", "4"]);
+    assert_eq!(code, Some(3));
+    assert_eq!(lines.len(), 1);
+    paused.send(b"go\n");
+    assert_eq!(
+        paused.json_line(),
+        json!({ "outcome": "opened", "seqs": [0, 1, 2, 3, 4] })
+    );
+    let (status, stderr) = paused.finish();
+    assert!(status.success(), "stderr: {stderr}");
+    assert_eq!(
+        fs::read_to_string(dir.join("session.v3.jsonl")).unwrap(),
+        [V2_MIGRATED, V2_SEQ4].concat()
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("session.v2.jsonl")).unwrap(),
+        V2_SOURCE
+    );
+    assert_eq!(
+        names(&dir),
+        ["session.lock", "session.v2.jsonl", "session.v3.jsonl"]
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn pause_migrate_unlink_stops_after_the_link_and_exits_at_eof() {
+    let root = TempRoot::new("pause-unlink");
+    let dir = root.seed_v2();
+    let mut paused = Probe::spawn(&["pause-migrate", root.arg(), "v2v3", "unlink", "4"], true);
+    assert_eq!(paused.json_line(), json!({ "state": "paused" }));
+    let listed = names(&dir);
+    assert_eq!(listed.len(), 4, "{listed:?}");
+    // `session.lock` sorts before `session.migration.*`.
+    let staged = &listed[1];
+    assert!(
+        staged.starts_with("session.migration.") && staged.ends_with(".jsonl.tmp"),
+        "{listed:?}"
+    );
+    assert_eq!(fs::read_to_string(dir.join(staged)).unwrap(), V2_MIGRATED);
+    assert_eq!(
+        fs::read_to_string(dir.join("session.v3.jsonl")).unwrap(),
+        V2_MIGRATED
+    );
+    // Stdin EOF exits without resuming, so the temporary file stays.
+    let (status, stderr) = paused.finish();
+    assert!(status.success(), "stderr: {stderr}");
+    assert_eq!(names(&dir), listed);
+}
+
+#[test]
+fn pause_migrate_without_a_migration_or_with_an_unknown_step_is_a_fixture_error() {
+    let root = TempRoot::new("pause-usage");
+    let mut creator = holder("hold", &root);
+    let (status, _) = creator.finish();
+    assert!(status.success());
+    let (code, lines, stderr) = run(&["pause-migrate", root.arg(), "s", "publish", "2"]);
+    assert_eq!(code, Some(2), "stderr: {stderr}");
+    assert!(lines.is_empty());
+    assert!(stderr.contains("reached no migration pause"), "{stderr}");
+    let (code, lines, stderr) = run(&["pause-migrate", root.arg(), "s", "later", "2"]);
+    assert_eq!((code, lines.len()), (Some(2), 0), "stderr: {stderr}");
+    assert_eq!(root.log_text(), [HEADER, SEQ0, SEQ1].concat());
 }

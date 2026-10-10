@@ -36,7 +36,10 @@ const posixOnly = new Set<string>(LEASE_SPEC.posixOnly)
 const allPassed = LEASE_SPEC.cases.map(title => [title, 'passed'] as const)
 const windowsRun = LEASE_SPEC.cases.map(title => [title, posixOnly.has(title) ? 'skipped' : 'passed'] as const)
 const resumePassed = RESUME_SPEC.cases.map(title => [title, 'passed'] as const)
+const resumePosixOnly = new Set<string>(RESUME_SPEC.posixOnly)
+const resumeWindows = RESUME_SPEC.cases.map(title => [title, resumePosixOnly.has(title) ? 'skipped' : 'passed'] as const)
 const total = LEASE_SPEC.cases.length + RESUME_SPEC.cases.length
+const windowsSkipped = LEASE_SPEC.posixOnly.length + RESUME_SPEC.posixOnly.length
 
 /** The titles of every `it` in a spec's source. */
 function specTitles(plan: InteropSpec): string[] {
@@ -53,23 +56,26 @@ describe('rust lease interop report guard', () => {
     expect(specTitles(LEASE_SPEC).sort()).toEqual([...LEASE_SPEC.cases].sort())
   })
 
-  it('pins the resume spec\'s cases: seven, none POSIX-only, matching the spec source', () => {
-    expect(RESUME_SPEC.cases).toHaveLength(7)
-    expect(new Set(RESUME_SPEC.cases).size).toBe(7)
-    expect(RESUME_SPEC.posixOnly).toEqual([])
+  it('pins the resume spec\'s cases: twenty-four, five of them POSIX-only, matching the spec source', () => {
+    expect(RESUME_SPEC.cases).toHaveLength(24)
+    expect(new Set(RESUME_SPEC.cases).size).toBe(24)
+    expect(RESUME_SPEC.posixOnly).toHaveLength(5)
+    for (const title of RESUME_SPEC.posixOnly) expect(RESUME_SPEC.cases).toContain(title)
     expect(specTitles(RESUME_SPEC).sort()).toEqual([...RESUME_SPEC.cases].sort())
     expect(SPECS).toEqual([LEASE_SPEC, RESUME_SPEC])
   })
 
-  it('accepts all sixteen passing on Linux and macOS', () => {
+  it('accepts all thirty-three passing on Linux and macOS', () => {
     expect(reportProblems(report(allPassed), 'linux')).toEqual([])
     expect(reportProblems(report(allPassed), 'darwin')).toEqual([])
   })
 
-  it('accepts fourteen passing and the two stopped-holder cases skipped or pending on Windows', () => {
-    expect(reportProblems(report(windowsRun), 'win32')).toEqual([])
+  it('accepts twenty-six passing and the seven POSIX-only cases skipped or pending on Windows', () => {
+    expect(reportProblems(report(windowsRun, resumeWindows), 'win32')).toEqual([])
     const pending = LEASE_SPEC.cases.map(title => [title, posixOnly.has(title) ? 'pending' : 'passed'] as const)
-    expect(reportProblems(report(pending), 'win32')).toEqual([])
+    const resumePending = RESUME_SPEC.cases.map(title => [title, resumePosixOnly.has(title) ? 'pending' : 'passed'] as const)
+    expect(reportProblems(report(pending, resumePending), 'win32')).toEqual([])
+    expect(reportProblems(report(windowsRun), 'win32')).toContain(`case passed, expected skipped: ${RESUME_SPEC.posixOnly[0]}`)
   })
 
   it('rejects a run whose opt-in skipped every case, on every platform', () => {
@@ -82,7 +88,7 @@ describe('rust lease interop report guard', () => {
       const problems = reportProblems(skipped, platform)
       expect(problems.some(problem => problem.startsWith('case outside the "cross-runtime write lease"'))).toBe(true)
       expect(problems.some(problem => problem.startsWith('case outside the "cross-runtime resume"'))).toBe(true)
-      expect(problems).toContain(`numPassedTests is 0, expected ${platform === 'win32' ? total - 2 : total}`)
+      expect(problems).toContain(`numPassedTests is 0, expected ${platform === 'win32' ? total - windowsSkipped : total}`)
     }
   })
 
@@ -90,9 +96,10 @@ describe('rust lease interop report guard', () => {
     expect(reportProblems(report(windowsRun), 'linux')).toContain(`case skipped, expected passed: ${LEASE_SPEC.posixOnly[0]}`)
     const other = LEASE_SPEC.cases[0]
     const extraSkip = windowsRun.map(([title, status]) => [title, title === other ? 'skipped' : status] as const)
-    expect(reportProblems(report(extraSkip), 'win32')).toContain(`case skipped, expected passed: ${other}`)
-    const resumeSkip = resumePassed.map(([title], index) => [title, index === 0 ? 'skipped' : 'passed'] as const)
+    expect(reportProblems(report(extraSkip, resumeWindows), 'win32')).toContain(`case skipped, expected passed: ${other}`)
+    const resumeSkip = resumeWindows.map(([title, status], index) => [title, index === 0 ? 'skipped' : status] as const)
     expect(reportProblems(report(windowsRun, resumeSkip), 'win32')).toContain(`case skipped, expected passed: ${RESUME_SPEC.cases[0]}`)
+    expect(reportProblems(report(allPassed, resumeWindows), 'linux')).toContain(`case skipped, expected passed: ${RESUME_SPEC.posixOnly[0]}`)
     expect(reportProblems(report(allPassed), 'win32')).toContain(`case passed, expected skipped: ${LEASE_SPEC.posixOnly[0]}`)
   })
 
@@ -134,7 +141,7 @@ describe('rust lease interop report guard', () => {
       `the report has no test file ${LEASE_SPEC.spec}`,
       'the report\'s test file "/work/bake/packages/session/session-persistence-jsonl/tests/lease.spec.ts" is not an interop spec',
     ])
-    const windowsPath = report(windowsRun)
+    const windowsPath = report(windowsRun, resumeWindows)
     for (const entry of windowsPath['testResults'] as Record<string, unknown>[]) {
       entry['name'] = `D:\\a\\bake\\${String(entry['name']).slice('/work/bake/'.length).replaceAll('/', '\\')}`
     }

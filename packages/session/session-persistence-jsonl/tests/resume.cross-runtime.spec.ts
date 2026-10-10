@@ -3,15 +3,26 @@
  * `bake-session` writer, over one shared root and real independent
  * processes (D31): TypeScript writes and Rust resumes, Rust writes and
  * TypeScript resumes, each after the writer was killed mid-append, and an
- * older generation migrated by either runtime and resumed by the other. The
- * Rust side is the development-only `bake-session-lease-probe` binary from
- * `rust/crates/bake-conformance`; the TypeScript side is the production
- * backend in this process and, for a writer killed mid-append, the built
- * package running in `fixtures/resume-cross-runtime-writer.mjs`.
+ * older generation migrated by either runtime and resumed by the other, in
+ * a plain root and in a Zstd root, TypeScript's default.
+ * Migrations also compete: one runtime's migration pauses after it read
+ * and migrated the source and before it publishes, holding the write lock,
+ * while the other runtime is refused, reads the unpublished migration, and
+ * then resumes the one target; a migrating writer of either runtime is
+ * killed while writing its temporary file, after linking it into place, or
+ * while stopped with `SIGSTOP`; and a read-only Session directory refuses
+ * both runtimes' migrations alike. The Rust side is the development-only
+ * `bake-session-lease-probe` binary from `rust/crates/bake-conformance`;
+ * the TypeScript side is the production backend in this process and, for a
+ * writer killed or paused mid-write, the built package running in
+ * `fixtures/resume-cross-runtime-writer.mjs` or
+ * `fixtures/migration-cross-runtime-writer.mjs`.
  *
  * Expected bytes are TypeScript's: each event row is `JSON.stringify` of the
- * event and an LF, as the backend writes it, and a migrated log is the one
- * TypeScript's own migration writes from the same source in another root.
+ * event and an LF, as the backend writes it, each Zstd batch is the frame
+ * the backend's own `compressZstdFrame` writes for its rows, and a migrated
+ * log is the one TypeScript's own migration writes from the same source in
+ * another root.
  * Every final log is read back through a fresh TypeScript backend, every
  * older generation is hashed before and after, and every Session directory
  * is listed at the end, so a file either runtime leaves outside its design
@@ -27,7 +38,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -39,13 +50,17 @@ import { SessionAlreadyOwnedError, SessionPersistenceNotFoundError } from 'bake-
 import type { SessionPersistence } from 'bake-session-persistence'
 import JsonlSessionPersistence from 'bake-session-persistence-jsonl'
 import { LEASE_FILENAME } from '../src/lease.ts'
+import { compressZstdFrame } from '../src/zstd.ts'
 
 /** The probe path, or `undefined` when the suite is not opted in. */
 const PROBE = process.env.BAKE_RUST_LEASE_PROBE ?? process.env.DSH_RUST_LEASE_PROBE
 const WRITER = fileURLToPath(new URL('./fixtures/resume-cross-runtime-writer.mjs', import.meta.url))
+const MIGRATOR = fileURLToPath(new URL('./fixtures/migration-cross-runtime-writer.mjs', import.meta.url))
 const BUILT_LIB = fileURLToPath(new URL('../lib/index.js', import.meta.url))
 const MIGRATED_CASES = fileURLToPath(new URL('../../../../conformance/session/migrated-restore-cases.json', import.meta.url))
 const POSIX = process.platform !== 'win32'
+// Root ignores a directory's write permission, so the read-only case would refuse nothing.
+const ROOT = process.getuid?.() === 0
 
 /** Bound on every single wait for a child's output or exit. */
 const WAIT_MS = 20_000
@@ -380,6 +395,78 @@ interface TornWriter { readonly writer: Child; readonly committed: Buffer; reado
 
 interface MigratedCase { readonly id: string; readonly version: number; readonly header: string; readonly rows: readonly string[] }
 
+const zstdLog = (root: string, id: string): string => `${plainLog(root, id)}.zstd`
+/** The frame TypeScript writes for one batch's rows, or a header line. */
+const frame = (text: string): Promise<Buffer> => compressZstdFrame(text)
+
+/** The probe's `zstd-open` must append `seq` and report every stored seq. */
+async function rustZstdResume(at: Area, id: string, seq: number): Promise<void> {
+  const { exit, output, child } = await runProbe(at, ['zstd-open', at.root, id, String(seq)])
+  expect(exit, child.describe()).toEqual({ code: 0, signal: null })
+  expect(output).toEqual({ outcome: 'opened', seqs: Array.from({ length: seq + 1 }, (_, index) => index) })
+}
+
+/** The probe's `zstd-open` must be refused as owned, leaving every non-lock byte unchanged. */
+async function expectRustZstdOwned(at: Area, id: string): Promise<void> {
+  const before = await snapshot(at.root)
+  const { exit, output, child } = await runProbe(at, ['zstd-open', at.root, id, '2'])
+  expect(exit, child.describe()).toEqual({ code: 3, signal: null })
+  expect(output).toEqual({ outcome: 'owned', message: `session "${id}" is already owned by an active write handle` })
+  expect(await snapshot(at.root)).toEqual(before)
+}
+
+/** Create the Zstd Session through the probe's `zstd-hold`, then release it gracefully. */
+async function rustZstdCreate(at: Area, id: string): Promise<void> {
+  const holder = new Child('probe zstd-hold', PROBE!, ['zstd-hold', at.root, id], at, 'pipe')
+  expect(await holder.nextJson(), holder.describe()).toEqual({ state: 'holding' })
+  holder.send('release')
+  expect(await holder.nextJson(), holder.describe()).toEqual({ state: 'released' })
+  expect(await holder.closed(), holder.describe()).toEqual({ code: 0, signal: null })
+  expect(holder.rest(), holder.describe()).toEqual({ stdout: '', stderr: '' })
+}
+
+/**
+ * The released source `caseId` as a Zstd writer of its version stores it,
+ * its header and its rows each one frame, migrated and resumed as
+ * {@link migratedResume} does in a plain root, in Zstd roots.
+ */
+async function migratedZstdResume(caseId: string): Promise<void> {
+  const source = releasedSource(caseId)
+  const headerEnd = source.text.indexOf('\n') + 1
+  const bytes = Buffer.concat([await frame(source.text.slice(0, headerEnd)), await frame(source.text.slice(headerEnd))])
+  const name = `${source.version === 0 ? 'session.jsonl' : `session.v${source.version}.jsonl`}.zstd`
+  const seed = async (root: string): Promise<void> => {
+    await mkdir(sessionDir(root, source.id), { recursive: true })
+    await writeFile(join(sessionDir(root, source.id), name), bytes)
+  }
+  const oracle = await area()
+  await seed(oracle.root)
+  await tsResume(oracle.root, source.id, [], 'zstd')
+  const migrated = await readFile(zstdLog(oracle.root, source.id))
+  const next = (await readEvents(oracle.root, source.id, 'zstd')).length
+  await tsResume(oracle.root, source.id, [turnStart(next, 3, 2)], 'zstd')
+  const expected = Buffer.concat([migrated, await frame(probeRow(next))])
+  expect(await readFile(zstdLog(oracle.root, source.id))).toEqual(expected)
+
+  const rustFirst = await area()
+  await seed(rustFirst.root)
+  await rustZstdResume(rustFirst, source.id, next)
+
+  const tsFirst = await area()
+  await seed(tsFirst.root)
+  await tsResume(tsFirst.root, source.id, [], 'zstd')
+  expect(await readFile(zstdLog(tsFirst.root, source.id))).toEqual(migrated)
+  await rustZstdResume(tsFirst, source.id, next)
+
+  const oracleEvents = await readEvents(oracle.root, source.id, 'zstd')
+  for (const at of [oracle, rustFirst, tsFirst]) {
+    expect(await readFile(zstdLog(at.root, source.id))).toEqual(expected)
+    expect(await readEvents(at.root, source.id, 'zstd')).toEqual(oracleEvents)
+    expect(sha256(await readFile(join(sessionDir(at.root, source.id), name)))).toBe(sha256(bytes))
+    await expectTree(at.root, source.id, [LEASE_FILENAME, name, 'session.v3.jsonl.zstd'])
+  }
+}
+
 /** A released v0, v1, or v2 source, by case id from the committed migrated restoration table. */
 function releasedSource(caseId: string): { id: string; version: number; text: string } {
   const table = JSON.parse(readFileSync(MIGRATED_CASES, 'utf8')) as { cases: MigratedCase[] }
@@ -435,6 +522,162 @@ async function migratedResume(caseId: string): Promise<void> {
   }
 }
 
+/** TypeScript's own migration of `source` in a fresh root: the migrated text, its event count, and its events after one appended row. */
+async function oracleMigration(source: { id: string; version: number; text: string }): Promise<{ migrated: string; next: number }> {
+  const oracle = await area()
+  await seedSource(oracle.root, source.id, source.version, source.text)
+  await tsResume(oracle.root, source.id, [])
+  const migrated = await readFile(plainLog(oracle.root, source.id), 'utf8')
+  const next = (await readEvents(oracle.root, source.id)).length
+  expect(await readSeqs(oracle.root, source.id)).toEqual(Array.from({ length: next }, (_, index) => index))
+  return { migrated, next }
+}
+
+type Runtime = 'Rust' | 'TypeScript'
+const other = (runtime: Runtime): Runtime => runtime === 'Rust' ? 'TypeScript' : 'Rust'
+const seqsTo = (last: number): number[] => Array.from({ length: last + 1 }, (_, index) => index)
+const MIGRATION_TEMPORARY = /^session\.migration\.[^/]+\.jsonl\.tmp$/u
+
+/**
+ * Start a migrating write open of `id` in `runtime` that pauses `at` a step,
+ * appending `turn/start` at `seq` once resumed, and await its `paused` line.
+ */
+async function pausedMigration(runtime: Runtime, at: Area, id: string, step: 'publish' | 'unlink', seq: number): Promise<Child> {
+  const child = runtime === 'Rust'
+    ? new Child('probe pause-migrate', PROBE!, ['pause-migrate', at.root, id, step, String(seq)], at, 'pipe')
+    : new Child('node migrator', process.execPath, [MIGRATOR, at.root, id, `pause-${step}`, String(seq)], at, 'pipe')
+  expect(await child.nextJson(), child.describe()).toEqual({ state: 'paused' })
+  expect(child.rest(), child.describe()).toEqual({ stdout: '', stderr: '' })
+  return child
+}
+
+/** Resume a paused migration and await its report of the appended `seq`. */
+async function resumeMigration(runtime: Runtime, child: Child, seq: number): Promise<void> {
+  child.send('go')
+  const report = await child.nextJson()
+  expect(report, child.describe()).toEqual(runtime === 'Rust' ? { outcome: 'opened', seqs: seqsTo(seq) } : { outcome: 'opened' })
+  expect(await child.closed(), child.describe()).toEqual({ code: 0, signal: null })
+  expect(child.rest(), child.describe()).toEqual({ stdout: '', stderr: '' })
+}
+
+/** `runtime`'s write open must be refused as owned, leaving every non-lock byte unchanged. */
+async function expectOwned(runtime: Runtime, at: Area, id: string): Promise<void> {
+  if (runtime === 'Rust') await expectRustOwned(at, id)
+  else await expectTsOwned(at.root, id)
+}
+
+/** `runtime` write-opens `id` and appends `turn/start` at `seq`, at time 3 from Rust and 5 from TypeScript; returns the row. */
+async function resumeIn(runtime: Runtime, at: Area, id: string, seq: number): Promise<string> {
+  if (runtime === 'Rust') {
+    await rustResume(at, id, seq)
+    return probeRow(seq)
+  }
+  await tsResume(at.root, id, [turnStart(seq, 5, 2)])
+  return rows(turnStart(seq, 5, 2))
+}
+
+/** Wait until `ps` reports `pid` stopped (state `T`), polling until the bound. */
+async function observeStopped(pid: number, at: Area): Promise<void> {
+  const deadline = Date.now() + WAIT_MS
+  for (;;) {
+    const ps = new Child('ps', 'ps', ['-o', 'stat=', '-p', String(pid)], at, 'ignore')
+    const exit = await ps.closed()
+    children.delete(ps)
+    if (exit.code === 0 && ps.rest().stdout.trim().startsWith('T')) return
+    if (Date.now() > deadline) throw new Error(`process ${pid} was not observed stopped within ${WAIT_MS} ms: ${ps.describe()}`)
+    await new Promise(resolve => setTimeout(resolve, 10))
+  }
+}
+
+/**
+ * Two runtimes migrate one released source concurrently: `first`'s migration
+ * pauses after reading and migrating the source and before publishing,
+ * holding the write lock, so `second`'s write open is refused while a
+ * TypeScript read open still reads the unpublished migration; resumed,
+ * `first` publishes and appends, and `second` resumes the one target. The
+ * root must end with TypeScript's own migration and both rows, the source
+ * unchanged, and no temporary file.
+ */
+async function concurrentMigration(caseId: string, first: Runtime, stop?: 'SIGSTOP'): Promise<void> {
+  const source = releasedSource(caseId)
+  const { migrated, next } = await oracleMigration(source)
+  const oracleEvents = await (async () => {
+    const at = await area()
+    await seedSource(at.root, source.id, source.version, source.text)
+    return readEvents(at.root, source.id)
+  })()
+  const at = await area()
+  const seeded = await seedSource(at.root, source.id, source.version, source.text)
+  const paused = await pausedMigration(first, at, source.id, 'publish', next)
+  await expectTree(at.root, source.id, [LEASE_FILENAME, seeded.name])
+  if (stop !== undefined) {
+    expect(paused.proc.kill(stop), paused.describe()).toBe(true)
+    await observeStopped(paused.proc.pid!, at)
+  }
+  await expectOwned(other(first), at, source.id)
+  // Reads take no lock: the unpublished migration reads as TypeScript migrates it.
+  expect(await readEvents(at.root, source.id)).toEqual(oracleEvents)
+  await expectTree(at.root, source.id, [LEASE_FILENAME, seeded.name])
+  let expected: string
+  if (stop === undefined) {
+    await resumeMigration(first, paused, next)
+    expected = migrated + probeRow(next)
+    expect(await readFile(plainLog(at.root, source.id), 'utf8')).toBe(expected)
+    expected += await resumeIn(other(first), at, source.id, next + 1)
+  } else {
+    // Only the stopped holder's death releases the lock; the other runtime then migrates.
+    await paused.crash()
+    await expectTree(at.root, source.id, [LEASE_FILENAME, seeded.name])
+    expected = migrated + await resumeIn(other(first), at, source.id, next)
+    expected += await resumeIn(first, at, source.id, next + 1)
+  }
+  expect(await readFile(plainLog(at.root, source.id), 'utf8')).toBe(expected)
+  expect(await readSeqs(at.root, source.id)).toEqual(seqsTo(next + 1))
+  expect(sha256(await readFile(join(sessionDir(at.root, source.id), seeded.name)))).toBe(seeded.hash)
+  await expectTree(at.root, source.id, [LEASE_FILENAME, seeded.name, 'session.v3.jsonl'])
+}
+
+/**
+ * A `killed` writer of the released v2 source dies at `step`: tearing its
+ * migration's temporary file after `bytes` bytes, or after linking the
+ * migrated log into place (POSIX only). The other runtime is refused while
+ * it lives, then migrates or resumes, and `killed`'s runtime resumes after
+ * it. The temporary file stays, never a generation.
+ */
+async function killedMigration(killed: Runtime, step: 'tear' | 'unlink'): Promise<void> {
+  const source = releasedSource('v2-clean-turn')
+  const { migrated, next } = await oracleMigration(source)
+  const at = await area()
+  const seeded = await seedSource(at.root, source.id, source.version, source.text)
+  const bytes = 50
+  let writer: Child
+  if (step === 'unlink') {
+    writer = await pausedMigration(killed, at, source.id, 'unlink', next)
+  } else if (killed === 'Rust') {
+    writer = await rustTear(at, ['tear-append', at.root, source.id, String(next), String(bytes)])
+  } else {
+    writer = new Child('node migrator', process.execPath, [MIGRATOR, at.root, source.id, 'tear', String(bytes)], at, 'pipe')
+    expect(await writer.nextJson(), writer.describe()).toEqual({ state: 'torn' })
+    expect(writer.rest(), writer.describe()).toEqual({ stdout: '', stderr: '' })
+  }
+  const published = step === 'unlink' ? ['session.v3.jsonl'] : []
+  await expectTree(at.root, source.id, [LEASE_FILENAME, seeded.name, MIGRATION_TEMPORARY, ...published])
+  const temporary = (await readdir(sessionDir(at.root, source.id))).find(name => MIGRATION_TEMPORARY.test(name))!
+  const temporaryPath = join(sessionDir(at.root, source.id), temporary)
+  expect(await readFile(temporaryPath, 'utf8')).toBe(step === 'unlink' ? migrated : migrated.slice(0, bytes))
+  if (step === 'unlink') expect(await readFile(plainLog(at.root, source.id), 'utf8')).toBe(migrated)
+  await expectOwned(other(killed), at, source.id)
+  await writer.crash()
+  let expected = migrated + await resumeIn(other(killed), at, source.id, next)
+  expected += await resumeIn(killed, at, source.id, next + 1)
+  expect(await readFile(plainLog(at.root, source.id), 'utf8')).toBe(expected)
+  expect(await readSeqs(at.root, source.id)).toEqual(seqsTo(next + 1))
+  // A torn temporary file is never read; a linked one is the log's second name.
+  expect(await readFile(temporaryPath, 'utf8')).toBe(step === 'unlink' ? expected : migrated.slice(0, bytes))
+  expect(sha256(await readFile(join(sessionDir(at.root, source.id), seeded.name)))).toBe(seeded.hash)
+  await expectTree(at.root, source.id, [LEASE_FILENAME, seeded.name, 'session.v3.jsonl', temporary])
+}
+
 const suite = PROBE === undefined ? describe.skip : describe
 const title = PROBE === undefined
   ? 'cross-runtime resume (opt-in skipped: run `bun run test:rust:lease`, or set DSH_RUST_LEASE_PROBE to the built probe)'
@@ -472,26 +715,66 @@ suite(title, () => {
     await expectTree(at.root, id, [LEASE_FILENAME, 'session.v3.jsonl'])
   })
 
-  it('a Zstd log a killed TypeScript writer left torn is refused by Rust with TypeScript\'s own message and kept byte for byte, and TypeScript resumes it', async () => {
+  it('a Zstd log a killed TypeScript writer left torn inside a frame is resumed by Rust, which truncates the frame and appends its own, to the bytes TypeScript reads back', async () => {
     const at = await area()
     const id = 'xrt-ts-zstd'
     const tear = 10
-    const { writer, committed } = await tsTear(at, id, 'zstd', tear)
+    const { writer, committed, content } = await tsTear(at, id, 'zstd', tear)
+    expect(committed).toEqual(Buffer.concat([await frame(HEADER.replace('<id>', id)), await frame(rows(...FIRST_TURN))]))
+    expect(content).toEqual(await frame(rows(turnStart(2, 7, 2), turnEnd(3, 8, 2))))
+    await expectRustZstdOwned(at, id)
     await writer.crash()
-    const before = await snapshot(at.root)
-    // TypeScript configured as Rust is, for compression none, is the oracle.
-    const refusal = await tsOpenError(at.root, id, 'none')
-    expect(refusal).toBeInstanceOf(Error)
-    expect(await snapshot(at.root)).toEqual(before)
-    const { exit, output, child } = await runProbe(at, ['open', at.root, id, '2'])
-    expect(exit, child.describe()).toEqual({ code: 1, signal: null })
-    expect(output).toEqual({ outcome: 'refused', message: (refusal as Error).message })
-    expect(await snapshot(at.root)).toEqual(before)
+    // Ten bytes of a frame recover no row.
     expect(await readSeqs(at.root, id, 'zstd')).toEqual([0, 1])
-    await tsResume(at.root, id, [turnStart(2, 5, 2), turnEnd(3, 6, 2)], 'zstd')
-    const final = await readFile(`${plainLog(at.root, id)}.zstd`)
-    expect(final.subarray(0, committed.length)).toEqual(committed)
+    await rustZstdResume(at, id, 2)
+    expect(await readFile(zstdLog(at.root, id))).toEqual(Buffer.concat([committed, await frame(probeRow(2))]))
+    await tsResume(at.root, id, [turnEnd(3, 5, 2)], 'zstd')
+    const resumed = Buffer.concat([committed, await frame(probeRow(2)), await frame(rows(turnEnd(3, 5, 2)))])
+    expect(await readFile(zstdLog(at.root, id))).toEqual(resumed)
     expect(await readSeqs(at.root, id, 'zstd')).toEqual([0, 1, 2, 3])
+    await expectTree(at.root, id, [LEASE_FILENAME, 'session.v3.jsonl.zstd'])
+  })
+
+  it('a torn TypeScript Zstd frame whose rows are complete is recovered by Rust, which rewrites them as one frame before its own, to the bytes TypeScript reads back', async () => {
+    const at = await area()
+    const id = 'xrt-ts-zstd-rows'
+    const torn = await frame(rows(turnStart(2, 7, 2), turnEnd(3, 8, 2)))
+    // Every byte but the checksum's last two: the frame's rows decode.
+    const tear = torn.length - 2
+    const { writer, committed, content } = await tsTear(at, id, 'zstd', tear)
+    expect(content).toEqual(torn)
+    await writer.crash()
+    expect(await readSeqs(at.root, id, 'zstd')).toEqual([0, 1, 2, 3])
+    await rustZstdResume(at, id, 4)
+    const resumed = Buffer.concat([committed, torn, await frame(probeRow(4))])
+    expect(await readFile(zstdLog(at.root, id))).toEqual(resumed)
+    await tsResume(at.root, id, [turnEnd(5, 5, 3)], 'zstd')
+    expect(await readFile(zstdLog(at.root, id))).toEqual(Buffer.concat([resumed, await frame(rows(turnEnd(5, 5, 3)))]))
+    expect(await readSeqs(at.root, id, 'zstd')).toEqual([0, 1, 2, 3, 4, 5])
+    await expectTree(at.root, id, [LEASE_FILENAME, 'session.v3.jsonl.zstd'])
+  })
+
+  it('a Rust Zstd writer killed mid-append leaves a torn frame whose rows TypeScript recovers and resumes, to the bytes Rust resumes after', async () => {
+    const at = await area()
+    const id = 'xrt-rust-zstd'
+    await rustZstdCreate(at, id)
+    const committed = await readFile(zstdLog(at.root, id))
+    expect(committed).toEqual(Buffer.concat([await frame(HEADER.replace('<id>', id)), await frame(rows(...FIRST_TURN))]))
+    const torn = await frame(rows(turnStart(2, 3, 2), turnEnd(3, 4, 2)))
+    const tear = torn.length - 2
+    const writer = await rustTear(at, ['zstd-tear-append', at.root, id, '2', String(tear)])
+    expect(await readFile(zstdLog(at.root, id))).toEqual(Buffer.concat([committed, torn.subarray(0, tear)]))
+    const before = await snapshot(at.root)
+    expect(await tsOpenError(at.root, id, 'zstd')).toBeInstanceOf(SessionAlreadyOwnedError)
+    expect(await snapshot(at.root)).toEqual(before)
+    await writer.crash()
+    expect(await readSeqs(at.root, id, 'zstd')).toEqual([0, 1, 2, 3])
+    await tsResume(at.root, id, [turnStart(4, 5, 3)], 'zstd')
+    const resumed = Buffer.concat([committed, torn, await frame(rows(turnStart(4, 5, 3)))])
+    expect(await readFile(zstdLog(at.root, id))).toEqual(resumed)
+    await rustZstdResume(at, id, 5)
+    expect(await readFile(zstdLog(at.root, id))).toEqual(Buffer.concat([resumed, await frame(probeRow(5))]))
+    expect(await readSeqs(at.root, id, 'zstd')).toEqual([0, 1, 2, 3, 4, 5])
     await expectTree(at.root, id, [LEASE_FILENAME, 'session.v3.jsonl.zstd'])
   })
 
@@ -550,4 +833,61 @@ suite(title, () => {
   it('a v1 log migrated by Rust or by TypeScript resumes in the other runtime to the same bytes, its source unchanged', () => migratedResume('v1-packed-run-cited'))
 
   it('a v2 log migrated by Rust or by TypeScript resumes in the other runtime to the same bytes, its source unchanged', () => migratedResume('v2-clean-turn'))
+  it('the runtimes migrate one v0 log concurrently: a Rust migration paused before publication holds the lock, TypeScript is refused, and both resume the one target TypeScript\'s migration writes, its source unchanged', () => concurrentMigration('v0-clean-turn', 'Rust'))
+
+  it('the runtimes migrate one v0 log concurrently: a TypeScript migration paused before publication holds the lock, Rust is refused, and both resume the one target TypeScript\'s migration writes, its source unchanged', () => concurrentMigration('v0-clean-turn', 'TypeScript'))
+
+  it('the runtimes migrate one v1 log concurrently: a Rust migration paused before publication holds the lock, TypeScript is refused, and both resume the one target TypeScript\'s migration writes, its source unchanged', () => concurrentMigration('v1-packed-run-cited', 'Rust'))
+
+  it('the runtimes migrate one v1 log concurrently: a TypeScript migration paused before publication holds the lock, Rust is refused, and both resume the one target TypeScript\'s migration writes, its source unchanged', () => concurrentMigration('v1-packed-run-cited', 'TypeScript'))
+
+  it('the runtimes migrate one v2 log concurrently: a Rust migration paused before publication holds the lock, TypeScript is refused, and both resume the one target TypeScript\'s migration writes, its source unchanged', () => concurrentMigration('v2-clean-turn', 'Rust'))
+
+  it('the runtimes migrate one v2 log concurrently: a TypeScript migration paused before publication holds the lock, Rust is refused, and both resume the one target TypeScript\'s migration writes, its source unchanged', () => concurrentMigration('v2-clean-turn', 'TypeScript'))
+
+  it('a Rust writer killed while writing its migration temporary file leaves only that file, beside which TypeScript migrates and Rust resumes', () => killedMigration('Rust', 'tear'))
+
+  it('a TypeScript writer killed while writing its migration temporary file leaves only that file, beside which Rust migrates and TypeScript resumes', () => killedMigration('TypeScript', 'tear'))
+
+  // Windows publishes a migration with a move, which leaves no temporary file to remove.
+  it.skipIf(!POSIX)('a Rust writer killed after linking its migrated log leaves the temporary file as its second link, and TypeScript then Rust resume the log (POSIX only)', () => killedMigration('Rust', 'unlink'))
+
+  it.skipIf(!POSIX)('a TypeScript writer killed after linking its migrated log leaves the temporary file as its second link, and Rust then TypeScript resume the log (POSIX only)', () => killedMigration('TypeScript', 'unlink'))
+
+  // Windows has no SIGSTOP.
+  it.skipIf(!POSIX)('a stopped Rust migration still refuses TypeScript, and only its death lets TypeScript migrate (POSIX only)', () => concurrentMigration('v2-clean-turn', 'Rust', 'SIGSTOP'))
+
+  it.skipIf(!POSIX)('a stopped TypeScript migration still refuses Rust, and only its death lets Rust migrate (POSIX only)', () => concurrentMigration('v2-clean-turn', 'TypeScript', 'SIGSTOP'))
+
+  // Windows directory permissions are ACLs, which a mode does not set.
+  it.skipIf(!POSIX || ROOT)('a read-only Session directory refuses both runtimes\' migrations with a permission error and leaves the tree unchanged (POSIX only)', async () => {
+    const source = releasedSource('v2-clean-turn')
+    const at = await area()
+    const seeded = await seedSource(at.root, source.id, source.version, source.text)
+    // The lock file exists, so the lock is taken and the migration's temporary file is refused.
+    await writeFile(join(sessionDir(at.root, source.id), LEASE_FILENAME), '')
+    const dir = sessionDir(at.root, source.id)
+    await chmod(dir, 0o500)
+    try {
+      const before = await snapshot(at.root)
+      const refusal = await tsOpenError(at.root, source.id)
+      expect((refusal as NodeJS.ErrnoException).code, String(refusal)).toBe('EACCES')
+      expect(await snapshot(at.root)).toEqual(before)
+      const { exit, output, child } = await runProbe(at, ['open', at.root, source.id, '9'])
+      expect(exit, child.describe()).toEqual({ code: 1, signal: null })
+      expect(output).toEqual({ outcome: 'io', kind: 'PermissionDenied' })
+      expect(await snapshot(at.root)).toEqual(before)
+      await expectTree(at.root, source.id, [LEASE_FILENAME, seeded.name])
+    } finally {
+      await chmod(dir, 0o700)
+    }
+    const { migrated, next } = await oracleMigration(source)
+    await rustResume(at, source.id, next)
+    expect(await readFile(plainLog(at.root, source.id), 'utf8')).toBe(migrated + probeRow(next))
+    await expectTree(at.root, source.id, [LEASE_FILENAME, seeded.name, 'session.v3.jsonl'])
+  })
+
+  it('a Zstd v0 log migrated by Rust or by TypeScript resumes in the other runtime to the same frames, its source unchanged', () => migratedZstdResume('v0-clean-turn'))
+
+  it('a Zstd v2 log migrated by Rust or by TypeScript resumes in the other runtime to the same frames, its source unchanged', () => migratedZstdResume('v2-clean-turn'))
 })

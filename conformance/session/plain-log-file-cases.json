@@ -1,7 +1,7 @@
 {
   "schema": "bake/session-conformance/plain-log-file-cases",
-  "version": 11,
-  "oracle": "in an owned temporary root holding the seeded entries, run each step through the JSONL backend with compression none on the step's handle, a or b, each its own backend instance over the root: create, a write open, or the open handle's append, flush, or close, or, with no handle open, the root renamed or reached through a symbolic link to it; after each step list every file beneath the root with its text, an empty session.lock by its size, and every symbolic link by its target",
+  "version": 12,
+  "oracle": "in an owned temporary root holding the seeded entries, run each step through the JSONL backend with the case's compression, none unless it names zstd, on the step's handle, a or b, each its own backend instance over the root: create, a write open, or the open handle's append, flush, or close, or, with no handle open, the root renamed or reached through a symbolic link to it; after each step list every file beneath the root with its text, or <hex BYTES> when its bytes are not UTF-8, an empty session.lock by its size, and every symbolic link by its target",
   "history": [
     "Version 1: 33 cases, written from the TypeScript sources before either harness ran; both arms passed on their first run.",
     "A Rust negative control that skipped the truncation still passed open-torn-tail-truncated-by-first-append, whose torn tail was a prefix of the row appended after it. Its tail became a longer torn ext/note row, and no outcome changed.",
@@ -14,7 +14,8 @@
     "Version 8: 73 cases. Rust ports TypeScript's flat-layout refusal, so the legacy-layout limit is removed: limit-legacy-layout became legacy-layout-flat-file-at-create with TypeScript's exact message, and legacy-layout-before-encoding-mismatch lost its rust override. The root check refuses only a regular file with the flat-layout suffix, as listSessionDirs does, and the id's flat names are probed by opening them, as rejectLegacyFlatArtifact does. session-directory-named-jsonl creates, reopens, and lists a Session directory nightly.jsonl; legacy-probe-finds-session-directory refuses the id nightly beside it at open and create; legacy-layout-file-refused-at-open keeps a flat file refused at open. The changed and added expectations were written from the TypeScript sources before either harness ran.",
     "Version 9: 75 cases. Rust holds lone surrogates, so limit-row-json-parser, whose lone-surrogate row follows an issue, became migrate-lone-surrogate-row-ignored with no rust override, and migrate-lone-surrogates-kept, written from the TypeScript sources before either harness ran, write-opens a v0 Session whose id and user text hold lone surrogates, laid out as h~D800 and migrated with them written back as JSON.stringify writes them. legacy-layout-noncharacter-path, written from the TypeScript sources before either harness ran, names a flat file holding U+FDD0 in the flat-layout message. legacy-layout-noncharacter-path runs on Linux and Win32 only: macOS CI showed APFS refusing a U+FDD0 file name with EILSEQ.",
     "Version 10: 82 cases. Rust ports TypeScript's stored-identity refusal, so the identity limit is removed: limit-identity became identity-path-mismatch and migrate-identity-path lost its override, each with TypeScript's exact message, in which {dst} is the case root joined with the step's dst path, the path the header's id and cwd name. A selected path the header does not name is admitted when realpath resolves both to one file: identity-case-alias-written, on macOS and Windows, writes a log with cwd /w into the project directory --W-- that a case-insensitive volume keeps for /W and reopens it, identity-case-alias-on-case-sensitive-volume refuses that layout on Linux, identity-requested-id-case-alias refuses a requested id ab in Session directory Ab, identity-requested-id-symlinked-session, on POSIX, refuses it through a link ab to Ab, and identity-symlinked-project-alias, on POSIX, admits a log in project directory --real-- whose header names it through the link --w--. identity-symlinked-root and identity-moved-root reopen a log through a symbolic link to its root and after renaming its root, the link-root and move-root steps; the platform darwin and the link seed were added for them, and a tree lists a symbolic link as <link to target>. The changed and added expectations were written from the TypeScript sources before either harness ran. identity-requested-id-symlinked-session runs on Linux only: macOS CI showed its link ab and target Ab colliding on a case-insensitive volume.",
-    "Version 11: 87 cases. Rust ports the released v2 codec's recovery and runs the v0 and v1 decoder's finish after the rows stream, so the `migration/v2-codec-recovery` limit is removed: limit-v2-codec-recovery lost its rust override and became migrate-v2-codec-gap-rethrown-at-turn-end, with its TypeScript outcome unchanged. migrate-v2-codec-decode-issue-rethrown-at-turn-end, migrate-v2-undecoded-turn-end-issue-kept-until-finish, migrate-v2-end-seed-data-thrown-while-recovering, migrate-v0-seed-length-exceeds-events-at-decoder-finish, and migrate-v0-history-refusal-before-decoder-finish were written from the TypeScript sources before either harness ran."
+    "Version 11: 87 cases. Rust ports the released v2 codec's recovery and runs the v0 and v1 decoder's finish after the rows stream, so the `migration/v2-codec-recovery` limit is removed: limit-v2-codec-recovery lost its rust override and became migrate-v2-codec-gap-rethrown-at-turn-end, with its TypeScript outcome unchanged. migrate-v2-codec-decode-issue-rethrown-at-turn-end, migrate-v2-undecoded-turn-end-issue-kept-until-finish, migrate-v2-end-seed-data-thrown-while-recovering, migrate-v0-seed-length-exceeds-events-at-decoder-finish, and migrate-v0-history-refusal-before-decoder-finish were written from the TypeScript sources before either harness ran.",
+    "Version 12: 109 cases. Rust ports the Zstd write path, so a case may name compression zstd, which both harnesses configure, a seed may give a file's bytes as hex, and a tree lists a file that is not UTF-8 as <hex BYTES>; the oracle says so, and no earlier case changed. Added 22 Zstd cases: create, flush, and append writing the header line and each batch as one checksummed frame, a first batch publishing both frames; a reopened log appending a frame; the encoding-mismatch refusal of a plain generation at create and open, naming the highest; a torn final frame whose complete rows are recovered, kept by a flush and by a refused contiguity check, and repaired by the first append, which truncates the torn frame, writes the recovered rows re-encoded as eventLines writes them as one frame, then the batch, even when the batch is then refused while it is encoded; a torn frame recovering nothing; corrupt frames, complete frames ending inside a record, a header frame holding two records, and plain bytes under the Zstd name, each refused with TypeScript's corruption message; create over a Zstd log; and Zstd v0, v1, and v2 sources, a torn one and one with a corrupt body frame, migrated to session.v3.jsonl.zstd. The seeds' frames were written by the backend's own compressZstdFrame, and every expected outcome and tree was recorded from the TypeScript backend over those seeds before the Rust arm ran; each was checked against the TypeScript sources (encodeMaterialization, encodeEventBatch, readZstdPrefix, persistContiguous, decodeStreamingMigration, writeSyncedTemp)."
   ],
   "cases": [
     {
@@ -4197,6 +4198,997 @@
         }
       ],
       "note": "The handle that migrated the v0 source keeps the lock on the Session directory; the other instance's open then finds the published v3 file and is refused as owned, and once the first closes it reads that file directly."
+    },
+    {
+      "id": "zstd-create-flush-append-reopen",
+      "compression": "zstd",
+      "seed": [],
+      "steps": [
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": "z1",
+            "createdAt": 1,
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {}
+        },
+        {
+          "step": "flush",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/z1/session.lock": "",
+            "_no-cwd/z1/session.v3.jsonl.zstd": "<hex 28b52ffd04589502007285121990a76d80f56575100190ff9f3147d615148519068db12c020745c23813563d4129d70c7e8eb6eb3182331e7f80a6ad9c17c1aff90ad85c0e3e63da8e5b2fd88c52aa5e7dbe32ac110101002a94263dfac760>"
+          }
+        },
+        {
+          "step": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": 0,
+              "time": 1,
+              "data": {
+                "turn": 1
+              }
+            },
+            {
+              "type": "turn/end",
+              "seq": 1,
+              "time": 2,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/z1/session.lock": "",
+            "_no-cwd/z1/session.v3.jsonl.zstd": "<hex 28b52ffd04589502007285121990a76d80f56575100190ff9f3147d615148519068db12c020745c23813563d4129d70c7e8eb6eb3182331e7f80a6ad9c17c1aff90ad85c0e3e63da8e5b2fd88c52aa5e7dbe32ac110101002a94263dfac76028b52ffd04584d020094037b2274797065223a227475726e2f7374617274222c22736571223a302c2274696d65223a312c2264617461223a7b223a317d7d0a656e6431320500800a7857ab7770258b93a0ca71f20ca6>"
+          }
+        },
+        {
+          "step": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": 2,
+              "time": 3,
+              "data": {
+                "turn": 2
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/z1/session.lock": "",
+            "_no-cwd/z1/session.v3.jsonl.zstd": "<hex 28b52ffd04589502007285121990a76d80f56575100190ff9f3147d615148519068db12c020745c23813563d4129d70c7e8eb6eb3182331e7f80a6ad9c17c1aff90ad85c0e3e63da8e5b2fd88c52aa5e7dbe32ac110101002a94263dfac76028b52ffd04584d020094037b2274797065223a227475726e2f7374617274222c22736571223a302c2274696d65223a312c2264617461223a7b223a317d7d0a656e6431320500800a7857ab7770258b93a0ca71f20ca628b52ffd0458c901007b2274797065223a227475726e2f7374617274222c22736571223a322c2274696d65223a332c2264617461223a7b227475726e223a327d7d0a53752729>"
+          }
+        },
+        {
+          "step": "flush",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/z1/session.lock": "",
+            "_no-cwd/z1/session.v3.jsonl.zstd": "<hex 28b52ffd04589502007285121990a76d80f56575100190ff9f3147d615148519068db12c020745c23813563d4129d70c7e8eb6eb3182331e7f80a6ad9c17c1aff90ad85c0e3e63da8e5b2fd88c52aa5e7dbe32ac110101002a94263dfac76028b52ffd04584d020094037b2274797065223a227475726e2f7374617274222c22736571223a302c2274696d65223a312c2264617461223a7b223a317d7d0a656e6431320500800a7857ab7770258b93a0ca71f20ca628b52ffd0458c901007b2274797065223a227475726e2f7374617274222c22736571223a322c2274696d65223a332c2264617461223a7b227475726e223a327d7d0a53752729>"
+          }
+        },
+        {
+          "step": "close",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/z1/session.lock": "",
+            "_no-cwd/z1/session.v3.jsonl.zstd": "<hex 28b52ffd04589502007285121990a76d80f56575100190ff9f3147d615148519068db12c020745c23813563d4129d70c7e8eb6eb3182331e7f80a6ad9c17c1aff90ad85c0e3e63da8e5b2fd88c52aa5e7dbe32ac110101002a94263dfac76028b52ffd04584d020094037b2274797065223a227475726e2f7374617274222c22736571223a302c2274696d65223a312c2264617461223a7b223a317d7d0a656e6431320500800a7857ab7770258b93a0ca71f20ca628b52ffd0458c901007b2274797065223a227475726e2f7374617274222c22736571223a322c2274696d65223a332c2264617461223a7b227475726e223a327d7d0a53752729>"
+          }
+        },
+        {
+          "step": "open",
+          "id": "z1",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/z1/session.lock": "",
+            "_no-cwd/z1/session.v3.jsonl.zstd": "<hex 28b52ffd04589502007285121990a76d80f56575100190ff9f3147d615148519068db12c020745c23813563d4129d70c7e8eb6eb3182331e7f80a6ad9c17c1aff90ad85c0e3e63da8e5b2fd88c52aa5e7dbe32ac110101002a94263dfac76028b52ffd04584d020094037b2274797065223a227475726e2f7374617274222c22736571223a302c2274696d65223a312c2264617461223a7b223a317d7d0a656e6431320500800a7857ab7770258b93a0ca71f20ca628b52ffd0458c901007b2274797065223a227475726e2f7374617274222c22736571223a322c2274696d65223a332c2264617461223a7b227475726e223a327d7d0a53752729>"
+          }
+        },
+        {
+          "step": "append",
+          "events": [
+            {
+              "type": "turn/end",
+              "seq": 3,
+              "time": 4,
+              "data": {
+                "turn": 2
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/z1/session.lock": "",
+            "_no-cwd/z1/session.v3.jsonl.zstd": "<hex 28b52ffd04589502007285121990a76d80f56575100190ff9f3147d615148519068db12c020745c23813563d4129d70c7e8eb6eb3182331e7f80a6ad9c17c1aff90ad85c0e3e63da8e5b2fd88c52aa5e7dbe32ac110101002a94263dfac76028b52ffd04584d020094037b2274797065223a227475726e2f7374617274222c22736571223a302c2274696d65223a312c2264617461223a7b223a317d7d0a656e6431320500800a7857ab7770258b93a0ca71f20ca628b52ffd0458c901007b2274797065223a227475726e2f7374617274222c22736571223a322c2274696d65223a332c2264617461223a7b227475726e223a327d7d0a5375272928b52ffd0458b901007b2274797065223a227475726e2f656e64222c22736571223a332c2274696d65223a342c2264617461223a7b227475726e223a327d7d0a98d8480f>"
+          }
+        },
+        {
+          "step": "close",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/z1/session.lock": "",
+            "_no-cwd/z1/session.v3.jsonl.zstd": "<hex 28b52ffd04589502007285121990a76d80f56575100190ff9f3147d615148519068db12c020745c23813563d4129d70c7e8eb6eb3182331e7f80a6ad9c17c1aff90ad85c0e3e63da8e5b2fd88c52aa5e7dbe32ac110101002a94263dfac76028b52ffd04584d020094037b2274797065223a227475726e2f7374617274222c22736571223a302c2274696d65223a312c2264617461223a7b223a317d7d0a656e6431320500800a7857ab7770258b93a0ca71f20ca628b52ffd0458c901007b2274797065223a227475726e2f7374617274222c22736571223a322c2274696d65223a332c2264617461223a7b227475726e223a327d7d0a5375272928b52ffd0458b901007b2274797065223a227475726e2f656e64222c22736571223a332c2274696d65223a342c2264617461223a7b227475726e223a327d7d0a98d8480f>"
+          }
+        }
+      ],
+      "note": "A Zstd root writes session.v3.jsonl.zstd: the header line as one checksummed frame at the flush, then each appended batch as one more frame; a reopened log appends after its frames."
+    },
+    {
+      "id": "zstd-create-first-batch-two-frames",
+      "compression": "zstd",
+      "seed": [],
+      "steps": [
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": "z2",
+            "createdAt": 1,
+            "cwd": "/w",
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {}
+        },
+        {
+          "step": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": 0,
+              "time": 1,
+              "data": {
+                "turn": 1
+              }
+            },
+            {
+              "type": "turn/end",
+              "seq": 1,
+              "time": 2,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "--w--/z2/session.lock": "",
+            "--w--/z2/session.v3.jsonl.zstd": "<hex 28b52ffd0458d502002286141b706bd20140c437dbd41a6702456953bdee85fa21411d4ffab15f08c823602bb2a9616152a24495de555410c2be5e7bc074fd00b6ef492e819d856ba23ac9f5a0b17de92298d3c5f5c224c4e2761b46ee0801002a94261027345928b52ffd04584d020094037b2274797065223a227475726e2f7374617274222c22736571223a302c2274696d65223a312c2264617461223a7b223a317d7d0a656e6431320500800a7857ab7770258b93a0ca71f20ca6>"
+          }
+        },
+        {
+          "step": "close",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "--w--/z2/session.lock": "",
+            "--w--/z2/session.v3.jsonl.zstd": "<hex 28b52ffd0458d502002286141b706bd20140c437dbd41a6702456953bdee85fa21411d4ffab15f08c823602bb2a9616152a24495de555410c2be5e7bc074fd00b6ef492e819d856ba23ac9f5a0b17de92298d3c5f5c224c4e2761b46ee0801002a94261027345928b52ffd04584d020094037b2274797065223a227475726e2f7374617274222c22736571223a302c2274696d65223a312c2264617461223a7b223a317d7d0a656e6431320500800a7857ab7770258b93a0ca71f20ca6>"
+          }
+        }
+      ],
+      "note": "A first batch publishes the header frame and the batch frame together, encodeMaterialization keeping their boundary."
+    },
+    {
+      "id": "zstd-create-refuses-plain-generation",
+      "compression": "zstd",
+      "seed": [
+        {
+          "file": "_no-cwd/p1/session.v3.jsonl",
+          "text": "{\"type\":\"session\",\"version\":3,\"id\":\"p1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": "z3",
+            "createdAt": 1,
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "src": "_no-cwd/p1/session.v3.jsonl",
+          "ts": {
+            "outcome": "thrown",
+            "class": "Error",
+            "message": "session artifact {srcJson} uses .jsonl, but this backend is configured for compression \"zstd\"; use a separate root or select the matching compression mode"
+          },
+          "tree": {
+            "_no-cwd/p1/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"p1\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        }
+      ],
+      "note": "A Zstd root refuses a plain canonical generation anywhere in the root, by TypeScript's encoding-mismatch message naming it."
+    },
+    {
+      "id": "zstd-open-refuses-plain-log",
+      "compression": "zstd",
+      "seed": [
+        {
+          "file": "_no-cwd/p2/session.v3.jsonl",
+          "text": "{\"type\":\"session\",\"version\":3,\"id\":\"p2\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "p2",
+          "src": "_no-cwd/p2/session.v3.jsonl",
+          "ts": {
+            "outcome": "thrown",
+            "class": "Error",
+            "message": "session artifact {srcJson} uses .jsonl, but this backend is configured for compression \"zstd\"; use a separate root or select the matching compression mode"
+          },
+          "tree": {
+            "_no-cwd/p2/session.v3.jsonl": "{\"type\":\"session\",\"version\":3,\"id\":\"p2\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        }
+      ],
+      "note": "The plain log of the requested id is refused, not read."
+    },
+    {
+      "id": "zstd-mismatch-names-highest-plain-generation",
+      "compression": "zstd",
+      "seed": [
+        {
+          "file": "_no-cwd/p3/session.v1.jsonl",
+          "text": "x"
+        },
+        {
+          "file": "_no-cwd/p3/session.v3.jsonl",
+          "text": "y"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "p3",
+          "src": "_no-cwd/p3/session.v3.jsonl",
+          "ts": {
+            "outcome": "thrown",
+            "class": "Error",
+            "message": "session artifact {srcJson} uses .jsonl, but this backend is configured for compression \"zstd\"; use a separate root or select the matching compression mode"
+          },
+          "tree": {
+            "_no-cwd/p3/session.v1.jsonl": "x",
+            "_no-cwd/p3/session.v3.jsonl": "y"
+          }
+        }
+      ],
+      "note": "The root check names the highest plain generation of a Session directory."
+    },
+    {
+      "id": "zstd-open-append",
+      "compression": "zstd",
+      "seed": [
+        {
+          "file": "_no-cwd/z6/session.v3.jsonl.zstd",
+          "hex": "28b52ffd04589502007285121980b76d80286cb5109591889171b57a1eb4e3462f668a6a104245c23813567d4129d70c7e8eb6eb3182331e7f80a6ed38af825ff315b03939f88c69436ebd60334aa97af5f9cab0460401002a9426801c9d0c28b52ffd0458c901007b2274797065223a227475726e2f7374617274222c22736571223a302c2274696d65223a312c2264617461223a7b227475726e223a317d7d0ab1b0f00a"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "z6",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/z6/session.lock": "",
+            "_no-cwd/z6/session.v3.jsonl.zstd": "<hex 28b52ffd04589502007285121980b76d80286cb5109591889171b57a1eb4e3462f668a6a104245c23813567d4129d70c7e8eb6eb3182331e7f80a6ed38af825ff315b03939f88c69436ebd60334aa97af5f9cab0460401002a9426801c9d0c28b52ffd0458c901007b2274797065223a227475726e2f7374617274222c22736571223a302c2274696d65223a312c2264617461223a7b227475726e223a317d7d0ab1b0f00a>"
+          }
+        },
+        {
+          "step": "append",
+          "events": [
+            {
+              "type": "turn/end",
+              "seq": 1,
+              "time": 2,
+              "data": {
+                "turn": 1
+              }
+            },
+            {
+              "type": "turn/start",
+              "seq": 2,
+              "time": 3,
+              "data": {
+                "turn": 2
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/z6/session.lock": "",
+            "_no-cwd/z6/session.v3.jsonl.zstd": "<hex 28b52ffd04589502007285121980b76d80286cb5109591889171b57a1eb4e3462f668a6a104245c23813567d4129d70c7e8eb6eb3182331e7f80a6ed38af825ff315b03939f88c69436ebd60334aa97af5f9cab0460401002a9426801c9d0c28b52ffd0458c901007b2274797065223a227475726e2f7374617274222c22736571223a302c2274696d65223a312c2264617461223a7b227475726e223a317d7d0ab1b0f00a28b52ffd04586d0200d4037b2274797065223a227475726e2f656e64222c22736571223a312c2274696d65223a322c2264617461223a7b223a317d7d0a73746172743233327d7d0a0500000920972b426b250b8fa0ca9b102798>"
+          }
+        },
+        {
+          "step": "close",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/z6/session.lock": "",
+            "_no-cwd/z6/session.v3.jsonl.zstd": "<hex 28b52ffd04589502007285121980b76d80286cb5109591889171b57a1eb4e3462f668a6a104245c23813567d4129d70c7e8eb6eb3182331e7f80a6ed38af825ff315b03939f88c69436ebd60334aa97af5f9cab0460401002a9426801c9d0c28b52ffd0458c901007b2274797065223a227475726e2f7374617274222c22736571223a302c2274696d65223a312c2264617461223a7b227475726e223a317d7d0ab1b0f00a28b52ffd04586d0200d4037b2274797065223a227475726e2f656e64222c22736571223a312c2274696d65223a322c2264617461223a7b223a317d7d0a73746172743233327d7d0a0500000920972b426b250b8fa0ca9b102798>"
+          }
+        }
+      ],
+      "note": "A write open of a Zstd log appends one frame per batch after its frames."
+    },
+    {
+      "id": "zstd-open-torn-frame-rows-recovered",
+      "compression": "zstd",
+      "seed": [
+        {
+          "file": "_no-cwd/z7/session.v3.jsonl.zstd",
+          "hex": "28b52ffd04589502007285121980b76d80286cb5109591889171b57a1e34bc462f668a6a104245c23813567d4129d70c7e8eb6eb3182331e7f80a6ed38af825ff315b03939f88c69436ebd60334aa97af5f9cab0460401002a94266ad62b9828b52ffd0458c901007b2274797065223a227475726e2f7374617274222c22736571223a302c2274696d65223a312c2264617461223a7b227475726e223a317d7d0ab1b0f00a28b52ffd04586d0200d4037b2274797065223a227475726e2f656e64222c22736571223a312c2274696d65223a322c2264617461223a7b223a317d7d0a73746172743233327d7d0a0500000920972b426b250b8fa0ca9b10"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "z7",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/z7/session.lock": "",
+            "_no-cwd/z7/session.v3.jsonl.zstd": "<hex 28b52ffd04589502007285121980b76d80286cb5109591889171b57a1e34bc462f668a6a104245c23813567d4129d70c7e8eb6eb3182331e7f80a6ed38af825ff315b03939f88c69436ebd60334aa97af5f9cab0460401002a94266ad62b9828b52ffd0458c901007b2274797065223a227475726e2f7374617274222c22736571223a302c2274696d65223a312c2264617461223a7b227475726e223a317d7d0ab1b0f00a28b52ffd04586d0200d4037b2274797065223a227475726e2f656e64222c22736571223a312c2274696d65223a322c2264617461223a7b223a317d7d0a73746172743233327d7d0a0500000920972b426b250b8fa0ca9b10>"
+          }
+        },
+        {
+          "step": "flush",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/z7/session.lock": "",
+            "_no-cwd/z7/session.v3.jsonl.zstd": "<hex 28b52ffd04589502007285121980b76d80286cb5109591889171b57a1e34bc462f668a6a104245c23813567d4129d70c7e8eb6eb3182331e7f80a6ed38af825ff315b03939f88c69436ebd60334aa97af5f9cab0460401002a94266ad62b9828b52ffd0458c901007b2274797065223a227475726e2f7374617274222c22736571223a302c2274696d65223a312c2264617461223a7b227475726e223a317d7d0ab1b0f00a28b52ffd04586d0200d4037b2274797065223a227475726e2f656e64222c22736571223a312c2274696d65223a322c2264617461223a7b223a317d7d0a73746172743233327d7d0a0500000920972b426b250b8fa0ca9b10>"
+          }
+        },
+        {
+          "step": "append",
+          "events": [
+            {
+              "type": "turn/end",
+              "seq": 3,
+              "time": 4,
+              "data": {
+                "turn": 2
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/z7/session.lock": "",
+            "_no-cwd/z7/session.v3.jsonl.zstd": "<hex 28b52ffd04589502007285121980b76d80286cb5109591889171b57a1e34bc462f668a6a104245c23813567d4129d70c7e8eb6eb3182331e7f80a6ed38af825ff315b03939f88c69436ebd60334aa97af5f9cab0460401002a94266ad62b9828b52ffd0458c901007b2274797065223a227475726e2f7374617274222c22736571223a302c2274696d65223a312c2264617461223a7b227475726e223a317d7d0ab1b0f00a28b52ffd04586d0200d4037b2274797065223a227475726e2f656e64222c22736571223a312c2274696d65223a322c2264617461223a7b223a317d7d0a73746172743233327d7d0a0500000920972b426b250b8fa0ca9b10279828b52ffd0458b901007b2274797065223a227475726e2f656e64222c22736571223a332c2274696d65223a342c2264617461223a7b227475726e223a327d7d0a98d8480f>"
+          }
+        },
+        {
+          "step": "close",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/z7/session.lock": "",
+            "_no-cwd/z7/session.v3.jsonl.zstd": "<hex 28b52ffd04589502007285121980b76d80286cb5109591889171b57a1e34bc462f668a6a104245c23813567d4129d70c7e8eb6eb3182331e7f80a6ed38af825ff315b03939f88c69436ebd60334aa97af5f9cab0460401002a94266ad62b9828b52ffd0458c901007b2274797065223a227475726e2f7374617274222c22736571223a302c2274696d65223a312c2264617461223a7b227475726e223a317d7d0ab1b0f00a28b52ffd04586d0200d4037b2274797065223a227475726e2f656e64222c22736571223a312c2274696d65223a322c2264617461223a7b223a317d7d0a73746172743233327d7d0a0500000920972b426b250b8fa0ca9b10279828b52ffd0458b901007b2274797065223a227475726e2f656e64222c22736571223a332c2274696d65223a342c2264617461223a7b227475726e223a327d7d0a98d8480f>"
+          }
+        },
+        {
+          "step": "open",
+          "id": "z7",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/z7/session.lock": "",
+            "_no-cwd/z7/session.v3.jsonl.zstd": "<hex 28b52ffd04589502007285121980b76d80286cb5109591889171b57a1e34bc462f668a6a104245c23813567d4129d70c7e8eb6eb3182331e7f80a6ed38af825ff315b03939f88c69436ebd60334aa97af5f9cab0460401002a94266ad62b9828b52ffd0458c901007b2274797065223a227475726e2f7374617274222c22736571223a302c2274696d65223a312c2264617461223a7b227475726e223a317d7d0ab1b0f00a28b52ffd04586d0200d4037b2274797065223a227475726e2f656e64222c22736571223a312c2274696d65223a322c2264617461223a7b223a317d7d0a73746172743233327d7d0a0500000920972b426b250b8fa0ca9b10279828b52ffd0458b901007b2274797065223a227475726e2f656e64222c22736571223a332c2274696d65223a342c2264617461223a7b227475726e223a327d7d0a98d8480f>"
+          }
+        },
+        {
+          "step": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": 4,
+              "time": 5,
+              "data": {
+                "turn": 3
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/z7/session.lock": "",
+            "_no-cwd/z7/session.v3.jsonl.zstd": "<hex 28b52ffd04589502007285121980b76d80286cb5109591889171b57a1e34bc462f668a6a104245c23813567d4129d70c7e8eb6eb3182331e7f80a6ed38af825ff315b03939f88c69436ebd60334aa97af5f9cab0460401002a94266ad62b9828b52ffd0458c901007b2274797065223a227475726e2f7374617274222c22736571223a302c2274696d65223a312c2264617461223a7b227475726e223a317d7d0ab1b0f00a28b52ffd04586d0200d4037b2274797065223a227475726e2f656e64222c22736571223a312c2274696d65223a322c2264617461223a7b223a317d7d0a73746172743233327d7d0a0500000920972b426b250b8fa0ca9b10279828b52ffd0458b901007b2274797065223a227475726e2f656e64222c22736571223a332c2274696d65223a342c2264617461223a7b227475726e223a327d7d0a98d8480f28b52ffd0458c901007b2274797065223a227475726e2f7374617274222c22736571223a342c2274696d65223a352c2264617461223a7b227475726e223a337d7d0aa59c56ca>"
+          }
+        },
+        {
+          "step": "close",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/z7/session.lock": "",
+            "_no-cwd/z7/session.v3.jsonl.zstd": "<hex 28b52ffd04589502007285121980b76d80286cb5109591889171b57a1e34bc462f668a6a104245c23813567d4129d70c7e8eb6eb3182331e7f80a6ed38af825ff315b03939f88c69436ebd60334aa97af5f9cab0460401002a94266ad62b9828b52ffd0458c901007b2274797065223a227475726e2f7374617274222c22736571223a302c2274696d65223a312c2264617461223a7b227475726e223a317d7d0ab1b0f00a28b52ffd04586d0200d4037b2274797065223a227475726e2f656e64222c22736571223a312c2274696d65223a322c2264617461223a7b223a317d7d0a73746172743233327d7d0a0500000920972b426b250b8fa0ca9b10279828b52ffd0458b901007b2274797065223a227475726e2f656e64222c22736571223a332c2274696d65223a342c2264617461223a7b227475726e223a327d7d0a98d8480f28b52ffd0458c901007b2274797065223a227475726e2f7374617274222c22736571223a342c2274696d65223a352c2264617461223a7b227475726e223a337d7d0aa59c56ca>"
+          }
+        }
+      ],
+      "note": "A torn final frame missing its checksum: its complete rows are recovered into the cursor; a flush leaves it; the first append truncates it, writes the recovered rows as one frame, then the batch as another."
+    },
+    {
+      "id": "zstd-open-torn-frame-rows-reencoded",
+      "compression": "zstd",
+      "seed": [
+        {
+          "file": "_no-cwd/zr/session.v3.jsonl.zstd",
+          "hex": "28b52ffd04588d02007245121980b76d80286cb510959188912d38c46568dde8c54c510d4208c4a1380b563d4129d7047e8eb6eb3180331e7f45d3669c17c1aff95a6c5e059f316dc7ad0f6c462955af3e5f11d68601002a9426dfc42dfb28b52ffd0458350300e28513198047e9cdb82a9f0235a146354e213247a1c8c817759272c50267ad0f80317e97c95c54ef1c1ca8922440360365934494c9b316ba9b1b8b810ddd4940ba15b72195ed2aac4224b5f43b0b87de040800c00910b709c62dc104408456847355c5e95265f7f835f628b52ffd0458f50200b286161b706b73f58826a1f5f7068d4e42dd11ebef611726906602d0031601802749043d842045b3e686546f148e588d61ee3da86865a7e89429e1dedbcaa2bf38a4c52885e21ea1e82f4aba3728ba3973cf4b638174dc459ff1483b01005778f3"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "zr",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/zr/session.lock": "",
+            "_no-cwd/zr/session.v3.jsonl.zstd": "<hex 28b52ffd04588d02007245121980b76d80286cb510959188912d38c46568dde8c54c510d4208c4a1380b563d4129d7047e8eb6eb3180331e7f45d3669c17c1aff95a6c5e059f316dc7ad0f6c462955af3e5f11d68601002a9426dfc42dfb28b52ffd0458350300e28513198047e9cdb82a9f0235a146354e213247a1c8c817759272c50267ad0f80317e97c95c54ef1c1ca8922440360365934494c9b316ba9b1b8b810ddd4940ba15b72195ed2aac4224b5f43b0b87de040800c00910b709c62dc104408456847355c5e95265f7f835f628b52ffd0458f50200b286161b706b73f58826a1f5f7068d4e42dd11ebef611726906602d0031601802749043d842045b3e686546f148e588d61ee3da86865a7e89429e1dedbcaa2bf38a4c52885e21ea1e82f4aba3728ba3973cf4b638174dc459ff1483b01005778f3>"
+          }
+        },
+        {
+          "step": "append",
+          "events": [
+            {
+              "type": "turn/end",
+              "seq": 4,
+              "time": 5,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/zr/session.lock": "",
+            "_no-cwd/zr/session.v3.jsonl.zstd": "<hex 28b52ffd04588d02007245121980b76d80286cb510959188912d38c46568dde8c54c510d4208c4a1380b563d4129d7047e8eb6eb3180331e7f45d3669c17c1aff95a6c5e059f316dc7ad0f6c462955af3e5f11d68601002a9426dfc42dfb28b52ffd0458350300e28513198047e9cdb82a9f0235a146354e213247a1c8c817759272c50267ad0f80317e97c95c54ef1c1ca8922440360365934494c9b316ba9b1b8b810ddd4940ba15b72195ed2aac4224b5f43b0b87de040800c00910b709c62dc104408456847355c5e95265f7f835f628b52ffd0458ad0200c245141b606dd20105ea207bb16fa83b28a0073122c349142e1e0d02a0c861800721b0e470635343a63e0a55a8c5e0f62477dab951a2c5d6a5f26e2381149318ca46b8bb28b90deea6b8bd2c0c24a4df7544722700d567a14c28b52ffd0458b901007b2274797065223a227475726e2f656e64222c22736571223a342c2274696d65223a352c2264617461223a7b227475726e223a317d7d0a8f99e20e>"
+          }
+        }
+      ],
+      "note": "A recovered row is rewritten as eventLines encodes the decoded event, not copied: the spaces of its stored spelling are gone and a two-seq sourceEventSeqs range is written as its seqs."
+    },
+    {
+      "id": "zstd-open-torn-frame-nothing-recovered",
+      "compression": "zstd",
+      "seed": [
+        {
+          "file": "_no-cwd/z8/session.v3.jsonl.zstd",
+          "hex": "28b52ffd04589502007285121980b76d80286cb5109591889171b57a1e7475a615668a6a104245c23813567d4129d70c7e8eb6eb3182331e7f80a6ed38af825ff315b03939f88c69436ebd60334aa97af5f9cab0460401002a94264e8b62dd28b52ffd0458c901007b2274797065223a227475726e2f7374617274222c22736571223a302c2274696d65223a312c2264617461223a7b227475726e223a317d7d0ab1b0f00a28b52f"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "z8",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/z8/session.lock": "",
+            "_no-cwd/z8/session.v3.jsonl.zstd": "<hex 28b52ffd04589502007285121980b76d80286cb5109591889171b57a1e7475a615668a6a104245c23813567d4129d70c7e8eb6eb3182331e7f80a6ed38af825ff315b03939f88c69436ebd60334aa97af5f9cab0460401002a94264e8b62dd28b52ffd0458c901007b2274797065223a227475726e2f7374617274222c22736571223a302c2274696d65223a312c2264617461223a7b227475726e223a317d7d0ab1b0f00a28b52f>"
+          }
+        },
+        {
+          "step": "append",
+          "events": [
+            {
+              "type": "turn/end",
+              "seq": 1,
+              "time": 2,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/z8/session.lock": "",
+            "_no-cwd/z8/session.v3.jsonl.zstd": "<hex 28b52ffd04589502007285121980b76d80286cb5109591889171b57a1e7475a615668a6a104245c23813567d4129d70c7e8eb6eb3182331e7f80a6ed38af825ff315b03939f88c69436ebd60334aa97af5f9cab0460401002a94264e8b62dd28b52ffd0458c901007b2274797065223a227475726e2f7374617274222c22736571223a302c2274696d65223a312c2264617461223a7b227475726e223a317d7d0ab1b0f00a28b52ffd0458b901007b2274797065223a227475726e2f656e64222c22736571223a312c2274696d65223a322c2264617461223a7b227475726e223a317d7d0a3d904bdd>"
+          }
+        }
+      ],
+      "note": "A torn frame holding only its first three bytes recovers nothing: the first append truncates it, writes no recovered frame, and appends the batch."
+    },
+    {
+      "id": "zstd-open-torn-seq-mismatch-keeps-torn-frame",
+      "compression": "zstd",
+      "seed": [
+        {
+          "file": "_no-cwd/z9/session.v3.jsonl.zstd",
+          "hex": "28b52ffd04589502007285121980b76d80286cb5109591889171b57a1e744a4f2f668a6a104245c23813567d4129d70c7e8eb6eb3182331e7f80a6ed38af825ff315b03939f88c69436ebd60334aa97af5f9cab0460401002a9426292be00328b52ffd0458c901007b2274797065223a227475726e2f7374617274222c22736571223a302c2274696d65223a312c2264617461223a7b227475726e223a317d7d0ab1b0f00a28b52ffd04586d0200d4037b2274797065223a227475726e2f656e64222c22736571223a312c2274696d65223a322c2264617461223a7b223a317d7d0a73746172743233327d7d0a0500000920972b426b250b8fa0ca9b10"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "z9",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/z9/session.lock": "",
+            "_no-cwd/z9/session.v3.jsonl.zstd": "<hex 28b52ffd04589502007285121980b76d80286cb5109591889171b57a1e744a4f2f668a6a104245c23813567d4129d70c7e8eb6eb3182331e7f80a6ed38af825ff315b03939f88c69436ebd60334aa97af5f9cab0460401002a9426292be00328b52ffd0458c901007b2274797065223a227475726e2f7374617274222c22736571223a302c2274696d65223a312c2264617461223a7b227475726e223a317d7d0ab1b0f00a28b52ffd04586d0200d4037b2274797065223a227475726e2f656e64222c22736571223a312c2274696d65223a322c2264617461223a7b223a317d7d0a73746172743233327d7d0a0500000920972b426b250b8fa0ca9b10>"
+          }
+        },
+        {
+          "step": "append",
+          "events": [
+            {
+              "type": "turn/end",
+              "seq": 1,
+              "time": 2,
+              "data": {
+                "turn": 1
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "thrown",
+            "class": "Error",
+            "message": "append seq mismatch for \"z9\": expected 3 at index 0, got 1"
+          },
+          "tree": {
+            "_no-cwd/z9/session.lock": "",
+            "_no-cwd/z9/session.v3.jsonl.zstd": "<hex 28b52ffd04589502007285121980b76d80286cb5109591889171b57a1e744a4f2f668a6a104245c23813567d4129d70c7e8eb6eb3182331e7f80a6ed38af825ff315b03939f88c69436ebd60334aa97af5f9cab0460401002a9426292be00328b52ffd0458c901007b2274797065223a227475726e2f7374617274222c22736571223a302c2274696d65223a312c2264617461223a7b227475726e223a317d7d0ab1b0f00a28b52ffd04586d0200d4037b2274797065223a227475726e2f656e64222c22736571223a312c2274696d65223a322c2264617461223a7b223a317d7d0a73746172743233327d7d0a0500000920972b426b250b8fa0ca9b10>"
+          }
+        },
+        {
+          "step": "append",
+          "events": [
+            {
+              "type": "turn/end",
+              "seq": 3,
+              "time": 4,
+              "data": {
+                "turn": 2
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/z9/session.lock": "",
+            "_no-cwd/z9/session.v3.jsonl.zstd": "<hex 28b52ffd04589502007285121980b76d80286cb5109591889171b57a1e744a4f2f668a6a104245c23813567d4129d70c7e8eb6eb3182331e7f80a6ed38af825ff315b03939f88c69436ebd60334aa97af5f9cab0460401002a9426292be00328b52ffd0458c901007b2274797065223a227475726e2f7374617274222c22736571223a302c2274696d65223a312c2264617461223a7b227475726e223a317d7d0ab1b0f00a28b52ffd04586d0200d4037b2274797065223a227475726e2f656e64222c22736571223a312c2274696d65223a322c2264617461223a7b223a317d7d0a73746172743233327d7d0a0500000920972b426b250b8fa0ca9b10279828b52ffd0458b901007b2274797065223a227475726e2f656e64222c22736571223a332c2274696d65223a342c2264617461223a7b227475726e223a327d7d0a98d8480f>"
+          }
+        }
+      ],
+      "note": "The contiguity check counts the recovered rows and runs before the repair, so a refused batch leaves the torn frame."
+    },
+    {
+      "id": "zstd-open-torn-encode-refusal-repairs",
+      "compression": "zstd",
+      "seed": [
+        {
+          "file": "_no-cwd/za/session.v3.jsonl.zstd",
+          "hex": "28b52ffd04588502007205121890296d8033dc89210480007dfe69a4516b690c37339645b8c6e2301b163d604eee155e8eae6b3982198fbf40d385981780df7b1ab87c099b315d89a51f5c362755af361f21d68a01002a942644c109c428b52ffd0458c901007b2274797065223a227475726e2f7374617274222c22736571223a302c2274696d65223a312c2264617461223a7b227475726e223a317d7d0ab1b0f00a28b52ffd04586d0200d4037b2274797065223a227475726e2f656e64222c22736571223a312c2274696d65223a322c2264617461223a7b223a317d7d0a73746172743233327d7d0a0500000920972b426b250b8fa0ca9b10"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "za",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/za/session.lock": "",
+            "_no-cwd/za/session.v3.jsonl.zstd": "<hex 28b52ffd04588502007205121890296d8033dc89210480007dfe69a4516b690c37339645b8c6e2301b163d604eee155e8eae6b3982198fbf40d385981780df7b1ab87c099b315d89a51f5c362755af361f21d68a01002a942644c109c428b52ffd0458c901007b2274797065223a227475726e2f7374617274222c22736571223a302c2274696d65223a312c2264617461223a7b227475726e223a317d7d0ab1b0f00a28b52ffd04586d0200d4037b2274797065223a227475726e2f656e64222c22736571223a312c2274696d65223a322c2264617461223a7b223a317d7d0a73746172743233327d7d0a0500000920972b426b250b8fa0ca9b10>"
+          }
+        },
+        {
+          "step": "append",
+          "events": [
+            {
+              "type": "turn/end",
+              "seq": 3,
+              "time": 4,
+              "data": {
+                "turn": 2
+              },
+              "extra": 1
+            }
+          ],
+          "ts": {
+            "outcome": "thrown",
+            "class": "SessionFormatError",
+            "message": "format v3 turn/end at seq 3 has unexpected field extra"
+          },
+          "tree": {
+            "_no-cwd/za/session.lock": "",
+            "_no-cwd/za/session.v3.jsonl.zstd": "<hex 28b52ffd04588502007205121890296d8033dc89210480007dfe69a4516b690c37339645b8c6e2301b163d604eee155e8eae6b3982198fbf40d385981780df7b1ab87c099b315d89a51f5c362755af361f21d68a01002a942644c109c428b52ffd0458c901007b2274797065223a227475726e2f7374617274222c22736571223a302c2274696d65223a312c2264617461223a7b227475726e223a317d7d0ab1b0f00a28b52ffd04586d0200d4037b2274797065223a227475726e2f656e64222c22736571223a312c2274696d65223a322c2264617461223a7b223a317d7d0a73746172743233327d7d0a0500000920972b426b250b8fa0ca9b102798>"
+          }
+        },
+        {
+          "step": "append",
+          "events": [
+            {
+              "type": "turn/end",
+              "seq": 3,
+              "time": 4,
+              "data": {
+                "turn": 2
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/za/session.lock": "",
+            "_no-cwd/za/session.v3.jsonl.zstd": "<hex 28b52ffd04588502007205121890296d8033dc89210480007dfe69a4516b690c37339645b8c6e2301b163d604eee155e8eae6b3982198fbf40d385981780df7b1ab87c099b315d89a51f5c362755af361f21d68a01002a942644c109c428b52ffd0458c901007b2274797065223a227475726e2f7374617274222c22736571223a302c2274696d65223a312c2264617461223a7b227475726e223a317d7d0ab1b0f00a28b52ffd04586d0200d4037b2274797065223a227475726e2f656e64222c22736571223a312c2274696d65223a322c2264617461223a7b223a317d7d0a73746172743233327d7d0a0500000920972b426b250b8fa0ca9b10279828b52ffd0458b901007b2274797065223a227475726e2f656e64222c22736571223a332c2274696d65223a342c2264617461223a7b227475726e223a327d7d0a98d8480f>"
+          }
+        }
+      ],
+      "note": "A batch refused while it is encoded still lands the truncation and the recovered rows' frame, which come first."
+    },
+    {
+      "id": "zstd-open-corrupt-checksum",
+      "compression": "zstd",
+      "seed": [
+        {
+          "file": "_no-cwd/c1/session.v3.jsonl.zstd",
+          "hex": "28b52ffd04588502007205121890a76d985f56071100f9ff997264bd8c53630c1a6359040e45c23817563d80526e21fc1c6dd75306673cfe024d1b392f00bfe5cbd84c8ccf98b6e3d60d36a394aa579faf0e6b4401002a94265e993d9628b52ffd0458c901007b2274797065223a227475726e2f7374617274222c22736571223a302c2274696d65223a312c2264617461223a7b227475726e223a317d7d0ab1b0f0f5"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "c1",
+          "src": "_no-cwd/c1/session.v3.jsonl.zstd",
+          "ts": {
+            "outcome": "thrown",
+            "class": "SessionPersistenceCorruptionError",
+            "message": "session \"c1\": stored log is corrupt: Error: corrupt Zstandard session log: frame at byte 93 failed validation (raw log: {src})"
+          },
+          "tree": {
+            "_no-cwd/c1/session.lock": "",
+            "_no-cwd/c1/session.v3.jsonl.zstd": "<hex 28b52ffd04588502007205121890a76d985f56071100f9ff997264bd8c53630c1a6359040e45c23817563d80526e21fc1c6dd75306673cfe024d1b392f00bfe5cbd84c8ccf98b6e3d60d36a394aa579faf0e6b4401002a94265e993d9628b52ffd0458c901007b2274797065223a227475726e2f7374617274222c22736571223a302c2274696d65223a312c2264617461223a7b227475726e223a317d7d0ab1b0f0f5>"
+          }
+        }
+      ],
+      "note": "A complete frame whose checksum fails is corruption, refused with the frame's offset and the log path; no lock file is written before the read, but the lease is taken first."
+    },
+    {
+      "id": "zstd-open-complete-frame-ends-inside-record",
+      "compression": "zstd",
+      "seed": [
+        {
+          "file": "_no-cwd/c2/session.v3.jsonl.zstd",
+          "hex": "28b52ffd04589502007285121990a76d985f56071100f9ff997264bd8cd3602d03e67ab6850345c23817563d80526e21fc1c6dd75306673cfe024ddb715e007ecb97b119313e63da925b37d88c52aa5e7dbe3aac110101002a9426ba2c946a28b52ffd0458e100007b2274797065223a227475726e2f7374617274222c22736571223a30083f9b3b"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "c2",
+          "src": "_no-cwd/c2/session.v3.jsonl.zstd",
+          "ts": {
+            "outcome": "thrown",
+            "class": "SessionPersistenceCorruptionError",
+            "message": "session \"c2\": stored log is corrupt: Error: corrupt Zstandard session log: complete frame contains a torn JSONL record (raw log: {src})"
+          },
+          "tree": {
+            "_no-cwd/c2/session.lock": "",
+            "_no-cwd/c2/session.v3.jsonl.zstd": "<hex 28b52ffd04589502007285121990a76d985f56071100f9ff997264bd8cd3602d03e67ab6850345c23817563d80526e21fc1c6dd75306673cfe024ddb715e007ecb97b119313e63da925b37d88c52aa5e7dbe3aac110101002a9426ba2c946a28b52ffd0458e100007b2274797065223a227475726e2f7374617274222c22736571223a30083f9b3b>"
+          }
+        }
+      ],
+      "note": "Complete frames must end on a record boundary."
+    },
+    {
+      "id": "zstd-open-header-frame-two-records",
+      "compression": "zstd",
+      "seed": [
+        {
+          "file": "_no-cwd/c3/session.v3.jsonl.zstd",
+          "hex": "28b52ffd04587d0300d2c7171980396dddc3974bd84ad705e8739b521e71329adb8b2e4c03eac6f32066c77c7bf843aeeb3023ae2e6fba55004a89359ec36cd8e602c4e45ee1cbd1755d8e60c6e33fd07421e60de0f79e149713c5664c5762e90a971193aa579bdf2cd64e040049c5f4c41dc1172aea559a7f0e00bb"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "c3",
+          "src": "_no-cwd/c3/session.v3.jsonl.zstd",
+          "ts": {
+            "outcome": "thrown",
+            "class": "SessionPersistenceCorruptionError",
+            "message": "session \"c3\": stored log is corrupt: Error: corrupt Zstandard session log: first frame is not exactly one header line (raw log: {src})"
+          },
+          "tree": {
+            "_no-cwd/c3/session.lock": "",
+            "_no-cwd/c3/session.v3.jsonl.zstd": "<hex 28b52ffd04587d0300d2c7171980396dddc3974bd84ad705e8739b521e71329adb8b2e4c03eac6f32066c77c7bf843aeeb3023ae2e6fba55004a89359ec36cd8e602c4e45ee1cbd1755d8e60c6e33fd07421e60de0f79e149713c5664c5762e90a971193aa579bdf2cd64e040049c5f4c41dc1172aea559a7f0e00bb>"
+          }
+        }
+      ],
+      "note": "The first frame must hold exactly the header line."
+    },
+    {
+      "id": "zstd-open-plain-bytes-under-zstd-name",
+      "compression": "zstd",
+      "seed": [
+        {
+          "file": "_no-cwd/c4/session.v3.jsonl.zstd",
+          "text": "{\"type\":\"session\",\"version\":3,\"id\":\"c4\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "c4",
+          "src": "_no-cwd/c4/session.v3.jsonl.zstd",
+          "ts": {
+            "outcome": "thrown",
+            "class": "SessionPersistenceCorruptionError",
+            "message": "session \"c4\": stored log is corrupt: Error: corrupt Zstandard session log: invalid frame magic at byte 0 (raw log: {src})"
+          },
+          "tree": {
+            "_no-cwd/c4/session.lock": "",
+            "_no-cwd/c4/session.v3.jsonl.zstd": "{\"type\":\"session\",\"version\":3,\"id\":\"c4\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}\n"
+          }
+        }
+      ],
+      "note": "Plain JSONL under the Zstd name fails the frame magic check."
+    },
+    {
+      "id": "zstd-create-over-existing-log",
+      "compression": "zstd",
+      "seed": [
+        {
+          "file": "_no-cwd/z6/session.v3.jsonl.zstd",
+          "hex": "28b52ffd04589502007285121980b76d80286cb5109591889171b57a1eb4e3462f668a6a104245c23813567d4129d70c7e8eb6eb3182331e7f80a6ed38af825ff315b03939f88c69436ebd60334aa97af5f9cab0460401002a9426801c9d0c"
+        }
+      ],
+      "steps": [
+        {
+          "step": "create",
+          "header": {
+            "version": 3,
+            "id": "z6",
+            "createdAt": 1,
+            "isSeeded": false,
+            "delegationDepth": 0
+          },
+          "ts": {
+            "outcome": "thrown",
+            "class": "SessionAlreadyExistsError",
+            "message": "session \"z6\" already exists"
+          },
+          "tree": {
+            "_no-cwd/z6/session.v3.jsonl.zstd": "<hex 28b52ffd04589502007285121980b76d80286cb5109591889171b57a1eb4e3462f668a6a104245c23813567d4129d70c7e8eb6eb3182331e7f80a6ed38af825ff315b03939f88c69436ebd60334aa97af5f9cab0460401002a9426801c9d0c>"
+          }
+        }
+      ],
+      "note": "A Zstd generation of the id refuses create."
+    },
+    {
+      "id": "zstd-migrate-v0-packed-run",
+      "compression": "zstd",
+      "seed": [
+        {
+          "file": "_no-cwd/hist/session.jsonl.zstd",
+          "hex": "28b52ffd04583d0200b2c40f1690b56d28ff57071130f2210d669ca3105690b99e3b8241e0d067d50994728bf1e3c67677027a07f32d5f85cdab798c36693b5c476c462955af465f256b4001002a942629231fd728b52ffd045885050032c91c1c70a56a03c80a5ad2b2efcf19c4a6fbff67f568132d89b43c4045200e436beda9adccd338c8f1b9caf209bf0e33850a4541c8d5e30ec3fcaec90d3cdfb10c7ca7a4b9ca6fa008bce265a30409b4a47dc47ab479686de1273c6b96bfa5d4c26ba3f44fe101947f6f88350b168afa787d02fa5318002009300716377b81111cdc5000980791c9ed7571362b15126f76770945c0bc830966b0910b3638123aaa6a0f4c06620124f94a4bb0564101d628f1f3"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "hist",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/hist/session.jsonl.zstd": "<hex 28b52ffd04583d0200b2c40f1690b56d28ff57071130f2210d669ca3105690b99e3b8241e0d067d50994728bf1e3c67677027a07f32d5f85cdab798c36693b5c476c462955af465f256b4001002a942629231fd728b52ffd045885050032c91c1c70a56a03c80a5ad2b2efcf19c4a6fbff67f568132d89b43c4045200e436beda9adccd338c8f1b9caf209bf0e33850a4541c8d5e30ec3fcaec90d3cdfb10c7ca7a4b9ca6fa008bce265a30409b4a47dc47ab479686de1273c6b96bfa5d4c26ba3f44fe101947f6f88350b168afa787d02fa5318002009300716377b81111cdc5000980791c9ed7571362b15126f76770945c0bc830966b0910b3638123aaa6a0f4c06620124f94a4bb0564101d628f1f3>",
+            "_no-cwd/hist/session.lock": "",
+            "_no-cwd/hist/session.v3.jsonl.zstd": "<hex 28b52ffd04589d0200c2c5121880a96dd8c8b25d531929fafce0eab98df58c187392422a04c6c2ce65d30707e592c3cdd17535c470c6e34fd0749919e0bc02fc921f059757b3f88ce90adc7184cb07a5ead5e7a7c45a1101002a94260da312a728b52ffd0458350b009656432140699d037123fb12db623d643ab464022a6d5d2e2644abecfb7b98df19c3d6352637003e0038006d2007cfabf3455e21c81638e6850e689b1314c2e03603c4c8f28bbc6ba7576c2d965fc8e9ab953758be7a4baef978d2d4cf2f4ce82f02f96da429e2ab3fbf4f245dbd5184639696ac2b28c3ac15608bb2e822b0e84a100aa2300d5196856009e302160b28a8266d6156b31a6b4d591ac368074614ed8e7eaed96176d7b710bae721c1360e214d7c15e3c190efb7fda2e62abe21144930c17a38ce50ec32dcd581a7fa730aa6073eafcf517c110031c6ebf63e108a9a17b15ba9a02889be3dc4c3a3e7b9fa266ec8b33a3043be1561f539576d9d156f4a3446236c1bf2905ba9396910da0e2420b02209ccc80e8b8c229d8663e648571870d0de44d6d9eb3ed004711219eca27d9ba807a7cbe55432e0bc45e6151a908d468b4462a1242f9447bc61ac3d82cc2298f7c822f43e028cfa75263b1649f2ab25584ba13fabfd06>"
+          }
+        },
+        {
+          "step": "append",
+          "events": [
+            {
+              "type": "turn/start",
+              "seq": 6,
+              "time": 7,
+              "data": {
+                "turn": 2
+              }
+            }
+          ],
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/hist/session.jsonl.zstd": "<hex 28b52ffd04583d0200b2c40f1690b56d28ff57071130f2210d669ca3105690b99e3b8241e0d067d50994728bf1e3c67677027a07f32d5f85cdab798c36693b5c476c462955af465f256b4001002a942629231fd728b52ffd045885050032c91c1c70a56a03c80a5ad2b2efcf19c4a6fbff67f568132d89b43c4045200e436beda9adccd338c8f1b9caf209bf0e33850a4541c8d5e30ec3fcaec90d3cdfb10c7ca7a4b9ca6fa008bce265a30409b4a47dc47ab479686de1273c6b96bfa5d4c26ba3f44fe101947f6f88350b168afa787d02fa5318002009300716377b81111cdc5000980791c9ed7571362b15126f76770945c0bc830966b0910b3638123aaa6a0f4c06620124f94a4bb0564101d628f1f3>",
+            "_no-cwd/hist/session.lock": "",
+            "_no-cwd/hist/session.v3.jsonl.zstd": "<hex 28b52ffd04589d0200c2c5121880a96dd8c8b25d531929fafce0eab98df58c187392422a04c6c2ce65d30707e592c3cdd17535c470c6e34fd0749919e0bc02fc921f059757b3f88ce90adc7184cb07a5ead5e7a7c45a1101002a94260da312a728b52ffd0458350b009656432140699d037123fb12db623d643ab464022a6d5d2e2644abecfb7b98df19c3d6352637003e0038006d2007cfabf3455e21c81638e6850e689b1314c2e03603c4c8f28bbc6ba7576c2d965fc8e9ab953758be7a4baef978d2d4cf2f4ce82f02f96da429e2ab3fbf4f245dbd5184639696ac2b28c3ac15608bb2e822b0e84a100aa2300d5196856009e302160b28a8266d6156b31a6b4d591ac368074614ed8e7eaed96176d7b710bae721c1360e214d7c15e3c190efb7fda2e62abe21144930c17a38ce50ec32dcd581a7fa730aa6073eafcf517c110031c6ebf63e108a9a17b15ba9a02889be3dc4c3a3e7b9fa266ec8b33a3043be1561f539576d9d156f4a3446236c1bf2905ba9396910da0e2420b02209ccc80e8b8c229d8663e648571870d0de44d6d9eb3ed004711219eca27d9ba807a7cbe55432e0bc45e6151a908d468b4462a1242f9447bc61ac3d82cc2298f7c822f43e028cfa75263b1649f2ab25584ba13fabfd0628b52ffd0458c901007b2274797065223a227475726e2f7374617274222c22736571223a362c2274696d65223a372c2264617461223a7b227475726e223a327d7d0ad44ba34f>"
+          }
+        }
+      ],
+      "note": "A Zstd v0 source migrates to session.v3.jsonl.zstd: the migrated header as one frame and every row as one more, the source unchanged."
+    },
+    {
+      "id": "zstd-migrate-v1-packed-run",
+      "compression": "zstd",
+      "seed": [
+        {
+          "file": "_no-cwd/hist/session.v1.jsonl.zstd",
+          "hex": "28b52ffd04584d0200b244101790b56d2847111d44c0c8873498718e421881c6584e0102c2e0d067d50994728bf1e3c6767704bd83f996afc2e6d53c469bb4115c07d88c52aa5e8dbe0aac050101002a9426d17e75a928b52ffd04584d0900961134214089b60d7660fddd46225a3cc9257dc19f6421730520aa0e1a0765f78ca2c39d0b2a002a002800cb416000fab18d096adb5c780fe59fbcb6a623421094df46f511c937968f6fa7cd86e59c7e7e5b42ff096730773cd2e793fa9388803d50e66d0cbdb45931eb72c5f17a25cfb82025dfe9b169a9e30149f2082f02efcd13df9e779b9483b9763c63136b9e4f4b2dfee497710ee3e3f2aed0e7df8f6d25df6b7b31e61885f7ded3f6325ac398c558d709241288b4f6696d6bfa7c2358460d9cc3c7653960a228796e6c41af750cbc172420a04231530fe54691ee860d685623571cc541f6886c8fe7b615f604354f0b6242cf70e4a1c9a8f8429cdd12a035e0794616ef0b6a674ad5e2ed62978a70de41c10c1fb9f0e0483aeaed9d8c584c92af96606d8702e46a8c73"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "hist",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/hist/session.lock": "",
+            "_no-cwd/hist/session.v1.jsonl.zstd": "<hex 28b52ffd04584d0200b244101790b56d2847111d44c0c8873498718e421881c6584e0102c2e0d067d50994728bf1e3c6767704bd83f996afc2e6d53c469bb4115c07d88c52aa5e8dbe0aac050101002a9426d17e75a928b52ffd04584d0900961134214089b60d7660fddd46225a3cc9257dc19f6421730520aa0e1a0765f78ca2c39d0b2a002a002800cb416000fab18d096adb5c780fe59fbcb6a623421094df46f511c937968f6fa7cd86e59c7e7e5b42ff096730773cd2e793fa9388803d50e66d0cbdb45931eb72c5f17a25cfb82025dfe9b169a9e30149f2082f02efcd13df9e779b9483b9763c63136b9e4f4b2dfee497710ee3e3f2aed0e7df8f6d25df6b7b31e61885f7ded3f6325ac398c558d709241288b4f6696d6bfa7c2358460d9cc3c7653960a228796e6c41af750cbc172420a04231530fe54691ee860d685623571cc541f6886c8fe7b615f604354f0b6242cf70e4a1c9a8f8429cdd12a035e0794616ef0b6a674ad5e2ed62978a70de41c10c1fb9f0e0483aeaed9d8c584c92af96606d8702e46a8c73>",
+            "_no-cwd/hist/session.v3.jsonl.zstd": "<hex 28b52ffd04589d0200c2c5121880a96dd8c8b25d531929fafce0eab98df58c187392422a04c6c2ce65d30707e592c3cdd17535c470c6e34fd0749919e0bc02fc921f059757b3f88ce90adc7184cb07a5ead5e7a7c45a1101002a94260da312a728b52ffd0458450c00061846214069ac0371630659aedda780552b0201eeb0b08e3f198c00f6295a234645f97c4d3b003f003b00063b305e1bc7c1f5fb7ca14fc7c1044d4a860a10b74c48c782dc1260cea55fe85bb77d5a4a2d3d434f3f29bd01cba7776c2d0b2e467d3dc384fe22f0fa754fe20b3d37317af2e9d7b3e2c5a737eb3446610837c3328ce280a524ca2a01ca2ac4498e846147a22867214c3ba87530ec224c6154a3d8622c511a23cb3cd3aee98dc0fdd512d6aeb57ca46c5fc710b6ebe10037cd89917c9a7341e8db71bbd73ccd37845e8405720b4f3312cc1232afc035dd3d0491220073ce2f372b20f41af764e378480cc83a5ee672e6e9ed08bd5c1642df8bc0eb9e27a62e132e2a680ca871ec43d774787de47d0e5e844f57f03e282c2090a21132e3012330aa7418366266b257a88383ec1119173d3f15c1f2f95087a09194c67c106ccf8608025f9add4c9db5034b46180548011af20b2d81db866d9863a1f2e8900da6880cb1f0242f9423de72ac3d828c45308fc822fa3e728cca754f662c24c96f2dc1da05054fecbe40>"
+          }
+        }
+      ],
+      "note": "A Zstd v1 source migrates as its plain spelling does."
+    },
+    {
+      "id": "zstd-migrate-v2-seeded",
+      "compression": "zstd",
+      "seed": [
+        {
+          "file": "_no-cwd/v2v3/session.v2.jsonl.zstd",
+          "hex": "28b52ffd04581503005286141980a9e9d8677fdb13a6f40f1257471c6dd458602b9a2aaa219c80c69724aa32693b6e44a6169072d21c9a286e55a8bcb1d826eb6cc7207027019ba6cab02d5890e51bcf869ceab28d94b356d777d32267040400335934c5b988dbac6d1103726f79c728b52ffd0458650300a2861417a0a739ad009242bebd879c50fcef4ed8b29daf3f9c1801c35a76254561f869574cea664fe64960521fd6b24abf1e1f250710f5b89a9b53524ab1ab05e825e54a7096f4d8093868020728d3d9ab8dc27b040900550902e6819801397fc50dec03c38e20ad344538039d47bbfe"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "v2v3",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/v2v3/session.lock": "",
+            "_no-cwd/v2v3/session.v2.jsonl.zstd": "<hex 28b52ffd04581503005286141980a9e9d8677fdb13a6f40f1257471c6dd458602b9a2aaa219c80c69724aa32693b6e44a6169072d21c9a286e55a8bcb1d826eb6cc7207027019ba6cab02d5890e51bcf869ceab28d94b356d777d32267040400335934c5b988dbac6d1103726f79c728b52ffd0458650300a2861417a0a739ad009242bebd879c50fcef4ed8b29daf3f9c1801c35a76254561f869574cea664fe64960521fd6b24abf1e1f250710f5b89a9b53524ab1ab05e825e54a7096f4d8093868020728d3d9ab8dc27b040900550902e6819801397fc50dec03c38e20ad344538039d47bbfe>",
+            "_no-cwd/v2v3/session.v3.jsonl.zstd": "<hex 28b52ffd04580d03005286141980a9e9d8677fdb13a6f40f1257471c6dd4b81629479da4a44e80c6712332b5809493e6d04471ab42e58dc5365967fb924455266dc7207027019ba6cab08d2c82e51bcf869ceab28d94b356d777d32267040400335914381f71ebb42d4dc7c3441c28b52ffd0458bd0800969238215067ac03a83a5a11b2bf289e2242968a21023b11c78e66aae086dea198598c69022c002f0031003d88a27d6abbc76d59f730e521f7d72f3e29a596fb36b29f947bc1f2d3e32e1b71ee311dc9bc7cf7a58b3e140c6159a8e05b25816cad61200ac3698329ee1ee521f7c490353ce66d8e669b178931bacdcb7dd6a7d7eafa9a8f599f778f53220eb92fac8fc34f4f38f5e90ac394d6108581f03dc8926d497b8ac01204014890d5165558de16dab296f81a025b83e8712ea5efee5460e163eac34f514430e0de737b3af0297ad3c6a9f4c0f190cf40ec32dd8d0177e9531a9e040d140022860458942cbb75dc6d8bb780d756824c2802cc83c822ec7d246054751d980cc402c8e42b6e601f18760469a529c219f4e023e9>"
+          }
+        }
+      ],
+      "note": "A seeded Zstd v2 source migrates as its plain spelling does."
+    },
+    {
+      "id": "zstd-migrate-v0-header-only-with-cwd",
+      "compression": "zstd",
+      "seed": [
+        {
+          "file": "--w--/hist/session.jsonl.zstd",
+          "hex": "28b52ffd04588d0200624512198037cd01882dcabeffcfb162c99f09d1365788d3d4418d4a0845a26c24970e1205d320b4d09b6e00dbd71c535505ec145cd328734ce74164fb702a636a984e143ca767bbcb21470401002a94268bfc19a2"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "hist",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "--w--/hist/session.jsonl.zstd": "<hex 28b52ffd04588d0200624512198037cd01882dcabeffcfb162c99f09d1365788d3d4418d4a0845a26c24970e1205d320b4d09b6e00dbd71c535505ec145cd328734ce74164fb702a636a984e143ca767bbcb21470401002a94268bfc19a2>",
+            "--w--/hist/session.lock": "",
+            "--w--/hist/session.v3.jsonl.zstd": "<hex 28b52ffd0458d50200728614198039e9f84678db99b18a8d5fdad5cc818deb29cea20bd3802780c6b191645a50969408d1a477151374b0afd71a305d2b02dba738ae738ec04ec235519be33a3121db97ae81354d5c2b4b422c6e9759e48c01002a9426315b4b5b>"
+          }
+        }
+      ],
+      "note": "A header-only Zstd source publishes a header frame alone."
+    },
+    {
+      "id": "zstd-migrate-torn-source-recovers-rows",
+      "compression": "zstd",
+      "seed": [
+        {
+          "file": "_no-cwd/v2v3/session.v2.jsonl.zstd",
+          "hex": "28b52ffd04581503005286141980a9e9d8677fdb13a6f40f1257471c6dd458602b9a2aaa219c80c69724aa32693b6e44a6169072d21c9a286e55a8bcb1d826eb6cc7207027019ba6cab02d5890e51bcf869ceab28d94b356d777d32267040400335934c5b988dbac6d1103726f79c728b52ffd0458150200a2840f16a0356de4032f97ac195180a0f58f6e30060cfae3c408414a079c3de337cf0b9346e7b2055d66469c6fe4baec9c5c5dc65f05341fcc91aa579f8f04d62800bd172f9f28b52ffd045865020042440e14b0370784dc72090514883f896e9404538fa1f00424f35c3306e115c93c77b9e727a85d29e7e220bc766e81aad6a7730510c9785d44c7bb020600550902e681980199bfd212ac555006c77f"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "v2v3",
+          "ts": {
+            "outcome": "ok"
+          },
+          "tree": {
+            "_no-cwd/v2v3/session.lock": "",
+            "_no-cwd/v2v3/session.v2.jsonl.zstd": "<hex 28b52ffd04581503005286141980a9e9d8677fdb13a6f40f1257471c6dd458602b9a2aaa219c80c69724aa32693b6e44a6169072d21c9a286e55a8bcb1d826eb6cc7207027019ba6cab02d5890e51bcf869ceab28d94b356d777d32267040400335934c5b988dbac6d1103726f79c728b52ffd0458150200a2840f16a0356de4032f97ac195180a0f58f6e30060cfae3c408414a079c3de337cf0b9346e7b2055d66469c6fe4baec9c5c5dc65f05341fcc91aa579f8f04d62800bd172f9f28b52ffd045865020042440e14b0370784dc72090514883f896e9404538fa1f00424f35c3306e115c93c77b9e727a85d29e7e220bc766e81aad6a7730510c9785d44c7bb020600550902e681980199bfd212ac555006c77f>",
+            "_no-cwd/v2v3/session.v3.jsonl.zstd": "<hex 28b52ffd04580d03005286141980a9e9d8677fdb13a6f40f1257471c6dd4b81629479da4a44e80c6712332b5809493e6d04471ab42e58dc5365967fb924455266dc7207027019ba6cab08d2c82e51bcf869ceab28d94b356d777d32267040400335914381f71ebb42d4dc7c3441c28b52ffd0458bd0800969238215067ac03a83a5a11b2bf289e2242968a21023b11c78e66aae086dea198598c69022c002f0031003d88a27d6abbc76d59f730e521f7d72f3e29a596fb36b29f947bc1f2d3e32e1b71ee311dc9bc7cf7a58b3e140c6159a8e05b25816cad61200ac3698329ee1ee521f7c490353ce66d8e669b178931bacdcb7dd6a7d7eafa9a8f599f778f53220eb92fac8fc34f4f38f5e90ac394d6108581f03dc8926d497b8ac01204014890d5165558de16dab296f81a025b83e8712ea5efee5460e163eac34f514430e0de737b3af0297ad3c6a9f4c0f190cf40ec32dd8d0177e9531a9e040d140022860458942cbb75dc6d8bb780d756824c2802cc83c822ec7d246054751d980cc402c8e42b6e601f18760469a529c219f4e023e9>"
+          }
+        }
+      ],
+      "note": "A torn final frame of a v2 source contributes its complete rows to the migration; the source is unchanged."
+    },
+    {
+      "id": "zstd-migrate-corrupt-body-frame",
+      "compression": "zstd",
+      "seed": [
+        {
+          "file": "_no-cwd/v2v3/session.v2.jsonl.zstd",
+          "hex": "28b52ffd04581503005286141980a9e9d8677fdb13a6f40f1257471c6dd458602b9a2aaa219c80c69724aa32693b6e44a6169072d21c9a286e55a8bcb1d826eb6cc7207027019ba6cab02d5890e51bcf869ceab28d94b356d777d32267040400335934c5b988dbac6d1103726f79c728b52ffd0458150200a2840f16a0356de4032f97ac195180a0f58f6e30060cfae3c408414a079c3de337cf0b9346e7b2055d66469c6fe4baec9c5c5dc65f05341fcc91aa579f8f04d62800bd172f6028b52ffd045865020042440e14b0370784dc72090514883f896e9404538fa1f00424f35c3306e115c93c77b9e727a85d29e7e220bc766e81aad6a7730510c9785d44c7bb020600550902e681980199bfd212ac555006c77fe6"
+        }
+      ],
+      "steps": [
+        {
+          "step": "open",
+          "id": "v2v3",
+          "src": "_no-cwd/v2v3/session.v2.jsonl.zstd",
+          "ts": {
+            "outcome": "thrown",
+            "class": "SessionPersistenceCorruptionError",
+            "message": "session \"v2v3\": stored log is corrupt: Error: corrupt Zstandard session log: frame at byte 111 failed validation (raw log: {src})"
+          },
+          "tree": {
+            "_no-cwd/v2v3/session.lock": "",
+            "_no-cwd/v2v3/session.v2.jsonl.zstd": "<hex 28b52ffd04581503005286141980a9e9d8677fdb13a6f40f1257471c6dd458602b9a2aaa219c80c69724aa32693b6e44a6169072d21c9a286e55a8bcb1d826eb6cc7207027019ba6cab02d5890e51bcf869ceab28d94b356d777d32267040400335934c5b988dbac6d1103726f79c728b52ffd0458150200a2840f16a0356de4032f97ac195180a0f58f6e30060cfae3c408414a079c3de337cf0b9346e7b2055d66469c6fe4baec9c5c5dc65f05341fcc91aa579f8f04d62800bd172f6028b52ffd045865020042440e14b0370784dc72090514883f896e9404538fa1f00424f35c3306e115c93c77b9e727a85d29e7e220bc766e81aad6a7730510c9785d44c7bb020600550902e681980199bfd212ac555006c77fe6>"
+          }
+        }
+      ],
+      "note": "A body frame of a v2 source that fails its checksum is corruption, after the rows before it streamed; nothing is published."
     }
   ]
 }

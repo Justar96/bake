@@ -41,7 +41,9 @@ pub const BUDGET: usize = 1 << 24;
 /// Logs per deduplicated position; see the module comment.
 const LOGS_PER_POSITION: usize = 1;
 /// [`Mode::Sample`] runs position 0 and every `SAMPLE_STRIDE`th after it.
-pub const SAMPLE_STRIDE: usize = 4;
+/// Windows hosts sample half as many: Windows CI runs each variant several
+/// times slower, and Linux and macOS CI run the denser sample.
+pub const SAMPLE_STRIDE: usize = if cfg!(windows) { 8 } else { 4 };
 const SHARD_ENV: &str = "BAKE_DEEPENED_SHARD";
 /// The first variant index a resumed shard runs, after a crashed one.
 const FROM_ENV: &str = "BAKE_DEEPENED_FROM";
@@ -491,14 +493,24 @@ fn plain_append_cases(table: &Value, collector: &mut Collector) {
     }
 }
 
-/// `plain-log-file` and `fault` cases: seeded file text, a hard-linked
-/// seed carrying none, and the logs their create and append steps write.
+/// `plain-log-file` and `fault` cases: seeded file text, the plaintext of
+/// seeded Zstd bytes, a hard-linked seed carrying none, and the logs their
+/// create and append steps write.
 fn plain_log_file_cases(table: &Value, collector: &mut Collector) {
     for case in cases(table) {
         let id = case_id(case);
         for seed in case["seed"].as_array().expect("seed") {
             if let Some(file_text) = seed.get("text") {
                 collector.plain_text(&id, &raw(file_text, &id));
+            } else if let Some(bytes) = seed.get("hex") {
+                // Bytes that are not a decodable Zstd log hold no log.
+                match released_zstd_plaintext(&hex(text(bytes, &id)), BUDGET)
+                    .ok()
+                    .and_then(|decoded| String::from_utf8(decoded.plaintext).ok())
+                {
+                    Some(plaintext) => collector.plain_text(&id, &plaintext),
+                    None => collector.referenced += 1,
+                }
             }
         }
         let steps = case["steps"].as_array().expect("steps");
@@ -667,6 +679,10 @@ const TABLES: &[(&str, Coverage)] = &[
         Coverage::Logs(released_row_cases),
     ),
     (
+        "session/migration-publication-cases.json",
+        Coverage::Logs(plain_log_file_cases),
+    ),
+    (
         "session/number-cases.json",
         Coverage::NoLogs("number lexemes and doubles, not Session logs"),
     ),
@@ -737,6 +753,10 @@ const TABLES: &[(&str, Coverage)] = &[
     ),
     ("session/v3-row-cases.json", Coverage::Logs(row_cases)),
     ("session/zstd-cases.json", Coverage::Logs(zstd_cases)),
+    (
+        "session/zstd-frame-cases.json",
+        Coverage::NoLogs("compressor inputs and the frames written for them, not Session logs"),
+    ),
     (
         "runtime/request-derivation-cases.json",
         Coverage::Logs(request_derivation_cases),
