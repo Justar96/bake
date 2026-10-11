@@ -2,15 +2,15 @@
 //!
 //! `bake-coding-agent` ports Pi's `packages/coding-agent` (release v1.1.0,
 //! revision `abe508e1b89912adde45528136c3221eb69acdd7`, MIT; see the crate's
-//! `NOTICE`). It holds Pi's session store, tool-output utilities, and the
-//! headless agent runtime that `bake-rs -p` uses, plus the retained
-//! CLIProxyAPI route. [`session`] reads and writes Pi's session format and
+//! `NOTICE`). It holds Pi's session store, tool-output utilities,
+//! file-mutation ordering, and the headless agent runtime that `bake-rs -p`
+//! uses, plus the retained CLIProxyAPI route. [`session`] reads and writes Pi's session format and
 //! [`home`] places it under the Bake home (D25, D32).
 //!
 //! | Module | Source |
 //! |---|---|
 //! | [`session`] | Pi `src/core/session-manager.ts`, `session-cwd.ts`, `messages.ts`, `src/utils/paths.ts` |
-//! | [`tools`] | Pi `src/core/tools/{truncate,output-accumulator}.ts`, `src/utils/output-files.ts` |
+//! | [`tools`] | Pi `src/core/tools/{truncate,output-accumulator,file-mutation-queue}.ts`, `src/utils/output-files.ts` |
 //! | [`home`] | Bake: `scripts/release/bake`, `packages/util/home-paths` |
 //! | [`agent_session`] | Pi `src/core/agent-session.ts`, `src/core/sdk.ts` |
 //! | [`system_prompt`] | Pi `src/core/system-prompt.ts`, `src/core/resource-loader.ts` (context files) |
