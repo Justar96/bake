@@ -204,7 +204,20 @@ export function scanRepository(): DispatcherViolation[] {
     ...globSync('apps/*/src/**/*.ts', { cwd: root }),
   ]
   if (files.length === 0) throw new Error('verify-no-bare-dispatcher: scanned an empty corpus; the globs no longer match.')
-  return files.flatMap(file => findDispatcherViolations(file, readFileSync(resolve(root, file), 'utf8')))
+  return files.flatMap((file) => {
+    const text = readIfPresent(resolve(root, file))
+    return text === undefined ? [] : findDispatcherViolations(file, text)
+  })
+}
+
+/** A file deleted after the glob listed it, such as another test's temporary file, has nothing to scan. */
+function readIfPresent(path: string): string | undefined {
+  try {
+    return readFileSync(path, 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+    throw error
+  }
 }
 
 function main(): void {

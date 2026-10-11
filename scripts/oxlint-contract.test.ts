@@ -20,6 +20,7 @@ function isUnknownArray(value: unknown): value is unknown[] {
 
 interface LintRun {
   readonly status: number | null
+  readonly signal: NodeJS.Signals | null
   readonly stdout: string
   readonly stderr: string
 }
@@ -38,7 +39,7 @@ function run(args: readonly string[], env: NodeJS.ProcessEnv): Promise<LintRun> 
     child.stdout.setEncoding('utf8').on('data', (chunk: string) => { stdout += chunk })
     child.stderr.setEncoding('utf8').on('data', (chunk: string) => { stderr += chunk })
     child.on('error', reject)
-    child.on('close', status => resolve({ status, stdout, stderr }))
+    child.on('close', (status, signal) => resolve({ status, signal, stdout, stderr }))
   })
 }
 
