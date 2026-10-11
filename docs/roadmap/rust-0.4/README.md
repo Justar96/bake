@@ -94,7 +94,7 @@ The effort bands are relative: **M** is a bounded subsystem; **L** spans multipl
 | 01 | Rust workspace and native eval arm | M | Native test executable and a fake eval arm whose tampering controls fail | In progress: workspace, preview, and [native eval fixture adapter](../../../evals/README.md#native-fixture-adapter); [qualification ledger](ledger/README.md) records partial evidence; the synthetic comparison harness was deleted under [D32](scope-00/support.md#decision-register); a live native arm remains open |
 | 02 | Session types and pure projections | L | Pi's session entry tree and context rebuild ([D32](scope-00/support.md#decision-register)) | In progress |
 | 03 | Persistence, locking, and queries | XL | Pi's session files, crash recovery, writer exclusion ([D32](scope-00/support.md#decision-register)) | In progress |
-| 04 | Host processes and sandbox enforcement | XL | Real denied effects and process-tree quiescence on each OS | Planned |
+| 04 | Host processes and sandbox enforcement | XL | Real denied effects and process-tree quiescence on each OS | In progress: Pi output handling; process ownership and sandbox backends remain open |
 | 05 | Configuration, composition, credentials, and lifetime ownership | XL | Configuration precedence, scoped cleanup, login/storage parity | Planned |
 | 06 | Provider-neutral streaming and failures | L | Stream assembly, cancellation, retry, and usage equivalence | Planned |
 | 07 | Provider protocols and authentication | XL | Wire fixtures and route/auth support matrix | Planned |
@@ -155,13 +155,13 @@ Each scope below specifies implementation, review order, and observable proof. S
 
 ### 04 — Filesystem, processes, and sandbox
 
-**Implement:** path handling, atomic private files, environment scrubbing, process spawning, PTYs, process groups/Windows job ownership, timeout outcomes, cancellation, and platform sandbox adapters. Preserve Linux bubblewrap/Landlock, macOS Seatbelt, and Windows restricted-token/ACL semantics, including partial enforcement reporting and unavailable-backend refusal.
+**Implement:** port Pi's `coding-agent/src/core/exec.ts`, `bash-executor.ts`, `tools/powershell.ts`, `tools/output-accumulator.ts`, `tools/truncate.ts`, `tools/file-mutation-queue.ts`, and their output-file helpers and tests. These own spawning, chunk-safe output, truncation, spill files, and mutation ordering. Add Bake's retained sandbox backends, approval prompts, permission presets, and process-tree ownership ([D24](scope-00/support.md#decision-register)): Linux bubblewrap/Landlock, macOS Seatbelt, and Windows restricted-token/ACL enforcement. Keep private atomic file creation, environment scrubbing, PTYs, process groups or Windows jobs, separate timeout and exit outcomes, and awaited cancellation. Preserve explicit reporting of partial enforcement and refusal when a required backend is unavailable.
 
-**PR order:** filesystem/process ownership → POSIX backends → Windows backend → hostile-operation and teardown integration. Existing native C helpers may remain while independently qualified replacements are evaluated; Rust migration does not require rewriting proven C first.
+**PR order:** output handling and private spill files → mutation ordering and process ownership → POSIX backends → Windows backend → hostile-operation and teardown integration. Existing native C helpers may remain while independently qualified replacements are evaluated.
 
-**Proof:** attempt writes, renames, deletes, symlink/junction escapes, and descendant processes inside and outside permitted roots. Inspect the filesystem and surviving processes. Exercise timeout plus exit 0, output truncation, ignored signals, cancellation during spawn, and repeated shutdown. Never substitute a mocked “denied” result for OS enforcement. Reuse [sandbox scenarios](../../../packages/sandbox/sandbox-local/tests/) and [subprocess scenarios](../../../packages/subprocess/subprocess-local/tests/).
+**Proof:** port Pi's chunk-boundary and truncation regressions and compare output with Pi-generated fixtures. Attempt writes, renames, deletes, symlink/junction escapes, and descendant processes inside and outside permitted roots. Inspect the filesystem and surviving processes. Exercise timeout plus exit 0, ignored signals, cancellation during spawn, and repeated shutdown. Bake's retained restrictions use fixtures derived from the [sandbox scenarios](../../../packages/sandbox/sandbox-local/tests/) and [subprocess scenarios](../../../packages/subprocess/subprocess-local/tests/), with real OS enforcement on each platform. TypeScript Session compatibility is excluded by D32.
 
-**Rollback:** native execution stays opt-in; no silent unsandboxed fallback. A missing platform backend blocks parity for that platform.
+**Rollback:** native execution stays opt-in; no silent unsandboxed fallback. A missing platform backend blocks qualification for that platform.
 
 ### 05 — Composition, settings, credentials, and lifecycle
 
@@ -315,6 +315,8 @@ During coexistence, run the current Bake gates for affected TypeScript paths and
 - The 0.3 maintenance owner, support window, fix-forward procedure, and post-cutover release rules are published.
 
 ## Dev Note
+
+**Scope 04 output handling (2026-10-11).** Re-checked Pi's latest official release: v1.1.0, `abe508e1b89912adde45528136c3221eb69acdd7`. `bake-coding-agent::tools` ports `src/core/tools/{truncate,output-accumulator}.ts` and `src/utils/output-files.ts`, with Pi's MIT notice, the output cases from `test/{tools,mcp-extension}.test.ts`, and fixtures generated by that revision. The Rust API uses synchronous writes and closes the spill file on finish; an I/O failure prevents reporting complete output. Bake's private-directory rule adds a 0700 directory around the exclusive 0600 file on Unix; Windows inherits the parent ACL. The checks own pure output semantics, UTF-8 chunk boundaries, spill contents, and failure handling; no concurrent task or system model changes. Process spawning, mutation ordering, sandbox enforcement, Windows ACL qualification, and binary integration remain open. This slice adds no TypeScript migration and does not close scope 04.
 
 **No TypeScript user migration (2026-10-10, [D32](scope-00/support.md#decision-register)).** 0.4 is a new binary that users install; it neither migrates nor interoperates with a 0.3 TypeScript install. It writes Pi's session format and keeps three Bake contracts: the CLIProxyAPI route, the sandbox and permissions, and the `~/.bake` home with its existing settings and credentials. The Bake Session readers, migrations, writer, `bake-rs session` diagnostics, and TypeScript conformance harnesses are removed, and scopes 02 and 03 port Pi's session manager instead ([plan](pi-first-plan.md#scope-plan)).
 

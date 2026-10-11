@@ -9,7 +9,10 @@ Ported: the session manager (src/core/session-manager.ts), the session
 working-directory checks (src/core/session-cwd.ts), the coding-agent message
 types and converters (src/core/messages.ts), the path helpers the session
 manager uses (src/utils/paths.ts), Pi's UUIDv7 generator
-(packages/ai/src/utils/uuid.ts), and the session-manager tests under test/.
+(packages/ai/src/utils/uuid.ts), and the session-manager tests under test/;
+tool-output truncation and accumulation (src/core/tools/truncate.ts, output-accumulator.ts), exclusive
+output files (src/utils/output-files.ts), and the output cases of
+test/tools.test.ts and test/mcp-extension.test.ts.
 --------------------------------------------------------------------------------
 MIT License
 
