@@ -11,11 +11,17 @@
 //! without Pi's colors, except Pi's bare `No session found matching`
 //! line, and every failure exits with code 1, as in Pi.
 //!
+//! Bake composes its permission layer (D24, [`crate::permissions`]) here:
+//! the session's permission is settled and stored in its session file
+//! before the agent starts, `bash`, `write`, and `edit` are wrapped by the
+//! permission engine over [`CliEnvironment::sandbox_provider`], approvals
+//! fail closed (no one can answer in print mode), and the permission is
+//! stated in the system prompt's `permissions` section.
+//!
 //! Not ported (deferred): interactive and RPC modes, `@file` arguments,
 //! `--resume`, `--fork`, `--session-id`, `--session-dir`, `--api-key`,
-//! `--models`, resource flags, extension and MCP tools, the `bash` tool,
-//! forking a session found in another project, and the missing-session-cwd
-//! prompt.
+//! `--models`, resource flags, extension and MCP tools, forking a session
+//! found in another project, and the missing-session-cwd prompt.
 
 pub mod args;
 
@@ -24,11 +30,16 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use bake_ai::ApiRegistry;
+use bake_sandbox::SandboxProvider;
 
 use crate::agent_session::{AgentSession, AgentSessionOptions, format_no_models_available_message};
 use crate::home::sessions_dir;
 use crate::model_registry::ModelRegistry;
 use crate::model_registry::resolver::resolve_cli_model;
+use crate::permissions::{
+    NoApprover, PermissionInputs, ToolPermissions, prepare_session_permission, sandbox_file_tools,
+    sandboxed_bash_tool,
+};
 use crate::print_mode::{PrintModeOptions, PrintOutput, SharedWriter, run_print_mode, write_out};
 use crate::session::file::default_session_dir_path;
 use crate::session::paths::{lexical_normalize, normalize_path};
@@ -36,8 +47,7 @@ use crate::session::{NewSessionOptions, SessionManager};
 use crate::settings::Settings;
 use crate::system_prompt::{DocsPaths, SystemPromptOptions, load_project_context_files};
 use crate::tools::index::{
-    NoTools, ToolSelectionOptions, ToolsOptions, create_all_tool_definitions,
-    create_bash_tool_definition, select_tools,
+    NoTools, ToolSelectionOptions, ToolsOptions, create_all_tool_definitions, select_tools,
 };
 use crate::tools::read::ReadToolOptions;
 
@@ -69,6 +79,13 @@ pub struct CliEnvironment {
     /// The default model the 0.3 home saved (D25), used only when
     /// `settings.json` names neither a default provider nor a default model.
     pub imported_default_model: Option<crate::cliproxyapi::DefaultModel>,
+    /// The default permission preset the 0.3 home saved (D25), used only
+    /// when `settings.json` names none.
+    pub imported_default_preset: Option<String>,
+    /// Confines bash under each call's policy (D24): the binary passes
+    /// [`bake_sandbox::default_provider`], which fails every confined call
+    /// closed on a host without a backend.
+    pub sandbox_provider: Arc<dyn SandboxProvider>,
     /// Startup warnings found before [`run`], printed with its own.
     pub warnings: Vec<String>,
     /// Resolves with an exit code when the process should stop, such as on
@@ -83,15 +100,19 @@ pub struct ImportedStartup {
     pub providers: Vec<(String, serde_json::Value, Option<String>)>,
     /// For [`CliEnvironment::imported_default_model`].
     pub default_model: Option<crate::cliproxyapi::DefaultModel>,
+    /// For [`CliEnvironment::imported_default_preset`].
+    pub default_preset: Option<String>,
     /// For [`CliEnvironment::warnings`]; never holds the key.
     pub warnings: Vec<String>,
 }
 
 /// Reads the CLIProxyAPI route, key, and default model from the Bake home
 /// at `home`, read-only, through
-/// [`import_cliproxyapi`](crate::cliproxyapi::import_cliproxyapi). A home
-/// without a route contributes nothing; an unreadable one contributes a
-/// warning, so a `models.json` route still runs.
+/// [`import_cliproxyapi`](crate::cliproxyapi::import_cliproxyapi), and the
+/// default permission preset through
+/// [`import_default_preset`](crate::permissions::import::import_default_preset).
+/// A home without them contributes nothing; an unreadable one contributes
+/// a warning, so a `models.json` route still runs.
 pub fn import_startup(
     home: &std::path::Path,
     env: &dyn Fn(&str) -> Option<std::ffi::OsString>,
@@ -120,6 +141,12 @@ pub fn import_startup(
         Err(error) => startup
             .warnings
             .push(format!("Could not import the CLIProxyAPI route: {error}")),
+    }
+    match crate::permissions::import::import_default_preset(home) {
+        Ok(preset) => startup.default_preset = preset,
+        Err(error) => startup.warnings.push(format!(
+            "Could not import the default permission preset: {error}"
+        )),
     }
     startup
 }
@@ -353,6 +380,8 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
         stderr,
         extra_providers,
         imported_default_model,
+        imported_default_preset,
+        sandbox_provider,
         warnings: startup_warnings,
         interrupt,
     } = environment;
@@ -394,10 +423,24 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
             }
             let session =
                 create_session_manager(&args, &cwd, settings.session_dir.as_deref(), &home);
-            let session = session.map(|session| {
+            let session = session.and_then(|mut session| {
+                // D24: the session's permission is settled, and stored in
+                // its file, before anything can run.
+                let permission = prepare_session_permission(
+                    &mut session,
+                    &PermissionInputs {
+                        settings: settings.permission.as_ref(),
+                        imported_default_preset: imported_default_preset.as_deref(),
+                        preset: args.permission.as_deref(),
+                        sandbox: args.sandbox,
+                        approval: args.approval,
+                    },
+                )
+                .map_err(SessionStartError::Error)?;
+                warnings.extend(permission.warnings.iter().cloned());
                 let (files, context_warnings) = load_project_context_files(session.cwd(), &home);
                 warnings.extend(context_warnings);
-                (session, files)
+                Ok((session, files, permission))
             });
             (settings, registry, warnings, session)
         })
@@ -407,7 +450,7 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
         Ok(loaded) => loaded,
         Err(join) => return error(&stderr, &format!("Startup failed: {join}")),
     };
-    let (session, context_files) = match session {
+    let (session, context_files, permission) = match session {
         Ok(session) => session,
         Err(SessionStartError::Error(message)) => return error(&stderr, &message),
         Err(SessionStartError::Plain(message)) => {
@@ -417,6 +460,11 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
     };
     let session_cwd = session.cwd().to_owned();
     let session_id = session.session_id().to_owned();
+    let tool_permissions = ToolPermissions::new(
+        Arc::new(permission.standing(Path::new(&session_cwd), Some(session_id.clone()))),
+        Arc::new(NoApprover),
+        sandbox_provider,
+    );
     let session_file = session
         .session_file()
         .map(|file| file.to_string_lossy().into_owned());
@@ -513,15 +561,23 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
                 })
             }),
         },
-        bash: Some(create_bash_tool_definition(
+        bash: match sandboxed_bash_tool(
             Path::new(&session_cwd),
             crate::tools::bash::BashToolOptions {
                 context: Some(bash_context),
                 ..Default::default()
             },
-        )),
+            &tool_permissions,
+        ) {
+            Ok(definition) => Some(definition),
+            Err(message) => return error(&stderr, &message),
+        },
     };
-    let definitions = create_all_tool_definitions(Path::new(&session_cwd), &tools_options);
+    let definitions = sandbox_file_tools(
+        create_all_tool_definitions(Path::new(&session_cwd), &tools_options),
+        Path::new(&session_cwd),
+        &tool_permissions,
+    );
     let available: Vec<String> = definitions
         .iter()
         .map(|definition| definition.name().to_owned())
@@ -555,8 +611,11 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
         })
         .collect();
 
-    let mut system_prompt = SystemPromptOptions::new(session_cwd, docs.clone());
+    let mut system_prompt = SystemPromptOptions::new(session_cwd.clone(), docs.clone());
     system_prompt.context_files = context_files;
+    system_prompt
+        .sections
+        .push(permission.prompt_section(Path::new(&session_cwd)));
     let session = match AgentSession::create(AgentSessionOptions {
         session,
         registry: Arc::new(registry),

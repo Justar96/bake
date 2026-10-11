@@ -16,9 +16,10 @@
 //!
 //! - A file larger than [`MAX_EDIT_FILE_BYTES`] is refused before it is
 //!   read; Pi reads files of any size.
-//! - Pi's pluggable `EditOperations` are not ported.
+//! - Pi's pluggable `EditOperations` are not ported; [`execute_guarded`]
+//!   is Bake's seam for the sandbox's containment check.
 
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -27,7 +28,8 @@ use bake_ai::{AbortSignal, ConstrainedSampling, StrictPreference};
 use serde_json::{Map, Value, json};
 
 use crate::tools::definition::{
-    ABORTED, ToolDefinition, boxed, run_blocking, string_arg, text_result,
+    ABORTED, MutationGuard, ToolDefinition, boxed, mutation_target, run_blocking, string_arg,
+    target_error, text_result,
 };
 use crate::tools::edit_diff::{
     Edit, apply_edits_to_normalized_content, detect_line_ending, generate_diff_string,
@@ -152,6 +154,12 @@ pub fn create_edit_tool(cwd: &Path) -> AgentTool {
     create_edit_tool_definition(cwd).tool
 }
 
+/// Pi's `validateEditInput`, as its error text: the check `execute` makes
+/// before it touches the file.
+pub fn validate_edit_input(args: &Value) -> Result<(), String> {
+    edits_of(args).map(|_| ())
+}
+
 /// Pi's `validateEditInput`.
 fn edits_of(args: &Value) -> Result<Vec<Edit>, String> {
     let invalid =
@@ -177,6 +185,19 @@ async fn execute(
     args: Value,
     signal: Option<AbortSignal>,
 ) -> Result<AgentToolResult, String> {
+    execute_guarded(cwd, args, signal, None).await
+}
+
+/// Runs an `edit` call, first passing the target to `guard` inside its
+/// mutation queue, after the first abort check and before the file is
+/// checked or read; the file is then read and written through the target
+/// the guard returns.
+pub async fn execute_guarded(
+    cwd: PathBuf,
+    args: Value,
+    signal: Option<AbortSignal>,
+    guard: Option<MutationGuard>,
+) -> Result<AgentToolResult, String> {
     let edits = edits_of(&args)?;
     let path = string_arg(&args, "path");
     let absolute = resolve_to_cwd(&path, &cwd)?;
@@ -189,7 +210,7 @@ async fn execute(
             }
         };
         let outcome = with_file_mutation_queue(&absolute, || {
-            Ok(edit_file(&absolute, &path, &edits, &check))
+            Ok(edit_file(&absolute, &path, &edits, &check, guard.as_ref()))
         })
         .map_err(|error| node_error::message(&error, "realpath", Some(&absolute)))?;
         let details = outcome?;
@@ -206,8 +227,13 @@ fn edit_file(
     path: &str,
     edits: &[Edit],
     check: &dyn Fn() -> Result<(), String>,
+    guard: Option<&MutationGuard>,
 ) -> Result<Value, String> {
     check()?;
+    // The guard's target carries the read and the write, so the call edits
+    // what the guard checked.
+    let target = mutation_target(guard, absolute)?;
+    let target = target.as_ref();
     if let Err(error) = node_error::access(absolute, true) {
         check()?;
         return Err(format!(
@@ -216,12 +242,13 @@ fn edit_file(
         ));
     }
     check()?;
-    let file = std::fs::File::open(absolute)
-        .map_err(|error| node_error::message(&error, "open", Some(absolute)))?;
+    let file = target
+        .open_read()
+        .map_err(|error| target_error(target, &error, "open", absolute))?;
     let mut bytes = Vec::new();
     file.take(MAX_EDIT_FILE_BYTES + 1)
         .read_to_end(&mut bytes)
-        .map_err(|error| node_error::message(&error, "read", Some(absolute)))?;
+        .map_err(|error| target_error(target, &error, "read", absolute))?;
     if bytes.len() as u64 > MAX_EDIT_FILE_BYTES {
         return Err(format!(
             "Could not edit file: {path}. It is larger than {} MB.",
@@ -242,8 +269,10 @@ fn edit_file(
         "{bom}{}",
         restore_line_endings(&applied.new_content, ending)
     );
-    std::fs::write(absolute, final_content)
-        .map_err(|error| node_error::message(&error, "open", Some(absolute)))?;
+    target
+        .create()
+        .and_then(|mut file| file.write_all(final_content.as_bytes()))
+        .map_err(|error| target_error(target, &error, "open", absolute))?;
     check()?;
     let diff = generate_diff_string(&applied.base_content, &applied.new_content);
     let patch = generate_unified_patch(path, &applied.base_content, &applied.new_content);

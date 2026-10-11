@@ -5,7 +5,8 @@
 //! the settings a session uses: the default provider, model, and thinking
 //! level, per-model thinking levels, the queue modes, the session
 //! directory, `blockImages`, `images.autoResize`, `defaultTools`, `compaction`
-//! (with per-model overrides), `branchSummary.reserveTokens`, and `retry`. Pi reads `~/.pi/agent/settings.json` and
+//! (with per-model overrides), `branchSummary.reserveTokens`, and `retry`,
+//! and Bake's own `permission` section ([`crate::permissions`]). Pi reads `~/.pi/agent/settings.json` and
 //! merges a project's `.pi/settings.json` over it; Bake reads
 //! `$BAKE_HOME/settings.json` only. Bake 0.3's `settings.yaml` beside it is
 //! a different file, which this module does not read (D25).
@@ -70,6 +71,9 @@ pub struct Settings {
     pub branch_summary_reserve_tokens: u64,
     /// `retry`.
     pub retry: RetrySettings,
+    /// `permission` as stored (`presets` and `defaultPreset`), read by
+    /// [`crate::permissions`]. Bake's own section, not Pi's.
+    pub permission: Option<Value>,
     /// Load errors, as Pi's settings diagnostics word them.
     pub warnings: Vec<String>,
 }
@@ -90,6 +94,7 @@ impl Default for Settings {
             compaction: None,
             branch_summary_reserve_tokens: DEFAULT_BRANCH_SUMMARY_RESERVE_TOKENS,
             retry: RetrySettings::default(),
+            permission: None,
             warnings: Vec::new(),
         }
     }
@@ -261,6 +266,7 @@ impl Settings {
                 .and_then(Value::as_u64)
                 .unwrap_or(DEFAULT_BRANCH_SUMMARY_RESERVE_TOKENS),
             retry: RetrySettings::from_value(object.get("retry")),
+            permission: object.get("permission").cloned(),
             warnings: Vec::new(),
         }
     }

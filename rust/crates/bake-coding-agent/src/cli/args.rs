@@ -3,10 +3,17 @@
 //! mode needs. Pi's other flags are not recognized: a long one becomes an
 //! unknown flag (Pi's extension flags), which the caller reports as Pi does
 //! when no extension registers it, and a short one is an error.
+//!
+//! Bake adds `--permission <preset>`, `--sandbox <mode>`, and
+//! `--approval <policy>`, which select the session's permission (D24) the
+//! way Pi's `--thinking` selects its thinking level.
 
 use bake_ai::ModelThinkingLevel;
 
+use bake_sandbox::SandboxMode;
+
 use crate::model_registry::resolver::parse_thinking_level;
+use crate::permissions::ApprovalPolicy;
 
 /// Pi's `--mode` values that `bake-rs` runs; `rpc` is not ported.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,6 +83,12 @@ pub struct Args {
     pub no_tools: bool,
     /// `--no-builtin-tools`, `-nbt`.
     pub no_builtin_tools: bool,
+    /// Bake's `--permission`: the preset to select.
+    pub permission: Option<String>,
+    /// Bake's `--sandbox`: the sandbox mode to set.
+    pub sandbox: Option<SandboxMode>,
+    /// Bake's `--approval`: the approval policy to set.
+    pub approval: Option<ApprovalPolicy>,
     /// Positional prompts.
     pub messages: Vec<String>,
     /// `@file` arguments.
@@ -176,6 +189,30 @@ pub fn parse_args(args: &[String]) -> Args {
                             "Invalid thinking level \"{level}\". Valid values: {VALID_THINKING_LEVELS}"
                         ),
                     }),
+                }
+            }
+            "--permission" if next.is_some() => {
+                result.permission = next.map(str::to_owned);
+                i += 1;
+            }
+            "--sandbox" if next.is_some() => {
+                let mode = next.unwrap_or_default();
+                i += 1;
+                match mode.parse::<SandboxMode>() {
+                    Ok(mode) => result.sandbox = Some(mode),
+                    Err(_) => result.diagnostics.push(Diagnostic::error(format!(
+                        "Invalid sandbox mode \"{mode}\". Valid values: read-only, workspace-write, danger-full-access"
+                    ))),
+                }
+            }
+            "--approval" if next.is_some() => {
+                let policy = next.unwrap_or_default();
+                i += 1;
+                match policy.parse::<ApprovalPolicy>() {
+                    Ok(policy) => result.approval = Some(policy),
+                    Err(_) => result.diagnostics.push(Diagnostic::error(format!(
+                        "Invalid approval policy \"{policy}\". Valid values: ask, never"
+                    ))),
                 }
             }
             "--print" | "-p" => {
@@ -338,6 +375,36 @@ mod tests {
         assert_eq!(
             parse(&["--tools", "-bash"]).tools,
             Some(vec!["-bash".into()])
+        );
+    }
+
+    // Bake's permission flags.
+    #[test]
+    fn permission_flags() {
+        let args = parse(&[
+            "--permission",
+            "danger-full-access",
+            "--sandbox",
+            "read-only",
+            "--approval",
+            "never",
+        ]);
+        assert_eq!(args.permission.as_deref(), Some("danger-full-access"));
+        assert_eq!(args.sandbox, Some(SandboxMode::ReadOnly));
+        assert_eq!(args.approval, Some(ApprovalPolicy::Never));
+        assert!(args.diagnostics.is_empty());
+        assert_eq!(
+            parse(&["--sandbox", "root", "--approval", "always"]).diagnostics,
+            [
+                Diagnostic::error(
+                    "Invalid sandbox mode \"root\". Valid values: read-only, workspace-write, danger-full-access"
+                ),
+                Diagnostic::error("Invalid approval policy \"always\". Valid values: ask, never"),
+            ]
+        );
+        assert_eq!(
+            parse(&["--permission"]).unknown_flags,
+            [("permission".into(), None)]
         );
     }
 

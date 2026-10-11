@@ -253,7 +253,7 @@ fn read_capped(file: &Path) -> Result<Option<Vec<u8>>, ImportError> {
     Ok(Some(bytes))
 }
 
-fn read_yaml(file: &Path) -> Result<Option<Value>, ImportError> {
+pub(crate) fn read_yaml(file: &Path) -> Result<Option<Value>, ImportError> {
     let Some(bytes) = read_capped(file)? else {
         return Ok(None);
     };
