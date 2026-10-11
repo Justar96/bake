@@ -27,6 +27,9 @@ const WEBWORKER_PHYSICAL_SESSION_FIXTURE_ROOT =
 const PYTHON_RUNTIME_PHYSICAL_SESSION_FIXTURE_ROOT =
   'scripts/snapshots/python-sdk-single-exe/'
 
+/** The Rust 0.4 workspace, whose JSONL fixtures are Pi session files rather than Bake Session logs (D32). */
+const PI_FORMAT_FIXTURE_ROOT = 'rust/'
+
 /** One repository session fixture and its canonical projected representation. */
 export interface SessionFixtureLayout {
   /** Repository-relative path with `/` separators. */
@@ -293,7 +296,7 @@ function discoverJsonlFiles(root: string): string[] {
  */
 export function inspectSessionFixtureLayouts(root: string): SessionFixtureLayout[] {
   return discoverJsonlFiles(root).flatMap((path) => {
-    if (isPhysicalSessionFixture(path)) return []
+    if (isPhysicalSessionFixture(path) || path.startsWith(PI_FORMAT_FIXTURE_ROOT)) return []
     const source = readFileSync(resolve(root, path), 'utf8')
     const canonical = canonicalSessionFixture(source, path)
     return canonical === undefined ? [] : [{ path, source, canonical }]
