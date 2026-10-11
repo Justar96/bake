@@ -43,9 +43,9 @@ Options:
   -v, --version             Show the version
 
 Messages are prompts, sent in order; piped standard input is prepended to the
-first. The agent starts with the read, edit, and write tools; grep, find, and
-ls are available through --tools. The bash tool is not available yet, and grep
-and find need rg and fd on PATH. Interactive mode is not available yet:
+first. The agent starts with the read, bash, edit, and write tools; grep, find,
+and ls are available through --tools. Bash runs without a sandbox or
+approvals, and grep and find need rg and fd on PATH. Interactive mode is not available yet:
 bake-rs prints when -p or --mode is given or a standard stream is not a
 terminal.
 

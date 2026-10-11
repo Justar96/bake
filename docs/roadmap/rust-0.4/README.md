@@ -94,11 +94,11 @@ The effort bands are relative: **M** is a bounded subsystem; **L** spans multipl
 | 01 | Rust workspace and native eval arm | M | Native test executable and a fake eval arm whose tampering controls fail | In progress: workspace, preview, and [native eval fixture adapter](../../../evals/README.md#native-fixture-adapter); [qualification ledger](ledger/README.md) records partial evidence; the synthetic comparison harness was deleted under [D32](scope-00/support.md#decision-register); a live native arm remains open |
 | 02 | Session types and pure projections | L | Pi's session entry tree and context rebuild ([D32](scope-00/support.md#decision-register)) | In progress |
 | 03 | Persistence, locking, and queries | XL | Pi's session files, crash recovery, writer exclusion ([D32](scope-00/support.md#decision-register)) | In progress |
-| 04 | Host processes and sandbox enforcement | XL | Real denied effects and process-tree quiescence on each OS | In progress: Pi output handling and mutation ordering; process ownership and sandbox backends remain open |
+| 04 | Host processes and sandbox enforcement | XL | Real denied effects and process-tree quiescence on each OS | In progress: Pi output handling, mutation ordering, and the bash tool's process-tree ownership; sandbox backends and approvals remain open |
 | 05 | Configuration, composition, credentials, and lifetime ownership | XL | Configuration precedence, scoped cleanup, login/storage parity | Planned |
 | 06 | Provider-neutral streaming and failures | L | Stream assembly, cancellation, retry, and usage equivalence | Planned |
 | 07 | Provider protocols and authentication | XL | Wire fixtures and route/auth support matrix | Planned |
-| 08 | Tool dispatch and local coding tools | XL | Exact schemas/results, permission decisions, external file outcomes | In progress: Pi's file tools and tool selection; bash, permissions, and dispatch policy remain |
+| 08 | Tool dispatch and local coding tools | XL | Exact schemas/results, permission decisions, external file outcomes | In progress: Pi's file and bash tools and tool selection; permissions and dispatch policy remain |
 | 09 | Agent loop and headless vertical slice | XL | End-to-end edit/resume/cancel and paired agent-loop record | In progress: `bake-rs -p` runs Pi print mode with tools on the CLIProxyAPI route; the paired eval record remains |
 | 10 | Context, skills, attachments, and compaction | L | Prompt parity, reconstruction after replacement, long-session eval | Planned |
 | 11 | Subagents, goals, background jobs, and schedules | XL | Durable orchestration and race/restart proofs | Planned |
@@ -155,7 +155,7 @@ Each scope below specifies implementation, review order, and observable proof. S
 
 ### 04 — Filesystem, processes, and sandbox
 
-**Implement:** port Pi's `coding-agent/src/core/exec.ts`, `bash-executor.ts`, `tools/powershell.ts`, `tools/output-accumulator.ts`, `tools/truncate.ts`, `tools/file-mutation-queue.ts`, and their output-file helpers and tests. These own spawning, chunk-safe output, truncation, spill files, and mutation ordering. Add Bake's retained sandbox backends, approval prompts, permission presets, and process-tree ownership ([D24](scope-00/support.md#decision-register)): Linux bubblewrap/Landlock, macOS Seatbelt, and Windows restricted-token/ACL enforcement. Keep private atomic file creation, environment scrubbing, PTYs, process groups or Windows jobs, separate timeout and exit outcomes, and awaited cancellation. Preserve explicit reporting of partial enforcement and refusal when a required backend is unavailable.
+**Implement:** port Pi's `coding-agent/src/core/tools/bash.ts` with `utils/shell.ts` and `utils/child-process.ts` (done), `exec.ts`, `bash-executor.ts`, `tools/powershell.ts`, `tools/output-accumulator.ts`, `tools/truncate.ts`, `tools/file-mutation-queue.ts`, and their output-file helpers and tests. These own spawning, chunk-safe output, truncation, spill files, and mutation ordering. Add Bake's retained sandbox backends, approval prompts, permission presets, and process-tree ownership ([D24](scope-00/support.md#decision-register)): Linux bubblewrap/Landlock, macOS Seatbelt, and Windows restricted-token/ACL enforcement. Keep private atomic file creation, environment scrubbing, PTYs, process groups or Windows jobs, separate timeout and exit outcomes, and awaited cancellation. Preserve explicit reporting of partial enforcement and refusal when a required backend is unavailable.
 
 **PR order:** output handling and private spill files → mutation ordering and process ownership → POSIX backends → Windows backend → hostile-operation and teardown integration. Existing native C helpers may remain while independently qualified replacements are evaluated.
 
@@ -315,6 +315,8 @@ During coexistence, run the current Bake gates for affected TypeScript paths and
 - The 0.3 maintenance owner, support window, fix-forward procedure, and post-cutover release rules are published.
 
 ## Dev Note
+
+**Scope 04 bash tool and process ownership (2026-10-11).** `bake-coding-agent::tools::bash` ports Pi v1.1.0's `bash.ts`, its shell resolution and environment from `utils/shell.ts`, and `waitForChildProcess`; its model-visible text matches a fixture Pi's own `createBashTool` records. Each command runs in a new session and process group on Unix and a job object on Windows; abort, timeout, and drop kill the whole tree and wait for it, and no task outlives the call. `BashOperations` is the one execution seam for the scope-04 sandbox and approval policy, not designed here. `bake-rs -p` now runs Pi's default tools, read, bash, edit, and write, without a sandbox or approvals.
 
 **Scope 08 file tools (2026-10-11).** `bake-coding-agent::tools` ports Pi v1.1.0's (`abe508e1`) `read`, `write`, `edit` (with `edit-diff` on jsdiff 8.0.4's line diff), `ls`, `find`, `grep`, `path-utils`, the tool index and selection rules, and the image utilities `read` uses, with the `image` crate in place of Photon. Model-visible text is checked byte for byte against a fixture Pi's own code records. `grep` and `find` spawn `rg` and `fd` from `PATH` without Pi's download. `bake-rs -p` now runs with Pi's built-in tools, selected by `--tools`, `--exclude-tools`, `--no-tools`, `--no-builtin-tools`, and `defaultTools`.
 

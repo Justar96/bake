@@ -36,7 +36,8 @@ use crate::session::{NewSessionOptions, SessionManager};
 use crate::settings::Settings;
 use crate::system_prompt::{DocsPaths, SystemPromptOptions, load_project_context_files};
 use crate::tools::index::{
-    NoTools, ToolSelectionOptions, ToolsOptions, create_all_tool_definitions, select_tools,
+    NoTools, ToolSelectionOptions, ToolsOptions, create_all_tool_definitions,
+    create_bash_tool_definition, select_tools,
 };
 use crate::tools::read::ReadToolOptions;
 
@@ -415,6 +416,10 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
         }
     };
     let session_cwd = session.cwd().to_owned();
+    let session_id = session.session_id().to_owned();
+    let session_file = session
+        .session_file()
+        .map(|file| file.to_string_lossy().into_owned());
 
     // Pi's `buildSessionOptions`.
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
@@ -470,6 +475,30 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
     // Pi's `_buildRuntime` tools and `createAgentSession` tool selection.
     // The read tool asks for the session's model when it runs.
     let session_model: Arc<std::sync::Mutex<Option<bake_ai::Model>>> = Arc::default();
+    // Bash reads the session for its `PI_*` variables when each call starts.
+    let session_thinking: Arc<std::sync::Mutex<Option<String>>> = Arc::default();
+    let bash_context: crate::tools::bash::BashToolContextFn = {
+        let session_model = Arc::clone(&session_model);
+        let session_thinking = Arc::clone(&session_thinking);
+        let session_cwd = PathBuf::from(&session_cwd);
+        Arc::new(move || crate::tools::bash::BashToolContext {
+            cwd: Some(session_cwd.clone()),
+            session_id: session_id.clone(),
+            session_file: session_file.clone(),
+            model: session_model
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_ref()
+                .map(|model| crate::tools::bash::BashModel {
+                    provider: model.provider.clone(),
+                    id: model.id.clone(),
+                }),
+            thinking_level: session_thinking
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone(),
+        })
+    };
     let tools_options = ToolsOptions {
         read: ReadToolOptions {
             auto_resize_images: settings.image_auto_resize(),
@@ -484,7 +513,13 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
                 })
             }),
         },
-        bash: None,
+        bash: Some(create_bash_tool_definition(
+            Path::new(&session_cwd),
+            crate::tools::bash::BashToolOptions {
+                context: Some(bash_context),
+                ..Default::default()
+            },
+        )),
     };
     let definitions = create_all_tool_definitions(Path::new(&session_cwd), &tools_options);
     let available: Vec<String> = definitions
@@ -548,6 +583,10 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
     *session_model
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner) = session.model();
+    *session_thinking
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) =
+        Some(session.thinking_level().as_str().to_owned());
 
     let piped = if stdin_is_terminal {
         Ok(None)

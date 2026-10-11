@@ -6,14 +6,15 @@
 //! `createToolNameMatcher` from `src/core/mcp-servers.ts` (v1.1.0; see the
 //! crate's `NOTICE`).
 //!
-//! Pi's `bash` tool is ported separately: [`ToolsOptions::bash`] is where it
-//! joins. Until it is supplied, every set leaves `bash` out. Pi's
-//! `powershell` tool is not ported.
+//! Pi's `bash` tool lives in [`crate::tools::bash`] and joins through
+//! [`ToolsOptions::bash`] ([`create_bash_tool_definition`]); without it,
+//! every set leaves `bash` out. Pi's `powershell` tool is not ported.
 
 use std::path::Path;
 
 use bake_agent::AgentTool;
 
+use crate::tools::bash::{BashToolOptions, bash_tool_prompt, create_bash_tool};
 use crate::tools::definition::ToolDefinition;
 use crate::tools::edit::create_edit_tool_definition;
 use crate::tools::find::create_find_tool_definition;
@@ -47,6 +48,18 @@ pub struct ToolsOptions {
     /// `createBashToolDefinition(cwd, options.bash)`. The bash port supplies
     /// it; `None` leaves `bash` out of every set.
     pub bash: Option<ToolDefinition>,
+}
+
+/// Pi's `createBashToolDefinition(cwd, options)`: the bash tool with its
+/// prompt snippet, and its guideline unless the session environment is
+/// hidden.
+pub fn create_bash_tool_definition(cwd: &Path, options: BashToolOptions) -> ToolDefinition {
+    let prompt = bash_tool_prompt(&options);
+    ToolDefinition {
+        tool: create_bash_tool(cwd, options),
+        prompt_snippet: prompt.snippet,
+        prompt_guidelines: (!prompt.guidelines.is_empty()).then_some(prompt.guidelines),
+    }
 }
 
 /// Pi's `createToolDefinition`: `None` for `powershell`, for `bash` without

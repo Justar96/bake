@@ -32,7 +32,9 @@ find.ts, grep.ts, path-utils.ts, index.ts, tool-definition-wrapper.ts), the
 tool selection of src/core/settings-manager.ts, sdk.ts, agent-session.ts, and
 mcp-servers.ts, the image helpers (src/utils/mime.ts, exif-orientation.ts,
 image-convert.ts, image-resize-core.ts, image-resize.ts, image-process.ts,
-tool-result-images.ts), and the tests under test/ that the Rust tests name.
+tool-result-images.ts), the bash tool and its process handling
+(src/core/tools/bash.ts, src/utils/shell.ts, src/utils/child-process.ts,
+BASH_UPDATE_THROTTLE_MS from src/core/tools/renderers/bash.ts), and the tests under test/ that the Rust tests name.
 --------------------------------------------------------------------------------
 MIT License
 

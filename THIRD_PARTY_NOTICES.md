@@ -294,6 +294,15 @@ The `read` tool decodes, orients, resizes, and re-encodes images with the `image
 | [`byteorder-lite`](https://github.com/image-rs/byteorder-lite) | 0.1.0 | Unlicense OR MIT |
 | [`quick-error`](https://github.com/tailhook/quick-error) | 2.0.1 | MIT OR Apache-2.0 |
 
+## Rust process ownership (`rust/crates/bake-coding-agent`)
+
+`bake-coding-agent`'s bash tool owns each command's process tree through these crates, which were already in [`rust/Cargo.lock`](rust/Cargo.lock) for Tokio and keep their own licenses.
+
+| Crate | Version | License | Use |
+| --- | --- | --- | --- |
+| [`libc`](https://github.com/rust-lang/libc) | 0.2.190 | MIT OR Apache-2.0 | `setsid` and `kill` on Unix |
+| [`windows-sys`](https://github.com/microsoft/windows-rs) | 0.61.2 | MIT OR Apache-2.0 | job objects on Windows |
+
 ## Adapted designs
 
 Earlier terminal turn header revisions included a Braille port (`GLYPH_PULSE`) of the "Glyph Pulse" loader (`dotm-square-9`) from [dot-matrix](https://dotmatrix.zzzzshawn.cloud) ([source](https://github.com/zzzzshawn/matrix)), copyright (c) 2026 dot-matrix contributors, all rights reserved. That adaptation is covered by the project's custom license, which permits use in commercial and non-commercial products and prohibits, without written permission, publishing or distributing its components as standalone reusable components or as part of another component library, and selling or sublicensing them as a standalone offering. Bake's MIT license does not cover this adaptation; do not extract it into a reusable component or library.

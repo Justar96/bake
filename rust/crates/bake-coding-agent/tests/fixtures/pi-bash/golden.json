@@ -1,0 +1,1591 @@
+{
+	"pi": {
+		"version": "1.1.0",
+		"revision": "abe508e1b89912adde45528136c3221eb69acdd7"
+	},
+	"definition": {
+		"name": "bash",
+		"label": "bash",
+		"description": "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.",
+		"parameters": {
+			"type": "object",
+			"required": [
+				"command"
+			],
+			"properties": {
+				"command": {
+					"type": "string",
+					"description": "Shell command to execute"
+				},
+				"timeout": {
+					"type": "number",
+					"description": "Timeout in seconds (optional, no default timeout)"
+				}
+			}
+		},
+		"outputSchema": {
+			"type": "object",
+			"required": [
+				"output",
+				"truncated",
+				"exit_code",
+				"wall_time_seconds"
+			],
+			"properties": {
+				"output": {
+					"type": "string",
+					"description": "Combined stdout and stderr, possibly truncated"
+				},
+				"truncated": {
+					"type": "boolean"
+				},
+				"full_output_path": {
+					"type": "string",
+					"description": "Full output, when truncated"
+				},
+				"exit_code": {
+					"type": "number"
+				},
+				"wall_time_seconds": {
+					"type": "number"
+				}
+			}
+		},
+		"constrainedSampling": {
+			"type": "json_schema",
+			"strict": "prefer"
+		},
+		"promptSnippet": "Execute bash commands (ls, grep, find, etc.)",
+		"promptGuidelines": [
+			"You can inspect PI_* environment variables for current model and session details."
+		],
+		"promptGuidelinesWithoutSessionEnvironment": null,
+		"contribution": {
+			"snippet": "Execute bash commands (ls, grep, find, etc.)",
+			"guidelines": [
+				"You can inspect PI_* environment variables for current model and session details."
+			]
+		},
+		"parametersJson": "{\"type\":\"object\",\"required\":[\"command\"],\"properties\":{\"command\":{\"type\":\"string\",\"description\":\"Shell command to execute\"},\"timeout\":{\"type\":\"number\",\"description\":\"Timeout in seconds (optional, no default timeout)\"}}}",
+		"outputSchemaJson": "{\"type\":\"object\",\"required\":[\"output\",\"truncated\",\"exit_code\",\"wall_time_seconds\"],\"properties\":{\"output\":{\"type\":\"string\",\"description\":\"Combined stdout and stderr, possibly truncated\"},\"truncated\":{\"type\":\"boolean\"},\"full_output_path\":{\"type\":\"string\",\"description\":\"Full output, when truncated\"},\"exit_code\":{\"type\":\"number\"},\"wall_time_seconds\":{\"type\":\"number\"}}}"
+	},
+	"scenarios": [
+		{
+			"name": "simple",
+			"chunks": [
+				{
+					"text": "test output\n"
+				}
+			],
+			"outcome": {
+				"exitCode": 0
+			},
+			"result": {
+				"content": [
+					{
+						"type": "text",
+						"text": "test output\n"
+					}
+				],
+				"structuredContent": {
+					"output": "test output\n",
+					"truncated": false,
+					"exit_code": 0
+				}
+			},
+			"updates": [
+				{
+					"content": []
+				},
+				{
+					"content": [
+						{
+							"type": "text",
+							"text": "test output\n"
+						}
+					],
+					"details": {}
+				}
+			],
+			"spillBytes": null,
+			"spillExists": null
+		},
+		{
+			"name": "exit-3",
+			"chunks": [
+				{
+					"text": "out\n"
+				}
+			],
+			"outcome": {
+				"exitCode": 3
+			},
+			"result": {
+				"content": [
+					{
+						"type": "text",
+						"text": "out\n\n\nCommand exited with code 3"
+					}
+				],
+				"structuredContent": {
+					"output": "out\n",
+					"truncated": false,
+					"exit_code": 3
+				},
+				"isError": true
+			},
+			"updates": [
+				{
+					"content": []
+				},
+				{
+					"content": [
+						{
+							"type": "text",
+							"text": "out\n"
+						}
+					],
+					"details": {}
+				}
+			],
+			"spillBytes": null,
+			"spillExists": null
+		},
+		{
+			"name": "empty",
+			"chunks": [],
+			"outcome": {
+				"exitCode": 0
+			},
+			"result": {
+				"content": [
+					{
+						"type": "text",
+						"text": "(no output)"
+					}
+				],
+				"structuredContent": {
+					"output": "",
+					"truncated": false,
+					"exit_code": 0
+				}
+			},
+			"updates": [
+				{
+					"content": []
+				}
+			],
+			"spillBytes": null,
+			"spillExists": null
+		},
+		{
+			"name": "empty-exit-1",
+			"chunks": [],
+			"outcome": {
+				"exitCode": 1
+			},
+			"result": {
+				"content": [
+					{
+						"type": "text",
+						"text": "(no output)\n\nCommand exited with code 1"
+					}
+				],
+				"structuredContent": {
+					"output": "",
+					"truncated": false,
+					"exit_code": 1
+				},
+				"isError": true
+			},
+			"updates": [
+				{
+					"content": []
+				}
+			],
+			"spillBytes": null,
+			"spillExists": null
+		},
+		{
+			"name": "null-exit",
+			"chunks": [
+				{
+					"text": "partial\n"
+				}
+			],
+			"outcome": {
+				"exitCode": null
+			},
+			"error": "partial\n\n\nCommand terminated without an exit code",
+			"updates": [
+				{
+					"content": []
+				},
+				{
+					"content": [
+						{
+							"type": "text",
+							"text": "partial\n"
+						}
+					],
+					"details": {}
+				}
+			],
+			"spillBytes": null,
+			"spillExists": null
+		},
+		{
+			"name": "null-exit-empty",
+			"chunks": [],
+			"outcome": {
+				"exitCode": null
+			},
+			"error": "(no output)\n\nCommand terminated without an exit code",
+			"updates": [
+				{
+					"content": []
+				}
+			],
+			"spillBytes": null,
+			"spillExists": null
+		},
+		{
+			"name": "signal-exit-137",
+			"chunks": [
+				{
+					"text": "before-kill\n"
+				}
+			],
+			"outcome": {
+				"exitCode": 137
+			},
+			"result": {
+				"content": [
+					{
+						"type": "text",
+						"text": "before-kill\n\n\nCommand exited with code 137"
+					}
+				],
+				"structuredContent": {
+					"output": "before-kill\n",
+					"truncated": false,
+					"exit_code": 137
+				},
+				"isError": true
+			},
+			"updates": [
+				{
+					"content": []
+				},
+				{
+					"content": [
+						{
+							"type": "text",
+							"text": "before-kill\n"
+						}
+					],
+					"details": {}
+				}
+			],
+			"spillBytes": null,
+			"spillExists": null
+		},
+		{
+			"name": "lines-4000",
+			"chunks": [
+				{
+					"lines": {
+						"from": 1,
+						"to": 4000,
+						"prefix": "line-",
+						"pad": 4
+					}
+				}
+			],
+			"outcome": {
+				"exitCode": 0
+			},
+			"result": {
+				"content": [
+					{
+						"type": "text",
+						"text": {
+							"$long": {
+								"bytes": 20067,
+								"head": "line-2001\nline-2002\nline-2003\nline-2004\nline-2005\nline-2006\nline-2007\nline-2008\nline-2009\nline-2010\nline-2011\nline-2012\nline-2013\nline-2014\nline-2015\nline-2016\nline-2017\nline-2018\nline-2019\nline-2020\nline-2021\nline-2022\nline-2023\nline-2024\nline-2025\nline-2",
+								"tail": "ine-3982\nline-3983\nline-3984\nline-3985\nline-3986\nline-3987\nline-3988\nline-3989\nline-3990\nline-3991\nline-3992\nline-3993\nline-3994\nline-3995\nline-3996\nline-3997\nline-3998\nline-3999\nline-4000\n\n[Showing lines 2001-4000 of 4000. Full output: <FULL_OUTPUT_PATH>]"
+							}
+						}
+					}
+				],
+				"details": {
+					"truncation": {
+						"content": {
+							"$long": {
+								"bytes": 19999,
+								"head": "line-2001\nline-2002\nline-2003\nline-2004\nline-2005\nline-2006\nline-2007\nline-2008\nline-2009\nline-2010\nline-2011\nline-2012\nline-2013\nline-2014\nline-2015\nline-2016\nline-2017\nline-2018\nline-2019\nline-2020\nline-2021\nline-2022\nline-2023\nline-2024\nline-2025\nline-2",
+								"tail": "e-3975\nline-3976\nline-3977\nline-3978\nline-3979\nline-3980\nline-3981\nline-3982\nline-3983\nline-3984\nline-3985\nline-3986\nline-3987\nline-3988\nline-3989\nline-3990\nline-3991\nline-3992\nline-3993\nline-3994\nline-3995\nline-3996\nline-3997\nline-3998\nline-3999\nline-4000"
+							}
+						},
+						"truncated": true,
+						"truncatedBy": "lines",
+						"totalLines": 4000,
+						"totalBytes": 40000,
+						"outputLines": 2000,
+						"outputBytes": 19999,
+						"lastLinePartial": false,
+						"firstLineExceedsLimit": false,
+						"maxLines": 2000,
+						"maxBytes": 51200
+					},
+					"fullOutputPath": "<FULL_OUTPUT_PATH>"
+				},
+				"structuredContent": {
+					"output": {
+						"$long": {
+							"bytes": 40000,
+							"head": "line-0001\nline-0002\nline-0003\nline-0004\nline-0005\nline-0006\nline-0007\nline-0008\nline-0009\nline-0010\nline-0011\nline-0012\nline-0013\nline-0014\nline-0015\nline-0016\nline-0017\nline-0018\nline-0019\nline-0020\nline-0021\nline-0022\nline-0023\nline-0024\nline-0025\nline-0",
+							"tail": "-3975\nline-3976\nline-3977\nline-3978\nline-3979\nline-3980\nline-3981\nline-3982\nline-3983\nline-3984\nline-3985\nline-3986\nline-3987\nline-3988\nline-3989\nline-3990\nline-3991\nline-3992\nline-3993\nline-3994\nline-3995\nline-3996\nline-3997\nline-3998\nline-3999\nline-4000\n"
+						}
+					},
+					"truncated": false,
+					"exit_code": 0
+				}
+			},
+			"updates": [
+				{
+					"content": []
+				},
+				{
+					"content": [
+						{
+							"type": "text",
+							"text": "line-0001\n"
+						}
+					],
+					"details": {}
+				},
+				{
+					"content": [
+						{
+							"type": "text",
+							"text": {
+								"$long": {
+									"bytes": 19999,
+									"head": "line-2001\nline-2002\nline-2003\nline-2004\nline-2005\nline-2006\nline-2007\nline-2008\nline-2009\nline-2010\nline-2011\nline-2012\nline-2013\nline-2014\nline-2015\nline-2016\nline-2017\nline-2018\nline-2019\nline-2020\nline-2021\nline-2022\nline-2023\nline-2024\nline-2025\nline-2",
+									"tail": "e-3975\nline-3976\nline-3977\nline-3978\nline-3979\nline-3980\nline-3981\nline-3982\nline-3983\nline-3984\nline-3985\nline-3986\nline-3987\nline-3988\nline-3989\nline-3990\nline-3991\nline-3992\nline-3993\nline-3994\nline-3995\nline-3996\nline-3997\nline-3998\nline-3999\nline-4000"
+								}
+							}
+						}
+					],
+					"details": {
+						"truncation": {
+							"content": {
+								"$long": {
+									"bytes": 19999,
+									"head": "line-2001\nline-2002\nline-2003\nline-2004\nline-2005\nline-2006\nline-2007\nline-2008\nline-2009\nline-2010\nline-2011\nline-2012\nline-2013\nline-2014\nline-2015\nline-2016\nline-2017\nline-2018\nline-2019\nline-2020\nline-2021\nline-2022\nline-2023\nline-2024\nline-2025\nline-2",
+									"tail": "e-3975\nline-3976\nline-3977\nline-3978\nline-3979\nline-3980\nline-3981\nline-3982\nline-3983\nline-3984\nline-3985\nline-3986\nline-3987\nline-3988\nline-3989\nline-3990\nline-3991\nline-3992\nline-3993\nline-3994\nline-3995\nline-3996\nline-3997\nline-3998\nline-3999\nline-4000"
+								}
+							},
+							"truncated": true,
+							"truncatedBy": "lines",
+							"totalLines": 4000,
+							"totalBytes": 40000,
+							"outputLines": 2000,
+							"outputBytes": 19999,
+							"lastLinePartial": false,
+							"firstLineExceedsLimit": false,
+							"maxLines": 2000,
+							"maxBytes": 51200
+						},
+						"fullOutputPath": "<FULL_OUTPUT_PATH>"
+					}
+				}
+			],
+			"spillBytes": 40000,
+			"spillExists": true
+		},
+		{
+			"name": "lines-3000-exit-2",
+			"chunks": [
+				{
+					"lines": {
+						"from": 1,
+						"to": 3000,
+						"prefix": "",
+						"pad": 0
+					}
+				}
+			],
+			"outcome": {
+				"exitCode": 2
+			},
+			"result": {
+				"content": [
+					{
+						"type": "text",
+						"text": {
+							"$long": {
+								"bytes": 10095,
+								"head": "1001\n1002\n1003\n1004\n1005\n1006\n1007\n1008\n1009\n1010\n1011\n1012\n1013\n1014\n1015\n1016\n1017\n1018\n1019\n1020\n1021\n1022\n1023\n1024\n1025\n1026\n1027\n1028\n1029\n1030\n1031\n1032\n1033\n1034\n1035\n1036\n1037\n1038\n1039\n1040\n1041\n1042\n1043\n1044\n1045\n1046\n1047\n1048\n1049\n1050\n1051\n1",
+								"tail": "\n2969\n2970\n2971\n2972\n2973\n2974\n2975\n2976\n2977\n2978\n2979\n2980\n2981\n2982\n2983\n2984\n2985\n2986\n2987\n2988\n2989\n2990\n2991\n2992\n2993\n2994\n2995\n2996\n2997\n2998\n2999\n3000\n\n[Showing lines 1001-3000 of 3000. Full output: <FULL_OUTPUT_PATH>]\n\nCommand exited with code 2"
+							}
+						}
+					}
+				],
+				"details": {
+					"truncation": {
+						"content": {
+							"$long": {
+								"bytes": 9999,
+								"head": "1001\n1002\n1003\n1004\n1005\n1006\n1007\n1008\n1009\n1010\n1011\n1012\n1013\n1014\n1015\n1016\n1017\n1018\n1019\n1020\n1021\n1022\n1023\n1024\n1025\n1026\n1027\n1028\n1029\n1030\n1031\n1032\n1033\n1034\n1035\n1036\n1037\n1038\n1039\n1040\n1041\n1042\n1043\n1044\n1045\n1046\n1047\n1048\n1049\n1050\n1051\n1",
+								"tail": "9\n2950\n2951\n2952\n2953\n2954\n2955\n2956\n2957\n2958\n2959\n2960\n2961\n2962\n2963\n2964\n2965\n2966\n2967\n2968\n2969\n2970\n2971\n2972\n2973\n2974\n2975\n2976\n2977\n2978\n2979\n2980\n2981\n2982\n2983\n2984\n2985\n2986\n2987\n2988\n2989\n2990\n2991\n2992\n2993\n2994\n2995\n2996\n2997\n2998\n2999\n3000"
+							}
+						},
+						"truncated": true,
+						"truncatedBy": "lines",
+						"totalLines": 3000,
+						"totalBytes": 13893,
+						"outputLines": 2000,
+						"outputBytes": 9999,
+						"lastLinePartial": false,
+						"firstLineExceedsLimit": false,
+						"maxLines": 2000,
+						"maxBytes": 51200
+					},
+					"fullOutputPath": "<FULL_OUTPUT_PATH>"
+				},
+				"structuredContent": {
+					"output": {
+						"$long": {
+							"bytes": 13893,
+							"head": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n31\n32\n33\n34\n35\n36\n37\n38\n39\n40\n41\n42\n43\n44\n45\n46\n47\n48\n49\n50\n51\n52\n53\n54\n55\n56\n57\n58\n59\n60\n61\n62\n63\n64\n65\n66\n67\n68\n69\n70\n71\n72\n73\n74\n75\n76\n77\n78\n79\n80\n81\n82\n83\n84\n85\n86\n87\n88\n8",
+							"tail": "\n2950\n2951\n2952\n2953\n2954\n2955\n2956\n2957\n2958\n2959\n2960\n2961\n2962\n2963\n2964\n2965\n2966\n2967\n2968\n2969\n2970\n2971\n2972\n2973\n2974\n2975\n2976\n2977\n2978\n2979\n2980\n2981\n2982\n2983\n2984\n2985\n2986\n2987\n2988\n2989\n2990\n2991\n2992\n2993\n2994\n2995\n2996\n2997\n2998\n2999\n3000\n"
+						}
+					},
+					"truncated": false,
+					"exit_code": 2
+				},
+				"isError": true
+			},
+			"updates": [
+				{
+					"content": []
+				},
+				{
+					"content": [
+						{
+							"type": "text",
+							"text": "1\n"
+						}
+					],
+					"details": {}
+				},
+				{
+					"content": [
+						{
+							"type": "text",
+							"text": {
+								"$long": {
+									"bytes": 9999,
+									"head": "1001\n1002\n1003\n1004\n1005\n1006\n1007\n1008\n1009\n1010\n1011\n1012\n1013\n1014\n1015\n1016\n1017\n1018\n1019\n1020\n1021\n1022\n1023\n1024\n1025\n1026\n1027\n1028\n1029\n1030\n1031\n1032\n1033\n1034\n1035\n1036\n1037\n1038\n1039\n1040\n1041\n1042\n1043\n1044\n1045\n1046\n1047\n1048\n1049\n1050\n1051\n1",
+									"tail": "9\n2950\n2951\n2952\n2953\n2954\n2955\n2956\n2957\n2958\n2959\n2960\n2961\n2962\n2963\n2964\n2965\n2966\n2967\n2968\n2969\n2970\n2971\n2972\n2973\n2974\n2975\n2976\n2977\n2978\n2979\n2980\n2981\n2982\n2983\n2984\n2985\n2986\n2987\n2988\n2989\n2990\n2991\n2992\n2993\n2994\n2995\n2996\n2997\n2998\n2999\n3000"
+								}
+							}
+						}
+					],
+					"details": {
+						"truncation": {
+							"content": {
+								"$long": {
+									"bytes": 9999,
+									"head": "1001\n1002\n1003\n1004\n1005\n1006\n1007\n1008\n1009\n1010\n1011\n1012\n1013\n1014\n1015\n1016\n1017\n1018\n1019\n1020\n1021\n1022\n1023\n1024\n1025\n1026\n1027\n1028\n1029\n1030\n1031\n1032\n1033\n1034\n1035\n1036\n1037\n1038\n1039\n1040\n1041\n1042\n1043\n1044\n1045\n1046\n1047\n1048\n1049\n1050\n1051\n1",
+									"tail": "9\n2950\n2951\n2952\n2953\n2954\n2955\n2956\n2957\n2958\n2959\n2960\n2961\n2962\n2963\n2964\n2965\n2966\n2967\n2968\n2969\n2970\n2971\n2972\n2973\n2974\n2975\n2976\n2977\n2978\n2979\n2980\n2981\n2982\n2983\n2984\n2985\n2986\n2987\n2988\n2989\n2990\n2991\n2992\n2993\n2994\n2995\n2996\n2997\n2998\n2999\n3000"
+								}
+							},
+							"truncated": true,
+							"truncatedBy": "lines",
+							"totalLines": 3000,
+							"totalBytes": 13893,
+							"outputLines": 2000,
+							"outputBytes": 9999,
+							"lastLinePartial": false,
+							"firstLineExceedsLimit": false,
+							"maxLines": 2000,
+							"maxBytes": 51200
+						},
+						"fullOutputPath": "<FULL_OUTPUT_PATH>"
+					}
+				}
+			],
+			"spillBytes": 13893,
+			"spillExists": true
+		},
+		{
+			"name": "bytes-100-lines",
+			"chunks": [
+				{
+					"lines": {
+						"from": 1,
+						"to": 100,
+						"prefix": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+						"pad": 3
+					}
+				}
+			],
+			"outcome": {
+				"exitCode": 0
+			},
+			"result": {
+				"content": [
+					{
+						"type": "text",
+						"text": {
+							"$long": {
+								"bytes": 50278,
+								"head": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+								"tail": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx100\n\n[Showing lines 51-100 of 100 (50.0KB limit). Full output: <FULL_OUTPUT_PATH>]"
+							}
+						}
+					}
+				],
+				"details": {
+					"truncation": {
+						"content": {
+							"$long": {
+								"bytes": 50199,
+								"head": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+								"tail": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx100"
+							}
+						},
+						"truncated": true,
+						"truncatedBy": "bytes",
+						"totalLines": 100,
+						"totalBytes": 100400,
+						"outputLines": 50,
+						"outputBytes": 50199,
+						"lastLinePartial": false,
+						"firstLineExceedsLimit": false,
+						"maxLines": 2000,
+						"maxBytes": 51200
+					},
+					"fullOutputPath": "<FULL_OUTPUT_PATH>"
+				},
+				"structuredContent": {
+					"output": {
+						"$long": {
+							"bytes": 100400,
+							"head": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+							"tail": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx100\n"
+						}
+					},
+					"truncated": false,
+					"exit_code": 0
+				}
+			},
+			"updates": [
+				{
+					"content": []
+				},
+				{
+					"content": [
+						{
+							"type": "text",
+							"text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx001\n"
+						}
+					],
+					"details": {}
+				},
+				{
+					"content": [
+						{
+							"type": "text",
+							"text": {
+								"$long": {
+									"bytes": 50199,
+									"head": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+									"tail": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx100"
+								}
+							}
+						}
+					],
+					"details": {
+						"truncation": {
+							"content": {
+								"$long": {
+									"bytes": 50199,
+									"head": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+									"tail": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx100"
+								}
+							},
+							"truncated": true,
+							"truncatedBy": "bytes",
+							"totalLines": 100,
+							"totalBytes": 100400,
+							"outputLines": 50,
+							"outputBytes": 50199,
+							"lastLinePartial": false,
+							"firstLineExceedsLimit": false,
+							"maxLines": 2000,
+							"maxBytes": 51200
+						},
+						"fullOutputPath": "<FULL_OUTPUT_PATH>"
+					}
+				}
+			],
+			"spillBytes": 100400,
+			"spillExists": true
+		},
+		{
+			"name": "last-line-partial",
+			"chunks": [
+				{
+					"repeat": {
+						"text": "y",
+						"count": 60000
+					}
+				}
+			],
+			"outcome": {
+				"exitCode": 0
+			},
+			"result": {
+				"content": [
+					{
+						"type": "text",
+						"text": {
+							"$long": {
+								"bytes": 51283,
+								"head": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+								"tail": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\n\n[Showing last 50.0KB of line 1 (line is 58.6KB). Full output: <FULL_OUTPUT_PATH>]"
+							}
+						}
+					}
+				],
+				"details": {
+					"truncation": {
+						"content": {
+							"$long": {
+								"bytes": 51200,
+								"head": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+								"tail": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+							}
+						},
+						"truncated": true,
+						"truncatedBy": "bytes",
+						"totalLines": 1,
+						"totalBytes": 60000,
+						"outputLines": 1,
+						"outputBytes": 51200,
+						"lastLinePartial": true,
+						"firstLineExceedsLimit": false,
+						"maxLines": 2000,
+						"maxBytes": 51200
+					},
+					"fullOutputPath": "<FULL_OUTPUT_PATH>"
+				},
+				"structuredContent": {
+					"output": {
+						"$long": {
+							"bytes": 60000,
+							"head": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+							"tail": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+						}
+					},
+					"truncated": false,
+					"exit_code": 0
+				}
+			},
+			"updates": [
+				{
+					"content": []
+				},
+				{
+					"content": [
+						{
+							"type": "text",
+							"text": {
+								"$long": {
+									"bytes": 51200,
+									"head": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+									"tail": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+								}
+							}
+						}
+					],
+					"details": {
+						"truncation": {
+							"content": {
+								"$long": {
+									"bytes": 51200,
+									"head": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+									"tail": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+								}
+							},
+							"truncated": true,
+							"truncatedBy": "bytes",
+							"totalLines": 1,
+							"totalBytes": 60000,
+							"outputLines": 1,
+							"outputBytes": 51200,
+							"lastLinePartial": true,
+							"firstLineExceedsLimit": false,
+							"maxLines": 2000,
+							"maxBytes": 51200
+						},
+						"fullOutputPath": "<FULL_OUTPUT_PATH>"
+					}
+				}
+			],
+			"spillBytes": 60000,
+			"spillExists": true
+		},
+		{
+			"name": "last-line-partial-multibyte",
+			"chunks": [
+				{
+					"text": "head\n"
+				},
+				{
+					"repeat": {
+						"text": "€",
+						"count": 30000
+					}
+				}
+			],
+			"outcome": {
+				"exitCode": 0
+			},
+			"result": {
+				"content": [
+					{
+						"type": "text",
+						"text": {
+							"$long": {
+								"bytes": 51281,
+								"head": "€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€",
+								"tail": "€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€\n\n[Showing last 50.0KB of line 2 (line is 87.9KB). Full output: <FULL_OUTPUT_PATH>]"
+							}
+						}
+					}
+				],
+				"details": {
+					"truncation": {
+						"content": {
+							"$long": {
+								"bytes": 51198,
+								"head": "€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€",
+								"tail": "€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€"
+							}
+						},
+						"truncated": true,
+						"truncatedBy": "bytes",
+						"totalLines": 2,
+						"totalBytes": 90005,
+						"outputLines": 1,
+						"outputBytes": 51198,
+						"lastLinePartial": true,
+						"firstLineExceedsLimit": false,
+						"maxLines": 2000,
+						"maxBytes": 51200
+					},
+					"fullOutputPath": "<FULL_OUTPUT_PATH>"
+				},
+				"structuredContent": {
+					"output": {
+						"$long": {
+							"bytes": 90005,
+							"head": "head\n€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€",
+							"tail": "€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€"
+						}
+					},
+					"truncated": false,
+					"exit_code": 0
+				}
+			},
+			"updates": [
+				{
+					"content": []
+				},
+				{
+					"content": [
+						{
+							"type": "text",
+							"text": "head\n"
+						}
+					],
+					"details": {}
+				},
+				{
+					"content": [
+						{
+							"type": "text",
+							"text": {
+								"$long": {
+									"bytes": 51198,
+									"head": "€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€",
+									"tail": "€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€"
+								}
+							}
+						}
+					],
+					"details": {
+						"truncation": {
+							"content": {
+								"$long": {
+									"bytes": 51198,
+									"head": "€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€",
+									"tail": "€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€"
+								}
+							},
+							"truncated": true,
+							"truncatedBy": "bytes",
+							"totalLines": 2,
+							"totalBytes": 90005,
+							"outputLines": 1,
+							"outputBytes": 51198,
+							"lastLinePartial": true,
+							"firstLineExceedsLimit": false,
+							"maxLines": 2000,
+							"maxBytes": 51200
+						},
+						"fullOutputPath": "<FULL_OUTPUT_PATH>"
+					}
+				}
+			],
+			"spillBytes": 90005,
+			"spillExists": true
+		},
+		{
+			"name": "timeout-5-truncated",
+			"chunks": [
+				{
+					"lines": {
+						"from": 1,
+						"to": 3000,
+						"prefix": "",
+						"pad": 0
+					}
+				}
+			],
+			"outcome": {
+				"throw": "timeout:5"
+			},
+			"error": {
+				"$long": {
+					"bytes": 10102,
+					"head": "1001\n1002\n1003\n1004\n1005\n1006\n1007\n1008\n1009\n1010\n1011\n1012\n1013\n1014\n1015\n1016\n1017\n1018\n1019\n1020\n1021\n1022\n1023\n1024\n1025\n1026\n1027\n1028\n1029\n1030\n1031\n1032\n1033\n1034\n1035\n1036\n1037\n1038\n1039\n1040\n1041\n1042\n1043\n1044\n1045\n1046\n1047\n1048\n1049\n1050\n1051\n1",
+					"tail": "970\n2971\n2972\n2973\n2974\n2975\n2976\n2977\n2978\n2979\n2980\n2981\n2982\n2983\n2984\n2985\n2986\n2987\n2988\n2989\n2990\n2991\n2992\n2993\n2994\n2995\n2996\n2997\n2998\n2999\n3000\n\n[Showing lines 1001-3000 of 3000. Full output: <FULL_OUTPUT_PATH>]\n\nCommand timed out after 5 seconds"
+				}
+			},
+			"updates": [
+				{
+					"content": []
+				},
+				{
+					"content": [
+						{
+							"type": "text",
+							"text": "1\n"
+						}
+					],
+					"details": {}
+				},
+				{
+					"content": [
+						{
+							"type": "text",
+							"text": {
+								"$long": {
+									"bytes": 9999,
+									"head": "1001\n1002\n1003\n1004\n1005\n1006\n1007\n1008\n1009\n1010\n1011\n1012\n1013\n1014\n1015\n1016\n1017\n1018\n1019\n1020\n1021\n1022\n1023\n1024\n1025\n1026\n1027\n1028\n1029\n1030\n1031\n1032\n1033\n1034\n1035\n1036\n1037\n1038\n1039\n1040\n1041\n1042\n1043\n1044\n1045\n1046\n1047\n1048\n1049\n1050\n1051\n1",
+									"tail": "9\n2950\n2951\n2952\n2953\n2954\n2955\n2956\n2957\n2958\n2959\n2960\n2961\n2962\n2963\n2964\n2965\n2966\n2967\n2968\n2969\n2970\n2971\n2972\n2973\n2974\n2975\n2976\n2977\n2978\n2979\n2980\n2981\n2982\n2983\n2984\n2985\n2986\n2987\n2988\n2989\n2990\n2991\n2992\n2993\n2994\n2995\n2996\n2997\n2998\n2999\n3000"
+								}
+							}
+						}
+					],
+					"details": {
+						"truncation": {
+							"content": {
+								"$long": {
+									"bytes": 9999,
+									"head": "1001\n1002\n1003\n1004\n1005\n1006\n1007\n1008\n1009\n1010\n1011\n1012\n1013\n1014\n1015\n1016\n1017\n1018\n1019\n1020\n1021\n1022\n1023\n1024\n1025\n1026\n1027\n1028\n1029\n1030\n1031\n1032\n1033\n1034\n1035\n1036\n1037\n1038\n1039\n1040\n1041\n1042\n1043\n1044\n1045\n1046\n1047\n1048\n1049\n1050\n1051\n1",
+									"tail": "9\n2950\n2951\n2952\n2953\n2954\n2955\n2956\n2957\n2958\n2959\n2960\n2961\n2962\n2963\n2964\n2965\n2966\n2967\n2968\n2969\n2970\n2971\n2972\n2973\n2974\n2975\n2976\n2977\n2978\n2979\n2980\n2981\n2982\n2983\n2984\n2985\n2986\n2987\n2988\n2989\n2990\n2991\n2992\n2993\n2994\n2995\n2996\n2997\n2998\n2999\n3000"
+								}
+							},
+							"truncated": true,
+							"truncatedBy": "lines",
+							"totalLines": 3000,
+							"totalBytes": 13893,
+							"outputLines": 2000,
+							"outputBytes": 9999,
+							"lastLinePartial": false,
+							"firstLineExceedsLimit": false,
+							"maxLines": 2000,
+							"maxBytes": 51200
+						},
+						"fullOutputPath": "<FULL_OUTPUT_PATH>"
+					}
+				}
+			],
+			"spillBytes": 13893,
+			"spillExists": true
+		},
+		{
+			"name": "aborted-truncated",
+			"chunks": [
+				{
+					"lines": {
+						"from": 1,
+						"to": 3000,
+						"prefix": "",
+						"pad": 0
+					}
+				}
+			],
+			"outcome": {
+				"throw": "aborted"
+			},
+			"error": {
+				"$long": {
+					"bytes": 10084,
+					"head": "1001\n1002\n1003\n1004\n1005\n1006\n1007\n1008\n1009\n1010\n1011\n1012\n1013\n1014\n1015\n1016\n1017\n1018\n1019\n1020\n1021\n1022\n1023\n1024\n1025\n1026\n1027\n1028\n1029\n1030\n1031\n1032\n1033\n1034\n1035\n1036\n1037\n1038\n1039\n1040\n1041\n1042\n1043\n1044\n1045\n1046\n1047\n1048\n1049\n1050\n1051\n1",
+					"tail": "6\n2967\n2968\n2969\n2970\n2971\n2972\n2973\n2974\n2975\n2976\n2977\n2978\n2979\n2980\n2981\n2982\n2983\n2984\n2985\n2986\n2987\n2988\n2989\n2990\n2991\n2992\n2993\n2994\n2995\n2996\n2997\n2998\n2999\n3000\n\n[Showing lines 1001-3000 of 3000. Full output: <FULL_OUTPUT_PATH>]\n\nCommand aborted"
+				}
+			},
+			"updates": [
+				{
+					"content": []
+				},
+				{
+					"content": [
+						{
+							"type": "text",
+							"text": "1\n"
+						}
+					],
+					"details": {}
+				},
+				{
+					"content": [
+						{
+							"type": "text",
+							"text": {
+								"$long": {
+									"bytes": 9999,
+									"head": "1001\n1002\n1003\n1004\n1005\n1006\n1007\n1008\n1009\n1010\n1011\n1012\n1013\n1014\n1015\n1016\n1017\n1018\n1019\n1020\n1021\n1022\n1023\n1024\n1025\n1026\n1027\n1028\n1029\n1030\n1031\n1032\n1033\n1034\n1035\n1036\n1037\n1038\n1039\n1040\n1041\n1042\n1043\n1044\n1045\n1046\n1047\n1048\n1049\n1050\n1051\n1",
+									"tail": "9\n2950\n2951\n2952\n2953\n2954\n2955\n2956\n2957\n2958\n2959\n2960\n2961\n2962\n2963\n2964\n2965\n2966\n2967\n2968\n2969\n2970\n2971\n2972\n2973\n2974\n2975\n2976\n2977\n2978\n2979\n2980\n2981\n2982\n2983\n2984\n2985\n2986\n2987\n2988\n2989\n2990\n2991\n2992\n2993\n2994\n2995\n2996\n2997\n2998\n2999\n3000"
+								}
+							}
+						}
+					],
+					"details": {
+						"truncation": {
+							"content": {
+								"$long": {
+									"bytes": 9999,
+									"head": "1001\n1002\n1003\n1004\n1005\n1006\n1007\n1008\n1009\n1010\n1011\n1012\n1013\n1014\n1015\n1016\n1017\n1018\n1019\n1020\n1021\n1022\n1023\n1024\n1025\n1026\n1027\n1028\n1029\n1030\n1031\n1032\n1033\n1034\n1035\n1036\n1037\n1038\n1039\n1040\n1041\n1042\n1043\n1044\n1045\n1046\n1047\n1048\n1049\n1050\n1051\n1",
+									"tail": "9\n2950\n2951\n2952\n2953\n2954\n2955\n2956\n2957\n2958\n2959\n2960\n2961\n2962\n2963\n2964\n2965\n2966\n2967\n2968\n2969\n2970\n2971\n2972\n2973\n2974\n2975\n2976\n2977\n2978\n2979\n2980\n2981\n2982\n2983\n2984\n2985\n2986\n2987\n2988\n2989\n2990\n2991\n2992\n2993\n2994\n2995\n2996\n2997\n2998\n2999\n3000"
+								}
+							},
+							"truncated": true,
+							"truncatedBy": "lines",
+							"totalLines": 3000,
+							"totalBytes": 13893,
+							"outputLines": 2000,
+							"outputBytes": 9999,
+							"lastLinePartial": false,
+							"firstLineExceedsLimit": false,
+							"maxLines": 2000,
+							"maxBytes": 51200
+						},
+						"fullOutputPath": "<FULL_OUTPUT_PATH>"
+					}
+				}
+			],
+			"spillBytes": 13893,
+			"spillExists": true
+		},
+		{
+			"name": "timeout-0.05-empty",
+			"chunks": [],
+			"outcome": {
+				"throw": "timeout:0.05"
+			},
+			"error": "Command timed out after 0.05 seconds",
+			"updates": [
+				{
+					"content": []
+				}
+			],
+			"spillBytes": null,
+			"spillExists": null
+		},
+		{
+			"name": "timeout-with-output",
+			"chunks": [
+				{
+					"text": "tick\n"
+				}
+			],
+			"outcome": {
+				"throw": "timeout:2"
+			},
+			"error": "tick\n\n\nCommand timed out after 2 seconds",
+			"updates": [
+				{
+					"content": []
+				},
+				{
+					"content": [
+						{
+							"type": "text",
+							"text": "tick\n"
+						}
+					],
+					"details": {}
+				}
+			],
+			"spillBytes": null,
+			"spillExists": null
+		},
+		{
+			"name": "aborted-empty",
+			"chunks": [],
+			"outcome": {
+				"throw": "aborted"
+			},
+			"error": "Command aborted",
+			"updates": [
+				{
+					"content": []
+				}
+			],
+			"spillBytes": null,
+			"spillExists": null
+		},
+		{
+			"name": "aborted-with-output",
+			"chunks": [
+				{
+					"text": "partial"
+				}
+			],
+			"outcome": {
+				"throw": "aborted"
+			},
+			"error": "partial\n\nCommand aborted",
+			"updates": [
+				{
+					"content": []
+				},
+				{
+					"content": [
+						{
+							"type": "text",
+							"text": "partial"
+						}
+					],
+					"details": {}
+				}
+			],
+			"spillBytes": null,
+			"spillExists": null
+		},
+		{
+			"name": "other-error",
+			"chunks": [
+				{
+					"text": "ignored\n"
+				}
+			],
+			"outcome": {
+				"throw": "boom"
+			},
+			"error": "boom",
+			"updates": [
+				{
+					"content": []
+				},
+				{
+					"content": [
+						{
+							"type": "text",
+							"text": "ignored\n"
+						}
+					],
+					"details": {}
+				}
+			],
+			"spillBytes": null,
+			"spillExists": null
+		},
+		{
+			"name": "non-utf8",
+			"chunks": [
+				{
+					"bytes": [
+						255,
+						254,
+						32,
+						97,
+						98,
+						99,
+						10
+					]
+				}
+			],
+			"outcome": {
+				"exitCode": 0
+			},
+			"result": {
+				"content": [
+					{
+						"type": "text",
+						"text": "�� abc\n"
+					}
+				],
+				"structuredContent": {
+					"output": "�� abc\n",
+					"truncated": false,
+					"exit_code": 0
+				}
+			},
+			"updates": [
+				{
+					"content": []
+				},
+				{
+					"content": [
+						{
+							"type": "text",
+							"text": "�� abc\n"
+						}
+					],
+					"details": {}
+				}
+			],
+			"spillBytes": null,
+			"spillExists": null
+		},
+		{
+			"name": "split-utf8",
+			"chunks": [
+				{
+					"bytes": [
+						226
+					]
+				},
+				{
+					"bytes": [
+						130,
+						172,
+						10
+					]
+				}
+			],
+			"outcome": {
+				"exitCode": 0
+			},
+			"result": {
+				"content": [
+					{
+						"type": "text",
+						"text": "€\n"
+					}
+				],
+				"structuredContent": {
+					"output": "€\n",
+					"truncated": false,
+					"exit_code": 0
+				}
+			},
+			"updates": [
+				{
+					"content": []
+				},
+				{
+					"content": [
+						{
+							"type": "text",
+							"text": ""
+						}
+					],
+					"details": {}
+				},
+				{
+					"content": [
+						{
+							"type": "text",
+							"text": "€\n"
+						}
+					],
+					"details": {}
+				}
+			],
+			"spillBytes": null,
+			"spillExists": null
+		},
+		{
+			"name": "unfinished-utf8",
+			"chunks": [
+				{
+					"text": "a"
+				},
+				{
+					"bytes": [
+						226,
+						130
+					]
+				}
+			],
+			"outcome": {
+				"exitCode": 0
+			},
+			"result": {
+				"content": [
+					{
+						"type": "text",
+						"text": "a�"
+					}
+				],
+				"structuredContent": {
+					"output": "a�",
+					"truncated": false,
+					"exit_code": 0
+				}
+			},
+			"updates": [
+				{
+					"content": []
+				},
+				{
+					"content": [
+						{
+							"type": "text",
+							"text": "a"
+						}
+					],
+					"details": {}
+				},
+				{
+					"content": [
+						{
+							"type": "text",
+							"text": "a�"
+						}
+					],
+					"details": {}
+				}
+			],
+			"spillBytes": null,
+			"spillExists": null
+		},
+		{
+			"name": "bom",
+			"chunks": [
+				{
+					"bytes": [
+						239,
+						187,
+						191,
+						104,
+						105,
+						10
+					]
+				}
+			],
+			"outcome": {
+				"exitCode": 0
+			},
+			"result": {
+				"content": [
+					{
+						"type": "text",
+						"text": "hi\n"
+					}
+				],
+				"structuredContent": {
+					"output": "hi\n",
+					"truncated": false,
+					"exit_code": 0
+				}
+			},
+			"updates": [
+				{
+					"content": []
+				},
+				{
+					"content": [
+						{
+							"type": "text",
+							"text": "hi\n"
+						}
+					],
+					"details": {}
+				}
+			],
+			"spillBytes": null,
+			"spillExists": null
+		},
+		{
+			"name": "ansi-and-crlf",
+			"chunks": [
+				{
+					"text": "\u001b[31mred\u001b[0m\r\n"
+				}
+			],
+			"outcome": {
+				"exitCode": 0
+			},
+			"result": {
+				"content": [
+					{
+						"type": "text",
+						"text": "\u001b[31mred\u001b[0m\r\n"
+					}
+				],
+				"structuredContent": {
+					"output": "\u001b[31mred\u001b[0m\r\n",
+					"truncated": false,
+					"exit_code": 0
+				}
+			},
+			"updates": [
+				{
+					"content": []
+				},
+				{
+					"content": [
+						{
+							"type": "text",
+							"text": "\u001b[31mred\u001b[0m\r\n"
+						}
+					],
+					"details": {}
+				}
+			],
+			"spillBytes": null,
+			"spillExists": null
+		},
+		{
+			"name": "no-trailing-newline",
+			"chunks": [
+				{
+					"text": "a\nb"
+				}
+			],
+			"outcome": {
+				"exitCode": 0
+			},
+			"result": {
+				"content": [
+					{
+						"type": "text",
+						"text": "a\nb"
+					}
+				],
+				"structuredContent": {
+					"output": "a\nb",
+					"truncated": false,
+					"exit_code": 0
+				}
+			},
+			"updates": [
+				{
+					"content": []
+				},
+				{
+					"content": [
+						{
+							"type": "text",
+							"text": "a\nb"
+						}
+					],
+					"details": {}
+				}
+			],
+			"spillBytes": null,
+			"spillExists": null
+		},
+		{
+			"name": "structured-over-1mib",
+			"chunks": [
+				{
+					"lines": {
+						"from": 1,
+						"to": 120,
+						"prefix": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+						"pad": 3
+					}
+				}
+			],
+			"outcome": {
+				"exitCode": 0
+			},
+			"result": {
+				"content": [
+					{
+						"type": "text",
+						"text": {
+							"$long": {
+								"bytes": 50099,
+								"head": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+								"tail": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz120\n\n[Showing lines 116-120 of 120 (50.0KB limit). Full output: <FULL_OUTPUT_PATH>]"
+							}
+						}
+					}
+				],
+				"details": {
+					"truncation": {
+						"content": {
+							"$long": {
+								"bytes": 50019,
+								"head": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+								"tail": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz120"
+							}
+						},
+						"truncated": true,
+						"truncatedBy": "bytes",
+						"totalLines": 120,
+						"totalBytes": 1200480,
+						"outputLines": 5,
+						"outputBytes": 50019,
+						"lastLinePartial": false,
+						"firstLineExceedsLimit": false,
+						"maxLines": 2000,
+						"maxBytes": 51200
+					},
+					"fullOutputPath": "<FULL_OUTPUT_PATH>"
+				},
+				"structuredContent": {
+					"output": {
+						"$long": {
+							"bytes": 1048610,
+							"head": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+							"tail": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz120\n"
+						}
+					},
+					"truncated": true,
+					"full_output_path": "<FULL_OUTPUT_PATH>",
+					"exit_code": 0
+				}
+			},
+			"updates": [
+				{
+					"content": []
+				},
+				{
+					"content": [
+						{
+							"type": "text",
+							"text": {
+								"$long": {
+									"bytes": 10004,
+									"head": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+									"tail": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz001\n"
+								}
+							}
+						}
+					],
+					"details": {}
+				},
+				{
+					"content": [
+						{
+							"type": "text",
+							"text": {
+								"$long": {
+									"bytes": 50019,
+									"head": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+									"tail": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz120"
+								}
+							}
+						}
+					],
+					"details": {
+						"truncation": {
+							"content": {
+								"$long": {
+									"bytes": 50019,
+									"head": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+									"tail": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz120"
+								}
+							},
+							"truncated": true,
+							"truncatedBy": "bytes",
+							"totalLines": 120,
+							"totalBytes": 1200480,
+							"outputLines": 5,
+							"outputBytes": 50019,
+							"lastLinePartial": false,
+							"firstLineExceedsLimit": false,
+							"maxLines": 2000,
+							"maxBytes": 51200
+						},
+						"fullOutputPath": "<FULL_OUTPUT_PATH>"
+					}
+				}
+			],
+			"spillBytes": 1200480,
+			"spillExists": true
+		}
+	],
+	"local": [
+		{
+			"name": "timeout-zero",
+			"cwd": null,
+			"params": {
+				"command": "echo never",
+				"timeout": 0
+			},
+			"options": {},
+			"error": "Invalid timeout: must be a finite number of seconds"
+		},
+		{
+			"name": "timeout-negative",
+			"cwd": null,
+			"params": {
+				"command": "echo never",
+				"timeout": -1
+			},
+			"options": {},
+			"error": "Invalid timeout: must be a finite number of seconds"
+		},
+		{
+			"name": "timeout-over-max",
+			"cwd": null,
+			"params": {
+				"command": "echo never",
+				"timeout": 2147484
+			},
+			"options": {},
+			"error": "Invalid timeout: maximum is 2147483.647 seconds"
+		},
+		{
+			"name": "missing-cwd",
+			"cwd": "/this/directory/definitely/does/not/exist/12345",
+			"params": {
+				"command": "echo test"
+			},
+			"options": {},
+			"error": "Working directory does not exist: /this/directory/definitely/does/not/exist/12345\nCannot execute bash commands."
+		},
+		{
+			"name": "missing-custom-shell",
+			"cwd": null,
+			"params": {
+				"command": "echo test"
+			},
+			"options": {
+				"shellPath": "/custom/bash"
+			},
+			"error": "Custom shell path not found: /custom/bash"
+		}
+	],
+	"windowsNoBash": {
+		"programFiles": "C:\\Bake Test Missing\\Program Files",
+		"programFilesX86": "C:\\Bake Test Missing\\Program Files (x86)",
+		"error": "No bash shell found. Options:\n  1. Install Git for Windows: https://git-scm.com/download/win\n  2. Add your bash to PATH (Cygwin, MSYS2, etc.)\n  3. Set shellPath in settings.json\n\nSearched Git Bash in:\n  C:\\Bake Test Missing\\Program Files\\Git\\bin\\bash.exe\n  C:\\Bake Test Missing\\Program Files (x86)\\Git\\bin\\bash.exe"
+	}
+}

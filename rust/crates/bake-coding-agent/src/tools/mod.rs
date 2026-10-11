@@ -9,6 +9,7 @@
 //! | [`definition`] | `src/core/tools/tool-definition-wrapper.ts` |
 //! | [`index`] | `src/core/tools/index.ts`, and the tool selection of `settings-manager.ts`, `sdk.ts`, and `mcp-servers.ts` |
 //! | [`image`] | `src/utils/{mime,exif-orientation,image-convert,image-resize-core,image-resize,image-process,tool-result-images}.ts` |
+//! | [`bash`] | `src/core/tools/bash.ts`, `src/utils/{shell,child-process}.ts`; owns each command's process tree |
 //! | [`truncate`], [`output_accumulator`], [`file_mutation_queue`] | `src/core/tools/{truncate,output-accumulator,file-mutation-queue}.ts` |
 //!
 //! Every tool is a [`bake_agent::AgentTool`] whose names, descriptions,
@@ -18,6 +19,7 @@
 //! `fd` from `PATH` ([`process`]) and kill and reap them on abort. Pi's `bash`
 //! tool joins through [`index::ToolsOptions::bash`].
 
+pub mod bash;
 pub mod definition;
 pub mod edit;
 pub mod edit_diff;

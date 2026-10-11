@@ -40,6 +40,29 @@ impl Reply {
         }
     }
 
+    /// A tool call: the `read` call with its name and arguments replaced.
+    #[cfg(unix)]
+    fn tool_call(name: &str, arguments: &Value) -> Self {
+        let arguments = serde_json::to_string(&arguments.to_string()).expect("arguments");
+        let read = serde_json::to_string(&json!({"path": "notes.txt"}).to_string())
+            .expect("read arguments");
+        let body = READ_CALL_SSE
+            .replace("\"name\":\"read\"", &format!("\"name\":\"{name}\""))
+            .replace(
+                &format!("\"delta\":{read}"),
+                &format!("\"delta\":{arguments}"),
+            )
+            .replace(
+                &format!("\"arguments\":{read}"),
+                &format!("\"arguments\":{arguments}"),
+            );
+        Self {
+            status: 200,
+            content_type: "text/event-stream",
+            body: format!("{body}\n"),
+        }
+    }
+
     /// A `read` call of `notes.txt`.
     fn read_call() -> Self {
         Self {
@@ -413,8 +436,8 @@ fn print_mode_answers_saves_and_continues() {
         first_input[0]
             .starts_with("system: You are an expert coding assistant operating inside pi")
     );
-    // Pi's default tools without bash, which is not ported yet.
-    let (tools, rules) = pi_prompt_sections(&["read", "edit", "write"]);
+    // Pi's default tools.
+    let (tools, rules) = pi_prompt_sections(&["read", "bash", "edit", "write"]);
     assert!(
         first_input[0].contains(&format!("\n{tools}\n")),
         "{}",
@@ -431,7 +454,7 @@ fn print_mode_answers_saves_and_continues() {
         .iter()
         .map(|tool| tool["name"].as_str().unwrap_or_default())
         .collect();
-    assert_eq!(declared, ["read", "edit", "write"]);
+    assert_eq!(declared, ["read", "bash", "edit", "write"]);
     assert_eq!(first_input[1], "user: Say hi");
 
     let files = workspace.session_files();
@@ -714,4 +737,51 @@ fn print_mode_runs_the_read_tool() {
         result["content"],
         json!([{ "type": "text", "text": "first line\nsecond line\n" }])
     );
+}
+
+/// Pi's bash tool through `bake-rs -p`: the command runs in the project
+/// with the session's `PI_*` variables, and its output goes back to the
+/// model.
+#[cfg(unix)]
+#[test]
+fn print_mode_runs_the_bash_tool() {
+    let command = "printf '%s|%s|%s\\n' \"$PI_PROVIDER\" \"$PI_MODEL\" \"$(basename \"$PWD\")\"";
+    let server = Server::start_sequence(vec![
+        Reply::tool_call("bash", &json!({ "command": command })),
+        Reply::sse(),
+    ]);
+    let workspace = Workspace::new("bash-tool", server.port);
+
+    let out = workspace.run(&["-p", "Run it"], None);
+    assert_eq!(text(&out.stderr), "");
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(text(&out.stdout), "Hello from the loop.\n");
+
+    let requests = server.requests();
+    assert_eq!(requests.len(), 2);
+    let tools: Vec<&str> = requests[0].body["tools"]
+        .as_array()
+        .expect("tools")
+        .iter()
+        .filter_map(|tool| tool["name"].as_str())
+        .collect();
+    assert_eq!(tools, ["read", "bash", "edit", "write"]);
+    let input = requests[1].body["input"].as_array().expect("input");
+    let output = input
+        .iter()
+        .find(|item| item["type"] == "function_call_output")
+        .expect("the tool result is sent");
+    let sent = match &output["output"] {
+        Value::String(text) => text.clone(),
+        Value::Array(parts) => parts
+            .iter()
+            .filter_map(|part| part["text"].as_str())
+            .collect(),
+        other => panic!("unexpected output {other}"),
+    };
+    assert_eq!(sent, "loop|loop-model|project\n");
+    let entries = lines(&workspace.session_files()[0]);
+    let result = &entries[6]["message"];
+    assert_eq!(result["toolName"], "bash");
+    assert_eq!(result["isError"], false);
 }
