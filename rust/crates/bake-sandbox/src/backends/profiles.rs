@@ -104,7 +104,9 @@ pub fn seatbelt_profile_args(policy: &SandboxPolicy) -> Result<Vec<OsString>, Pa
     Ok(vec!["-p".into(), forms.join(" ").into()])
 }
 
-#[cfg(test)]
+// The runners these profiles feed exist only on Linux and macOS, and the
+// expected argv spells POSIX paths.
+#[cfg(all(test, unix))]
 mod tests {
     //! Follows `describe('profile dialects')` in
     //! `packages/sandbox/sandbox-local/tests/local.spec.ts`.
