@@ -1,0 +1,15 @@
+[package]
+name = "bake-sandbox"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Bake's process-confinement contract: sandbox modes, per-call policies, escalation vocabulary, and the provider seam its backends implement"
+
+[dependencies]
+
+[features]
+# A provider that runs commands unconfined while reporting a chosen mode, for
+# tests of code above the seam. Never enable it in a shipped binary.
+testing = []
