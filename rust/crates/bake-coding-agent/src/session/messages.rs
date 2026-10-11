@@ -7,13 +7,22 @@
 //! does not validate messages it reads, and a message written by another Pi
 //! version may carry members this one does not know, so the object is the
 //! message and every member survives a read and a rewrite in its order.
-//! [`AgentMessage::to_typed`] reads it as a [`TypedAgentMessage`]: one of
-//! `bake-ai`'s model messages, or one of the four coding-agent roles below.
+//! [`AgentMessage::to_agent`] reads it as Pi's `AgentMessage` union in its
+//! one live representation, [`bake_agent::AgentMessage`]: one of `bake-ai`'s
+//! model messages, or one of the four coding-agent kinds below, which
+//! implement [`CustomAgentMessage`] as Pi's `CustomAgentMessages`
+//! declaration merging adds them. The agent carries them, the session stores
+//! them through `From<&bake_agent::AgentMessage>`, and they reach the model
+//! only through [`convert_to_llm`].
 
-use serde::de::{self, Deserializer};
+use std::any::Any;
+use std::sync::Arc;
+
+use serde::de::Deserializer;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::Value;
 
+use bake_agent::{AgentMessage as LiveMessage, CustomAgentMessage};
 use bake_ai::{Message, TextContent, UserContent, UserContentBlock, UserMessage};
 
 use crate::session::json::JsonObject;
@@ -95,23 +104,6 @@ pub struct CompactionSummaryMessage {
     pub timestamp: i64,
 }
 
-/// A message read by its `role`.
-// Unboxed variants keep matching plain, as `bake_ai::Message` does.
-#[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, PartialEq)]
-pub enum TypedAgentMessage {
-    /// `system`, `user`, `assistant`, or `toolResult`.
-    Llm(Message),
-    /// `bashExecution`
-    BashExecution(BashExecutionMessage),
-    /// `custom`
-    Custom(CustomMessage),
-    /// `branchSummary`
-    BranchSummary(BranchSummaryMessage),
-    /// `compactionSummary`
-    CompactionSummary(CompactionSummaryMessage),
-}
-
 fn tagged<T: Serialize>(role: &str, value: &T) -> JsonObject {
     let mut object = JsonObject::new();
     object.insert("role".to_owned(), Value::String(role.to_owned()));
@@ -123,40 +115,108 @@ fn tagged<T: Serialize>(role: &str, value: &T) -> JsonObject {
     object
 }
 
-impl TypedAgentMessage {
-    /// The message as the JSON object Pi stores.
-    pub fn to_json(&self) -> JsonObject {
-        match self {
-            Self::Llm(message) => match serde_json::to_value(message) {
-                Ok(Value::Object(object)) => object,
-                _ => JsonObject::new(),
-            },
-            Self::BashExecution(message) => tagged("bashExecution", message),
-            Self::Custom(message) => tagged("custom", message),
-            Self::BranchSummary(message) => tagged("branchSummary", message),
-            Self::CompactionSummary(message) => tagged("compactionSummary", message),
+macro_rules! custom_kind {
+    ($type:ty, $role:literal) => {
+        impl CustomAgentMessage for $type {
+            fn role(&self) -> &str {
+                $role
+            }
+
+            fn timestamp(&self) -> i64 {
+                self.timestamp
+            }
+
+            fn to_json(&self) -> Value {
+                Value::Object(tagged($role, self))
+            }
+
+            fn as_any(&self) -> &dyn Any {
+                self
+            }
         }
+    };
+}
+
+custom_kind!(BashExecutionMessage, "bashExecution");
+custom_kind!(CustomMessage, "custom");
+custom_kind!(BranchSummaryMessage, "branchSummary");
+custom_kind!(CompactionSummaryMessage, "compactionSummary");
+
+/// A stored message the agent carries without reading it: a role this
+/// crate does not know, or members of the wrong shape for their role. Pi
+/// passes such objects on unvalidated; here they stay in the transcript and
+/// round-trip through the session unchanged, and [`convert_to_llm`] drops
+/// them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OpaqueMessage(pub JsonObject);
+
+impl CustomAgentMessage for OpaqueMessage {
+    fn role(&self) -> &str {
+        self.0.get("role").and_then(Value::as_str).unwrap_or("")
     }
 
-    /// Read a stored object by its `role`.
-    pub fn from_json(object: &JsonObject) -> Result<Self, serde_json::Error> {
-        let value = Value::Object(object.clone());
-        let role = object.get("role").and_then(Value::as_str).unwrap_or("");
+    fn timestamp(&self) -> i64 {
+        self.0
+            .get("timestamp")
+            .and_then(|value| value.as_i64().or_else(|| value.as_f64().map(|n| n as i64)))
+            .unwrap_or(0)
+    }
+
+    fn to_json(&self) -> Value {
+        Value::Object(self.0.clone())
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+fn custom<T: CustomAgentMessage>(message: T) -> LiveMessage {
+    LiveMessage::Custom(Arc::new(message))
+}
+
+/// Read a stored object by its `role` as Pi's `AgentMessage` union: one of
+/// `bake-ai`'s model messages, or one of the four coding-agent kinds as a
+/// [`CustomAgentMessage`]. Anything else is an [`OpaqueMessage`].
+fn live_from_json(object: &JsonObject) -> LiveMessage {
+    let role = object.get("role").and_then(Value::as_str).unwrap_or("");
+    let untagged = || {
         let mut untagged = object.clone();
         untagged.remove("role");
-        let untagged = Value::Object(untagged);
-        Ok(match role {
-            "system" | "user" | "assistant" | "toolResult" => {
-                Self::Llm(serde_json::from_value(value)?)
-            }
-            "bashExecution" => Self::BashExecution(serde_json::from_value(untagged)?),
-            "custom" => Self::Custom(serde_json::from_value(untagged)?),
-            "branchSummary" => Self::BranchSummary(serde_json::from_value(untagged)?),
-            "compactionSummary" => Self::CompactionSummary(serde_json::from_value(untagged)?),
-            other => {
-                return Err(de::Error::custom(format!("unknown message role `{other}`")));
-            }
-        })
+        Value::Object(untagged)
+    };
+    let read = match role {
+        "system" | "user" | "assistant" | "toolResult" => {
+            serde_json::from_value::<Message>(Value::Object(object.clone()))
+                .map(LiveMessage::Llm)
+                .ok()
+        }
+        "bashExecution" => serde_json::from_value::<BashExecutionMessage>(untagged())
+            .map(custom)
+            .ok(),
+        "custom" => serde_json::from_value::<CustomMessage>(untagged())
+            .map(custom)
+            .ok(),
+        "branchSummary" => serde_json::from_value::<BranchSummaryMessage>(untagged())
+            .map(custom)
+            .ok(),
+        "compactionSummary" => serde_json::from_value::<CompactionSummaryMessage>(untagged())
+            .map(custom)
+            .ok(),
+        _ => None,
+    };
+    read.unwrap_or_else(|| custom(OpaqueMessage(object.clone())))
+}
+
+/// The JSON object Pi stores for a live message.
+fn live_to_json(message: &LiveMessage) -> JsonObject {
+    let value = match message {
+        LiveMessage::Llm(message) => serde_json::to_value(message).unwrap_or(Value::Null),
+        LiveMessage::Custom(message) => message.to_json(),
+    };
+    match value {
+        Value::Object(object) => object,
+        _ => JsonObject::new(),
     }
 }
 
@@ -189,10 +249,12 @@ impl AgentMessage {
         self.0.get("role").and_then(Value::as_str)
     }
 
-    /// Read the message by its `role`. Fails for a role this crate does not
-    /// know or members of the wrong shape; the stored object is unchanged.
-    pub fn to_typed(&self) -> Result<TypedAgentMessage, serde_json::Error> {
-        TypedAgentMessage::from_json(&self.0)
+    /// The message as Pi's `AgentMessage` union, the one representation the
+    /// agent and the session share: a model message, one of the four
+    /// coding-agent kinds, or an [`OpaqueMessage`] for anything else. It
+    /// never fails; the stored object is unchanged.
+    pub fn to_agent(&self) -> LiveMessage {
+        live_from_json(&self.0)
     }
 }
 
@@ -208,15 +270,21 @@ impl<'de> Deserialize<'de> for AgentMessage {
     }
 }
 
-impl From<TypedAgentMessage> for AgentMessage {
-    fn from(message: TypedAgentMessage) -> Self {
-        Self(message.to_json())
+impl From<&LiveMessage> for AgentMessage {
+    fn from(message: &LiveMessage) -> Self {
+        Self(live_to_json(message))
+    }
+}
+
+impl From<LiveMessage> for AgentMessage {
+    fn from(message: LiveMessage) -> Self {
+        Self(live_to_json(&message))
     }
 }
 
 impl From<Message> for AgentMessage {
     fn from(message: Message) -> Self {
-        TypedAgentMessage::Llm(message).into()
+        LiveMessage::Llm(message).into()
     }
 }
 
@@ -246,25 +314,25 @@ impl From<bake_ai::SystemMessage> for AgentMessage {
 
 impl From<BashExecutionMessage> for AgentMessage {
     fn from(message: BashExecutionMessage) -> Self {
-        TypedAgentMessage::BashExecution(message).into()
+        custom(message).into()
     }
 }
 
 impl From<CustomMessage> for AgentMessage {
     fn from(message: CustomMessage) -> Self {
-        TypedAgentMessage::Custom(message).into()
+        custom(message).into()
     }
 }
 
 impl From<BranchSummaryMessage> for AgentMessage {
     fn from(message: BranchSummaryMessage) -> Self {
-        TypedAgentMessage::BranchSummary(message).into()
+        custom(message).into()
     }
 }
 
 impl From<CompactionSummaryMessage> for AgentMessage {
     fn from(message: CompactionSummaryMessage) -> Self {
-        TypedAgentMessage::CompactionSummary(message).into()
+        custom(message).into()
     }
 }
 
@@ -350,49 +418,56 @@ fn text_message(text: String, timestamp: i64) -> Message {
 /// becomes user text (or is dropped when excluded from context), `custom`
 /// becomes a user message with its content, and the summaries become user
 /// text inside their prefix and suffix. A message of an unknown role is
-/// dropped, as in Pi; so is one whose members do not read as its role's
-/// type, which Pi would pass on unvalidated.
-pub fn convert_to_llm(messages: &[AgentMessage]) -> Vec<Message> {
+/// dropped, as in Pi; so is an [`OpaqueMessage`] whose members do not read
+/// as its role's type, which Pi would pass on unvalidated.
+pub fn convert_to_llm(messages: &[LiveMessage]) -> Vec<Message> {
     messages
         .iter()
-        .filter_map(|message| match message.to_typed().ok()? {
-            TypedAgentMessage::Llm(message) => Some(message),
-            TypedAgentMessage::BashExecution(message) => {
+        .filter_map(|message| {
+            let custom = match message {
+                LiveMessage::Llm(message) => return Some(message.clone()),
+                LiveMessage::Custom(custom) => custom.as_any(),
+            };
+            if let Some(message) = custom.downcast_ref::<BashExecutionMessage>() {
                 if message.exclude_from_context == Some(true) {
-                    None
-                } else {
-                    Some(text_message(
-                        bash_execution_to_text(&message),
-                        message.timestamp,
-                    ))
+                    return None;
                 }
+                return Some(text_message(
+                    bash_execution_to_text(message),
+                    message.timestamp,
+                ));
             }
-            TypedAgentMessage::Custom(message) => {
-                let content = match message.content {
-                    UserContent::Text(text) => {
-                        UserContent::Blocks(vec![UserContentBlock::Text(TextContent::new(text))])
-                    }
-                    blocks => blocks,
+            if let Some(message) = custom.downcast_ref::<CustomMessage>() {
+                let content = match &message.content {
+                    UserContent::Text(text) => UserContent::Blocks(vec![UserContentBlock::Text(
+                        TextContent::new(text.clone()),
+                    )]),
+                    blocks => blocks.clone(),
                 };
-                Some(Message::User(UserMessage {
+                return Some(Message::User(UserMessage {
                     content,
                     timestamp: message.timestamp,
-                }))
+                }));
             }
-            TypedAgentMessage::BranchSummary(message) => Some(text_message(
-                format!(
-                    "{BRANCH_SUMMARY_PREFIX}{}{BRANCH_SUMMARY_SUFFIX}",
-                    message.summary
-                ),
-                message.timestamp,
-            )),
-            TypedAgentMessage::CompactionSummary(message) => Some(text_message(
-                format!(
-                    "{COMPACTION_SUMMARY_PREFIX}{}{COMPACTION_SUMMARY_SUFFIX}",
-                    message.summary
-                ),
-                message.timestamp,
-            )),
+            if let Some(message) = custom.downcast_ref::<BranchSummaryMessage>() {
+                return Some(text_message(
+                    format!(
+                        "{BRANCH_SUMMARY_PREFIX}{}{BRANCH_SUMMARY_SUFFIX}",
+                        message.summary
+                    ),
+                    message.timestamp,
+                ));
+            }
+            if let Some(message) = custom.downcast_ref::<CompactionSummaryMessage>() {
+                return Some(text_message(
+                    format!(
+                        "{COMPACTION_SUMMARY_PREFIX}{}{COMPACTION_SUMMARY_SUFFIX}",
+                        message.summary
+                    ),
+                    message.timestamp,
+                ));
+            }
+            None
         })
         .collect()
 }
@@ -421,8 +496,8 @@ mod tests {
             r#"{"role":"user","zeta":1,"content":"hi","timestamp":3,"alpha":{"x":[1]}}"#
         );
         assert!(matches!(
-            message.to_typed(),
-            Ok(TypedAgentMessage::Llm(Message::User(_)))
+            message.to_agent(),
+            LiveMessage::Llm(Message::User(_))
         ));
         assert_eq!(message.into_json(), stored);
     }
@@ -444,16 +519,24 @@ mod tests {
             serde_json::to_string(&stored).unwrap_or_default(),
             r#"{"role":"bashExecution","command":"ls","output":"","exitCode":2,"cancelled":false,"truncated":true,"fullOutputPath":"/tmp/out","timestamp":5}"#
         );
+        let live = stored.to_agent();
         assert_eq!(
-            stored.to_typed().ok(),
-            Some(TypedAgentMessage::BashExecution(bash.clone()))
+            live.as_custom()
+                .and_then(|custom| custom.as_any().downcast_ref::<BashExecutionMessage>()),
+            Some(&bash)
         );
+        assert_eq!(AgentMessage::from(&live), stored);
         assert_eq!(
             bash_execution_to_text(&bash),
             "Ran `ls`\n(no output)\n\nCommand exited with code 2\n\n[Output truncated. Full output: /tmp/out]"
         );
-        let unknown = AgentMessage::from_json(object(json!({"role": "future"})));
-        assert!(unknown.to_typed().is_err());
+        let unknown = AgentMessage::from_json(object(json!({"role": "future", "x": 1})));
+        let live = unknown.to_agent();
+        assert_eq!(live.role(), "future");
+        assert_eq!(AgentMessage::from(&live), unknown);
+        // A known role with the wrong shape is carried, not read.
+        let malformed = AgentMessage::from_json(object(json!({"role": "custom", "content": 1})));
+        assert_eq!(AgentMessage::from(malformed.to_agent()), malformed);
     }
 
     #[test]
@@ -475,7 +558,8 @@ mod tests {
             .into(),
             AgentMessage::from_json(object(json!({"role": "future"}))),
         ];
-        let converted = convert_to_llm(&messages);
+        let live: Vec<LiveMessage> = messages.iter().map(AgentMessage::to_agent).collect();
+        let converted = convert_to_llm(&live);
         let texts: Vec<String> = converted
             .iter()
             .map(|message| match message {

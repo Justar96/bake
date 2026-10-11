@@ -101,7 +101,7 @@ pub use file::{
 };
 pub use list::{ListProgress, SessionInfo};
 pub use manager::{NewSessionOptions, SessionManager, SessionTree, SessionTreeNode};
-pub use messages::{AgentMessage, TypedAgentMessage};
+pub use messages::{AgentMessage, OpaqueMessage};
 
 /// A session operation's failure.
 #[derive(Debug)]

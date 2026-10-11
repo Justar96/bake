@@ -87,16 +87,21 @@ dependencies = [
 name = "bake-cli"
 version = "0.4.0-dev"
 dependencies = [
+ "bake-coding-agent",
  "bake-tui",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
 name = "bake-coding-agent"
 version = "0.4.0-dev"
 dependencies = [
+ "bake-agent",
  "bake-ai",
  "getrandom 0.2.17",
  "indexmap",
+ "regex",
  "reqwest",
  "serde",
  "serde-saphyr",
@@ -1652,6 +1657,7 @@ dependencies = [
  "libc",
  "mio",
  "pin-project-lite",
+ "signal-hook-registry",
  "socket2",
  "tokio-macros",
  "windows-sys 0.61.2",

@@ -1,0 +1,21 @@
+Custom preamble.
+
+<addendum>
+Appended.
+</addendum>
+
+<project_context>
+Project-specific instructions and guidelines:
+
+<project_instructions path="a">
+b
+</project_instructions>
+</project_context>
+
+<cwd>
+override
+</cwd>
+
+<notes>
+N
+</notes>
