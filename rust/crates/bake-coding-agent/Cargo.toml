@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "Pi's coding-agent services for Bake's Rust agent: the session store and tool output"
+description = "Pi's coding-agent services for Bake's Rust agent: the session store and local tool foundations"
 
 [dependencies]
 bake-ai.workspace = true
@@ -13,3 +13,6 @@ serde.workspace = true
 serde_json.workspace = true
 getrandom.workspace = true
 indexmap.workspace = true
+
+[dev-dependencies]
+loom = { version = "=0.7.2", default-features = false }
