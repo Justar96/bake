@@ -11,7 +11,9 @@
 //! | [`session`] | Pi `src/core/session-manager.ts`, `session-cwd.ts`, `messages.ts`, `src/utils/paths.ts` |
 //! | [`tools`] | Pi `src/core/tools/{truncate,output-accumulator}.ts`, `src/utils/output-files.ts` |
 //! | [`home`] | Bake: `scripts/release/bake`, `packages/util/home-paths` |
+//! | [`cliproxyapi`] | Bake: `apps/tui/packages/app/src/cliproxyapi.ts`, the retained CLIProxyAPI route and its read-only D25 import |
 
+pub mod cliproxyapi;
 pub mod home;
 pub mod session;
 pub mod tools;

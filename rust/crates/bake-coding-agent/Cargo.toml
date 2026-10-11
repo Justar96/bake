@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "Pi's coding-agent services for Bake's Rust agent: the session store and tool output"
+description = "Pi's coding-agent services for Bake's Rust agent: the session store, tool output, and the CLIProxyAPI route"
 
 [dependencies]
 bake-ai.workspace = true
@@ -13,3 +13,9 @@ serde.workspace = true
 serde_json.workspace = true
 getrandom.workspace = true
 indexmap.workspace = true
+serde-saphyr.workspace = true
+tokio = { workspace = true, features = ["rt", "sync", "time", "macros"] }
+reqwest.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "time", "macros", "net", "io-util"] }

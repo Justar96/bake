@@ -44,3 +44,7 @@ regex = { version = "=1.13.1", default-features = false, features = ["std", "uni
 # Both versions are the ones the lock already carries for ring and serde_json.
 getrandom = { version = "=0.2.17", default-features = false }
 indexmap = { version = "=2.14.2", default-features = false, features = ["std"] }
+# The `bake-coding-agent` CLIProxyAPI import: a panic-free YAML reader with
+# built-in budgets (depth, aliases, nodes, input size) for the 0.3 home's
+# `settings.yaml` and `.credentials.yaml` (D25). MIT OR Apache-2.0.
+serde-saphyr = { version = "=1.3.0", default-features = false, features = ["deserialize"] }
