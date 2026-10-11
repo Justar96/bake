@@ -225,7 +225,7 @@ mod tests {
         let temp = TempDir::new("context-layering");
         let agent = temp.join("agent");
         let cwd = temp.join("project");
-        let nested = cwd.join("services/api");
+        let nested = cwd.join("services").join("api");
         write(&agent.join("AGENTS.md"), "global instructions");
         write(&agent.join("AGENTS.override.md"), "global override");
         write(&cwd.join("AGENTS.md"), "project instructions");
@@ -294,7 +294,7 @@ mod tests {
         let temp = TempDir::new(name);
         let outer = temp.join("outer");
         let main = outer.join("main");
-        let worktree = main.join("worktrees/feat");
+        let worktree = main.join("worktrees").join("feat");
         let src = worktree.join("src");
         std::fs::create_dir_all(&src).expect("dirs");
         link_worktree(&main, &worktree, "feat");
@@ -358,7 +358,7 @@ mod tests {
         let proj = temp.join("proj");
         let bare = proj.join(".bare");
         let worktree = proj.join("main");
-        let git_dir = bare.join("worktrees/main");
+        let git_dir = bare.join("worktrees").join("main");
         write(&bare.join("HEAD"), "ref: refs/heads/main\n");
         write(&git_dir.join("HEAD"), "ref: refs/heads/main\n");
         write(&git_dir.join("commondir"), "../..");
@@ -391,7 +391,7 @@ mod tests {
         // "should NOT skip the superproject's context from inside a submodule"
         let temp = TempDir::new("wt-submodule");
         let sup = temp.join("super");
-        let sub = sup.join("vendor/lib");
+        let sub = sup.join("vendor").join("lib");
         std::fs::create_dir_all(sub.join("src")).expect("dirs");
         write(&sup.join("AGENTS.md"), "superproject instructions");
         write(&sub.join("AGENTS.md"), "submodule instructions");

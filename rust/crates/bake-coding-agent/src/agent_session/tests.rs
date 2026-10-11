@@ -444,10 +444,16 @@ async fn prompts_need_a_model_with_auth() {
     .expect("session");
     assert_eq!(
         session.prompt("hi", Vec::new()).await,
-        Err(
-            "No API key found for faux.\n\nUse /login to log into a provider via OAuth or API key. See:\n  /opt/pi/docs/providers.md\n  /opt/pi/docs/models.md"
-                .into()
-        )
+        // Pi joins the docs paths with the platform separator.
+        Err(format!(
+            "No API key found for faux.\n\nUse /login to log into a provider via OAuth or API key. See:\n  {}\n  {}",
+            std::path::Path::new("/opt/pi/docs")
+                .join("providers.md")
+                .display(),
+            std::path::Path::new("/opt/pi/docs")
+                .join("models.md")
+                .display()
+        ))
     );
     assert_eq!(
         session
