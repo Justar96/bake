@@ -18,14 +18,31 @@
 //! requests hold permits of the session's [`WorkGate`], which
 //! [`AgentSession::shutdown`] closes, so none outlives the session.
 //!
-//! Not ported (deferred): compaction, auto-retry, extensions and their
-//! events, skills, prompt templates, MCP, bash `!` commands, the cache
-//! warmer, scoped models, virtual models, queued steering and follow-up
-//! bookkeeping, tool-loadout changes between turns, and image resizing.
+//! Compaction and auto-retry follow Pi (in `agent_session/recovery.rs`):
+//! after each run a retryable error is retried with backoff, and a context
+//! overflow, a recoverable length stop, or a context over the threshold
+//! compacts the session through [`crate::compaction`]; between the turns of
+//! a run the threshold is checked again; [`AgentSession::compact`] compacts
+//! on request. A failed attempt that is retried is omitted from model context
+//! by a context edit, so the file keeps it and a resumed session sends
+//! exactly what the live one would.
+//!
+//! Not ported (deferred): extensions and their events (including
+//! `session_before_compact`, `session_compact`, and
+//! `session_compact_failed`), branch navigation and its summaries, skills,
+//! prompt templates, MCP, bash `!` commands, the cache warmer, scoped
+//! models, virtual models and their failed-response routing, the
+//! `entry_appended` event, queued steering and follow-up bookkeeping,
+//! tool-loadout changes between turns, and image resizing.
+
+mod recovery;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
+
+pub use recovery::CompactionReason;
+use recovery::{Activity, Core, RunState};
 
 use bake_agent::{
     Agent, AgentError, AgentEvent, AgentInitialState, AgentMessage as LiveMessage, AgentOptions,
@@ -37,6 +54,7 @@ use bake_ai::{
     TextContent, UserContent, UserContentBlock, UserMessage,
 };
 
+use crate::compaction::CompactionResult;
 use crate::model_registry::ModelRegistry;
 use crate::model_registry::resolver::{DEFAULT_THINKING_LEVEL, find_initial_model};
 use crate::owned_work::WorkGate;
@@ -138,9 +156,15 @@ pub struct ToolPrompt {
 /// features' events.
 #[derive(Debug)]
 pub enum SessionEvent<'a> {
-    /// An agent event; Pi's `agent_end` gains `willRetry`, always false
-    /// without auto-retry.
+    /// An agent event other than `agent_end`.
     Agent(&'a AgentEvent),
+    /// Pi's `agent_end`, with whether auto-retry will continue the run.
+    AgentEnd {
+        /// The run's new messages.
+        messages: &'a [LiveMessage],
+        /// Whether a retry follows.
+        will_retry: bool,
+    },
     /// A prompt finished, Pi's `agent_settled`.
     AgentSettled {
         /// Whether it was aborted.
@@ -148,6 +172,62 @@ pub enum SessionEvent<'a> {
     },
     /// The thinking level changed, Pi's `thinking_level_changed`.
     ThinkingLevelChanged(ModelThinkingLevel),
+    /// Pi's `compaction_start`.
+    CompactionStart {
+        /// What started it.
+        reason: CompactionReason,
+    },
+    /// Pi's `compaction_end`.
+    CompactionEnd {
+        /// What started it.
+        reason: CompactionReason,
+        /// The recorded compaction, when it succeeded.
+        result: Option<&'a CompactionResult>,
+        /// Whether it was aborted.
+        aborted: bool,
+        /// Whether the interrupted turn continues.
+        will_retry: bool,
+        /// Why it failed, unless aborted.
+        error_message: Option<String>,
+    },
+    /// Pi's `auto_retry_start`.
+    AutoRetryStart {
+        /// The retry number, from 1.
+        attempt: u32,
+        /// The retry budget.
+        max_attempts: u32,
+        /// The backoff before the retry.
+        delay_ms: u64,
+        /// The error retried.
+        error_message: String,
+    },
+    /// Pi's `auto_retry_end`.
+    AutoRetryEnd {
+        /// Whether a retry succeeded.
+        success: bool,
+        /// The last retry number.
+        attempt: u32,
+        /// The final error, when retries ended without success.
+        final_error: Option<String>,
+    },
+    /// Pi's `summarization_retry_scheduled`.
+    SummarizationRetryScheduled {
+        /// The retry number, from 1.
+        attempt: u32,
+        /// The retry budget.
+        max_attempts: u32,
+        /// The backoff.
+        delay_ms: u64,
+        /// The error retried.
+        error_message: String,
+    },
+    /// Pi's `summarization_retry_attempt_start` of a compaction.
+    SummarizationRetryAttemptStart {
+        /// The compaction's reason.
+        reason: CompactionReason,
+    },
+    /// Pi's `summarization_retry_finished`.
+    SummarizationRetryFinished,
 }
 
 type Listener = Arc<dyn Fn(&SessionEvent<'_>) + Send + Sync>;
@@ -156,10 +236,25 @@ type Listener = Arc<dyn Fn(&SessionEvent<'_>) + Send + Sync>;
 struct Listeners {
     next: AtomicU64,
     list: Mutex<Vec<(u64, Listener)>>,
+    /// Set by [`AgentSession::shutdown`]: later events reach no listener.
+    closed: AtomicBool,
 }
 
 impl Listeners {
+    /// Pi's `dispose` clearing `_eventListeners`: the work shutdown
+    /// cancels ends without telling anyone.
+    fn close(&self) {
+        self.closed.store(true, Ordering::SeqCst);
+        self.list
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clear();
+    }
+
     fn emit(&self, event: &SessionEvent<'_>) {
+        if self.closed.load(Ordering::SeqCst) {
+            return;
+        }
         let listeners: Vec<Listener> = self
             .list
             .lock()
@@ -212,6 +307,7 @@ async fn with_session<R: Send + 'static>(
 /// Pi's `AgentSession`, headless.
 pub struct AgentSession {
     agent: Arc<Agent>,
+    core: Arc<Core>,
     work: WorkGate,
     session: SharedSession,
     registry: Arc<ModelRegistry>,
@@ -221,8 +317,6 @@ pub struct AgentSession {
     prompt_options: SystemPromptOptions,
     listeners: Arc<Listeners>,
     persist_error: Arc<Mutex<Option<String>>>,
-    abort_requested: AtomicBool,
-    has_model: AtomicBool,
     subscription: Mutex<Option<Subscription>>,
     model_fallback_message: Option<String>,
 }
@@ -379,9 +473,10 @@ fn block_images(messages: Vec<Message>) -> Vec<Message> {
 /// Persists a finished message as Pi's `_handleAgentEvent` does: custom
 /// messages as `custom_message` entries, LLM messages as `message`
 /// entries, and the other kinds not at all (they are written elsewhere).
-fn persist(session: &mut SessionManager, message: &LiveMessage) -> Result<(), String> {
+/// Returns the entry id.
+fn persist(session: &mut SessionManager, message: &LiveMessage) -> Result<Option<String>, String> {
     let result = match message {
-        LiveMessage::Llm(llm) => session.append_message(llm.clone()).map(drop),
+        LiveMessage::Llm(llm) => session.append_message(llm.clone()).map(Some),
         LiveMessage::Custom(custom) => match custom.as_any().downcast_ref::<CustomMessage>() {
             Some(custom) => session
                 .append_custom_message_entry(
@@ -390,11 +485,96 @@ fn persist(session: &mut SessionManager, message: &LiveMessage) -> Result<(), St
                     custom.display,
                     custom.details.clone(),
                 )
-                .map(drop),
-            None => Ok(()),
+                .map(Some),
+            None => Ok(None),
         },
     };
     result.map_err(|error| error.to_string())
+}
+
+/// Pi's `prepareNextTurnWithContext` hook: threshold compaction between
+/// turns.
+fn next_turn_hook(core: Arc<Core>) -> bake_agent::agent::AgentPrepareNextTurnWithContext {
+    Arc::new(move |turn, signal| {
+        let tools = turn.context.tools.clone();
+        let core = Arc::clone(&core);
+        Box::pin(async move { core.compact_before_next_response(tools, signal).await })
+    })
+}
+
+/// Persists a finished message unless an earlier write failed or the
+/// session is shut down (Pi's `dispose` disconnects without persisting the
+/// aborted message). `Err` when this write failed.
+async fn persist_message(
+    core: &Core,
+    persist_error: &Mutex<Option<String>>,
+    message: &LiveMessage,
+) -> Result<Option<String>, ()> {
+    // After a failed write, later messages would leave a gap.
+    if persist_error
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .is_some()
+    {
+        return Ok(None);
+    }
+    let Some(permit) = core.work.enter() else {
+        return Ok(None);
+    };
+    let message = message.clone();
+    let session = Arc::clone(&core.session);
+    // The permit lives in the blocking work, which keeps running if this
+    // run is cancelled.
+    let result = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        persist(&mut lock(&session), &message)
+    })
+    .await
+    .unwrap_or_else(|error| Err(format!("Session I/O task failed: {error}")));
+    result.map_err(|error| {
+        persist_error
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get_or_insert(error);
+    })
+}
+
+/// Pi's bookkeeping after persisting: the last assistant message and the
+/// turn's tool results, overflow recovery, and the end of a successful
+/// retry.
+fn track_message(core: &Core, message: &LiveMessage, entry_id: Option<String>) {
+    if message.as_tool_result().is_some() {
+        core.state().turn_tool_results.push(entry_id);
+        return;
+    }
+    let Some(assistant) = message.as_assistant() else {
+        return;
+    };
+    let finished_retry = {
+        let mut state = core.state();
+        state.last_assistant = Some((assistant.clone(), entry_id));
+        state.turn_tool_results.clear();
+        if !matches!(
+            assistant.stop_reason,
+            bake_ai::StopReason::Error | bake_ai::StopReason::Length
+        ) {
+            state.overflow_recovery_attempted = false;
+        }
+        // A successful response ends the retry, so attempts do not
+        // accumulate across the turns of a run.
+        if assistant.stop_reason != bake_ai::StopReason::Error && state.retry_attempt > 0 {
+            Some(std::mem::take(&mut state.retry_attempt))
+        } else {
+            None
+        }
+    };
+    if let Some(attempt) = finished_retry {
+        core.emit(&SessionEvent::AutoRetryEnd {
+            success: true,
+            attempt,
+            final_error: None,
+        });
+    }
 }
 
 impl AgentSession {
@@ -466,6 +646,22 @@ impl AgentSession {
         let block = settings.block_images;
         let session_id = lock(&session).session_id().to_owned();
         let work = WorkGate::default();
+        let stream_fn = registry.stream_fn_owned(Arc::clone(&apis), Some(work.clone()));
+        let listeners = Arc::new(Listeners::default());
+        let core = Arc::new(Core {
+            session: Arc::clone(&session),
+            settings: settings.clone(),
+            listeners: Arc::clone(&listeners),
+            stream_fn: Arc::clone(&stream_fn),
+            work: work.clone(),
+            agent: OnceLock::new(),
+            has_model: AtomicBool::new(selection.model.is_some()),
+            abort_requested: AtomicBool::new(false),
+            state: Mutex::new(RunState::default()),
+            activity: tokio::sync::watch::Sender::new(Activity::default()),
+            #[cfg(test)]
+            session_io: tokio::sync::watch::Sender::new(0),
+        });
         let agent = Agent::new(AgentOptions {
             initial_state: AgentInitialState {
                 system_prompt: None,
@@ -484,7 +680,8 @@ impl AgentSession {
                     }
                 })
             })),
-            stream_fn: Some(registry.stream_fn_owned(Arc::clone(&apis), Some(work.clone()))),
+            stream_fn: Some(stream_fn),
+            prepare_next_turn_with_context: Some(next_turn_hook(Arc::clone(&core))),
             steering_mode: settings.steering_mode,
             follow_up_mode: settings.follow_up_mode,
             session_id: Some(session_id),
@@ -492,6 +689,7 @@ impl AgentSession {
         })
         .map_err(|error| error.to_string())?;
         let agent = Arc::new(agent);
+        let _ = core.agent.set(Arc::downgrade(&agent));
 
         let model = selection.model.clone();
         let thinking = selection.thinking_level;
@@ -515,10 +713,10 @@ impl AgentSession {
             .into_iter()
             .filter(|name| tools.iter().any(|tool| &tool.name == name))
             .collect();
-        let listeners = Arc::new(Listeners::default());
         let persist_error = Arc::new(Mutex::new(None));
         let created = Self {
             agent,
+            core,
             work,
             session,
             registry,
@@ -526,10 +724,8 @@ impl AgentSession {
             tools,
             active_tool_names,
             prompt_options: system_prompt,
-            has_model: AtomicBool::new(selection.model.is_some()),
             listeners,
             persist_error,
-            abort_requested: AtomicBool::new(false),
             subscription: Mutex::new(None),
             model_fallback_message: selection.fallback_message,
         };
@@ -540,54 +736,45 @@ impl AgentSession {
     /// Subscribes the session to its agent: listeners first, then
     /// persistence, as Pi's `_handleAgentEvent` orders them.
     fn connect(&self) {
-        let listeners = Arc::clone(&self.listeners);
-        let session = Arc::clone(&self.session);
+        let core = Arc::clone(&self.core);
         let persist_error = Arc::clone(&self.persist_error);
-        let work = self.work.clone();
         // Weak: the agent owns this listener.
         let agent = Arc::downgrade(&self.agent);
         let subscription = self.agent.subscribe(move |event, _signal| {
-            let listeners = Arc::clone(&listeners);
-            let session = Arc::clone(&session);
+            let core = Arc::clone(&core);
             let persist_error = Arc::clone(&persist_error);
-            let work = work.clone();
             let agent = agent.clone();
             Box::pin(async move {
-                listeners.emit(&SessionEvent::Agent(event));
-                let AgentEvent::MessageEnd { message } = event else {
-                    return;
-                };
-                // After a failed write, later messages would leave a gap.
-                if persist_error
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .is_some()
+                if let AgentEvent::MessageStart { message } = event
+                    && message.role() == "user"
                 {
-                    return;
+                    core.state().overflow_recovery_attempted = false;
                 }
-                // Closed at shutdown: Pi's `dispose` disconnects without
-                // persisting the aborted message.
-                let Some(permit) = work.enter() else {
-                    return;
-                };
-                let message = message.clone();
-                let session = Arc::clone(&session);
-                // The permit lives in the blocking work, which keeps
-                // running if this run is cancelled.
-                let result = tokio::task::spawn_blocking(move || {
-                    let _permit = permit;
-                    persist(&mut lock(&session), &message)
-                })
-                .await
-                .unwrap_or_else(|error| Err(format!("Session I/O task failed: {error}")));
-                if let Err(error) = result {
-                    persist_error
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .get_or_insert(error);
-                    if let Some(agent) = agent.upgrade() {
-                        agent.abort();
+                match event {
+                    AgentEvent::AgentEnd { messages } => {
+                        let will_retry = core.will_retry_after_agent_end(messages);
+                        core.emit(&SessionEvent::AgentEnd {
+                            messages,
+                            will_retry,
+                        });
                     }
+                    event => core.emit(&SessionEvent::Agent(event)),
+                }
+                match event {
+                    AgentEvent::MessageEnd { message } => {
+                        let entry_id = persist_message(&core, &persist_error, message).await;
+                        if entry_id.is_err()
+                            && let Some(agent) = agent.upgrade()
+                        {
+                            agent.abort();
+                        }
+                        track_message(&core, message, entry_id.unwrap_or_default());
+                    }
+                    AgentEvent::TurnEnd { .. } => {
+                        let mut state = core.state();
+                        state.last_tool_results = std::mem::take(&mut state.turn_tool_results);
+                    }
+                    _ => {}
                 }
             })
         });
@@ -628,9 +815,7 @@ impl AgentSession {
 
     /// The model, unless none was available.
     pub fn model(&self) -> Option<Model> {
-        self.has_model
-            .load(Ordering::SeqCst)
-            .then(|| self.agent.model())
+        self.core.model()
     }
 
     /// The thinking level.
@@ -698,7 +883,7 @@ impl AgentSession {
             .or(self.settings.default_thinking_level)
             .unwrap_or_else(|| self.agent.thinking_level());
         self.agent.set_model(model.clone());
-        self.has_model.store(true, Ordering::SeqCst);
+        self.core.has_model.store(true, Ordering::SeqCst);
         with_session(&self.session, move |session| {
             session.append_model_change(&model.provider, &model.id)
         })
@@ -742,13 +927,35 @@ impl AgentSession {
     }
 
     /// Pi's `prompt` for text and images: checks the model and its auth,
-    /// prepends the system-prompt patch, runs the agent until it is idle,
-    /// and reports the first persistence failure.
+    /// compacts first when the last response calls for it, prepends the
+    /// system-prompt patch, runs the agent with its retries and
+    /// compactions until the session is idle, and reports the first
+    /// failure.
     pub async fn prompt(&self, text: &str, images: Vec<ImageContent>) -> Result<(), String> {
-        // Pi queues with a `streamingBehavior`; queueing is not ported.
-        if self.agent.is_streaming() {
-            return Err("Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message.".into());
+        // Claimed at once: two concurrent prompts must not both start.
+        let mut refusal = None;
+        let agent_streaming = self.agent.is_streaming();
+        self.core.activity.send_if_modified(|activity| {
+            if activity.manual_compaction {
+                refusal = Some("Cannot submit a prompt while compaction is in progress. Wait for compaction to finish and retry.");
+                false
+            } else if activity.run || agent_streaming {
+                // Pi queues with a `streamingBehavior`; queueing is not
+                // ported.
+                refusal = Some("Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message.");
+                false
+            } else {
+                activity.run = true;
+                true
+            }
+        });
+        if let Some(refusal) = refusal {
+            return Err(refusal.to_owned());
         }
+        let run = RunGuard(&self.core);
+        // Reset at the claim, not at the run as in Pi, so an abort during
+        // the compaction before the prompt also ends the prompt.
+        self.core.abort_requested.store(false, Ordering::SeqCst);
         let docs = &self.prompt_options.docs.docs;
         let Some(model) = self.model() else {
             return Err(format_no_model_selected_message(docs));
@@ -757,6 +964,19 @@ impl AgentSession {
             && self.registry.check_auth(&model.provider).is_none()
         {
             return Err(format_no_api_key_found_message(&model.provider, docs));
+        }
+        // Compact before sending when the last response calls for it,
+        // aborted ones included; the new prompt is sent either way.
+        let last = self
+            .agent
+            .messages()
+            .iter()
+            .rev()
+            .find_map(|message| message.as_assistant().cloned());
+        if let Some(last) = last {
+            self.core
+                .check_compaction(&last, None, false, Vec::new())
+                .await?;
         }
         let mut content = vec![UserContentBlock::Text(TextContent::new(text))];
         content.extend(images.into_iter().map(UserContentBlock::Image));
@@ -771,11 +991,61 @@ impl AgentSession {
             }
             .into(),
         );
-        self.abort_requested.store(false, Ordering::SeqCst);
-        let result = self.agent.prompt(PromptInput::Messages(messages)).await;
-        let aborted = self.abort_requested.load(Ordering::SeqCst);
-        self.listeners.emit(&SessionEvent::AgentSettled { aborted });
-        result.map_err(|error: AgentError| error.to_string())?;
+        self.run_agent_prompt(messages, run).await
+    }
+
+    /// Pi's `_runAgentPrompt`: the run, then retries, overflow recovery,
+    /// and queued messages until the session settles.
+    async fn run_agent_prompt(
+        &self,
+        messages: Vec<LiveMessage>,
+        run: RunGuard<'_>,
+    ) -> Result<(), String> {
+        let core = &self.core;
+        {
+            let mut state = core.state();
+            state.last_assistant = None;
+            state.last_tool_results.clear();
+            state.turn_tool_results.clear();
+        }
+        let mut result = if core.aborted() {
+            Ok(())
+        } else {
+            self.agent
+                .prompt(PromptInput::Messages(messages))
+                .await
+                .map_err(|error: AgentError| error.to_string())
+        };
+        while result.is_ok() && !core.aborted() {
+            match self.handle_post_agent_run().await {
+                Ok(true) => {
+                    if core.aborted() {
+                        break;
+                    }
+                    result = self.agent.continue_run().await.map_err(|e| e.to_string());
+                    continue;
+                }
+                Ok(false) => {}
+                Err(error) => {
+                    result = Err(error);
+                    break;
+                }
+            }
+            // Without extensions, Pi's pre-settlement boundary continues
+            // only for queued messages.
+            if core.aborted() || !self.agent.has_queued_messages() {
+                break;
+            }
+            result = self.agent.continue_run().await.map_err(|e| e.to_string());
+        }
+        if core.aborted() {
+            core.finish_cancelled_retry();
+        }
+        let aborted = core.aborted();
+        // Listeners of `agent_settled` may prompt again.
+        drop(run);
+        core.emit(&SessionEvent::AgentSettled { aborted });
+        result?;
         match self
             .persist_error
             .lock()
@@ -787,18 +1057,145 @@ impl AgentSession {
         }
     }
 
-    /// Pi's `abort`: signals the run and waits until it is idle.
-    pub async fn abort(&self) {
-        self.abort_requested.store(true, Ordering::SeqCst);
-        self.agent.abort();
-        self.agent.wait_for_idle().await;
+    /// Pi's `_handlePostAgentRun`: whether to continue the agent.
+    async fn handle_post_agent_run(&self) -> Result<bool, String> {
+        let core = &self.core;
+        let (last, tool_results) = {
+            let mut state = core.state();
+            (
+                state.last_assistant.take(),
+                std::mem::take(&mut state.last_tool_results),
+            )
+        };
+        if core.aborted() {
+            core.finish_cancelled_retry();
+            return Ok(false);
+        }
+        let Some((message, entry_id)) = last else {
+            return Ok(self.agent.has_queued_messages());
+        };
+        if core.is_retryable_error(&message)
+            && core.prepare_retry(&message, entry_id.clone()).await?
+        {
+            if core.aborted() {
+                core.finish_cancelled_retry();
+            }
+            return Ok(!core.aborted());
+        }
+        if core.aborted() {
+            core.finish_cancelled_retry();
+            return Ok(false);
+        }
+        if message.stop_reason == bake_ai::StopReason::Error {
+            let attempt = std::mem::take(&mut core.state().retry_attempt);
+            if attempt > 0 {
+                core.emit(&SessionEvent::AutoRetryEnd {
+                    success: false,
+                    attempt,
+                    final_error: message.error_message.clone(),
+                });
+            }
+        }
+        if core
+            .check_compaction(&message, entry_id, true, tool_results)
+            .await?
+        {
+            return Ok(!core.aborted());
+        }
+        // The loop drains both queues before `agent_end`; messages queued
+        // by `agent_end` listeners need a fresh run.
+        Ok(!core.aborted() && self.agent.has_queued_messages())
     }
 
-    /// Pi's `dispose`, awaited: aborts and cancels the run, waits for its
-    /// task, its session writes, and its model requests, and disconnects
-    /// from the agent. Later prompts fail.
+    /// Pi's `compact`: aborts the current run, then summarizes the history
+    /// before the kept recent messages, records the compaction, and
+    /// replaces the transcript with the compacted context. Never retried or
+    /// continued.
+    pub async fn compact(
+        &self,
+        custom_instructions: Option<&str>,
+    ) -> Result<CompactionResult, String> {
+        self.abort().await;
+        let no_model = format_no_model_selected_message(&self.prompt_options.docs.docs);
+        self.core
+            .manual_compaction(custom_instructions, no_model)
+            .await
+    }
+
+    /// Pi's `abortCompaction`: cancels a running compaction.
+    pub fn abort_compaction(&self) {
+        let state = self.core.state();
+        for controller in [&state.compaction_abort, &state.auto_compaction_abort]
+            .into_iter()
+            .flatten()
+        {
+            controller.abort();
+        }
+    }
+
+    /// Pi's `abortRetry`: cancels the wait before a retry.
+    pub fn abort_retry(&self) {
+        if let Some(controller) = &self.core.state().retry_abort {
+            controller.abort();
+        }
+    }
+
+    /// Pi's `isCompacting`.
+    pub fn is_compacting(&self) -> bool {
+        let activity = *self.core.activity.borrow();
+        activity.manual_compaction || activity.auto_compaction
+    }
+
+    /// Pi's `isRetrying`: waiting before a retry.
+    pub fn is_retrying(&self) -> bool {
+        self.core.state().retry_abort.is_some()
+    }
+
+    /// Pi's `retryAttempt`: 0 when not retrying.
+    pub fn retry_attempt(&self) -> u32 {
+        self.core.state().retry_attempt
+    }
+
+    /// Pi's `isStreaming`: a prompt and its post-run work are running.
+    pub fn is_streaming(&self) -> bool {
+        self.core.activity.borrow().run
+    }
+
+    /// Pi's `autoCompactionEnabled`.
+    pub fn auto_compaction_enabled(&self) -> bool {
+        self.settings.compaction_enabled()
+    }
+
+    /// Pi's `autoRetryEnabled`.
+    pub fn auto_retry_enabled(&self) -> bool {
+        self.settings.retry.enabled
+    }
+
+    /// Pi's `abort`: signals the run, cancels a retry wait and a
+    /// compaction, and waits until the session is idle.
+    pub async fn abort(&self) {
+        if self.core.activity.borrow().run {
+            self.core.abort_requested.store(true, Ordering::SeqCst);
+        }
+        self.core.abort_retry_and_compaction();
+        self.agent.abort();
+        self.agent.wait_for_idle().await;
+        self.core.wait_for_idle().await;
+    }
+
+    /// Pi's `dispose`, awaited: aborts and cancels the run, a retry wait,
+    /// and a compaction, removes every listener so the cancelled work
+    /// reports nothing, waits for the run's task, its session writes, and
+    /// its model requests, and disconnects from the agent. Later prompts
+    /// fail and emit no events.
     pub async fn shutdown(&self) {
-        self.abort_requested.store(true, Ordering::SeqCst);
+        // Closed before anything is cancelled: a cancelled retry wait or
+        // compaction resumes on another worker at once, and Pi's
+        // synchronous `dispose` clears its listeners before any of that
+        // work's continuations run.
+        self.listeners.close();
+        self.core.abort_requested.store(true, Ordering::SeqCst);
+        self.core.abort_retry_and_compaction();
         self.agent.shutdown().await;
         self.work.close().await;
         if let Some(subscription) = self
@@ -812,5 +1209,17 @@ impl AgentSession {
     }
 }
 
+/// Clears the session's run flag however the prompt ends, including when
+/// its future is dropped.
+struct RunGuard<'a>(&'a Core);
+
+impl Drop for RunGuard<'_> {
+    fn drop(&mut self) {
+        self.0.activity.send_modify(|activity| activity.run = false);
+    }
+}
+
+#[cfg(test)]
+mod recovery_tests;
 #[cfg(test)]
 mod tests;

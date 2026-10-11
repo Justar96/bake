@@ -1,5 +1,6 @@
-bake-coding-agent includes code ported from the following MIT-licensed project.
-Bake's own changes are under the workspace's MIT license.
+bake-coding-agent includes code ported from the following projects, each under
+the license reproduced below. Bake's own changes are under the workspace's MIT
+license.
 
 ================================================================================
 Pi (packages/coding-agent)
@@ -25,8 +26,18 @@ values (src/core/resolve-config-value.ts), settings
 (src/core/settings-manager.ts), print mode and its JSON events
 (src/modes/print-mode.ts, json-event.ts), the command line (src/main.ts,
 src/cli/args.ts, src/cli/initial-message.ts), JSON comment stripping
-(src/utils/json.ts), the login guidance (src/core/auth-guidance.ts), and the
-tests under test/ that the Rust tests name.
+(src/utils/json.ts), the login guidance (src/core/auth-guidance.ts), the
+file tools (src/core/tools/read.ts, write.ts, edit.ts, edit-diff.ts, ls.ts,
+find.ts, grep.ts, path-utils.ts, index.ts, tool-definition-wrapper.ts), the
+tool selection of src/core/settings-manager.ts, sdk.ts, agent-session.ts, and
+mcp-servers.ts, the image helpers (src/utils/mime.ts, exif-orientation.ts,
+image-convert.ts, image-resize-core.ts, image-resize.ts, image-process.ts,
+tool-result-images.ts), the bash tool and its process handling
+(src/core/tools/bash.ts, src/utils/shell.ts, src/utils/child-process.ts,
+BASH_UPDATE_THROTTLE_MS from src/core/tools/renderers/bash.ts), compaction
+(src/core/compaction/compaction.ts, branch-summarization.ts, utils.ts) with
+auto-compaction and auto-retry from src/core/agent-session.ts, and the tests
+under test/ that the Rust tests name.
 --------------------------------------------------------------------------------
 MIT License
 
@@ -49,3 +60,41 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+================================================================================
+jsdiff (diff)
+https://github.com/kpdecker/jsdiff
+Release 8.0.4, the version Pi v1.1.0 locks.
+Ported: the line diff (src/diff/line.ts, src/diff/base.ts) and
+createTwoFilesPatch (src/patch/create.ts), which Pi's edit tool uses for its
+diff and patch.
+--------------------------------------------------------------------------------
+BSD 3-Clause License
+
+Copyright (c) 2009-2015, Kevin Decker <kpdecker@gmail.com>
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.

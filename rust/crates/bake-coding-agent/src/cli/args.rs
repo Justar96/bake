@@ -67,6 +67,15 @@ pub struct Args {
     pub no_session: bool,
     /// `--session`.
     pub session: Option<String>,
+    /// `--tools`, `-t`: a checked list of names, patterns, or `+name` and
+    /// `-name` changes.
+    pub tools: Option<Vec<String>>,
+    /// `--exclude-tools`, `-xt`.
+    pub exclude_tools: Option<Vec<String>>,
+    /// `--no-tools`, `-nt`.
+    pub no_tools: bool,
+    /// `--no-builtin-tools`, `-nbt`.
+    pub no_builtin_tools: bool,
     /// Positional prompts.
     pub messages: Vec<String>,
     /// `@file` arguments.
@@ -76,6 +85,15 @@ pub struct Args {
     pub unknown_flags: Vec<(String, Option<String>)>,
     /// Parse problems.
     pub diagnostics: Vec<Diagnostic>,
+}
+
+/// Pi's comma-separated tool list: trimmed, empty entries dropped.
+fn tool_list(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(|entry| crate::tools::js::trim(entry).to_owned())
+        .filter(|entry| !entry.is_empty())
+        .collect()
 }
 
 const VALID_THINKING_LEVELS: &str = "off, minimal, low, medium, high, xhigh, max";
@@ -129,6 +147,22 @@ pub fn parse_args(args: &[String]) -> Args {
             "--no-session" => result.no_session = true,
             "--session" if next.is_some() => {
                 result.session = next.map(str::to_owned);
+                i += 1;
+            }
+            "--no-tools" | "-nt" => result.no_tools = true,
+            "--no-builtin-tools" | "-nbt" => result.no_builtin_tools = true,
+            "--tools" | "-t" if next.is_some() => {
+                let tools = tool_list(next.unwrap_or_default());
+                i += 1;
+                match crate::tools::index::get_tool_list_error(&tools) {
+                    Some(error) => result
+                        .diagnostics
+                        .push(Diagnostic::error(format!("{arg}: {error}"))),
+                    None => result.tools = Some(tools),
+                }
+            }
+            "--exclude-tools" | "-xt" if next.is_some() => {
+                result.exclude_tools = Some(tool_list(next.unwrap_or_default()));
                 i += 1;
             }
             "--thinking" if next.is_some() => {
@@ -262,6 +296,49 @@ mod tests {
         assert!(args.diagnostics.is_empty());
         // Pi: a flag missing its value falls through to the unknown flags.
         assert_eq!(parse(&["--model"]).unknown_flags, [("model".into(), None)]);
+    }
+
+    #[test]
+    fn tool_flags() {
+        let args = parse(&[
+            "--tools",
+            " read, grep ,,",
+            "-xt",
+            "ls,mcp__*",
+            "-nt",
+            "-nbt",
+        ]);
+        assert_eq!(args.tools, Some(vec!["read".into(), "grep".into()]));
+        assert_eq!(args.exclude_tools, Some(vec!["ls".into(), "mcp__*".into()]));
+        assert!(args.no_tools && args.no_builtin_tools);
+        assert!(args.diagnostics.is_empty());
+        assert_eq!(
+            parse(&["-t", "+grep,-bash"]).tools,
+            Some(vec!["+grep".into(), "-bash".into()])
+        );
+        assert_eq!(
+            parse(&["-t", "read,+grep"]).diagnostics,
+            [Diagnostic::error(
+                "-t: tool names cannot be mixed with +name or -name entries"
+            )]
+        );
+        assert_eq!(
+            parse(&["--tools", "-gr*"]).diagnostics,
+            [Diagnostic::error(
+                "--tools: +name and -name entries take exact tool names, not patterns: -gr*"
+            )]
+        );
+        // Pi: a missing value falls through, `-t` to an unknown option.
+        assert_eq!(
+            parse(&["-t"]).diagnostics,
+            [Diagnostic::error("Unknown option: -t")]
+        );
+        assert_eq!(parse(&["--tools"]).unknown_flags, [("tools".into(), None)]);
+        // Pi takes the value even when it starts with `-`.
+        assert_eq!(
+            parse(&["--tools", "-bash"]).tools,
+            Some(vec!["-bash".into()])
+        );
     }
 
     #[test]

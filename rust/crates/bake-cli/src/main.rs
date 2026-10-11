@@ -33,11 +33,19 @@ Options:
   -c, --continue            Continue the most recent session in this directory
       --session <path|id>   Use a session file, or a session id or id prefix
       --no-session          Do not save the session
+  -t, --tools <list>        Allow these tools: names, patterns with *, or +name
+                            and -name changes to the defaults, comma-separated
+  -xt, --exclude-tools <list>
+                            Disable these tools: names or patterns with *
+  -nt, --no-tools           Start with no tools
+  -nbt, --no-builtin-tools  Start without the built-in tools
   -h, --help                Show this help
   -v, --version             Show the version
 
 Messages are prompts, sent in order; piped standard input is prepended to the
-first. The agent runs without tools. Interactive mode is not available yet:
+first. The agent starts with the read, bash, edit, and write tools; grep, find,
+and ls are available through --tools. Bash runs without a sandbox or
+approvals, and grep and find need rg and fd on PATH. Interactive mode is not available yet:
 bake-rs prints when -p or --mode is given or a standard stream is not a
 terminal.
 
