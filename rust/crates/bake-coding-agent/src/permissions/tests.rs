@@ -817,6 +817,12 @@ async fn a_panicking_answerer_fails_closed() {
     );
 }
 
+/// The root a session pins for `root`: canonicalized once at start, so
+/// `D:\session-project` on Windows.
+fn pinned(root: &str) -> std::path::PathBuf {
+    bake_sandbox::canonical_path(std::path::Path::new(root))
+}
+
 fn engine(mode: SandboxMode, outcome: EscalationOutcome) -> (PermissionEngine, Arc<AtomicUsize>) {
     let asked = Arc::new(AtomicUsize::new(0));
     let standing = standing(mode, ASK);
@@ -862,7 +868,7 @@ const FS: BlankJustification = BlankJustification::Checked;
 #[tokio::test]
 async fn requests_for_access_the_call_has_need_nothing() {
     let (engine, asked) = engine(WW, EscalationOutcome::AllowedOnce);
-    let standing = SandboxPolicy::new(WW, "/session-project").with_session_id("sess");
+    let standing = SandboxPolicy::new(WW, pinned("/session-project")).with_session_id("sess");
     for args in [
         json!({ "command": "true" }),
         json!({ "command": "true", "justification": "" }),
@@ -991,7 +997,7 @@ async fn an_approved_widening_applies_to_that_call_only() {
     .expect("granted");
     assert_eq!(
         granted,
-        SandboxPolicy::new(DFA, "/session-project").with_session_id("sess")
+        SandboxPolicy::new(DFA, pinned("/session-project")).with_session_id("sess")
     );
     assert_eq!(asked.load(Ordering::SeqCst), 1);
     assert_eq!(

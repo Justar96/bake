@@ -820,7 +820,7 @@ async fn a_denied_bash_write_shows_the_markers() {
     assert_eq!(calls[0].0, argv);
     assert_eq!(
         calls[0].1,
-        SandboxPolicy::new(WW, &root).with_session_id("sess-perm")
+        SandboxPolicy::new(WW, bake_sandbox::canonical_path(&root)).with_session_id("sess-perm")
     );
 
     // A terminated line gains no extra newline.
