@@ -13,12 +13,13 @@
 //! | [`session`] | Pi `src/core/session-manager.ts`, `session-cwd.ts`, `messages.ts`, `src/utils/paths.ts` |
 //! | [`tools`] | Pi `src/core/tools/*.ts` (see the module's table), `src/utils/{output-files,shell,child-process}.ts` |
 //! | [`home`] | Bake: `scripts/release/bake`, `packages/util/home-paths` |
-//! | [`agent_session`] | Pi `src/core/agent-session.ts`, `src/core/sdk.ts` |
+//! | [`agent_session`] | Pi `src/core/agent-session.ts`, `src/core/sdk.ts`, with auto-compaction, manual `compact`, and auto-retry |
+//! | [`compaction`] | Pi `src/core/compaction/{compaction,branch-summarization,utils}.ts` |
 //! | [`system_prompt`] | Pi `src/core/system-prompt.ts`, `src/core/resource-loader.ts` (context files) |
 //! | [`model_registry`] | Pi `src/core/{model-runtime,provider-composer,model-config,model-resolver}.ts`, `src/utils/json.ts` |
 //! | [`auth_storage`] | Pi `src/core/auth-storage.ts` (read-only) |
 //! | [`config_value`] | Pi `src/core/resolve-config-value.ts` |
-//! | [`settings`] | Pi `src/core/settings-manager.ts` (default model and thinking level) |
+//! | [`settings`] | Pi `src/core/settings-manager.ts` (default model, thinking level, tools, images, compaction with per-model overrides, branch-summary reserve, and retry) |
 //! | [`print_mode`], [`json_event`] | Pi `src/modes/print-mode.ts`, `src/modes/json-event.ts` |
 //! | [`cli`] | Pi `src/main.ts`, `src/cli/args.ts`, `src/cli/initial-message.ts` |
 //! | [`owned_work`] | Bake: the gate shutdown closes over owned work |
@@ -28,6 +29,7 @@ pub mod agent_session;
 pub mod auth_storage;
 pub mod cli;
 pub mod cliproxyapi;
+pub mod compaction;
 pub mod config_value;
 pub mod home;
 pub mod json_event;

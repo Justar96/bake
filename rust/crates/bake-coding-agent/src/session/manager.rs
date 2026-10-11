@@ -182,7 +182,7 @@ fn usage_value(usage: &Usage) -> Value {
 
 /// Pi's `getCurrentSystemMessage` over stored messages, kept as JSON so the
 /// recorded tools keep every member they were declared with.
-fn current_system_message(messages: &[AgentMessage]) -> Option<JsonObject> {
+pub(crate) fn current_system_message(messages: &[AgentMessage]) -> Option<JsonObject> {
     let mut content: Vec<String> = Vec::new();
     let mut sections: IndexMap<String, Value> = IndexMap::new();
     let mut tools: IndexMap<String, Value> = IndexMap::new();
