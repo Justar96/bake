@@ -47,8 +47,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use bake_agent::StreamFn;
 use bake_ai::{
-    ApiRegistry, AssistantMessage, AssistantMessageEventStream, Model, ProviderHeaders,
-    SimpleStreamOptions, StopReason, TranscriptContext, assistant_message_channel,
+    AbortSignal, ApiRegistry, AssistantMessage, AssistantMessageEventStream, Model,
+    ProviderHeaders, SimpleStreamOptions, StopReason, TranscriptContext, assistant_message_channel,
 };
 use serde_json::Value;
 
@@ -1059,9 +1059,10 @@ struct LazyRequest {
 /// Pi's `lazyStream`: returns at once, then authenticates and forwards the
 /// provider's stream. A setup failure ends the stream with an error
 /// message. The request's abort signal kills a `!command` authentication
-/// runs, waits for its blocking thread, and ends the stream as aborted;
-/// while forwarding, it ends the task once the consumer is gone. `permit`
-/// is held until the task ends.
+/// runs, waits for its blocking thread, and ends the stream as aborted; a
+/// request aborted before authentication finishes never reaches the
+/// provider. While forwarding, it ends the task once the consumer is
+/// gone. `permit` is held until the task ends.
 fn lazy_stream(request: LazyRequest, permit: Option<WorkPermit>) -> AssistantMessageEventStream {
     let LazyRequest {
         registry,
@@ -1099,8 +1100,10 @@ fn lazy_stream(request: LazyRequest, permit: Option<WorkPermit>) -> AssistantMes
         let _cancel_on_drop = CancelOnDrop(Arc::clone(&cancel));
         let resolving = resolve_request(registry, &model, options, Arc::clone(&cancel));
         tokio::pin!(resolving);
+        // Biased: when both are ready, the abort wins, so a request
+        // aborted before it starts never reaches the provider.
         let resolved = tokio::select! {
-            resolved = &mut resolving => resolved,
+            biased;
             () = cancelled => {
                 cancel.store(true, Ordering::SeqCst);
                 // The killed command returns promptly; the auth thread is
@@ -1109,7 +1112,14 @@ fn lazy_stream(request: LazyRequest, permit: Option<WorkPermit>) -> AssistantMes
                 sender.finish(aborted(&model));
                 return;
             }
+            resolved = &mut resolving => resolved,
         };
+        // An abort that landed while authentication finished: the select
+        // above saw the resolution first.
+        if signal.as_ref().is_some_and(AbortSignal::aborted) {
+            sender.finish(aborted(&model));
+            return;
+        }
         let options = match resolved {
             Ok(options) => options,
             Err(error) => {

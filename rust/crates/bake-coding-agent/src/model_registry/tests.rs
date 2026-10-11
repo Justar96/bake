@@ -688,3 +688,40 @@ async fn the_stream_function_fails_setup_with_pi_messages() {
         Some("Unknown provider: ghost")
     );
 }
+
+// An abort that lands before authentication finishes ends the request as
+// aborted, as Pi's providers end a request whose signal is aborted, without
+// sending it to the provider.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_request_aborted_before_it_starts_never_reaches_the_provider() {
+    use bake_ai::providers::faux::{FauxProvider, FauxProviderOptions};
+    let faux = Arc::new(FauxProvider::new(FauxProviderOptions::default()));
+    let apis = Arc::new(ApiRegistry::new());
+    apis.register(faux.clone());
+    let mut registry = registry(json!({}), "{}");
+    registry
+        .add_provider_config(
+            "faux",
+            json!({
+                "baseUrl": "http://127.0.0.1:9/unused",
+                "api": faux.model().api,
+                "models": [{ "id": "faux-1" }],
+            }),
+            Some("test-key".into()),
+        )
+        .expect("faux provider");
+    let registry = Arc::new(registry);
+    let model = registry.model("faux", "faux-1").expect("faux-1");
+    let stream_fn = registry.stream_fn_owned(apis, None);
+    for _ in 0..50 {
+        let controller = bake_ai::AbortController::new();
+        controller.abort();
+        let mut options = SimpleStreamOptions::default();
+        options.base.signal = Some(controller.signal());
+        let stream = stream_fn(&model, &TranscriptContext::default(), options).expect("stream");
+        let result = stream.result().await.expect("result");
+        assert_eq!(result.stop_reason, StopReason::Aborted);
+        assert_eq!(result.error_message.as_deref(), Some("Request was aborted"));
+    }
+    assert_eq!(faux.call_count(), 0);
+}

@@ -659,6 +659,8 @@ impl AgentSession {
             abort_requested: AtomicBool::new(false),
             state: Mutex::new(RunState::default()),
             activity: tokio::sync::watch::Sender::new(Activity::default()),
+            #[cfg(test)]
+            session_io: tokio::sync::watch::Sender::new(0),
         });
         let agent = Agent::new(AgentOptions {
             initial_state: AgentInitialState {
@@ -1187,9 +1189,13 @@ impl AgentSession {
     /// its model requests, and disconnects from the agent. Later prompts
     /// fail and emit no events.
     pub async fn shutdown(&self) {
+        // Closed before anything is cancelled: a cancelled retry wait or
+        // compaction resumes on another worker at once, and Pi's
+        // synchronous `dispose` clears its listeners before any of that
+        // work's continuations run.
+        self.listeners.close();
         self.core.abort_requested.store(true, Ordering::SeqCst);
         self.core.abort_retry_and_compaction();
-        self.listeners.close();
         self.agent.shutdown().await;
         self.work.close().await;
         if let Some(subscription) = self

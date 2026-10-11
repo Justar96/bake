@@ -1064,6 +1064,8 @@ async fn abort_cancels_the_retry_wait() {
 /// until [`Self::release`], so the session's next I/O waits there.
 struct SessionHold {
     held: Arc<AtomicBool>,
+    /// The session's I/O count when the lock was taken.
+    io_at_hold: Arc<std::sync::atomic::AtomicU64>,
     release: Mutex<Option<std::sync::mpsc::Sender<()>>>,
     thread: Arc<Mutex<Option<std::thread::JoinHandle<()>>>>,
     _subscription: SessionSubscription,
@@ -1072,12 +1074,15 @@ struct SessionHold {
 impl SessionHold {
     fn on(session: &AgentSession, kind: &'static str) -> Self {
         let held = Arc::new(AtomicBool::new(false));
+        let io_at_hold = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let thread = Arc::new(Mutex::new(None));
         let (release, released) = std::sync::mpsc::channel::<()>();
         let released = Mutex::new(Some(released));
         let shared = Arc::clone(&session.session);
+        let core = Arc::clone(&session.core);
         let subscription = session.subscribe({
             let held = Arc::clone(&held);
+            let io_at_hold = Arc::clone(&io_at_hold);
             let thread = Arc::clone(&thread);
             move |event| {
                 if crate::json_event::session_event_json(event)["type"] != kind {
@@ -1101,11 +1106,13 @@ impl SessionHold {
                 // The listener returns only once the lock is held, so the
                 // session's next I/O after this event waits for it.
                 let _ = is_locked.recv();
+                io_at_hold.store(*core.session_io.borrow(), Ordering::SeqCst);
                 *thread.lock().unwrap_or_else(PoisonError::into_inner) = Some(handle);
             }
         });
         Self {
             held,
+            io_at_hold,
             release: Mutex::new(Some(release)),
             thread,
             _subscription: subscription,
@@ -1118,6 +1125,20 @@ impl SessionHold {
             assert!(tokio::time::Instant::now() < deadline, "never held");
             tokio::time::sleep(Duration::from_millis(2)).await;
         }
+    }
+
+    /// Waits until the session's next I/O after the hold has started, so it
+    /// waits on the held lock.
+    async fn wait_blocked_io(&self, session: &AgentSession) {
+        let at_hold = self.io_at_hold.load(Ordering::SeqCst);
+        let mut io = session.core.session_io.subscribe();
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            io.wait_for(|count| *count > at_hold),
+        )
+        .await
+        .expect("the session's I/O never started")
+        .expect("the session is alive");
     }
 
     fn release(&self) {
@@ -1137,7 +1158,9 @@ impl SessionHold {
 }
 
 /// Starts `session.abort()` and returns once it requested the abort, while
-/// it waits for the session to settle.
+/// it waits for the session to settle. Whether it has also aborted the
+/// registered controllers yet does not matter: `register_abort` and `abort`
+/// each see the other's write.
 async fn start_abort(session: &Arc<AgentSession>) -> tokio::task::JoinHandle<()> {
     let abort = {
         let session = Arc::clone(session);
@@ -1148,8 +1171,6 @@ async fn start_abort(session: &Arc<AgentSession>) -> tokio::task::JoinHandle<()>
         assert!(tokio::time::Instant::now() < deadline, "never aborted");
         tokio::time::sleep(Duration::from_millis(2)).await;
     }
-    // Past `abort_retry_and_compaction`, which found no controller.
-    tokio::time::sleep(Duration::from_millis(20)).await;
     abort
 }
 
@@ -1173,6 +1194,7 @@ async fn abort_during_the_retry_omission_cancels_the_wait() {
         tokio::spawn(async move { session.prompt("Test", Vec::new()).await })
     };
     hold.wait_held().await;
+    hold.wait_blocked_io(&session).await;
     let abort = start_abort(&session).await;
     hold.release();
     tokio::time::timeout(Duration::from_secs(5), abort)
@@ -1223,6 +1245,9 @@ async fn abort_during_the_compaction_check_cancels_the_compaction() {
         tokio::spawn(async move { session.prompt("a question to compact", Vec::new()).await })
     };
     hold.wait_held().await;
+    // The post-run check is reading the branch: an earlier abort would skip
+    // the check, and with it the compaction this test cancels.
+    hold.wait_blocked_io(&session).await;
     let abort = start_abort(&session).await;
     hold.release();
     tokio::time::timeout(Duration::from_secs(5), abort)

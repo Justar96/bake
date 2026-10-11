@@ -293,6 +293,10 @@ pub(super) struct Core {
     pub abort_requested: AtomicBool,
     pub state: Mutex<RunState>,
     pub activity: watch::Sender<Activity>,
+    /// Counts [`Self::with_session`] calls, so tests can tell when the
+    /// session's I/O has started.
+    #[cfg(test)]
+    pub session_io: watch::Sender<u64>,
 }
 
 /// Clears an activity flag however its work ends.
@@ -374,6 +378,8 @@ impl Core {
         let Some(permit) = self.work.enter() else {
             return Err("The session is shut down".to_owned());
         };
+        #[cfg(test)]
+        self.session_io.send_modify(|count| *count += 1);
         let session = Arc::clone(&self.session);
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
@@ -602,6 +608,11 @@ impl Core {
         // Registered before the branch read, so an abort during it cancels
         // the request.
         let (controller, slot) = self.register_abort(|state| &mut state.auto_compaction_abort);
+        // A run already aborted sends no summarization request: its signal
+        // is only watched once the request has started.
+        if run_signal.is_some_and(AbortSignal::aborted) {
+            controller.abort();
+        }
         let model = self.model();
         let settings = self.compaction_settings(model.as_ref())?;
         let Some(model) = model else {
