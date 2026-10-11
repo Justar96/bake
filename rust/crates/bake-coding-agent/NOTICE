@@ -12,7 +12,18 @@ manager uses (src/utils/paths.ts), Pi's UUIDv7 generator
 (packages/ai/src/utils/uuid.ts), and the session-manager tests under test/;
 tool-output truncation and accumulation (src/core/tools/truncate.ts, output-accumulator.ts), exclusive
 output files (src/utils/output-files.ts), and the output cases of
-test/tools.test.ts and test/mcp-extension.test.ts.
+test/tools.test.ts and test/mcp-extension.test.ts;
+the headless agent session (src/core/agent-session.ts, src/core/sdk.ts), the
+system prompt (src/core/system-prompt.ts) and context-file loading
+(src/core/resource-loader.ts), the model registry and resolver
+(src/core/model-runtime.ts, provider-composer.ts, model-config.ts,
+model-resolver.ts), credential reading (src/core/auth-storage.ts), config
+values (src/core/resolve-config-value.ts), settings
+(src/core/settings-manager.ts), print mode and its JSON events
+(src/modes/print-mode.ts, json-event.ts), the command line (src/main.ts,
+src/cli/args.ts, src/cli/initial-message.ts), JSON comment stripping
+(src/utils/json.ts), the login guidance (src/core/auth-guidance.ts), and the
+tests under test/ that the Rust tests name.
 --------------------------------------------------------------------------------
 MIT License
 

@@ -242,6 +242,23 @@ The Rust `bake-agent` crate ports Pi's agent loop and stateful agent, and the to
 | --- | --- | --- |
 | [Pi](https://github.com/earendil-works/pi) `packages/agent` and `packages/ai/src/utils/validation.ts`, Copyright (c) 2025 Mario Zechner | v1.1.0 (`abe508e1b89912adde45528136c3221eb69acdd7`) | MIT |
 
+## Rust YAML reader (`rust/crates/bake-coding-agent`)
+
+`bake-coding-agent` reads the 0.3 Bake home's `settings.yaml` and `.credentials.yaml` with serde-saphyr. These crates entered [`rust/Cargo.lock`](rust/Cargo.lock) with it and keep their own licenses.
+
+| Crate | Version | License |
+| --- | --- | --- |
+| [`serde-saphyr`](https://github.com/bourumir-wyngs/serde-saphyr) | 1.3.0 | MIT OR Apache-2.0 |
+| [`granit-parser`](https://github.com/bourumir-wyngs/granit-parser) | 1.3.0 | MIT OR Apache-2.0 |
+| [`annotate-snippets`](https://github.com/rust-lang/annotate-snippets-rs) | 0.12.16 | MIT OR Apache-2.0 |
+| [`anstyle`](https://github.com/rust-cli/anstyle) | 1.0.14 | MIT OR Apache-2.0 |
+| [`arraydeque`](https://github.com/andylokandy/arraydeque) | 0.5.1 | MIT OR Apache-2.0 |
+| [`encoding_rs_io`](https://github.com/BurntSushi/encoding_rs_io) | 0.1.8 | MIT OR Apache-2.0 |
+| [`encoding_rs`](https://github.com/hsivonen/encoding_rs) | 0.8.42 | (Apache-2.0 OR MIT) AND BSD-3-Clause |
+| [`core_detect`](https://github.com/thomcc/core_detect) | 1.0.0 | MIT OR Apache-2.0 |
+| [`multiversion_no_op`](https://github.com/hsivonen/multiversion_no_op) | 1.0.0 | Apache-2.0 OR MIT |
+| [`simdutf8`](https://github.com/rusticstuff/simdutf8) | 0.1.5 | MIT OR Apache-2.0 |
+
 ## Adapted designs
 
 Earlier terminal turn header revisions included a Braille port (`GLYPH_PULSE`) of the "Glyph Pulse" loader (`dotm-square-9`) from [dot-matrix](https://dotmatrix.zzzzshawn.cloud) ([source](https://github.com/zzzzshawn/matrix)), copyright (c) 2026 dot-matrix contributors, all rights reserved. That adaptation is covered by the project's custom license, which permits use in commercial and non-commercial products and prohibits, without written permission, publishing or distributing its components as standalone reusable components or as part of another component library, and selling or sublicensing them as a standalone offering. Bake's MIT license does not cover this adaptation; do not extract it into a reusable component or library.

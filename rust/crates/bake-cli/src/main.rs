@@ -1,32 +1,59 @@
-//! `bake-rs`: entry point for Bake's native terminal preview.
+//! `bake-rs`: Bake's native agent (Rust preview).
+//!
+//! `bake-rs -p "prompt"` runs one headless turn through
+//! [`bake_coding_agent::cli`], a port of Pi's print mode; `bake-rs preview`
+//! opens the sample terminal preview. Help and version need no Bake home.
 
 use std::ffi::OsString;
 use std::io::{self, IsTerminal, Write};
+use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::{Arc, Mutex};
 
+use bake_coding_agent::cli::{self, Action, CliEnvironment, Interrupt};
+use bake_coding_agent::print_mode::SharedWriter;
+use bake_coding_agent::system_prompt::DocsPaths;
 use bake_tui::PreviewExit;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 const HELP: &str = "\
-bake-rs: Bake's native terminal preview (Rust preview)
+bake-rs: Bake's native agent (Rust preview)
 
 Usage:
-  bake-rs preview      Open the fullscreen preview in an interactive terminal
-  bake-rs --help       Show this help
-  bake-rs --version    Show the version
+  bake-rs [options] [messages...]
+  bake-rs preview      Open the fullscreen sample preview in an interactive terminal
 
-The preview shows sample content only. It does not connect to a model,
-read credentials, write sessions, or start agents. Ctrl+C quits.
+Options:
+  -p, --print               Send the prompts, print the final answer, and exit
+      --mode <mode>         Output: text (the final answer) or json (every event)
+      --provider <name>     Provider of --model
+      --model <pattern>     Model id, pattern, or provider/id, optionally :<thinking>
+      --thinking <level>    off, minimal, low, medium, high, xhigh, or max
+  -c, --continue            Continue the most recent session in this directory
+      --session <path|id>   Use a session file, or a session id or id prefix
+      --no-session          Do not save the session
+  -h, --help                Show this help
+  -v, --version             Show the version
+
+Messages are prompts, sent in order; piped standard input is prepended to the
+first. The agent runs without tools. Interactive mode is not available yet:
+bake-rs prints when -p or --mode is given or a standard stream is not a
+terminal.
+
+Models come from models.json and keys from auth.json in the Bake home
+(BAKE_HOME, then DSH_HOME, then ~/.bake), which also holds settings.json, a
+global AGENTS.md, and the saved sessions.
+
+The preview shows sample content only and does not connect to a model.
+Ctrl+C quits it.
 ";
-
-const KNOWN: &[&str] = &["-h", "--help", "help", "-V", "--version", "preview"];
 
 #[derive(Debug, PartialEq, Eq)]
 enum Command {
     Help,
-    Version,
     Preview,
+    Agent(Vec<String>),
 }
 
 fn parse(args: &[OsString]) -> Result<Command, String> {
@@ -34,21 +61,16 @@ fn parse(args: &[OsString]) -> Result<Command, String> {
         .iter()
         .map(|a| {
             a.to_str()
+                .map(str::to_owned)
                 .ok_or_else(|| format!("argument {a:?} is not valid UTF-8"))
         })
         .collect::<Result<Vec<_>, _>>()?;
-    match args.as_slice() {
-        [] | ["-h" | "--help" | "help"] | ["preview", "-h" | "--help"] => Ok(Command::Help),
-        ["-V" | "--version"] => Ok(Command::Version),
+    let strs: Vec<&str> = args.iter().map(String::as_str).collect();
+    match strs.as_slice() {
+        [] | ["help"] | ["preview", "-h" | "--help"] => Ok(Command::Help),
         ["preview"] => Ok(Command::Preview),
         ["preview", extra, ..] => Err(format!("unexpected argument '{extra}' for 'preview'")),
-        [first, ..] if !KNOWN.contains(first) => Err(if first.starts_with('-') {
-            format!("unknown option '{first}'")
-        } else {
-            format!("unknown command '{first}'")
-        }),
-        [first, extra, ..] => Err(format!("unexpected argument '{extra}' after '{first}'")),
-        [first] => Err(format!("unexpected argument '{first}'")),
+        _ => Ok(Command::Agent(args)),
     }
 }
 
@@ -56,13 +78,98 @@ fn main() -> ExitCode {
     let args: Vec<OsString> = std::env::args_os().skip(1).collect();
     match parse(&args) {
         Ok(Command::Help) => print(HELP),
-        Ok(Command::Version) => print(&format!("bake-rs {VERSION}\n")),
         Ok(Command::Preview) => preview(),
+        Ok(Command::Agent(args)) => agent(&args),
         Err(message) => {
             eprintln!("bake-rs: {message}\n\nRun 'bake-rs --help' for usage.");
             ExitCode::from(2)
         }
     }
+}
+
+fn exit_code(code: i32) -> ExitCode {
+    ExitCode::from(u8::try_from(code).unwrap_or(1))
+}
+
+/// Pi's documentation paths, beside the executable.
+fn docs_paths() -> DocsPaths {
+    let dir = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(PathBuf::from))
+        .unwrap_or_default();
+    DocsPaths::under(&dir)
+}
+
+/// `SIGTERM` and `SIGHUP` stop print mode with Pi's exit codes, 143 and 129.
+#[cfg(unix)]
+fn interrupt() -> Interrupt {
+    use tokio::signal::unix::{SignalKind, signal};
+    Box::pin(async {
+        let (Ok(mut term), Ok(mut hangup)) = (
+            signal(SignalKind::terminate()),
+            signal(SignalKind::hangup()),
+        ) else {
+            return std::future::pending().await;
+        };
+        tokio::select! {
+            _ = term.recv() => 143,
+            _ = hangup.recv() => 129,
+        }
+    })
+}
+
+/// Pi registers only `SIGTERM` on Windows, which has no such signal.
+#[cfg(not(unix))]
+fn interrupt() -> Interrupt {
+    cli::no_interrupt()
+}
+
+fn agent(args: &[String]) -> ExitCode {
+    let stdout: SharedWriter = Arc::new(Mutex::new(io::stdout()));
+    let stderr: SharedWriter = Arc::new(Mutex::new(io::stderr()));
+    let stdin_is_terminal = io::stdin().is_terminal();
+    let action = cli::plan(args, stdin_is_terminal, io::stdout().is_terminal(), &stderr);
+    let (parsed, mode) = match action {
+        Action::Help => return print(HELP),
+        Action::Version => return print(&format!("bake-rs {VERSION}\n")),
+        Action::Exit(code) => return exit_code(code),
+        Action::Print(parsed, mode) => (parsed, mode),
+    };
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            eprintln!("Error: could not start the async runtime: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let home = bake_coding_agent::home::bake_home();
+    let imported = match &home {
+        Some(home) => cli::import_startup(home, &|name| std::env::var_os(name)),
+        None => cli::ImportedStartup::default(),
+    };
+    let code = runtime.block_on(async move {
+        // Signal streams register with the runtime, so they start inside it.
+        let environment = CliEnvironment {
+            cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            home,
+            docs: docs_paths(),
+            stdin_is_terminal,
+            stdin: Box::new(io::stdin()),
+            stdout,
+            stderr,
+            extra_providers: imported.providers,
+            imported_default_model: imported.default_model,
+            warnings: imported.warnings,
+            interrupt: interrupt(),
+        };
+        cli::run(environment, *parsed, mode).await
+    });
+    // A blocked standard-input read cannot be cancelled; do not wait for it.
+    runtime.shutdown_timeout(std::time::Duration::from_secs(1));
+    exit_code(code)
 }
 
 /// Writes to stdout without panicking when the reader has gone away.
@@ -127,6 +234,18 @@ mod tests {
     }
 
     #[test]
+    fn other_arguments_go_to_the_agent_command_line() {
+        assert_eq!(
+            parse_strs(&["-p", "hi"]),
+            Ok(Command::Agent(vec!["-p".into(), "hi".into()]))
+        );
+        assert_eq!(
+            parse_strs(&["--version"]),
+            Ok(Command::Agent(vec!["--version".into()]))
+        );
+    }
+
+    #[test]
     fn preview_names_the_first_stream_that_is_not_a_terminal() {
         assert_eq!(non_terminal_stream(true, true), None);
         assert_eq!(non_terminal_stream(true, false), Some("output"));
@@ -135,23 +254,10 @@ mod tests {
     }
 
     #[test]
-    fn unexpected_arguments_name_the_offender() {
+    fn unexpected_preview_arguments_name_the_offender() {
         assert_eq!(
             parse_strs(&["preview", "--fullscreen"]),
             Err("unexpected argument '--fullscreen' for 'preview'".into())
-        );
-        assert_eq!(
-            parse_strs(&["--bogus"]),
-            Err("unknown option '--bogus'".into())
-        );
-        assert_eq!(parse_strs(&["run"]), Err("unknown command 'run'".into()));
-        assert_eq!(
-            parse_strs(&["session", "inspect"]),
-            Err("unknown command 'session'".into())
-        );
-        assert_eq!(
-            parse_strs(&["--version", "x"]),
-            Err("unexpected argument 'x' after '--version'".into())
         );
     }
 }

@@ -16,18 +16,22 @@ fn text(bytes: &[u8]) -> String {
 
 #[test]
 fn help_and_version_work_without_a_terminal() {
-    for args in [&[][..], &["--help"], &["help"]] {
+    for args in [&[][..], &["--help"], &["help"], &["-h"], &["-p", "--help"]] {
         let out = run(args);
         assert!(out.status.success());
-        assert!(text(&out.stdout).contains("bake-rs preview"));
+        let help = text(&out.stdout);
+        assert!(help.contains("bake-rs preview"));
+        assert!(help.contains("-p, --print"));
         assert!(out.stderr.is_empty());
     }
-    let out = run(&["--version"]);
-    assert!(out.status.success());
-    assert_eq!(
-        text(&out.stdout),
-        format!("bake-rs {}\n", env!("CARGO_PKG_VERSION"))
-    );
+    for flag in ["--version", "-v", "-V"] {
+        let out = run(&[flag]);
+        assert!(out.status.success());
+        assert_eq!(
+            text(&out.stdout),
+            format!("bake-rs {}\n", env!("CARGO_PKG_VERSION"))
+        );
+    }
 }
 
 #[test]
@@ -49,13 +53,18 @@ fn unexpected_arguments_fail_with_usage_guidance() {
 }
 
 #[test]
-fn session_commands_are_unknown() {
-    for command in ["inspect", "stat", "list"] {
-        let out = run(&["session", command, "--help"]);
-        assert_eq!(out.status.code(), Some(2));
-        assert!(out.stdout.is_empty());
-        let stderr = text(&out.stderr);
-        assert!(stderr.contains("unknown command 'session'"));
-        assert!(stderr.contains("bake-rs --help"));
-    }
+fn unknown_options_fail_as_pi_reports_them() {
+    let out = run(&["--bogus"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(out.stdout.is_empty());
+    assert_eq!(text(&out.stderr), "Error: Unknown option: --bogus\n");
+    let out = run(&["-x", "hi"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(text(&out.stderr), "Error: Unknown option: -x\n");
+    let out = run(&["--mode", "rpc"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(
+        text(&out.stderr),
+        "Error: Invalid mode \"rpc\". Valid values: text, json\n"
+    );
 }

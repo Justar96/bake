@@ -1,0 +1,75 @@
+{
+  "providers": {
+    "cliproxyapi": {
+      "name": "CLIProxyAPI",
+      "baseUrl": "https://proxy.example/v1",
+      "api": "openai-responses",
+      "apiKey": "$CLIPROXYAPI_API_KEY",
+      "headers": {
+        "x-team": "core",
+        "x-cmd": "$!echo pwned",
+        "x-env": "a $$HOME $${HOME} $$$$ $$! b!",
+        "x-edge": "$${ $$1 $${1x} !! $$"
+      },
+      "compat": {
+        "sendSessionAffinityHeaders": true
+      },
+      "models": [
+        {
+          "id": "gpt-6-sol",
+          "name": "GPT 6 Sol",
+          "reasoning": true,
+          "thinkingLevelMap": {
+            "off": null,
+            "minimal": null,
+            "low": "low",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": null
+          },
+          "input": [
+            "text",
+            "image"
+          ],
+          "contextWindow": 272000,
+          "maxTokens": 128000
+        },
+        {
+          "id": "claude-opus-5-5",
+          "name": "Claude Opus 5.5",
+          "api": "anthropic-messages",
+          "baseUrl": "https://proxy.example",
+          "reasoning": true,
+          "thinkingLevelMap": {
+            "minimal": null,
+            "low": "low",
+            "medium": null,
+            "high": "high",
+            "xhigh": null,
+            "max": "max"
+          },
+          "input": [
+            "text"
+          ],
+          "contextWindow": 200000,
+          "maxTokens": 32768,
+          "compat": {
+            "forceAdaptiveThinking": true
+          }
+        },
+        {
+          "id": "glm-test",
+          "name": "glm-test",
+          "api": "openai-completions",
+          "reasoning": false,
+          "input": [
+            "text"
+          ],
+          "contextWindow": 200000,
+          "maxTokens": 32768
+        }
+      ]
+    }
+  }
+}

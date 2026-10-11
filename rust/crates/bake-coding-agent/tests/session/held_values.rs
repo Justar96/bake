@@ -7,7 +7,7 @@
 use std::fs;
 
 use bake_coding_agent::session::json_line::MAX_HELD_DEPTH;
-use bake_coding_agent::session::{NewSessionOptions, SessionManager, TypedAgentMessage};
+use bake_coding_agent::session::{NewSessionOptions, SessionManager};
 use serde_json::{Value, json};
 
 use crate::support::{TempDir, roles, text_of, user_msg};
@@ -167,8 +167,8 @@ fn the_held_depth_is_safe_on_a_small_stack() {
         .spawn(move || {
             let session = SessionManager::open(&file, None, None).expect("open");
             let messages = session.build_session_context().messages;
-            let typed = messages[0].to_typed().expect("typed");
-            assert!(matches!(typed, TypedAgentMessage::Llm(_)));
+            let live = messages[0].to_agent();
+            assert!(live.as_llm().is_some());
             let copy = messages.clone();
             assert_eq!(copy, messages);
             // Held in full: the innermost member is still the number.
