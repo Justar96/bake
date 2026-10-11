@@ -12,7 +12,9 @@ manager uses (src/utils/paths.ts), Pi's UUIDv7 generator
 (packages/ai/src/utils/uuid.ts), and the session-manager tests under test/;
 tool-output truncation and accumulation (src/core/tools/truncate.ts, output-accumulator.ts), exclusive
 output files (src/utils/output-files.ts), and the output cases of
-test/tools.test.ts and test/mcp-extension.test.ts.
+test/tools.test.ts and test/mcp-extension.test.ts; file-mutation ordering
+(src/core/tools/file-mutation-queue.ts) and test/file-mutation-queue.test.ts.
+The callback cancellation pattern follows src/core/tools/write.ts and edit.ts.
 --------------------------------------------------------------------------------
 MIT License
 
