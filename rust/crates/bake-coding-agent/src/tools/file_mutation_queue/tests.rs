@@ -400,7 +400,8 @@ fn successful_return_values_survive_and_registration_storage_is_reclaimed() {
     }
 }
 
-#[cfg(unix)]
+// Linux filesystems allow raw filename bytes; macOS can reject them with EILSEQ.
+#[cfg(target_os = "linux")]
 #[test]
 fn path_keys_preserve_non_utf8_bytes() {
     use std::os::unix::ffi::OsStringExt;
