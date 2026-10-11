@@ -23,6 +23,7 @@
 //! | [`print_mode`], [`json_event`] | Pi `src/modes/print-mode.ts`, `src/modes/json-event.ts` |
 //! | [`cli`] | Pi `src/main.ts`, `src/cli/args.ts`, `src/cli/initial-message.ts` |
 //! | [`owned_work`] | Bake: the gate shutdown closes over owned work |
+//! | [`permissions`] | Bake: the D24 permission presets, approvals, policy engine, and sandboxed `bash`, `write`, and `edit` (see the module's table) |
 //! | [`cliproxyapi`] | Bake: `apps/tui/packages/app/src/cliproxyapi.ts`, the retained CLIProxyAPI route and its read-only D25 import |
 
 pub mod agent_session;
@@ -35,6 +36,7 @@ pub mod home;
 pub mod json_event;
 pub mod model_registry;
 pub mod owned_work;
+pub mod permissions;
 pub mod print_mode;
 pub mod session;
 pub mod settings;

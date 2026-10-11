@@ -12,6 +12,10 @@
 //! neither hangs the call nor loses output it is still writing
 //! (earendil-works/pi#5303). Like Pi, a command that completes normally
 //! leaves such descendants running.
+//!
+//! [`LocalShellOperations::exec_prepared`] is Bake's seam for confinement:
+//! it hands Pi's shell argv to a caller that may wrap it (a sandbox runner)
+//! and spawns the result under the same ownership, timeout, and abort.
 
 use std::ffi::OsString;
 use std::future::Future;
@@ -221,13 +225,110 @@ fn exit_code(status: ExitStatus) -> i64 {
     }
 }
 
+/// The shell invocation Pi's local backend would spawn for one command:
+/// the shell's argv, ending with the command unless the shell reads it
+/// from standard input, and those standard-input bytes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShellInvocation {
+    /// The shell and its arguments.
+    pub argv: Vec<OsString>,
+    /// The command, for a shell that reads it from standard input.
+    pub stdin: Option<Vec<u8>>,
+}
+
+/// What to spawn in place of a [`ShellInvocation`], such as the same argv
+/// wrapped by a sandbox runner.
+pub struct PreparedSpawn {
+    /// The program.
+    pub program: OsString,
+    /// Its arguments.
+    pub args: Vec<OsString>,
+    /// Variables set on top of the call's environment.
+    pub env: Vec<(OsString, OsString)>,
+    /// Written to standard input, which is then closed; `None` gives the
+    /// process no standard input.
+    pub stdin: Option<Vec<u8>>,
+    /// Also receives each standard-error chunk, after `on_data`.
+    pub on_stderr: Option<super::BashDataCallback>,
+}
+
+impl std::fmt::Debug for PreparedSpawn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PreparedSpawn")
+            .field("program", &self.program)
+            .field("args", &self.args)
+            .finish_non_exhaustive()
+    }
+}
+
+impl PreparedSpawn {
+    /// The invocation itself, unwrapped.
+    pub fn unwrapped(invocation: ShellInvocation) -> Self {
+        let mut argv = invocation.argv.into_iter();
+        Self {
+            program: argv.next().unwrap_or_default(),
+            args: argv.collect(),
+            env: Vec::new(),
+            stdin: invocation.stdin,
+            on_stderr: None,
+        }
+    }
+}
+
+/// Why [`LocalShellOperations::exec_prepared`] failed.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PreparedExecError {
+    /// Pi's error for the call.
+    pub error: BashExecError,
+    /// The I/O error kind when spawning the prepared program failed.
+    pub spawn_error: Option<io::ErrorKind>,
+}
+
+impl From<BashExecError> for PreparedExecError {
+    fn from(error: BashExecError) -> Self {
+        Self {
+            error,
+            spawn_error: None,
+        }
+    }
+}
+
 impl LocalShellOperations {
+    /// The shell invocation for `command`, resolved as each call resolves it.
+    pub fn shell_invocation(&self, command: &str) -> Result<ShellInvocation, String> {
+        let config = (self.resolve)()?;
+        Ok(invocation(&config, command))
+    }
+
     async fn run(
         &self,
         command: String,
         cwd: PathBuf,
         options: BashExecOptions,
     ) -> Result<Option<i64>, BashExecError> {
+        self.exec_prepared(command, cwd, options, |invocation| {
+            std::future::ready(Ok(PreparedSpawn::unwrapped(invocation)))
+        })
+        .await
+        .map_err(|failure| failure.error)
+    }
+
+    /// Runs `command` as [`BashOperations::exec`] does, but spawns what
+    /// `prepare` makes of Pi's shell invocation. Pi's checks (timeout,
+    /// abort, shell, working directory) run first; `prepare` then races the
+    /// abort signal and the call's timeout, which keeps counting through
+    /// the spawned process. Dropping `prepare`'s future cancels it.
+    pub async fn exec_prepared<F, Fut>(
+        &self,
+        command: String,
+        cwd: PathBuf,
+        options: BashExecOptions,
+        prepare: F,
+    ) -> Result<Option<i64>, PreparedExecError>
+    where
+        F: FnOnce(ShellInvocation) -> Fut,
+        Fut: Future<Output = Result<PreparedSpawn, BashExecError>>,
+    {
         let BashExecOptions {
             on_data,
             signal,
@@ -235,8 +336,9 @@ impl LocalShellOperations {
             env,
         } = options;
         let timeout_duration = resolve_timeout(timeout).map_err(BashExecError::Failed)?;
+        let deadline = timeout_duration.map(|duration| Instant::now() + duration);
         if signal.as_ref().is_some_and(AbortSignal::aborted) {
-            return Err(BashExecError::Aborted);
+            return Err(BashExecError::Aborted.into());
         }
         let config = (self.resolve)().map_err(BashExecError::Failed)?;
         if std::fs::metadata(&cwd).is_err() {
@@ -244,22 +346,37 @@ impl LocalShellOperations {
                 "Working directory does not exist: {}\nCannot execute {} commands.",
                 cwd.display(),
                 self.shell_name
-            )));
+            ))
+            .into());
         }
 
-        let from_stdin = config.command_transport == CommandTransport::Stdin;
-        let mut process = Command::new(&config.shell);
-        process.args(&config.args);
-        if !from_stdin {
-            process.arg(&command);
-        }
+        let prepared = {
+            let prepare = prepare(invocation(&config, &command));
+            tokio::select! {
+                prepared = prepare => prepared?,
+                () = aborted(signal.as_ref()) => return Err(BashExecError::Aborted.into()),
+                () = sleep_until(deadline) => {
+                    return Err(BashExecError::TimedOut(timeout.unwrap_or_default()).into());
+                }
+            }
+        };
+        let PreparedSpawn {
+            program,
+            args,
+            env: extra_env,
+            stdin: stdin_bytes,
+            on_stderr,
+        } = prepared;
+        let mut process = Command::new(&program);
+        process.args(&args);
         let env: Vec<(OsString, OsString)> =
             env.unwrap_or_else(|| get_shell_env(self.bin_dir.as_deref()));
         process
             .current_dir(&cwd)
             .env_clear()
             .envs(env)
-            .stdin(if from_stdin {
+            .envs(extra_env)
+            .stdin(if stdin_bytes.is_some() {
                 Stdio::piped()
             } else {
                 Stdio::null()
@@ -268,9 +385,10 @@ impl LocalShellOperations {
             .stderr(Stdio::piped())
             .kill_on_drop(true);
         configure(&mut process);
-        let child = process
-            .spawn()
-            .map_err(|error| BashExecError::Failed(spawn_error(&config.shell, &error)))?;
+        let child = process.spawn().map_err(|error| PreparedExecError {
+            error: BashExecError::Failed(spawn_error(Path::new(&program), &error)),
+            spawn_error: Some(error.kind()),
+        })?;
         let tree = ProcessTree::adopt(&child).map(TrackedTree::new);
         let mut shell = OwnedShell {
             child,
@@ -280,7 +398,7 @@ impl LocalShellOperations {
 
         let mut stdin_write: Option<Pin<Box<dyn Future<Output = ()> + Send>>> =
             shell.child.stdin.take().map(|mut stdin| {
-                let bytes = command.into_bytes();
+                let bytes = stdin_bytes.unwrap_or_default();
                 Box::pin(async move {
                     // Pi ignores standard-input errors; the shell may exit
                     // without reading.
@@ -294,7 +412,7 @@ impl LocalShellOperations {
         let mut err_buffer = vec![0; READ_CHUNK];
         let mut status: Option<ExitStatus> = None;
         let mut grace: Option<Instant> = None;
-        let mut timeout_at = timeout_duration.map(|duration| Instant::now() + duration);
+        let mut timeout_at = deadline;
         let mut abort_pending = signal.is_some();
         let mut timed_out = false;
 
@@ -310,7 +428,7 @@ impl LocalShellOperations {
                         status = Some(exit);
                         grace = Some(Instant::now() + EXIT_STDIO_GRACE);
                     }
-                    Err(error) => return Err(BashExecError::Failed(error.to_string())),
+                    Err(error) => return Err(BashExecError::Failed(error.to_string()).into()),
                 },
                 read = read_some(stdout.as_mut(), &mut out_buffer) => match read {
                     Ok(count) if count > 0 => {
@@ -324,6 +442,9 @@ impl LocalShellOperations {
                 read = read_some(stderr.as_mut(), &mut err_buffer) => match read {
                     Ok(count) if count > 0 => {
                         on_data(&err_buffer[..count]);
+                        if let Some(on_stderr) = &on_stderr {
+                            on_stderr(&err_buffer[..count]);
+                        }
                         if exited {
                             grace = Some(Instant::now() + EXIT_STDIO_GRACE);
                         }
@@ -347,11 +468,25 @@ impl LocalShellOperations {
         drop(shell);
 
         if signal.as_ref().is_some_and(AbortSignal::aborted) {
-            return Err(BashExecError::Aborted);
+            return Err(BashExecError::Aborted.into());
         }
         if timed_out {
-            return Err(BashExecError::TimedOut(timeout.unwrap_or_default()));
+            return Err(BashExecError::TimedOut(timeout.unwrap_or_default()).into());
         }
         Ok(status.map(exit_code))
+    }
+}
+
+/// Pi's argv for `command` under `config`.
+fn invocation(config: &ShellConfig, command: &str) -> ShellInvocation {
+    let from_stdin = config.command_transport == CommandTransport::Stdin;
+    let mut argv: Vec<OsString> = vec![config.shell.clone().into_os_string()];
+    argv.extend(config.args.iter().map(OsString::from));
+    if !from_stdin {
+        argv.push(command.into());
+    }
+    ShellInvocation {
+        argv,
+        stdin: from_stdin.then(|| command.as_bytes().to_vec()),
     }
 }

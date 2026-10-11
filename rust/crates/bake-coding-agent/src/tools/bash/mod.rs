@@ -14,8 +14,10 @@
 //!
 //! [`BashOperations`] is the one execution seam: the tool hands it the
 //! final command, directory, and environment, and a wrapper can refuse or
-//! rewrite the spawn there. Sandboxing and approvals (scope 04, D24) are
-//! not here. Pi's `powershell` tool is not ported: Pi's default tools are
+//! rewrite the spawn there, and [`LocalShellOperations::exec_prepared`]
+//! lets it spawn a wrapped argv (a sandbox runner) with Pi's own process
+//! handling. Sandboxing and approvals (D24) live in
+//! [`crate::permissions`], which wraps this tool. Pi's `powershell` tool is not ported: Pi's default tools are
 //! `read`, `bash`, `edit`, and `write` on every platform, Windows included.
 //!
 //! Pi passes each call an extension context for its working directory and
@@ -49,7 +51,10 @@ mod tree;
 #[cfg(test)]
 mod tests;
 
-pub use local::{LocalShellOperations, create_local_bash_operations};
+pub use local::{
+    LocalShellOperations, PreparedExecError, PreparedSpawn, ShellInvocation,
+    create_local_bash_operations,
+};
 pub use shell::{CommandTransport, ShellConfig, get_shell_config, get_shell_env};
 pub use tree::kill_tracked_detached_children;
 

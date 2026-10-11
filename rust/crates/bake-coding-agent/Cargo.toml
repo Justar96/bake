@@ -5,11 +5,12 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "Pi's coding-agent services for Bake's Rust agent: sessions, the file tools (read, write, edit, ls, find, grep) with their output and file-mutation ordering, the bash tool, models, prompts, print mode, and the CLIProxyAPI route"
+description = "Pi's coding-agent services for Bake's Rust agent: sessions, the file tools (read, write, edit, ls, find, grep) with their output and file-mutation ordering, the bash tool, models, prompts, print mode, the CLIProxyAPI route, and the D24 permission layer over bake-sandbox"
 
 [dependencies]
 bake-agent.workspace = true
 bake-ai.workspace = true
+bake-sandbox.workspace = true
 tokio = { workspace = true, features = ["rt", "sync", "time", "macros", "process", "io-util"] }
 serde.workspace = true
 serde_json.workspace = true
@@ -31,3 +32,4 @@ windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Securit
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "time", "macros", "net", "io-util", "test-util"] }
 loom = { version = "=0.7.2", default-features = false }
+bake-sandbox = { workspace = true, features = ["testing"] }

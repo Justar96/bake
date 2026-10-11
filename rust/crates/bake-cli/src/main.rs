@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex};
 use bake_coding_agent::cli::{self, Action, CliEnvironment, Interrupt};
 use bake_coding_agent::print_mode::SharedWriter;
 use bake_coding_agent::system_prompt::DocsPaths;
+use bake_sandbox::SandboxProvider;
 use bake_tui::PreviewExit;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -39,15 +40,25 @@ Options:
                             Disable these tools: names or patterns with *
   -nt, --no-tools           Start with no tools
   -nbt, --no-builtin-tools  Start without the built-in tools
+      --permission <preset> Permission preset: workspace-write or
+                            danger-full-access, or one from settings.json;
+                            new sessions default to the saved preset, else
+                            workspace-write
+      --sandbox <mode>      read-only, workspace-write, or danger-full-access
+      --approval <policy>   ask or never
   -h, --help                Show this help
   -v, --version             Show the version
 
 Messages are prompts, sent in order; piped standard input is prepended to the
 first. The agent starts with the read, bash, edit, and write tools; grep, find,
-and ls are available through --tools. Bash runs without a sandbox or
-approvals, and grep and find need rg and fd on PATH. Interactive mode is not available yet:
-bake-rs prints when -p or --mode is given or a standard stream is not a
-terminal.
+and ls are available through --tools, and grep and find need rg and fd on
+PATH. A session keeps its permission: write and edit change files only where
+its sandbox mode allows, and bash runs only under a sandbox that enforces it:
+bubblewrap or Landlock on Linux and Seatbelt on macOS. Without one (Windows,
+for now), confined bash calls are refused. Escalations need approval, which
+print mode cannot give.
+Interactive mode is not available yet: bake-rs prints when -p or --mode is
+given or a standard stream is not a terminal.
 
 Models come from models.json and keys from auth.json in the Bake home
 (BAKE_HOME, then DSH_HOME, then ~/.bake), which also holds settings.json, a
@@ -178,6 +189,8 @@ fn agent(args: &[String]) -> ExitCode {
             stderr,
             extra_providers: imported.providers,
             imported_default_model: imported.default_model,
+            imported_default_preset: imported.default_preset,
+            sandbox_provider: sandbox_provider(),
             warnings: imported.warnings,
             interrupt: interrupt(),
         };
@@ -186,6 +199,14 @@ fn agent(args: &[String]) -> ExitCode {
     // A blocked standard-input read cannot be cancelled; do not wait for it.
     runtime.shutdown_timeout(std::time::Duration::from_secs(1));
     exit_code(code)
+}
+
+/// The process's one sandbox provider: bubblewrap or Landlock on Linux,
+/// Seatbelt on macOS, and a fail-closed refusal elsewhere. It is built on
+/// first use and shared by every consumer, so a backend probes and caches
+/// its runner once.
+fn sandbox_provider() -> Arc<dyn SandboxProvider> {
+    bake_sandbox::default_provider()
 }
 
 /// Writes to stdout without panicking when the reader has gone away.
@@ -267,6 +288,11 @@ mod tests {
         assert_eq!(non_terminal_stream(true, false), Some("output"));
         assert_eq!(non_terminal_stream(false, true), Some("input"));
         assert_eq!(non_terminal_stream(false, false), Some("input"));
+    }
+
+    #[test]
+    fn the_sandbox_provider_is_built_once() {
+        assert!(Arc::ptr_eq(&sandbox_provider(), &sandbox_provider()));
     }
 
     #[test]

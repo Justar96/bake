@@ -41,7 +41,6 @@ impl Reply {
     }
 
     /// A tool call: the `read` call with its name and arguments replaced.
-    #[cfg(unix)]
     fn tool_call(name: &str, arguments: &Value) -> Self {
         let arguments = serde_json::to_string(&arguments.to_string()).expect("arguments");
         let read = serde_json::to_string(&json!({"path": "notes.txt"}).to_string())
@@ -464,12 +463,19 @@ fn print_mode_answers_saves_and_continues() {
         kinds(&entries),
         [
             "session",
+            "custom",
             "model_change",
             "thinking_level_change",
             "message:system",
             "message:user",
             "message:assistant",
         ]
+    );
+    // D24: a new session pins the default preset, outside the model's view.
+    assert_eq!(entries[1]["customType"], "bake.permission");
+    assert_eq!(
+        entries[1]["data"],
+        json!({"preset": "workspace-write", "sandbox": "workspace-write", "approval": "ask"})
     );
     // The child reads its working directory with the links resolved, as
     // macOS's `/var` to `/private/var`.
@@ -478,14 +484,14 @@ fn print_mode_answers_saves_and_continues() {
         std::fs::canonicalize(header_cwd).expect("header cwd exists"),
         std::fs::canonicalize(workspace.project()).expect("project exists")
     );
-    assert_eq!(entries[1]["provider"], "loop");
-    assert_eq!(entries[1]["modelId"], "loop-model");
-    assert_eq!(entries[2]["thinkingLevel"], "off");
+    assert_eq!(entries[2]["provider"], "loop");
+    assert_eq!(entries[2]["modelId"], "loop-model");
+    assert_eq!(entries[3]["thinkingLevel"], "off");
     assert_eq!(
-        entries[5]["message"]["content"][0]["text"],
+        entries[6]["message"]["content"][0]["text"],
         "Hello from the loop."
     );
-    assert_eq!(entries[5]["message"]["usage"]["totalTokens"], 48);
+    assert_eq!(entries[6]["message"]["usage"]["totalTokens"], 48);
 
     // `--continue` sends the earlier turn and appends to the same file.
     let second = workspace.run(&["-p", "--continue", "Again"], None);
@@ -502,7 +508,8 @@ fn print_mode_answers_saves_and_continues() {
     assert_eq!(second_input[3], "user: Again");
     assert_eq!(workspace.session_files(), files);
     let entries = lines(&files[0]);
-    assert_eq!(kinds(&entries)[6..], ["message:user", "message:assistant"]);
+    // The resumed session keeps its permission and writes no more of it.
+    assert_eq!(kinds(&entries)[7..], ["message:user", "message:assistant"]);
 
     // `--session <path>` resumes the same file; `--no-session` writes none.
     let third = workspace.run(
@@ -515,7 +522,7 @@ fn print_mode_answers_saves_and_continues() {
     assert_eq!(fourth.status.code(), Some(0), "{}", text(&fourth.stderr));
     assert_eq!(transcript(&server.requests()[3]).len(), 2);
     assert_eq!(workspace.session_files(), files);
-    assert_eq!(lines(&files[0]).len(), 10);
+    assert_eq!(lines(&files[0]).len(), 11);
 }
 
 #[test]
@@ -655,9 +662,9 @@ fn the_imported_cliproxyapi_route_runs_a_turn() {
     assert_eq!(requests[0].body["model"], "proxy-model");
 
     let entries = lines(&workspace.session_files()[0]);
-    assert_eq!(entries[1]["provider"], "cliproxyapi");
-    assert_eq!(entries[1]["modelId"], "proxy-model");
-    assert_eq!(entries[2]["thinkingLevel"], "high");
+    assert_eq!(entries[2]["provider"], "cliproxyapi");
+    assert_eq!(entries[2]["modelId"], "proxy-model");
+    assert_eq!(entries[3]["thinkingLevel"], "high");
     assert_eq!(
         std::fs::read_to_string(workspace.home().join("settings.yaml")).expect("settings"),
         settings
@@ -713,7 +720,7 @@ fn print_mode_runs_the_read_tool() {
 
     let entries = lines(&workspace.session_files()[0]);
     assert_eq!(
-        kinds(&entries)[3..],
+        kinds(&entries)[4..],
         [
             "message:system",
             "message:user",
@@ -722,14 +729,14 @@ fn print_mode_runs_the_read_tool() {
             "message:assistant",
         ]
     );
-    let assistant = &entries[5]["message"];
+    let assistant = &entries[6]["message"];
     assert_eq!(assistant["content"][0]["type"], "toolCall");
     assert_eq!(assistant["content"][0]["name"], "read");
     assert_eq!(
         assistant["content"][0]["arguments"],
         json!({"path": "notes.txt"})
     );
-    let result = &entries[6]["message"];
+    let result = &entries[7]["message"];
     assert_eq!(result["toolName"], "read");
     assert_eq!(result["toolCallId"], assistant["content"][0]["id"]);
     assert_eq!(result["isError"], false);
@@ -741,7 +748,8 @@ fn print_mode_runs_the_read_tool() {
 
 /// Pi's bash tool through `bake-rs -p`: the command runs in the project
 /// with the session's `PI_*` variables, and its output goes back to the
-/// model.
+/// model. `danger-full-access` runs it unconfined, which needs no sandbox
+/// backend on the test host.
 #[cfg(unix)]
 #[test]
 fn print_mode_runs_the_bash_tool() {
@@ -752,7 +760,10 @@ fn print_mode_runs_the_bash_tool() {
     ]);
     let workspace = Workspace::new("bash-tool", server.port);
 
-    let out = workspace.run(&["-p", "Run it"], None);
+    let out = workspace.run(
+        &["-p", "--permission", "danger-full-access", "Run it"],
+        None,
+    );
     assert_eq!(text(&out.stderr), "");
     assert_eq!(out.status.code(), Some(0));
     assert_eq!(text(&out.stdout), "Hello from the loop.\n");
@@ -781,7 +792,149 @@ fn print_mode_runs_the_bash_tool() {
     };
     assert_eq!(sent, "loop|loop-model|project\n");
     let entries = lines(&workspace.session_files()[0]);
-    let result = &entries[6]["message"];
+    let result = &entries[7]["message"];
     assert_eq!(result["toolName"], "bash");
     assert_eq!(result["isError"], false);
+}
+
+/// The tool result sent back for the first tool call of `request`.
+fn sent_tool_output(request: &Request) -> String {
+    let input = request.body["input"].as_array().expect("input");
+    let output = input
+        .iter()
+        .find(|item| item["type"] == "function_call_output")
+        .expect("the tool result is sent");
+    match &output["output"] {
+        Value::String(text) => text.clone(),
+        Value::Array(parts) => parts
+            .iter()
+            .filter_map(|part| part["text"].as_str())
+            .collect(),
+        other => panic!("unexpected output {other}"),
+    }
+}
+
+/// D24 through `bake-rs -p --permission workspace-write`: the model's
+/// `write` outside the project is refused before any effect, and the tool
+/// result sent back is the denial marker and the escalation hint
+/// (`packages/fs/tool-fs/src/sandbox.ts` `mapError`). The target lives under
+/// Cargo's per-target temporary directory, outside the project and outside
+/// the temporary directories `workspace-write` also allows.
+/// Removes a test's directory on drop, so a failed assertion leaves nothing.
+struct RemoveOnDrop(PathBuf);
+
+impl Drop for RemoveOnDrop {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+#[test]
+fn print_mode_refuses_a_write_outside_the_project() {
+    let outside_root = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("bake-rs-print-outside-{}", std::process::id()));
+    let _cleanup = RemoveOnDrop(outside_root.clone());
+    let temp = std::fs::canonicalize(std::env::temp_dir()).unwrap_or_else(|_| std::env::temp_dir());
+    let tmp = std::fs::canonicalize("/tmp").unwrap_or_else(|_| PathBuf::from("/tmp"));
+    std::fs::create_dir_all(&outside_root).expect("outside dir");
+    let outside_root = std::fs::canonicalize(&outside_root).expect("outside dir");
+    if outside_root.starts_with(&temp) || outside_root.starts_with(&tmp) {
+        eprintln!("skipped: the Cargo target directory is under a temporary directory");
+        return;
+    }
+    let target = outside_root.join("escape.txt");
+    let _ = std::fs::remove_file(&target);
+    let path = target.to_string_lossy().into_owned();
+    let server = Server::start_sequence(vec![
+        Reply::tool_call("write", &json!({ "path": path, "content": "escaped" })),
+        Reply::sse(),
+    ]);
+    let workspace = Workspace::new("write-outside", server.port);
+
+    let out = workspace.run(&["-p", "--permission", "workspace-write", "Write it"], None);
+    assert_eq!(text(&out.stderr), "");
+    assert_eq!(out.status.code(), Some(0));
+    assert!(
+        !target.exists(),
+        "the refused write reached {}",
+        target.display()
+    );
+
+    let requests = server.requests();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(
+        sent_tool_output(&requests[1]),
+        "[sandbox: file access denied under workspace-write mode]\n[sandbox: escalation available — retry this exact operation once with sandbox_permissions (the narrowest wider mode that suffices) + justification; the approval prompt asks the user]"
+    );
+    // The file tools advertise the escalation parameters.
+    let write = requests[0].body["tools"]
+        .as_array()
+        .expect("tools")
+        .iter()
+        .find(|tool| tool["name"] == "write")
+        .expect("write is declared");
+    assert_eq!(
+        write["parameters"]["properties"]["sandbox_permissions"],
+        json!({
+            "type": "string",
+            "enum": ["workspace-write", "danger-full-access"],
+            "description": "One retry after a sandbox denial; asks the user.",
+        })
+    );
+    // The permission is stated in the system prompt.
+    let system = &transcript(&requests[0])[0];
+    let root = serde_json::to_string(
+        lines(&workspace.session_files()[0])[0]["cwd"]
+            .as_str()
+            .expect("cwd"),
+    )
+    .expect("root");
+    assert!(
+        system.ends_with(&format!(
+            "\n<permissions>\nFile sandbox: workspace-write. Sandboxed tools can modify files under {root}, and possibly in some temporary directories.\n\nApproval prompts: enabled. Actions that need approval request it before running, and fail if no one can answer.\n</permissions>"
+        )),
+        "{system}"
+    );
+    let entries = lines(&workspace.session_files()[0]);
+    let result = &entries[7]["message"];
+    assert_eq!(result["toolName"], "write");
+    assert_eq!(result["isError"], true);
+}
+
+/// D24 through `bake-rs -p` on a real backend: under `workspace-write`, a
+/// bash write outside the project and the temporary directories is denied by
+/// the kernel, nothing is created, and the result carries the denial marker
+/// and the escalation hint.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn workspace_write_confines_bash() {
+    // Outside every writable root: Cargo's target tmpdir is not under the
+    // system temporary directories.
+    let outside = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("bake-rs-confined-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&outside);
+    std::fs::create_dir_all(&outside).expect("outside dir");
+    let target = outside.join("escaped.txt");
+    let command = format!("echo pwned > '{}'", target.display());
+    let server = Server::start_sequence(vec![
+        Reply::tool_call("bash", &json!({ "command": command })),
+        Reply::sse(),
+    ]);
+    let workspace = Workspace::new("confined-bash", server.port);
+
+    let out = workspace.run(&["-p", "--permission", "workspace-write", "Run it"], None);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    let sent = sent_tool_output(&server.requests()[1]);
+    if sent.contains("no sandbox backend is usable") && std::env::var_os("CI").is_none() {
+        eprintln!("skipped: no sandbox backend on this host: {sent}");
+        let _ = std::fs::remove_dir_all(&outside);
+        return;
+    }
+    assert!(!target.exists(), "the write escaped: {sent}");
+    assert!(
+        sent.contains("[sandbox: file access denied under workspace-write mode]"),
+        "{sent}"
+    );
+    assert!(sent.contains("[sandbox: escalation available"), "{sent}");
+    let _ = std::fs::remove_dir_all(&outside);
 }

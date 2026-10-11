@@ -2,8 +2,10 @@
 //! the crate's `NOTICE`): creates parent directories, then writes the
 //! content as UTF-8, inside the file's mutation queue on Tokio's blocking
 //! pool. An abort is observed between steps and never releases the queue
-//! while a step runs. Pi's pluggable `WriteOperations` are not ported.
+//! while a step runs. Pi's pluggable `WriteOperations` are not ported;
+//! [`execute_guarded`] is Bake's seam for the sandbox's containment check.
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use bake_agent::{AgentTool, AgentToolResult};
@@ -11,7 +13,8 @@ use bake_ai::{AbortSignal, ConstrainedSampling, StrictPreference};
 use serde_json::{Value, json};
 
 use crate::tools::definition::{
-    ABORTED, ToolDefinition, boxed, run_blocking, string_arg, text_result,
+    ABORTED, MutationGuard, ToolDefinition, boxed, mutation_target, run_blocking, string_arg,
+    target_error, text_result,
 };
 use crate::tools::file_mutation_queue::with_file_mutation_queue;
 use crate::tools::node_error;
@@ -69,6 +72,19 @@ async fn execute(
     args: Value,
     signal: Option<AbortSignal>,
 ) -> Result<AgentToolResult, String> {
+    execute_guarded(cwd, args, signal, None).await
+}
+
+/// Runs a `write` call, first passing the target to `guard` inside its
+/// mutation queue, after the first abort check and before any effect; the
+/// directories and the file are then made through the target the guard
+/// returns.
+pub async fn execute_guarded(
+    cwd: PathBuf,
+    args: Value,
+    signal: Option<AbortSignal>,
+    guard: Option<MutationGuard>,
+) -> Result<AgentToolResult, String> {
     let path = string_arg(&args, "path");
     let content = string_arg(&args, "content");
     let absolute = resolve_to_cwd(&path, &cwd)?;
@@ -80,23 +96,36 @@ async fn execute(
                 Ok(())
             }
         };
-        let outcome =
-            with_file_mutation_queue(&absolute, || Ok(write(&absolute, &content, &check)))
-                .map_err(|error| node_error::message(&error, "realpath", Some(&absolute)))?;
+        let outcome = with_file_mutation_queue(&absolute, || {
+            Ok(write(&absolute, &content, &check, guard.as_ref()))
+        })
+        .map_err(|error| node_error::message(&error, "realpath", Some(&absolute)))?;
         outcome?;
         Ok(text_result(format!("Successfully wrote to {path}"), None))
     })
     .await
 }
 
-fn write(path: &Path, content: &str, check: &dyn Fn() -> Result<(), String>) -> Result<(), String> {
+fn write(
+    path: &Path,
+    content: &str,
+    check: &dyn Fn() -> Result<(), String>,
+    guard: Option<&MutationGuard>,
+) -> Result<(), String> {
     check()?;
+    // The guard's target carries every later step, so the call writes what
+    // the guard checked.
+    let target = mutation_target(guard, path)?;
+    let target = target.as_ref();
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)
-            .map_err(|error| node_error::message(&error, "mkdir", Some(dir)))?;
+        target
+            .create_parent_dirs()
+            .map_err(|error| target_error(target, &error, "mkdir", dir))?;
     }
     check()?;
-    std::fs::write(path, content)
-        .map_err(|error| node_error::message(&error, "open", Some(path)))?;
+    target
+        .create()
+        .and_then(|mut file| file.write_all(content.as_bytes()))
+        .map_err(|error| target_error(target, &error, "open", path))?;
     check()
 }

@@ -15,6 +15,77 @@ use serde_json::Value;
 
 use crate::agent_session::ToolPrompt;
 
+/// Checks a mutation's target before `write` or `edit` changes it: Bake's
+/// seam for the sandbox's write containment ([`crate::permissions`]). It
+/// runs inside the file's mutation queue, before the first effect, with the
+/// tool's absolute target path. `Ok` is the [`MutationTarget`] every later
+/// step of the call goes through, so the call mutates what was checked;
+/// an `Err` is the tool's error text.
+pub type MutationGuard = std::sync::Arc<
+    dyn Fn(&std::path::Path) -> Result<Box<dyn MutationTarget>, String> + Send + Sync,
+>;
+
+/// Where `write` and `edit` perform a call's file operations.
+pub trait MutationTarget: Send + Sync {
+    /// Makes the file's missing parent directories (Pi's recursive `mkdir`
+    /// of the file's directory).
+    fn create_parent_dirs(&self) -> std::io::Result<()>;
+    /// Opens the file for writing, created if missing and truncated.
+    fn create(&self) -> std::io::Result<std::fs::File>;
+    /// Opens the file for reading.
+    fn open_read(&self) -> std::io::Result<std::fs::File>;
+    /// The tool's error text for `error` when the target refuses it rather
+    /// than reporting it as Node would; `None` otherwise.
+    fn refusal(&self, _error: &std::io::Error) -> Option<String> {
+        None
+    }
+}
+
+/// Pi's own target: the path itself, links followed.
+#[derive(Debug, Clone)]
+pub struct PathTarget(pub std::path::PathBuf);
+
+impl MutationTarget for PathTarget {
+    fn create_parent_dirs(&self) -> std::io::Result<()> {
+        match self.0.parent() {
+            Some(dir) => std::fs::create_dir_all(dir),
+            None => Ok(()),
+        }
+    }
+
+    fn create(&self) -> std::io::Result<std::fs::File> {
+        std::fs::File::create(&self.0)
+    }
+
+    fn open_read(&self) -> std::io::Result<std::fs::File> {
+        std::fs::File::open(&self.0)
+    }
+}
+
+/// A mutation's target: `guard`'s for `path`, else [`PathTarget`].
+pub(crate) fn mutation_target(
+    guard: Option<&MutationGuard>,
+    path: &std::path::Path,
+) -> Result<Box<dyn MutationTarget>, String> {
+    match guard {
+        Some(guard) => guard(path),
+        None => Ok(Box::new(PathTarget(path.to_path_buf()))),
+    }
+}
+
+/// The text of a failed step on `target`: its refusal, else Node's message
+/// for `syscall` on `path`.
+pub(crate) fn target_error(
+    target: &dyn MutationTarget,
+    error: &std::io::Error,
+    syscall: &str,
+    path: &std::path::Path,
+) -> String {
+    target
+        .refusal(error)
+        .unwrap_or_else(|| crate::tools::node_error::message(error, syscall, Some(path)))
+}
+
 /// The message every tool rejects with when aborted.
 pub(crate) const ABORTED: &str = "Operation aborted";
 
