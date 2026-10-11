@@ -13,8 +13,9 @@
 //!
 //! Not ported (deferred): interactive and RPC modes, `@file` arguments,
 //! `--resume`, `--fork`, `--session-id`, `--session-dir`, `--api-key`,
-//! `--models`, tool and resource flags, forking a session found in another
-//! project, and the missing-session-cwd prompt.
+//! `--models`, resource flags, extension and MCP tools, the `bash` tool,
+//! forking a session found in another project, and the missing-session-cwd
+//! prompt.
 
 pub mod args;
 
@@ -34,6 +35,10 @@ use crate::session::paths::{lexical_normalize, normalize_path};
 use crate::session::{NewSessionOptions, SessionManager};
 use crate::settings::Settings;
 use crate::system_prompt::{DocsPaths, SystemPromptOptions, load_project_context_files};
+use crate::tools::index::{
+    NoTools, ToolSelectionOptions, ToolsOptions, create_all_tool_definitions, select_tools,
+};
+use crate::tools::read::ReadToolOptions;
 
 pub use args::{Args, Diagnostic, DiagnosticKind, Mode, parse_args, unknown_flags_message};
 
@@ -462,6 +467,59 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
         return 1;
     }
 
+    // Pi's `_buildRuntime` tools and `createAgentSession` tool selection.
+    // The read tool asks for the session's model when it runs.
+    let session_model: Arc<std::sync::Mutex<Option<bake_ai::Model>>> = Arc::default();
+    let tools_options = ToolsOptions {
+        read: ReadToolOptions {
+            auto_resize_images: settings.image_auto_resize(),
+            resize_options: None,
+            model: Some({
+                let session_model = Arc::clone(&session_model);
+                Arc::new(move || {
+                    session_model
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .clone()
+                })
+            }),
+        },
+        bash: None,
+    };
+    let definitions = create_all_tool_definitions(Path::new(&session_cwd), &tools_options);
+    let available: Vec<String> = definitions
+        .iter()
+        .map(|definition| definition.name().to_owned())
+        .collect();
+    let selection = select_tools(
+        &ToolSelectionOptions {
+            tools: args.tools.clone(),
+            exclude_tools: args.exclude_tools.clone(),
+            no_tools: if args.no_tools {
+                Some(NoTools::All)
+            } else if args.no_builtin_tools {
+                Some(NoTools::Builtin)
+            } else {
+                None
+            },
+        },
+        settings.default_tools.as_deref(),
+        &available,
+    );
+    let selection = match selection {
+        Ok(selection) => selection,
+        Err(message) => return error(&stderr, &message),
+    };
+    let registered: Vec<_> = definitions
+        .into_iter()
+        .filter(|definition| {
+            selection
+                .registered
+                .iter()
+                .any(|name| name == definition.name())
+        })
+        .collect();
+
     let mut system_prompt = SystemPromptOptions::new(session_cwd, docs.clone());
     system_prompt.context_files = context_files;
     let session = match AgentSession::create(AgentSessionOptions {
@@ -471,9 +529,15 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
         settings,
         model,
         thinking_level,
-        tools: Vec::new(),
-        active_tool_names: Vec::new(),
-        tool_prompts: Vec::new(),
+        tools: registered
+            .iter()
+            .map(|definition| Arc::new(definition.tool.clone()))
+            .collect(),
+        active_tool_names: selection.active,
+        tool_prompts: registered
+            .iter()
+            .map(|definition| definition.prompt())
+            .collect(),
         system_prompt,
     })
     .await
@@ -481,6 +545,9 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
         Ok(session) => session,
         Err(message) => return error(&stderr, &message),
     };
+    *session_model
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = session.model();
 
     let piped = if stdin_is_terminal {
         Ok(None)

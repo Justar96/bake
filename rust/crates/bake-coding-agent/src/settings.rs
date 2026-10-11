@@ -4,7 +4,7 @@
 //! `packages/coding-agent/src/core/settings-manager.ts` (v1.1.0), limited to
 //! the settings print mode uses: the default provider, model, and thinking
 //! level, per-model thinking levels, the queue modes, the session
-//! directory, and `blockImages`. Pi reads `~/.pi/agent/settings.json` and
+//! directory, `blockImages`, `images.autoResize`, and `defaultTools`. Pi reads `~/.pi/agent/settings.json` and
 //! merges a project's `.pi/settings.json` over it; Bake reads
 //! `$BAKE_HOME/settings.json` only. Bake 0.3's `settings.yaml` beside it is
 //! a different file, which this module does not read (D25).
@@ -52,6 +52,12 @@ pub struct Settings {
     pub session_dir: Option<PathBuf>,
     /// `blockImages`.
     pub block_images: bool,
+    /// `images.autoResize`; Pi's `getImageAutoResize` defaults it to true
+    /// ([`Self::image_auto_resize`]).
+    pub images_auto_resize: Option<bool>,
+    /// `defaultTools` resolved as Pi's `getDefaultTools` resolves it:
+    /// `None` when unset, and string entries only.
+    pub default_tools: Option<Vec<String>>,
     /// Load errors, as Pi's settings diagnostics word them.
     pub warnings: Vec<String>,
 }
@@ -100,6 +106,23 @@ impl Settings {
             follow_up_mode: queue_mode(object.get("followUpMode")),
             session_dir: string(object, "sessionDir").map(|dir| normalize_path(&dir)),
             block_images: object.get("blockImages").and_then(Value::as_bool) == Some(true),
+            images_auto_resize: object
+                .get("images")
+                .and_then(|images| images.get("autoResize"))
+                .and_then(Value::as_bool),
+            default_tools: object.get("defaultTools").map(|tools| {
+                let entries: Vec<String> = tools
+                    .as_array()
+                    .map(|tools| {
+                        tools
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .map(str::to_owned)
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                crate::tools::index::resolve_default_tools(&entries)
+            }),
             warnings: Vec::new(),
         }
     }
@@ -132,6 +155,11 @@ impl Settings {
             Ok(Some(text)) => Self::parse(&text, &path),
             Err(error) => Self::failed(&path, &error.to_string()),
         }
+    }
+
+    /// Pi's `getImageAutoResize`.
+    pub fn image_auto_resize(&self) -> bool {
+        self.images_auto_resize.unwrap_or(true)
     }
 
     /// Pi's `getModelThinkingLevel`.
@@ -171,6 +199,24 @@ mod tests {
         assert_eq!(settings.follow_up_mode, QueueMode::OneAtATime);
         assert!(settings.block_images);
         assert!(settings.warnings.is_empty());
+        assert!(settings.image_auto_resize());
+        assert_eq!(settings.default_tools, None);
+    }
+
+    // Pi `default-tools-setting.test.ts` and `getImageAutoResize`.
+    #[test]
+    fn reads_the_tool_and_image_settings() {
+        let settings = Settings::parse(
+            r#"{"images":{"autoResize":false},"defaultTools":["+grep",5,"-write"]}"#,
+            Path::new("s.json"),
+        );
+        assert!(!settings.image_auto_resize());
+        assert_eq!(
+            settings.default_tools.as_deref(),
+            Some(&["read", "bash", "edit", "grep"].map(String::from)[..])
+        );
+        let settings = Settings::parse(r#"{"defaultTools":"read"}"#, Path::new("s.json"));
+        assert_eq!(settings.default_tools, Some(Vec::new()));
     }
 
     #[test]

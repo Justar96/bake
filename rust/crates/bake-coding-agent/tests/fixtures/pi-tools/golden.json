@@ -1,0 +1,5169 @@
+{
+ "revision": "abe508e1b89912adde45528136c3221eb69acdd7",
+ "definitions": {
+  "read": {
+   "name": "read",
+   "label": "read",
+   "description": "Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.",
+   "parameters": {
+    "type": "object",
+    "required": [
+     "path"
+    ],
+    "properties": {
+     "path": {
+      "type": "string",
+      "description": "Path to the file to read (relative or absolute)"
+     },
+     "offset": {
+      "type": "number",
+      "description": "Line number to start reading from (1-indexed)"
+     },
+     "limit": {
+      "type": "number",
+      "description": "Maximum number of lines to read"
+     }
+    }
+   },
+   "outputSchema": {
+    "anyOf": [
+     {
+      "type": "string"
+     },
+     {
+      "type": "object",
+      "required": [
+       "type",
+       "data",
+       "mimeType",
+       "note"
+      ],
+      "properties": {
+       "type": {
+        "type": "string",
+        "const": "image"
+       },
+       "data": {
+        "type": "string"
+       },
+       "mimeType": {
+        "type": "string"
+       },
+       "note": {
+        "type": "string"
+       }
+      }
+     }
+    ]
+   },
+   "constrainedSampling": {
+    "type": "json_schema",
+    "strict": "prefer"
+   },
+   "promptSnippet": "Read file contents",
+   "promptGuidelines": [
+    "Use read to examine files instead of cat or sed."
+   ],
+   "hasPrepareArguments": false,
+   "executionMode": null
+  },
+  "write": {
+   "name": "write",
+   "label": "write",
+   "description": "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.",
+   "parameters": {
+    "type": "object",
+    "required": [
+     "path",
+     "content"
+    ],
+    "properties": {
+     "path": {
+      "type": "string",
+      "description": "Path to the file to write (relative or absolute)"
+     },
+     "content": {
+      "type": "string",
+      "description": "Content to write to the file"
+     }
+    }
+   },
+   "outputSchema": null,
+   "constrainedSampling": {
+    "type": "json_schema",
+    "strict": "prefer"
+   },
+   "promptSnippet": "Create or overwrite files",
+   "promptGuidelines": [
+    "Use write only for new files or complete rewrites."
+   ],
+   "hasPrepareArguments": false,
+   "executionMode": null
+  },
+  "edit": {
+   "name": "edit",
+   "label": "edit",
+   "description": "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.",
+   "parameters": {
+    "type": "object",
+    "required": [
+     "path",
+     "edits"
+    ],
+    "properties": {
+     "path": {
+      "type": "string",
+      "description": "Path to the file to edit (relative or absolute)"
+     },
+     "edits": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "required": [
+        "oldText",
+        "newText"
+       ],
+       "properties": {
+        "oldText": {
+         "type": "string",
+         "description": "Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call."
+        },
+        "newText": {
+         "type": "string",
+         "description": "Replacement text for this targeted edit."
+        }
+       }
+      },
+      "description": "One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead."
+     }
+    }
+   },
+   "outputSchema": null,
+   "constrainedSampling": {
+    "type": "json_schema",
+    "strict": "prefer"
+   },
+   "promptSnippet": "Make precise file edits with exact text replacement, including multiple disjoint edits in one call",
+   "promptGuidelines": [
+    "Use edit for precise changes (edits[].oldText must match exactly)",
+    "When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls",
+    "Each edits[].oldText is matched against the original file, not after earlier edits are applied. Do not emit overlapping or nested edits. Merge nearby changes into one edit.",
+    "Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions."
+   ],
+   "hasPrepareArguments": true,
+   "executionMode": null
+  },
+  "ls": {
+   "name": "ls",
+   "label": "ls",
+   "description": "List directory contents. Returns entries sorted alphabetically, with '/' suffix for directories. Includes dotfiles. Output is truncated to 500 entries or 50KB (whichever is hit first).",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "path": {
+      "type": "string",
+      "description": "Directory to list (default: current directory)"
+     },
+     "limit": {
+      "type": "number",
+      "description": "Maximum number of entries to return (default: 500)"
+     }
+    }
+   },
+   "outputSchema": null,
+   "constrainedSampling": null,
+   "promptSnippet": "List directory contents",
+   "promptGuidelines": null,
+   "hasPrepareArguments": false,
+   "executionMode": null
+  },
+  "find": {
+   "name": "find",
+   "label": "find",
+   "description": "Search for files by glob pattern. Returns matching file paths relative to the search directory. Respects .gitignore. Output is truncated to 1000 results or 50KB (whichever is hit first).",
+   "parameters": {
+    "type": "object",
+    "required": [
+     "pattern"
+    ],
+    "properties": {
+     "pattern": {
+      "type": "string",
+      "description": "Glob pattern to match files, e.g. '*.ts', '**/*.json', or 'src/**/*.spec.ts'"
+     },
+     "path": {
+      "type": "string",
+      "description": "Directory to search in (default: current directory)"
+     },
+     "limit": {
+      "type": "number",
+      "description": "Maximum number of results (default: 1000)"
+     }
+    }
+   },
+   "outputSchema": null,
+   "constrainedSampling": null,
+   "promptSnippet": "Find files by glob pattern (respects .gitignore)",
+   "promptGuidelines": null,
+   "hasPrepareArguments": false,
+   "executionMode": null
+  },
+  "grep": {
+   "name": "grep",
+   "label": "grep",
+   "description": "Search file contents for a pattern. Returns matching lines with file paths and line numbers. Respects .gitignore. Output is truncated to 100 matches or 50KB (whichever is hit first). Long lines are truncated to 500 chars.",
+   "parameters": {
+    "type": "object",
+    "required": [
+     "pattern"
+    ],
+    "properties": {
+     "pattern": {
+      "type": "string",
+      "description": "Search pattern (regex or literal string)"
+     },
+     "path": {
+      "type": "string",
+      "description": "Directory or file to search (default: current directory)"
+     },
+     "glob": {
+      "type": "string",
+      "description": "Filter files by glob pattern, e.g. '*.ts' or '**/*.spec.ts'"
+     },
+     "ignoreCase": {
+      "type": "boolean",
+      "description": "Case-insensitive search (default: false)"
+     },
+     "literal": {
+      "type": "boolean",
+      "description": "Treat pattern as literal string instead of regex (default: false)"
+     },
+     "context": {
+      "type": "number",
+      "description": "Number of lines to show before and after each match (default: 0)"
+     },
+     "limit": {
+      "type": "number",
+      "description": "Maximum number of matches to return (default: 100)"
+     }
+    }
+   },
+   "outputSchema": null,
+   "constrainedSampling": null,
+   "promptSnippet": "Search file contents for patterns (respects .gitignore)",
+   "promptGuidelines": null,
+   "hasPrepareArguments": false,
+   "executionMode": null
+  },
+  "bash": {
+   "name": "bash",
+   "label": "bash",
+   "description": "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.",
+   "parameters": {
+    "type": "object",
+    "required": [
+     "command"
+    ],
+    "properties": {
+     "command": {
+      "type": "string",
+      "description": "Shell command to execute"
+     },
+     "timeout": {
+      "type": "number",
+      "description": "Timeout in seconds (optional, no default timeout)"
+     }
+    }
+   },
+   "outputSchema": {
+    "type": "object",
+    "required": [
+     "output",
+     "truncated",
+     "exit_code",
+     "wall_time_seconds"
+    ],
+    "properties": {
+     "output": {
+      "type": "string",
+      "description": "Combined stdout and stderr, possibly truncated"
+     },
+     "truncated": {
+      "type": "boolean"
+     },
+     "full_output_path": {
+      "type": "string",
+      "description": "Full output, when truncated"
+     },
+     "exit_code": {
+      "type": "number"
+     },
+     "wall_time_seconds": {
+      "type": "number"
+     }
+    }
+   },
+   "constrainedSampling": {
+    "type": "json_schema",
+    "strict": "prefer"
+   },
+   "promptSnippet": "Execute bash commands (ls, grep, find, etc.)",
+   "promptGuidelines": [
+    "You can inspect PI_* environment variables for current model and session details."
+   ],
+   "hasPrepareArguments": false,
+   "executionMode": null
+  }
+ },
+ "contributions": {
+  "read": {
+   "snippet": "Read file contents",
+   "guidelines": [
+    "Use read to examine files instead of cat or sed."
+   ]
+  },
+  "bash": {
+   "snippet": "Execute bash commands (ls, grep, find, etc.)",
+   "guidelines": [
+    "You can inspect PI_* environment variables for current model and session details."
+   ]
+  },
+  "edit": {
+   "snippet": "Make precise file edits with exact text replacement, including multiple disjoint edits in one call",
+   "guidelines": [
+    "Use edit for precise changes (edits[].oldText must match exactly)",
+    "When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls",
+    "Each edits[].oldText is matched against the original file, not after earlier edits are applied. Do not emit overlapping or nested edits. Merge nearby changes into one edit.",
+    "Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions."
+   ]
+  },
+  "write": {
+   "snippet": "Create or overwrite files",
+   "guidelines": [
+    "Use write only for new files or complete rewrites."
+   ]
+  },
+  "grep": {
+   "snippet": "Search file contents for patterns (respects .gitignore)",
+   "guidelines": []
+  },
+  "find": {
+   "snippet": "Find files by glob pattern (respects .gitignore)",
+   "guidelines": []
+  },
+  "ls": {
+   "snippet": "List directory contents",
+   "guidelines": []
+  }
+ },
+ "prompts": [
+  {
+   "selected": [
+    "read",
+    "bash",
+    "edit",
+    "write"
+   ],
+   "tools": "<tools>\n- read: Read file contents\n- bash: Execute bash commands (ls, grep, find, etc.)\n- edit: Make precise file edits with exact text replacement, including multiple disjoint edits in one call\n- write: Create or overwrite files\n\nIn addition to the tools above, you may have access to other custom tools depending on the project.\n</tools>",
+   "rules": "<rules>\n- Use bash for file operations like ls, rg, find\n- Use read to examine files instead of cat or sed.\n- You can inspect PI_* environment variables for current model and session details.\n- Use edit for precise changes (edits[].oldText must match exactly)\n- When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls\n- Each edits[].oldText is matched against the original file, not after earlier edits are applied. Do not emit overlapping or nested edits. Merge nearby changes into one edit.\n- Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions.\n- Use write only for new files or complete rewrites.\n- Be concise in your responses\n- Show file paths clearly when working with files\n</rules>"
+  },
+  {
+   "selected": [
+    "read",
+    "edit",
+    "write"
+   ],
+   "tools": "<tools>\n- read: Read file contents\n- edit: Make precise file edits with exact text replacement, including multiple disjoint edits in one call\n- write: Create or overwrite files\n\nIn addition to the tools above, you may have access to other custom tools depending on the project.\n</tools>",
+   "rules": "<rules>\n- Use read to examine files instead of cat or sed.\n- Use edit for precise changes (edits[].oldText must match exactly)\n- When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls\n- Each edits[].oldText is matched against the original file, not after earlier edits are applied. Do not emit overlapping or nested edits. Merge nearby changes into one edit.\n- Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions.\n- Use write only for new files or complete rewrites.\n- Be concise in your responses\n- Show file paths clearly when working with files\n</rules>"
+  },
+  {
+   "selected": [
+    "read",
+    "grep",
+    "find",
+    "ls"
+   ],
+   "tools": "<tools>\n- read: Read file contents\n- grep: Search file contents for patterns (respects .gitignore)\n- find: Find files by glob pattern (respects .gitignore)\n- ls: List directory contents\n\nIn addition to the tools above, you may have access to other custom tools depending on the project.\n</tools>",
+   "rules": "<rules>\n- Use read to examine files instead of cat or sed.\n- Be concise in your responses\n- Show file paths clearly when working with files\n</rules>"
+  },
+  {
+   "selected": [
+    "read",
+    "bash",
+    "edit",
+    "write",
+    "grep",
+    "find",
+    "ls"
+   ],
+   "tools": "<tools>\n- read: Read file contents\n- bash: Execute bash commands (ls, grep, find, etc.)\n- edit: Make precise file edits with exact text replacement, including multiple disjoint edits in one call\n- write: Create or overwrite files\n- grep: Search file contents for patterns (respects .gitignore)\n- find: Find files by glob pattern (respects .gitignore)\n- ls: List directory contents\n\nIn addition to the tools above, you may have access to other custom tools depending on the project.\n</tools>",
+   "rules": "<rules>\n- Use read to examine files instead of cat or sed.\n- You can inspect PI_* environment variables for current model and session details.\n- Use edit for precise changes (edits[].oldText must match exactly)\n- When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls\n- Each edits[].oldText is matched against the original file, not after earlier edits are applied. Do not emit overlapping or nested edits. Merge nearby changes into one edit.\n- Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions.\n- Use write only for new files or complete rewrites.\n- Be concise in your responses\n- Show file paths clearly when working with files\n</rules>"
+  },
+  {
+   "selected": [
+    "bash"
+   ],
+   "tools": "<tools>\n- bash: Execute bash commands (ls, grep, find, etc.)\n\nIn addition to the tools above, you may have access to other custom tools depending on the project.\n</tools>",
+   "rules": "<rules>\n- Use bash for file operations like ls, rg, find\n- You can inspect PI_* environment variables for current model and session details.\n- Be concise in your responses\n- Show file paths clearly when working with files\n</rules>"
+  },
+  {
+   "selected": [],
+   "tools": "<tools>\n(none)\n\nIn addition to the tools above, you may have access to other custom tools depending on the project.\n</tools>",
+   "rules": "<rules>\n- Be concise in your responses\n- Show file paths clearly when working with files\n</rules>"
+  }
+ ],
+ "prepareArguments": [
+  {
+   "input": {
+    "path": "file.txt",
+    "oldText": "before",
+    "newText": "after"
+   },
+   "output": {
+    "path": "file.txt",
+    "edits": [
+     {
+      "oldText": "before",
+      "newText": "after"
+     }
+    ]
+   }
+  },
+  {
+   "input": {
+    "path": "file.txt",
+    "edits": [
+     {
+      "oldText": "a",
+      "newText": "b"
+     }
+    ],
+    "oldText": "c",
+    "newText": "d"
+   },
+   "output": {
+    "path": "file.txt",
+    "edits": [
+     {
+      "oldText": "a",
+      "newText": "b"
+     },
+     {
+      "oldText": "c",
+      "newText": "d"
+     }
+    ]
+   }
+  },
+  {
+   "input": {
+    "path": "file.txt",
+    "edits": [
+     {
+      "oldText": "a",
+      "newText": "b"
+     }
+    ]
+   },
+   "output": {
+    "path": "file.txt",
+    "edits": [
+     {
+      "oldText": "a",
+      "newText": "b"
+     }
+    ]
+   }
+  },
+  {
+   "input": {
+    "path": "file.txt",
+    "edits": "[{\"oldText\":\"a\",\"newText\":\"b\"}]"
+   },
+   "output": {
+    "path": "file.txt",
+    "edits": [
+     {
+      "oldText": "a",
+      "newText": "b"
+     }
+    ]
+   }
+  },
+  {
+   "input": {
+    "path": "file.txt",
+    "edits": "{\"oldText\":\"a\",\"newText\":\"b\"}"
+   },
+   "output": {
+    "path": "file.txt",
+    "edits": [
+     {
+      "oldText": "a",
+      "newText": "b"
+     }
+    ]
+   }
+  },
+  {
+   "input": {
+    "path": "file.txt",
+    "edits": "not json"
+   },
+   "output": {
+    "path": "file.txt",
+    "edits": "not json"
+   }
+  },
+  {
+   "input": {
+    "path": "file.txt",
+    "edits": {
+     "oldText": "a",
+     "newText": "b"
+    }
+   },
+   "output": {
+    "path": "file.txt",
+    "edits": [
+     {
+      "oldText": "a",
+      "newText": "b"
+     }
+    ]
+   }
+  },
+  {
+   "input": {
+    "path": "file.txt",
+    "oldText": "x"
+   },
+   "output": {
+    "path": "file.txt",
+    "oldText": "x"
+   }
+  },
+  {
+   "input": {
+    "path": "file.txt",
+    "edits": 5,
+    "oldText": "c",
+    "newText": "d"
+   },
+   "output": {
+    "path": "file.txt",
+    "edits": [
+     {
+      "oldText": "c",
+      "newText": "d"
+     }
+    ]
+   }
+  },
+  {
+   "input": null,
+   "output": null
+  },
+  {
+   "input": "garbage",
+   "output": "garbage"
+  },
+  {
+   "input": [
+    1,
+    2
+   ],
+   "output": [
+    1,
+    2
+   ]
+  }
+ ],
+ "toolSelection": {
+  "listErrors": [
+   {
+    "entries": [
+     "read",
+     "grep"
+    ],
+    "error": null
+   },
+   {
+    "entries": [
+     "+grep",
+     "-write"
+    ],
+    "error": null
+   },
+   {
+    "entries": [
+     "read",
+     "+grep"
+    ],
+    "error": "tool names cannot be mixed with +name or -name entries"
+   },
+   {
+    "entries": [
+     "-gr*"
+    ],
+    "error": "+name and -name entries take exact tool names, not patterns: -gr*"
+   },
+   {
+    "entries": [
+     "mcp__*"
+    ],
+    "error": null
+   },
+   {
+    "entries": [],
+    "error": null
+   }
+  ],
+  "modifiers": [
+   {
+    "base": [
+     "read",
+     "bash"
+    ],
+    "entries": [
+     "+grep",
+     "-bash",
+     "+grep",
+     "-missing",
+     "+"
+    ],
+    "result": [
+     "read",
+     "grep"
+    ]
+   },
+   {
+    "base": [],
+    "entries": [
+     "-read",
+     "+read"
+    ],
+    "result": [
+     "read"
+    ]
+   }
+  ],
+  "defaults": [
+   {
+    "entries": [],
+    "result": []
+   },
+   {
+    "entries": [
+     "grep",
+     "find"
+    ],
+    "result": [
+     "grep",
+     "find"
+    ]
+   },
+   {
+    "entries": [
+     "+grep",
+     "-write"
+    ],
+    "result": [
+     "read",
+     "bash",
+     "edit",
+     "grep"
+    ]
+   },
+   {
+    "entries": [
+     "ls",
+     "+grep",
+     "-ls"
+    ],
+    "result": [
+     "grep"
+    ]
+   },
+   {
+    "entries": [
+     "-read"
+    ],
+    "result": [
+     "bash",
+     "edit",
+     "write"
+    ]
+   }
+  ],
+  "matchers": [
+   {
+    "entries": [
+     "read",
+     "gr*"
+    ],
+    "names": [
+     "read",
+     "grep",
+     "green",
+     "bash",
+     "gr"
+    ],
+    "matches": [
+     true,
+     true,
+     true,
+     false,
+     true
+    ]
+   },
+   {
+    "entries": [
+     "*"
+    ],
+    "names": [
+     "read",
+     "x"
+    ],
+    "matches": [
+     true,
+     true
+    ]
+   },
+   {
+    "entries": [
+     "a.b*",
+     "(x)"
+    ],
+    "names": [
+     "a.bc",
+     "axbc",
+     "(x)"
+    ],
+    "matches": [
+     true,
+     false,
+     true
+    ]
+   }
+  ]
+ },
+ "cases": [
+  {
+   "tool": "read",
+   "name": "small",
+   "files": [
+    {
+     "path": "test.txt",
+     "text": "Hello, world!\nLine 2\nLine 3"
+    }
+   ],
+   "args": {
+    "path": "<DIR>/test.txt"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Hello, world!\nLine 2\nLine 3"
+     }
+    ],
+    "details": null,
+    "structuredContent": "Hello, world!\nLine 2\nLine 3"
+   },
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "relative",
+   "files": [
+    {
+     "path": "sub/test.txt",
+     "text": "Hello, world!\nLine 2\nLine 3"
+    }
+   ],
+   "args": {
+    "path": "sub/test.txt"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Hello, world!\nLine 2\nLine 3"
+     }
+    ],
+    "details": null,
+    "structuredContent": "Hello, world!\nLine 2\nLine 3"
+   },
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "at-prefix",
+   "files": [
+    {
+     "path": "test.txt",
+     "text": "Hello, world!\nLine 2\nLine 3"
+    }
+   ],
+   "args": {
+    "path": "@test.txt"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Hello, world!\nLine 2\nLine 3"
+     }
+    ],
+    "details": null,
+    "structuredContent": "Hello, world!\nLine 2\nLine 3"
+   },
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "missing",
+   "files": [],
+   "args": {
+    "path": "<DIR>/nonexistent.txt"
+   },
+   "error": "ENOENT: no such file or directory, access '<DIR>/nonexistent.txt'",
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "directory",
+   "files": [
+    {
+     "path": "sub",
+     "dir": true
+    }
+   ],
+   "args": {
+    "path": "sub"
+   },
+   "error": "EISDIR: illegal operation on a directory, read",
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "line-limit",
+   "files": [
+    {
+     "path": "large.txt",
+     "text": [
+      [
+       "lines",
+       2500,
+       [
+        "Line {i}"
+       ]
+      ]
+     ]
+    }
+   ],
+   "args": {
+    "path": "large.txt"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": {
+       "$hash": "8edf4d042f3bd177",
+       "bytes": 18954,
+       "head": "Line 1\nLine 2\nLine 3\nLine 4\nLine 5\nLine 6\nLine 7\nLine 8\nLine 9\nLine 10\nLine 11\nLine 12\nLine 13\nLine 14\nLine 15\nLine 16\nL",
+       "tail": "ine 1995\nLine 1996\nLine 1997\nLine 1998\nLine 1999\nLine 2000\n\n[Showing lines 1-2000 of 2500. Use offset=2001 to continue.]"
+      }
+     }
+    ],
+    "details": {
+     "truncation": {
+      "content": {
+       "$hash": "165f4e9159f352d7",
+       "bytes": 18892,
+       "head": "Line 1\nLine 2\nLine 3\nLine 4\nLine 5\nLine 6\nLine 7\nLine 8\nLine 9\nLine 10\nLine 11\nLine 12\nLine 13\nLine 14\nLine 15\nLine 16\nL",
+       "tail": "\nLine 1989\nLine 1990\nLine 1991\nLine 1992\nLine 1993\nLine 1994\nLine 1995\nLine 1996\nLine 1997\nLine 1998\nLine 1999\nLine 2000"
+      },
+      "truncated": true,
+      "truncatedBy": "lines",
+      "totalLines": 2500,
+      "totalBytes": 23892,
+      "outputLines": 2000,
+      "outputBytes": 18892,
+      "lastLinePartial": false,
+      "firstLineExceedsLimit": false,
+      "maxLines": 2000,
+      "maxBytes": 51200
+     }
+    },
+    "structuredContent": {
+     "$hash": "8edf4d042f3bd177",
+     "bytes": 18954,
+     "head": "Line 1\nLine 2\nLine 3\nLine 4\nLine 5\nLine 6\nLine 7\nLine 8\nLine 9\nLine 10\nLine 11\nLine 12\nLine 13\nLine 14\nLine 15\nLine 16\nL",
+     "tail": "ine 1995\nLine 1996\nLine 1997\nLine 1998\nLine 1999\nLine 2000\n\n[Showing lines 1-2000 of 2500. Use offset=2001 to continue.]"
+    }
+   },
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "byte-limit",
+   "files": [
+    {
+     "path": "b.txt",
+     "text": [
+      [
+       "lines",
+       500,
+       [
+        "Line {i}: ",
+        [
+         "repeat",
+         "x",
+         200
+        ]
+       ]
+      ]
+     ]
+    }
+   ],
+   "args": {
+    "path": "b.txt"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": {
+       "$hash": "c5216eb0a0d4ef67",
+       "bytes": 51238,
+       "head": "Line 1: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "tail": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\n[Showing lines 1-243 of 500 (50.0KB limit). Use offset=244 to continue.]"
+      }
+     }
+    ],
+    "details": {
+     "truncation": {
+      "content": {
+       "$hash": "e30a3e96c85eb867",
+       "bytes": 51164,
+       "head": "Line 1: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "tail": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      "truncated": true,
+      "truncatedBy": "bytes",
+      "totalLines": 500,
+      "totalBytes": 105391,
+      "outputLines": 243,
+      "outputBytes": 51164,
+      "lastLinePartial": false,
+      "firstLineExceedsLimit": false,
+      "maxLines": 2000,
+      "maxBytes": 51200
+     }
+    },
+    "structuredContent": {
+     "$hash": "c5216eb0a0d4ef67",
+     "bytes": 51238,
+     "head": "Line 1: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+     "tail": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\n[Showing lines 1-243 of 500 (50.0KB limit). Use offset=244 to continue.]"
+    }
+   },
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "offset",
+   "files": [
+    {
+     "path": "o.txt",
+     "text": [
+      [
+       "lines",
+       100,
+       [
+        "Line {i}"
+       ]
+      ]
+     ]
+    }
+   ],
+   "args": {
+    "path": "o.txt",
+    "offset": 51
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Line 51\nLine 52\nLine 53\nLine 54\nLine 55\nLine 56\nLine 57\nLine 58\nLine 59\nLine 60\nLine 61\nLine 62\nLine 63\nLine 64\nLine 65\nLine 66\nLine 67\nLine 68\nLine 69\nLine 70\nLine 71\nLine 72\nLine 73\nLine 74\nLine 75\nLine 76\nLine 77\nLine 78\nLine 79\nLine 80\nLine 81\nLine 82\nLine 83\nLine 84\nLine 85\nLine 86\nLine 87\nLine 88\nLine 89\nLine 90\nLine 91\nLine 92\nLine 93\nLine 94\nLine 95\nLine 96\nLine 97\nLine 98\nLine 99\nLine 100"
+     }
+    ],
+    "details": null,
+    "structuredContent": "Line 51\nLine 52\nLine 53\nLine 54\nLine 55\nLine 56\nLine 57\nLine 58\nLine 59\nLine 60\nLine 61\nLine 62\nLine 63\nLine 64\nLine 65\nLine 66\nLine 67\nLine 68\nLine 69\nLine 70\nLine 71\nLine 72\nLine 73\nLine 74\nLine 75\nLine 76\nLine 77\nLine 78\nLine 79\nLine 80\nLine 81\nLine 82\nLine 83\nLine 84\nLine 85\nLine 86\nLine 87\nLine 88\nLine 89\nLine 90\nLine 91\nLine 92\nLine 93\nLine 94\nLine 95\nLine 96\nLine 97\nLine 98\nLine 99\nLine 100"
+   },
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "limit",
+   "files": [
+    {
+     "path": "o.txt",
+     "text": [
+      [
+       "lines",
+       100,
+       [
+        "Line {i}"
+       ]
+      ]
+     ]
+    }
+   ],
+   "args": {
+    "path": "o.txt",
+    "limit": 10
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Line 1\nLine 2\nLine 3\nLine 4\nLine 5\nLine 6\nLine 7\nLine 8\nLine 9\nLine 10\n\n[90 more lines in file. Use offset=11 to continue.]"
+     }
+    ],
+    "details": null,
+    "structuredContent": "Line 1\nLine 2\nLine 3\nLine 4\nLine 5\nLine 6\nLine 7\nLine 8\nLine 9\nLine 10\n\n[90 more lines in file. Use offset=11 to continue.]"
+   },
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "offset-limit",
+   "files": [
+    {
+     "path": "o.txt",
+     "text": [
+      [
+       "lines",
+       100,
+       [
+        "Line {i}"
+       ]
+      ]
+     ]
+    }
+   ],
+   "args": {
+    "path": "o.txt",
+    "offset": 41,
+    "limit": 20
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Line 41\nLine 42\nLine 43\nLine 44\nLine 45\nLine 46\nLine 47\nLine 48\nLine 49\nLine 50\nLine 51\nLine 52\nLine 53\nLine 54\nLine 55\nLine 56\nLine 57\nLine 58\nLine 59\nLine 60\n\n[40 more lines in file. Use offset=61 to continue.]"
+     }
+    ],
+    "details": null,
+    "structuredContent": "Line 41\nLine 42\nLine 43\nLine 44\nLine 45\nLine 46\nLine 47\nLine 48\nLine 49\nLine 50\nLine 51\nLine 52\nLine 53\nLine 54\nLine 55\nLine 56\nLine 57\nLine 58\nLine 59\nLine 60\n\n[40 more lines in file. Use offset=61 to continue.]"
+   },
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "offset-beyond",
+   "files": [
+    {
+     "path": "s.txt",
+     "text": "Line 1\nLine 2\nLine 3"
+    }
+   ],
+   "args": {
+    "path": "s.txt",
+    "offset": 100
+   },
+   "error": "Offset 100 is beyond end of file (3 lines total)",
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "offset-last-empty",
+   "files": [
+    {
+     "path": "s.txt",
+     "text": "a\nb\n"
+    }
+   ],
+   "args": {
+    "path": "s.txt",
+    "offset": 3
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": ""
+     }
+    ],
+    "details": null,
+    "structuredContent": ""
+   },
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "offset-zero",
+   "files": [
+    {
+     "path": "s.txt",
+     "text": "a\nb"
+    }
+   ],
+   "args": {
+    "path": "s.txt",
+    "offset": 0
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "a\nb"
+     }
+    ],
+    "details": null,
+    "structuredContent": "a\nb"
+   },
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "offset-negative",
+   "files": [
+    {
+     "path": "s.txt",
+     "text": "a\nb"
+    }
+   ],
+   "args": {
+    "path": "s.txt",
+    "offset": -4
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "a\nb"
+     }
+    ],
+    "details": null,
+    "structuredContent": "a\nb"
+   },
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "limit-zero",
+   "files": [
+    {
+     "path": "s.txt",
+     "text": "a\nb\nc"
+    }
+   ],
+   "args": {
+    "path": "s.txt",
+    "limit": 0
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "\n\n[3 more lines in file. Use offset=1 to continue.]"
+     }
+    ],
+    "details": null,
+    "structuredContent": "\n\n[3 more lines in file. Use offset=1 to continue.]"
+   },
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "limit-negative",
+   "files": [
+    {
+     "path": "s.txt",
+     "text": [
+      [
+       "lines",
+       10,
+       [
+        "L{i}"
+       ]
+      ]
+     ]
+    }
+   ],
+   "args": {
+    "path": "s.txt",
+    "offset": 2,
+    "limit": -3
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "L2\nL3\nL4\nL5\nL6\nL7\nL8\n\n[12 more lines in file. Use offset=-1 to continue.]"
+     }
+    ],
+    "details": null,
+    "structuredContent": "L2\nL3\nL4\nL5\nL6\nL7\nL8\n\n[12 more lines in file. Use offset=-1 to continue.]"
+   },
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "limit-negative-past-start",
+   "files": [
+    {
+     "path": "s.txt",
+     "text": [
+      [
+       "lines",
+       10,
+       [
+        "L{i}"
+       ]
+      ]
+     ]
+    }
+   ],
+   "args": {
+    "path": "s.txt",
+    "offset": 3,
+    "limit": -9
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "L3\n\n[17 more lines in file. Use offset=-6 to continue.]"
+     }
+    ],
+    "details": null,
+    "structuredContent": "L3\n\n[17 more lines in file. Use offset=-6 to continue.]"
+   },
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "fractional",
+   "files": [
+    {
+     "path": "s.txt",
+     "text": [
+      [
+       "lines",
+       10,
+       [
+        "L{i}"
+       ]
+      ]
+     ]
+    }
+   ],
+   "args": {
+    "path": "s.txt",
+    "offset": 2.5,
+    "limit": 2.5
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "L2\nL3\nL4\n\n[6 more lines in file. Use offset=5 to continue.]"
+     }
+    ],
+    "details": null,
+    "structuredContent": "L2\nL3\nL4\n\n[6 more lines in file. Use offset=5 to continue.]"
+   },
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "limit-past-end",
+   "files": [
+    {
+     "path": "s.txt",
+     "text": "a\nb"
+    }
+   ],
+   "args": {
+    "path": "s.txt",
+    "limit": 1e+300
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "a\nb"
+     }
+    ],
+    "details": null,
+    "structuredContent": "a\nb"
+   },
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "trailing-newline",
+   "files": [
+    {
+     "path": "s.txt",
+     "text": "a\nb\n"
+    }
+   ],
+   "args": {
+    "path": "s.txt"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "a\nb\n"
+     }
+    ],
+    "details": null,
+    "structuredContent": "a\nb\n"
+   },
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "empty",
+   "files": [
+    {
+     "path": "e.txt",
+     "text": ""
+    }
+   ],
+   "args": {
+    "path": "e.txt"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": ""
+     }
+    ],
+    "details": null,
+    "structuredContent": ""
+   },
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "crlf",
+   "files": [
+    {
+     "path": "c.txt",
+     "text": "a\r\nb\r\n"
+    }
+   ],
+   "args": {
+    "path": "c.txt"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "a\r\nb\r\n"
+     }
+    ],
+    "details": null,
+    "structuredContent": "a\r\nb\r\n"
+   },
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "invalid-utf8",
+   "files": [
+    {
+     "path": "u.txt",
+     "base64": "Yf8K4oIK8J+YgMM="
+    }
+   ],
+   "args": {
+    "path": "u.txt"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "a�\n�\n😀�"
+     }
+    ],
+    "details": null,
+    "structuredContent": "a�\n�\n😀�"
+   },
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "first-line-too-long",
+   "files": [
+    {
+     "path": "w.txt",
+     "text": [
+      [
+       "repeat",
+       "x",
+       61440
+      ],
+      "\nshort"
+     ]
+    }
+   ],
+   "args": {
+    "path": "w.txt"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "[Line 1 is 60.0KB, exceeds 50.0KB limit. Use bash: sed -n '1p' w.txt | head -c 51200]"
+     }
+    ],
+    "details": {
+     "truncation": {
+      "content": "",
+      "truncated": true,
+      "truncatedBy": "bytes",
+      "totalLines": 2,
+      "totalBytes": 61446,
+      "outputLines": 0,
+      "outputBytes": 0,
+      "lastLinePartial": false,
+      "firstLineExceedsLimit": true,
+      "maxLines": 2000,
+      "maxBytes": 51200
+     }
+    },
+    "structuredContent": "[Line 1 is 60.0KB, exceeds 50.0KB limit. Use bash: sed -n '1p' w.txt | head -c 51200]"
+   },
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "later-line-too-long",
+   "files": [
+    {
+     "path": "w.txt",
+     "text": [
+      "short\n",
+      [
+       "repeat",
+       "é",
+       40960
+      ],
+      "\nend"
+     ]
+    }
+   ],
+   "args": {
+    "path": "w.txt",
+    "offset": 2
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "[Line 2 is 80.0KB, exceeds 50.0KB limit. Use bash: sed -n '2p' w.txt | head -c 51200]"
+     }
+    ],
+    "details": {
+     "truncation": {
+      "content": "",
+      "truncated": true,
+      "truncatedBy": "bytes",
+      "totalLines": 2,
+      "totalBytes": 81924,
+      "outputLines": 0,
+      "outputBytes": 0,
+      "lastLinePartial": false,
+      "firstLineExceedsLimit": true,
+      "maxLines": 2000,
+      "maxBytes": 51200
+     }
+    },
+    "structuredContent": "[Line 2 is 80.0KB, exceeds 50.0KB limit. Use bash: sed -n '2p' w.txt | head -c 51200]"
+   },
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "long-line-after-short",
+   "files": [
+    {
+     "path": "w.txt",
+     "text": [
+      "short\n",
+      [
+       "repeat",
+       "y",
+       61440
+      ],
+      "\nend"
+     ]
+    }
+   ],
+   "args": {
+    "path": "w.txt"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "short\n\n[Showing lines 1-1 of 3 (50.0KB limit). Use offset=2 to continue.]"
+     }
+    ],
+    "details": {
+     "truncation": {
+      "content": "short",
+      "truncated": true,
+      "truncatedBy": "bytes",
+      "totalLines": 3,
+      "totalBytes": 61450,
+      "outputLines": 1,
+      "outputBytes": 5,
+      "lastLinePartial": false,
+      "firstLineExceedsLimit": false,
+      "maxLines": 2000,
+      "maxBytes": 51200
+     }
+    },
+    "structuredContent": "short\n\n[Showing lines 1-1 of 3 (50.0KB limit). Use offset=2 to continue.]"
+   },
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "exact-lines",
+   "files": [
+    {
+     "path": "x.txt",
+     "text": [
+      [
+       "lines",
+       2000,
+       [
+        "{i}"
+       ]
+      ],
+      "\n"
+     ]
+    }
+   ],
+   "args": {
+    "path": "x.txt"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": {
+       "$hash": "7dc93ead369d994f",
+       "bytes": 8893,
+       "head": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n31\n32\n33\n34\n35\n36\n37\n38\n39\n40\n41\n42\n43\n",
+       "tail": "1977\n1978\n1979\n1980\n1981\n1982\n1983\n1984\n1985\n1986\n1987\n1988\n1989\n1990\n1991\n1992\n1993\n1994\n1995\n1996\n1997\n1998\n1999\n2000\n"
+      }
+     }
+    ],
+    "details": null,
+    "structuredContent": {
+     "$hash": "7dc93ead369d994f",
+     "bytes": 8893,
+     "head": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n31\n32\n33\n34\n35\n36\n37\n38\n39\n40\n41\n42\n43\n",
+     "tail": "1977\n1978\n1979\n1980\n1981\n1982\n1983\n1984\n1985\n1986\n1987\n1988\n1989\n1990\n1991\n1992\n1993\n1994\n1995\n1996\n1997\n1998\n1999\n2000\n"
+    }
+   },
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "lines-and-trailing",
+   "files": [
+    {
+     "path": "x.txt",
+     "text": [
+      [
+       "lines",
+       2001,
+       [
+        "{i}"
+       ]
+      ],
+      "\n"
+     ]
+    }
+   ],
+   "args": {
+    "path": "x.txt"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": {
+       "$hash": "a425f26415ccf84c",
+       "bytes": 8954,
+       "head": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n31\n32\n33\n34\n35\n36\n37\n38\n39\n40\n41\n42\n43\n",
+       "tail": "989\n1990\n1991\n1992\n1993\n1994\n1995\n1996\n1997\n1998\n1999\n2000\n\n[Showing lines 1-2000 of 2002. Use offset=2001 to continue.]"
+      }
+     }
+    ],
+    "details": {
+     "truncation": {
+      "content": {
+       "$hash": "69b5ef1a4adda3ff",
+       "bytes": 8892,
+       "head": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n31\n32\n33\n34\n35\n36\n37\n38\n39\n40\n41\n42\n43\n",
+       "tail": "\n1977\n1978\n1979\n1980\n1981\n1982\n1983\n1984\n1985\n1986\n1987\n1988\n1989\n1990\n1991\n1992\n1993\n1994\n1995\n1996\n1997\n1998\n1999\n2000"
+      },
+      "truncated": true,
+      "truncatedBy": "lines",
+      "totalLines": 2001,
+      "totalBytes": 8898,
+      "outputLines": 2000,
+      "outputBytes": 8892,
+      "lastLinePartial": false,
+      "firstLineExceedsLimit": false,
+      "maxLines": 2000,
+      "maxBytes": 51200
+     }
+    },
+    "structuredContent": {
+     "$hash": "a425f26415ccf84c",
+     "bytes": 8954,
+     "head": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n31\n32\n33\n34\n35\n36\n37\n38\n39\n40\n41\n42\n43\n",
+     "tail": "989\n1990\n1991\n1992\n1993\n1994\n1995\n1996\n1997\n1998\n1999\n2000\n\n[Showing lines 1-2000 of 2002. Use offset=2001 to continue.]"
+    }
+   },
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "limit-under-truncation",
+   "files": [
+    {
+     "path": "x.txt",
+     "text": [
+      [
+       "lines",
+       3000,
+       [
+        "{i}"
+       ]
+      ]
+     ]
+    }
+   ],
+   "args": {
+    "path": "x.txt",
+    "offset": 10,
+    "limit": 2500
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": {
+       "$hash": "e032468b31d05c8c",
+       "bytes": 8982,
+       "head": "10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n31\n32\n33\n34\n35\n36\n37\n38\n39\n40\n41\n42\n43\n44\n45\n46\n47\n48\n49\n",
+       "tail": "98\n1999\n2000\n2001\n2002\n2003\n2004\n2005\n2006\n2007\n2008\n2009\n\n[Showing lines 10-2009 of 3000. Use offset=2010 to continue.]"
+      }
+     }
+    ],
+    "details": {
+     "truncation": {
+      "content": {
+       "$hash": "acf3f3d087ad3e2b",
+       "bytes": 8919,
+       "head": "10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n31\n32\n33\n34\n35\n36\n37\n38\n39\n40\n41\n42\n43\n44\n45\n46\n47\n48\n49\n",
+       "tail": "\n1986\n1987\n1988\n1989\n1990\n1991\n1992\n1993\n1994\n1995\n1996\n1997\n1998\n1999\n2000\n2001\n2002\n2003\n2004\n2005\n2006\n2007\n2008\n2009"
+      },
+      "truncated": true,
+      "truncatedBy": "lines",
+      "totalLines": 2500,
+      "totalBytes": 11419,
+      "outputLines": 2000,
+      "outputBytes": 8919,
+      "lastLinePartial": false,
+      "firstLineExceedsLimit": false,
+      "maxLines": 2000,
+      "maxBytes": 51200
+     }
+    },
+    "structuredContent": {
+     "$hash": "e032468b31d05c8c",
+     "bytes": 8982,
+     "head": "10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n31\n32\n33\n34\n35\n36\n37\n38\n39\n40\n41\n42\n43\n44\n45\n46\n47\n48\n49\n",
+     "tail": "98\n1999\n2000\n2001\n2002\n2003\n2004\n2005\n2006\n2007\n2008\n2009\n\n[Showing lines 10-2009 of 3000. Use offset=2010 to continue.]"
+    }
+   },
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "bytes-with-limit",
+   "files": [
+    {
+     "path": "b.txt",
+     "text": [
+      [
+       "lines",
+       500,
+       [
+        "Line {i}: ",
+        [
+         "repeat",
+         "z",
+         300
+        ]
+       ]
+      ]
+     ]
+    }
+   ],
+   "args": {
+    "path": "b.txt",
+    "offset": 7,
+    "limit": 400
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": {
+       "$hash": "c2e835afc153f093",
+       "bytes": 50981,
+       "head": "Line 7: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+       "tail": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n\n[Showing lines 7-170 of 500 (50.0KB limit). Use offset=171 to continue.]"
+      }
+     }
+    ],
+    "details": {
+     "truncation": {
+      "content": {
+       "$hash": "3774d09dccbb3123",
+       "bytes": 50907,
+       "head": "Line 7: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+       "tail": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+      },
+      "truncated": true,
+      "truncatedBy": "bytes",
+      "totalLines": 400,
+      "totalBytes": 124303,
+      "outputLines": 164,
+      "outputBytes": 50907,
+      "lastLinePartial": false,
+      "firstLineExceedsLimit": false,
+      "maxLines": 2000,
+      "maxBytes": 51200
+     }
+    },
+    "structuredContent": {
+     "$hash": "c2e835afc153f093",
+     "bytes": 50981,
+     "head": "Line 7: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+     "tail": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n\n[Showing lines 7-170 of 500 (50.0KB limit). Use offset=171 to continue.]"
+    }
+   },
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "png-magic",
+   "files": [
+    {
+     "path": "image.txt",
+     "base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAX+XDSwAAAABJRU5ErkJggg=="
+    }
+   ],
+   "args": {
+    "path": "image.txt"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Read image file [image/png]"
+     },
+     {
+      "type": "image",
+      "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAX+XDSwAAAABJRU5ErkJggg==",
+      "mimeType": "image/png"
+     }
+    ],
+    "details": null,
+    "structuredContent": {
+     "type": "image",
+     "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAX+XDSwAAAABJRU5ErkJggg==",
+     "mimeType": "image/png",
+     "note": "Read image file [image/png]"
+    }
+   },
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "png-non-vision",
+   "files": [
+    {
+     "path": "a.png",
+     "base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAX+XDSwAAAABJRU5ErkJggg=="
+    }
+   ],
+   "args": {
+    "path": "a.png"
+   },
+   "model": {
+    "input": [
+     "text"
+    ]
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Read image file [image/png]\n[Current model does not support images. The image will be omitted from this request.]"
+     },
+     {
+      "type": "image",
+      "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAX+XDSwAAAABJRU5ErkJggg==",
+      "mimeType": "image/png"
+     }
+    ],
+    "details": null,
+    "structuredContent": {
+     "type": "image",
+     "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAX+XDSwAAAABJRU5ErkJggg==",
+     "mimeType": "image/png",
+     "note": "Read image file [image/png]\n[Current model does not support images. The image will be omitted from this request.]"
+    }
+   },
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "gif",
+   "files": [
+    {
+     "path": "a.gif",
+     "base64": "R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw=="
+    }
+   ],
+   "args": {
+    "path": "a.gif"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Read image file [image/gif]"
+     },
+     {
+      "type": "image",
+      "data": "R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==",
+      "mimeType": "image/gif"
+     }
+    ],
+    "details": null,
+    "structuredContent": {
+     "type": "image",
+     "data": "R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==",
+     "mimeType": "image/gif",
+     "note": "Read image file [image/gif]"
+    }
+   },
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "webp",
+   "files": [
+    {
+     "path": "a.webp",
+     "base64": "UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA"
+    }
+   ],
+   "args": {
+    "path": "a.webp"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Read image file [image/webp]"
+     },
+     {
+      "type": "image",
+      "data": "UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA",
+      "mimeType": "image/webp"
+     }
+    ],
+    "details": null,
+    "structuredContent": {
+     "type": "image",
+     "data": "UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA",
+     "mimeType": "image/webp",
+     "note": "Read image file [image/webp]"
+    }
+   },
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "jpeg-oriented",
+   "files": [
+    {
+     "path": "a.jpg",
+     "base64": "/9j/4QBEaHR0cDovL25zLmFkb2JlLmNvbS94YXAvMS4wLwA8eDp4bXBtZXRhIHhtbG5zOng9ImFkb2JlOm5zOm1ldGEvIi8+/+EAIkV4aWYAAElJKgAIAAAAAQASAQMAAQAAAAYAAAAAAAAA/+AAEEpGSUYAAQIAAAEAAQAA/8AAEQgAAQACAwERAAIRAQMRAf/bAEMAAwICAwICAwMDAwQDAwQFCAUFBAQFCgcHBggMCgwMCwoLCw0OEhANDhEOCwsQFhARExQVFRUMDxcYFhQYEhQVFP/bAEMBAwQEBQQFCQUFCRQNCw0UFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFP/EAB8AAAEFAQEBAQEBAAAAAAAAAAABAgMEBQYHCAkKC//EALUQAAIBAwMCBAMFBQQEAAABfQECAwAEEQUSITFBBhNRYQcicRQygZGhCCNCscEVUtHwJDNicoIJChYXGBkaJSYnKCkqNDU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6g4SFhoeIiYqSk5SVlpeYmZqio6Slpqeoqaqys7S1tre4ubrCw8TFxsfIycrS09TV1tfY2drh4uPk5ebn6Onq8fLz9PX29/j5+v/EAB8BAAMBAQEBAQEBAQEAAAAAAAABAgMEBQYHCAkKC//EALURAAIBAgQEAwQHBQQEAAECdwABAgMRBAUhMQYSQVEHYXETIjKBCBRCkaGxwQkjM1LwFWJy0QoWJDThJfEXGBkaJicoKSo1Njc4OTpDREVGR0hJSlNUVVZXWFlaY2RlZmdoaWpzdHV2d3h5eoKDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uLj5OXm5+jp6vLz9PX29/j5+v/aAAwDAQACEQMRAD8A+B/EP/If1L/r5l/9DNf6NcCf8kllP/YNQ/8ATUTDjP8A5KfM/wDr/W/9OSP/2Q=="
+    }
+   ],
+   "args": {
+    "path": "a.jpg"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Read image file [image/jpeg]"
+     },
+     {
+      "type": "image",
+      "data": "/9j/4QBEaHR0cDovL25zLmFkb2JlLmNvbS94YXAvMS4wLwA8eDp4bXBtZXRhIHhtbG5zOng9ImFkb2JlOm5zOm1ldGEvIi8+/+EAIkV4aWYAAElJKgAIAAAAAQASAQMAAQAAAAYAAAAAAAAA/+AAEEpGSUYAAQIAAAEAAQAA/8AAEQgAAQACAwERAAIRAQMRAf/bAEMAAwICAwICAwMDAwQDAwQFCAUFBAQFCgcHBggMCgwMCwoLCw0OEhANDhEOCwsQFhARExQVFRUMDxcYFhQYEhQVFP/bAEMBAwQEBQQFCQUFCRQNCw0UFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFP/EAB8AAAEFAQEBAQEBAAAAAAAAAAABAgMEBQYHCAkKC//EALUQAAIBAwMCBAMFBQQEAAABfQECAwAEEQUSITFBBhNRYQcicRQygZGhCCNCscEVUtHwJDNicoIJChYXGBkaJSYnKCkqNDU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6g4SFhoeIiYqSk5SVlpeYmZqio6Slpqeoqaqys7S1tre4ubrCw8TFxsfIycrS09TV1tfY2drh4uPk5ebn6Onq8fLz9PX29/j5+v/EAB8BAAMBAQEBAQEBAQEAAAAAAAABAgMEBQYHCAkKC//EALURAAIBAgQEAwQHBQQEAAECdwABAgMRBAUhMQYSQVEHYXETIjKBCBRCkaGxwQkjM1LwFWJy0QoWJDThJfEXGBkaJicoKSo1Njc4OTpDREVGR0hJSlNUVVZXWFlaY2RlZmdoaWpzdHV2d3h5eoKDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uLj5OXm5+jp6vLz9PX29/j5+v/aAAwDAQACEQMRAD8A+B/EP/If1L/r5l/9DNf6NcCf8kllP/YNQ/8ATUTDjP8A5KfM/wDr/W/9OSP/2Q==",
+      "mimeType": "image/jpeg"
+     }
+    ],
+    "details": null,
+    "structuredContent": {
+     "type": "image",
+     "data": "/9j/4QBEaHR0cDovL25zLmFkb2JlLmNvbS94YXAvMS4wLwA8eDp4bXBtZXRhIHhtbG5zOng9ImFkb2JlOm5zOm1ldGEvIi8+/+EAIkV4aWYAAElJKgAIAAAAAQASAQMAAQAAAAYAAAAAAAAA/+AAEEpGSUYAAQIAAAEAAQAA/8AAEQgAAQACAwERAAIRAQMRAf/bAEMAAwICAwICAwMDAwQDAwQFCAUFBAQFCgcHBggMCgwMCwoLCw0OEhANDhEOCwsQFhARExQVFRUMDxcYFhQYEhQVFP/bAEMBAwQEBQQFCQUFCRQNCw0UFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFP/EAB8AAAEFAQEBAQEBAAAAAAAAAAABAgMEBQYHCAkKC//EALUQAAIBAwMCBAMFBQQEAAABfQECAwAEEQUSITFBBhNRYQcicRQygZGhCCNCscEVUtHwJDNicoIJChYXGBkaJSYnKCkqNDU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6g4SFhoeIiYqSk5SVlpeYmZqio6Slpqeoqaqys7S1tre4ubrCw8TFxsfIycrS09TV1tfY2drh4uPk5ebn6Onq8fLz9PX29/j5+v/EAB8BAAMBAQEBAQEBAQEAAAAAAAABAgMEBQYHCAkKC//EALURAAIBAgQEAwQHBQQEAAECdwABAgMRBAUhMQYSQVEHYXETIjKBCBRCkaGxwQkjM1LwFWJy0QoWJDThJfEXGBkaJicoKSo1Njc4OTpDREVGR0hJSlNUVVZXWFlaY2RlZmdoaWpzdHV2d3h5eoKDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uLj5OXm5+jp6vLz9PX29/j5+v/aAAwDAQACEQMRAD8A+B/EP/If1L/r5l/9DNf6NcCf8kllP/YNQ/8ATUTDjP8A5KfM/wDr/W/9OSP/2Q==",
+     "mimeType": "image/jpeg",
+     "note": "Read image file [image/jpeg]"
+    }
+   },
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "bmp",
+   "files": [
+    {
+     "path": "image.bmp",
+     "base64": "Qk06AAAAAAAAADYAAAAoAAAAAQAAAAEAAAABABgAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAD/AA=="
+    }
+   ],
+   "args": {
+    "path": "image.bmp"
+   },
+   "imageDataExact": false,
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Read image file [image/png]\n[Image converted from image/bmp to image/png.]"
+     },
+     {
+      "type": "image",
+      "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAEElEQVR4AQEFAPr/AP8AAP8FAAH/+lyI0QAAAABJRU5ErkJggg==",
+      "mimeType": "image/png"
+     }
+    ],
+    "details": null,
+    "structuredContent": {
+     "type": "image",
+     "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAEElEQVR4AQEFAPr/AP8AAP8FAAH/+lyI0QAAAABJRU5ErkJggg==",
+     "mimeType": "image/png",
+     "note": "Read image file [image/png]\n[Image converted from image/bmp to image/png.]"
+    }
+   },
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "bmp-non-vision",
+   "files": [
+    {
+     "path": "image.bmp",
+     "base64": "Qk06AAAAAAAAADYAAAAoAAAAAQAAAAEAAAABABgAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAD/AA=="
+    }
+   ],
+   "args": {
+    "path": "image.bmp"
+   },
+   "imageDataExact": false,
+   "model": {
+    "input": [
+     "text"
+    ]
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Read image file [image/png]\n[Image converted from image/bmp to image/png.]\n[Current model does not support images. The image will be omitted from this request.]"
+     },
+     {
+      "type": "image",
+      "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAEElEQVR4AQEFAPr/AP8AAP8FAAH/+lyI0QAAAABJRU5ErkJggg==",
+      "mimeType": "image/png"
+     }
+    ],
+    "details": null,
+    "structuredContent": {
+     "type": "image",
+     "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAEElEQVR4AQEFAPr/AP8AAP8FAAH/+lyI0QAAAABJRU5ErkJggg==",
+     "mimeType": "image/png",
+     "note": "Read image file [image/png]\n[Image converted from image/bmp to image/png.]\n[Current model does not support images. The image will be omitted from this request.]"
+    }
+   },
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "png-resized",
+   "files": [
+    {
+     "path": "wide.png",
+     "base64": "iVBORw0KGgoAAAANSUhEUgAACWAAAABkCAAAAAAnL1R3AAAB/0lEQVR4nO3B10IIAAAF0EuyScjMiIaGnaxCZW8RWZH+/x/8xH085yQAAHTtAACgKjsBAKjKAAAAVdkFAEBVBgEAqMpuAACqsgcAgKrsBQCgKvsAAKjKfgAAqnIAAICqHAQAoCqHAACoymEAAKoyBABAVY4AAFCVYQAAqnIUAICqHAMAoCrHAQCoyggAAFU5AQBAVU4CAFCVUwAAVOU0AABVOQMAQFXOAgBQlVEAAKpyDgCAqpwHAKAqFwAAqMpFAACqMgYAQFUuAQBQlcsAAFRlHACAqkwAAFCVSQAAqjIFAEBVrgAAUJVpAACqMgMAQFVmAQCoyhwAAFW5CgBAVa4BAFCV6wAAVOUGAABVuQkAQFVuAQBQldsAAFRlHgCAqtwBAKAqCwAAVOUuAABVuQcAQFXuAwBQlQcAAFTlIQAAVVkEAKAqSwAAVOURAABVeQwAQFWeAABQlWUAAKqyAgBAVVYBAKjKUwAAqvIMAICqPAcAoCovAACoyksAAKryCgCAqrwGAKAqbwAAqMpbAACq8g4AgKq8BwCgKh8AAKjKRwAAqvIJAICqrAEAUJXPAABU5QsAAFVZBwCgKl8BAKjKNwAAqrIBAEBVvgMAUJUfAABU5ScAAFX5BQBAVX4DAFCVTQAAqvIHAICq/AUAoCpbAABU5R8AAFXZBgCg6j8P2FDctzxnTQAAAABJRU5ErkJggg=="
+    }
+   ],
+   "args": {
+    "path": "wide.png"
+   },
+   "imageDataExact": false,
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Read image file [image/png]\n[Image: original 2400x100, displayed at 2000x83. Multiply coordinates by 1.20 to map to original image.]"
+     },
+     {
+      "type": "image",
+      "data": {
+       "$hash": "795e8697cddf5849",
+       "bytes": 7184,
+       "head": "iVBORw0KGgoAAAANSUhEUgAAB9AAAABTCAYAAADHu5yBAAAU0klEQVR4Ae3AA6AkWZbG8f937o3IzKdyS2Oubdu2bdu2bdu2bWmMnpZKr54yMyLu+Xa3anqm",
+       "tail": "uuqqq6666qqrrrrqqquuuuqqq6666qr/56iSuOqqq6666qqrrrrqqquuuuqqq6666qqrrrrqqquuuuqqq6666qr/5/hH+xfZQG185cUAAAAASUVORK5CYII="
+      },
+      "mimeType": "image/png"
+     }
+    ],
+    "details": null,
+    "structuredContent": {
+     "type": "image",
+     "data": {
+      "$hash": "795e8697cddf5849",
+      "bytes": 7184,
+      "head": "iVBORw0KGgoAAAANSUhEUgAAB9AAAABTCAYAAADHu5yBAAAU0klEQVR4Ae3AA6AkWZbG8f937o3IzKdyS2Oubdu2bdu2bdu2bWmMnpZKr54yMyLu+Xa3anqm",
+      "tail": "uuqqq6666qqrrrrqqquuuuqqq6666qr/56iSuOqqq6666qqrrrrqqquuuuqqq6666qqrrrrqqquuuuqqq6666qr/5/hH+xfZQG185cUAAAAASUVORK5CYII="
+     },
+     "mimeType": "image/png",
+     "note": "Read image file [image/png]\n[Image: original 2400x100, displayed at 2000x83. Multiply coordinates by 1.20 to map to original image.]"
+    }
+   },
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "png-broken",
+   "files": [
+    {
+     "path": "broken.png",
+     "base64": "iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAAAAACMmsGiZ2FyYmFnZQ=="
+    }
+   ],
+   "args": {
+    "path": "broken.png"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Read image file [image/png]\n[Image omitted: could not be resized below the inline image size limit.]"
+     }
+    ],
+    "details": null,
+    "structuredContent": "Read image file [image/png]\n[Image omitted: could not be resized below the inline image size limit.]"
+   },
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "not-an-image",
+   "files": [
+    {
+     "path": "not-an-image.png",
+     "text": "definitely not a png"
+    }
+   ],
+   "args": {
+    "path": "not-an-image.png"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "definitely not a png"
+     }
+    ],
+    "details": null,
+    "structuredContent": "definitely not a png"
+   },
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "curly-quote-variant",
+   "files": [
+    {
+     "path": "Capture d’cran.txt",
+     "text": "curly"
+    }
+   ],
+   "args": {
+    "path": "Capture d'cran.txt"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "curly"
+     }
+    ],
+    "details": null,
+    "structuredContent": "curly"
+   },
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "am-pm-variant",
+   "files": [
+    {
+     "path": "Shot 10.00.00 am.png",
+     "text": "ampm"
+    }
+   ],
+   "args": {
+    "path": "Shot 10.00.00 am.png"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "ampm"
+     }
+    ],
+    "details": null,
+    "structuredContent": "ampm"
+   },
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "nfd-variant",
+   "files": [
+    {
+     "path": "café.txt",
+     "text": "nfd"
+    }
+   ],
+   "args": {
+    "path": "café.txt"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "nfd"
+     }
+    ],
+    "details": null,
+    "structuredContent": "nfd"
+   },
+   "after": null
+  },
+  {
+   "tool": "read",
+   "name": "unicode-space",
+   "files": [
+    {
+     "path": "a b.txt",
+     "text": "space"
+    }
+   ],
+   "args": {
+    "path": "a b.txt"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "space"
+     }
+    ],
+    "details": null,
+    "structuredContent": "space"
+   },
+   "after": null
+  },
+  {
+   "tool": "write",
+   "name": "write",
+   "files": [],
+   "args": {
+    "path": "<DIR>/write-test.txt",
+    "content": "Test content"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Successfully wrote to <DIR>/write-test.txt"
+     }
+    ],
+    "details": null,
+    "structuredContent": null
+   },
+   "after": "VGVzdCBjb250ZW50"
+  },
+  {
+   "tool": "write",
+   "name": "nested",
+   "files": [],
+   "args": {
+    "path": "nested/dir/test.txt",
+    "content": "Nested content"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Successfully wrote to nested/dir/test.txt"
+     }
+    ],
+    "details": null,
+    "structuredContent": null
+   },
+   "after": "TmVzdGVkIGNvbnRlbnQ="
+  },
+  {
+   "tool": "write",
+   "name": "overwrite",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "old"
+    }
+   ],
+   "args": {
+    "path": "f.txt",
+    "content": "new\r\né"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Successfully wrote to f.txt"
+     }
+    ],
+    "details": null,
+    "structuredContent": null
+   },
+   "after": "bmV3DQrDqQ=="
+  },
+  {
+   "tool": "write",
+   "name": "directory",
+   "files": [
+    {
+     "path": "sub",
+     "dir": true
+    }
+   ],
+   "args": {
+    "path": "sub",
+    "content": "x"
+   },
+   "error": "EISDIR: illegal operation on a directory, open '<DIR>/sub'",
+   "after": null
+  },
+  {
+   "tool": "edit",
+   "name": "replace",
+   "files": [
+    {
+     "path": "edit-test.txt",
+     "text": "Hello, world!"
+    }
+   ],
+   "args": {
+    "path": "<DIR>/edit-test.txt",
+    "edits": [
+     {
+      "oldText": "world",
+      "newText": "testing"
+     }
+    ]
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Successfully replaced 1 block(s) in <DIR>/edit-test.txt."
+     }
+    ],
+    "details": {
+     "diff": "-1 Hello, world!\n+1 Hello, testing!",
+     "patch": "--- <DIR>/edit-test.txt\n+++ <DIR>/edit-test.txt\n@@ -1,1 +1,1 @@\n-Hello, world!\n\\ No newline at end of file\n+Hello, testing!\n\\ No newline at end of file\n",
+     "firstChangedLine": 1
+    },
+    "structuredContent": null
+   },
+   "after": "SGVsbG8sIHRlc3Rpbmch"
+  },
+  {
+   "tool": "edit",
+   "name": "not-found",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "Hello, world!"
+    }
+   ],
+   "args": {
+    "path": "f.txt",
+    "edits": [
+     {
+      "oldText": "nonexistent",
+      "newText": "testing"
+     }
+    ]
+   },
+   "error": "Could not find the exact text in f.txt. The old text must match exactly including all whitespace and newlines.",
+   "after": "SGVsbG8sIHdvcmxkIQ=="
+  },
+  {
+   "tool": "edit",
+   "name": "missing",
+   "files": [],
+   "args": {
+    "path": "<DIR>/missing.txt",
+    "edits": [
+     {
+      "oldText": "hello",
+      "newText": "world"
+     }
+    ]
+   },
+   "error": "Could not edit file: <DIR>/missing.txt. Error code: ENOENT.",
+   "after": null
+  },
+  {
+   "tool": "edit",
+   "name": "duplicates",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "foo foo foo"
+    }
+   ],
+   "args": {
+    "path": "f.txt",
+    "edits": [
+     {
+      "oldText": "foo",
+      "newText": "bar"
+     }
+    ]
+   },
+   "error": "Found 3 occurrences of the text in f.txt. The text must be unique. Please provide more context to make it unique.",
+   "after": "Zm9vIGZvbyBmb28="
+  },
+  {
+   "tool": "edit",
+   "name": "multi",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "alpha\nbeta\ngamma\ndelta\n"
+    }
+   ],
+   "args": {
+    "path": "f.txt",
+    "edits": [
+     {
+      "oldText": "alpha\n",
+      "newText": "ALPHA\n"
+     },
+     {
+      "oldText": "gamma\n",
+      "newText": "GAMMA\n"
+     }
+    ]
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Successfully replaced 2 block(s) in f.txt."
+     }
+    ],
+    "details": {
+     "diff": "-1 alpha\n+1 ALPHA\n 2 beta\n-3 gamma\n+3 GAMMA\n 4 delta",
+     "patch": "--- f.txt\n+++ f.txt\n@@ -1,4 +1,4 @@\n-alpha\n+ALPHA\n beta\n-gamma\n+GAMMA\n delta\n",
+     "firstChangedLine": 1
+    },
+    "structuredContent": null
+   },
+   "after": "QUxQSEEKYmV0YQpHQU1NQQpkZWx0YQo="
+  },
+  {
+   "tool": "edit",
+   "name": "large-gap",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": [
+      [
+       "lines",
+       600,
+       [
+        "line ",
+        [
+         "pad",
+         3
+        ]
+       ]
+      ],
+      "\n"
+     ]
+    }
+   ],
+   "args": {
+    "path": "f.txt",
+    "edits": [
+     {
+      "oldText": "line 100\n",
+      "newText": "LINE 100\n"
+     },
+     {
+      "oldText": "line 300\n",
+      "newText": "LINE 300\n"
+     },
+     {
+      "oldText": "line 500\n",
+      "newText": "LINE 500\n"
+     }
+    ]
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Successfully replaced 3 block(s) in f.txt."
+     }
+    ],
+    "details": {
+     "diff": "     ...\n  96 line 096\n  97 line 097\n  98 line 098\n  99 line 099\n-100 line 100\n+100 LINE 100\n 101 line 101\n 102 line 102\n 103 line 103\n 104 line 104\n     ...\n 296 line 296\n 297 line 297\n 298 line 298\n 299 line 299\n-300 line 300\n+300 LINE 300\n 301 line 301\n 302 line 302\n 303 line 303\n 304 line 304\n     ...\n 496 line 496\n 497 line 497\n 498 line 498\n 499 line 499\n-500 line 500\n+500 LINE 500\n 501 line 501\n 502 line 502\n 503 line 503\n 504 line 504\n     ...",
+     "patch": "--- f.txt\n+++ f.txt\n@@ -96,9 +96,9 @@\n line 096\n line 097\n line 098\n line 099\n-line 100\n+LINE 100\n line 101\n line 102\n line 103\n line 104\n@@ -296,9 +296,9 @@\n line 296\n line 297\n line 298\n line 299\n-line 300\n+LINE 300\n line 301\n line 302\n line 303\n line 304\n@@ -496,9 +496,9 @@\n line 496\n line 497\n line 498\n line 499\n-line 500\n+LINE 500\n line 501\n line 502\n line 503\n line 504\n",
+     "firstChangedLine": 100
+    },
+    "structuredContent": null
+   },
+   "after": {
+    "$hash": "90c0cec2b585d560",
+    "bytes": 7200,
+    "head": "bGluZSAwMDEKbGluZSAwMDIKbGluZSAwMDMKbGluZSAwMDQKbGluZSAwMDUKbGluZSAwMDYKbGluZSAwMDcKbGluZSAwMDgKbGluZSAwMDkKbGluZSAwMTAK",
+    "tail": "bGluZSA1OTEKbGluZSA1OTIKbGluZSA1OTMKbGluZSA1OTQKbGluZSA1OTUKbGluZSA1OTYKbGluZSA1OTcKbGluZSA1OTgKbGluZSA1OTkKbGluZSA2MDAK"
+   }
+  },
+  {
+   "tool": "edit",
+   "name": "original-not-incremental",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "foo\nbar\nbaz\n"
+    }
+   ],
+   "args": {
+    "path": "f.txt",
+    "edits": [
+     {
+      "oldText": "foo\n",
+      "newText": "foo bar\n"
+     },
+     {
+      "oldText": "bar\n",
+      "newText": "BAR\n"
+     }
+    ]
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Successfully replaced 2 block(s) in f.txt."
+     }
+    ],
+    "details": {
+     "diff": "-1 foo\n-2 bar\n+1 foo bar\n+2 BAR\n 3 baz",
+     "patch": "--- f.txt\n+++ f.txt\n@@ -1,3 +1,3 @@\n-foo\n-bar\n+foo bar\n+BAR\n baz\n",
+     "firstChangedLine": 1
+    },
+    "structuredContent": null
+   },
+   "after": "Zm9vIGJhcgpCQVIKYmF6Cg=="
+  },
+  {
+   "tool": "edit",
+   "name": "empty-edits",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "hello\nworld\n"
+    }
+   ],
+   "args": {
+    "path": "f.txt",
+    "edits": []
+   },
+   "error": "Edit tool input is invalid. edits must contain at least one replacement.",
+   "after": "aGVsbG8Kd29ybGQK"
+  },
+  {
+   "tool": "edit",
+   "name": "overlap",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "one\ntwo\nthree\n"
+    }
+   ],
+   "args": {
+    "path": "f.txt",
+    "edits": [
+     {
+      "oldText": "one\ntwo\n",
+      "newText": "ONE\nTWO\n"
+     },
+     {
+      "oldText": "two\nthree\n",
+      "newText": "TWO\nTHREE\n"
+     }
+    ]
+   },
+   "error": "edits[0] and edits[1] overlap in f.txt. Merge them into one edit or target disjoint regions.",
+   "after": "b25lCnR3bwp0aHJlZQo="
+  },
+  {
+   "tool": "edit",
+   "name": "partial",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "alpha\nbeta\ngamma\n"
+    }
+   ],
+   "args": {
+    "path": "f.txt",
+    "edits": [
+     {
+      "oldText": "alpha\n",
+      "newText": "ALPHA\n"
+     },
+     {
+      "oldText": "missing\n",
+      "newText": "MISSING\n"
+     }
+    ]
+   },
+   "error": "Could not find edits[1] in f.txt. The oldText must match exactly including all whitespace and newlines.",
+   "after": "YWxwaGEKYmV0YQpnYW1tYQo="
+  },
+  {
+   "tool": "edit",
+   "name": "readonly",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "hello\n",
+     "mode": 292
+    }
+   ],
+   "args": {
+    "path": "f.txt",
+    "edits": [
+     {
+      "oldText": "hello",
+      "newText": "world"
+     }
+    ]
+   },
+   "error": "Could not edit file: f.txt. Error code: EACCES.",
+   "after": "aGVsbG8K"
+  },
+  {
+   "tool": "edit",
+   "name": "empty-old-text",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "hello\n"
+    }
+   ],
+   "args": {
+    "path": "f.txt",
+    "edits": [
+     {
+      "oldText": "",
+      "newText": "world"
+     }
+    ]
+   },
+   "error": "oldText must not be empty in f.txt.",
+   "after": "aGVsbG8K"
+  },
+  {
+   "tool": "edit",
+   "name": "empty-old-text-multi",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "hello\n"
+    }
+   ],
+   "args": {
+    "path": "f.txt",
+    "edits": [
+     {
+      "oldText": "hello",
+      "newText": "x"
+     },
+     {
+      "oldText": "",
+      "newText": "world"
+     }
+    ]
+   },
+   "error": "edits[1].oldText must not be empty in f.txt.",
+   "after": "aGVsbG8K"
+  },
+  {
+   "tool": "edit",
+   "name": "no-change",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "hello\n"
+    }
+   ],
+   "args": {
+    "path": "f.txt",
+    "edits": [
+     {
+      "oldText": "hello",
+      "newText": "hello"
+     }
+    ]
+   },
+   "error": "No changes made to f.txt. The replacement produced identical content. This might indicate an issue with special characters or the text not existing as expected.",
+   "after": "aGVsbG8K"
+  },
+  {
+   "tool": "edit",
+   "name": "no-change-multi",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "a\nb\n"
+    }
+   ],
+   "args": {
+    "path": "f.txt",
+    "edits": [
+     {
+      "oldText": "a",
+      "newText": "a"
+     },
+     {
+      "oldText": "b",
+      "newText": "b"
+     }
+    ]
+   },
+   "error": "No changes made to f.txt. The replacements produced identical content.",
+   "after": "YQpiCg=="
+  },
+  {
+   "tool": "edit",
+   "name": "duplicates-multi",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "a a b"
+    }
+   ],
+   "args": {
+    "path": "f.txt",
+    "edits": [
+     {
+      "oldText": "b",
+      "newText": "c"
+     },
+     {
+      "oldText": "a",
+      "newText": "x"
+     }
+    ]
+   },
+   "error": "Found 2 occurrences of edits[1] in f.txt. Each oldText must be unique. Please provide more context to make it unique.",
+   "after": "YSBhIGI="
+  },
+  {
+   "tool": "edit",
+   "name": "not-found-multi",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "a b"
+    }
+   ],
+   "args": {
+    "path": "f.txt",
+    "edits": [
+     {
+      "oldText": "a",
+      "newText": "c"
+     },
+     {
+      "oldText": "q",
+      "newText": "x"
+     }
+    ]
+   },
+   "error": "Could not find edits[1] in f.txt. The oldText must match exactly including all whitespace and newlines.",
+   "after": "YSBi"
+  },
+  {
+   "tool": "edit",
+   "name": "trailing-ws",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "line one   \nline two  \nline three\n"
+    }
+   ],
+   "args": {
+    "path": "f.txt",
+    "edits": [
+     {
+      "oldText": "line one\nline two\n",
+      "newText": "replaced\n"
+     }
+    ]
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Successfully replaced 1 block(s) in f.txt."
+     }
+    ],
+    "details": {
+     "diff": "-1 line one   \n-2 line two  \n+1 replaced\n 3 line three",
+     "patch": "--- f.txt\n+++ f.txt\n@@ -1,3 +1,2 @@\n-line one   \n-line two  \n+replaced\n line three\n",
+     "firstChangedLine": 1
+    },
+    "structuredContent": null
+   },
+   "after": "cmVwbGFjZWQKbGluZSB0aHJlZQo="
+  },
+  {
+   "tool": "edit",
+   "name": "fullwidth",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "你好，世界\n你好（世界）\n"
+    }
+   ],
+   "args": {
+    "path": "f.txt",
+    "edits": [
+     {
+      "oldText": "你好,世界\n你好(世界)\n",
+      "newText": "你好，pi\n你好(pi)\n"
+     }
+    ]
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Successfully replaced 1 block(s) in f.txt."
+     }
+    ],
+    "details": {
+     "diff": "-1 你好，世界\n-2 你好（世界）\n+1 你好，pi\n+2 你好(pi)",
+     "patch": "--- f.txt\n+++ f.txt\n@@ -1,2 +1,2 @@\n-你好，世界\n-你好（世界）\n+你好，pi\n+你好(pi)\n",
+     "firstChangedLine": 1
+    },
+    "structuredContent": null
+   },
+   "after": "5L2g5aW977yMcGkK5L2g5aW9KHBpKQo="
+  },
+  {
+   "tool": "edit",
+   "name": "compatibility",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "ＡＢＣ１２３\ncafé\n"
+    }
+   ],
+   "args": {
+    "path": "f.txt",
+    "edits": [
+     {
+      "oldText": "ABC123\ncafé\n",
+      "newText": "XYZ789\ncoffee\n"
+     }
+    ]
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Successfully replaced 1 block(s) in f.txt."
+     }
+    ],
+    "details": {
+     "diff": "-1 ＡＢＣ１２３\n-2 café\n+1 XYZ789\n+2 coffee",
+     "patch": "--- f.txt\n+++ f.txt\n@@ -1,2 +1,2 @@\n-ＡＢＣ１２３\n-café\n+XYZ789\n+coffee\n",
+     "firstChangedLine": 1
+    },
+    "structuredContent": null
+   },
+   "after": "WFlaNzg5CmNvZmZlZQo="
+  },
+  {
+   "tool": "edit",
+   "name": "smart-single",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "console.log(‘hello’);\n"
+    }
+   ],
+   "args": {
+    "path": "f.txt",
+    "edits": [
+     {
+      "oldText": "console.log('hello');",
+      "newText": "console.log('world');"
+     }
+    ]
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Successfully replaced 1 block(s) in f.txt."
+     }
+    ],
+    "details": {
+     "diff": "-1 console.log(‘hello’);\n+1 console.log('world');",
+     "patch": "--- f.txt\n+++ f.txt\n@@ -1,1 +1,1 @@\n-console.log(‘hello’);\n+console.log('world');\n",
+     "firstChangedLine": 1
+    },
+    "structuredContent": null
+   },
+   "after": "Y29uc29sZS5sb2coJ3dvcmxkJyk7Cg=="
+  },
+  {
+   "tool": "edit",
+   "name": "smart-double",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "const msg = “Hello World”;\n"
+    }
+   ],
+   "args": {
+    "path": "f.txt",
+    "edits": [
+     {
+      "oldText": "const msg = \"Hello World\";",
+      "newText": "const msg = \"Goodbye\";"
+     }
+    ]
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Successfully replaced 1 block(s) in f.txt."
+     }
+    ],
+    "details": {
+     "diff": "-1 const msg = “Hello World”;\n+1 const msg = \"Goodbye\";",
+     "patch": "--- f.txt\n+++ f.txt\n@@ -1,1 +1,1 @@\n-const msg = “Hello World”;\n+const msg = \"Goodbye\";\n",
+     "firstChangedLine": 1
+    },
+    "structuredContent": null
+   },
+   "after": "Y29uc3QgbXNnID0gIkdvb2RieWUiOwo="
+  },
+  {
+   "tool": "edit",
+   "name": "dashes",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "range: 1–5\nbreak—here\n"
+    }
+   ],
+   "args": {
+    "path": "f.txt",
+    "edits": [
+     {
+      "oldText": "range: 1-5\nbreak-here",
+      "newText": "range: 10-50\nbreak--here"
+     }
+    ]
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Successfully replaced 1 block(s) in f.txt."
+     }
+    ],
+    "details": {
+     "diff": "-1 range: 1–5\n-2 break—here\n+1 range: 10-50\n+2 break--here",
+     "patch": "--- f.txt\n+++ f.txt\n@@ -1,2 +1,2 @@\n-range: 1–5\n-break—here\n+range: 10-50\n+break--here\n",
+     "firstChangedLine": 1
+    },
+    "structuredContent": null
+   },
+   "after": "cmFuZ2U6IDEwLTUwCmJyZWFrLS1oZXJlCg=="
+  },
+  {
+   "tool": "edit",
+   "name": "nbsp",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "hello world\n"
+    }
+   ],
+   "args": {
+    "path": "f.txt",
+    "edits": [
+     {
+      "oldText": "hello world",
+      "newText": "hello universe"
+     }
+    ]
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Successfully replaced 1 block(s) in f.txt."
+     }
+    ],
+    "details": {
+     "diff": "-1 hello world\n+1 hello universe",
+     "patch": "--- f.txt\n+++ f.txt\n@@ -1,1 +1,1 @@\n-hello world\n+hello universe\n",
+     "firstChangedLine": 1
+    },
+    "structuredContent": null
+   },
+   "after": "aGVsbG8gdW5pdmVyc2UK"
+  },
+  {
+   "tool": "edit",
+   "name": "exact-preferred",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "const x = 'exact';\nconst y = 'other';\n"
+    }
+   ],
+   "args": {
+    "path": "f.txt",
+    "edits": [
+     {
+      "oldText": "const x = 'exact';",
+      "newText": "const x = 'changed';"
+     }
+    ]
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Successfully replaced 1 block(s) in f.txt."
+     }
+    ],
+    "details": {
+     "diff": "-1 const x = 'exact';\n+1 const x = 'changed';\n 2 const y = 'other';",
+     "patch": "--- f.txt\n+++ f.txt\n@@ -1,2 +1,2 @@\n-const x = 'exact';\n+const x = 'changed';\n const y = 'other';\n",
+     "firstChangedLine": 1
+    },
+    "structuredContent": null
+   },
+   "after": "Y29uc3QgeCA9ICdjaGFuZ2VkJzsKY29uc3QgeSA9ICdvdGhlcic7Cg=="
+  },
+  {
+   "tool": "edit",
+   "name": "fuzzy-not-found",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "completely different content\n"
+    }
+   ],
+   "args": {
+    "path": "f.txt",
+    "edits": [
+     {
+      "oldText": "this does not exist",
+      "newText": "replacement"
+     }
+    ]
+   },
+   "error": "Could not find the exact text in f.txt. The old text must match exactly including all whitespace and newlines.",
+   "after": "Y29tcGxldGVseSBkaWZmZXJlbnQgY29udGVudAo="
+  },
+  {
+   "tool": "edit",
+   "name": "fuzzy-duplicates",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "hello world   \nhello world\n"
+    }
+   ],
+   "args": {
+    "path": "f.txt",
+    "edits": [
+     {
+      "oldText": "hello world",
+      "newText": "replaced"
+     }
+    ]
+   },
+   "error": "Found 2 occurrences of the text in f.txt. The text must be unique. Please provide more context to make it unique.",
+   "after": "aGVsbG8gd29ybGQgICAKaGVsbG8gd29ybGQK"
+  },
+  {
+   "tool": "edit",
+   "name": "fuzzy-multi",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "console.log(‘hello’);\nhello world\n"
+    }
+   ],
+   "args": {
+    "path": "f.txt",
+    "edits": [
+     {
+      "oldText": "console.log('hello');\n",
+      "newText": "console.log('world');\n"
+     },
+     {
+      "oldText": "hello world\n",
+      "newText": "hello universe\n"
+     }
+    ]
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Successfully replaced 2 block(s) in f.txt."
+     }
+    ],
+    "details": {
+     "diff": "-1 console.log(‘hello’);\n-2 hello world\n+1 console.log('world');\n+2 hello universe",
+     "patch": "--- f.txt\n+++ f.txt\n@@ -1,2 +1,2 @@\n-console.log(‘hello’);\n-hello world\n+console.log('world');\n+hello universe\n",
+     "firstChangedLine": 1
+    },
+    "structuredContent": null
+   },
+   "after": "Y29uc29sZS5sb2coJ3dvcmxkJyk7CmhlbGxvIHVuaXZlcnNlCg=="
+  },
+  {
+   "tool": "edit",
+   "name": "fuzzy-duplicate-line",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "replace me   \nafter   \n"
+    }
+   ],
+   "args": {
+    "path": "f.txt",
+    "edits": [
+     {
+      "oldText": "replace me\n",
+      "newText": "after\n"
+     }
+    ]
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Successfully replaced 1 block(s) in f.txt."
+     }
+    ],
+    "details": {
+     "diff": "-1 replace me   \n+1 after\n 2 after   ",
+     "patch": "--- f.txt\n+++ f.txt\n@@ -1,2 +1,2 @@\n-replace me   \n+after\n after   \n",
+     "firstChangedLine": 1
+    },
+    "structuredContent": null
+   },
+   "after": "YWZ0ZXIKYWZ0ZXIgICAK"
+  },
+  {
+   "tool": "edit",
+   "name": "fuzzy-preserve-multi",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "keep before  \nfirst target  \nfirst after\nkeep middle   \nsecond target  \nsecond after\nkeep after  \n"
+    }
+   ],
+   "args": {
+    "path": "f.txt",
+    "edits": [
+     {
+      "oldText": "first target\nfirst after",
+      "newText": "FIRST\nFIRST2"
+     },
+     {
+      "oldText": "second target\nsecond after",
+      "newText": "SECOND\nSECOND2"
+     }
+    ]
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Successfully replaced 2 block(s) in f.txt."
+     }
+    ],
+    "details": {
+     "diff": " 1 keep before  \n-2 first target  \n-3 first after\n+2 FIRST\n+3 FIRST2\n 4 keep middle   \n-5 second target  \n-6 second after\n+5 SECOND\n+6 SECOND2\n 7 keep after  ",
+     "patch": "--- f.txt\n+++ f.txt\n@@ -1,7 +1,7 @@\n keep before  \n-first target  \n-first after\n+FIRST\n+FIRST2\n keep middle   \n-second target  \n-second after\n+SECOND\n+SECOND2\n keep after  \n",
+     "firstChangedLine": 2
+    },
+    "structuredContent": null
+   },
+   "after": "a2VlcCBiZWZvcmUgIApGSVJTVApGSVJTVDIKa2VlcCBtaWRkbGUgICAKU0VDT05EClNFQ09ORDIKa2VlcCBhZnRlciAgCg=="
+  },
+  {
+   "tool": "edit",
+   "name": "fuzzy-trailing-feff",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "a﻿\nb\n"
+    }
+   ],
+   "args": {
+    "path": "f.txt",
+    "edits": [
+     {
+      "oldText": "a\nb",
+      "newText": "c"
+     }
+    ]
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Successfully replaced 1 block(s) in f.txt."
+     }
+    ],
+    "details": {
+     "diff": "-1 a﻿\n-2 b\n+1 c",
+     "patch": "--- f.txt\n+++ f.txt\n@@ -1,2 +1,1 @@\n-a﻿\n-b\n+c\n",
+     "firstChangedLine": 1
+    },
+    "structuredContent": null
+   },
+   "after": "Ywo="
+  },
+  {
+   "tool": "edit",
+   "name": "crlf-match",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "line one\r\nline two\r\nline three\r\n"
+    }
+   ],
+   "args": {
+    "path": "f.txt",
+    "edits": [
+     {
+      "oldText": "line two\n",
+      "newText": "replaced line\n"
+     }
+    ]
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Successfully replaced 1 block(s) in f.txt."
+     }
+    ],
+    "details": {
+     "diff": " 1 line one\n-2 line two\n+2 replaced line\n 3 line three",
+     "patch": "--- f.txt\n+++ f.txt\n@@ -1,3 +1,3 @@\n line one\n-line two\n+replaced line\n line three\n",
+     "firstChangedLine": 2
+    },
+    "structuredContent": null
+   },
+   "after": "bGluZSBvbmUNCnJlcGxhY2VkIGxpbmUNCmxpbmUgdGhyZWUNCg=="
+  },
+  {
+   "tool": "edit",
+   "name": "crlf-preserve",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "first\r\nsecond\r\nthird\r\n"
+    }
+   ],
+   "args": {
+    "path": "f.txt",
+    "edits": [
+     {
+      "oldText": "second\n",
+      "newText": "REPLACED\n"
+     }
+    ]
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Successfully replaced 1 block(s) in f.txt."
+     }
+    ],
+    "details": {
+     "diff": " 1 first\n-2 second\n+2 REPLACED\n 3 third",
+     "patch": "--- f.txt\n+++ f.txt\n@@ -1,3 +1,3 @@\n first\n-second\n+REPLACED\n third\n",
+     "firstChangedLine": 2
+    },
+    "structuredContent": null
+   },
+   "after": "Zmlyc3QNClJFUExBQ0VEDQp0aGlyZA0K"
+  },
+  {
+   "tool": "edit",
+   "name": "mixed-endings",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "hello\r\nworld\r\n---\r\nhello\nworld\n"
+    }
+   ],
+   "args": {
+    "path": "f.txt",
+    "edits": [
+     {
+      "oldText": "hello\nworld\n",
+      "newText": "replaced\n"
+     }
+    ]
+   },
+   "error": "Found 2 occurrences of the text in f.txt. The text must be unique. Please provide more context to make it unique.",
+   "after": "aGVsbG8NCndvcmxkDQotLS0NCmhlbGxvCndvcmxkCg=="
+  },
+  {
+   "tool": "edit",
+   "name": "lone-cr",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "a\rb\nc\n"
+    }
+   ],
+   "args": {
+    "path": "f.txt",
+    "edits": [
+     {
+      "oldText": "b\nc",
+      "newText": "B\r\nC"
+     }
+    ]
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Successfully replaced 1 block(s) in f.txt."
+     }
+    ],
+    "details": {
+     "diff": " 1 a\n-2 b\n-3 c\n+2 B\n+3 C",
+     "patch": "--- f.txt\n+++ f.txt\n@@ -1,3 +1,3 @@\n a\n-b\n-c\n+B\n+C\n",
+     "firstChangedLine": 2
+    },
+    "structuredContent": null
+   },
+   "after": "YQpCCkMK"
+  },
+  {
+   "tool": "edit",
+   "name": "bom",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "﻿first\r\nsecond\r\nthird\r\n"
+    }
+   ],
+   "args": {
+    "path": "f.txt",
+    "edits": [
+     {
+      "oldText": "second\n",
+      "newText": "REPLACED\n"
+     }
+    ]
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Successfully replaced 1 block(s) in f.txt."
+     }
+    ],
+    "details": {
+     "diff": " 1 first\n-2 second\n+2 REPLACED\n 3 third",
+     "patch": "--- f.txt\n+++ f.txt\n@@ -1,3 +1,3 @@\n first\n-second\n+REPLACED\n third\n",
+     "firstChangedLine": 2
+    },
+    "structuredContent": null
+   },
+   "after": "77u/Zmlyc3QNClJFUExBQ0VEDQp0aGlyZA0K"
+  },
+  {
+   "tool": "edit",
+   "name": "bom-crlf-multi",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "﻿first\r\nsecond\r\nthird\r\nfourth\r\n"
+    }
+   ],
+   "args": {
+    "path": "f.txt",
+    "edits": [
+     {
+      "oldText": "second\n",
+      "newText": "SECOND\n"
+     },
+     {
+      "oldText": "fourth\n",
+      "newText": "FOURTH\n"
+     }
+    ]
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Successfully replaced 2 block(s) in f.txt."
+     }
+    ],
+    "details": {
+     "diff": " 1 first\n-2 second\n+2 SECOND\n 3 third\n-4 fourth\n+4 FOURTH",
+     "patch": "--- f.txt\n+++ f.txt\n@@ -1,4 +1,4 @@\n first\n-second\n+SECOND\n third\n-fourth\n+FOURTH\n",
+     "firstChangedLine": 2
+    },
+    "structuredContent": null
+   },
+   "after": "77u/Zmlyc3QNClNFQ09ORA0KdGhpcmQNCkZPVVJUSA0K"
+  },
+  {
+   "tool": "edit",
+   "name": "no-trailing-newline",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "a\nb\nc"
+    }
+   ],
+   "args": {
+    "path": "f.txt",
+    "edits": [
+     {
+      "oldText": "c",
+      "newText": "C\nD"
+     }
+    ]
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Successfully replaced 1 block(s) in f.txt."
+     }
+    ],
+    "details": {
+     "diff": " 1 a\n 2 b\n-3 c\n+3 C\n+4 D",
+     "patch": "--- f.txt\n+++ f.txt\n@@ -1,3 +1,4 @@\n a\n b\n-c\n\\ No newline at end of file\n+C\n+D\n\\ No newline at end of file\n",
+     "firstChangedLine": 3
+    },
+    "structuredContent": null
+   },
+   "after": "YQpiCkMKRA=="
+  },
+  {
+   "tool": "edit",
+   "name": "remove-all",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "only\n"
+    }
+   ],
+   "args": {
+    "path": "f.txt",
+    "edits": [
+     {
+      "oldText": "only\n",
+      "newText": ""
+     }
+    ]
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Successfully replaced 1 block(s) in f.txt."
+     }
+    ],
+    "details": {
+     "diff": "-1 only",
+     "patch": "--- f.txt\n+++ f.txt\n@@ -1,1 +0,0 @@\n-only\n",
+     "firstChangedLine": 1
+    },
+    "structuredContent": null
+   },
+   "after": ""
+  },
+  {
+   "tool": "edit",
+   "name": "add-to-empty-line",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "\n"
+    }
+   ],
+   "args": {
+    "path": "f.txt",
+    "edits": [
+     {
+      "oldText": "\n",
+      "newText": "x\n"
+     }
+    ]
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Successfully replaced 1 block(s) in f.txt."
+     }
+    ],
+    "details": {
+     "diff": "-1 \n+1 x",
+     "patch": "--- f.txt\n+++ f.txt\n@@ -1,1 +1,1 @@\n-\n+x\n",
+     "firstChangedLine": 1
+    },
+    "structuredContent": null
+   },
+   "after": "eAo="
+  },
+  {
+   "tool": "edit",
+   "name": "diff-context",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": [
+      [
+       "lines",
+       30,
+       [
+        "row {i}"
+       ]
+      ],
+      "\n"
+     ]
+    }
+   ],
+   "args": {
+    "path": "f.txt",
+    "edits": [
+     {
+      "oldText": "row 3\n",
+      "newText": "ROW 3\n"
+     },
+     {
+      "oldText": "row 12\n",
+      "newText": "ROW 12\nnew\n"
+     },
+     {
+      "oldText": "row 15\n",
+      "newText": ""
+     },
+     {
+      "oldText": "row 28\n",
+      "newText": "ROW 28\n"
+     }
+    ]
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Successfully replaced 4 block(s) in f.txt."
+     }
+    ],
+    "details": {
+     "diff": "  1 row 1\n  2 row 2\n- 3 row 3\n+ 3 ROW 3\n  4 row 4\n  5 row 5\n  6 row 6\n  7 row 7\n  8 row 8\n  9 row 9\n 10 row 10\n 11 row 11\n-12 row 12\n+12 ROW 12\n+13 new\n 13 row 13\n 14 row 14\n-15 row 15\n 16 row 16\n 17 row 17\n 18 row 18\n 19 row 19\n    ...\n 24 row 24\n 25 row 25\n 26 row 26\n 27 row 27\n-28 row 28\n+28 ROW 28\n 29 row 29\n 30 row 30",
+     "patch": "--- f.txt\n+++ f.txt\n@@ -1,19 +1,19 @@\n row 1\n row 2\n-row 3\n+ROW 3\n row 4\n row 5\n row 6\n row 7\n row 8\n row 9\n row 10\n row 11\n-row 12\n+ROW 12\n+new\n row 13\n row 14\n-row 15\n row 16\n row 17\n row 18\n row 19\n@@ -24,7 +24,7 @@\n row 24\n row 25\n row 26\n row 27\n-row 28\n+ROW 28\n row 29\n row 30\n",
+     "firstChangedLine": 3
+    },
+    "structuredContent": null
+   },
+   "after": "cm93IDEKcm93IDIKUk9XIDMKcm93IDQKcm93IDUKcm93IDYKcm93IDcKcm93IDgKcm93IDkKcm93IDEwCnJvdyAxMQpST1cgMTIKbmV3CnJvdyAxMwpyb3cgMTQKcm93IDE2CnJvdyAxNwpyb3cgMTgKcm93IDE5CnJvdyAyMApyb3cgMjEKcm93IDIyCnJvdyAyMwpyb3cgMjQKcm93IDI1CnJvdyAyNgpyb3cgMjcKUk9XIDI4CnJvdyAyOQpyb3cgMzAK"
+  },
+  {
+   "tool": "edit",
+   "name": "invalid-utf8",
+   "files": [
+    {
+     "path": "f.txt",
+     "base64": "Yf8KYg=="
+    }
+   ],
+   "args": {
+    "path": "f.txt",
+    "edits": [
+     {
+      "oldText": "b",
+      "newText": "c"
+     }
+    ]
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Successfully replaced 1 block(s) in f.txt."
+     }
+    ],
+    "details": {
+     "diff": " 1 a�\n-2 b\n+2 c",
+     "patch": "--- f.txt\n+++ f.txt\n@@ -1,2 +1,2 @@\n a�\n-b\n\\ No newline at end of file\n+c\n\\ No newline at end of file\n",
+     "firstChangedLine": 2
+    },
+    "structuredContent": null
+   },
+   "after": "Ye+/vQpj"
+  },
+  {
+   "tool": "edit",
+   "name": "directory",
+   "files": [
+    {
+     "path": "sub",
+     "dir": true
+    }
+   ],
+   "args": {
+    "path": "sub",
+    "edits": [
+     {
+      "oldText": "a",
+      "newText": "b"
+     }
+    ]
+   },
+   "error": "EISDIR: illegal operation on a directory, read '<DIR>/sub'",
+   "after": null
+  },
+  {
+   "tool": "ls",
+   "name": "sorted",
+   "files": [
+    {
+     "path": "_a",
+     "text": ""
+    },
+    {
+     "path": "a1",
+     "text": ""
+    },
+    {
+     "path": "a_b",
+     "text": ""
+    },
+    {
+     "path": "B",
+     "text": ""
+    },
+    {
+     "path": "a-b",
+     "text": ""
+    },
+    {
+     "path": "ab",
+     "text": ""
+    },
+    {
+     "path": ".x",
+     "text": ""
+    },
+    {
+     "path": "Z",
+     "text": ""
+    },
+    {
+     "path": "10",
+     "text": ""
+    },
+    {
+     "path": "9",
+     "text": ""
+    },
+    {
+     "path": "e",
+     "text": ""
+    },
+    {
+     "path": "é",
+     "text": ""
+    },
+    {
+     "path": "a.b",
+     "text": ""
+    },
+    {
+     "path": "a b",
+     "text": ""
+    },
+    {
+     "path": "~x",
+     "text": ""
+    },
+    {
+     "path": "a",
+     "text": ""
+    },
+    {
+     "path": "dir",
+     "dir": true
+    },
+    {
+     "path": ".hidden-dir",
+     "dir": true
+    }
+   ],
+   "args": {},
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "_a\n.hidden-dir/\n.x\n~x\n10\n9\na\na b\na_b\na-b\na.b\na1\nab\nB\ndir/\ne\né\nZ"
+     }
+    ],
+    "details": null,
+    "structuredContent": null
+   },
+   "after": null
+  },
+  {
+   "tool": "ls",
+   "name": "limit",
+   "files": [
+    {
+     "path": "a",
+     "text": ""
+    },
+    {
+     "path": "b",
+     "text": ""
+    },
+    {
+     "path": "c",
+     "dir": true
+    },
+    {
+     "path": "d",
+     "text": ""
+    }
+   ],
+   "args": {
+    "path": ".",
+    "limit": 2
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "a\nb\n\n[2 entries limit reached. Use limit=4 for more]"
+     }
+    ],
+    "details": {
+     "entryLimitReached": 2
+    },
+    "structuredContent": null
+   },
+   "after": null
+  },
+  {
+   "tool": "ls",
+   "name": "limit-zero",
+   "files": [
+    {
+     "path": "a",
+     "text": ""
+    }
+   ],
+   "args": {
+    "limit": 0
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "(empty directory)"
+     }
+    ],
+    "details": null,
+    "structuredContent": null
+   },
+   "after": null
+  },
+  {
+   "tool": "ls",
+   "name": "empty",
+   "files": [
+    {
+     "path": "empty",
+     "dir": true
+    }
+   ],
+   "args": {
+    "path": "empty"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "(empty directory)"
+     }
+    ],
+    "details": null,
+    "structuredContent": null
+   },
+   "after": null
+  },
+  {
+   "tool": "ls",
+   "name": "not-a-directory",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": ""
+    }
+   ],
+   "args": {
+    "path": "f.txt"
+   },
+   "error": "Not a directory: <DIR>/f.txt",
+   "after": null
+  },
+  {
+   "tool": "ls",
+   "name": "missing",
+   "files": [],
+   "args": {
+    "path": "nope"
+   },
+   "error": "Path not found: <DIR>/nope",
+   "after": null
+  },
+  {
+   "tool": "ls",
+   "name": "broken-symlink",
+   "files": [
+    {
+     "path": "real",
+     "text": ""
+    },
+    {
+     "path": "dangling",
+     "symlink": "nowhere"
+    },
+    {
+     "path": "linkdir",
+     "symlink": "sub"
+    },
+    {
+     "path": "sub",
+     "dir": true
+    }
+   ],
+   "args": {},
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "linkdir/\nreal\nsub/"
+     }
+    ],
+    "details": null,
+    "structuredContent": null
+   },
+   "after": null
+  },
+  {
+   "tool": "ls",
+   "name": "byte-limit",
+   "files": [
+    {
+     "path": ".",
+     "series": {
+      "count": 300,
+      "pad": 3,
+      "suffix": [
+       "-",
+       [
+        "repeat",
+        "n",
+        200
+       ]
+      ]
+     }
+    }
+   ],
+   "args": {
+    "limit": 1000
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": {
+       "$hash": "733511fc894929a5",
+       "bytes": 51068,
+       "head": "000-nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+       "tail": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn\n\n[50.0KB limit reached]"
+      }
+     }
+    ],
+    "details": {
+     "truncation": {
+      "content": {
+       "$hash": "5e60acf2794eb4ac",
+       "bytes": 51044,
+       "head": "000-nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+       "tail": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"
+      },
+      "truncated": true,
+      "truncatedBy": "bytes",
+      "totalLines": 300,
+      "totalBytes": 61499,
+      "outputLines": 249,
+      "outputBytes": 51044,
+      "lastLinePartial": false,
+      "firstLineExceedsLimit": false,
+      "maxLines": 9007199254740991,
+      "maxBytes": 51200
+     }
+    },
+    "structuredContent": null
+   },
+   "after": null
+  }
+ ],
+ "grep": [
+  {
+   "tool": "grep",
+   "name": "single-file",
+   "files": [
+    {
+     "path": "example.txt",
+     "text": "first line\nmatch line\nlast line"
+    }
+   ],
+   "args": {
+    "pattern": "match",
+    "path": "example.txt"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "example.txt:2: match line"
+     }
+    ],
+    "details": null
+   },
+   "argv": [
+    "--json",
+    "--line-number",
+    "--color=never",
+    "--hidden",
+    "--",
+    "match",
+    "<DIR>/example.txt"
+   ],
+   "stdout": "{\"type\":\"begin\",\"data\":{\"path\":{\"text\":\"<DIR>/example.txt\"}}}\n{\"type\":\"match\",\"data\":{\"path\":{\"text\":\"<DIR>/example.txt\"},\"lines\":{\"text\":\"match line\\n\"},\"line_number\":2,\"absolute_offset\":11,\"submatches\":[{\"match\":{\"text\":\"match\"},\"start\":0,\"end\":5}]}}\n{\"type\":\"end\",\"data\":{\"path\":{\"text\":\"<DIR>/example.txt\"},\"binary_offset\":null,\"stats\":{\"elapsed\":{\"secs\":0,\"nanos\":7893,\"human\":\"0.000008s\"},\"searches\":1,\"searches_with_match\":1,\"bytes_searched\":31,\"bytes_printed\":313,\"matched_lines\":1,\"matches\":1}}}\n{\"data\":{\"elapsed_total\":{\"human\":\"0.000391s\",\"nanos\":391254,\"secs\":0},\"stats\":{\"bytes_printed\":313,\"bytes_searched\":31,\"elapsed\":{\"human\":\"0.000008s\",\"nanos\":7893,\"secs\":0},\"matched_lines\":1,\"matches\":1,\"searches\":1,\"searches_with_match\":1}},\"type\":\"summary\"}\n",
+   "stderr": "",
+   "code": 0
+  },
+  {
+   "tool": "grep",
+   "name": "limit-context",
+   "files": [
+    {
+     "path": "context.txt",
+     "text": "before\nmatch one\nafter\nmiddle\nmatch two\nafter two"
+    }
+   ],
+   "args": {
+    "pattern": "match",
+    "path": "context.txt",
+    "limit": 1,
+    "context": 1
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "context.txt-1- before\ncontext.txt:2: match one\ncontext.txt-3- after\n\n[1 matches limit reached. Use limit=2 for more, or refine pattern]"
+     }
+    ],
+    "details": {
+     "matchLimitReached": 1
+    }
+   },
+   "argv": [
+    "--json",
+    "--line-number",
+    "--color=never",
+    "--hidden",
+    "--",
+    "match",
+    "<DIR>/context.txt"
+   ],
+   "stdout": "{\"type\":\"begin\",\"data\":{\"path\":{\"text\":\"<DIR>/context.txt\"}}}\n{\"type\":\"match\",\"data\":{\"path\":{\"text\":\"<DIR>/context.txt\"},\"lines\":{\"text\":\"match one\\n\"},\"line_number\":2,\"absolute_offset\":7,\"submatches\":[{\"match\":{\"text\":\"match\"},\"start\":0,\"end\":5}]}}\n{\"type\":\"match\",\"data\":{\"path\":{\"text\":\"<DIR>/context.txt\"},\"lines\":{\"text\":\"match two\\n\"},\"line_number\":5,\"absolute_offset\":30,\"submatches\":[{\"match\":{\"text\":\"match\"},\"start\":0,\"end\":5}]}}\n{\"type\":\"end\",\"data\":{\"path\":{\"text\":\"<DIR>/context.txt\"},\"binary_offset\":null,\"stats\":{\"elapsed\":{\"secs\":0,\"nanos\":5802,\"human\":\"0.000006s\"},\"searches\":1,\"searches_with_match\":1,\"bytes_searched\":49,\"bytes_printed\":534,\"matched_lines\":2,\"matches\":2}}}\n{\"data\":{\"elapsed_total\":{\"human\":\"0.000462s\",\"nanos\":461853,\"secs\":0},\"stats\":{\"bytes_printed\":534,\"bytes_searched\":49,\"elapsed\":{\"human\":\"0.000006s\",\"nanos\":5802,\"secs\":0},\"matched_lines\":2,\"matches\":2,\"searches\":1,\"searches_with_match\":1}},\"type\":\"summary\"}\n",
+   "stderr": "",
+   "code": 0
+  },
+  {
+   "tool": "grep",
+   "name": "directory",
+   "files": [
+    {
+     "path": "src/a.ts",
+     "text": "const x = 1;\n// TODO one\n"
+    },
+    {
+     "path": "src/b.md",
+     "text": "no\n"
+    }
+   ],
+   "args": {
+    "pattern": "TODO"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "src/a.ts:2: // TODO one"
+     }
+    ],
+    "details": null
+   },
+   "argv": [
+    "--json",
+    "--line-number",
+    "--color=never",
+    "--hidden",
+    "--",
+    "TODO",
+    "<DIR>"
+   ],
+   "stdout": "{\"type\":\"begin\",\"data\":{\"path\":{\"text\":\"<DIR>/src/a.ts\"}}}\n{\"type\":\"match\",\"data\":{\"path\":{\"text\":\"<DIR>/src/a.ts\"},\"lines\":{\"text\":\"// TODO one\\n\"},\"line_number\":2,\"absolute_offset\":13,\"submatches\":[{\"match\":{\"text\":\"TODO\"},\"start\":3,\"end\":7}]}}\n{\"type\":\"end\",\"data\":{\"path\":{\"text\":\"<DIR>/src/a.ts\"},\"binary_offset\":null,\"stats\":{\"elapsed\":{\"secs\":0,\"nanos\":11949,\"human\":\"0.000012s\"},\"searches\":1,\"searches_with_match\":1,\"bytes_searched\":25,\"bytes_printed\":309,\"matched_lines\":1,\"matches\":1}}}\n{\"data\":{\"elapsed_total\":{\"human\":\"0.003360s\",\"nanos\":3360252,\"secs\":0},\"stats\":{\"bytes_printed\":309,\"bytes_searched\":28,\"elapsed\":{\"human\":\"0.000016s\",\"nanos\":15596,\"secs\":0},\"matched_lines\":1,\"matches\":1,\"searches\":2,\"searches_with_match\":1}},\"type\":\"summary\"}\n",
+   "stderr": "",
+   "code": 0
+  },
+  {
+   "tool": "grep",
+   "name": "two-files",
+   "files": [
+    {
+     "path": "a.txt",
+     "text": "hit\n"
+    },
+    {
+     "path": "z/b.txt",
+     "text": "x\nhit\nhit\n"
+    }
+   ],
+   "args": {
+    "pattern": "hit"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "a.txt:1: hit\nz/b.txt:2: hit\nz/b.txt:3: hit"
+     }
+    ],
+    "details": null
+   },
+   "argv": [
+    "--json",
+    "--line-number",
+    "--color=never",
+    "--hidden",
+    "--",
+    "hit",
+    "<DIR>"
+   ],
+   "stdout": "{\"type\":\"begin\",\"data\":{\"path\":{\"text\":\"<DIR>/a.txt\"}}}\n{\"type\":\"match\",\"data\":{\"path\":{\"text\":\"<DIR>/a.txt\"},\"lines\":{\"text\":\"hit\\n\"},\"line_number\":1,\"absolute_offset\":0,\"submatches\":[{\"match\":{\"text\":\"hit\"},\"start\":0,\"end\":3}]}}\n{\"type\":\"end\",\"data\":{\"path\":{\"text\":\"<DIR>/a.txt\"},\"binary_offset\":null,\"stats\":{\"elapsed\":{\"secs\":0,\"nanos\":8479,\"human\":\"0.000008s\"},\"searches\":1,\"searches_with_match\":1,\"bytes_searched\":4,\"bytes_printed\":293,\"matched_lines\":1,\"matches\":1}}}\n{\"type\":\"begin\",\"data\":{\"path\":{\"text\":\"<DIR>/z/b.txt\"}}}\n{\"type\":\"match\",\"data\":{\"path\":{\"text\":\"<DIR>/z/b.txt\"},\"lines\":{\"text\":\"hit\\n\"},\"line_number\":2,\"absolute_offset\":2,\"submatches\":[{\"match\":{\"text\":\"hit\"},\"start\":0,\"end\":3}]}}\n{\"type\":\"match\",\"data\":{\"path\":{\"text\":\"<DIR>/z/b.txt\"},\"lines\":{\"text\":\"hit\\n\"},\"line_number\":3,\"absolute_offset\":6,\"submatches\":[{\"match\":{\"text\":\"hit\"},\"start\":0,\"end\":3}]}}\n{\"type\":\"end\",\"data\":{\"path\":{\"text\":\"<DIR>/z/b.txt\"},\"binary_offset\":null,\"stats\":{\"elapsed\":{\"secs\":0,\"nanos\":4064,\"human\":\"0.000004s\"},\"searches\":1,\"searches_with_match\":1,\"bytes_searched\":10,\"bytes_printed\":505,\"matched_lines\":2,\"matches\":2}}}\n{\"data\":{\"elapsed_total\":{\"human\":\"0.002058s\",\"nanos\":2057540,\"secs\":0},\"stats\":{\"bytes_printed\":798,\"bytes_searched\":14,\"elapsed\":{\"human\":\"0.000013s\",\"nanos\":12543,\"secs\":0},\"matched_lines\":3,\"matches\":3,\"searches\":2,\"searches_with_match\":2}},\"type\":\"summary\"}\n",
+   "stderr": "",
+   "code": 0
+  },
+  {
+   "tool": "grep",
+   "name": "ignore-case",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "Alpha\nalpha\nALPHA\n"
+    }
+   ],
+   "args": {
+    "pattern": "alpha",
+    "ignoreCase": true
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "f.txt:1: Alpha\nf.txt:2: alpha\nf.txt:3: ALPHA"
+     }
+    ],
+    "details": null
+   },
+   "argv": [
+    "--json",
+    "--line-number",
+    "--color=never",
+    "--hidden",
+    "--ignore-case",
+    "--",
+    "alpha",
+    "<DIR>"
+   ],
+   "stdout": "{\"type\":\"begin\",\"data\":{\"path\":{\"text\":\"<DIR>/f.txt\"}}}\n{\"type\":\"match\",\"data\":{\"path\":{\"text\":\"<DIR>/f.txt\"},\"lines\":{\"text\":\"Alpha\\n\"},\"line_number\":1,\"absolute_offset\":0,\"submatches\":[{\"match\":{\"text\":\"Alpha\"},\"start\":0,\"end\":5}]}}\n{\"type\":\"match\",\"data\":{\"path\":{\"text\":\"<DIR>/f.txt\"},\"lines\":{\"text\":\"alpha\\n\"},\"line_number\":2,\"absolute_offset\":6,\"submatches\":[{\"match\":{\"text\":\"alpha\"},\"start\":0,\"end\":5}]}}\n{\"type\":\"match\",\"data\":{\"path\":{\"text\":\"<DIR>/f.txt\"},\"lines\":{\"text\":\"ALPHA\\n\"},\"line_number\":3,\"absolute_offset\":12,\"submatches\":[{\"match\":{\"text\":\"ALPHA\"},\"start\":0,\"end\":5}]}}\n{\"type\":\"end\",\"data\":{\"path\":{\"text\":\"<DIR>/f.txt\"},\"binary_offset\":null,\"stats\":{\"elapsed\":{\"secs\":0,\"nanos\":13812,\"human\":\"0.000014s\"},\"searches\":1,\"searches_with_match\":1,\"bytes_searched\":18,\"bytes_printed\":718,\"matched_lines\":3,\"matches\":3}}}\n{\"data\":{\"elapsed_total\":{\"human\":\"0.002287s\",\"nanos\":2286767,\"secs\":0},\"stats\":{\"bytes_printed\":718,\"bytes_searched\":18,\"elapsed\":{\"human\":\"0.000014s\",\"nanos\":13812,\"secs\":0},\"matched_lines\":3,\"matches\":3,\"searches\":1,\"searches_with_match\":1}},\"type\":\"summary\"}\n",
+   "stderr": "",
+   "code": 0
+  },
+  {
+   "tool": "grep",
+   "name": "literal",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "a.b\naxb\n"
+    }
+   ],
+   "args": {
+    "pattern": "a.b",
+    "literal": true
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "f.txt:1: a.b"
+     }
+    ],
+    "details": null
+   },
+   "argv": [
+    "--json",
+    "--line-number",
+    "--color=never",
+    "--hidden",
+    "--fixed-strings",
+    "--",
+    "a.b",
+    "<DIR>"
+   ],
+   "stdout": "{\"type\":\"begin\",\"data\":{\"path\":{\"text\":\"<DIR>/f.txt\"}}}\n{\"type\":\"match\",\"data\":{\"path\":{\"text\":\"<DIR>/f.txt\"},\"lines\":{\"text\":\"a.b\\n\"},\"line_number\":1,\"absolute_offset\":0,\"submatches\":[{\"match\":{\"text\":\"a.b\"},\"start\":0,\"end\":3}]}}\n{\"type\":\"end\",\"data\":{\"path\":{\"text\":\"<DIR>/f.txt\"},\"binary_offset\":null,\"stats\":{\"elapsed\":{\"secs\":0,\"nanos\":10912,\"human\":\"0.000011s\"},\"searches\":1,\"searches_with_match\":1,\"bytes_searched\":8,\"bytes_printed\":293,\"matched_lines\":1,\"matches\":1}}}\n{\"data\":{\"elapsed_total\":{\"human\":\"0.002183s\",\"nanos\":2182840,\"secs\":0},\"stats\":{\"bytes_printed\":293,\"bytes_searched\":8,\"elapsed\":{\"human\":\"0.000011s\",\"nanos\":10912,\"secs\":0},\"matched_lines\":1,\"matches\":1,\"searches\":1,\"searches_with_match\":1}},\"type\":\"summary\"}\n",
+   "stderr": "",
+   "code": 0
+  },
+  {
+   "tool": "grep",
+   "name": "glob",
+   "files": [
+    {
+     "path": "a.ts",
+     "text": "hit\n"
+    },
+    {
+     "path": "b.js",
+     "text": "hit\n"
+    }
+   ],
+   "args": {
+    "pattern": "hit",
+    "glob": "*.ts"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "a.ts:1: hit"
+     }
+    ],
+    "details": null
+   },
+   "argv": [
+    "--json",
+    "--line-number",
+    "--color=never",
+    "--hidden",
+    "--glob",
+    "*.ts",
+    "--",
+    "hit",
+    "<DIR>"
+   ],
+   "stdout": "{\"type\":\"begin\",\"data\":{\"path\":{\"text\":\"<DIR>/a.ts\"}}}\n{\"type\":\"match\",\"data\":{\"path\":{\"text\":\"<DIR>/a.ts\"},\"lines\":{\"text\":\"hit\\n\"},\"line_number\":1,\"absolute_offset\":0,\"submatches\":[{\"match\":{\"text\":\"hit\"},\"start\":0,\"end\":3}]}}\n{\"type\":\"end\",\"data\":{\"path\":{\"text\":\"<DIR>/a.ts\"},\"binary_offset\":null,\"stats\":{\"elapsed\":{\"secs\":0,\"nanos\":10109,\"human\":\"0.000010s\"},\"searches\":1,\"searches_with_match\":1,\"bytes_searched\":4,\"bytes_printed\":291,\"matched_lines\":1,\"matches\":1}}}\n{\"data\":{\"elapsed_total\":{\"human\":\"0.003214s\",\"nanos\":3214024,\"secs\":0},\"stats\":{\"bytes_printed\":291,\"bytes_searched\":4,\"elapsed\":{\"human\":\"0.000010s\",\"nanos\":10109,\"secs\":0},\"matched_lines\":1,\"matches\":1,\"searches\":1,\"searches_with_match\":1}},\"type\":\"summary\"}\n",
+   "stderr": "",
+   "code": 0
+  },
+  {
+   "tool": "grep",
+   "name": "no-match",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "nothing\n"
+    }
+   ],
+   "args": {
+    "pattern": "absent"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "No matches found"
+     }
+    ],
+    "details": null
+   },
+   "argv": [
+    "--json",
+    "--line-number",
+    "--color=never",
+    "--hidden",
+    "--",
+    "absent",
+    "<DIR>"
+   ],
+   "stdout": "{\"data\":{\"elapsed_total\":{\"human\":\"0.001914s\",\"nanos\":1914490,\"secs\":0},\"stats\":{\"bytes_printed\":0,\"bytes_searched\":8,\"elapsed\":{\"human\":\"0.000006s\",\"nanos\":6224,\"secs\":0},\"matched_lines\":0,\"matches\":0,\"searches\":1,\"searches_with_match\":0}},\"type\":\"summary\"}\n",
+   "stderr": "",
+   "code": 1
+  },
+  {
+   "tool": "grep",
+   "name": "long-line",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": [
+      [
+       "repeat",
+       "y",
+       700
+      ],
+      "hit\nshort hit\n"
+     ]
+    }
+   ],
+   "args": {
+    "pattern": "hit"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "f.txt:1: yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy... [truncated]\nf.txt:2: short hit\n\n[Some lines truncated to 500 chars. Use read tool to see full lines]"
+     }
+    ],
+    "details": {
+     "linesTruncated": true
+    }
+   },
+   "argv": [
+    "--json",
+    "--line-number",
+    "--color=never",
+    "--hidden",
+    "--",
+    "hit",
+    "<DIR>"
+   ],
+   "stdout": "{\"type\":\"begin\",\"data\":{\"path\":{\"text\":\"<DIR>/f.txt\"}}}\n{\"type\":\"match\",\"data\":{\"path\":{\"text\":\"<DIR>/f.txt\"},\"lines\":{\"text\":\"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyhit\\n\"},\"line_number\":1,\"absolute_offset\":0,\"submatches\":[{\"match\":{\"text\":\"hit\"},\"start\":700,\"end\":703}]}}\n{\"type\":\"match\",\"data\":{\"path\":{\"text\":\"<DIR>/f.txt\"},\"lines\":{\"text\":\"short hit\\n\"},\"line_number\":2,\"absolute_offset\":704,\"submatches\":[{\"match\":{\"text\":\"hit\"},\"start\":6,\"end\":9}]}}\n{\"type\":\"end\",\"data\":{\"path\":{\"text\":\"<DIR>/f.txt\"},\"binary_offset\":null,\"stats\":{\"elapsed\":{\"secs\":0,\"nanos\":12308,\"human\":\"0.000012s\"},\"searches\":1,\"searches_with_match\":1,\"bytes_searched\":714,\"bytes_printed\":1211,\"matched_lines\":2,\"matches\":2}}}\n{\"data\":{\"elapsed_total\":{\"human\":\"0.003162s\",\"nanos\":3162328,\"secs\":0},\"stats\":{\"bytes_printed\":1211,\"bytes_searched\":714,\"elapsed\":{\"human\":\"0.000012s\",\"nanos\":12308,\"secs\":0},\"matched_lines\":2,\"matches\":2,\"searches\":1,\"searches_with_match\":1}},\"type\":\"summary\"}\n",
+   "stderr": "",
+   "code": 0
+  },
+  {
+   "tool": "grep",
+   "name": "context-crlf",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "one\r\ntwo hit\r\nthree\r\n"
+    }
+   ],
+   "args": {
+    "pattern": "hit",
+    "context": 2
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "f.txt-1- one\nf.txt:2: two hit\nf.txt-3- three\nf.txt-4- "
+     }
+    ],
+    "details": null
+   },
+   "argv": [
+    "--json",
+    "--line-number",
+    "--color=never",
+    "--hidden",
+    "--",
+    "hit",
+    "<DIR>"
+   ],
+   "stdout": "{\"type\":\"begin\",\"data\":{\"path\":{\"text\":\"<DIR>/f.txt\"}}}\n{\"type\":\"match\",\"data\":{\"path\":{\"text\":\"<DIR>/f.txt\"},\"lines\":{\"text\":\"two hit\\r\\n\"},\"line_number\":2,\"absolute_offset\":5,\"submatches\":[{\"match\":{\"text\":\"hit\"},\"start\":4,\"end\":7}]}}\n{\"type\":\"end\",\"data\":{\"path\":{\"text\":\"<DIR>/f.txt\"},\"binary_offset\":null,\"stats\":{\"elapsed\":{\"secs\":0,\"nanos\":9494,\"human\":\"0.000009s\"},\"searches\":1,\"searches_with_match\":1,\"bytes_searched\":21,\"bytes_printed\":299,\"matched_lines\":1,\"matches\":1}}}\n{\"data\":{\"elapsed_total\":{\"human\":\"0.002186s\",\"nanos\":2186260,\"secs\":0},\"stats\":{\"bytes_printed\":299,\"bytes_searched\":21,\"elapsed\":{\"human\":\"0.000009s\",\"nanos\":9494,\"secs\":0},\"matched_lines\":1,\"matches\":1,\"searches\":1,\"searches_with_match\":1}},\"type\":\"summary\"}\n",
+   "stderr": "",
+   "code": 0
+  },
+  {
+   "tool": "grep",
+   "name": "context-long",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": [
+      [
+       "repeat",
+       "p",
+       600
+      ],
+      "\nhit\n"
+     ]
+    }
+   ],
+   "args": {
+    "pattern": "hit",
+    "context": 1
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "f.txt-1- pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp... [truncated]\nf.txt:2: hit\nf.txt-3- \n\n[Some lines truncated to 500 chars. Use read tool to see full lines]"
+     }
+    ],
+    "details": {
+     "linesTruncated": true
+    }
+   },
+   "argv": [
+    "--json",
+    "--line-number",
+    "--color=never",
+    "--hidden",
+    "--",
+    "hit",
+    "<DIR>"
+   ],
+   "stdout": "{\"type\":\"begin\",\"data\":{\"path\":{\"text\":\"<DIR>/f.txt\"}}}\n{\"type\":\"match\",\"data\":{\"path\":{\"text\":\"<DIR>/f.txt\"},\"lines\":{\"text\":\"hit\\n\"},\"line_number\":2,\"absolute_offset\":601,\"submatches\":[{\"match\":{\"text\":\"hit\"},\"start\":0,\"end\":3}]}}\n{\"type\":\"end\",\"data\":{\"path\":{\"text\":\"<DIR>/f.txt\"},\"binary_offset\":null,\"stats\":{\"elapsed\":{\"secs\":0,\"nanos\":8419,\"human\":\"0.000008s\"},\"searches\":1,\"searches_with_match\":1,\"bytes_searched\":605,\"bytes_printed\":295,\"matched_lines\":1,\"matches\":1}}}\n{\"data\":{\"elapsed_total\":{\"human\":\"0.002086s\",\"nanos\":2086452,\"secs\":0},\"stats\":{\"bytes_printed\":295,\"bytes_searched\":605,\"elapsed\":{\"human\":\"0.000008s\",\"nanos\":8419,\"secs\":0},\"matched_lines\":1,\"matches\":1,\"searches\":1,\"searches_with_match\":1}},\"type\":\"summary\"}\n",
+   "stderr": "",
+   "code": 0
+  },
+  {
+   "tool": "grep",
+   "name": "non-utf8-line",
+   "files": [
+    {
+     "path": "f.bin.txt",
+     "base64": "aGl0/wpvawo="
+    }
+   ],
+   "args": {
+    "pattern": "hit"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "f.bin.txt:1: hit�"
+     }
+    ],
+    "details": null
+   },
+   "argv": [
+    "--json",
+    "--line-number",
+    "--color=never",
+    "--hidden",
+    "--",
+    "hit",
+    "<DIR>"
+   ],
+   "stdout": "{\"type\":\"begin\",\"data\":{\"path\":{\"text\":\"<DIR>/f.bin.txt\"}}}\n{\"type\":\"match\",\"data\":{\"path\":{\"text\":\"<DIR>/f.bin.txt\"},\"lines\":{\"bytes\":\"aGl0/wo=\"},\"line_number\":1,\"absolute_offset\":0,\"submatches\":[{\"match\":{\"text\":\"hit\"},\"start\":0,\"end\":3}]}}\n{\"type\":\"end\",\"data\":{\"path\":{\"text\":\"<DIR>/f.bin.txt\"},\"binary_offset\":null,\"stats\":{\"elapsed\":{\"secs\":0,\"nanos\":19060,\"human\":\"0.000019s\"},\"searches\":1,\"searches_with_match\":1,\"bytes_searched\":8,\"bytes_printed\":305,\"matched_lines\":1,\"matches\":1}}}\n{\"data\":{\"elapsed_total\":{\"human\":\"0.003147s\",\"nanos\":3146684,\"secs\":0},\"stats\":{\"bytes_printed\":305,\"bytes_searched\":8,\"elapsed\":{\"human\":\"0.000019s\",\"nanos\":19060,\"secs\":0},\"matched_lines\":1,\"matches\":1,\"searches\":1,\"searches_with_match\":1}},\"type\":\"summary\"}\n",
+   "stderr": "",
+   "code": 0
+  },
+  {
+   "tool": "grep",
+   "name": "hidden",
+   "files": [
+    {
+     "path": ".env",
+     "text": "SECRET=hit\n"
+    }
+   ],
+   "args": {
+    "pattern": "hit"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": ".env:1: SECRET=hit"
+     }
+    ],
+    "details": null
+   },
+   "argv": [
+    "--json",
+    "--line-number",
+    "--color=never",
+    "--hidden",
+    "--",
+    "hit",
+    "<DIR>"
+   ],
+   "stdout": "{\"type\":\"begin\",\"data\":{\"path\":{\"text\":\"<DIR>/.env\"}}}\n{\"type\":\"match\",\"data\":{\"path\":{\"text\":\"<DIR>/.env\"},\"lines\":{\"text\":\"SECRET=hit\\n\"},\"line_number\":1,\"absolute_offset\":0,\"submatches\":[{\"match\":{\"text\":\"hit\"},\"start\":7,\"end\":10}]}}\n{\"type\":\"end\",\"data\":{\"path\":{\"text\":\"<DIR>/.env\"},\"binary_offset\":null,\"stats\":{\"elapsed\":{\"secs\":0,\"nanos\":10368,\"human\":\"0.000010s\"},\"searches\":1,\"searches_with_match\":1,\"bytes_searched\":11,\"bytes_printed\":299,\"matched_lines\":1,\"matches\":1}}}\n{\"data\":{\"elapsed_total\":{\"human\":\"0.002124s\",\"nanos\":2123878,\"secs\":0},\"stats\":{\"bytes_printed\":299,\"bytes_searched\":11,\"elapsed\":{\"human\":\"0.000010s\",\"nanos\":10368,\"secs\":0},\"matched_lines\":1,\"matches\":1,\"searches\":1,\"searches_with_match\":1}},\"type\":\"summary\"}\n",
+   "stderr": "",
+   "code": 0
+  },
+  {
+   "tool": "grep",
+   "name": "gitignored",
+   "files": [
+    {
+     "path": ".gitignore",
+     "text": "ignored.txt\n"
+    },
+    {
+     "path": ".git/HEAD",
+     "text": "ref: refs/heads/main\n"
+    },
+    {
+     "path": "ignored.txt",
+     "text": "hit\n"
+    },
+    {
+     "path": "kept.txt",
+     "text": "hit\n"
+    }
+   ],
+   "args": {
+    "pattern": "hit"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "kept.txt:1: hit"
+     }
+    ],
+    "details": null
+   },
+   "argv": [
+    "--json",
+    "--line-number",
+    "--color=never",
+    "--hidden",
+    "--",
+    "hit",
+    "<DIR>"
+   ],
+   "stdout": "{\"type\":\"begin\",\"data\":{\"path\":{\"text\":\"<DIR>/kept.txt\"}}}\n{\"type\":\"match\",\"data\":{\"path\":{\"text\":\"<DIR>/kept.txt\"},\"lines\":{\"text\":\"hit\\n\"},\"line_number\":1,\"absolute_offset\":0,\"submatches\":[{\"match\":{\"text\":\"hit\"},\"start\":0,\"end\":3}]}}\n{\"type\":\"end\",\"data\":{\"path\":{\"text\":\"<DIR>/kept.txt\"},\"binary_offset\":null,\"stats\":{\"elapsed\":{\"secs\":0,\"nanos\":9135,\"human\":\"0.000009s\"},\"searches\":1,\"searches_with_match\":1,\"bytes_searched\":4,\"bytes_printed\":299,\"matched_lines\":1,\"matches\":1}}}\n{\"data\":{\"elapsed_total\":{\"human\":\"0.003214s\",\"nanos\":3214394,\"secs\":0},\"stats\":{\"bytes_printed\":299,\"bytes_searched\":37,\"elapsed\":{\"human\":\"0.000015s\",\"nanos\":15064,\"secs\":0},\"matched_lines\":1,\"matches\":1,\"searches\":3,\"searches_with_match\":1}},\"type\":\"summary\"}\n",
+   "stderr": "",
+   "code": 0
+  },
+  {
+   "tool": "grep",
+   "name": "flag-like",
+   "files": [
+    {
+     "path": "target.txt",
+     "text": "target\n"
+    }
+   ],
+   "args": {
+    "pattern": "--pre=/bin/false"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "No matches found"
+     }
+    ],
+    "details": null
+   },
+   "argv": [
+    "--json",
+    "--line-number",
+    "--color=never",
+    "--hidden",
+    "--",
+    "--pre=/bin/false",
+    "<DIR>"
+   ],
+   "stdout": "{\"data\":{\"elapsed_total\":{\"human\":\"0.002124s\",\"nanos\":2123616,\"secs\":0},\"stats\":{\"bytes_printed\":0,\"bytes_searched\":7,\"elapsed\":{\"human\":\"0.000005s\",\"nanos\":4534,\"secs\":0},\"matched_lines\":0,\"matches\":0,\"searches\":1,\"searches_with_match\":0}},\"type\":\"summary\"}\n",
+   "stderr": "",
+   "code": 1
+  },
+  {
+   "tool": "grep",
+   "name": "bad-regex",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": "x\n"
+    }
+   ],
+   "args": {
+    "pattern": "("
+   },
+   "error": "rg: regex parse error:\n    (?:()\n    ^\nerror: unclosed group",
+   "argv": [
+    "--json",
+    "--line-number",
+    "--color=never",
+    "--hidden",
+    "--",
+    "(",
+    "<DIR>"
+   ],
+   "stdout": "",
+   "stderr": "rg: regex parse error:\n    (?:()\n    ^\nerror: unclosed group\n",
+   "code": 2
+  },
+  {
+   "tool": "grep",
+   "name": "limit-many",
+   "files": [
+    {
+     "path": "f.txt",
+     "text": [
+      [
+       "lines",
+       10,
+       [
+        "hit {i}"
+       ]
+      ]
+     ]
+    }
+   ],
+   "args": {
+    "pattern": "hit",
+    "limit": 3
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "f.txt:1: hit 1\nf.txt:2: hit 2\nf.txt:3: hit 3\n\n[3 matches limit reached. Use limit=6 for more, or refine pattern]"
+     }
+    ],
+    "details": {
+     "matchLimitReached": 3
+    }
+   },
+   "argv": [
+    "--json",
+    "--line-number",
+    "--color=never",
+    "--hidden",
+    "--",
+    "hit",
+    "<DIR>"
+   ],
+   "stdout": "{\"type\":\"begin\",\"data\":{\"path\":{\"text\":\"<DIR>/f.txt\"}}}\n{\"type\":\"match\",\"data\":{\"path\":{\"text\":\"<DIR>/f.txt\"},\"lines\":{\"text\":\"hit 1\\n\"},\"line_number\":1,\"absolute_offset\":0,\"submatches\":[{\"match\":{\"text\":\"hit\"},\"start\":0,\"end\":3}]}}\n{\"type\":\"match\",\"data\":{\"path\":{\"text\":\"<DIR>/f.txt\"},\"lines\":{\"text\":\"hit 2\\n\"},\"line_number\":2,\"absolute_offset\":6,\"submatches\":[{\"match\":{\"text\":\"hit\"},\"start\":0,\"end\":3}]}}\n{\"type\":\"match\",\"data\":{\"path\":{\"text\":\"<DIR>/f.txt\"},\"lines\":{\"text\":\"hit 3\\n\"},\"line_number\":3,\"absolute_offset\":12,\"submatches\":[{\"match\":{\"text\":\"hit\"},\"start\":0,\"end\":3}]}}\n{\"type\":\"match\",\"data\":{\"path\":{\"text\":\"<DIR>/f.txt\"},\"lines\":{\"text\":\"hit 4\\n\"},\"line_number\":4,\"absolute_offset\":18,\"submatches\":[{\"match\":{\"text\":\"hit\"},\"start\":0,\"end\":3}]}}\n{\"type\":\"match\",\"data\":{\"path\":{\"text\":\"<DIR>/f.txt\"},\"lines\":{\"text\":\"hit 5\\n\"},\"line_number\":5,\"absolute_offset\":24,\"submatches\":[{\"match\":{\"text\":\"hit\"},\"start\":0,\"end\":3}]}}\n{\"type\":\"match\",\"data\":{\"path\":{\"text\":\"<DIR>/f.txt\"},\"lines\":{\"text\":\"hit 6\\n\"},\"line_number\":6,\"absolute_offset\":30,\"submatches\":[{\"match\":{\"text\":\"hit\"},\"start\":0,\"end\":3}]}}\n{\"type\":\"match\",\"data\":{\"path\":{\"text\":\"<DIR>/f.txt\"},\"lines\":{\"text\":\"hit 7\\n\"},\"line_number\":7,\"absolute_offset\":36,\"submatches\":[{\"match\":{\"text\":\"hit\"},\"start\":0,\"end\":3}]}}\n{\"type\":\"match\",\"data\":{\"path\":{\"text\":\"<DIR>/f.txt\"},\"lines\":{\"text\":\"hit 8\\n\"},\"line_number\":8,\"absolute_offset\":42,\"submatches\":[{\"match\":{\"text\":\"hit\"},\"start\":0,\"end\":3}]}}\n{\"type\":\"match\",\"data\":{\"path\":{\"text\":\"<DIR>/f.txt\"},\"lines\":{\"text\":\"hit 9\\n\"},\"line_number\":9,\"absolute_offset\":48,\"submatches\":[{\"match\":{\"text\":\"hit\"},\"start\":0,\"end\":3}]}}\n{\"type\":\"match\",\"data\":{\"path\":{\"text\":\"<DIR>/f.txt\"},\"lines\":{\"text\":\"hit 10\"},\"line_number\":10,\"absolute_offset\":54,\"submatches\":[{\"match\":{\"text\":\"hit\"},\"start\":0,\"end\":3}]}}\n{\"type\":\"end\",\"data\":{\"path\":{\"text\":\"<DIR>/f.txt\"},\"binary_offset\":null,\"stats\":{\"elapsed\":{\"secs\":0,\"nanos\":18165,\"human\":\"0.000018s\"},\"searches\":1,\"searches_with_match\":1,\"bytes_searched\":60,\"bytes_printed\":2175,\"matched_lines\":10,\"matches\":10}}}\n{\"data\":{\"elapsed_total\":{\"human\":\"0.002180s\",\"nanos\":2180128,\"secs\":0},\"stats\":{\"bytes_printed\":2175,\"bytes_searched\":60,\"elapsed\":{\"human\":\"0.000018s\",\"nanos\":18165,\"secs\":0},\"matched_lines\":10,\"matches\":10,\"searches\":1,\"searches_with_match\":1}},\"type\":\"summary\"}\n",
+   "stderr": "",
+   "code": 0
+  },
+  {
+   "tool": "grep",
+   "name": "missing-path",
+   "files": [],
+   "args": {
+    "pattern": "x",
+    "path": "nope"
+   },
+   "error": "Path not found: <DIR>/nope",
+   "argv": [
+    "--json",
+    "--line-number",
+    "--color=never",
+    "--hidden",
+    "--",
+    "x",
+    "<DIR>/nope"
+   ],
+   "stdout": "{\"data\":{\"elapsed_total\":{\"human\":\"0.000450s\",\"nanos\":450219,\"secs\":0},\"stats\":{\"bytes_printed\":0,\"bytes_searched\":0,\"elapsed\":{\"human\":\"0.000000s\",\"nanos\":0,\"secs\":0},\"matched_lines\":0,\"matches\":0,\"searches\":0,\"searches_with_match\":0}},\"type\":\"summary\"}\n",
+   "stderr": "rg: <DIR>/nope: IO error for operation on <DIR>/nope: No such file or directory (os error 2)\n",
+   "code": 2
+  }
+ ],
+ "find": [
+  {
+   "tool": "find",
+   "name": "hidden",
+   "files": [
+    {
+     "path": ".secret/hidden.txt",
+     "text": ""
+    },
+    {
+     "path": "visible.txt",
+     "text": ""
+    }
+   ],
+   "args": {
+    "pattern": "**/*.txt"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": ".secret/hidden.txt\nvisible.txt"
+     }
+    ],
+    "details": null
+   },
+   "argv": [
+    "--glob",
+    "--color=never",
+    "--hidden",
+    "--no-require-git",
+    "--max-results",
+    "1000",
+    "--full-path",
+    "--",
+    "**/*.txt",
+    "<DIR>"
+   ],
+   "stdout": "<DIR>/.secret/hidden.txt\n<DIR>/visible.txt\n",
+   "stderr": "",
+   "code": 0
+  },
+  {
+   "tool": "find",
+   "name": "gitignore",
+   "files": [
+    {
+     "path": ".gitignore",
+     "text": "ignored.txt\n"
+    },
+    {
+     "path": "ignored.txt",
+     "text": ""
+    },
+    {
+     "path": "kept.txt",
+     "text": ""
+    }
+   ],
+   "args": {
+    "pattern": "**/*.txt"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "kept.txt"
+     }
+    ],
+    "details": null
+   },
+   "argv": [
+    "--glob",
+    "--color=never",
+    "--hidden",
+    "--no-require-git",
+    "--max-results",
+    "1000",
+    "--full-path",
+    "--",
+    "**/*.txt",
+    "<DIR>"
+   ],
+   "stdout": "<DIR>/kept.txt\n",
+   "stderr": "",
+   "code": 0
+  },
+  {
+   "tool": "find",
+   "name": "basename",
+   "files": [
+    {
+     "path": "a/b/c.spec.ts",
+     "text": ""
+    },
+    {
+     "path": "a/d.ts",
+     "text": ""
+    }
+   ],
+   "args": {
+    "pattern": "*.spec.ts"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "a/b/c.spec.ts"
+     }
+    ],
+    "details": null
+   },
+   "argv": [
+    "--glob",
+    "--color=never",
+    "--hidden",
+    "--no-require-git",
+    "--max-results",
+    "1000",
+    "--",
+    "*.spec.ts",
+    "<DIR>"
+   ],
+   "stdout": "<DIR>/a/b/c.spec.ts\n",
+   "stderr": "",
+   "code": 0
+  },
+  {
+   "tool": "find",
+   "name": "full-path",
+   "files": [
+    {
+     "path": "src/x/y.spec.ts",
+     "text": ""
+    },
+    {
+     "path": "lib/y.spec.ts",
+     "text": ""
+    }
+   ],
+   "args": {
+    "pattern": "src/**/*.spec.ts"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "src/x/y.spec.ts"
+     }
+    ],
+    "details": null
+   },
+   "argv": [
+    "--glob",
+    "--color=never",
+    "--hidden",
+    "--no-require-git",
+    "--max-results",
+    "1000",
+    "--full-path",
+    "--",
+    "**/src/**/*.spec.ts",
+    "<DIR>"
+   ],
+   "stdout": "<DIR>/src/x/y.spec.ts\n",
+   "stderr": "",
+   "code": 0
+  },
+  {
+   "tool": "find",
+   "name": "directories",
+   "files": [
+    {
+     "path": "pkg/inner",
+     "dir": true
+    },
+    {
+     "path": "pkg/file",
+     "text": ""
+    }
+   ],
+   "args": {
+    "pattern": "*"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "pkg/\npkg/file\npkg/inner/"
+     }
+    ],
+    "details": null
+   },
+   "argv": [
+    "--glob",
+    "--color=never",
+    "--hidden",
+    "--no-require-git",
+    "--max-results",
+    "1000",
+    "--",
+    "*",
+    "<DIR>"
+   ],
+   "stdout": "<DIR>/pkg/\n<DIR>/pkg/file\n<DIR>/pkg/inner/\n",
+   "stderr": "",
+   "code": 0
+  },
+  {
+   "tool": "find",
+   "name": "limit",
+   "files": [
+    {
+     "path": "a.md",
+     "text": ""
+    },
+    {
+     "path": "b.md",
+     "text": ""
+    },
+    {
+     "path": "c.md",
+     "text": ""
+    }
+   ],
+   "args": {
+    "pattern": "*.md",
+    "limit": 2
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "a.md\nb.md\n\n[2 results limit reached. Use limit=4 for more, or refine pattern]"
+     }
+    ],
+    "details": {
+     "resultLimitReached": 2
+    }
+   },
+   "argv": [
+    "--glob",
+    "--color=never",
+    "--hidden",
+    "--no-require-git",
+    "--max-results",
+    "2",
+    "--",
+    "*.md",
+    "<DIR>"
+   ],
+   "stdout": "<DIR>/a.md\n<DIR>/b.md\n",
+   "stderr": "",
+   "code": 0
+  },
+  {
+   "tool": "find",
+   "name": "none",
+   "files": [
+    {
+     "path": "a.md",
+     "text": ""
+    }
+   ],
+   "args": {
+    "pattern": "*.rs"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "No files found matching pattern"
+     }
+    ],
+    "details": null
+   },
+   "argv": [
+    "--glob",
+    "--color=never",
+    "--hidden",
+    "--no-require-git",
+    "--max-results",
+    "1000",
+    "--",
+    "*.rs",
+    "<DIR>"
+   ],
+   "stdout": "",
+   "stderr": "",
+   "code": 0
+  },
+  {
+   "tool": "find",
+   "name": "bad-glob",
+   "files": [
+    {
+     "path": "a.md",
+     "text": ""
+    }
+   ],
+   "args": {
+    "pattern": "["
+   },
+   "error": "[fd error]: error parsing glob '[': unclosed character class; missing ']'",
+   "argv": [
+    "--glob",
+    "--color=never",
+    "--hidden",
+    "--no-require-git",
+    "--max-results",
+    "1000",
+    "--",
+    "[",
+    "<DIR>"
+   ],
+   "stdout": "",
+   "stderr": "[fd error]: error parsing glob '[': unclosed character class; missing ']'\n",
+   "code": 1
+  },
+  {
+   "tool": "find",
+   "name": "flag-like",
+   "files": [
+    {
+     "path": "a.md",
+     "text": ""
+    }
+   ],
+   "args": {
+    "pattern": "--help"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "No files found matching pattern"
+     }
+    ],
+    "details": null
+   },
+   "argv": [
+    "--glob",
+    "--color=never",
+    "--hidden",
+    "--no-require-git",
+    "--max-results",
+    "1000",
+    "--",
+    "--help",
+    "<DIR>"
+   ],
+   "stdout": "",
+   "stderr": "",
+   "code": 0
+  },
+  {
+   "tool": "find",
+   "name": "subdir",
+   "files": [
+    {
+     "path": "sub/a.md",
+     "text": ""
+    },
+    {
+     "path": "b.md",
+     "text": ""
+    }
+   ],
+   "args": {
+    "pattern": "*.md",
+    "path": "sub"
+   },
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "a.md"
+     }
+    ],
+    "details": null
+   },
+   "argv": [
+    "--glob",
+    "--color=never",
+    "--hidden",
+    "--no-require-git",
+    "--max-results",
+    "1000",
+    "--",
+    "*.md",
+    "<DIR>/sub"
+   ],
+   "stdout": "<DIR>/sub/a.md\n",
+   "stderr": "",
+   "code": 0
+  }
+ ],
+ "toolResultImages": [
+  {
+   "name": "text-only",
+   "content": [
+    {
+     "type": "text",
+     "text": "no images here"
+    }
+   ],
+   "options": null,
+   "unchanged": true,
+   "output": [
+    {
+     "type": "text",
+     "text": "no images here"
+    }
+   ]
+  },
+  {
+   "name": "within-limits",
+   "content": [
+    {
+     "type": "text",
+     "text": "s"
+    },
+    {
+     "type": "image",
+     "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAX+XDSwAAAABJRU5ErkJggg==",
+     "mimeType": "image/png"
+    }
+   ],
+   "options": null,
+   "unchanged": true,
+   "output": [
+    {
+     "type": "text",
+     "text": "s"
+    },
+    {
+     "type": "image",
+     "mimeType": "image/png"
+    }
+   ]
+  },
+  {
+   "name": "oversized",
+   "content": [
+    {
+     "type": "image",
+     "data": {
+      "$png": [
+       2400,
+       4800
+      ]
+     },
+     "mimeType": "image/png"
+    }
+   ],
+   "options": null,
+   "unchanged": false,
+   "output": [
+    {
+     "type": "image",
+     "mimeType": "image/png"
+    },
+    {
+     "type": "text",
+     "text": "[Image: original 2400x4800, displayed at 1000x2000. Multiply coordinates by 2.40 to map to original image.]"
+    }
+   ]
+  },
+  {
+   "name": "oversized-no-resize",
+   "content": [
+    {
+     "type": "image",
+     "data": {
+      "$png": [
+       2400,
+       4800
+      ]
+     },
+     "mimeType": "image/png"
+    }
+   ],
+   "options": {
+    "autoResizeImages": false
+   },
+   "unchanged": true,
+   "output": [
+    {
+     "type": "image",
+     "mimeType": "image/png"
+    }
+   ]
+  },
+  {
+   "name": "bmp-no-resize",
+   "content": [
+    {
+     "type": "image",
+     "data": "Qk06AAAAAAAAADYAAAAoAAAAAQAAAAEAAAABABgAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAD/AA==",
+     "mimeType": "image/bmp"
+    }
+   ],
+   "options": {
+    "autoResizeImages": false
+   },
+   "unchanged": false,
+   "output": [
+    {
+     "type": "image",
+     "mimeType": "image/png"
+    },
+    {
+     "type": "text",
+     "text": "[Image converted from image/bmp to image/png.]"
+    }
+   ]
+  },
+  {
+   "name": "undecodable",
+   "content": [
+    {
+     "type": "image",
+     "data": "bm90LWFuLWltYWdl",
+     "mimeType": "image/png"
+    }
+   ],
+   "options": null,
+   "unchanged": true,
+   "output": [
+    {
+     "type": "image",
+     "mimeType": "image/png"
+    }
+   ]
+  },
+  {
+   "name": "order",
+   "content": [
+    {
+     "type": "text",
+     "text": "before"
+    },
+    {
+     "type": "image",
+     "data": {
+      "$png": [
+       2400,
+       100
+      ]
+     },
+     "mimeType": "image/png"
+    },
+    {
+     "type": "text",
+     "text": "after"
+    }
+   ],
+   "options": null,
+   "unchanged": false,
+   "output": [
+    {
+     "type": "text",
+     "text": "before"
+    },
+    {
+     "type": "image",
+     "mimeType": "image/png"
+    },
+    {
+     "type": "text",
+     "text": "[Image: original 2400x100, displayed at 2000x83. Multiply coordinates by 1.20 to map to original image.]"
+    },
+    {
+     "type": "text",
+     "text": "after"
+    }
+   ]
+  }
+ ]
+}

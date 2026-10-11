@@ -1,6 +1,7 @@
 //! End-to-end print mode: the built `bake-rs` against a loopback HTTP
-//! server that answers `POST /v1/responses` with an OpenAI Responses event
-//! stream (`fixtures/openai-responses-text.sse`). Each test owns a temporary
+//! server that answers `POST /v1/responses` with OpenAI Responses event
+//! streams (`fixtures/openai-responses-text.sse`, and a `read` tool call in
+//! `fixtures/openai-responses-read-call.sse`). Each test owns a temporary
 //! Bake home, project directory, and server; nothing reaches the network.
 
 use std::io::{Read, Write};
@@ -15,6 +16,7 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 
 const SSE: &str = include_str!("fixtures/openai-responses-text.sse");
+const READ_CALL_SSE: &str = include_str!("fixtures/openai-responses-read-call.sse");
 
 /// How long one `bake-rs` run may take before the test fails.
 const RUN_TIMEOUT: Duration = Duration::from_secs(60);
@@ -37,6 +39,15 @@ impl Reply {
             body: format!("{SSE}\n"),
         }
     }
+
+    /// A `read` call of `notes.txt`.
+    fn read_call() -> Self {
+        Self {
+            status: 200,
+            content_type: "text/event-stream",
+            body: format!("{READ_CALL_SSE}\n"),
+        }
+    }
 }
 
 /// One request the server received.
@@ -56,8 +67,8 @@ impl Request {
     }
 }
 
-/// A loopback server answering every connection with `reply`; stopped
-/// and joined on drop.
+/// A loopback server answering its connections with `replies` in turn,
+/// repeating the last; stopped and joined on drop.
 struct Server {
     port: u16,
     requests: Arc<Mutex<Vec<Request>>>,
@@ -71,7 +82,7 @@ fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
         .position(|window| window == needle)
 }
 
-fn handle(mut socket: TcpStream, reply: &Reply, requests: &Mutex<Vec<Request>>) {
+fn handle(mut socket: TcpStream, replies: &[Reply], requests: &Mutex<Vec<Request>>) {
     let _ = socket.set_read_timeout(Some(Duration::from_secs(10)));
     let mut buffer = Vec::new();
     let mut chunk = [0u8; 8192];
@@ -115,13 +126,18 @@ fn handle(mut socket: TcpStream, reply: &Reply, requests: &Mutex<Vec<Request>>) 
         .get(head_end + 4..)
         .and_then(|body| serde_json::from_slice(body).ok())
         .unwrap_or(Value::Null);
-    if let Ok(mut requests) = requests.lock() {
-        requests.push(Request {
-            line,
-            headers,
-            body,
-        });
-    }
+    let seen = match requests.lock() {
+        Ok(mut requests) => {
+            requests.push(Request {
+                line,
+                headers,
+                body,
+            });
+            requests.len() - 1
+        }
+        Err(_) => 0,
+    };
+    let reply = &replies[seen.min(replies.len() - 1)];
     let response = format!(
         "HTTP/1.1 {} X\r\ncontent-type: {}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
         reply.status,
@@ -135,6 +151,10 @@ fn handle(mut socket: TcpStream, reply: &Reply, requests: &Mutex<Vec<Request>>) 
 
 impl Server {
     fn start(reply: Reply) -> Self {
+        Self::start_sequence(vec![reply])
+    }
+
+    fn start_sequence(replies: Vec<Reply>) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
         listener.set_nonblocking(true).expect("nonblocking");
         let port = listener.local_addr().expect("address").port();
@@ -148,7 +168,7 @@ impl Server {
                     match listener.accept() {
                         Ok((socket, _)) => {
                             let _ = socket.set_nonblocking(false);
-                            handle(socket, &reply, &requests);
+                            handle(socket, &replies, &requests);
                         }
                         Err(_) => std::thread::sleep(Duration::from_millis(5)),
                     }
@@ -353,6 +373,25 @@ fn transcript(request: &Request) -> Vec<String> {
         .collect()
 }
 
+/// The `tools` and `rules` sections Pi v1.1.0 builds for `selected`,
+/// recorded by `bake-coding-agent/tests/fixtures/pi-tools/generate.ts`.
+fn pi_prompt_sections(selected: &[&str]) -> (String, String) {
+    let golden: Value = serde_json::from_str(include_str!(
+        "../../bake-coding-agent/tests/fixtures/pi-tools/golden.json"
+    ))
+    .expect("golden.json");
+    let case = golden["prompts"]
+        .as_array()
+        .expect("prompts")
+        .iter()
+        .find(|case| case["selected"] == json!(selected))
+        .expect("a recorded selection");
+    (
+        case["tools"].as_str().expect("tools").to_owned(),
+        case["rules"].as_str().expect("rules").to_owned(),
+    )
+}
+
 #[test]
 fn print_mode_answers_saves_and_continues() {
     let server = Server::start(Reply::sse());
@@ -374,7 +413,25 @@ fn print_mode_answers_saves_and_continues() {
         first_input[0]
             .starts_with("system: You are an expert coding assistant operating inside pi")
     );
-    assert!(first_input[0].contains("<tools>\n(none)\n"));
+    // Pi's default tools without bash, which is not ported yet.
+    let (tools, rules) = pi_prompt_sections(&["read", "edit", "write"]);
+    assert!(
+        first_input[0].contains(&format!("\n{tools}\n")),
+        "{}",
+        first_input[0]
+    );
+    assert!(
+        first_input[0].contains(&format!("\n{rules}\n")),
+        "{}",
+        first_input[0]
+    );
+    let declared: Vec<&str> = requests[0].body["tools"]
+        .as_array()
+        .expect("declared tools")
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap_or_default())
+        .collect();
+    assert_eq!(declared, ["read", "edit", "write"]);
     assert_eq!(first_input[1], "user: Say hi");
 
     let files = workspace.session_files();
@@ -585,5 +642,76 @@ fn the_imported_cliproxyapi_route_runs_a_turn() {
     assert_eq!(
         std::fs::read_to_string(workspace.home().join(".credentials.yaml")).expect("creds"),
         credentials
+    );
+}
+
+/// Pi's agent loop through `bake-rs -p`: the model calls `read` on a
+/// project file, the tool result goes back to it, and the session file
+/// records the call and its result.
+#[test]
+fn print_mode_runs_the_read_tool() {
+    let server = Server::start_sequence(vec![Reply::read_call(), Reply::sse()]);
+    let workspace = Workspace::new("read-tool", server.port);
+    std::fs::write(
+        workspace.project().join("notes.txt"),
+        "first line\nsecond line\n",
+    )
+    .expect("notes.txt");
+
+    let out = workspace.run(&["-p", "Read notes.txt"], None);
+    assert_eq!(text(&out.stderr), "");
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(text(&out.stdout), "Hello from the loop.\n");
+
+    let requests = server.requests();
+    assert_eq!(requests.len(), 2);
+    let input = requests[1].body["input"].as_array().expect("input");
+    let call = input
+        .iter()
+        .find(|item| item["type"] == "function_call")
+        .expect("the call is replayed");
+    assert_eq!(call["name"], "read");
+    assert_eq!(call["arguments"], "{\"path\":\"notes.txt\"}");
+    let output = input
+        .iter()
+        .find(|item| item["type"] == "function_call_output")
+        .expect("the tool result is sent");
+    assert_eq!(output["call_id"], call["call_id"]);
+    let sent = match &output["output"] {
+        Value::String(text) => text.clone(),
+        Value::Array(parts) => parts
+            .iter()
+            .filter_map(|part| part["text"].as_str())
+            .collect(),
+        other => panic!("unexpected output {other}"),
+    };
+    // Pi's read result for a short file is its text.
+    assert_eq!(sent, "first line\nsecond line\n");
+
+    let entries = lines(&workspace.session_files()[0]);
+    assert_eq!(
+        kinds(&entries)[3..],
+        [
+            "message:system",
+            "message:user",
+            "message:assistant",
+            "message:toolResult",
+            "message:assistant",
+        ]
+    );
+    let assistant = &entries[5]["message"];
+    assert_eq!(assistant["content"][0]["type"], "toolCall");
+    assert_eq!(assistant["content"][0]["name"], "read");
+    assert_eq!(
+        assistant["content"][0]["arguments"],
+        json!({"path": "notes.txt"})
+    );
+    let result = &entries[6]["message"];
+    assert_eq!(result["toolName"], "read");
+    assert_eq!(result["toolCallId"], assistant["content"][0]["id"]);
+    assert_eq!(result["isError"], false);
+    assert_eq!(
+        result["content"],
+        json!([{ "type": "text", "text": "first line\nsecond line\n" }])
     );
 }

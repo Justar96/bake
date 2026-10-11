@@ -98,8 +98,8 @@ The effort bands are relative: **M** is a bounded subsystem; **L** spans multipl
 | 05 | Configuration, composition, credentials, and lifetime ownership | XL | Configuration precedence, scoped cleanup, login/storage parity | Planned |
 | 06 | Provider-neutral streaming and failures | L | Stream assembly, cancellation, retry, and usage equivalence | Planned |
 | 07 | Provider protocols and authentication | XL | Wire fixtures and route/auth support matrix | Planned |
-| 08 | Tool dispatch and local coding tools | XL | Exact schemas/results, permission decisions, external file outcomes | Planned |
-| 09 | Agent loop and headless vertical slice | XL | End-to-end edit/resume/cancel and paired agent-loop record | Planned |
+| 08 | Tool dispatch and local coding tools | XL | Exact schemas/results, permission decisions, external file outcomes | In progress: Pi's file tools and tool selection; bash, permissions, and dispatch policy remain |
+| 09 | Agent loop and headless vertical slice | XL | End-to-end edit/resume/cancel and paired agent-loop record | In progress: `bake-rs -p` runs Pi print mode with tools on the CLIProxyAPI route; the paired eval record remains |
 | 10 | Context, skills, attachments, and compaction | L | Prompt parity, reconstruction after replacement, long-session eval | Planned |
 | 11 | Subagents, goals, background jobs, and schedules | XL | Durable orchestration and race/restart proofs | Planned |
 | 12 | MCP, web, hooks, code mode, native plugin API, and extensions | XL | Protocol, permission, VM containment, plugin API design, and extension compatibility | Planned |
@@ -315,6 +315,8 @@ During coexistence, run the current Bake gates for affected TypeScript paths and
 - The 0.3 maintenance owner, support window, fix-forward procedure, and post-cutover release rules are published.
 
 ## Dev Note
+
+**Scope 08 file tools (2026-10-11).** `bake-coding-agent::tools` ports Pi v1.1.0's (`abe508e1`) `read`, `write`, `edit` (with `edit-diff` on jsdiff 8.0.4's line diff), `ls`, `find`, `grep`, `path-utils`, the tool index and selection rules, and the image utilities `read` uses, with the `image` crate in place of Photon. Model-visible text is checked byte for byte against a fixture Pi's own code records. `grep` and `find` spawn `rg` and `fd` from `PATH` without Pi's download. `bake-rs -p` now runs with Pi's built-in tools, selected by `--tools`, `--exclude-tools`, `--no-tools`, `--no-builtin-tools`, and `defaultTools`.
 
 **Scope 04 mutation ordering (2026-10-11).** `bake-coding-agent::tools::file_mutation_queue` ports Pi v1.1.0's `src/core/tools/file-mutation-queue.ts`; the release remains `abe508e1b89912adde45528136c3221eb69acdd7`. Its process-wide registry serializes path resolution and runs same-key callbacks FIFO while other keys proceed. The Rust API uses synchronous callbacks, with cancellation checked around completed I/O as Pi's `write.ts` and `edit.ts` require. Async consumers must await their blocking workers during teardown. All seven cases from `test/file-mutation-queue.test.ts` run at the callback layer, alongside Pi-generated file outcomes and native path, error, and cleanup cases. Loom compiles the same queue core and checks three bounded concurrency scenarios (two preemptions, 1,000 branches per execution); a deliberately incorrect tail cleanup fails exclusion. No separate system model is introduced: the claim is local registration and completion ordering, with filesystem resolution tested separately. Windows verbatim prefixes are normalized so file creation does not change a queue key. Hard-link identity, aliases of missing files, nested callbacks, tool dispatch, and process/sandbox ownership remain outside this slice. No TypeScript migration is added.
 
