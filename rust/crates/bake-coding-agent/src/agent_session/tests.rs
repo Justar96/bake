@@ -591,6 +591,9 @@ async fn a_failed_write_aborts_the_run() {
     let file = manager.session_file().expect("file path").to_path_buf();
     let runs = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let counter = Arc::clone(&runs);
+    // The tool's own I/O errors, reported by the assertions below.
+    let blocked: Arc<Mutex<Vec<String>>> = Arc::default();
+    let tool_errors = Arc::clone(&blocked);
     let tool = AgentTool::new(
         "dummy",
         "dummy",
@@ -599,9 +602,20 @@ async fn a_failed_write_aborts_the_run() {
         move |_, _, _, _| {
             counter.fetch_add(1, Ordering::SeqCst);
             let file = file.clone();
+            let tool_errors = Arc::clone(&tool_errors);
             Box::pin(async move {
-                std::fs::remove_file(&file).expect("the file was written");
-                std::fs::create_dir_all(&file).expect("block the file");
+                let outcome = std::fs::remove_file(&file)
+                    .map_err(|error| format!("remove {}: {error}", file.display()))
+                    .and_then(|()| {
+                        std::fs::create_dir_all(&file)
+                            .map_err(|error| format!("block {}: {error}", file.display()))
+                    });
+                if let Err(error) = outcome {
+                    tool_errors
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .push(error);
+                }
                 Ok(AgentToolResult::default())
             })
         },
@@ -616,6 +630,15 @@ async fn a_failed_write_aborts_the_run() {
     let result = session.prompt("run", Vec::new()).await;
     assert!(result.is_err(), "{result:?}");
     assert_eq!(runs.load(Ordering::SeqCst), 1);
+    let tool_errors = blocked
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone();
+    assert_eq!(
+        tool_errors,
+        Vec::<String>::new(),
+        "the tool blocks the file"
+    );
     assert_eq!(h.faux.call_count(), 1, "the run stops after the failure");
     // The run ends as aborted after the tool result, and nothing more is
     // written: the blocked path is all the session directory holds.
