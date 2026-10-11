@@ -94,6 +94,7 @@ name = "bake-cli"
 version = "0.4.0-dev"
 dependencies = [
  "bake-coding-agent",
+ "bake-sandbox",
  "bake-tui",
  "serde_json",
  "tokio",
@@ -131,6 +132,10 @@ dependencies = [
 [[package]]
 name = "bake-sandbox"
 version = "0.4.0-dev"
+dependencies = [
+ "libc",
+ "tokio",
+]
 
 [[package]]
 name = "bake-tui"

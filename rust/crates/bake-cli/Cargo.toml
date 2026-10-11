@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 bake-coding-agent.workspace = true
+bake-sandbox.workspace = true
 bake-tui.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "signal", "macros"] }
 

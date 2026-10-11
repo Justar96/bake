@@ -58,6 +58,13 @@ pub fn is_path_under(path: &Path, root: &Path) -> bool {
     path.starts_with(&root)
 }
 
+/// `path` with `.` components removed and `..` applied lexically, without
+/// touching the filesystem: how [`crate::SandboxPolicy::writable_roots`]
+/// normalizes the roots its caller already resolved.
+pub(crate) fn normalize_lexically(path: &Path) -> PathBuf {
+    lexical(path)
+}
+
 fn lexical(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for component in path.components() {

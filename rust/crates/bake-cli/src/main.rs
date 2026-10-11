@@ -84,6 +84,14 @@ fn parse(args: &[OsString]) -> Result<Command, String> {
 
 fn main() -> ExitCode {
     let args: Vec<OsString> = std::env::args_os().skip(1).collect();
+    // The sandbox's Landlock helper re-executes this binary; it must run
+    // before anything starts a thread, and it never returns.
+    if args
+        .first()
+        .is_some_and(|arg| arg == bake_sandbox::backends::landlock::HELPER_ARG)
+    {
+        bake_sandbox::backends::landlock::helper_main(args.into_iter().skip(1));
+    }
     match parse(&args) {
         Ok(Command::Help) => print(HELP),
         Ok(Command::Preview) => preview(),
