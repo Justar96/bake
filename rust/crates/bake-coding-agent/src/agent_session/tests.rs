@@ -111,6 +111,33 @@ fn new_file_session(dir: &TempDir) -> SessionManager {
     .expect("session")
 }
 
+// Bake: shutdown releases the session file for good. A later change stays
+// in memory, takes no lock, and writes nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn shutdown_closes_the_session_file() {
+    let dir = TempDir::new("shutdown-closes");
+    let cwd = dir.path().to_string_lossy().into_owned();
+    let h = harness();
+    h.faux
+        .set_responses(vec![faux_assistant_message("first").into()]);
+    let session = AgentSession::create(options(&h, new_file_session(&dir), &cwd))
+        .await
+        .expect("session");
+    session.prompt("one", Vec::new()).await.expect("one");
+    let file = session.session_file().expect("persisted");
+    session.shutdown().await;
+    let written = std::fs::read(&file).expect("read");
+    let model = session.model().expect("model");
+    let error = session.set_model(model).await.expect_err("closed");
+    assert!(
+        error.starts_with("Session file is closed for writing"),
+        "{error}"
+    );
+    assert_eq!(std::fs::read(&file).expect("read"), written);
+    // Another writer takes the file at once.
+    drop(SessionManager::open(&file, None, None).expect("open"));
+}
+
 // Pi: "declares the prompt and tools once and reuses them across resume".
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn declares_the_prompt_once_and_reuses_it_across_resume() {

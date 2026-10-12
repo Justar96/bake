@@ -96,17 +96,21 @@ fn a_second_writer_is_refused_and_takes_over_after_a_drop() {
     );
 }
 
-/// A released writer can be taken over; its own next write is then refused,
-/// and as with any failed write, the entry stays in memory and the leaf
-/// moves to it.
+/// A closed writer can be taken over and never writes again: as with any
+/// failed write, its entries stay in memory and the leaf moves to them.
 #[test]
-fn a_released_writer_is_refused_its_next_write() {
-    let dir = TempDir::new("exclusion-release");
+fn a_closed_writer_writes_nothing_more() {
+    let dir = TempDir::new("exclusion-close");
     let (mut first, file) = written_session(&dir);
-    first.release_writer();
+    first.close_writer();
     let second = SessionManager::open(&file, None, None).expect("taken over");
-    let result = first.append_message(user_msg("late"));
-    assert!(matches!(result, Err(SessionError::Locked(ref path)) if *path == file));
+    let closed = |result: Result<String, SessionError>| {
+        assert!(
+            matches!(result, Err(SessionError::WriterClosed(ref path)) if *path == file),
+            "{result:?}"
+        );
+    };
+    closed(first.append_message(user_msg("late")));
     assert_eq!(
         first
             .leaf_entry()
@@ -115,10 +119,28 @@ fn a_released_writer_is_refused_its_next_write() {
             .as_deref(),
         Some("late")
     );
-    assert_eq!(load_entries_from_file(&file).expect("load").len(), 3);
     drop(second);
-    // Once free, the next write takes the lock again.
-    first.append_message(user_msg("later")).expect("append");
+    // Even with the file free, nothing is written and no lock is taken.
+    closed(first.append_thinking_level_change("high"));
+    assert_eq!(load_entries_from_file(&file).expect("load").len(), 3);
+    drop(SessionManager::open(&file, None, None).expect("still free"));
+}
+
+/// Only a session being written gets a lock file: opening a missing path or
+/// a file that is not a session leaves none.
+#[test]
+fn lock_files_are_made_only_for_sessions() {
+    let dir = TempDir::new("exclusion-stray");
+    let missing = dir.join("missing.jsonl");
+    let session = SessionManager::open(&missing, None, None).expect("open missing");
+    drop(session);
+    let other = dir.join("other.jsonl");
+    fs::write(&other, "not a session\n").expect("write");
+    assert!(matches!(
+        SessionManager::open(&other, None, None),
+        Err(SessionError::NotASession(_))
+    ));
+    assert_eq!(names(dir.path()), ["other.jsonl"]);
 }
 
 #[test]
@@ -377,4 +399,80 @@ fn migration_rewrites_atomically_and_leftovers_are_not_sessions() {
         SessionManager::find_by_id(dir.str(), "v1-session", Some(dir.path())).expect("find"),
         Some(file)
     );
+}
+
+fn v1_content(cwd: &str, id: &str) -> String {
+    let lines = [
+        json!({"type": "session", "id": id, "timestamp": "2025-01-01T00:00:00Z", "cwd": cwd}),
+        json!({"type": "message", "timestamp": "2025-01-01T00:00:01Z", "message": {"role": "user", "content": "hi", "timestamp": 1}}),
+    ];
+    lines.iter().map(|line| format!("{line}\n")).collect()
+}
+
+/// Migration keeps the file's mode, and through a symbolic link migrates
+/// the file the link names, leaving the link a link.
+#[cfg(unix)]
+#[test]
+fn migration_keeps_mode_and_links() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = TempDir::new("exclusion-mode");
+    let file = dir.join("private.jsonl");
+    fs::write(&file, v1_content(dir.str(), "private")).expect("write");
+    fs::set_permissions(&file, fs::Permissions::from_mode(0o600)).expect("chmod");
+    drop(SessionManager::open(&file, None, None).expect("open"));
+    let metadata = fs::metadata(&file).expect("stat");
+    assert_eq!(metadata.permissions().mode() & 0o777, 0o600);
+    assert!(
+        fs::read_to_string(&file)
+            .expect("read")
+            .contains(r#""version":3"#)
+    );
+
+    let real = dir.join("real.jsonl");
+    fs::write(&real, v1_content(dir.str(), "real")).expect("write");
+    let link = dir.join("link.jsonl");
+    std::os::unix::fs::symlink(&real, &link).expect("symlink");
+    drop(SessionManager::open(&link, None, None).expect("open link"));
+    assert!(
+        fs::symlink_metadata(&link)
+            .expect("lstat")
+            .file_type()
+            .is_symlink()
+    );
+    assert!(
+        fs::read_to_string(&real)
+            .expect("read")
+            .contains(r#""version":3"#)
+    );
+}
+
+/// In a read-only directory, a writable session without a lock file is
+/// still opened, held, and appended to: the session file itself is locked.
+#[cfg(unix)]
+#[test]
+fn a_read_only_directory_still_writes() {
+    use std::os::unix::fs::PermissionsExt;
+    struct Restore<'a>(&'a Path);
+    impl Drop for Restore<'_> {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(self.0, fs::Permissions::from_mode(0o755));
+        }
+    }
+    let dir = TempDir::new("exclusion-read-only");
+    let (session, file) = written_session(&dir);
+    drop(session);
+    fs::remove_file(lock_of(&file)).expect("remove lock");
+    fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o555)).expect("chmod");
+    let _restore = Restore(dir.path());
+    if fs::write(dir.join("probe"), "").is_ok() {
+        // Running as root: directory permissions do not apply.
+        return;
+    }
+    let mut held = SessionManager::open(&file, None, None).expect("open");
+    assert_locked(SessionManager::open(&file, None, None), &file);
+    held.append_message(user_msg("two")).expect("append");
+    drop(held);
+    let reopened = SessionManager::open(&file, None, None).expect("reopen");
+    assert_eq!(reopened.build_session_context().messages.len(), 3);
+    assert!(!lock_of(&file).exists());
 }

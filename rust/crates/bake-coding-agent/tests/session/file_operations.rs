@@ -104,7 +104,9 @@ mod load_entries_from_file_tests {
         assert_eq!(load_entries_from_file(&file).expect("load").len(), 2);
     }
 
-    /// "adds a newline after an unterminated valid record"
+    /// "adds a newline after an unterminated valid record". Deviation: the
+    /// reader leaves the file as it is, and the writer that opens it adds
+    /// the newline (`session::file`).
     #[test]
     fn adds_newline_after_unterminated_valid_record() {
         let dir = TempDir::new("load-unterminated");
@@ -112,13 +114,19 @@ mod load_entries_from_file_tests {
         let content = format!("{VALID_HEADER}\n{VALID_MESSAGE}");
         fs::write(&file, &content).expect("write");
         assert_eq!(load_entries_from_file(&file).expect("load").len(), 2);
+        assert_eq!(fs::read_to_string(&file).expect("read"), content);
+        // A current-version header, so opening repairs without migrating.
+        let current = content.replacen(r#""cwd":"/tmp"}"#, r#""cwd":"/tmp","version":3}"#, 1);
+        fs::write(&file, &current).expect("write");
+        drop(SessionManager::open(&file, None, None).expect("open"));
         assert_eq!(
             fs::read_to_string(&file).expect("read"),
-            format!("{content}\n")
+            format!("{current}\n")
         );
     }
 
-    /// "adds a newline after an unterminated malformed final fragment"
+    /// "adds a newline after an unterminated malformed final fragment", with
+    /// the same deviation.
     #[test]
     fn adds_newline_after_torn_final_fragment() {
         let dir = TempDir::new("load-torn");
@@ -126,9 +134,14 @@ mod load_entries_from_file_tests {
         let content = format!("{VALID_HEADER}\n{{\"type\":\"message\"");
         fs::write(&file, &content).expect("write");
         assert_eq!(load_entries_from_file(&file).expect("load").len(), 1);
+        assert_eq!(fs::read_to_string(&file).expect("read"), content);
+        // A current-version header, so opening repairs without migrating.
+        let current = content.replacen(r#""cwd":"/tmp"}"#, r#""cwd":"/tmp","version":3}"#, 1);
+        fs::write(&file, &current).expect("write");
+        drop(SessionManager::open(&file, None, None).expect("open"));
         assert_eq!(
             fs::read_to_string(&file).expect("read"),
-            format!("{content}\n")
+            format!("{current}\n")
         );
     }
 

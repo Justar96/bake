@@ -68,22 +68,26 @@
 //! details):
 //!
 //! - **One writer per file.** A persisted manager takes the file's writer
-//!   lock when it opens an existing file or path, and before a new
+//!   lock before it loads an existing session file and before a new
 //!   session's first write, and holds it until it moves to another file, is
-//!   dropped, or [`SessionManager::release_writer`] is called. The lock is an
+//!   dropped, or [`SessionManager::close_writer`] is called. The lock is an
 //!   exclusive `File::try_lock` on a sidecar beside the session file, named
-//!   by appending `.lock` to its name: a second writer, in this process or
-//!   another, fails with [`SessionError::Locked`] after waiting up to a
-//!   second for the lock, and takes over once the holder releases the lock,
-//!   exits, or is killed. The sidecar is left in place and is never listed.
-//!   Readers (listing, discovery, and
-//!   [`load_entries_from_file`]) need no lock; a reader appends a torn
-//!   file's missing final newline only while no writer holds the file.
-//! - **Durable writes.** Each append is synced, a new file's directory entry
-//!   is synced on Unix, and a rewrite (migration, an empty file's header, a
-//!   branched session) goes through a synced temporary file in the same
-//!   directory that is renamed over the session file. A crash never leaves a
-//!   truncated or half-rewritten file.
+//!   by appending `.lock` to its name and created only for a session being
+//!   written: a second writer, in this process or another, fails with
+//!   [`SessionError::Locked`] after waiting up to a second for the lock, and
+//!   takes over once the holder releases the lock, exits, or is killed. The
+//!   sidecar is left in place and is never listed. Where the sidecar cannot
+//!   be created, an existing one is locked read-only, or on Unix the session
+//!   file itself is locked and rewritten in place. On NFS and CIFS, two
+//!   writers in one process are not excluded. Readers (listing, discovery,
+//!   and [`load_entries_from_file`]) need no lock and never modify a file.
+//! - **Durable writes.** Each append is synced, and a rewrite (migration, an
+//!   empty file's header, a branched session) goes through a synced
+//!   temporary file beside the real file, with its permissions, renamed
+//!   over it, so a crash never leaves a truncated or half-rewritten file. A
+//!   symbolic link is followed to the file it names; a file with other hard
+//!   links is rewritten in place, as Pi does, rather than split from them.
+//!   Directory entries are synced on Unix, best effort.
 //! - **Torn tails.** A writer killed mid-append leaves a partial last line,
 //!   which loading skips as Pi does. The next append starts on a new line,
 //!   so the torn fragment cannot join the new entry.
@@ -151,6 +155,8 @@ pub enum SessionError {
     SummaryMessage(String),
     /// Another writer holds this session file's writer lock.
     Locked(PathBuf),
+    /// A write after [`SessionManager::close_writer`].
+    WriterClosed(PathBuf),
     /// No session directory was given and the Bake home is unknown: no
     /// `BAKE_HOME` or `DSH_HOME` is set and the user's home directory cannot
     /// be found.
@@ -199,6 +205,11 @@ impl fmt::Display for SessionError {
             Self::Locked(path) => write!(
                 formatter,
                 "Session file is in use by another writer: {}",
+                path.display()
+            ),
+            Self::WriterClosed(path) => write!(
+                formatter,
+                "Session file is closed for writing: {}",
                 path.display()
             ),
             Self::NoHome => formatter.write_str(

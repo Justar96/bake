@@ -138,6 +138,8 @@ pub struct SessionManager {
     leaf_id: Option<String>,
     /// The writer lock of `session_file`, once taken.
     writer: Option<WriterLock>,
+    /// Set by [`SessionManager::close_writer`]: no lock is taken again.
+    writer_closed: bool,
 }
 
 fn home() -> Result<PathBuf, SessionError> {
@@ -309,6 +311,7 @@ impl SessionManager {
         persist: bool,
         options: NewSessionOptions,
         preloaded: Option<Vec<Line>>,
+        writer: Option<WriterLock>,
     ) -> Result<Self, SessionError> {
         let mut manager = Self {
             session_id: String::new(),
@@ -322,7 +325,8 @@ impl SessionManager {
             labels_by_id: IndexMap::new(),
             label_timestamps_by_id: HashMap::new(),
             leaf_id: None,
-            writer: None,
+            writer,
+            writer_closed: false,
         };
         if persist && !manager.session_dir.as_os_str().is_empty() && !manager.session_dir.exists() {
             fs::create_dir_all(&manager.session_dir)
@@ -342,26 +346,52 @@ impl SessionManager {
     /// is loaded and migrated, an empty file gets a fresh header, and a
     /// missing file becomes the path of a new session.
     ///
-    /// A persisted manager first takes the file's writer lock and fails with
-    /// [`SessionError::Locked`] while another writer holds it; it then
-    /// releases the lock of the file it held before.
+    /// A persisted manager releases the lock of the file it held before. It
+    /// takes an existing session file's writer lock before loading it, and
+    /// fails with [`SessionError::Locked`] while another writer holds it; a
+    /// missing file's lock is taken at its first write, and a file that is
+    /// not a session is not locked.
     pub fn set_session_file(&mut self, session_file: &Path) -> Result<(), SessionError> {
         self.load_session_file(session_file)
     }
 
+    /// Whether `path`, which exists, is a session file or an empty one that
+    /// will become one, reading only its header.
+    fn is_session_candidate(path: &Path) -> Result<bool, SessionError> {
+        let size = fs::metadata(path)
+            .map_err(|error| SessionError::io(path, error))?
+            .len();
+        if size == 0 {
+            return Ok(true);
+        }
+        match read_session_header(path) {
+            Ok(header) => Ok(header.is_some()),
+            Err(HeaderError::ScanLimit) => Ok(true),
+            Err(HeaderError::Io(error)) => Err(SessionError::io(path, error)),
+        }
+    }
+
     fn load_session_file(&mut self, session_file: &Path) -> Result<(), SessionError> {
         let path = resolve_path(session_file);
-        self.hold_writer(&path)?;
+        if self.persist && path.exists() && Self::is_session_candidate(&path)? {
+            self.hold_writer(&path)?;
+        } else if self
+            .writer
+            .as_ref()
+            .is_some_and(|writer| writer.session_file() != path)
+        {
+            self.writer = None;
+        }
         self.session_file = Some(path.clone());
         if !path.exists() {
             self.start_session(NewSessionOptions::default())?;
             self.session_file = Some(path);
             return Ok(());
         }
-        let repair = if self.persist {
+        let repair = if self.holds_writer(&path) {
             Repair::Held
         } else {
-            Repair::IfFree
+            Repair::Never
         };
         let entries =
             load_objects(&path, repair).map_err(|error| SessionError::io(&path, error))?;
@@ -499,31 +529,39 @@ impl SessionManager {
             return Ok(());
         };
         self.hold_writer(&path)?;
-        durable::replace(&path, &lines_of(&self.file_entries))
+        let in_place = self.writer.as_ref().is_some_and(WriterLock::in_place);
+        durable::replace(&path, &lines_of(&self.file_entries), in_place)
             .map_err(|error| SessionError::io(&path, error))
     }
 
+    fn holds_writer(&self, path: &Path) -> bool {
+        self.writer
+            .as_ref()
+            .is_some_and(|writer| writer.session_file() == path)
+    }
+
     /// Take `path`'s writer lock unless it is already held, releasing the
-    /// lock of any other file. In-memory sessions take no lock.
+    /// lock of any other file. In-memory sessions take no lock, and a
+    /// manager whose writer is closed takes none again.
     fn hold_writer(&mut self, path: &Path) -> Result<(), SessionError> {
-        if !self.persist
-            || self
-                .writer
-                .as_ref()
-                .is_some_and(|writer| writer.session_file() == path)
-        {
+        if !self.persist || self.holds_writer(path) {
             return Ok(());
+        }
+        if self.writer_closed {
+            return Err(SessionError::WriterClosed(path.to_path_buf()));
         }
         self.writer = Some(WriterLock::acquire(path)?);
         Ok(())
     }
 
-    /// Release the session file's writer lock, so another writer can take
-    /// the file over. The next write takes the lock again, and fails with
-    /// [`SessionError::Locked`] while another writer holds it; entries that
-    /// writer added meanwhile are not read.
-    pub fn release_writer(&mut self) {
+    /// Stop writing: release the session file's writer lock, so another
+    /// writer can take the file over, and write nothing more. Later appends
+    /// keep their entries in memory and advance the leaf, as a failed write
+    /// does, and fail with [`SessionError::WriterClosed`]; so does anything
+    /// else that would write or take a lock, such as opening another file.
+    pub fn close_writer(&mut self) {
         self.writer = None;
+        self.writer_closed = true;
     }
 
     /// Whether this session writes to a file.
@@ -1227,7 +1265,7 @@ impl SessionManager {
                 })?
             }
         };
-        Self::construct(cwd, dir, None, true, options, None)
+        Self::construct(cwd, dir, None, true, options, None, None)
     }
 
     /// Open a session file. Without `session_dir`, new and branched
@@ -1281,6 +1319,7 @@ impl SessionManager {
             true,
             NewSessionOptions::default(),
             None,
+            None,
         )
     }
 
@@ -1308,6 +1347,7 @@ impl SessionManager {
             true,
             NewSessionOptions::default(),
             None,
+            None,
         )
     }
 
@@ -1327,7 +1367,15 @@ impl SessionManager {
                 .unwrap_or_else(|_| ".".to_owned()),
         };
         let objects: Vec<Line> = entries.into_iter().map(FileEntry::into_line).collect();
-        Self::construct(&cwd, PathBuf::new(), None, false, options, Some(objects))
+        Self::construct(
+            &cwd,
+            PathBuf::new(),
+            None,
+            false,
+            options,
+            Some(objects),
+            None,
+        )
     }
 
     /// Fork a session file, possibly from another project, into a new
@@ -1342,7 +1390,7 @@ impl SessionManager {
     ) -> Result<Self, SessionError> {
         let source = resolve_path(source_path);
         let target_cwd = resolve_path_string(target_cwd);
-        let entries = load_objects(&source, Repair::IfFree)
+        let entries = load_objects(&source, Repair::Never)
             .map_err(|error| SessionError::io(&source, error))?;
         if entries.is_empty() {
             return Err(SessionError::InvalidForkSource(source));
@@ -1362,7 +1410,7 @@ impl SessionManager {
         }
         let id = options.id.unwrap_or_else(uuid_v7);
         let timestamp = now_iso();
-        let file = dir.join(session_file_name(&timestamp, &id));
+        let file = resolve_path(&dir.join(session_file_name(&timestamp, &id)));
         let header = SessionHeader::new(
             &id,
             &timestamp,
@@ -1379,9 +1427,8 @@ impl SessionManager {
         if !body.is_empty() {
             append_bytes(&file, &lines_of(&body))?;
         }
-        // The new manager takes the lock again; the file's name is new, so
-        // no other writer looks for it in between.
-        drop(writer);
+        // The new manager keeps the lock, so no other writer, such as a
+        // `continue_recent` that finds the new file, takes it in between.
         Self::construct(
             &target_cwd,
             dir,
@@ -1389,6 +1436,7 @@ impl SessionManager {
             true,
             NewSessionOptions::default(),
             None,
+            Some(writer),
         )
     }
 
