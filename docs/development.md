@@ -32,7 +32,7 @@ For real model requests, sign in with `/login` or set `DEEPSEEK_API_KEY` in the 
 
 Run `bun run dev:rust` from the repository root to build and launch the native TUI preview. It supports editing and sample-agent inspection without a model connection, credentials, or session writes. See [its controls and limits](../rust/README.md) before treating it as an agent. `bun run check:rust` checks its locked workspace; `bun run test:rust:pty` exercises the built binary on Linux or macOS.
 
-After the Rust build, `bun run test:rust:eval` exercises a compiled fake arm through the [existing evaluator fixture and independent check](../evals/README.md#native-fixture-adapter), including test-file tampering. It runs after Cargo builds in the native preflight group on Linux, macOS, and Windows.
+After the Rust build, `bun run test:rust:eval` exercises a compiled fake arm through the [existing evaluator fixture and independent check](../evals/README.md#native-fixture-adapter), including test-file tampering. It runs after Cargo builds in the native preflight group, which CI runs on Linux and Windows and contributors run on a Mac before a pull request.
 
 | Work | Command | Behavior |
 |---|---|---|

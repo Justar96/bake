@@ -18,14 +18,15 @@ concurrency:
 # commit on main is skipped. Direct pushes to main still run.
 #
 # A pull request from develop to main runs Linux alone. Every change it carries
-# already ran on every platform in its own pull request, and the release tag
-# after it builds and checks every platform again. Only the combination of
+# already ran on every CI platform in its own pull request, and the release
+# tag after it builds and checks every platform again. Only the combination of
 # those changes is new, which no earlier run has tested, so the Linux jobs stay.
 #
 # A pull request into the Rust 0.4.0 line, rust/0.4.0, directly or through a
-# stack on it, runs the native job on every OS and TypeScript checks on Linux
-# only as far as its files need. The pull request that syncs the line into
-# develop runs everything. scripts/ci-scope.ts makes these choices.
+# stack on it, runs the native job on Linux and Windows and TypeScript checks
+# on Linux only as far as its files need. The pull request that syncs the line
+# into develop runs everything. No job runs on macOS, which is checked locally
+# before a pull request opens. scripts/ci-scope.ts makes these choices.
 jobs:
   scope:
     if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Merge pull request ')

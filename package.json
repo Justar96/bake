@@ -89,6 +89,7 @@
     "release:verify-live": "bun scripts/release/verify-live.ts",
     "lint": "bun scripts/run-oxlint.ts apps packages scripts evals --config .oxlintrc.staged.json",
     "preflight": "bun scripts/preflight.ts",
+    "preflight:mac": "scripts/mac-preflight.sh",
     "doc-sync": "bun apps/tui/scripts/tui.ts check docs",
     "eval": "bun evals/agent-loop/run.ts",
     "eval:record": "bun evals/agent-loop/record.ts",

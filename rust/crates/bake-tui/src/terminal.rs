@@ -853,17 +853,20 @@ mod hangup {
         }
     }
 
-    /// Polls `fds` for no events, which still reports a hangup or an error,
-    /// waking every [`READER_WAKE`] to check `stop`. A descriptor poll cannot
-    /// watch, which macOS reports for some devices, ends the watch instead
-    /// of counting as a hangup.
+    /// Polls `fds` for input, waking every [`READER_WAKE`] to check `stop`.
+    /// Input is asked for because macOS builds `poll` on kqueue and reports a
+    /// hangup only on a descriptor that asked for an event; the input itself
+    /// is left to the reader, so while it waits the watcher sleeps a beat
+    /// instead of polling again at once. A descriptor poll cannot watch,
+    /// which macOS reports for some devices, ends the watch instead of
+    /// counting as a hangup.
     pub(super) fn watch(fds: &[libc::c_int], sender: &Sender<Source>, stop: &AtomicBool) {
         let wake = libc::c_int::try_from(READER_WAKE.as_millis()).unwrap_or(libc::c_int::MAX);
         let mut polled: Vec<libc::pollfd> = fds
             .iter()
             .map(|&fd| libc::pollfd {
                 fd,
-                events: 0,
+                events: libc::POLLIN,
                 revents: 0,
             })
             .collect();
@@ -885,6 +888,9 @@ mod hangup {
             if events & (libc::POLLHUP | libc::POLLERR) != 0 {
                 let _ = sender.send(Source::Hangup);
                 return;
+            }
+            if ready > 0 {
+                thread::sleep(READER_WAKE);
             }
         }
     }
@@ -1225,25 +1231,33 @@ mod tests {
         unsafe { libc::close(fd) };
     }
 
+    /// Watches `fd` on a thread until it reports or `limit` passes, then
+    /// stops it, so a watcher that misses a hangup fails instead of hanging.
     #[cfg(unix)]
-    #[test]
-    fn the_watcher_reports_a_hung_up_descriptor_and_otherwise_stops_when_asked() {
-        let [read, write] = pipe();
-        close(write);
-        let (sender, found) = mpsc::channel();
-        hangup::watch(&[read], &sender, &AtomicBool::new(false));
-        assert!(matches!(found.try_recv(), Ok(Source::Hangup)));
-        close(read);
-
-        let [read, write] = pipe();
+    fn watched(fd: libc::c_int, limit: Duration) -> bool {
         let stop = Arc::new(AtomicBool::new(false));
         let flag = Arc::clone(&stop);
         let (sender, found) = mpsc::channel();
-        let watcher = thread::spawn(move || hangup::watch(&[read], &sender, &flag));
-        thread::sleep(READER_WAKE / 2);
+        let watcher = thread::spawn(move || hangup::watch(&[fd], &sender, &flag));
+        let reported = matches!(found.recv_timeout(limit), Ok(Source::Hangup));
         stop.store(true, Ordering::SeqCst);
         watcher.join().unwrap();
-        assert!(found.try_recv().is_err());
+        reported
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_watcher_reports_a_hung_up_descriptor_but_not_waiting_input() {
+        let [read, write] = pipe();
+        close(write);
+        assert!(watched(read, Duration::from_secs(5)));
+        close(read);
+
+        // Input the reader has not taken yet is not a hangup.
+        let [read, write] = pipe();
+        // SAFETY: the buffer is one live byte.
+        assert_eq!(unsafe { libc::write(write, b"x".as_ptr().cast(), 1) }, 1);
+        assert!(!watched(read, READER_WAKE * 3));
         close(read);
         close(write);
     }
