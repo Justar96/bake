@@ -6,8 +6,9 @@ mod clipboard;
 mod files;
 mod fixture;
 mod git;
+mod inline;
 mod input;
 mod port;
 mod terminal;
 
-pub use terminal::{PreviewExit, TerminalSession, run_preview};
+pub use terminal::{PreviewExit, ScreenMode, TerminalSession, run_preview, run_preview_mode};

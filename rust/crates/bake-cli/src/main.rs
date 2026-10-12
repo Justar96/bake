@@ -14,7 +14,7 @@ use bake_coding_agent::cli::{self, Action, CliEnvironment, Interrupt};
 use bake_coding_agent::print_mode::SharedWriter;
 use bake_coding_agent::system_prompt::DocsPaths;
 use bake_sandbox::SandboxProvider;
-use bake_tui::PreviewExit;
+use bake_tui::{PreviewExit, ScreenMode};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -23,7 +23,7 @@ bake-rs: Bake's native agent (Rust preview)
 
 Usage:
   bake-rs [options] [messages...]
-  bake-rs preview      Open the fullscreen sample preview in an interactive terminal
+  bake-rs preview [--inline]  Open the sample preview in an interactive terminal
 
 Options:
   -p, --print               Send the prompts, print the final answer, and exit
@@ -71,7 +71,7 @@ Ctrl+C quits it.
 #[derive(Debug, PartialEq, Eq)]
 enum Command {
     Help,
-    Preview,
+    Preview(ScreenMode),
     Agent(Vec<String>),
 }
 
@@ -87,7 +87,12 @@ fn parse(args: &[OsString]) -> Result<Command, String> {
     let strs: Vec<&str> = args.iter().map(String::as_str).collect();
     match strs.as_slice() {
         [] | ["help"] | ["preview", "-h" | "--help"] => Ok(Command::Help),
-        ["preview"] => Ok(Command::Preview),
+        ["preview"] => Ok(Command::Preview(ScreenMode::Fullscreen)),
+        ["preview", "--inline"] => Ok(Command::Preview(ScreenMode::Inline)),
+        ["preview", "--inline", "-h" | "--help"] => Ok(Command::Help),
+        ["preview", "--inline", extra, ..] => {
+            Err(format!("unexpected argument '{extra}' for 'preview'"))
+        }
         ["preview", extra, ..] => Err(format!("unexpected argument '{extra}' for 'preview'")),
         _ => Ok(Command::Agent(args)),
     }
@@ -105,7 +110,7 @@ fn main() -> ExitCode {
     }
     match parse(&args) {
         Ok(Command::Help) => print(HELP),
-        Ok(Command::Preview) => preview(),
+        Ok(Command::Preview(mode)) => preview(mode),
         Ok(Command::Agent(args)) => agent(&args),
         Err(message) => {
             eprintln!("bake-rs: {message}\n\nRun 'bake-rs --help' for usage.");
@@ -235,7 +240,7 @@ fn non_terminal_stream(stdin_tty: bool, stdout_tty: bool) -> Option<&'static str
     }
 }
 
-fn preview() -> ExitCode {
+fn preview(mode: ScreenMode) -> ExitCode {
     // Checked before any terminal mode changes.
     if let Some(name) = non_terminal_stream(io::stdin().is_terminal(), io::stdout().is_terminal()) {
         eprintln!(
@@ -243,7 +248,7 @@ fn preview() -> ExitCode {
         );
         return ExitCode::FAILURE;
     }
-    match bake_tui::run_preview() {
+    match bake_tui::run_preview_mode(mode) {
         Ok(PreviewExit::Quit) => ExitCode::SUCCESS,
         // The terminal is gone, so there is nowhere to report anything; 129
         // is the SIGHUP status the TypeScript launcher reports too.
@@ -270,7 +275,10 @@ mod tests {
     fn no_arguments_print_help_instead_of_opening_the_preview() {
         assert_eq!(parse_strs(&[]), Ok(Command::Help));
         assert_eq!(parse_strs(&["preview", "--help"]), Ok(Command::Help));
-        assert_eq!(parse_strs(&["preview"]), Ok(Command::Preview));
+        assert_eq!(
+            parse_strs(&["preview"]),
+            Ok(Command::Preview(ScreenMode::Fullscreen))
+        );
     }
 
     #[test]

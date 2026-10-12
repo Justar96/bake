@@ -17,7 +17,7 @@
 //! view's next timed change, applies every waiting message, and draws once.
 
 use std::io::{self, Stdout};
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Once};
 use std::thread::{self, JoinHandle};
@@ -31,7 +31,7 @@ use bake_tui_view::runtime::RuntimeUpdate;
 use bake_tui_view::state::{Effect, ImageSource, Msg, State, update};
 use bake_tui_view::status;
 use bake_tui_view::wheel::{self, WheelSteps};
-use crossterm::cursor::Show;
+use crossterm::cursor::{RestorePosition, Show};
 use crossterm::event::{self, DisableBracketedPaste, EnableBracketedPaste};
 use crossterm::execute;
 use crossterm::style::Print;
@@ -47,6 +47,7 @@ use ratatui::layout::Rect;
 use crate::clipboard::{self, Clipboard, Platform};
 use crate::files::{Ask, Finder};
 use crate::git;
+use crate::inline::{self, Inline};
 use crate::input;
 use crate::port::{FixturePort, Request};
 
@@ -181,6 +182,20 @@ const MOUSE_OFF: &str = "\x1b[?1006l\x1b[?1002l\x1b[?1000l";
 /// Modes the live session changed. Process-wide so the panic hook can restore
 /// them before the panic message is printed.
 static MODES: AtomicU8 = AtomicU8::new(0);
+/// A positive count means the terminal's save slot names a safe held-region
+/// boundary. Publishing transcript rows clears the claim until blank rows
+/// have a saved boundary again, so restoration cannot erase settled output.
+pub(crate) static HELD_ROWS: AtomicU16 = AtomicU16::new(0);
+const INLINE: u8 = 1 << 7;
+
+/// Which terminal screen the sample preview owns.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ScreenMode {
+    #[default]
+    Fullscreen,
+    /// Uses terminal scrollback for settled transcript rows.
+    Inline,
+}
 
 /// How long the input thread waits for input before it checks whether to
 /// stop. It bounds how long shutdown waits to join the thread; input itself
@@ -231,16 +246,23 @@ trait Screen {
     fn write(&mut self, sequence: &str) -> io::Result<()>;
 }
 
-/// Owns raw mode, the alternate screen, bracketed paste, autowrap, cursor
-/// visibility, and synchronized output. [`TerminalSession::close`] restores
+/// Owns raw mode, bracketed paste, autowrap, cursor visibility, synchronized
+/// output, and either the alternate screen or the inline cursor save slot.
+/// [`TerminalSession::close`] restores
 /// them and reports failures; dropping it restores them silently if `close`
 /// did not run.
 pub struct TerminalSession {
     terminal: Terminal<CrosstermBackend<Stdout>>,
+    inline: Option<Inline>,
 }
 
 impl TerminalSession {
     pub fn acquire() -> io::Result<Self> {
+        Self::acquire_mode(ScreenMode::Fullscreen)
+    }
+
+    /// Acquires the terminal for an explicitly selected preview screen.
+    pub fn acquire_mode(mode: ScreenMode) -> io::Result<Self> {
         if MODES
             .compare_exchange(0, OWNED, Ordering::SeqCst, Ordering::SeqCst)
             .is_err()
@@ -252,10 +274,14 @@ impl TerminalSession {
             enable_raw_mode()?;
             MODES.fetch_or(RAW, Ordering::SeqCst);
             let mut out = io::stdout();
-            MODES.fetch_or(ALTERNATE, Ordering::SeqCst);
-            // Cleared directly: `Terminal::clear` queries the cursor position,
-            // which waits on a reply that some terminals never send.
-            execute!(out, EnterAlternateScreen, Clear(ClearType::All))?;
+            if mode == ScreenMode::Fullscreen {
+                MODES.fetch_or(ALTERNATE, Ordering::SeqCst);
+                // Cleared directly: `Terminal::clear` queries the cursor position,
+                // which waits on a reply that some terminals never send.
+                execute!(out, EnterAlternateScreen, Clear(ClearType::All))?;
+            } else {
+                MODES.fetch_or(INLINE, Ordering::SeqCst);
+            }
             MODES.fetch_or(PASTE, Ordering::SeqCst);
             execute!(out, EnableBracketedPaste)?;
             MODES.fetch_or(MOUSE, Ordering::SeqCst);
@@ -264,10 +290,16 @@ impl TerminalSession {
             // right edge instead of wrapping onto the row below.
             MODES.fetch_or(NO_WRAP, Ordering::SeqCst);
             execute!(out, DisableLineWrap)?;
-            Terminal::new(CrosstermBackend::new(out))
+            match mode {
+                ScreenMode::Fullscreen => Terminal::new(CrosstermBackend::new(out)),
+                ScreenMode::Inline => inline::fixed(Rect::default()),
+            }
         };
         match setup() {
-            Ok(terminal) => Ok(Self { terminal }),
+            Ok(terminal) => Ok(Self {
+                terminal,
+                inline: (mode == ScreenMode::Inline).then(Inline::default),
+            }),
             Err(err) => {
                 let _ = restore();
                 Err(err)
@@ -297,6 +329,11 @@ impl Screen for TerminalSession {
         MODES.fetch_or(SYNC, Ordering::SeqCst);
         execute!(self.terminal.backend_mut(), BeginSynchronizedUpdate)?;
         let drawn = (|| {
+            if let Some(inline) = &mut self.inline {
+                let held = inline.draw(&mut self.terminal, state)?;
+                HELD_ROWS.store(held, Ordering::SeqCst);
+                return Ok(());
+            }
             if stale {
                 let size = self.terminal.size()?;
                 self.terminal.resize(Rect::from(size))?;
@@ -339,6 +376,18 @@ fn restore() -> io::Result<()> {
     if modes & SYNC != 0 {
         keep(execute!(out, EndSynchronizedUpdate));
     }
+    // DECRC may restore saved rendition and autowrap as well as position;
+    // release the inline save slot before restoring those terminal modes.
+    if modes & INLINE != 0 {
+        let held = HELD_ROWS.swap(0, Ordering::SeqCst);
+        if held > 0 {
+            keep(execute!(
+                out,
+                RestorePosition,
+                Clear(ClearType::FromCursorDown)
+            ));
+        }
+    }
     if modes & NO_WRAP != 0 {
         keep(execute!(out, EnableLineWrap));
     }
@@ -376,11 +425,16 @@ fn install_panic_hook() {
 /// A loop error takes priority over a restoration error; otherwise a
 /// restoration error is returned.
 pub fn run_preview() -> io::Result<PreviewExit> {
+    run_preview_mode(ScreenMode::Fullscreen)
+}
+
+/// Runs the existing sample preview in the selected terminal screen.
+pub fn run_preview_mode(mode: ScreenMode) -> io::Result<PreviewExit> {
     let (sender, inputs) = mpsc::channel();
     // Declared first so it is dropped last: signals stay handled until the
     // terminal is restored.
     let signals = signals::Forwarder::start(sender.clone())?;
-    let mut session = TerminalSession::acquire()?;
+    let mut session = TerminalSession::acquire_mode(mode)?;
     let env = |name: &str| std::env::var(name).ok();
     let mut state = State::new(frame::resolve(env, cfg!(windows)), Tones::resolve(env));
     state.status.cwd = working_directory(env);

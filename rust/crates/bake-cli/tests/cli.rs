@@ -36,10 +36,12 @@ fn help_and_version_work_without_a_terminal() {
 
 #[test]
 fn preview_refuses_non_terminal_streams_before_writing_any_output() {
-    let out = run(&["preview"]);
-    assert_eq!(out.status.code(), Some(1));
-    assert!(out.stdout.is_empty(), "no terminal sequences on stdout");
-    assert!(text(&out.stderr).contains("needs an interactive terminal"));
+    for args in [&["preview"][..], &["preview", "--inline"]] {
+        let out = run(args);
+        assert_eq!(out.status.code(), Some(1));
+        assert!(out.stdout.is_empty(), "no terminal sequences on stdout");
+        assert!(text(&out.stderr).contains("needs an interactive terminal"));
+    }
 }
 
 #[test]
@@ -67,4 +69,15 @@ fn unknown_options_fail_as_pi_reports_them() {
         text(&out.stderr),
         "Error: Invalid mode \"rpc\". Valid values: text, json\n"
     );
+}
+
+#[test]
+fn inline_preview_is_documented_and_rejects_extra_arguments() {
+    let help = run(&["--help"]);
+    assert!(help.status.success());
+    assert!(text(&help.stdout).contains("--inline"));
+    let out = run(&["preview", "--inline", "now"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(out.stdout.is_empty());
+    assert!(text(&out.stderr).contains("unexpected argument 'now'"));
 }

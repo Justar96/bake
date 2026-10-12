@@ -32,6 +32,8 @@ use crate::transcript::{self, Look, TagTone};
 /// Cells between the terminal's edges and rows drawn outside the box, so
 /// they align with the box's contents.
 const INSET: u16 = 2;
+/// Transcript rows retained in the inline live region before the controls.
+const INLINE_BODY_ROWS: u16 = 8;
 
 fn dim() -> Style {
     Style::new().add_modifier(Modifier::DIM)
@@ -41,26 +43,58 @@ fn accent() -> Style {
     Style::new().fg(Color::Cyan)
 }
 
-/// Draws one frame. The only state it changes is the composer window, which
-/// follows the caret within the rows this frame grants it.
+/// Draws one frame, records its interaction geometry, and follows the draft
+/// caret within the composer rows this frame grants it.
 pub fn render(app: &mut State, frame: &mut Frame) {
+    render_region(app, frame, None, frame.area().height);
+}
+
+/// Draws the existing preview components in an inline held region. Settled
+/// rows already in terminal scrollback are excluded while following output.
+pub fn render_inline(app: &mut State, frame: &mut Frame, published: usize, terminal_height: u16) {
+    render_region(app, frame, Some(published), terminal_height);
+}
+
+fn needs(app: &State, width: u16) -> Needs {
+    let geometry = composer::geometry(width);
+    let draft = editor::layout(app.draft.text(), app.draft.caret(), geometry.wrap_width);
+    Needs {
+        draft_rows: u16::try_from(draft.rows.len()).unwrap_or(u16::MAX),
+        standing: true,
+        notice: u16::from(app.notice.is_some() || app.quitting()),
+        pending: panel_rows(app.pending.len()),
+        panel: panel_rows(app.attachments.len()),
+        menu: menu_rows(app),
+    }
+}
+
+/// Natural controls plus a bounded transcript, with the same composer window
+/// policy as the fullscreen preview. Short terminals retain its collapse order.
+pub fn inline_height(app: &State, width: u16, terminal_height: u16) -> u16 {
+    let rows = layout::plan(terminal_height, needs(app, width));
+    // Keep navigation's measured viewport stable when live output settles;
+    // the held controls still grow with the draft and its panels.
+    let body = rows.body.min(INLINE_BODY_ROWS);
+    rows.total() - rows.body + body
+}
+
+fn render_region(
+    app: &mut State,
+    frame: &mut Frame,
+    published: Option<usize>,
+    terminal_height: u16,
+) {
     let area = frame.area();
     if area.is_empty() {
         return;
     }
     let geometry = composer::geometry(area.width);
     let draft = editor::layout(app.draft.text(), app.draft.caret(), geometry.wrap_width);
-    let rows = layout::plan(
-        area.height,
-        Needs {
-            draft_rows: u16::try_from(draft.rows.len()).unwrap_or(u16::MAX),
-            standing: true,
-            notice: u16::from(app.notice.is_some() || app.quitting()),
-            pending: panel_rows(app.pending.len()),
-            panel: panel_rows(app.attachments.len()),
-            menu: menu_rows(app),
-        },
-    );
+    let mut rows = layout::plan(terminal_height, needs(app, area.width));
+    if published.is_some() {
+        rows.body = area.height.saturating_sub(rows.total() - rows.body);
+    }
+    app.transcript_published = published.unwrap_or(0);
 
     let mut y = area.y;
     let mut next = |height: u16| {
@@ -91,7 +125,7 @@ pub fn render(app: &mut State, frame: &mut Frame) {
     let buf = frame.buffer_mut();
     app.latest = None;
     app.transcript_area = None;
-    render_body(app, body, gap, buf);
+    render_body(app, body, gap, buf, published);
     // The prompt to press Ctrl+C again takes the notice's row while it is
     // armed; the notice returns when it lapses.
     if app.quitting() {
@@ -805,7 +839,13 @@ fn tone_style(tone: Tone, tones: Tones) -> Style {
 /// the gap row just above the controls, so it reads with the bar and the
 /// box rather than over the text. The planner grants the gap before any
 /// viewport row, so a viewport always has one under it.
-fn render_transcript(app: &mut State, area: Rect, gap: Rect, buf: &mut Buffer) {
+fn render_transcript(
+    app: &mut State,
+    area: Rect,
+    gap: Rect,
+    buf: &mut Buffer,
+    published: Option<usize>,
+) {
     let rows = area.height;
     let hint = (gap.height > 0).then_some(gap);
     // The last column is the scrollbar's, whether or not it is drawn, so
@@ -824,8 +864,19 @@ fn render_transcript(app: &mut State, area: Rect, gap: Rect, buf: &mut Buffer) {
         },
     );
     let range = app.selecting.range();
-    for (i, (at, content)) in view.screen().into_iter().enumerate() {
-        let y = area.y + i as u16;
+    let inline_follow = published.is_some() && view.following();
+    let screen: Vec<_> = view
+        .screen()
+        .into_iter()
+        .filter(|(at, _)| !inline_follow || at.row >= published.unwrap_or(0))
+        .collect();
+    let offset = if inline_follow {
+        rows.saturating_sub(screen.len() as u16)
+    } else {
+        0
+    };
+    for (i, (at, content)) in screen.into_iter().enumerate() {
+        let y = area.y + offset + i as u16;
         // The cells a selection covers are drawn reversed, keeping their
         // own colours, as a terminal draws its own selection.
         let selected = range.and_then(|range| line_columns(range, at, &content.to_string()));
@@ -840,11 +891,14 @@ fn render_transcript(app: &mut State, area: Rect, gap: Rect, buf: &mut Buffer) {
     }
     app.transcript_area = Some(Area {
         x: area.x,
-        y: area.y,
+        y: area.y + offset,
         width,
-        rows,
-    });
-    let thumb = bar.then(|| view.thumb(usize::from(rows))).flatten();
+        rows: rows - offset,
+    })
+    .filter(|area| area.rows > 0);
+    let thumb = (bar && !inline_follow)
+        .then(|| view.thumb(usize::from(rows)))
+        .flatten();
     app.track = thumb.map(|_| ScrollTrack {
         column: area.x + width,
         top: area.y,
@@ -1030,14 +1084,14 @@ fn scrollbar_look(
     (glyphs, styles)
 }
 
-fn render_body(app: &mut State, area: Rect, gap: Rect, buf: &mut Buffer) {
+fn render_body(app: &mut State, area: Rect, gap: Rect, buf: &mut Buffer, published: Option<usize>) {
     if area.is_empty() {
         return;
     }
     let width = usize::from(area.width);
     let classic = app.frame == FrameStyle::Classic;
     let lines = match app.focus {
-        Focus::Composer => return render_transcript(app, area, gap, buf),
+        Focus::Composer => return render_transcript(app, area, gap, buf, published),
         Focus::AgentList => agent_list(app.selected, width, classic, app.tones),
         Focus::Inspect(id) => inspection(
             agent(id).unwrap_or(&SAMPLE_AGENTS[0]),
@@ -2405,6 +2459,92 @@ mod tests {
         update(&mut app, Msg::Runtime(RuntimeUpdate::Pending(Vec::new())));
         let (rows, _) = draw(&mut app, 60, 24);
         assert!(!rows.iter().any(|r| r.contains("Pending input")));
+    }
+
+    #[test]
+    fn inline_keeps_fullscreen_composer_rows_and_absolute_mouse_geometry() {
+        use ratatui_core::terminal::{TerminalOptions, Viewport};
+        for width in [1, 12, 40, 80] {
+            for physical_height in [1, 4, 8, 24, 40] {
+                for draft_rows in [1, 2, 5, 12] {
+                    let mut app = State::default();
+                    app.draft.paste(&vec!["x"; draft_rows].join("\n"));
+                    let height = inline_height(&app, width, physical_height);
+                    let expected = layout::plan(physical_height, needs(&app, width)).composer;
+                    let published = app.settled_rows();
+                    let mut terminal = Terminal::with_options(
+                        TestBackend::new(width, physical_height),
+                        TerminalOptions {
+                            viewport: Viewport::Fixed(Rect::new(
+                                0,
+                                physical_height - height,
+                                width,
+                                height,
+                            )),
+                        },
+                    )
+                    .unwrap();
+                    terminal
+                        .draw(|frame| render_inline(&mut app, frame, published, physical_height))
+                        .unwrap();
+                    let spot = app.draft_spot.unwrap();
+                    assert_eq!(
+                        spot.rows, expected,
+                        "{width}x{physical_height}, {draft_rows} draft rows"
+                    );
+                    assert!(spot.top_row >= physical_height - height);
+                    let expected_caret =
+                        editor::layout(app.draft.text(), app.draft.caret(), spot.width).rows
+                            [spot.first]
+                            .start;
+                    update(
+                        &mut app,
+                        mouse(MouseKind::Down, spot.text_x, spot.top_row, 0),
+                    );
+                    assert_eq!(app.draft.caret(), expected_caret);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn inline_selection_copies_the_displayed_live_row_after_padding() {
+        use ratatui_core::terminal::{TerminalOptions, Viewport};
+        let mut app = State::default();
+        let published = app.settled_rows();
+        app.transcript
+            .set_live(vec![transcript::Row::Answer("live words".into())]);
+        let height = (inline_height(&app, 80, 24) + 3).min(24);
+        let mut terminal = Terminal::with_options(
+            TestBackend::new(80, 24),
+            TerminalOptions {
+                viewport: Viewport::Fixed(Rect::new(0, 24 - height, 80, height)),
+            },
+        )
+        .unwrap();
+        terminal
+            .draw(|frame| render_inline(&mut app, frame, published, 24))
+            .unwrap();
+        let area = app.transcript_area.unwrap();
+        let displayed: Vec<_> = app
+            .transcript
+            .screen()
+            .into_iter()
+            .filter(|(at, _)| at.row >= published)
+            .collect();
+        let row = displayed
+            .iter()
+            .position(|(_, text)| text.to_string().contains("live words"))
+            .unwrap();
+        let column =
+            u16::try_from(displayed[row].1.to_string().find("live words").unwrap()).unwrap();
+        let y = area.y + row as u16;
+        update(&mut app, mouse(MouseKind::Down, column, y, 0));
+        update(&mut app, mouse(MouseKind::Drag, column + 10, y, 10));
+        assert_eq!(
+            update(&mut app, mouse(MouseKind::Up, column + 10, y, 20)),
+            vec![Effect::Copy("live words".into())]
+        );
     }
 
     #[test]
