@@ -1,7 +1,7 @@
 /** Loop-shape metrics over synthetic Bake and pi event streams. */
 import { describe, expect, test } from 'bun:test'
 import {
-  backgroundStarts, type Call, compactions, editCheckSplits, excessRequests, isBareGlob, normalizeBake, normalizePi, orientationCalls, ranCheck,
+  backgroundStarts, type Call, compactions, editCheckSplits, excessRequests, isBareGlob, jsonModeCompactions, normalizeBake, normalizePi, orientationCalls, ranCheck,
   readsFile, requestsOverFloor, runawayAbort, shellEdits, verifiedBeforeFinal,
 } from './metrics.ts'
 
@@ -155,6 +155,14 @@ describe('counters', () => {
     expect(compactions([
       { type: 'compaction/start', data: {} }, { type: 'compaction/summary', data: {} }, { type: 'compaction/end', data: {} },
       { type: 'compaction/start', data: {} }, { type: 'compaction/end', data: { error: 'still above threshold' } },
+    ])).toEqual({ summaries: 1, errors: 1 })
+  })
+
+  test('JSON-mode compactions count completed and failed compaction_end events, not aborted ones', () => {
+    expect(jsonModeCompactions([
+      { type: 'compaction_start' }, { type: 'compaction_end', result: { summary: 's' }, aborted: false },
+      { type: 'compaction_start' }, { type: 'compaction_end', aborted: false, errorMessage: 'summary failed' },
+      { type: 'compaction_start' }, { type: 'compaction_end', aborted: true },
     ])).toEqual({ summaries: 1, errors: 1 })
   })
 })

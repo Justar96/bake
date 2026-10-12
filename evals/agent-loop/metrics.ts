@@ -205,3 +205,16 @@ export function compactions(events: readonly { type?: string; data?: any }[]) {
     errors: events.filter(event => event.type === 'compaction/end' && typeof event.data?.error === 'string').length,
   }
 }
+
+/**
+ * Compactions from a Pi-shaped `--mode json` stream, as `bake-rs` writes it:
+ * a `compaction_end` with a result is a completed summary, and one with an
+ * `errorMessage` ended in an error. Aborted compactions count as neither.
+ */
+export function jsonModeCompactions(events: readonly { type?: string; result?: unknown; aborted?: unknown; errorMessage?: unknown }[]) {
+  const ends = events.filter(event => event.type === 'compaction_end')
+  return {
+    summaries: ends.filter(event => event.result !== undefined && event.aborted !== true).length,
+    errors: ends.filter(event => typeof event.errorMessage === 'string').length,
+  }
+}

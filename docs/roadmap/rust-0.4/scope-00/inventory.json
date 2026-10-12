@@ -669,6 +669,7 @@
     {"path":"apps/tui/packages/ui/tests/welcome.spec.tsx","lane":"vitest-tui","owner":"apps/tui/packages/ui","scopes":["14","15"],"disposition":"reuse-oracle","basis":"apps/tui/packages/ui"},
     {"path":"apps/tui/packages/ui/tests/wheel.test.ts","lane":"bun-tui","owner":"apps/tui/packages/ui","scopes":["14","15"],"disposition":"reuse-oracle","basis":"apps/tui/packages/ui"},
     {"path":"apps/tui/tests/no-bun-runtime.test.ts","lane":"bun-tui","owner":"apps/tui","scopes":["14"],"disposition":"replace-tooling","basis":"apps/tui"},
+    {"path":"evals/agent-loop/arms.test.ts","lane":"bun-evals","owner":"evals","scopes":["01","09"],"disposition":"replace-tooling","basis":"evals"},
     {"path":"evals/agent-loop/composition.test.ts","lane":"bun-evals","owner":"evals","scopes":["01","09"],"disposition":"replace-tooling","basis":"evals"},
     {"path":"evals/agent-loop/launch.test.ts","lane":"bun-evals","owner":"evals","scopes":["01","09"],"disposition":"replace-tooling","basis":"evals"},
     {"path":"evals/agent-loop/metrics.test.ts","lane":"bun-evals","owner":"evals","scopes":["01","09"],"disposition":"replace-tooling","basis":"evals"},
