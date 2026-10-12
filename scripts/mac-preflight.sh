@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Remote commands are built here on purpose, from values this script controls.
+# shellcheck disable=SC2029
 # Run a check on a Mac over SSH against this checkout's working tree, since no
 # CI job runs on macOS. Tracked changes go too, staged or not; untracked
 # files do not.
