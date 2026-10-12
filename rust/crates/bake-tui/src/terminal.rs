@@ -5,9 +5,15 @@
 //! a panic, or a handled SIGINT/SIGTERM/SIGHUP restores exactly what was
 //! changed.
 //!
+//! A terminal that goes away ends the preview as a [`PreviewExit::Hangup`]:
+//! SIGHUP, a hangup the watcher thread sees on standard input or output, or a
+//! write that fails with EIO or EPIPE. Restoring a terminal that is gone
+//! fails, so those failures are dropped, as the TypeScript launcher's
+//! `tolerateLostTerminal` drops them.
+//!
 //! The loop owns the view's state and the terminal. An input thread, the
-//! runtime port's thread, and, on Unix, a signal thread only send it
-//! messages over one channel; the loop waits for the next message or the
+//! runtime port's thread, and, on Unix, a signal thread and a hangup watcher
+//! only send it messages over one channel; the loop waits for the next message or the
 //! view's next timed change, applies every waiting message, and draws once.
 
 use std::io::{self, Stdout};
@@ -180,6 +186,11 @@ static MODES: AtomicU8 = AtomicU8::new(0);
 /// stop. It bounds how long shutdown waits to join the thread; input itself
 /// is read as soon as it arrives.
 const READER_WAKE: Duration = Duration::from_millis(50);
+/// How long shutdown waits for the input thread after a hangup. Crossterm's
+/// reader retries a failed or empty read without returning, so on a terminal
+/// that is gone the thread may never stop; past this it ends with the
+/// process.
+const HANGUP_JOIN: Duration = Duration::from_millis(100);
 /// Messages applied before a frame is drawn, so a long burst still draws.
 const MAX_BATCH: usize = 256;
 /// The shortest gap between frames that only runtime updates prompted. A
@@ -190,13 +201,21 @@ const RUNTIME_FRAME: Duration = Duration::from_millis(16);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PreviewExit {
     Quit,
-    /// A handled termination signal, by number.
+    /// A handled termination signal, by number. SIGHUP is a
+    /// [`PreviewExit::Hangup`] instead.
     Signal(i32),
+    /// The terminal went away: SIGHUP, a hangup on standard input or output,
+    /// or a write that failed with EIO or EPIPE. Nothing can be shown on it,
+    /// so the caller should exit quietly with the SIGHUP status, 129.
+    Hangup,
 }
 
 /// What the loop receives from the threads that feed it.
 enum Source {
     Msg(Msg),
+    // Only Unix watches for a hangup; elsewhere, only tests send one.
+    #[cfg_attr(not(unix), allow(dead_code))]
+    Hangup,
     // Only Unix forwards signals; elsewhere, only tests send one.
     #[cfg_attr(not(unix), allow(dead_code))]
     Signal(i32),
@@ -373,7 +392,15 @@ pub fn run_preview() -> io::Result<PreviewExit> {
     let clock = Instant::now();
     // Started only once raw mode is on, so it never reads cooked input.
     let updates = sender.clone();
+    let watched = sender.clone();
     let outcome = Reader::start(sender, clock).and_then(|reader| {
+        let watcher = match hangup::Watcher::start(watched) {
+            Ok(watcher) => watcher,
+            Err(err) => {
+                let _ = reader.stop();
+                return Err(err);
+            }
+        };
         let clipboard = Clipboard::new(Platform::current(), env);
         let home = env(if cfg!(windows) { "USERPROFILE" } else { "HOME" });
         let found = updates.clone();
@@ -402,17 +429,37 @@ pub fn run_preview() -> io::Result<PreviewExit> {
         );
         // Joined before the terminal leaves raw mode, so it reads nothing
         // meant for the shell, and no runtime update or found path outlives
-        // the loop.
+        // the loop. After a hangup there is no shell, and the reader may be
+        // stuck, so it is waited for only briefly.
         let ported = port.stop();
         let searched = finder.stop();
-        let stopped = reader.stop();
+        drop(watcher);
+        let stopped = if matches!(outcome, Ok(PreviewExit::Hangup)) {
+            reader.abandon(HANGUP_JOIN);
+            Ok(())
+        } else {
+            reader.stop()
+        };
         outcome.and_then(|exit| ported.and(searched).and(stopped).map(|()| exit))
     });
     let closed = session.close();
     drop(signals);
     let exit = outcome?;
-    closed?;
+    if exit != PreviewExit::Hangup {
+        closed?;
+    }
     Ok(exit)
+}
+
+/// Whether an I/O error means the terminal is gone: EIO from a hung-up
+/// terminal, or EPIPE (on Windows, a closed console's pipe) from a closed
+/// reader.
+fn hung_up(err: &io::Error) -> bool {
+    #[cfg(unix)]
+    if err.raw_os_error() == Some(libc::EIO) {
+        return true;
+    }
+    err.kind() == io::ErrorKind::BrokenPipe
 }
 
 /// What the loop hands effects to: the clipboard and image jobs, the
@@ -430,6 +477,21 @@ struct Owners<'a> {
 /// alone waits until [`RUNTIME_FRAME`] after the last frame. Returns when
 /// the view asks to quit, a signal arrives, or input fails.
 fn run_loop(
+    screen: &mut impl Screen,
+    state: &mut State,
+    inputs: &Receiver<Source>,
+    clock: Instant,
+    owners: Owners,
+) -> io::Result<PreviewExit> {
+    match drive(screen, state, inputs, clock, owners) {
+        Err(err) if hung_up(&err) => Ok(PreviewExit::Hangup),
+        outcome => outcome,
+    }
+}
+
+/// The loop itself; [`run_loop`] turns a lost terminal's errors into a
+/// hangup.
+fn drive(
     screen: &mut impl Screen,
     state: &mut State,
     inputs: &Receiver<Source>,
@@ -480,6 +542,7 @@ fn run_loop(
         loop {
             match source {
                 Source::Signal(signal) => return Ok(PreviewExit::Signal(signal)),
+                Source::Hangup => return Ok(PreviewExit::Hangup),
                 Source::Failed(err) => return Err(err),
                 Source::Msg(msg) => {
                     input |= !matches!(msg, Msg::Runtime(_));
@@ -558,6 +621,15 @@ impl Reader {
         self.join()
     }
 
+    /// Stops the thread and waits at most `limit` for it; a thread still
+    /// running then is left to end with the process.
+    fn abandon(mut self, limit: Duration) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(thread) = self.thread.take() {
+            join_within(thread, limit);
+        }
+    }
+
     fn join(&mut self) -> io::Result<()> {
         self.stop.store(true, Ordering::SeqCst);
         match self.thread.take() {
@@ -573,6 +645,20 @@ impl Drop for Reader {
     fn drop(&mut self) {
         let _ = self.join();
     }
+}
+
+/// Joins `thread` if it finishes within `limit`, and otherwise detaches it.
+/// Returns whether it finished.
+fn join_within(thread: JoinHandle<()>, limit: Duration) -> bool {
+    let deadline = Instant::now() + limit;
+    while !thread.is_finished() {
+        if Instant::now() >= deadline {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
+    let _ = thread.join();
+    true
 }
 
 /// Tells the loop that input has ended however the input thread exits,
@@ -619,6 +705,14 @@ mod signals {
 
     use super::Source;
 
+    fn source(signal: i32) -> Source {
+        if signal == SIGHUP {
+            Source::Hangup
+        } else {
+            Source::Signal(signal)
+        }
+    }
+
     /// Forwards SIGINT, SIGTERM, and SIGHUP to the loop instead of
     /// terminating, so the loop can restore the terminal. Raw mode turns the
     /// Ctrl-C key into input, so SIGINT arrives only from another process.
@@ -640,7 +734,7 @@ mod signals {
                 .name("bake-tui-signals".into())
                 .spawn(move || {
                     for signal in signals.forever() {
-                        if sender.send(Source::Signal(signal)).is_err() {
+                        if sender.send(source(signal)).is_err() {
                             break;
                         }
                     }
@@ -658,6 +752,107 @@ mod signals {
             if let Some(thread) = self.thread.take() {
                 let _ = thread.join();
             }
+        }
+    }
+}
+
+#[cfg(unix)]
+mod hangup {
+    use std::io;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::mpsc::Sender;
+    use std::thread::{self, JoinHandle};
+
+    use super::{READER_WAKE, Source};
+
+    /// Sends [`Source::Hangup`] once standard input or output reports a
+    /// hangup or an error. The kernel hangs a terminal up when its emulator
+    /// closes, and SIGHUP follows only for a process that the terminal
+    /// controls; meanwhile Crossterm's reader retries the failed reads
+    /// without returning, so the loop would wait forever.
+    pub struct Watcher {
+        stop: Arc<AtomicBool>,
+        thread: Option<JoinHandle<()>>,
+    }
+
+    impl Watcher {
+        pub fn start(sender: Sender<Source>) -> io::Result<Self> {
+            let stop = Arc::new(AtomicBool::new(false));
+            let flag = Arc::clone(&stop);
+            let thread = thread::Builder::new()
+                .name("bake-tui-hangup".into())
+                .spawn(move || watch(&[libc::STDIN_FILENO, libc::STDOUT_FILENO], &sender, &flag))?;
+            Ok(Self {
+                stop,
+                thread: Some(thread),
+            })
+        }
+    }
+
+    impl Drop for Watcher {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::SeqCst);
+            if let Some(thread) = self.thread.take() {
+                let _ = thread.join();
+            }
+        }
+    }
+
+    /// Polls `fds` for no events, which still reports a hangup or an error,
+    /// waking every [`READER_WAKE`] to check `stop`. A descriptor poll cannot
+    /// watch, which macOS reports for some devices, ends the watch instead
+    /// of counting as a hangup.
+    pub(super) fn watch(fds: &[libc::c_int], sender: &Sender<Source>, stop: &AtomicBool) {
+        let wake = libc::c_int::try_from(READER_WAKE.as_millis()).unwrap_or(libc::c_int::MAX);
+        let mut polled: Vec<libc::pollfd> = fds
+            .iter()
+            .map(|&fd| libc::pollfd {
+                fd,
+                events: 0,
+                revents: 0,
+            })
+            .collect();
+        let count = libc::nfds_t::try_from(polled.len()).unwrap_or(0);
+        while !stop.load(Ordering::SeqCst) {
+            // SAFETY: `polled` holds `count` initialized records and outlives
+            // the call.
+            let ready = unsafe { libc::poll(polled.as_mut_ptr(), count, wake) };
+            if ready < 0 {
+                if io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {
+                    continue;
+                }
+                return;
+            }
+            let events = polled.iter().fold(0, |all, fd| all | fd.revents);
+            if events & libc::POLLNVAL != 0 {
+                return;
+            }
+            if events & (libc::POLLHUP | libc::POLLERR) != 0 {
+                let _ = sender.send(Source::Hangup);
+                return;
+            }
+        }
+    }
+}
+
+#[cfg(not(unix))]
+mod hangup {
+    use std::io;
+    use std::sync::mpsc::Sender;
+
+    use super::Source;
+
+    /// Watches nothing: a closed console fails the next write with a broken
+    /// pipe, which ends the loop as a hangup. It holds its sender for as long
+    /// as the Unix watcher's thread would, as the signal forwarder does.
+    pub struct Watcher {
+        _sender: Sender<Source>,
+    }
+
+    impl Watcher {
+        pub fn start(sender: Sender<Source>) -> io::Result<Self> {
+            Ok(Self { _sender: sender })
         }
     }
 }
@@ -904,6 +1099,99 @@ mod tests {
             Scripted::new(vec![vec![key('x'), Source::Signal(15), key('y')]]);
         assert_eq!(run(&mut screen, &inputs).unwrap(), PreviewExit::Signal(15));
         assert_eq!(screen.frames.len(), 1);
+    }
+
+    #[test]
+    fn a_hangup_ends_the_loop_before_the_rest_of_its_batch() {
+        let (mut screen, inputs) = Scripted::new(vec![vec![key('x'), Source::Hangup, key('y')]]);
+        assert_eq!(run(&mut screen, &inputs).unwrap(), PreviewExit::Hangup);
+        assert_eq!(screen.frames.len(), 1);
+    }
+
+    /// Fails every frame with one error.
+    struct Lost(fn() -> io::Error);
+
+    impl Screen for Lost {
+        fn draw(&mut self, _state: &mut State, _stale: bool) -> io::Result<()> {
+            Err((self.0)())
+        }
+
+        fn write(&mut self, _sequence: &str) -> io::Result<()> {
+            Err((self.0)())
+        }
+    }
+
+    fn draw_fails(error: fn() -> io::Error) -> io::Result<PreviewExit> {
+        let (_sender, inputs) = mpsc::channel();
+        let mut state = State::default();
+        run_loop(
+            &mut Lost(error),
+            &mut state,
+            &inputs,
+            Instant::now(),
+            owners(&|_| {}),
+        )
+    }
+
+    #[test]
+    fn a_write_to_a_lost_terminal_is_a_hangup_and_other_failures_are_errors() {
+        let broken = || io::Error::from(io::ErrorKind::BrokenPipe);
+        assert_eq!(draw_fails(broken).unwrap(), PreviewExit::Hangup);
+        #[cfg(unix)]
+        assert_eq!(
+            draw_fails(|| io::Error::from_raw_os_error(libc::EIO)).unwrap(),
+            PreviewExit::Hangup
+        );
+        let err = draw_fails(|| io::Error::other("disk full")).unwrap_err();
+        assert_eq!(err.to_string(), "disk full");
+    }
+
+    #[test]
+    fn a_thread_that_does_not_stop_in_time_is_left_behind() {
+        let (release, wait) = mpsc::channel::<()>();
+        let stuck = thread::spawn(move || {
+            let _ = wait.recv();
+        });
+        assert!(!join_within(stuck, Duration::from_millis(20)));
+        drop(release);
+        assert!(join_within(thread::spawn(|| {}), Duration::from_secs(5)));
+    }
+
+    #[cfg(unix)]
+    fn pipe() -> [libc::c_int; 2] {
+        let mut ends = [0; 2];
+        // SAFETY: `ends` has room for the two descriptors `pipe` writes.
+        assert_eq!(unsafe { libc::pipe(ends.as_mut_ptr()) }, 0);
+        ends
+    }
+
+    #[cfg(unix)]
+    fn close(fd: libc::c_int) {
+        // SAFETY: each test closes only descriptors its own `pipe` opened.
+        unsafe { libc::close(fd) };
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_watcher_reports_a_hung_up_descriptor_and_otherwise_stops_when_asked() {
+        let [read, write] = pipe();
+        close(write);
+        let (sender, found) = mpsc::channel();
+        hangup::watch(&[read], &sender, &AtomicBool::new(false));
+        assert!(matches!(found.try_recv(), Ok(Source::Hangup)));
+        close(read);
+
+        let [read, write] = pipe();
+        let stop = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&stop);
+        let (sender, found) = mpsc::channel();
+        let watcher = thread::spawn(move || hangup::watch(&[read], &sender, &flag));
+        thread::sleep(READER_WAKE / 2);
+        stop.store(true, Ordering::SeqCst);
+        watcher.join().unwrap();
+        assert!(found.try_recv().is_err());
+        close(read);
+        close(write);
     }
 
     #[test]

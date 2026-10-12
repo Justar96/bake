@@ -136,6 +136,14 @@ class Preview {
     assert.throws(() => process.kill(this.process.pid, 0), 'application remains alive after exit')
   }
 
+  /** Close the terminal under the preview, as an emulator window closing does, and expect the quiet hangup exit. */
+  async hangUp(): Promise<void> {
+    this.pty.close()
+    const code = await Promise.race([this.exited, delay(5_000).then(() => 'timed out')])
+    assert.equal(code, 129, 'a closed terminal did not end the preview as a hangup')
+    assert.equal(this.process.signalCode, null)
+  }
+
   async close(): Promise<void> {
     if (this.code === undefined) this.process.kill('SIGKILL')
     await this.exited
@@ -376,6 +384,33 @@ await scenario('a prompt runs a fixture turn that streams, completes, takes a st
   await preview.wait('turn interrupted', () => /^ {2}■ Interrupted/mu.test(preview.screen)
     && /Bash: true +interrupted/u.test(preview.screen))
   await preview.quit()
+})
+
+await scenario('a resize while a turn streams redraws it once at the new width', async (preview) => {
+  preview.send('resize me\r')
+  await preview.wait('turn running', () => preview.screen.includes('Esc interrupts'))
+  await preview.resize(60, 20)
+  await preview.wait('turn completed narrow', () => preview.screen.includes('❯ Type a draft')
+    && /^ {2}✓ Completed {2}\d+s/mu.test(preview.screen))
+  assert.equal(preview.screen.split('\n').length, 20)
+  assert(preview.screen.split('\n').every(line => [...line].length <= 60), `a row is wider than the terminal\n${preview.screen}`)
+  assert.equal(preview.screen.split('> resize me').length - 1, 1, 'the prompt was drawn twice')
+  await preview.resize(80, 24)
+  await preview.wait('wide again', () => preview.screen.includes('> resize me'))
+  await preview.quit()
+})
+
+// The sample session's running call pulses, so the next frame's write can
+// see the hangup before the watcher does; the watcher has its own unit test.
+// Either way the input thread is stuck in Crossterm and must not be joined.
+await scenario('a terminal that closes while idle ends the preview quietly as a hangup', async (preview) => {
+  await preview.hangUp()
+})
+
+await scenario('a terminal that closes during a turn ends the preview quietly as a hangup', async (preview) => {
+  preview.send('hello\r')
+  await preview.wait('turn running', () => preview.screen.includes('Esc interrupts'))
+  await preview.hangUp()
 })
 
 if (process.platform === 'linux') {

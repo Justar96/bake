@@ -245,6 +245,9 @@ fn preview() -> ExitCode {
     }
     match bake_tui::run_preview() {
         Ok(PreviewExit::Quit) => ExitCode::SUCCESS,
+        // The terminal is gone, so there is nowhere to report anything; 129
+        // is the SIGHUP status the TypeScript launcher reports too.
+        Ok(PreviewExit::Hangup) => ExitCode::from(129),
         Ok(PreviewExit::Signal(signal)) => {
             ExitCode::from(u8::try_from(128 + signal).unwrap_or(u8::MAX))
         }
