@@ -22,12 +22,12 @@ describe('typeScriptNeed', () => {
 })
 
 describe('plan', () => {
-  it('runs every job on every platform outside the Rust line', () => {
+  it('runs every job outside the Rust line, on Linux and Windows but never macOS', () => {
     const chosen = plan(pull('develop'), false, undefined)
     expect(chosen.preflight.map(job => `${job.name}/${job.os}`)).toEqual([
-      'checks/ubuntu-latest', 'runtime/ubuntu-latest', 'checks/macos-latest', 'runtime/macos-latest',
+      'checks/ubuntu-latest', 'runtime/ubuntu-latest',
     ])
-    expect(chosen.rust).toEqual(['ubuntu-latest', 'macos-latest', 'windows-latest'])
+    expect(chosen.rust).toEqual(['ubuntu-latest', 'windows-latest'])
     expect(chosen.windowsRelease).toBe(true)
     expect(plan({ name: 'push', sameRepository: true }, false, undefined)).toEqual(chosen)
   })
@@ -41,9 +41,9 @@ describe('plan', () => {
     expect(plan(pull('main', 'develop', false), false, undefined).windowsRelease).toBe(true)
   })
 
-  it('runs the native job everywhere on the Rust line and TypeScript on Linux as needed', () => {
+  it('runs the native job on Linux and Windows on the Rust line and TypeScript on Linux as needed', () => {
     const rust = plan(pull(RUST_LINE), true, ['rust/src/a.rs'])
-    expect(rust.rust).toEqual(['ubuntu-latest', 'macos-latest', 'windows-latest'])
+    expect(rust.rust).toEqual(['ubuntu-latest', 'windows-latest'])
     expect(rust.preflight).toEqual([])
     expect(rust.windowsRelease).toBe(false)
     expect(plan(pull(RUST_LINE), true, ['rust/src/a.rs', 'CHANGELOG.md']).preflight)
