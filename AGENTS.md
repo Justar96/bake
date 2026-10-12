@@ -57,7 +57,7 @@ Run the checks relevant to your change while you work, and `bun run preflight` b
 `develop` is where work lands; `main` holds released code; `rust/0.4.0` collects the Rust 0.4 port. [CONTRIBUTING.md](CONTRIBUTING.md) covers pull requests and [distribution/README.md](distribution/README.md#release-with-github-actions) the release workflow.
 
 - Start every change, hotfixes included, on a new branch from an up-to-date `origin/develop`, and open its pull request against `develop`. Never commit to `main`, `develop`, or `rust/0.4.0` directly.
-- Rust port work, a change under the [0.4 roadmap](docs/roadmap/rust-0.4/README.md) (see [Rust 0.4 port](#rust-04-port)), starts instead from an up-to-date `origin/rust/0.4.0` and targets it. CI runs its native job on Linux and Windows and its TypeScript checks on Linux only as far as its files need. No CI job runs on macOS: before opening a pull request that touches `rust/`, native code, or terminal behavior, run `bun run preflight --only native` on a Mac and report its summary in the pull request. A pull request from `rust/0.4.0` into `develop` brings the line over with a merge commit and full CI; a pull request from `develop` into `rust/0.4.0` brings 0.3 fixes forward. A 0.3 fix still lands on `develop` first.
+- Rust port work, a change under the [0.4 roadmap](docs/roadmap/rust-0.4/README.md) (see [Rust 0.4 port](#rust-04-port)), starts instead from an up-to-date `origin/rust/0.4.0` and targets it. CI runs its native job on Linux and Windows and its TypeScript checks on Linux only as far as its files need. No CI job runs on macOS: before opening a pull request that touches `rust/`, native code, or terminal behavior, run `bun run preflight:mac` and paste its summary into the pull request (see [macOS checks](#macos-checks)). A pull request from `rust/0.4.0` into `develop` brings the line over with a merge commit and full CI; a pull request from `develop` into `rust/0.4.0` brings 0.3 fixes forward. A 0.3 fix still lands on `develop` first.
 - Split dependent changes into a stack of pull requests, each based on the one below, and link them with `gh stack link --base <trunk> <bottom> … <top>` so GitHub owns their order. The [stack review guide](docs/cookbook/responding-to-pr-review-on-a-stack.md) covers review fixes, and the `dsh-merging-stacked-prs` skill covers landing with `gh stack merge`.
 - `main` accepts only a merge-commit pull request from `develop`, which the `develop only` check enforces. Open one only to ship a release.
 - To release, finish the change on its branch, then:
@@ -65,6 +65,16 @@ Run the checks relevant to your change while you work, and `bun run preflight` b
   2. Run `bun run release:preflight --offline --tag v<version>`, then commit only those edits as `release: <version>`.
   3. Merge into `develop`, then open the pull request from `develop` to `main`.
   4. Once that merges, tag `main`'s merge commit `v<version>` and push only the tag. The tag publishes to every install, so push it only when the user asks for that release.
+
+## macOS checks
+
+macOS is checked on a Mac over SSH, not in CI. `bun run preflight:mac` sends this checkout's committed and tracked uncommitted changes to the Mac, runs `bun run preflight --only native` there, follows its log, and exits with its status. Pass another command to run that instead, such as `bun run preflight:mac 'cd rust && cargo test --locked -p bake-tui'`, and use `bun run preflight:mac --log` to print the last run again.
+
+- The SSH host is `macpro`, an alias in `~/.ssh/config` with key login, or `BAKE_MAC_HOST`. Never commit the Mac's address.
+- The first run clones the repository into `~/bake-ci` on the Mac (`BAKE_MAC_DIR`). The Mac needs git, Bun, and rustup.
+- The run is detached on the Mac, so a dropped connection does not stop it. Commands longer than a tool's time limit belong in a background job.
+- Report the Mac's architecture with its summary. The Mac in use is an Intel x86_64 machine, so Apple Silicon is checked only by the release builds.
+- When `macpro` cannot be reached, say so in the pull request instead of claiming macOS evidence.
 
 ## Rust 0.4 port
 
