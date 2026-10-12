@@ -10,7 +10,7 @@ export interface Call { tool: string; input: any; callId: string; step: number }
 /** Steps, calls, and results in one shape, whichever agent produced the event stream. */
 export interface Normalized {
   final: string
-  steps: { usage?: Record<string, number> }[]
+  steps: { usage?: Record<string, number> | undefined }[]
   calls: Call[]
   results: { callId: string; status: string; result: string }[]
 }

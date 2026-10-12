@@ -35,12 +35,14 @@ export function pairedChange<T>(pairs: [T, T][], metric: (sample: T) => number):
 }
 
 /**
- * A failed sample's category: `runaway` when the whitespace-runaway guard
+ * A failed sample's category: `invalid: <reason>` when the evaluator could not
+ * trust its own measurement, `runaway` when the whitespace-runaway guard
  * aborted a tool call, else the runner's abort cause, a non-zero exit, an
  * empty final reply, or a failed check. Null for a success.
  */
 export function failureOf(sample: Record<string, any>): string | null {
   if (sample.success === true) return null
+  if (typeof sample.invalid === 'string') return `invalid: ${sample.invalid}`
   if (sample.runawayAbort === true) return 'runaway'
   return sample.abortCause ?? (sample.code !== 0 ? `exit ${sample.code}` : (sample.final ?? '') === '' ? 'empty final reply' : 'validation failed')
 }

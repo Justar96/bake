@@ -33,7 +33,7 @@ import { createHash } from 'node:crypto'
 import YAML from 'yaml'
 import { reconcile } from './accounting.ts'
 import { compositionCheck, ROSTERS, systemPromptOf, type Roster } from './composition.ts'
-import { bakeCommand, bakeOverlay, nativeCommand, parseArms, type Arm } from './arms.ts'
+import { bakeCommand, bakeOverlay, nativeCommand, nativeStaleWriter, parseArms, strayContextFiles, type Arm } from './arms.ts'
 import {
   backgroundStarts, compactions, editCheckSplits, excessRequests, jsonModeCompactions, normalizeBake, normalizePi, orientationCalls, ranCheck,
   requestsOverFloor, routingDecisions, runawayAbort, shellEdits, verifiedBeforeFinal,
@@ -387,7 +387,9 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
     const env: Record<string, string | undefined> = { ...process.env, NO_COLOR: '1' }
     delete env.DEEPSEEK_API_KEY
     // bake-rs has no extensions, so a native arm's stale writer acts on its event stream instead (see the stdout reader).
-    let nativeStaleWriter: ((event: any) => void) | undefined
+    let nativeInjection: ReturnType<typeof nativeStaleWriter> | undefined
+    // Failures of the evaluator's own work during a sample, such as the stale writer's; any one makes the sample invalid.
+    const evaluatorErrors: string[] = []
     if (nativeRoute !== undefined) {
       const files = nativeRoute.home(`${server.url.origin}/upstream`)
       if (files.settings !== undefined) {
@@ -408,22 +410,10 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
       }), { mode: 0o600 })
       if (nativeRoute.keyName !== undefined) env.EVAL_API_KEY = credential(nativeRoute.keyName)
       Object.assign(env, { BAKE_HOME: home, DSH_HOME: home })
-      if (scenario === 'stale_edit') {
-        // The write lands when the evaluator reads the read's `tool_execution_end`
-        // line, which bake-rs writes before its next model request; the edit that
-        // must keep the comment comes at least one response later.
-        const reads = new Map<string, unknown>()
-        let changed = false
-        nativeStaleWriter = event => {
-          if (event.type === 'tool_execution_start' && event.toolName === 'read') reads.set(event.toolCallId, event.args?.path)
-          if (changed || event.type !== 'tool_execution_end' || event.toolName !== 'read' || event.isError) return
-          const path = reads.get(event.toolCallId)
-          if (typeof path !== 'string' || resolve(workspace, path) !== join(workspace, file)) return
-          changed = true
-          writeFileSync(join(workspace, file), '// EXTERNAL_CHANGE_KEEP\n' + readFileSync(join(workspace, file), 'utf8'))
-          writeFileSync(injectionPath, JSON.stringify({ injected: true }))
-        }
-      }
+      // bake-rs loads AGENTS.md and CLAUDE.md from every ancestor of its working directory and from its home.
+      const stray = strayContextFiles(workspace, home, usesAgentInstructions(scenario))
+      if (stray.length > 0) throw new Error(`${label}: bake-rs would load context files outside the fixture: ${stray.join(', ')}; move them or set TMPDIR to a directory without them`)
+      if (scenario === 'stale_edit') nativeInjection = nativeStaleWriter(workspace, join(workspace, file), injectionPath)
       command = nativeCommand(arm.bin!, nativeRoute.provider, model, route.effort, prompts[scenario]!)
     } else if (piRoute !== undefined) {
       const agentDir = join(root, 'pi-agent'); mkdirSync(agentDir, { mode: 0o700 })
@@ -468,7 +458,12 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
         let event: any
         try { event = JSON.parse(line) } catch { if (line.trim()) events.push({ type: 'unparsed', text: line.slice(0, 1000) }); continue }
         events.push(event)
-        nativeStaleWriter?.(event)
+        try { nativeInjection?.onEvent(event) } catch (error) {
+          // An evaluator failure, not the agent's: record it and stop the sample rather than throw out of the stream.
+          evaluatorErrors.push(`stale writer: ${(error as Error).message}`)
+          nativeInjection = undefined
+          terminate('evaluator_error')
+        }
       }
     })
     child.stderr!.setEncoding('utf8')
@@ -492,9 +487,12 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
     const logged = jsonMode ? [] : sessionEvents(join(root, 'sessions'))
     const workspaces = [workspace, realpathSync(workspace)]
     const toolErrors = results.filter(result => result.status === 'error').map(result => result.result)
+    // A sample whose measurement the evaluator could not trust is kept but left out of every comparison.
+    const invalid = evaluatorErrors.length > 0 ? 'evaluator_error' : nativeInjection?.state.raced === true ? 'stale_injection_raced' : null
     const summary = {
       label, model, provider: piRoute !== undefined ? 'eval' : nativeRoute?.provider ?? route.provider, agent: arm.kind, api, effort: route.effort, scenario, trial, variant, code, signal, abortCause: abortCause ?? null,
-      success: code === 0 && validated, validated, testsUnchanged, testExit, fixturesUnchanged,
+      success: invalid === null && code === 0 && validated, validated, invalid, evaluatorErrors,
+      staleInjection: nativeInjection === undefined ? null : nativeInjection.state, testsUnchanged, testExit, fixturesUnchanged,
       injectedStale: scenario === 'stale_edit' && existsSync(injectionPath),
       elapsedMs: Math.round(performance.now() - started), requests: wire.length, steps: steps.length,
       toolCalls: calls.length, byTool, toolErrors: toolErrors.length,
@@ -560,14 +558,15 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
 /**
  * The checkout's commit and whether its tracked files differ from it; a pi arm
  * records its package version instead, and a native arm its binary's version
- * and digest with the commit of the checkout holding it, if any.
+ * and digest with the provenance read when it was resolved: the commit of the
+ * checkout it was built from, or none for a prebuilt binary.
  */
 function revisionOf(arm: Arm) {
   if (arm.kind === 'pi') return { root: arm.root, agent: 'pi', version: arm.version, commit: null, dirty: false }
+  if (arm.kind === 'native') return { root: arm.root, agent: 'native', ...arm.revision, bin: arm.bin, version: arm.version, binarySha256: arm.binarySha256 }
   const { root } = arm
   const git = (...args: string[]) => Bun.spawnSync(['git', '-C', root, ...args]).stdout.toString().trim()
-  const checkout = { root, commit: git('rev-parse', 'HEAD') || null, dirty: git('status', '--porcelain', '--untracked-files=no') !== '' }
-  return arm.kind === 'native' ? { ...checkout, agent: 'native', bin: arm.bin, version: arm.version, binarySha256: arm.binarySha256 } : checkout
+  return { root, commit: git('rev-parse', 'HEAD'), dirty: git('status', '--porcelain', '--untracked-files=no') !== '' }
 }
 writeFileSync(join(out, 'design.json'), JSON.stringify({
   arms: Object.fromEntries(armNames.map(name => [name, ARMS[name]])),

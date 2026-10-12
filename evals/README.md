@@ -153,7 +153,9 @@ Run the adapter's script-arm tests with `bun test --timeout=30000 evals/agent-lo
 
 ### Native bake-rs arm
 
-An arm named `native` runs the native agent, `bake-rs -p --mode json`, through the same capturing proxy, fixtures, and checks as the other arms. `native` builds this evaluator's checkout with `cargo build --locked --release -p bake-cli` from its `rust/` directory, so the pinned toolchain applies; `native:<checkout>` builds another checkout the same way, and `native:<bin>` runs a built `bake-rs` as given. The build runs once, before any sample, and its output goes to stderr. `design.json` records each native arm's binary path, `bake-rs --version`, SHA-256, and the commit of the checkout holding it.
+An arm named `native` runs the native agent, `bake-rs -p --mode json`, through the same capturing proxy, fixtures, and checks as the other arms. `native` builds this evaluator's checkout with `cargo build --locked --release -p bake-cli` from its `rust/` directory, so the pinned toolchain applies, and `native:<checkout>` builds another checkout the same way. The arm runs the executable Cargo reports in its JSON messages, wherever `CARGO_TARGET_DIR` or `build.target-dir` put it, so an older binary left under `rust/target` is never measured. The build runs once, before any sample, and Cargo's progress goes to stderr. `native:<bin>` runs a prebuilt `bake-rs` as given.
+
+`design.json` records each native arm's binary path, `bake-rs --version`, and SHA-256. A built arm also records `prebuilt: false` with the checkout's commit and whether its tracked files differed, both read right after the build. A prebuilt binary records `prebuilt: true` with no commit, since nothing ties it to one, and a record names no candidate commit for it. A record meant to name a commit builds its native arm from a checkout.
 
 Each sample runs `bake-rs -p --mode json --no-session --permission danger-full-access --model <provider>/<model> --thinking <effort> -- <prompt>` in the fixture workspace, with `BAKE_HOME` and `DSH_HOME` set to the sample's private home. The evaluator fills that home as it fills a Bake arm's:
 
@@ -161,7 +163,11 @@ Each sample runs `bake-rs -p --mode json --no-session --permission danger-full-a
 - A DeepSeek model gets a `models.json` `deepseek` provider over Chat Completions at `api.deepseek.com`, whose model entry carries the shipped profile's metadata. `bake-rs` ships no Anthropic-format DeepSeek profile, so this arm reaches DeepSeek over the wire pi uses, not the Bake arm's. Its key, `DEEPSEEK_API_KEY` from the environment or `~/.bake/.credentials.yaml`, reaches the agent as `EVAL_API_KEY`.
 - `settings.json` turns agent-level retry off. A scenario that forces a context window also gets pi's compaction settings for that window (`piCompaction`).
 
-Every native arm uses Pi's system prompt and default tools: `read`, `bash`, `edit`, and `write`. `EVAL_ROSTER`, `EVAL_EXTRA_<ARM>`, and `EVAL_SETTINGS_<ARM>` apply to Bake arms only. `bake-rs` has no extensions, so its stale writer runs in the evaluator. The evaluator writes the change when it reads the `tool_execution_end` line of the first successful `read` of the target file. `bake-rs` writes that line before its next request, and the edit that must keep the change comes at least one response later. `bake-rs` has no `--no-context-files` option, so it loads `AGENTS.md` and `CLAUDE.md` from the workspace and its parent directories. A fixture under a temporary directory has no such file outside `instructions_file`.
+Every native arm uses Pi's system prompt and default tools: `read`, `bash`, `edit`, and `write`. `EVAL_ROSTER`, `EVAL_EXTRA_<ARM>`, and `EVAL_SETTINGS_<ARM>` apply to Bake arms only.
+
+`bake-rs` has no extensions, so its stale writer runs in the evaluator. The evaluator writes the change when it reads the `tool_execution_end` line of the first successful `read` of the target file, while `bake-rs` has already moved on. An edit in a later response comes after the write. An edit in the same response as that read can run before the write lands, whichever order its `tool_execution_start` line arrives in. The evaluator then records `staleInjection.raced` and marks the sample `invalid: stale_injection_raced`, which fails it and leaves its cell out of every comparison rather than scoring it as the agent's behavior. A pi arm has a narrower form of the same race that is not detected: its extension writes synchronously on the read's `tool_result`, but an edit pi runs in parallel with that read can still finish first. An exception in the writer stops the sample and marks it `invalid: evaluator_error`, with the message in `evaluatorErrors`.
+
+`bake-rs` has no `--no-context-files` option. It loads one `AGENTS.override.md`, `AGENTS.md`, or `CLAUDE.md` (in either case of `.md`) from its home and from each directory between the filesystem root and the workspace. Before each native sample, the evaluator looks for such files in the private home, the workspace's ancestors, and the workspace itself unless the scenario provides its own (`instructions_file`). If it finds any, it stops the run with an error naming them. Recording them instead would leave samples whose prompts differ from what the fixture defines. Move the files, or point `TMPDIR` at a directory without them.
 
 The `--mode json` stream is pi's, so `normalizePi` reads it. Each assistant `message_end` is a step, and its usage is that step's usage. Tool calls come from `tool_execution_start`, and tool errors come from `tool_execution_end`. The proxy counts requests and reconciles the wire's usage, as it does for every arm. `compactions` comes from `compaction_end` events rather than a session log. Each completed result is a summary, each `errorMessage` is an error, and aborted compactions count as neither. The following native fields are absent or are not comparable with a Bake arm's:
 
@@ -181,19 +187,27 @@ bun run check:rust          # builds rust/target/debug/bake-rs
 bun run test:rust:eval      # includes evals/agent-loop/native-arm-smoke.ts
 ```
 
-`native-arm-smoke.ts` runs the real `run.ts` with two native arms on the debug binary, `ordinary_edit` and `stale_edit`, one trial. Their `cliproxyapi` route points at a local OpenAI Responses server that scripts a `read`, then an `edit` sent with `node test.cjs`, then a final answer. The smoke checks success, requests, steps, tool calls by tool, usage totals and their reconciliation with the wire, the loop-shape metrics, compactions, the stale injection, and the revisions in `design.json`. It also checks that no raw output holds the route key. The smoke uses dummy credentials, owns its port and temporary root, and is skipped on Windows, where the live evaluator cannot stop process groups. It says nothing about a real model.
+`native-arm-smoke.ts` runs the real `run.ts` with two native arms on the debug binary, `ordinary_edit` and `stale_edit`, one trial. Their `cliproxyapi` route points at a local OpenAI Responses server that scripts a `read`, then an `edit` sent with `node test.cjs`, then a final answer. The smoke checks success, requests, steps, tool calls by tool, usage totals and their reconciliation with the wire, the loop-shape metrics, compactions, the stale injection, and the prebuilt revisions in `design.json`. It also checks that no raw output holds the route key. Before the server sends a `stale_edit` edit, it checks that the injected comment is already in the workspace file, so a late injection fails the smoke.
+
+Three controls follow:
+
+- A run whose read never names the target must fail both samples, with no injection and the check passing.
+- A run that reads and edits in one response must mark both samples `stale_injection_raced`.
+- An `AGENTS.md` above the workspace must stop the evaluator before any request.
+
+The smoke uses dummy credentials, owns its port and temporary root, and is skipped on Windows, where the live evaluator cannot stop process groups. It says nothing about a real model. `arms.test.ts` covers the writer (an errored read, another path, a single write, and the race in either order), the context-file search, the prebuilt revision, and the use of the executable Cargo reports.
 
 #### Live paired run
 
-A record of the native arm pairs it with the TypeScript arm of the same commit, on the standard suite with both model sets and three trials. Build both arms once in a clean checkout, then run one process per model. Each run spends model tokens, as described under [Run](#run).
+A record of the native arm pairs it with the TypeScript arm of the same commit, on the standard suite with both model sets and three trials. Build the TypeScript arm in a clean checkout, warm the Cargo build, then run one process per model. Each process names the checkout (`native:.`), so its own `cargo build` is a locked no-op that reports the binary and credits it to the checkout's commit. Each run spends model tokens, as described under [Run](#run).
 
 ```sh
 bun install --frozen-lockfile && bun run build
-(cd rust && cargo build --locked --release -p bake-cli)
+(cd rust && cargo build --locked --release -p bake-cli)   # once, so the parallel runs do not rebuild
 topic=native-arm
 mkdir -p .preflight/evals/agent-loop/$topic
 for model in gemini-3.8-flash-medium gpt-6.1-sol claude-sonnet-5-5 claude-opus-5-5 deepseek/deepseek-flash deepseek/deepseek-v4-pro; do
-  EVAL_ARMS=base=.,candidate=native:rust/target/release/bake-rs EVAL_MODELS=$model EVAL_TRIALS=3 \
+  EVAL_ARMS=base=.,candidate=native:. EVAL_MODELS=$model EVAL_TRIALS=3 \
     EVAL_CASES=standard EVAL_OUTPUT=.preflight/evals/agent-loop/$topic/${model#deepseek/} \
     bun run eval > .preflight/evals/agent-loop/$topic/${model#deepseek/}.log 2>&1 &
 done
@@ -258,7 +272,7 @@ Labels name what an arm measured: a tag such as `v0.2.0`, `<tag>+<short commit>`
 - the candidate failed at least two more runs than the base; or
 - tool errors rose.
 
-`--fail-on-regression` exits non-zero for scripts. A flagged regression is either fixed before merge or explained in the record's `--note` and in the PR, with its cause. Some regressions are the intended price of a change, as when a scenario pays for a `tool_help` read. Compare two versions only through a paired run. Absolute counts from runs on different days drift with the gateway, the provider's cache, and model updates.
+A cell in which either sample is `invalid`, because the evaluator could not trust its own measurement, is left out of every comparison and failure count. `summary.json` counts such cells as `invalidCells`, and `REPORT.md` lists their samples as `invalid: <reason>` failures. `--fail-on-regression` exits non-zero for scripts. A flagged regression is either fixed before merge or explained in the record's `--note` and in the PR, with its cause. Some regressions are the intended price of a change, as when a scenario pays for a `tool_help` read. Compare two versions only through a paired run. Absolute counts from runs on different days drift with the gateway, the provider's cache, and model updates.
 
 ## Rules
 
