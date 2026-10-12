@@ -413,6 +413,8 @@ pub struct State {
     pub draft_spot: Option<DraftSpot>,
     /// The transcript's lines as last drawn; a press there selects.
     pub transcript_area: Option<Area>,
+    /// Settled rows excluded from the inline live region while following.
+    pub(crate) transcript_published: usize,
     /// The transcript selection.
     pub selecting: Selecting,
     /// The terminal's columns at the last resize; a change drops the
@@ -445,6 +447,13 @@ impl Default for State {
 }
 
 impl State {
+    /// Rows that will not change again, including a sample script only after
+    /// its turn settles. Terminal scrollback may publish only these rows.
+    pub fn settled_rows(&self) -> usize {
+        self.live_call
+            .unwrap_or(self.transcript.committed())
+            .min(self.transcript.committed())
+    }
     pub fn new(frame: FrameStyle, tones: Tones) -> Self {
         Self {
             draft: Draft::default(),
@@ -471,6 +480,7 @@ impl State {
             latest: None,
             draft_spot: None,
             transcript_area: None,
+            transcript_published: 0,
             selecting: Selecting::default(),
             columns: 0,
             copied: None,
@@ -871,10 +881,11 @@ fn pointer_at(state: &mut State, mouse: Mouse) {
 }
 
 /// The lines on screen, each with the row and line that draw it.
-fn on_screen(transcript: &Transcript) -> Vec<(transcript::Anchor, String)> {
+fn on_screen(transcript: &Transcript, published: usize) -> Vec<(transcript::Anchor, String)> {
     transcript
         .screen()
         .into_iter()
+        .filter(|(at, _)| !transcript.following() || at.row >= published)
         .map(|(at, line)| (at, line.to_string()))
         .collect()
 }
@@ -893,7 +904,7 @@ fn press(state: &mut State, mouse: Mouse) {
         select.ends = None;
         return;
     };
-    let lines = on_screen(&state.transcript);
+    let lines = on_screen(&state.transcript, state.transcript_published);
     let anchors: Vec<_> = lines.iter().map(|(at, _)| *at).collect();
     let row = usize::from(mouse.row - area.y);
     let column = usize::from(mouse.column - area.x);
@@ -988,9 +999,7 @@ fn extend_to(state: &mut State, column: usize, row: isize) {
         return;
     };
     let width = usize::from(area.width);
-    let anchors: Vec<_> = state
-        .transcript
-        .screen()
+    let anchors: Vec<_> = on_screen(&state.transcript, state.transcript_published)
         .into_iter()
         .map(|(at, _)| at)
         .collect();
@@ -1628,6 +1637,19 @@ mod tests {
         assert_eq!(press(&mut state, Key::Enter), []);
         assert_eq!(state.notice, Some(Notice::NoImages));
         assert_eq!(state.draft.text(), "hi[Image #1]");
+    }
+
+    #[test]
+    fn animated_sample_is_published_only_after_settlement() {
+        let mut state = State::default();
+        let before = state.settled_rows();
+        toggle_activity(&mut state);
+        assert_eq!(state.transcript.committed(), before + 1);
+        assert_eq!(state.settled_rows(), before);
+        update(&mut state, Msg::Tick(Duration::from_secs(2)));
+        assert_eq!(state.settled_rows(), before);
+        end_turn(&mut state, Outcome::Interrupted);
+        assert_eq!(state.settled_rows(), before + 1);
     }
 
     #[test]

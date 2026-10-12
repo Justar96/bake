@@ -127,6 +127,7 @@
     "@types/mdast": "catalog:",
     "@types/node": "catalog:",
     "@vitest/coverage-v8": "^4.1.8",
+    "@xterm/addon-unicode11": "0.9.0",
     "eslint-plugin-sonarjs": "^4.1.0",
     "fast-check": "^4.8.0",
     "js-yaml": "catalog:",
