@@ -1186,8 +1186,8 @@ impl AgentSession {
     /// Pi's `dispose`, awaited: aborts and cancels the run, a retry wait,
     /// and a compaction, removes every listener so the cancelled work
     /// reports nothing, waits for the run's task, its session writes, and
-    /// its model requests, and disconnects from the agent. Later prompts
-    /// fail and emit no events.
+    /// its model requests, disconnects from the agent, and releases the
+    /// session file's writer lock. Later prompts fail and emit no events.
     pub async fn shutdown(&self) {
         // Closed before anything is cancelled: a cancelled retry wait or
         // compaction resumes on another worker at once, and Pi's
@@ -1206,6 +1206,9 @@ impl AgentSession {
         {
             subscription.unsubscribe();
         }
+        // Nothing writes the session any more: another writer may take
+        // its file over.
+        lock(&self.session).release_writer();
     }
 }
 

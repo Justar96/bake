@@ -70,6 +70,7 @@ fn every_truncation_opens_and_repairs() {
                     let written = fs::read(&file).expect("read");
                     assert_eq!(written.last(), Some(&b'\n'), "cut at {cut}");
                     session.append_message(user_msg("resumed")).expect("append");
+                    drop(session);
                     let reopened = SessionManager::open(&file, Some(&work), None).expect("reopen");
                     let messages = reopened.build_session_context().messages;
                     if let Some(last) = messages.last() {

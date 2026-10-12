@@ -825,6 +825,8 @@ mod tests {
         )
         .expect("continue");
         assert_eq!(continued.session_file(), Some(file.as_path()));
+        // The continued manager holds the file's writer lock until dropped.
+        drop(continued);
 
         let by_prefix = create_session_manager(
             &session_args(|args| args.session = Some("0193aaaa".into())),
@@ -834,6 +836,22 @@ mod tests {
         )
         .expect("by id");
         assert_eq!(by_prefix.session_file(), Some(file.as_path()));
+        // A second writer of the held file is refused, by id and by
+        // `--continue`, until the holder is dropped.
+        let locked = Some(SessionStartError::Error(format!(
+            "Session file is in use by another writer: {}",
+            file.display()
+        )));
+        for args in [
+            session_args(|args| args.session = Some("0193aaaa".into())),
+            session_args(|args| args.continue_session = true),
+        ] {
+            assert_eq!(
+                create_session_manager(&args, &cwd, None, &home).err(),
+                locked
+            );
+        }
+        drop(by_prefix);
 
         // A session of another project, found under the same home.
         let other = root.join("other");

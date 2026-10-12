@@ -650,6 +650,9 @@ mod create_branched_session {
             )
             .expect("summary");
         let file = session.session_file().expect("file").to_path_buf();
+        // Pi has no writer exclusion; Bake's first writer releases the file
+        // before it is reopened.
+        drop(session);
         let reopened = SessionManager::open(&file, Some(dir.path()), None).expect("open");
         let entries = reopened.entries();
         let usage_of = |kind: &str| {

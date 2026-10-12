@@ -622,6 +622,47 @@ fn startup_errors_follow_pi() {
     assert!(server.requests().is_empty());
 }
 
+/// A session another writer holds is refused by `--continue` and
+/// `--session` with an error and exit code 1, before any request, and is
+/// taken over once the holder lets go.
+#[test]
+fn a_held_session_is_refused() {
+    let server = Server::start(Reply::sse());
+    let workspace = Workspace::new("held", server.port);
+    let first = workspace.run(&["-p", "Say hi"], None);
+    assert_eq!(first.status.code(), Some(0), "{}", text(&first.stderr));
+    let files = workspace.session_files();
+    assert_eq!(files.len(), 1);
+    let holder = bake_coding_agent::session::SessionManager::open(&files[0], None, None)
+        .expect("hold the session");
+    let path = files[0].to_string_lossy().into_owned();
+    for args in [
+        ["-p", "--continue", "Again"].as_slice(),
+        ["-p", "--session", &path, "Again"].as_slice(),
+    ] {
+        let out = workspace.run(args, None);
+        assert_eq!(out.status.code(), Some(1), "{args:?}");
+        assert_eq!(text(&out.stdout), "");
+        let stderr = text(&out.stderr);
+        assert!(
+            stderr.starts_with("Error: Session file is in use by another writer: ")
+                && stderr.trim_end().ends_with(
+                    &files[0]
+                        .file_name()
+                        .expect("name")
+                        .to_string_lossy()
+                        .into_owned()
+                ),
+            "{stderr}"
+        );
+    }
+    assert_eq!(server.requests().len(), 1);
+    drop(holder);
+    let again = workspace.run(&["-p", "--continue", "Again"], None);
+    assert_eq!(again.status.code(), Some(0), "{}", text(&again.stderr));
+    assert_eq!(workspace.session_files(), files);
+}
+
 /// D25: with no `models.json` and no Pi settings, the 0.3 home's CLIProxyAPI
 /// route, key, and default model run the turn, and neither 0.3 file changes.
 #[test]

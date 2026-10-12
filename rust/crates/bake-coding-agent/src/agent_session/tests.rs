@@ -641,16 +641,23 @@ async fn a_failed_write_aborts_the_run() {
     );
     assert_eq!(h.faux.call_count(), 1, "the run stops after the failure");
     // The run ends as aborted after the tool result, and nothing more is
-    // written: the blocked path is all the session directory holds.
+    // written: the blocked path and its writer lock are all the session
+    // directory holds.
     let last = session
         .messages()
         .last()
         .and_then(|m| m.as_assistant().cloned());
     assert_eq!(last.map(|m| m.stop_reason), Some(StopReason::Aborted));
-    let written = std::fs::read_dir(dir.join("sessions"))
+    let mut written: Vec<String> = std::fs::read_dir(dir.join("sessions"))
         .expect("sessions dir")
-        .count();
-    assert_eq!(written, 1);
+        .map(|entry| {
+            let name = entry.expect("entry").file_name();
+            name.to_string_lossy().into_owned()
+        })
+        .collect();
+    written.sort();
+    assert_eq!(written.len(), 2, "{written:?}");
+    assert_eq!(format!("{}.lock", written[0]), written[1]);
     session.shutdown().await;
 }
 

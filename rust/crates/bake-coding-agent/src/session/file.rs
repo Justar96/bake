@@ -18,7 +18,10 @@
 //!   file is not a session and is not modified.
 //! - When the file does not end in a newline, one is appended once the
 //!   header is valid, so the next append starts a line of its own and a
-//!   torn fragment stays an unparseable line of its own.
+//!   torn fragment stays an unparseable line of its own. Only a holder of
+//!   the file's writer lock appends it ([`crate::session::durable`]): a
+//!   reader skips the repair while another writer holds the file, and that
+//!   writer starts its next append on a new line itself.
 //!
 //! Lines are parsed as `JSON.parse` parses them
 //! ([`crate::session::json_line`]): any nesting depth, lone UTF-16 surrogate
@@ -39,6 +42,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
+use crate::session::durable::WriterLock;
 use crate::session::entry::{CURRENT_SESSION_VERSION, FileEntry, SessionHeader};
 use crate::session::id::generate_entry_id;
 use crate::session::json::{JsonObject, js_to_number, js_trim, str_member};
@@ -94,9 +98,20 @@ fn is_valid_header(object: &JsonObject) -> bool {
     str_member(object, "type") == Some("session") && str_member(object, "id").is_some()
 }
 
-/// Read the objects of a session file, repairing a missing final newline.
-/// Empty when the file does not exist or is not a session.
-pub(crate) fn load_objects(path: &Path) -> io::Result<Vec<Line>> {
+/// Who may append a missing final newline to a session file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Repair {
+    /// The caller holds the file's writer lock.
+    Held,
+    /// A reader: repair only when no other writer holds the file.
+    IfFree,
+    /// Leave the file as it is.
+    Never,
+}
+
+/// Read the objects of a session file, repairing a missing final newline as
+/// `repair` allows. Empty when the file does not exist or is not a session.
+pub(crate) fn load_objects(path: &Path, repair: Repair) -> io::Result<Vec<Line>> {
     let file = match File::open(path) {
         Ok(file) => file,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -136,10 +151,17 @@ pub(crate) fn load_objects(path: &Path) -> io::Result<Vec<Line>> {
         Some(true) => {}
     }
     if unterminated {
-        OpenOptions::new()
-            .append(true)
-            .open(path)?
-            .write_all(b"\n")?;
+        let append_newline = || OpenOptions::new().append(true).open(path)?.write_all(b"\n");
+        match repair {
+            Repair::Held => append_newline()?,
+            Repair::IfFree => match WriterLock::try_acquire(path) {
+                Ok(Some(_held)) => append_newline()?,
+                Ok(None) => {}
+                // No lock file can be made here; repair as Pi does.
+                Err(_) => append_newline()?,
+            },
+            Repair::Never => {}
+        }
     }
     Ok(objects)
 }
@@ -147,10 +169,11 @@ pub(crate) fn load_objects(path: &Path) -> io::Result<Vec<Line>> {
 /// Pi's `loadEntriesFromFile`: the lines of a session file, without
 /// migration. Empty when the file does not exist or its first parsed line is
 /// not a header with a string `id`; then the file is left as it is. When the
-/// file does not end in a newline, one is appended.
+/// file does not end in a newline, one is appended, unless a writer holds the
+/// file.
 pub fn load_entries_from_file(path: &Path) -> io::Result<Vec<FileEntry>> {
     let path = normalize_path_buf(path);
-    Ok(load_objects(&path)?
+    Ok(load_objects(&path, Repair::IfFree)?
         .into_iter()
         .map(|(object, verbatim)| FileEntry::from_line(object, verbatim))
         .collect())

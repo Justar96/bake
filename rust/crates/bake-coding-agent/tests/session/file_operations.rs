@@ -481,8 +481,12 @@ mod corrupted_files {
         fs::write(&file, "").expect("write");
         let first = SessionManager::open(&file, Some(dir.path()), None).expect("open");
         assert_eq!(first.session_file(), Some(file.as_path()));
+        let first_id = first.session_id().to_owned();
+        // Pi has no writer exclusion; Bake's first writer releases the file
+        // before it is reopened.
+        drop(first);
         let second = SessionManager::open(&file, Some(dir.path()), None).expect("reopen");
-        assert_eq!(second.session_id(), first.session_id());
+        assert_eq!(second.session_id(), first_id);
         assert!(second.header().is_some());
     }
 }
@@ -522,6 +526,9 @@ mod file_creation {
             read_session_file_roles(&file),
             ["session", "model_change", "user"]
         );
+        // Pi has no writer exclusion; Bake's first writer releases the file
+        // before it is reopened.
+        drop(session);
         let reopened = SessionManager::open(&file, Some(dir.path()), None).expect("open");
         assert_eq!(reopened.build_session_context().messages.len(), 1);
     }
