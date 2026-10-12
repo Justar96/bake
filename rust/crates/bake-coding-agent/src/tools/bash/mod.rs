@@ -46,7 +46,7 @@ use crate::tools::truncate::{DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, TruncatedBy, 
 
 pub mod local;
 pub mod shell;
-mod tree;
+pub(crate) mod tree;
 
 #[cfg(test)]
 mod tests;

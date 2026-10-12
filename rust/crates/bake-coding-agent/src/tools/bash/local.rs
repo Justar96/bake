@@ -21,26 +21,24 @@ use std::ffi::OsString;
 use std::future::Future;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::pin::Pin;
 use std::process::{ExitStatus, Stdio};
 use std::sync::Arc;
 use std::time::Duration;
 
 use bake_agent::BoxFuture;
 use bake_ai::AbortSignal;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
-use tokio::process::{Child, Command};
+use tokio::process::Command;
 use tokio::time::Instant;
 
 use super::shell::{CommandTransport, ShellConfig, get_shell_config, get_shell_env};
-use super::tree::{ProcessTree, TrackedTree, configure};
+use super::tree::configure;
 use super::{BashExecError, BashExecOptions, BashOperations};
+use crate::child_process::{aborted, sleep_until, wait_for_process};
 use crate::session::json::js_number_to_string;
 
 /// Pi's `EXIT_STDIO_GRACE_MS`.
-pub const EXIT_STDIO_GRACE: Duration = Duration::from_millis(100);
+pub const EXIT_STDIO_GRACE: Duration = crate::child_process::EXIT_STDIO_GRACE;
 const MAX_TIMEOUT_MS: f64 = 2_147_483_647.0;
-const READ_CHUNK: usize = 64 * 1024;
 
 type ResolveShell = Arc<dyn Fn() -> Result<ShellConfig, String> + Send + Sync>;
 
@@ -131,75 +129,6 @@ fn spawn_error(shell: &Path, error: &io::Error) -> String {
         _ => error.to_string(),
     };
     format!("spawn {} {code}", shell.display())
-}
-
-/// The shell, killed with its tree when dropped before it settles.
-struct OwnedShell {
-    child: Child,
-    tree: Option<TrackedTree>,
-    settled: bool,
-}
-
-impl OwnedShell {
-    fn kill(&mut self, exited: bool) {
-        if let Some(tree) = &self.tree {
-            tree.kill();
-        }
-        // Pi falls back to the shell's own pid. Tokio refuses to signal a
-        // shell it has reaped, so this cannot reach a reused pid.
-        if !exited {
-            let _ = self.child.start_kill();
-        }
-    }
-}
-
-impl Drop for OwnedShell {
-    fn drop(&mut self) {
-        if !self.settled {
-            self.kill(false);
-        }
-        // Dropping the guard untracks the tree.
-        self.tree = None;
-    }
-}
-
-async fn read_some<R: AsyncRead + Unpin>(
-    reader: Option<&mut R>,
-    buffer: &mut [u8],
-) -> io::Result<usize> {
-    match reader {
-        Some(reader) => reader.read(buffer).await,
-        None => std::future::pending().await,
-    }
-}
-
-async fn sleep_until(deadline: Option<Instant>) {
-    match deadline {
-        Some(deadline) => tokio::time::sleep_until(deadline).await,
-        None => std::future::pending().await,
-    }
-}
-
-async fn aborted(signal: Option<&AbortSignal>) {
-    match signal {
-        Some(signal) => signal.cancelled().await,
-        None => std::future::pending().await,
-    }
-}
-
-async fn poll_some(task: Option<&mut Pin<Box<dyn Future<Output = ()> + Send>>>) {
-    match task {
-        Some(task) => task.await,
-        None => std::future::pending().await,
-    }
-}
-
-async fn wait_child(child: &mut Child, exited: bool) -> io::Result<ExitStatus> {
-    if exited {
-        std::future::pending().await
-    } else {
-        child.wait().await
-    }
 }
 
 /// Pi's exit code: the shell's code, else 128 plus the signal that killed
@@ -389,91 +318,29 @@ impl LocalShellOperations {
             error: BashExecError::Failed(spawn_error(Path::new(&program), &error)),
             spawn_error: Some(error.kind()),
         })?;
-        let tree = ProcessTree::adopt(&child).map(TrackedTree::new);
-        let mut shell = OwnedShell {
+        let exit = wait_for_process(
             child,
-            tree,
-            settled: false,
-        };
-
-        let mut stdin_write: Option<Pin<Box<dyn Future<Output = ()> + Send>>> =
-            shell.child.stdin.take().map(|mut stdin| {
-                let bytes = stdin_bytes.unwrap_or_default();
-                Box::pin(async move {
-                    // Pi ignores standard-input errors; the shell may exit
-                    // without reading.
-                    let _ = stdin.write_all(&bytes).await;
-                    let _ = stdin.shutdown().await;
-                }) as Pin<Box<dyn Future<Output = ()> + Send>>
-            });
-        let mut stdout = shell.child.stdout.take();
-        let mut stderr = shell.child.stderr.take();
-        let mut out_buffer = vec![0; READ_CHUNK];
-        let mut err_buffer = vec![0; READ_CHUNK];
-        let mut status: Option<ExitStatus> = None;
-        let mut grace: Option<Instant> = None;
-        let mut timeout_at = deadline;
-        let mut abort_pending = signal.is_some();
-        let mut timed_out = false;
-
-        loop {
-            if status.is_some() && stdout.is_none() && stderr.is_none() {
-                break;
-            }
-            let exited = status.is_some();
-            let abort_signal = signal.as_ref().filter(|_| abort_pending);
-            tokio::select! {
-                result = wait_child(&mut shell.child, exited) => match result {
-                    Ok(exit) => {
-                        status = Some(exit);
-                        grace = Some(Instant::now() + EXIT_STDIO_GRACE);
-                    }
-                    Err(error) => return Err(BashExecError::Failed(error.to_string()).into()),
-                },
-                read = read_some(stdout.as_mut(), &mut out_buffer) => match read {
-                    Ok(count) if count > 0 => {
-                        on_data(&out_buffer[..count]);
-                        if exited {
-                            grace = Some(Instant::now() + EXIT_STDIO_GRACE);
-                        }
-                    }
-                    _ => stdout = None,
-                },
-                read = read_some(stderr.as_mut(), &mut err_buffer) => match read {
-                    Ok(count) if count > 0 => {
-                        on_data(&err_buffer[..count]);
-                        if let Some(on_stderr) = &on_stderr {
-                            on_stderr(&err_buffer[..count]);
-                        }
-                        if exited {
-                            grace = Some(Instant::now() + EXIT_STDIO_GRACE);
-                        }
-                    }
-                    _ => stderr = None,
-                },
-                () = poll_some(stdin_write.as_mut()) => stdin_write = None,
-                () = sleep_until(grace) => break,
-                () = aborted(abort_signal) => {
-                    abort_pending = false;
-                    shell.kill(exited);
+            stdin_bytes,
+            signal.as_ref(),
+            deadline,
+            |data| on_data(data),
+            |data| {
+                on_data(data);
+                if let Some(on_stderr) = &on_stderr {
+                    on_stderr(data);
                 }
-                () = sleep_until(timeout_at) => {
-                    timeout_at = None;
-                    timed_out = true;
-                    shell.kill(exited);
-                }
-            }
-        }
-        shell.settled = true;
-        drop(shell);
+            },
+        )
+        .await
+        .map_err(|error| BashExecError::Failed(error.to_string()))?;
 
         if signal.as_ref().is_some_and(AbortSignal::aborted) {
             return Err(BashExecError::Aborted.into());
         }
-        if timed_out {
+        if exit.timed_out {
             return Err(BashExecError::TimedOut(timeout.unwrap_or_default()).into());
         }
-        Ok(status.map(exit_code))
+        Ok(exit.status.map(exit_code))
     }
 }
 

@@ -1,0 +1,352 @@
+{
+  "revision": "abe508e1b89912adde45528136c3221eb69acdd7",
+  "cases": [
+    {
+      "args": [
+        "capture",
+        "",
+        "hello\n",
+        "0"
+      ],
+      "result": {
+        "stdout": "",
+        "stderr": "hello\n",
+        "code": 0,
+        "killed": false
+      }
+    },
+    {
+      "args": [
+        "capture",
+        "hello\n",
+        "",
+        "1"
+      ],
+      "result": {
+        "stdout": "hello\n",
+        "stderr": "",
+        "code": 1,
+        "killed": false
+      }
+    },
+    {
+      "args": [
+        "capture",
+        "stderr\r\n",
+        "\u001b[31mred\u001b[0m\n",
+        "7"
+      ],
+      "result": {
+        "stdout": "stderr\r\n",
+        "stderr": "\u001b[31mred\u001b[0m\n",
+        "code": 7,
+        "killed": false
+      }
+    },
+    {
+      "args": [
+        "capture",
+        "literal $HOME; `echo no` & \"quotes\"",
+        "λ ไทย 日本語 😀\n",
+        "255"
+      ],
+      "result": {
+        "stdout": "literal $HOME; `echo no` & \"quotes\"",
+        "stderr": "λ ไทย 日本語 😀\n",
+        "code": 255,
+        "killed": false
+      }
+    },
+    {
+      "args": [
+        "capture",
+        "λ ไทย 日本語 😀\n",
+        "literal $HOME; `echo no` & \"quotes\"",
+        "0"
+      ],
+      "result": {
+        "stdout": "λ ไทย 日本語 😀\n",
+        "stderr": "literal $HOME; `echo no` & \"quotes\"",
+        "code": 0,
+        "killed": false
+      }
+    },
+    {
+      "args": [
+        "capture",
+        "\u001b[31mred\u001b[0m\n",
+        "stderr\r\n",
+        "1"
+      ],
+      "result": {
+        "stdout": "\u001b[31mred\u001b[0m\n",
+        "stderr": "stderr\r\n",
+        "code": 1,
+        "killed": false
+      }
+    },
+    {
+      "args": [
+        "capture",
+        "",
+        "hello\n",
+        "7"
+      ],
+      "result": {
+        "stdout": "",
+        "stderr": "hello\n",
+        "code": 7,
+        "killed": false
+      }
+    },
+    {
+      "args": [
+        "capture",
+        "hello\n",
+        "",
+        "255"
+      ],
+      "result": {
+        "stdout": "hello\n",
+        "stderr": "",
+        "code": 255,
+        "killed": false
+      }
+    },
+    {
+      "args": [
+        "capture",
+        "stderr\r\n",
+        "\u001b[31mred\u001b[0m\n",
+        "0"
+      ],
+      "result": {
+        "stdout": "stderr\r\n",
+        "stderr": "\u001b[31mred\u001b[0m\n",
+        "code": 0,
+        "killed": false
+      }
+    },
+    {
+      "args": [
+        "capture",
+        "literal $HOME; `echo no` & \"quotes\"",
+        "λ ไทย 日本語 😀\n",
+        "1"
+      ],
+      "result": {
+        "stdout": "literal $HOME; `echo no` & \"quotes\"",
+        "stderr": "λ ไทย 日本語 😀\n",
+        "code": 1,
+        "killed": false
+      }
+    },
+    {
+      "args": [
+        "capture",
+        "λ ไทย 日本語 😀\n",
+        "literal $HOME; `echo no` & \"quotes\"",
+        "7"
+      ],
+      "result": {
+        "stdout": "λ ไทย 日本語 😀\n",
+        "stderr": "literal $HOME; `echo no` & \"quotes\"",
+        "code": 7,
+        "killed": false
+      }
+    },
+    {
+      "args": [
+        "capture",
+        "\u001b[31mred\u001b[0m\n",
+        "stderr\r\n",
+        "255"
+      ],
+      "result": {
+        "stdout": "\u001b[31mred\u001b[0m\n",
+        "stderr": "stderr\r\n",
+        "code": 255,
+        "killed": false
+      }
+    },
+    {
+      "args": [
+        "capture",
+        "",
+        "hello\n",
+        "0"
+      ],
+      "result": {
+        "stdout": "",
+        "stderr": "hello\n",
+        "code": 0,
+        "killed": false
+      }
+    },
+    {
+      "args": [
+        "capture",
+        "hello\n",
+        "",
+        "1"
+      ],
+      "result": {
+        "stdout": "hello\n",
+        "stderr": "",
+        "code": 1,
+        "killed": false
+      }
+    },
+    {
+      "args": [
+        "capture",
+        "stderr\r\n",
+        "\u001b[31mred\u001b[0m\n",
+        "7"
+      ],
+      "result": {
+        "stdout": "stderr\r\n",
+        "stderr": "\u001b[31mred\u001b[0m\n",
+        "code": 7,
+        "killed": false
+      }
+    },
+    {
+      "args": [
+        "capture",
+        "literal $HOME; `echo no` & \"quotes\"",
+        "λ ไทย 日本語 😀\n",
+        "255"
+      ],
+      "result": {
+        "stdout": "literal $HOME; `echo no` & \"quotes\"",
+        "stderr": "λ ไทย 日本語 😀\n",
+        "code": 255,
+        "killed": false
+      }
+    },
+    {
+      "args": [
+        "capture",
+        "λ ไทย 日本語 😀\n",
+        "literal $HOME; `echo no` & \"quotes\"",
+        "0"
+      ],
+      "result": {
+        "stdout": "λ ไทย 日本語 😀\n",
+        "stderr": "literal $HOME; `echo no` & \"quotes\"",
+        "code": 0,
+        "killed": false
+      }
+    },
+    {
+      "args": [
+        "capture",
+        "\u001b[31mred\u001b[0m\n",
+        "stderr\r\n",
+        "1"
+      ],
+      "result": {
+        "stdout": "\u001b[31mred\u001b[0m\n",
+        "stderr": "stderr\r\n",
+        "code": 1,
+        "killed": false
+      }
+    },
+    {
+      "args": [
+        "capture",
+        "",
+        "hello\n",
+        "7"
+      ],
+      "result": {
+        "stdout": "",
+        "stderr": "hello\n",
+        "code": 7,
+        "killed": false
+      }
+    },
+    {
+      "args": [
+        "capture",
+        "hello\n",
+        "",
+        "255"
+      ],
+      "result": {
+        "stdout": "hello\n",
+        "stderr": "",
+        "code": 255,
+        "killed": false
+      }
+    },
+    {
+      "args": [
+        "capture",
+        "stderr\r\n",
+        "\u001b[31mred\u001b[0m\n",
+        "0"
+      ],
+      "result": {
+        "stdout": "stderr\r\n",
+        "stderr": "\u001b[31mred\u001b[0m\n",
+        "code": 0,
+        "killed": false
+      }
+    },
+    {
+      "args": [
+        "capture",
+        "literal $HOME; `echo no` & \"quotes\"",
+        "λ ไทย 日本語 😀\n",
+        "1"
+      ],
+      "result": {
+        "stdout": "literal $HOME; `echo no` & \"quotes\"",
+        "stderr": "λ ไทย 日本語 😀\n",
+        "code": 1,
+        "killed": false
+      }
+    },
+    {
+      "args": [
+        "capture",
+        "λ ไทย 日本語 😀\n",
+        "literal $HOME; `echo no` & \"quotes\"",
+        "7"
+      ],
+      "result": {
+        "stdout": "λ ไทย 日本語 😀\n",
+        "stderr": "literal $HOME; `echo no` & \"quotes\"",
+        "code": 7,
+        "killed": false
+      }
+    },
+    {
+      "args": [
+        "capture",
+        "\u001b[31mred\u001b[0m\n",
+        "stderr\r\n",
+        "255"
+      ],
+      "result": {
+        "stdout": "\u001b[31mred\u001b[0m\n",
+        "stderr": "stderr\r\n",
+        "code": 255,
+        "killed": false
+      }
+    },
+    {
+      "args": [
+        "stdin"
+      ],
+      "result": {
+        "stdout": "0",
+        "stderr": "",
+        "code": 0,
+        "killed": false
+      }
+    }
+  ]
+}
