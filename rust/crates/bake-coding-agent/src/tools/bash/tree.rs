@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use tokio::process::{Child, Command};
 
 /// Puts the command's process in a tree [`ProcessTree::kill`] can end.
-pub(super) fn configure(command: &mut Command) {
+pub(crate) fn configure(command: &mut Command) {
     #[cfg(unix)]
     {
         // SAFETY: the closure runs in the forked child before `exec` and
@@ -43,7 +43,7 @@ pub(super) fn configure(command: &mut Command) {
 
 /// A spawned shell's whole tree.
 #[derive(Debug)]
-pub(super) struct ProcessTree {
+pub(crate) struct ProcessTree {
     pid: u32,
     #[cfg(windows)]
     job: Option<std::os::windows::io::OwnedHandle>,
@@ -52,7 +52,7 @@ pub(super) struct ProcessTree {
 impl ProcessTree {
     /// Adopts a just-spawned child; `None` when it has no pid (it already
     /// exited and was reaped).
-    pub(super) fn adopt(child: &Child) -> Option<Self> {
+    pub(crate) fn adopt(child: &Child) -> Option<Self> {
         let pid = child.id()?;
         Some(Self {
             pid,
@@ -62,7 +62,7 @@ impl ProcessTree {
     }
 
     /// Kills every process in the tree; errors mean it is already gone.
-    pub(super) fn kill(&self) {
+    pub(crate) fn kill(&self) {
         #[cfg(unix)]
         {
             // `kill(-1)` and `kill(0)` would signal this process's own
@@ -100,13 +100,13 @@ struct Tracked {
 
 /// Pi's `trackDetachedChildPid`; dropping the guard is
 /// `untrackDetachedChildPid`.
-pub(super) struct TrackedTree {
+pub(crate) struct TrackedTree {
     id: u64,
     tree: Arc<ProcessTree>,
 }
 
 impl TrackedTree {
-    pub(super) fn new(tree: ProcessTree) -> Self {
+    pub(crate) fn new(tree: ProcessTree) -> Self {
         let tree = Arc::new(tree);
         let mut tracked = TRACKED.lock().unwrap_or_else(PoisonError::into_inner);
         let id = tracked.next;
@@ -115,7 +115,7 @@ impl TrackedTree {
         Self { id, tree }
     }
 
-    pub(super) fn kill(&self) {
+    pub(crate) fn kill(&self) {
         self.tree.kill();
     }
 }

@@ -12,6 +12,7 @@
 //! |---|---|
 //! | [`session`] | Pi `src/core/session-manager.ts`, `session-cwd.ts`, `messages.ts`, `src/utils/paths.ts` |
 //! | [`tools`] | Pi `src/core/tools/*.ts` (see the module's table), `src/utils/{output-files,shell,child-process}.ts` |
+//! | [`exec`] | Pi `src/core/exec.ts`; shares `src/utils/child-process.ts` handling with bash |
 //! | [`home`] | Bake: `scripts/release/bake`, `packages/util/home-paths` |
 //! | [`agent_session`] | Pi `src/core/agent-session.ts`, `src/core/sdk.ts`, with auto-compaction, manual `compact`, and auto-retry |
 //! | [`compaction`] | Pi `src/core/compaction/{compaction,branch-summarization,utils}.ts` |
@@ -28,10 +29,12 @@
 
 pub mod agent_session;
 pub mod auth_storage;
+mod child_process;
 pub mod cli;
 pub mod cliproxyapi;
 pub mod compaction;
 pub mod config_value;
+pub mod exec;
 pub mod home;
 pub mod json_event;
 pub mod model_registry;
