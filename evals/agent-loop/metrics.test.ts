@@ -146,6 +146,14 @@ describe('skill loads', () => {
     expect(skillLoads([bash(0, "head -n 40 '/w/.agents/skills/money-check/SKILL.md'")])).toEqual(['money-check'])
   })
 
+  test('count a glob or a find that prints every skill as *, a load of all of them', () => {
+    expect(skillLoads([bash(0, 'cat .agents/skills/*/* 2>/dev/null | head -50')])).toEqual(['*'])
+    expect(skillLoads([bash(0, 'cat .agents/skills/*/SKILL.md')])).toEqual(['*'])
+    expect(skillLoads([bash(0, `cd /w && find .agents -type f | xargs -I{} sh -c 'echo "== {}"; cat "{}"'`)])).toEqual(['*'])
+    expect(skillLoads([bash(0, 'find .agents -name SKILL.md -exec cat {} +')])).toEqual(['*'])
+    expect(skillLoads([bash(0, 'find .agents -type f | head'), bash(1, 'ls .agents/skills/*')])).toEqual([])
+  })
+
   test('do not count listing, searching, or running a skill\'s other files', () => {
     expect(skillLoads([
       call(0, 'ls', { path: '.agents/skills' }),

@@ -171,7 +171,7 @@ function skillUse(model: string, arm: string) {
   const needing = own.filter(sample => sample.skillNeeded !== null)
   return {
     samples: own.length,
-    neededLoaded: [needing.filter(sample => sample.skillLoads!.includes(sample.skillNeeded!)).length, needing.length],
+    neededLoaded: [needing.filter(sample => sample.skillLoads!.includes(sample.skillNeeded!) || sample.skillLoads!.includes('*')).length, needing.length],
     otherLoaded: [own.filter(sample => sample.skillLoads!.some(name => name !== sample.skillNeeded)).length, own.length],
   }
 }

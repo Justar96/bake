@@ -252,7 +252,7 @@ Besides tokens, requests, tool calls, and errors, every sample records these loo
 | `ranCheck` | whether any call ran the check |
 | `verifiedBeforeFinal` | whether a check call came at or after the last edit; null when the sample made no edit |
 | `backgroundStarts` | shell calls started with `run_in_background` |
-| `skillLoads` | in a skill scenario, the skills the sample loaded, each once in first-load order: a `skill` tool call, a `read` of a `SKILL.md` under `.agents/skills`, or a shell `cat`, `head`, `tail`, `less`, or `sed -n` that prints a `SKILL.md` and names its skill's directory; listing, searching, or running a skill's other files is not a load. Null in other scenarios; `skillNeeded` names the skill the task needs, null in `skill_distractors` |
+| `skillLoads` | in a skill scenario, the skills the sample loaded, each once in first-load order: a `skill` tool call, a `read` of a `SKILL.md` under `.agents/skills`, or a shell `cat`, `head`, `tail`, `less`, or `sed -n` that prints a `SKILL.md` and names its skill's directory. A command that prints every skill at once, through a glob in place of the skill's directory or a `find` under `.agents` piped to `cat`, records `*`, which counts as loading every skill. Listing, searching, or running a skill's other files is not a load. Null in other scenarios; `skillNeeded` names the skill the task needs, null in `skill_distractors` |
 | `compactions` | completed summarizing compactions (`compaction/summary`) and compactions that ended in an error, from the session log |
 | `runaway` | the llm-pi-ai whitespace-runaway guard aborted a tool call's stream; such a failure is recorded as `runaway` rather than its exit code |
 
