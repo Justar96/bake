@@ -776,6 +776,9 @@ fn print_mode_reads_agents_instructions_and_skills() {
         "---\nname: project-skill\ndescription: From the project.\n---\n\nProject body.\n",
     );
 
+    // The session's working directory has its links resolved, as macOS's
+    // temporary directory needs.
+    let project_skill = std::fs::canonicalize(&project_skill).expect("project skill");
     let out = workspace.run(&["-p", "/skill:project-skill now"], None);
     assert_eq!(text(&out.stderr), "");
     assert_eq!(out.status.code(), Some(0));
