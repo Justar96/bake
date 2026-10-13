@@ -50,7 +50,7 @@ Each scope re-checks these revisions when it starts, and records the revision it
 | Sandbox, approvals, and permission presets ([D24](scope-00/support.md#decision-register)) | Bake's sandbox backends, approval prompts, and presets, ported into Pi's tool execution | Real denied effects on each OS (scope 04) |
 | The `~/.bake` home ([D25](scope-00/support.md#decision-register)) | `BAKE_HOME`, then `DSH_HOME`, then `~/.bake`; the CLIProxyAPI route, key, and default model read from the existing settings and credentials, which stay unchanged | Fixture homes with 0.3 settings and credentials files |
 
-Not retained: Bake Session logs of any format (0.4 writes Pi's session format), the model-visible surface (tools, schemas, results, prompts, and repair text follow Pi), the Desktop contract (D9), CLI flags and exits, and the settings and credentials file formats for new writes.
+Not retained: Bake Session logs of any format (0.4 writes Pi's session format), the model-visible surface (tools, schemas, results, and repair text follow Pi; the system prompt is Bake's own under [D33](scope-00/support.md#decision-register) and the [system prompt design](system-prompt.md)), the Desktop contract (D9), CLI flags and exits, and the settings and credentials file formats for new writes.
 
 ## Porting rules
 
