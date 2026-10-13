@@ -20,6 +20,9 @@ class Preview {
   private readonly process: Bun.Subprocess
   private readonly exited: Promise<number>
   private parsed = Promise.resolve()
+  /** Whether the emulator has parsed the start of a synchronized update but not its end. */
+  private frameOpen = false
+  private parsedTail = ''
   private code: number | undefined
   private streamStatus: number | undefined
   /** Everything the preview wrote, its last MiB, for sequences the screen does not show. */
@@ -45,7 +48,10 @@ class Preview {
         data: (_terminal, bytes) => {
           const text = decoder.decode(bytes, { stream: true })
           this.raw = (this.raw + text).slice(-1_048_576)
-          this.parsed = this.parsed.then(() => new Promise<void>(done => this.terminal.write(text, done)))
+          this.parsed = this.parsed.then(() => new Promise<void>(done => this.terminal.write(text, () => {
+            this.track(text)
+            done()
+          })))
         },
         exit: (_terminal, status) => { this.streamStatus = status },
       },
@@ -57,6 +63,21 @@ class Preview {
     this.initialModes = this.modes()
     this.pty.write('start\n')
     this.exited = this.process.exited.then((code) => { this.code = code; return code })
+  }
+
+  /**
+   * Follows synchronized updates through parsed output. The headless emulator
+   * shows a frame's cells as they arrive, while a supporting terminal holds
+   * them until the update ends; a read split inside a frame would otherwise
+   * expose its text before the caret moves. The kept tail is shorter than a
+   * mode sequence, so one split across reads is still seen once whole.
+   */
+  private track(text: string): void {
+    const seen = this.parsedTail + text
+    const begin = seen.lastIndexOf('\x1b[?2026h')
+    const end = seen.lastIndexOf('\x1b[?2026l')
+    if (begin !== end) this.frameOpen = begin > end
+    this.parsedTail = seen.slice(-7)
   }
 
   private modes(): readonly number[] {
@@ -99,11 +120,12 @@ class Preview {
     assert(!scrollback.includes('❯') && !/^ {2}Agents .*Ctrl\+G$/mu.test(scrollback), 'live controls escaped into scrollback')
   }
 
-  async wait(label: string, condition: () => boolean): Promise<void> {
+  /** Waits until `condition` holds of a whole frame, or of any output when `framed` is false. */
+  async wait(label: string, condition: () => boolean, framed = true): Promise<void> {
     const deadline = performance.now() + 30_000
     while (true) {
       await this.parsed
-      if (condition()) return
+      if ((!framed || !this.frameOpen) && condition()) return
       if ((this.code !== undefined && this.streamStatus !== undefined) || performance.now() > deadline) {
         throw new Error(`${label}: ${this.code === undefined ? 'timed out' : `exited ${this.code}`}\n${this.screen}`)
       }
@@ -130,13 +152,18 @@ class Preview {
       : this.raw.slice(offset).includes('\x1b[2J'))
   }
 
-  async resizeBurst(): Promise<void> {
+  /**
+   * Resizes twice while the preview is stopped, after typing `keys`, so it
+   * wakes to input and a resize at once and must read both.
+   */
+  async resizeBurst(keys: string): Promise<void> {
     this.process.kill('SIGSTOP')
     const offset = this.raw.length
     try {
       // Hold every application thread while the emulator reflows twice. The
       // final kernel size equals the previous frame, but that frame is stale.
-      await this.wait('preview stopped', () => /^State:\s+T/mu.test(readFileSync(`/proc/${this.process.pid}/status`, 'utf8')))
+      await this.wait('preview stopped', () => /^State:\s+T/mu.test(readFileSync(`/proc/${this.process.pid}/status`, 'utf8')), false)
+      this.send(keys)
       for (const [cols, rows] of [[40, 12], [80, 24]] as const) {
         this.terminal.resize(cols, rows)
         this.pty.resize(cols, rows)
@@ -158,7 +185,7 @@ class Preview {
       assert.equal(this.code, undefined, 'one Ctrl+C quit the preview')
       this.send('\x03')
     } else this.process.kill(signal)
-    await this.wait('preview process and PTY exit', () => this.code !== undefined && this.streamStatus !== undefined)
+    await this.wait('preview process and PTY exit', () => this.code !== undefined && this.streamStatus !== undefined, false)
     // The wait read the parse queue before its last output arrived; the
     // stream has ended now, so this queue holds every byte the preview wrote.
     await this.parsed
@@ -468,8 +495,8 @@ if (process.platform === 'linux') {
   await scenario('coalesced resize invalidates stale screen', async (preview) => {
     preview.send('RESIZE_DRAFT')
     await preview.wait('draft before resize', () => preview.screen.includes('RESIZE_DRAFT'))
-    await preview.resizeBurst()
-    await preview.wait('draft after resize', () => preview.screen.includes('RESIZE_DRAFT'))
+    await preview.resizeBurst('_TYPED')
+    await preview.wait('draft after resize', () => preview.screen.includes('RESIZE_DRAFT_TYPED'))
     assert.equal(preview.screen.split('RESIZE_DRAFT').length - 1, 1, 'resize duplicated the draft')
     await preview.quit()
   })
@@ -571,6 +598,19 @@ for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
   }, [], true)
 }
 
+// Typing and a resize that reach the preview together must both be read; a
+// reader that took only the resize left the keys unread until the next one.
+await scenario('inline keys sent with a resize are read at once', async (preview) => {
+  let draft = ''
+  for (let round = 0; round < 40; round++) {
+    draft += String.fromCharCode(97 + round % 26)
+    preview.send(draft.at(-1) ?? '')
+    await preview.resize(round % 2 === 0 ? 79 : 80, 24)
+    await preview.wait(`key ${round} with a resize`, () => preview.screen.includes(`❯ ${draft} `))
+  }
+  await preview.quit()
+}, [], true)
+
 await scenario('inline terminal hangup while idle exits quietly', async (preview) => {
   await preview.hangUp()
 }, [], true)
@@ -588,9 +628,9 @@ if (process.platform === 'linux') {
     await preview.wait('inline stream before burst', () => preview.screen.includes('Esc interrupts'))
     preview.send('BURST_DRAFT')
     await preview.wait('inline draft before burst', () => preview.screen.includes('❯ BURST_DRAFT'))
-    await preview.resizeBurst()
-    await preview.wait('inline draft after burst', () => preview.screen.includes('❯ BURST_DRAFT'))
-    preview.assertCursorAfter('BURST_DRAFT')
+    await preview.resizeBurst('_TYPED')
+    await preview.wait('inline draft after burst', () => preview.screen.includes('❯ BURST_DRAFT_TYPED'))
+    preview.assertCursorAfter('BURST_DRAFT_TYPED')
     preview.assertShellHistory()
     preview.assertNoChromeResidue()
     assert.equal(preview.history.split('\n').filter(line => line.trimEnd() === '> INLINE_BURST_UNIQUE').length, 1,
