@@ -62,8 +62,16 @@ fn paths(result: &LoadSkillsResult) -> Vec<String> {
         .collect()
 }
 
+/// A path as the loader reports it. The loader joins one component at a
+/// time, so on Windows its paths use `\` throughout, while the tests join
+/// literals such as `.agents/skills/x/SKILL.md`.
 fn path(path: PathBuf) -> String {
-    path.to_string_lossy().into_owned()
+    let path = path.to_string_lossy().into_owned();
+    if cfg!(windows) {
+        path.replace('/', "\\")
+    } else {
+        path
+    }
 }
 
 // describe("loadSkillsFromDir")
