@@ -186,5 +186,10 @@ describe('stray context files', () => {
     const inside = strayContextFiles(workspace, userHome, false)
     expect(inside).toContain(join(real, 'repo/.agents/skills'))
     expect(inside).not.toContain(join(real, '.agents/skills'))
+    // A skill scenario owns the workspace's skills, but not those of its ancestors or the user.
+    const owned = strayContextFiles(workspace, userHome, false, true)
+    expect(owned).not.toContain(join(real, 'repo/workspace/.agents/skills'))
+    expect(owned).toContain(join(real, 'repo/.agents/skills'))
+    expect(owned).toContain(join(userHome, '.agents/skills'))
   })
 })

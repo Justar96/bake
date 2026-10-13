@@ -36,11 +36,11 @@ import { compositionCheck, ROSTERS, systemPromptOf, type Roster } from './compos
 import { bakeCommand, bakeOverlay, nativeCommand, nativeStaleWriter, parseArms, strayContextFiles, type Arm } from './arms.ts'
 import {
   backgroundStarts, compactions, editCheckSplits, excessRequests, jsonModeCompactions, normalizeBake, normalizePi, orientationCalls, ranCheck,
-  requestsOverFloor, routingDecisions, runawayAbort, shellEdits, verifiedBeforeFinal,
+  requestsOverFloor, routingDecisions, runawayAbort, shellEdits, skillLoads, verifiedBeforeFinal,
 } from './metrics.ts'
 import {
   CASE_SETS, capMsFor, checkCommandFor, CONTEXT_WINDOWS, fixture, maxRequestsFor, piCompactionFor, prompts, REQUEST_FLOORS, requestCaps,
-  requestFloorFor, STANDARD_CASES, usesAgentInstructions, validate, wallClockCaps,
+  requestFloorFor, SKILL_SCENARIOS, STANDARD_CASES, usesAgentInstructions, usesSkills, validate, wallClockCaps,
 } from './scenarios.ts'
 import { DEEPSEEK_ANTHROPIC_BASE_URL, deepseekProfile } from '../../packages/llm/llm-pi-ai/tests/deepseek-profile.ts'
 import { parseCredentialsDocument } from '../../packages/credentials/credentials-local/src/index.ts'
@@ -413,7 +413,7 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
       const userHome = join(root, 'user'); mkdirSync(userHome, { mode: 0o700 })
       Object.assign(env, { BAKE_HOME: home, DSH_HOME: home, HOME: userHome, USERPROFILE: userHome })
       // bake-rs also loads an AGENTS.md from every ancestor of its working directory, and .agents/skills up to the git root.
-      const stray = strayContextFiles(workspace, userHome, usesAgentInstructions(scenario))
+      const stray = strayContextFiles(workspace, userHome, usesAgentInstructions(scenario), usesSkills(scenario))
       if (stray.length > 0) throw new Error(`${label}: bake-rs would load context files outside the fixture: ${stray.join(', ')}; move them or set TMPDIR to a directory without them`)
       if (scenario === 'stale_edit') nativeInjection = nativeStaleWriter(workspace, join(workspace, file), injectionPath)
       command = nativeCommand(arm.bin!, nativeRoute.provider, model, route.effort, prompts[scenario]!)
@@ -433,6 +433,8 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
       Object.assign(env, { PI_CODING_AGENT_DIR: agentDir, PI_OFFLINE: '1', EVAL_API_KEY: credential(piRoute.keyName) })
       command = [arm.bin!, '--mode', 'json', '--no-session', '--no-extensions', '--no-skills', '--no-prompt-templates', '--no-themes',
         ...usesAgentInstructions(scenario) ? [] : ['--no-context-files'],
+        // pi loads a project's .agents/skills only once the project is trusted, so a skill scenario names the fixture's skills.
+        ...usesSkills(scenario) ? ['--skill', join(workspace, '.agents', 'skills')] : [],
         '--model', `eval/${model}`, '--thinking', route.effort, ...(scenario === 'stale_edit' ? ['-e', hookPath] : []), prompts[scenario]!]
     } else {
       const routeSettings = route.settings(`${server.url.origin}/upstream`, arm.llmDeepseek)
@@ -518,6 +520,8 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
       ranCheck: ranCheck(calls, check),
       verifiedBeforeFinal: verifiedBeforeFinal(calls, check),
       backgroundStarts: backgroundStarts(calls),
+      skillLoads: usesSkills(scenario) ? skillLoads(calls) : null,
+      skillNeeded: SKILL_SCENARIOS[scenario] ?? null,
       contextWindow: contextWindowApplied ? contextWindow : null,
       compactions: nativeRoute !== undefined ? jsonModeCompactions(events) : piRoute === undefined ? compactions(logged) : null,
       runawayAbort: runawayAbort([stderr, final, ...events.filter(event => event.type === 'unparsed').map(event => event.text)]),
@@ -585,7 +589,7 @@ writeFileSync(join(out, 'design.json'), JSON.stringify({
     + (roster === 'tui' ? ' Roster tui: the standard preset\'s tool-fs, tool-fs-search, and tool-result-pruner configs and the terminal spill-policy inline cap; ask_user_question stays out, having no one to answer it headless.' : ' Roster headless: the headless bundle\'s own tool configs.')
     + ' Session title and ambient AGENTS disabled equally; instructions_file keeps agent-instructions for its own AGENTS.md.'
     + (armNames.some(name => ARMS[name]!.kind === 'native') ? ' A native arm runs bake-rs -p --mode json with its own system prompt and Pi\'s default tools (read, bash, edit, write), no session file, the danger-full-access preset, and agent-level retry off; a cliproxyapi model comes through the 0.3 settings.yaml and .credentials.yaml it imports read-only, and a DeepSeek model through models.json over Chat Completions. It skips scenarios that need a Bake-only tool, and its stale writer acts on its event stream. Where a scenario forces a context window, it gets the same window and pi\'s compaction settings (piCompaction).' : '')
-    + (armNames.some(name => ARMS[name]!.kind === 'pi') ? ' A pi arm runs pi --mode json with its own system prompt and default tools, no session, extensions, skills, prompt templates, or context files, agent-level retry off, and pi\'s own wire for each model; it skips scenarios that need a Bake-only tool. Where a scenario forces a context window, pi gets the same window and compaction settings that mirror Bake\'s policy at it (piCompaction).' : ''),
+    + (armNames.some(name => ARMS[name]!.kind === 'pi') ? ' A pi arm runs pi --mode json with its own system prompt and default tools, no session, extensions, prompt templates, or context files, no skills but a skill scenario\'s own, agent-level retry off, and pi\'s own wire for each model; it skips scenarios that need a Bake-only tool. Where a scenario forces a context window, pi gets the same window and compaction settings that mirror Bake\'s policy at it (piCompaction).' : ''),
   cache: 'Fresh process/home/workspace/session per sample; provider cache is observed, not assumed cold. Pair order alternates by trial and scenario.',
   endpoint: 'Agent exits; external Node test passes without test modification; injected external comment is preserved.',
   tokenAccounting: 'Provider total_tokens is authoritative. Gemini via Responses may report reasoning outside output_tokens; recorded separately and reconciled against raw SSE. Anthropic-format totals, DeepSeek\'s included, are the sum of input, cache reads/writes, and output.',

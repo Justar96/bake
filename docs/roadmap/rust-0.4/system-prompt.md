@@ -6,7 +6,7 @@
 
 The design keeps Pi's prompt machinery (named sections that a session records and later patches) and replaces the text: a one-sentence identity, Bake 0.3's measured rules, the tool-contributed guidelines, a one-line pointer to Bake's own documentation, a run-mode line, the permissions section, and a small environment section last. The prompt states the outcome and the boundaries and leaves the method to the model. A rule stays only when an eval or a cited failure shows that the model behaves worse without it, and the one rule that promises harness behavior, that tool calls in one response run in order, is made true by the harness. One prompt serves every model family until a paired eval shows that a family needs a delta.
 
-**Status: proposed design, 2026-10-13.** [D33](scope-00/support.md#decision-register) makes the system prompt Bake's own. Nothing on this page is implemented; the [implementation plan](#implementation-plan) lands it in reviewable pull requests, and the [evaluation plan](#evaluation-plan) decides whether it ships.
+**Status: implemented, 2026-10-13.** [D33](scope-00/support.md#decision-register) makes the system prompt Bake's own. `bake-rs` sends the prompt this page designs, measured in the [system prompt record](../../../evals/agent-loop/versions/unreleased/2026-10-13-bake-system-prompt/REPORT.md); the [implementation plan](#implementation-plan) and [evaluation plan](#evaluation-plan) record how it landed.
 
 ## Table of Contents
 
@@ -26,7 +26,7 @@ The design keeps Pi's prompt machinery (named sections that a session records an
 - **Model-driven.** The prompt states what done looks like and where the boundaries are; the model chooses how to get there. Guarantees that must hold every time are enforced by the harness (the sandbox, approvals, and permission presets of [D24](scope-00/support.md#decision-register)), not by prose.
 - **Cache-stable and reconstructable.** The system prompt is byte-stable for a session, with the facts most likely to differ between sessions last. Every change reaches the model as a recorded section patch, so model input stays reconstructable from the session file.
 
-Non-goals: tool descriptions, schemas, results, and repair text keep following Pi, with D24's sandbox additions, under D33. Skills, prompt templates, and the `--system-prompt` and `--append-system-prompt` flags remain scope 10 work; this design leaves room for them without adding them.
+Non-goals: tool descriptions, schemas, results, and repair text keep following Pi, with D24's sandbox additions, under D33. Prompt templates and the `--system-prompt` and `--append-system-prompt` flags remain scope 10 work; this design leaves room for them without adding them. Skills landed in scope 10 with Pi's section; the [skills section](#skills-section) records why it stays as Pi wrote it.
 
 ## Evidence
 
@@ -113,10 +113,11 @@ The prompt keeps Pi's mechanism: an untagged `preamble`, then named sections wra
 | 4 | `run` | The run mode | Never within a session |
 | 5 | `addendum` | `--append-system-prompt` text, when scope 10 adds the flag | Never within a session |
 | 6 | `project_context` | The loaded context files, wrapped with their paths | When the files change between runs |
-| 7 | `permissions` | The run's sandbox and approval sentences ([D24](scope-00/support.md#decision-register)) | When the permission changes |
-| 8 | `environment` | Working directory, platform, shell, git repository or not, session start date | When one of them changes between runs |
+| 7 | `skills` | The skills the model may load, when any load ([Skills section](#skills-section)) | When the skills change between runs |
+| 8 | `permissions` | The run's sandbox and approval sentences ([D24](scope-00/support.md#decision-register)) | When the permission changes |
+| 9 | `environment` | Working directory, platform, shell, git repository or not, session start date | When one of them changes between runs |
 
-Pi's `tools` section is removed: it repeats the tool schemas the request already carries, plus a sentence about custom tools that `bake-rs` cannot load. Pi's `cwd` section becomes the first line of `environment`. A custom prompt (`--system-prompt`, scope 10) replaces `preamble`, `rules`, and `docs`, as in Pi, and keeps the other sections, since they state facts the harness enforces. Scope 10 adds Pi's `skills` section, the list of loaded skills, between `project_context` and `permissions`: like the context files, it changes only between runs.
+Pi's `tools` section is removed: it repeats the tool schemas the request already carries, plus a sentence about custom tools that `bake-rs` cannot load. Pi's `cwd` section becomes the first line of `environment`. A custom prompt (`--system-prompt`, scope 10) replaces `preamble`, `rules`, and `docs`, as in Pi, and keeps the other sections, since they state facts the harness enforces. Pi's `skills` section, the list of loaded skills, follows `project_context` when skills load: like the context files, it changes only between runs.
 
 ### The text
 
@@ -212,6 +213,39 @@ The section comes last because its facts are the most likely to differ between s
 
 The binary carries Bake's 0.4 user documentation, compiled in, so it always matches the installed version and works offline. `bake-rs docs` lists the topics and `bake-rs docs <topic>` prints one: the command line, the Bake home, settings, models and providers (including the imported CLIProxyAPI route), permissions and the sandbox, sessions, context files, and skills. The prompt's `docs` section names that command by the executable's absolute path, shell-quoted when the path holds spaces or other special characters. A built-in skill could replace the line when scope 10 adds skills; the command stays either way.
 
+### Skills section
+
+When skills load, the prompt carries Pi's `skills` section between `project_context` and `permissions`, as Pi's `formatSkillsForPrompt` writes it: three sentences, then one `<skill>` entry for each skill the model may invoke, with its `name`, `description`, and the absolute `location` of its `SKILL.md`. The model loads a skill by reading that file, with `read`, or with `bash` when `read` is not selected. A skill whose frontmatter sets `disable-model-invocation` is left out, and with no such skills the section is omitted. Skills load once per run, sorted by directory entry, so the section is byte-stable for a session.
+
+Agents present skills in one of two ways (surveyed 2026-10-13 at the named releases):
+
+| Agent | Where the listing goes | Entry | How a skill loads | Listing limit |
+|---|---|---|---|---|
+| Pi v1.2.0, `bake-rs` | System prompt | XML: name, description, location | `read` | None |
+| [agentskills.io integration guide](https://agentskills.io/client-implementation/adding-skills-support) | System prompt or the activation tool's description, "Both work" | XML, JSON, or bullets | File read or a dedicated tool | About 50–100 tokens per skill |
+| Codex CLI rust-v0.162.1 | Developer message | `- name: description (file: path)` | File read | 2% of the context window; descriptions shortened before entries drop |
+| Claude Code 2.1.296 | System reminder in a user message | `- name: description` | `Skill` tool | 1% of the context window; names always kept |
+| Gemini CLI v0.63.0 | System prompt | XML: name, description, location | `activate_skill`, names as an enum | None |
+| opencode v1.19.0 | System prompt, last | XML: name, description, location | `skill` tool | None |
+| VS Code Copilot (`main`, `3fd165b`) | Custom instructions | XML: name, description, file | `skill` tool, or a file read | 15,000 characters, then names only |
+
+The published evidence is on triggering, not format. Vercel's [AGENTS.md eval](https://vercel.com/blog/agents-md-outperforms-skills-in-our-agent-evals) found a listed skill unused in 56% of runs; an AGENTS.md instruction to use it raised the pass rate from 53% to 79%, but "You MUST invoke the skill" made the agent anchor on the skill and miss project files, and "explore the project first, then invoke the skill" did not. A [sandboxed Claude Code study](https://scottspence.com/posts/measuring-claude-code-skill-activation-with-sandboxed-evals) (22 prompts) found a plain instruction did not change activation. Anthropic's [skill-creator](https://github.com/anthropics/skills) and [agentskills.io](https://agentskills.io/skill-creation/optimizing-descriptions) put the remedy in the description: say what the skill does and when to use it. No controlled comparison of XML and Markdown listings was found.
+
+`bake-rs` keeps Pi's text, placement, and format:
+
+- **Pi first.** The section is Pi's, ported under [D22](scope-00/support.md#decision-register), and it matches the agentskills.io template for agents that load skills with a file read. A dedicated skill tool, as most other agents use, adds a tool schema and diverges from Pi for no measured gain.
+- **No stronger trigger rule.** The prompt's wording follows [principle 7](#principles), and the evidence shows emphatic "must use" wording trading one failure for another. Descriptions carry the match.
+- **No listing budget yet.** The section grows with the skills a user installs. A budget that shortens descriptions before it drops names, as Codex CLI and Claude Code do, is the remedy if a measured skill set makes the section costly.
+- **Cache-stable by construction.** Skills change only between runs, so the section never patches within a session. A mid-session reload, if a later scope adds one, should send the change as a recorded section patch.
+
+The `skill_check` and `skill_distractors` scenarios of the [agent-loop evaluator](../../../evals/README.md) measure the section: whether a model loads the one skill a task needs, and whether it loads skills a task does not need. The [skills section record](../../../evals/agent-loop/versions/unreleased/2026-10-13-skills-section/REPORT.md) pairs `bake-rs` with and without the listing on six models:
+
+- **The listing is what makes skills work.** With it, every model loaded the skill `skill_check` needs and passed, apart from two GPT runaways unrelated to skills. Without it, Gemini 3.8 Flash never found the skill and failed all three trials, and DeepSeek V4 Pro failed two; Claude and DeepSeek Flash found it only by listing `.agents`, sometimes printing every skill.
+- **No model over-triggers.** With the listing, no sample loaded a skill its task did not need, in either scenario.
+- **The cost is the listing's bytes.** Three skills add about 1,200 characters to every request, which is 10 to 20 percent of `skill_distractors`'s small task, with no extra round trips; `skill_check` saves round trips instead (Claude 12 to 9 requests).
+
+Pi's wording needs no stronger trigger rule on these models. The evidence for a budget is the per-skill cost, which grows with the skills a user installs.
+
 ### Names the model sees
 
 The `bash` tool exports the session's details to the commands it runs under Bake's names: `BAKE_SESSION_ID`, `BAKE_SESSION_FILE` (for a persisted session), `BAKE_PROVIDER`, `BAKE_MODEL`, and `BAKE_REASONING_LEVEL`. The `PI_*` names are not exported, since 0.4 has no Pi or TypeScript install to stay compatible with ([D32](scope-00/support.md#decision-register)). The documentation describes them; the prompt does not. The spill files that truncation notices name take Bake's prefixes, `bake-bash-` and `bake-output-`, in place of Pi's `pi-bash-` and `pi-output-`.
@@ -258,6 +292,9 @@ Pull requests 2 and 3 change the public Rust API, so each updates the `rust/READ
 | Moving Pi's edit guidelines into the `edit` tool description | Tool text follows Pi under D33; a separate change with its own record |
 | An "expert" persona or a reasoning scaffold | No measured benefit; the effort setting controls thinking |
 | A per-model prompt for every family | No family has a measured need yet |
+| A dedicated skill tool, as Claude Code, Gemini CLI, and opencode have | Diverges from Pi's file read for no measured gain; see [Skills section](#skills-section) |
+| "You must use a skill whose description matches the task" | Emphatic trigger wording made Vercel's agent anchor on the skill and miss project files; descriptions carry the match |
+| A token budget for the skills listing | No measured skill set makes the section costly yet |
 
 ## Open questions
 
@@ -265,3 +302,4 @@ Pull requests 2 and 3 change the public Rust API, so each updates the `rust/READ
 - Whether Pi's four `edit` guideline lines are all needed once the round-trip rule asks for one edit call per file.
 - How large a context file can grow before it costs more than it saves; the published results are underpowered for sizes beyond typical files.
 - Whether the `workspace-write` text needs its own measured cell once the evaluator can run a confining backend.
+- How large the skills listing can grow before a budget pays for itself, and whether every model family loads a skill from its description alone.

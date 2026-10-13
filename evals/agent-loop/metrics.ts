@@ -182,6 +182,34 @@ export const requestsOverFloor = (requests: number, floor: number) => requests -
 /** Requests above the scenario's floor, never negative. */
 export const excessRequests = (requests: number, floor: number) => Math.max(0, requestsOverFloor(requests, floor))
 
+/** A skill's directory under a `.agents/skills` root; group 1 is the skill's name. */
+const SKILL_DIR = /(?:^|[\s'"=\\/])\.agents[\\/]skills[\\/]([\w.-]+)/g
+/** A glob in place of a skill's directory name, which names every skill at once. */
+const SKILL_GLOB = /(?:^|[\s'"=\\/])\.agents(?:[\\/]skills)?[\\/]\*/
+/** A `find` under `.agents` whose files a later `xargs` or `-exec` prints. */
+const SKILL_FIND = /\bfind\s+(?:\S*\/)?\.agents\b[^;&]*(?:\bxargs\b|-exec\b).*?\b(?:cat|head)\b/
+
+/**
+ * The skills a sample loaded, each once, in the order it first loaded them: a
+ * `skill` tool call (Bake 0.3's loader), a `read` of a skill's `SKILL.md`
+ * under `.agents/skills` (bake-rs and pi), or a shell command that prints a
+ * `SKILL.md` and names the skill's directory, as `cat` of the file or `cd`
+ * into the directory first does. A command that prints every skill at once,
+ * through a glob over the skill directories or a `find` piped to `cat`, loads
+ * `*`, which stands for all of them. Listing or searching the skills is not a load.
+ */
+export function skillLoads(calls: readonly Call[]): string[] {
+  const names: string[] = []
+  const add = (name: unknown) => { if (typeof name === 'string' && name !== '' && !names.includes(name)) names.push(name) }
+  for (const call of calls) {
+    if (call.tool === 'skill') { add(call.input?.name); continue }
+    const text = call.tool === 'read' ? String(call.input?.path ?? call.input?.file_path ?? '') : readsFile(commandOf(call)) ? commandOf(call) : ''
+    if (call.tool === 'bash' && (SKILL_FIND.test(commandOf(call)) || (text !== '' && SKILL_GLOB.test(text)))) { add('*'); continue }
+    if (/\bSKILL\.md\b/.test(text)) for (const match of text.matchAll(SKILL_DIR)) add(match[1])
+  }
+  return names
+}
+
 /** Shell calls started with `run_in_background`. */
 export const backgroundStarts = (calls: readonly Call[]) => calls.filter(call => SHELL_TOOLS.has(call.tool) && call.input?.run_in_background === true).length
 
