@@ -16,7 +16,7 @@ bake-rs --mode json -p "List the tests" > events.jsonl
 - `--mode text` prints the text of the final answer; `--mode json` prints the session header and then every event as one JSON line.
 - `@file` arguments are not supported yet.
 
-Model flags are in `bake-rs docs models`, session flags in `bake-rs docs sessions`, and permission flags in `bake-rs docs permissions`.
+Model flags are in `bake-rs docs models`, session flags in `bake-rs docs sessions`, permission flags in `bake-rs docs permissions`, and `--skill`, `--no-skills`, and `/skill:<name>` prompts in `bake-rs docs skills`.
 
 ## Tools
 

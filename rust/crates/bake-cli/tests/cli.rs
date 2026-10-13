@@ -107,6 +107,7 @@ fn every_docs_topic_prints_its_markdown_without_a_terminal() {
         "permissions",
         "sessions",
         "context",
+        "skills",
     ] {
         assert!(topics.iter().any(|topic| topic == expected), "{expected}");
     }

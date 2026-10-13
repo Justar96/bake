@@ -76,7 +76,7 @@ The preview shows sample content only and does not connect to a model.
 Ctrl+C quits it.
 
 Run 'bake-rs docs' for the documentation: the Bake home, settings, models,
-permissions, sessions, context files, and the command line.
+permissions, sessions, context files, skills, and the command line.
 ";
 
 #[derive(Debug, PartialEq, Eq)]

@@ -210,7 +210,7 @@ The section comes last because its facts are the most likely to differ between s
 
 ### Self-documentation
 
-The binary carries Bake's 0.4 user documentation, compiled in, so it always matches the installed version and works offline. `bake-rs docs` lists the topics and `bake-rs docs <topic>` prints one: the command line, the Bake home, settings, models and providers (including the imported CLIProxyAPI route), permissions and the sandbox, sessions, and context files. The prompt's `docs` section names that command by the executable's absolute path, shell-quoted when the path holds spaces or other special characters. A built-in skill could replace the line when scope 10 adds skills; the command stays either way.
+The binary carries Bake's 0.4 user documentation, compiled in, so it always matches the installed version and works offline. `bake-rs docs` lists the topics and `bake-rs docs <topic>` prints one: the command line, the Bake home, settings, models and providers (including the imported CLIProxyAPI route), permissions and the sandbox, sessions, context files, and skills. The prompt's `docs` section names that command by the executable's absolute path, shell-quoted when the path holds spaces or other special characters. A built-in skill could replace the line when scope 10 adds skills; the command stays either way.
 
 ### Names the model sees
 
