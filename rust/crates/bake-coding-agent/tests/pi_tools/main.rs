@@ -734,6 +734,36 @@ fn sorted_text(value: &Value) -> Value {
     value
 }
 
+/// `fd --max-results` stops at the first matches its parallel walk reaches,
+/// so a limited search keeps any `limit` of the matching files, not the ones
+/// Pi recorded. When `mine` names that many distinct files of the case, its
+/// list is replaced by the recorded one so the rest still compares exactly.
+fn settle_limited_find(case: &Value, mine: &mut Value, expected: &Value) {
+    if expected["result"]["details"]["resultLimitReached"].is_null() {
+        return;
+    }
+    let body = |value: &Value| -> Option<(String, String)> {
+        let text = value["result"]["content"][0]["text"].as_str()?;
+        let (body, notice) = text.split_once("\n\n[")?;
+        Some((body.to_owned(), notice.to_owned()))
+    };
+    let (Some((mine_body, notice)), Some((pi_body, _))) = (body(mine), body(expected)) else {
+        return;
+    };
+    let files: Vec<&str> = case["files"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|file| file["path"].as_str())
+        .collect();
+    let mut found: Vec<&str> = mine_body.lines().collect();
+    found.sort_unstable();
+    found.dedup();
+    if found.len() == pi_body.lines().count() && found.iter().all(|line| files.contains(line)) {
+        mine["result"]["content"][0]["text"] = json!(format!("{pi_body}\n\n[{notice}"));
+    }
+}
+
 async fn run_external(kind: &str) {
     let binary = if kind == "grep" { "rg" } else { "fd" };
     if !on_path(binary) {
@@ -766,6 +796,9 @@ async fn run_external(kind: &str) {
             if let Some(value) = case.get(key) {
                 expected[key] = value.clone();
             }
+        }
+        if kind == "find" {
+            settle_limited_find(case, &mut mine, &expected);
         }
         if sorted_text(&mine) != sorted_text(&expected) {
             failures.push(format!(
