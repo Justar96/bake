@@ -126,7 +126,10 @@ fn main() -> ExitCode {
         Ok(Command::Docs(topic)) => show_docs(topic.as_deref()),
         Ok(Command::Agent(args)) => agent(&args),
         Err(message) => {
-            eprintln!("bake-rs: {message}\n\nRun 'bake-rs --help' for usage.");
+            // A closed standard error is not a panic.
+            let _ = io::stderr().lock().write_all(
+                format!("bake-rs: {message}\n\nRun 'bake-rs --help' for usage.\n").as_bytes(),
+            );
             ExitCode::from(2)
         }
     }

@@ -8,7 +8,7 @@ bake-rs has no built-in model catalog: every model comes from `models.json` in t
 - `--provider <name>` limits `--model` to one provider. It needs `--model`.
 - `--thinking <level>` sets the thinking level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. It wins over a suffix. A level the model does not support is clamped to one it does.
 
-Without `--model`, a resumed session keeps the model it last used while that model's provider has a key. Otherwise bake-rs uses `defaultProvider` and `defaultModel` from `settings.json` (else the default model imported from Bake 0.3) when that provider has a key, else another model whose provider has one. A run with no usable model fails before sending anything.
+Without `--model`, a resumed session keeps the model it last used while that model's provider has a key. Otherwise bake-rs uses `defaultProvider` and `defaultModel` from `settings.json` (else the default model imported from Bake 0.3) when that provider has a key, else another model whose provider has one. A run with no usable model fails before sending anything. The ids `--model` accepts are the `id` members in `models.json` and the ids the imported route saved; bake-rs has no command that lists them.
 
 ## models.json
 

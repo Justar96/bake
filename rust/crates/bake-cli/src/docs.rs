@@ -79,24 +79,30 @@ pub fn topic_list() -> String {
     list
 }
 
-/// How to run `bake-rs docs` through `exe`: the path, quoted for a shell
-/// when it holds anything but letters, digits, and `-_./:,+=@%` (and `\`
-/// on Windows), then `docs`. Unix shells get single quotes; Windows, whose
-/// paths cannot hold `"`, gets double quotes.
+/// How to run `bake-rs docs` through `exe`, as a POSIX shell command: the
+/// model runs it with the bash tool, which is Git Bash on Windows. Windows
+/// separators become `/`, as in the prompt's working directory, and a path
+/// holding anything but letters, digits, and `-_./:,+=@%` is single-quoted.
+/// A plain path also runs in PowerShell; a quoted one needs `& ` there. A
+/// path that is not UTF-8 cannot be named, so it gives `bake-rs docs`.
 pub fn docs_command(exe: &Path) -> String {
-    let path = exe.to_string_lossy();
-    let plain = !path.is_empty()
-        && path.chars().all(|c| {
-            c.is_ascii_alphanumeric() || "-_./:,+=@%".contains(c) || (cfg!(windows) && c == '\\')
-        });
-    let quoted = if plain {
-        path.into_owned()
-    } else if cfg!(windows) {
-        format!("\"{path}\"")
-    } else {
-        format!("'{}'", path.replace('\'', r"'\''"))
+    let Some(path) = exe.to_str() else {
+        return "bake-rs docs".to_owned();
     };
-    format!("{quoted} docs")
+    let path = if cfg!(windows) {
+        path.replace('\\', "/")
+    } else {
+        path.to_owned()
+    };
+    let plain = !path.is_empty()
+        && path
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "-_./:,+=@%".contains(c));
+    if plain {
+        format!("{path} docs")
+    } else {
+        format!("'{}' docs", path.replace('\'', r"'\''"))
+    }
 }
 
 #[cfg(test)]
@@ -169,9 +175,8 @@ mod tests {
         assert_eq!(docs_command(Path::new("bake-rs")), "bake-rs docs");
     }
 
-    #[cfg(unix)]
     #[test]
-    fn other_paths_are_single_quoted_on_unix() {
+    fn other_paths_are_single_quoted() {
         assert_eq!(
             docs_command(Path::new("/opt/My Apps/bake-rs")),
             "'/opt/My Apps/bake-rs' docs"
@@ -183,16 +188,25 @@ mod tests {
         assert_eq!(docs_command(Path::new("")), "'' docs");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn a_path_that_is_not_utf8_gives_the_bare_command() {
+        use std::os::unix::ffi::OsStrExt;
+        let exe = std::ffi::OsStr::from_bytes(b"/opt/\xff/bake-rs");
+        assert_eq!(docs_command(Path::new(exe)), "bake-rs docs");
+    }
+
+    // Git Bash would drop unquoted backslashes.
     #[cfg(windows)]
     #[test]
-    fn other_paths_are_double_quoted_on_windows() {
+    fn windows_paths_use_forward_slashes() {
         assert_eq!(
             docs_command(Path::new(r"C:\Tools\bake-rs.exe")),
-            r"C:\Tools\bake-rs.exe docs"
+            "C:/Tools/bake-rs.exe docs"
         );
         assert_eq!(
             docs_command(Path::new(r"C:\Program Files\Bake\bake-rs.exe")),
-            r#""C:\Program Files\Bake\bake-rs.exe" docs"#
+            "'C:/Program Files/Bake/bake-rs.exe' docs"
         );
     }
 }

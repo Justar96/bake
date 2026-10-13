@@ -164,7 +164,8 @@ fn documented_flags(page: &str) -> Vec<String> {
 
 #[test]
 fn flags_named_in_the_docs_are_accepted() {
-    let help = text(&run(&["--help"]).stdout);
+    // Whole words, so `-c` does not pass inside `--continue`.
+    let help = documented_flags(&text(&run(&["--help"]).stdout));
     let mut checked = 0;
     for topic in listed_topics() {
         let page = text(&run(&["docs", &topic]).stdout);

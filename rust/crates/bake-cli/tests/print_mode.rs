@@ -15,6 +15,15 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
+// The command the messages name, from the source the binary uses.
+#[allow(dead_code)]
+#[path = "../src/docs.rs"]
+mod docs;
+
+fn docs_command() -> String {
+    docs::docs_command(Path::new(env!("CARGO_BIN_EXE_bake-rs")))
+}
+
 const SSE: &str = include_str!("fixtures/openai-responses-text.sse");
 const READ_CALL_SSE: &str = include_str!("fixtures/openai-responses-read-call.sse");
 
@@ -600,7 +609,10 @@ fn startup_errors_follow_pi() {
     assert_eq!(out.status.code(), Some(1));
     assert_eq!(
         text(&out.stderr),
-        "Error: Model \"nope/missing\" not found. Use --list-models to see available models.\n"
+        format!(
+            "Error: Model \"nope/missing\" not found. See:\n  {} models\n",
+            docs_command()
+        )
     );
     let out = workspace.run(&["-p", "--provider", "loop", "hi"], None);
     assert_eq!(out.status.code(), Some(1));
@@ -621,7 +633,7 @@ fn startup_errors_follow_pi() {
     let stderr = text(&out.stderr);
     assert!(stderr.starts_with("No models available. "));
     // The help names this executable's `docs` command.
-    assert!(stderr.contains("bake-rs") && stderr.ends_with(" docs models\n"));
+    assert!(stderr.ends_with(&format!("\n  {} models\n", docs_command())));
     assert!(server.requests().is_empty());
 }
 

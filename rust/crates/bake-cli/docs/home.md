@@ -20,7 +20,7 @@ A home that Bake 0.3 used also holds `settings.yaml` and `.credentials.yaml`. ba
 
 - the CLIProxyAPI route saved by the 0.3 login (`llm-pi-ai.providers.cliproxyapi`), which becomes the `cliproxyapi` provider;
 - that route's API key: the `CLIPROXYAPI_API_KEY` environment variable when it is set and not empty, else the key `.credentials.yaml` stores;
-- the default model (`agent-default-model`), used only when `settings.json` names no default provider or model;
+- the default model (`agent-default-model`) and its reasoning effort, used only when `settings.json` names no default provider or model; the effort is the default thinking level unless `defaultThinkingLevel` sets one;
 - the default permission preset (`permission.defaultPreset`), used only when `settings.json` names none.
 
-A file that cannot be read or parsed produces a warning, and the run continues without what it would have supplied. bake-rs reads nothing else from a 0.3 home, and it does not open 0.3 Session logs.
+`.credentials.yaml` must be readable by its owner only (mode `0600` on Unix). A problem with it, or a `CLIPROXYAPI_API_KEY` that cannot be used, prints a warning and drops the whole import: the route, its key, and the default model. A `settings.yaml` that cannot be read or parsed does the same. bake-rs reads nothing else from a 0.3 home, and it does not open 0.3 Session logs.

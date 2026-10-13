@@ -500,10 +500,11 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
                 message: warning,
             });
         }
+        // Pi points at `--list-models`, which bake-rs does not have.
         if let Some(message) = resolved.error {
             diagnostics.push(Diagnostic {
                 kind: DiagnosticKind::Error,
-                message,
+                message: format!("{message} See:\n  {docs_command} models"),
             });
         }
         if let Some(found) = resolved.model {
