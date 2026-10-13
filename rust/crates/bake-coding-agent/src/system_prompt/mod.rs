@@ -1,98 +1,148 @@
 //! The structured system prompt and the context files it includes.
 //!
-//! Ported from Pi `packages/coding-agent/src/core/system-prompt.ts`
-//! (v1.1.0), and from `resource-loader.ts` the loading of `AGENTS.md` and
-//! `CLAUDE.md` context files and of the `--system-prompt` and
-//! `--append-system-prompt` inputs ([`context`]). The text is Pi's byte for
-//! byte, including the paragraph that points at Pi's documentation; the
-//! paths it names are [`DocsPaths`], which the caller chooses. Pi v1.1.0's
-//! prompt carries no date.
+//! The prompt's text is Bake's own (D33,
+//! `docs/roadmap/rust-0.4/system-prompt.md`); its mechanism is ported from
+//! Pi `packages/coding-agent/src/core/system-prompt.ts` (v1.1.0), and from
+//! `resource-loader.ts` the loading of `AGENTS.md` and `CLAUDE.md` context
+//! files and of the `--system-prompt` and `--append-system-prompt` inputs
+//! ([`context`]). The tools contribute their guidelines, which follow Pi.
 //!
 //! The prompt is a set of named sections: `preamble` is untagged, and every
 //! other section is wrapped in a tag of its name so that a later system
 //! message can replace it. A session records the sections in a system
 //! message and later sends only the sections that changed
-//! ([`diff_system_prompt_sections`]).
+//! ([`diff_system_prompt_sections`]), so the sections whose facts vary come
+//! last.
 //!
 //! Not ported: skills (scope 10; the `skills` section is never present),
 //! and the forced prompt of an extension's `before_agent_start` handler.
 
 pub mod context;
 
+use std::path::Path;
+
 use bake_ai::utils::text::get_system_message_text;
 use bake_ai::{Sections, SystemContent, SystemMessage};
 
+use crate::permissions::context::PERMISSIONS_SECTION;
+use crate::session::time::format_iso;
+use crate::tools::bash::get_shell_config;
+
 pub use context::{ContextFile, load_project_context_files, resolve_prompt_input};
 
-/// The documentation paths Pi's prompt names: its package's `README.md`,
-/// `docs`, and `examples`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DocsPaths {
-    /// Pi's `getReadmePath()`.
-    pub readme: String,
-    /// Pi's `getDocsPath()`.
-    pub docs: String,
-    /// Pi's `getExamplesPath()`.
-    pub examples: String,
+/// How the session runs, which the `run` section states.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RunMode {
+    /// `bake-rs -p`: no one can answer a question.
+    #[default]
+    Print,
+    /// A user at the terminal can answer.
+    Interactive,
 }
 
-impl DocsPaths {
-    /// Paths under a package directory, as Pi resolves them from its own.
-    pub fn under(package_dir: &std::path::Path) -> Self {
-        let path = |name: &str| package_dir.join(name).to_string_lossy().into_owned();
+/// The facts the `environment` section states; an empty fact is left out.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Environment {
+    /// The operating system family, as `std::env::consts::OS` names it.
+    pub platform: String,
+    /// The file name of the shell the `bash` tool runs, stated while `bash`
+    /// is selected.
+    pub shell: String,
+    /// Whether the working directory is inside a git repository.
+    pub git_repository: bool,
+    /// The UTC date the session started, `YYYY-MM-DD`.
+    pub started: String,
+}
+
+impl Environment {
+    /// The facts for a session in `cwd` that started at `started_ms`: this
+    /// platform, the shell the `bash` tool would resolve, and whether `cwd`
+    /// or an ancestor holds `.git` (a directory, or the file a worktree or
+    /// submodule has). Git itself is not run, and `GIT_DIR` is not read.
+    pub fn detect(cwd: &Path, started_ms: i64) -> Self {
+        let shell = get_shell_config(None)
+            .ok()
+            .and_then(|config| {
+                config
+                    .shell
+                    .file_stem()
+                    .map(|stem| stem.to_string_lossy().into_owned())
+            })
+            .unwrap_or_default();
         Self {
-            readme: path("README.md"),
-            docs: path("docs"),
-            examples: path("examples"),
+            platform: std::env::consts::OS.to_owned(),
+            shell,
+            git_repository: has_git_ancestor(cwd, |path| path.symlink_metadata().is_ok()),
+            started: utc_date(started_ms),
         }
     }
 }
 
-/// Pi's `BuildSystemPromptOptions` without skills or a forced prompt.
+/// Whether `cwd` or one of its ancestors holds a `.git` entry.
+pub fn has_git_ancestor(cwd: &Path, exists: impl Fn(&Path) -> bool) -> bool {
+    cwd.ancestors()
+        .any(|directory| exists(&directory.join(".git")))
+}
+
+/// The UTC calendar date of `ms`, `YYYY-MM-DD`.
+pub fn utc_date(ms: i64) -> String {
+    format_iso(ms).chars().take_while(|c| *c != 'T').collect()
+}
+
+/// The inputs of [`build_system_prompt_sections`]: Pi's
+/// `BuildSystemPromptOptions` without skills or a forced prompt, with
+/// Bake's permission, documentation, run, and environment facts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SystemPromptOptions {
-    /// Replaces the default preamble and its tool, rule, and docs sections.
+    /// Replaces the default preamble and its rule and docs sections.
     pub custom_prompt: Option<String>,
-    /// Tools to list; Pi's default is `read`, `bash`, `edit`, `write`.
+    /// The selected tools; Pi's default is `read`, `bash`, `edit`, `write`.
     pub selected_tools: Vec<String>,
     /// Selected tools whose declarations requests leave out.
     pub hidden_tools: Vec<String>,
-    /// One-line tool snippets by tool name; tools without one are not
-    /// listed.
-    pub tool_snippets: Vec<(String, String)>,
     /// Guideline bullets by tool name.
     pub tool_guidelines: Vec<(String, Vec<String>)>,
     /// Further guideline bullets.
     pub prompt_guidelines: Vec<String>,
+    /// The permission statement; empty for none.
+    pub permissions: String,
+    /// The command that lists Bake's documentation topics, such as
+    /// `/usr/local/bin/bake-rs docs`, already shell-quoted; empty for none.
+    pub docs_command: String,
+    /// How the session runs.
+    pub run_mode: RunMode,
     /// Text appended before the project context.
     pub append_system_prompt: String,
     /// More sections by tag name.
     pub sections: Vec<(String, String)>,
     /// The working directory.
     pub cwd: String,
+    /// The environment facts besides the working directory.
+    pub environment: Environment,
     /// Loaded context files.
     pub context_files: Vec<ContextFile>,
-    /// The documentation paths.
-    pub docs: DocsPaths,
 }
 
 impl SystemPromptOptions {
-    /// Options for `cwd` with Pi's default tool selection and nothing else.
-    pub fn new(cwd: impl Into<String>, docs: DocsPaths) -> Self {
+    /// Options for `cwd` with Pi's default tool selection, a print run, and
+    /// nothing else.
+    pub fn new(cwd: impl Into<String>) -> Self {
         Self {
             custom_prompt: None,
             selected_tools: ["read", "bash", "edit", "write"]
                 .map(str::to_owned)
                 .to_vec(),
             hidden_tools: Vec::new(),
-            tool_snippets: Vec::new(),
             tool_guidelines: Vec::new(),
             prompt_guidelines: Vec::new(),
+            permissions: String::new(),
+            docs_command: String::new(),
+            run_mode: RunMode::Print,
             append_system_prompt: String::new(),
             sections: Vec::new(),
             cwd: cwd.into(),
+            environment: Environment::default(),
             context_files: Vec::new(),
-            docs,
         }
     }
 }
@@ -128,6 +178,29 @@ fn render_project_context(files: &[ContextFile]) -> String {
     parts.join("\n\n")
 }
 
+/// The preamble of Bake's default prompt.
+pub const PREAMBLE: &str = "You are Bake, a coding agent that works in the user's workspace by reading code, running commands, and editing files.";
+
+/// Bake's first rules, from Bake 0.3's headless prompt
+/// (`packages/bundle/headless/cordis.patch.yml`); the precedence sentence
+/// follows Codex CLI's base instructions.
+const LEADING_RULES: [&str; 2] = [
+    "Follow the conventions of the surrounding code and the project's instructions. The user's requests take precedence over project instructions.",
+    "Commit or push only when the task requests it, and do not discard changes you did not make.",
+];
+
+/// Bake 0.3's round-trip paragraph, for a session with tools, without the
+/// sentence `edit`'s own guideline states. Calls in one response do run
+/// in order: the session makes the tools that change files or run commands
+/// sequential (`agent_session::ORDERED_TOOLS`).
+const ROUND_TRIP_RULE: &str = "Work in as few model round trips as you can. Put independent tool calls in one response: read the files you need together, and send an edit with the command that checks it, since calls in one response run in order. Do not re-read a file to confirm an edit that succeeded.";
+
+/// Bake 0.3's last rules, before the tool-contributed guidelines.
+const TRAILING_RULES: [&str; 2] = [
+    "Report results and verification accurately, including failures and skipped checks.",
+    "Keep the final answer concise, factual, and neutral.",
+];
+
 fn build_rules(
     selected: &[String],
     tool_guidelines: &[(String, Vec<String>)],
@@ -140,6 +213,11 @@ fn build_rules(
             rules.push(normalized.to_owned());
         }
     };
+    LEADING_RULES.iter().for_each(|rule| add(rule));
+    if !selected.is_empty() {
+        add(ROUND_TRIP_RULE);
+    }
+    TRAILING_RULES.iter().for_each(|rule| add(rule));
     let has = |name: &str| selected.iter().any(|tool| tool == name);
     let (bash, powershell) = (has("bash"), has("powershell"));
     if (bash || powershell) && !has("grep") && !has("find") && !has("ls") {
@@ -161,13 +239,44 @@ fn build_rules(
         }
     }
     prompt_guidelines.iter().for_each(|rule| add(rule));
-    add("Be concise in your responses");
-    add("Show file paths clearly when working with files");
     rules
         .iter()
         .map(|rule| format!("- {rule}"))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn run_text(mode: RunMode) -> &'static str {
+    match mode {
+        RunMode::Print => {
+            "This is a non-interactive run: no one can answer questions. Make reasonable assumptions, state them in your final answer, and finish the task."
+        }
+        RunMode::Interactive => {
+            "This is an interactive session. Ask the user only when you are blocked or before an action that is hard to reverse or visible to others."
+        }
+    }
+}
+
+fn environment_text(cwd: &str, environment: &Environment, bash: bool) -> String {
+    let mut lines = vec![format!("Working directory: {}", cwd.replace('\\', "/"))];
+    if !environment.platform.is_empty() {
+        lines.push(format!("Platform: {}", environment.platform));
+    }
+    if bash && !environment.shell.is_empty() {
+        lines.push(format!("Shell: {}", environment.shell));
+    }
+    lines.push(format!(
+        "Git repository: {}",
+        if environment.git_repository {
+            "yes"
+        } else {
+            "no"
+        }
+    ));
+    if !environment.started.is_empty() {
+        lines.push(format!("Session started: {} (UTC)", environment.started));
+    }
+    lines.join("\n")
 }
 
 /// Sets a JavaScript object member: an existing key keeps its position.
@@ -178,8 +287,12 @@ fn set_section(sections: &mut Vec<(String, String)>, name: &str, content: String
     }
 }
 
-/// Pi's `buildSystemPromptSections`: the ordered sections, every one but
-/// `preamble` wrapped in its tag.
+/// Pi's `buildSystemPromptSections` with Bake's sections: `preamble`,
+/// `rules`, `docs`, `run`, `addendum`, `project_context`, `permissions`,
+/// `environment`, then [`SystemPromptOptions::sections`], from the most
+/// stable to the most likely to differ between sessions. A custom prompt
+/// replaces `preamble`, `rules`, and `docs`. Every section but `preamble`
+/// is wrapped in its tag.
 pub fn build_system_prompt_sections(
     options: &SystemPromptOptions,
 ) -> Result<Vec<(String, String)>, InvalidSectionName> {
@@ -194,14 +307,6 @@ pub fn build_system_prompt_sections(
         .filter(|name| !options.hidden_tools.contains(name))
         .cloned()
         .collect();
-    let snippet = |name: &str| {
-        options
-            .tool_snippets
-            .iter()
-            .rev()
-            .find(|(tool, snippet)| tool == name && !snippet.is_empty())
-            .map(|(_, snippet)| snippet.as_str())
-    };
     let mut sections: Vec<(String, String)> = Vec::new();
     match options
         .custom_prompt
@@ -210,27 +315,7 @@ pub fn build_system_prompt_sections(
     {
         Some(custom) => set_section(&mut sections, "preamble", custom.to_owned()),
         None => {
-            set_section(
-                &mut sections,
-                "preamble",
-                "You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.".to_owned(),
-            );
-            let visible: Vec<String> = declared
-                .iter()
-                .filter_map(|name| Some(format!("- {name}: {}", snippet(name)?)))
-                .collect();
-            let tools = if visible.is_empty() {
-                "(none)".to_owned()
-            } else {
-                visible.join("\n")
-            };
-            set_section(
-                &mut sections,
-                "tools",
-                format!(
-                    "{tools}\n\nIn addition to the tools above, you may have access to other custom tools depending on the project."
-                ),
-            );
+            set_section(&mut sections, "preamble", PREAMBLE.to_owned());
             set_section(
                 &mut sections,
                 "rules",
@@ -240,27 +325,19 @@ pub fn build_system_prompt_sections(
                     &options.prompt_guidelines,
                 ),
             );
-            let DocsPaths {
-                readme,
-                docs,
-                examples,
-            } = &options.docs;
-            set_section(
-                &mut sections,
-                "docs",
-                format!(
-                    "Pi documentation (read only when the user asks about pi itself, its SDK, extensions, themes, skills, or TUI):
-- Main documentation: {readme}
-- Additional docs: {docs}
-- Examples: {examples} (extensions, custom tools, SDK)
-- When reading pi docs or examples, resolve docs/... under Additional docs and examples/... under Examples, not the current working directory
-- When asked about: extensions (docs/extensions.md, examples/extensions/), themes (docs/themes.md), skills (docs/skills.md), prompt templates (docs/prompt-templates.md), TUI components (docs/tui.md), keybindings (docs/keybindings.md), SDK integrations (docs/sdk.md), custom providers (docs/custom-provider.md), adding models (docs/models.md), pi packages (docs/packages.md), environment variables (docs/environment-variables.md), MCP servers (docs/mcp.md), codemode scripts and non-LLM models such as classifiers and image models (docs/codemode.md)
-- When working on pi topics, read the docs and examples, and follow .md cross-references before implementing
-- Always read pi .md files completely and follow links to related docs (e.g., tui.md for TUI API details)"
-                ),
-            );
+            if !options.docs_command.is_empty() {
+                set_section(
+                    &mut sections,
+                    "docs",
+                    format!(
+                        "For questions about Bake itself, such as its settings, models, permissions, or sessions, run `{docs}` to list the topics and `{docs} <topic>` to read one.",
+                        docs = options.docs_command
+                    ),
+                );
+            }
         }
     }
+    set_section(&mut sections, "run", run_text(options.run_mode).to_owned());
     if !options.append_system_prompt.is_empty() {
         set_section(
             &mut sections,
@@ -275,7 +352,22 @@ pub fn build_system_prompt_sections(
             render_project_context(&options.context_files),
         );
     }
-    set_section(&mut sections, "cwd", options.cwd.replace('\\', "/"));
+    if !options.permissions.is_empty() {
+        set_section(
+            &mut sections,
+            PERMISSIONS_SECTION,
+            options.permissions.clone(),
+        );
+    }
+    set_section(
+        &mut sections,
+        "environment",
+        environment_text(
+            &options.cwd,
+            &options.environment,
+            declared.iter().any(|tool| tool == "bash"),
+        ),
+    );
     for (name, content) in &options.sections {
         if !content.is_empty() {
             set_section(&mut sections, name, content.clone());
@@ -345,14 +437,6 @@ pub fn diff_system_prompt_sections(
         }
     }
     (!patch.is_empty()).then_some(Sections(patch))
-}
-
-/// Pi's `_normalizePromptSnippet`: one line with collapsed whitespace, or
-/// `None` when empty.
-pub fn normalize_prompt_snippet(text: Option<&str>) -> Option<String> {
-    let text = text?;
-    let one_line = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    (!one_line.is_empty()).then_some(one_line)
 }
 
 /// Pi's `_normalizePromptGuidelines`: trimmed, non-empty, unique, in order.

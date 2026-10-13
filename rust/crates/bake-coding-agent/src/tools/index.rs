@@ -51,10 +51,10 @@ pub struct ToolsOptions {
 }
 
 /// Pi's `createBashToolDefinition(cwd, options)`: the bash tool with its
-/// prompt snippet, and its guideline unless the session environment is
-/// hidden.
+/// prompt snippet; Pi's guideline names `PI_*` variables, so Bake's has
+/// none.
 pub fn create_bash_tool_definition(cwd: &Path, options: BashToolOptions) -> ToolDefinition {
-    let prompt = bash_tool_prompt(&options);
+    let prompt = bash_tool_prompt();
     ToolDefinition {
         tool: create_bash_tool(cwd, options),
         prompt_snippet: prompt.snippet,

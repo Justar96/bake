@@ -67,7 +67,7 @@ function compact(sample: Sample) {
   return {
     model: sample.model, scenario: sample.scenario, trial: sample.trial, arm: sample.variant, version: armLabels[sample.variant],
     success: sample.success === true, usageComplete: sample.usageComplete === true,
-    failure: failureOf(sample),
+    failure: failureOf(sample), invalid: sample.invalid ?? null,
     requests: sample.requests, toolCalls: sample.toolCalls, toolErrors: sample.toolErrors, byTool: sample.byTool ?? {},
     guardRefusals: sample.guardRefusals ?? null, shellEdits: sample.shellEdits ?? null, multiEditCalls: sample.multiEditCalls ?? null,
     toolHelpCalls: sample.toolHelpCalls ?? null, workflowCalls: sample.workflowCalls ?? null,
@@ -102,12 +102,14 @@ const logicalInput = (sample: Compact) => sample.inputTokens + sample.cacheWrite
 function compare(model: string, baseArm: string, scenarios: (scenario: string) => boolean) {
   const key = (sample: Compact) => `${sample.scenario}.${sample.trial}`
   const baseByKey = new Map(samples.filter(s => s.model === model && s.arm === baseArm && scenarios(s.scenario)).map(s => [key(s), s]))
-  const matched = samples.filter(s => s.model === model && s.arm === candidate && scenarios(s.scenario) && baseByKey.has(key(s)))
+  const cells = samples.filter(s => s.model === model && s.arm === candidate && scenarios(s.scenario) && baseByKey.has(key(s)))
     .map(s => [baseByKey.get(key(s))!, s] as [Compact, Compact])
+  // A cell with an invalid sample measured the evaluator, not either agent: it counts toward no comparison or failure.
+  const matched = cells.filter(([b, c]) => b.invalid === null && c.invalid === null)
   const usable = matched.filter(([b, c]) => b.success && c.success && b.usageComplete && c.usageComplete)
   const total = (arm: 0 | 1, metric: (sample: Compact) => number) => usable.reduce((sum, pair) => sum + metric(pair[arm]), 0)
   return {
-    cells: matched.length, pairs: usable.length,
+    cells: matched.length, invalidCells: cells.length - matched.length, pairs: usable.length,
     failures: [matched.filter(pair => !pair[0].success).length, matched.filter(pair => !pair[1].success).length],
     totalTokens: usable.length ? pairedChange(usable, s => s.totalTokens) : null,
     logicalInputTokens: usable.length ? pairedChange(usable, logicalInput) : null,

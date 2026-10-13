@@ -9,8 +9,11 @@
 //!
 //! The model-visible text (name, description, schemas, results, exit-code,
 //! timeout, abort, and truncation notices) is Pi's byte for byte;
-//! `tests/fixtures/pi-bash/` records it from Pi's own code. The prompt
-//! still names Pi's `PI_*` variables, as Pi's does.
+//! `tests/fixtures/pi-bash/` records it from Pi's own code. Three
+//! deviations name Bake where Pi names itself (D33): the session's details
+//! reach commands as `BAKE_*` variables where Pi exports `PI_*`, spill
+//! files are named `bake-bash-…` where Pi's are `pi-bash-…`, and the tool
+//! contributes no prompt guideline, since Pi's names the `PI_*` variables.
 //!
 //! [`BashOperations`] is the one execution seam: the tool hands it the
 //! final command, directory, and environment, and a wrapper can refuse or
@@ -60,21 +63,21 @@ pub use tree::kill_tracked_detached_children;
 
 /// Pi's `bashToolSystemPromptContribution.snippet`.
 pub const BASH_TOOL_PROMPT_SNIPPET: &str = "Execute bash commands (ls, grep, find, etc.)";
-/// Pi's `bashToolSystemPromptContribution.guidelines`.
-pub const BASH_TOOL_PROMPT_GUIDELINES: &[&str] =
-    &["You can inspect PI_* environment variables for current model and session details."];
 /// Pi's `BASH_UPDATE_THROTTLE_MS`: the least time between streamed updates.
 pub const BASH_UPDATE_THROTTLE: Duration = Duration::from_millis(100);
 /// Pi's `STRUCTURED_OUTPUT_MAX_BYTES`: the cap on `structured_content.output`.
 pub const STRUCTURED_OUTPUT_MAX_BYTES: usize = 1024 * 1024;
 
-const TEMP_FILE_PREFIX: &str = "pi-bash";
-const SESSION_VARIABLES: [&str; 5] = [
-    "PI_SESSION_ID",
-    "PI_SESSION_FILE",
-    "PI_PROVIDER",
-    "PI_MODEL",
-    "PI_REASONING_LEVEL",
+/// The spill file's name prefix; Pi's is `pi-bash`.
+const TEMP_FILE_PREFIX: &str = "bake-bash";
+/// The variables a command receives the session's details in, Pi's
+/// `PI_*` names under Bake's prefix; inherited values are removed first.
+pub const SESSION_VARIABLES: [&str; 5] = [
+    "BAKE_SESSION_ID",
+    "BAKE_SESSION_FILE",
+    "BAKE_PROVIDER",
+    "BAKE_MODEL",
+    "BAKE_REASONING_LEVEL",
 ];
 
 /// Receives output bytes as the command writes them, Pi's `onData`.
@@ -142,7 +145,7 @@ pub struct BashSpawnContext {
 /// Adjusts a call before it runs, Pi's `BashSpawnHook`.
 pub type BashSpawnHook = Arc<dyn Fn(BashSpawnContext) -> BashSpawnContext + Send + Sync>;
 
-/// The model a session uses, for `PI_PROVIDER` and `PI_MODEL`.
+/// The model a session uses, for `BAKE_PROVIDER` and `BAKE_MODEL`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BashModel {
     /// The provider name.
@@ -157,13 +160,13 @@ pub struct BashToolContext {
     /// The session's working directory, which wins over the tool's when
     /// not empty (Pi's `ctx.cwd || cwd`).
     pub cwd: Option<PathBuf>,
-    /// `PI_SESSION_ID`.
+    /// `BAKE_SESSION_ID`.
     pub session_id: String,
-    /// `PI_SESSION_FILE`, for a persisted session.
+    /// `BAKE_SESSION_FILE`, for a persisted session.
     pub session_file: Option<String>,
-    /// `PI_PROVIDER` and `PI_MODEL`.
+    /// `BAKE_PROVIDER` and `BAKE_MODEL`.
     pub model: Option<BashModel>,
-    /// `PI_REASONING_LEVEL`.
+    /// `BAKE_REASONING_LEVEL`.
     pub thinking_level: Option<String>,
 }
 
@@ -179,8 +182,7 @@ pub struct BashToolOptions {
     pub command_prefix: Option<String>,
     /// An explicit shell, Pi's `shellPath` setting.
     pub shell_path: Option<PathBuf>,
-    /// Exposes session details as `PI_*` variables and lists the guideline
-    /// that mentions them. Default: true.
+    /// Exposes session details as the [`SESSION_VARIABLES`]. Default: true.
     pub expose_session_environment: bool,
     /// Adjusts the command, directory, or environment before each call.
     pub spawn_hook: Option<BashSpawnHook>,
@@ -264,20 +266,13 @@ pub fn bash_tool_output_schema() -> Value {
     })
 }
 
-/// The tool's prompt text, Pi's `promptSnippet` and `promptGuidelines`;
-/// the guideline is left out when the session environment is hidden.
-pub fn bash_tool_prompt(options: &BashToolOptions) -> ToolPrompt {
+/// The tool's prompt text, Pi's `promptSnippet`; Pi's one guideline names
+/// the `PI_*` variables, so Bake's tool has none.
+pub fn bash_tool_prompt() -> ToolPrompt {
     ToolPrompt {
         name: "bash".to_owned(),
         snippet: Some(BASH_TOOL_PROMPT_SNIPPET.to_owned()),
-        guidelines: if options.expose_session_environment {
-            BASH_TOOL_PROMPT_GUIDELINES
-                .iter()
-                .map(|line| (*line).to_owned())
-                .collect()
-        } else {
-            Vec::new()
-        },
+        guidelines: Vec::new(),
     }
 }
 
@@ -478,24 +473,24 @@ impl Shared {
         if self.options.expose_session_environment
             && let Some(context) = &context
         {
-            env.push(("PI_SESSION_ID".into(), context.session_id.clone().into()));
+            env.push(("BAKE_SESSION_ID".into(), context.session_id.clone().into()));
             if let Some(file) = context
                 .session_file
                 .as_ref()
                 .filter(|file| !file.is_empty())
             {
-                env.push(("PI_SESSION_FILE".into(), file.into()));
+                env.push(("BAKE_SESSION_FILE".into(), file.into()));
             }
             if let Some(model) = &context.model {
-                env.push(("PI_PROVIDER".into(), model.provider.clone().into()));
-                env.push(("PI_MODEL".into(), model.id.clone().into()));
+                env.push(("BAKE_PROVIDER".into(), model.provider.clone().into()));
+                env.push(("BAKE_MODEL".into(), model.id.clone().into()));
             }
             if let Some(level) = context
                 .thinking_level
                 .as_ref()
                 .filter(|level| !level.is_empty())
             {
-                env.push(("PI_REASONING_LEVEL".into(), level.into()));
+                env.push(("BAKE_REASONING_LEVEL".into(), level.into()));
             }
         }
         let cwd = context

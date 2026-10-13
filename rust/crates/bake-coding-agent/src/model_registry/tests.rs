@@ -201,10 +201,7 @@ fn resolve_cli_model_follows_pi() {
         pair("openrouter", "qwen/qwen3-coder:exacto")
     );
     let unknown = cli(Some("nope"), "x", &all);
-    assert_eq!(
-        unknown.error.as_deref(),
-        Some("Unknown provider \"nope\". Use --list-models to see available providers/models.")
-    );
+    assert_eq!(unknown.error.as_deref(), Some("Unknown provider \"nope\"."));
 }
 
 #[test]

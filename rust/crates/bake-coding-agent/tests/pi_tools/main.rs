@@ -16,9 +16,7 @@ use std::sync::Arc;
 
 use bake_agent::{AgentToolResult, AgentToolUpdateCallback};
 use bake_ai::{AbortController, ConstrainedSampling, ImageContent, Model, UserContentBlock};
-use bake_coding_agent::system_prompt::{
-    DocsPaths, SystemPromptOptions, build_system_prompt_sections,
-};
+use bake_coding_agent::system_prompt::{SystemPromptOptions, build_system_prompt_sections};
 use bake_coding_agent::tools::definition::ToolDefinition;
 use bake_coding_agent::tools::edit::prepare_edit_arguments;
 use bake_coding_agent::tools::image::ImageResizeOptions;
@@ -146,22 +144,29 @@ fn tool_sets_follow_pi_and_take_bash_from_its_slot() {
     assert!(create_tool_definition("nope", cwd, &with_bash).is_none());
 }
 
-/// Pi: `system-prompt.test.ts`'s tool sections for the sets the session
-/// builds, with snippets and guidelines from the tool definitions. Bash's
-/// text comes from the fixture until its port supplies the definition.
+/// Pi: `system-prompt.test.ts`'s rules for the sets the session builds:
+/// after Bake's own rules, the tool guidelines Pi lists, in Pi's order,
+/// from the tool definitions. Pi's last two rules and its `bash` guideline,
+/// which names the `PI_*` variables, are Pi's own and left out (D33).
 #[test]
-fn prompt_sections_match_pi() {
+fn tool_guidelines_match_pi() {
+    const PI_ONLY: [&str; 3] = [
+        "- Be concise in your responses",
+        "- Show file paths clearly when working with files",
+        "- You can inspect PI_* environment variables for current model and session details.",
+    ];
     let built = definitions(&ToolsOptions::default());
-    let bash = &golden()["definitions"]["bash"];
+    let lines = |section: &str| -> Vec<String> {
+        section
+            .lines()
+            .filter(|line| *line != "<rules>" && *line != "</rules>")
+            .map(str::to_owned)
+            .collect()
+    };
     for case in golden()["prompts"].as_array().expect("prompts") {
-        let mut options = SystemPromptOptions::new("/work", DocsPaths::under(Path::new("/docs")));
+        let mut options = SystemPromptOptions::new("/work");
         options.selected_tools = strings(&case["selected"]);
         for definition in &built {
-            if let Some(snippet) = &definition.prompt_snippet {
-                options
-                    .tool_snippets
-                    .push((definition.name().to_owned(), snippet.clone()));
-            }
             if let Some(guidelines) = definition
                 .prompt_guidelines
                 .as_ref()
@@ -172,33 +177,23 @@ fn prompt_sections_match_pi() {
                     .push((definition.name().to_owned(), guidelines.clone()));
             }
         }
-        options.tool_snippets.push((
-            "bash".into(),
-            bash["promptSnippet"].as_str().expect("snippet").into(),
-        ));
-        options
-            .tool_guidelines
-            .push(("bash".into(), strings(&bash["promptGuidelines"])));
         let sections = build_system_prompt_sections(&options).expect("sections");
-        let section = |name: &str| {
-            sections
-                .iter()
-                .find(|(known, _)| known == name)
-                .map(|(_, text)| text.clone())
-                .unwrap_or_default()
+        let rules = sections
+            .iter()
+            .find(|(name, _)| name == "rules")
+            .map(|(_, text)| lines(text))
+            .unwrap_or_default();
+        let pi: Vec<String> = lines(case["rules"].as_str().expect("rules"))
+            .into_iter()
+            .filter(|line| !PI_ONLY.contains(&line.as_str()))
+            .collect();
+        assert!(rules.ends_with(&pi), "{:?}: {rules:?}", case["selected"]);
+        let own = if options.selected_tools.is_empty() {
+            4
+        } else {
+            5
         };
-        assert_eq!(
-            section("tools"),
-            case["tools"].as_str().expect("tools"),
-            "{:?}",
-            case["selected"]
-        );
-        assert_eq!(
-            section("rules"),
-            case["rules"].as_str().expect("rules"),
-            "{:?}",
-            case["selected"]
-        );
+        assert_eq!(rules.len() - pi.len(), own, "{:?}", case["selected"]);
     }
 }
 
