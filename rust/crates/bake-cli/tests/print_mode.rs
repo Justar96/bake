@@ -888,6 +888,104 @@ fn print_mode_runs_the_read_tool() {
     );
 }
 
+/// Instructions and skills come from the universal `.agents` locations:
+/// `~/.agents/AGENTS.md` and `~/.agents/skills` under the user's home, and
+/// the project's `AGENTS.md` and `.agents/skills`. `CLAUDE.md` and the Bake
+/// home's `AGENTS.md` are not read, and `/skill:name` expands the skill.
+#[test]
+fn print_mode_reads_agents_instructions_and_skills() {
+    let server = Server::start(Reply::sse());
+    let workspace = Workspace::new("agents", server.port);
+    let user = workspace.root.join("user");
+    let project = workspace.project();
+    // The project is a repository, so the skill search stops at it.
+    std::fs::create_dir_all(project.join(".git")).expect(".git");
+    let write = |path: PathBuf, text: &str| {
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+        std::fs::write(path, text).expect("write");
+    };
+    write(user.join(".agents/AGENTS.md"), "Global agents rules.");
+    write(workspace.home().join("AGENTS.md"), "Bake home rules.");
+    write(project.join("AGENTS.md"), "Project agents rules.");
+    write(project.join("CLAUDE.md"), "Claude rules.");
+    // Built by component, as bake-rs builds them, so Windows paths match.
+    let skill_file = |root: &Path, name: &str| {
+        root.join(".agents")
+            .join("skills")
+            .join(name)
+            .join("SKILL.md")
+    };
+    let user_skill = skill_file(&user, "user-skill");
+    write(
+        user_skill.clone(),
+        "---\nname: user-skill\ndescription: From the user.\n---\nUser body.\n",
+    );
+    let project_skill = skill_file(&project, "project-skill");
+    write(
+        project_skill.clone(),
+        "---\nname: project-skill\ndescription: From the project.\n---\n\nProject body.\n",
+    );
+
+    // On Unix the working directory bake-rs reads has its links resolved,
+    // as macOS's temporary directory needs; Windows reports it as set, in
+    // the short form its temporary directory may use, where canonicalizing
+    // would give a `\\?\` long path.
+    #[cfg(unix)]
+    let project_skill = std::fs::canonicalize(&project_skill).expect("project skill");
+    let out = workspace.run(&["-p", "/skill:project-skill now"], None);
+    assert_eq!(text(&out.stderr), "");
+    assert_eq!(out.status.code(), Some(0));
+    let requests = server.requests();
+    let input = transcript(&requests[0]);
+    let system = &input[0];
+    assert!(system.contains("Global agents rules."), "{system}");
+    assert!(system.contains("Project agents rules."), "{system}");
+    assert!(!system.contains("Bake home rules."), "{system}");
+    assert!(!system.contains("Claude rules."), "{system}");
+    let skills = system
+        .split("<skills>\n")
+        .nth(1)
+        .and_then(|rest| rest.split("\n</skills>").next())
+        .expect("a skills section");
+    assert!(
+        skills.contains(&format!(
+            "<name>project-skill</name>\n    <description>From the project.</description>\n    <location>{}</location>",
+            project_skill.display()
+        )),
+        "{skills}"
+    );
+    assert!(
+        skills.contains(&format!("<location>{}</location>", user_skill.display())),
+        "{skills}"
+    );
+    assert_eq!(
+        input[1],
+        format!(
+            "user: <skill name=\"project-skill\" location=\"{}\">\nReferences are relative to {}.\n\nProject body.\n</skill>\n\nnow",
+            project_skill.display(),
+            project_skill.parent().expect("dir").display()
+        )
+    );
+
+    // `--no-skills` leaves the section out; `--skill` adds a file back.
+    let out = workspace.run(
+        &[
+            "-p",
+            "--no-session",
+            "--no-skills",
+            "--skill",
+            ".agents/skills/project-skill/SKILL.md",
+            "Hi",
+        ],
+        None,
+    );
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    let requests = server.requests();
+    let system = &transcript(&requests[1])[0];
+    assert!(system.contains("<name>project-skill</name>"), "{system}");
+    assert!(!system.contains("<name>user-skill</name>"), "{system}");
+}
+
 /// Pi's bash tool through `bake-rs -p`: the command runs in the project
 /// with the session's `BAKE_*` variables, and its output goes back to the
 /// model. `danger-full-access` runs it unconfined, which needs no sandbox

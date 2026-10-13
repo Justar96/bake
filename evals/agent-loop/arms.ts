@@ -211,23 +211,32 @@ export function nativeStaleWriter(workspace: string, target: string, injectionPa
 }
 
 /** The context file names `bake-rs` loads from a directory, after Pi's, in its order. */
-export const NATIVE_CONTEXT_FILES = ['AGENTS.override.md', 'AGENTS.md', 'AGENTS.MD', 'CLAUDE.md', 'CLAUDE.MD']
+export const NATIVE_CONTEXT_FILES = ['AGENTS.override.md', 'AGENTS.md', 'AGENTS.MD']
 
 /**
- * Context files a native sample would load but the scenario does not own:
- * `bake-rs` reads one file from its Bake home and one from each directory
- * between the filesystem root and its working directory. The workspace itself
- * is left out when the scenario provides its own instructions.
- * @returns the files found, first match per directory.
+ * Context files and skill directories a native sample would load but the
+ * scenario does not own. `bake-rs` reads `~/.agents/AGENTS.md` and
+ * `~/.agents/skills` under the user's home, one context file from each
+ * directory between the filesystem root and its working directory, and the
+ * `.agents/skills` of each directory from its working directory up to the git
+ * root, or to the filesystem root outside a repository. The workspace's own
+ * context file is left out when the scenario provides its own instructions.
+ * @returns the files found, first match per directory, then the skill directories.
  */
-export function strayContextFiles(workspace: string, home: string, ownsWorkspaceFile: boolean): string[] {
-  const dirs = [home]
-  for (let dir = realpathSync(workspace); ; dir = dirname(dir)) {
-    if (!(ownsWorkspaceFile && dir === realpathSync(workspace))) dirs.push(dir)
+export function strayContextFiles(workspace: string, userHome: string, ownsWorkspaceFile: boolean): string[] {
+  const start = realpathSync(workspace)
+  const contextDirs = [join(userHome, '.agents')]
+  const skillDirs = [join(userHome, '.agents', 'skills')]
+  let collectingSkills = true
+  for (let dir = start; ; dir = dirname(dir)) {
+    if (!(ownsWorkspaceFile && dir === start)) contextDirs.push(dir)
+    if (collectingSkills) skillDirs.push(join(dir, '.agents', 'skills'))
+    if (existsSync(join(dir, '.git'))) collectingSkills = false
     if (dirname(dir) === dir) break
   }
-  return dirs.flatMap(dir => {
+  const files = contextDirs.flatMap(dir => {
     const found = NATIVE_CONTEXT_FILES.map(name => join(dir, name)).find(path => existsSync(path) && statSync(path).isFile())
     return found === undefined ? [] : [found]
   })
+  return [...files, ...skillDirs.filter(dir => existsSync(dir))]
 }

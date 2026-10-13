@@ -37,7 +37,13 @@ tool-result-images.ts), the bash tool and its process handling
 BASH_UPDATE_THROTTLE_MS from src/core/tools/renderers/bash.ts), compaction
 (src/core/compaction/compaction.ts, branch-summarization.ts, utils.ts) with
 auto-compaction and auto-retry from src/core/agent-session.ts, and the tests
-under test/ that the Rust tests name.
+under test/ that the Rust tests name. From release v1.2.0, revision
+06a466935536f8c9bcacb2d5efc0fc021be1bdff: skills (src/core/skills.ts,
+src/utils/frontmatter.ts, the .agents skill discovery of
+src/core/package-manager.ts, and the skill-command expansion of
+src/core/agent-session.ts), the linked-worktree fix of
+src/core/resource-loader.ts, and Pi's skill fixtures under
+test/fixtures/skills and test/fixtures/skills-collision.
 --------------------------------------------------------------------------------
 MIT License
 

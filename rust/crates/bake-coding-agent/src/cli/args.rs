@@ -4,6 +4,9 @@
 //! unknown flag (Pi's extension flags), which the caller reports as Pi does
 //! when no extension registers it, and a short one is an error.
 //!
+//! `--skill <path>` and `--no-skills` (`-ns`) select skills
+//! ([`crate::skills`]).
+//!
 //! Bake adds `--permission <preset>`, `--sandbox <mode>`, and
 //! `--approval <policy>`, which select the session's permission (D24) the
 //! way Pi's `--thinking` selects its thinking level.
@@ -83,6 +86,10 @@ pub struct Args {
     pub no_tools: bool,
     /// `--no-builtin-tools`, `-nbt`.
     pub no_builtin_tools: bool,
+    /// `--skill`, each path in order.
+    pub skills: Vec<String>,
+    /// `--no-skills`, `-ns`.
+    pub no_skills: bool,
     /// Bake's `--permission`: the preset to select.
     pub permission: Option<String>,
     /// Bake's `--sandbox`: the sandbox mode to set.
@@ -164,6 +171,11 @@ pub fn parse_args(args: &[String]) -> Args {
             }
             "--no-tools" | "-nt" => result.no_tools = true,
             "--no-builtin-tools" | "-nbt" => result.no_builtin_tools = true,
+            "--skill" if next.is_some() => {
+                result.skills.extend(next.map(str::to_owned));
+                i += 1;
+            }
+            "--no-skills" | "-ns" => result.no_skills = true,
             "--tools" | "-t" if next.is_some() => {
                 let tools = tool_list(next.unwrap_or_default());
                 i += 1;
@@ -349,6 +361,16 @@ mod tests {
         assert_eq!(args.exclude_tools, Some(vec!["ls".into(), "mcp__*".into()]));
         assert!(args.no_tools && args.no_builtin_tools);
         assert!(args.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn skill_flags() {
+        let args = parse(&["--skill", "a/SKILL.md", "-ns", "--skill", "~/skills"]);
+        assert_eq!(args.skills, ["a/SKILL.md", "~/skills"]);
+        assert!(args.no_skills);
+        assert!(args.diagnostics.is_empty());
+        // Pi: `--skill` without a value falls through to the unknown flags.
+        assert_eq!(parse(&["--skill"]).unknown_flags, [("skill".into(), None)]);
         assert_eq!(
             parse(&["-t", "+grep,-bash"]).tools,
             Some(vec!["+grep".into(), "-bash".into()])

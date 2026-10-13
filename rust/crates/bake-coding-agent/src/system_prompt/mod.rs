@@ -3,9 +3,8 @@
 //! The prompt's text is Bake's own (D33,
 //! `docs/roadmap/rust-0.4/system-prompt.md`); its mechanism is ported from
 //! Pi `packages/coding-agent/src/core/system-prompt.ts` (v1.1.0), and from
-//! `resource-loader.ts` the loading of `AGENTS.md` and `CLAUDE.md` context
-//! files and of the `--system-prompt` and `--append-system-prompt` inputs
-//! ([`context`]). The tools contribute their guidelines, which follow Pi.
+//! `resource-loader.ts` the loading of `AGENTS.md` context files and of
+//! the `--system-prompt` and `--append-system-prompt` inputs ([`context`]). The tools contribute their guidelines, which follow Pi.
 //!
 //! The prompt is a set of named sections: `preamble` is untagged, and every
 //! other section is wrapped in a tag of its name so that a later system
@@ -14,8 +13,11 @@
 //! ([`diff_system_prompt_sections`]), so the sections whose facts vary come
 //! last.
 //!
-//! Not ported: skills (scope 10; the `skills` section is never present),
-//! and the forced prompt of an extension's `before_agent_start` handler.
+//! The `skills` section lists the loaded [skills](crate::skills) when a
+//! selected tool can read their files (Pi v1.2.0, unchanged since v1.1.0).
+//!
+//! Not ported: the forced prompt of an extension's `before_agent_start`
+//! handler.
 
 pub mod context;
 
@@ -26,9 +28,10 @@ use bake_ai::{Sections, SystemContent, SystemMessage};
 
 use crate::permissions::context::PERMISSIONS_SECTION;
 use crate::session::time::format_iso;
+use crate::skills::{Skill, SkillReader, format_skills_for_prompt};
 use crate::tools::bash::get_shell_config;
 
-pub use context::{ContextFile, load_project_context_files, resolve_prompt_input};
+pub use context::{ContextFile, load_project_context_files, resolve_prompt_input, user_agents_dir};
 
 /// How the session runs, which the `run` section states.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -90,7 +93,7 @@ pub fn utc_date(ms: i64) -> String {
 }
 
 /// The inputs of [`build_system_prompt_sections`]: Pi's
-/// `BuildSystemPromptOptions` without skills or a forced prompt, with
+/// `BuildSystemPromptOptions` without a forced prompt, with
 /// Bake's permission, documentation, run, and environment facts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SystemPromptOptions {
@@ -121,6 +124,8 @@ pub struct SystemPromptOptions {
     pub environment: Environment,
     /// Loaded context files.
     pub context_files: Vec<ContextFile>,
+    /// Loaded skills.
+    pub skills: Vec<Skill>,
 }
 
 impl SystemPromptOptions {
@@ -143,6 +148,7 @@ impl SystemPromptOptions {
             cwd: cwd.into(),
             environment: Environment::default(),
             context_files: Vec::new(),
+            skills: Vec::new(),
         }
     }
 }
@@ -351,6 +357,34 @@ pub fn build_system_prompt_sections(
             "project_context",
             render_project_context(&options.context_files),
         );
+    }
+    // A hidden reader is still reachable through another tool, so skills
+    // stay but the hint names no tool.
+    let reader = ["read", "bash"]
+        .into_iter()
+        .find(|tool| declared.iter().any(|name| name == tool))
+        .map(|tool| {
+            if tool == "read" {
+                SkillReader::Read
+            } else {
+                SkillReader::Bash
+            }
+        })
+        .or_else(|| {
+            options
+                .selected_tools
+                .iter()
+                .any(|name| name == "read" || name == "bash")
+                .then_some(SkillReader::Indirect)
+        });
+    if let Some(reader) = reader
+        && !options.skills.is_empty()
+    {
+        let skills = format_skills_for_prompt(&options.skills, reader);
+        let skills = crate::tools::js::trim(&skills);
+        if !skills.is_empty() {
+            set_section(&mut sections, "skills", skills.to_owned());
+        }
     }
     if !options.permissions.is_empty() {
         set_section(

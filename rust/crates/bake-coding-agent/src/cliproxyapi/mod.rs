@@ -27,7 +27,7 @@ pub mod endpoints;
 pub mod fetch;
 pub mod import;
 pub mod route;
-mod yaml;
+pub(crate) mod yaml;
 
 pub use catalog::{
     CliProxyApi, CliProxyModel, InvalidModelList, Modality, cli_proxy_api, cli_proxy_models,

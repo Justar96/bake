@@ -49,8 +49,13 @@ pub const TOPICS: &[Topic] = &[
     },
     Topic {
         name: "context",
-        summary: "AGENTS.md and CLAUDE.md instruction files",
+        summary: "AGENTS.md instruction files",
         text: include_str!("../docs/context.md"),
+    },
+    Topic {
+        name: "skills",
+        summary: "Agent Skills, where they are found, and /skill:<name>",
+        text: include_str!("../docs/skills.md"),
     },
 ];
 

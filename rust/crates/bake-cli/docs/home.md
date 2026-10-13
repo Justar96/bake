@@ -1,6 +1,6 @@
 # The Bake home
 
-The Bake home is the directory that holds bake-rs's models, keys, settings, global instructions, and saved sessions. It is the first of these that is set and not blank: `BAKE_HOME`, then `DSH_HOME`, then `~/.bake`. A leading `~` in either variable is expanded, and a relative path is taken from the working directory. When none of them can be resolved, bake-rs stops with an error.
+The Bake home is the directory that holds bake-rs's models, keys, settings, and saved sessions. It is the first of these that is set and not blank: `BAKE_HOME`, then `DSH_HOME`, then `~/.bake`. A leading `~` in either variable is expanded, and a relative path is taken from the working directory. When none of them can be resolved, bake-rs stops with an error.
 
 ## What bake-rs reads there
 
@@ -9,8 +9,9 @@ The Bake home is the directory that holds bake-rs's models, keys, settings, glob
 | `models.json` | Providers and models (`bake-rs docs models`) |
 | `auth.json` | API keys by provider (`bake-rs docs models`) |
 | `settings.json` | Default model, tools, sessions, compaction, retry, and permission presets (`bake-rs docs settings`) |
-| `AGENTS.md` | Instructions for every project (`bake-rs docs context`) |
 | `sessions/` | Saved sessions, one directory per working directory (`bake-rs docs sessions`) |
+
+Instructions and skills for every project are not in the Bake home: they are in `~/.agents` in your home directory (`bake-rs docs context` and `bake-rs docs skills`).
 
 bake-rs never writes `models.json`, `auth.json`, or `settings.json`. It creates `sessions/`, the session files in it, and a `.lock` file beside each session it writes, which it leaves in place (`bake-rs docs sessions`).
 

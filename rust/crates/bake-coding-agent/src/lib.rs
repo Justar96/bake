@@ -17,6 +17,7 @@
 //! | [`agent_session`] | Pi `src/core/agent-session.ts`, `src/core/sdk.ts`, with auto-compaction, manual `compact`, and auto-retry |
 //! | [`compaction`] | Pi `src/core/compaction/{compaction,branch-summarization,utils}.ts` |
 //! | [`system_prompt`] | Pi `src/core/system-prompt.ts`, `src/core/resource-loader.ts` (context files) |
+//! | [`skills`] | Pi `src/core/skills.ts`, `src/utils/frontmatter.ts`, the `.agents` discovery of `src/core/package-manager.ts` (v1.2.0) |
 //! | [`model_registry`] | Pi `src/core/{model-runtime,provider-composer,model-config,model-resolver}.ts`, `src/utils/json.ts` |
 //! | [`auth_storage`] | Pi `src/core/auth-storage.ts` (read-only) |
 //! | [`config_value`] | Pi `src/core/resolve-config-value.ts` |
@@ -43,6 +44,7 @@ pub mod permissions;
 pub mod print_mode;
 pub mod session;
 pub mod settings;
+pub mod skills;
 pub mod system_prompt;
 #[cfg(test)]
 mod test_support;

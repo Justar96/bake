@@ -10,9 +10,11 @@
  * fails the smoke. Two controls follow: a run whose read never names the
  * target, so nothing is injected and the samples must fail, and a run that
  * reads and edits in one response, which the evaluator must mark as a raced
- * injection rather than score. A last control puts an `AGENTS.md` above the
- * workspace, which the evaluator must refuse before any request. It measures
- * nothing about a real model.
+ * injection rather than score. The evaluator's own home holds a
+ * `~/.agents/AGENTS.md` and a skill throughout, and no request may carry
+ * either, since each sample must get an empty user home. A last control puts
+ * an `AGENTS.md` above the workspace, which the evaluator must refuse before
+ * any request. It measures nothing about a real model.
  *
  * The live evaluator stops its agents through POSIX process groups, so this
  * check is skipped on Windows. The script owns its temporary root, the
@@ -33,6 +35,8 @@ const binary = join(root, 'rust/target/debug', `bake-rs${process.platform === 'w
 const RUN = join(import.meta.dir, 'run.ts')
 const MODEL = 'native-smoke-model'
 const KEY = 'native-smoke-dummy-key'
+/** A marker in the evaluator's own `~/.agents`, which no sample's request may carry. */
+const LEAK = 'SMOKE_EVALUATOR_HOME_LEAK'
 const MARKER = 'EXTERNAL_CHANGE_KEEP'
 /** Each evaluation has at most four samples of three requests, well inside the scenarios' own caps. */
 const DEADLINE_MS = 120_000
@@ -118,13 +122,14 @@ async function smokeNativeArm(): Promise<void> {
   const temp = mkdtempSync(join(tmpdir(), 'bake-native-arm-smoke-'))
   const samplesDir = join(temp, 'tmp')
   let mode: Mode = 'normal'
-  const received: { path: string; authorization: string | null; model: unknown }[] = []
+  const received: { path: string; authorization: string | null; model: unknown; leaked: boolean }[] = []
   /** Whether each `stale_edit` edit the server sent found the injected comment already in place. */
   const injectedBeforeEdit: boolean[] = []
   const server = Bun.serve({ port: 0, hostname: '127.0.0.1',
     async fetch(request) {
       const body = await request.json() as Json
-      received.push({ path: new URL(request.url).pathname, authorization: request.headers.get('authorization'), model: body.model })
+      received.push({ path: new URL(request.url).pathname, authorization: request.headers.get('authorization'), model: body.model,
+        leaked: JSON.stringify(body).includes(LEAK) })
       const { text, sendsEdit } = reply(body, mode)
       if (sendsEdit && JSON.stringify(body.input).includes(JSON.stringify(prompts.stale_edit).slice(1, 40))) {
         // Samples run one at a time, so the evaluator's sample root holds exactly one workspace.
@@ -141,6 +146,10 @@ async function smokeNativeArm(): Promise<void> {
     mkdirSync(join(home, '.bake'), { recursive: true })
     writeFileSync(join(home, '.bake/settings.yaml'), settings(server.port!))
     writeFileSync(join(home, '.bake/.credentials.yaml'), `version: 1\nrefs:\n  CLIPROXYAPI_API_KEY: ${KEY}\n`, { mode: 0o600 })
+    // The evaluator's own instructions and skills, which bake-rs would read from ~/.agents if a sample shared this home.
+    mkdirSync(join(home, '.agents/skills/leak'), { recursive: true })
+    writeFileSync(join(home, '.agents/AGENTS.md'), `${LEAK} instructions\n`)
+    writeFileSync(join(home, '.agents/skills/leak/SKILL.md'), `---\nname: leak\ndescription: ${LEAK} skill\n---\nBody.\n`)
     mkdirSync(samplesDir)
 
     /** Run the evaluator once in `mode`; resolves with its exit code and output. */
@@ -198,6 +207,8 @@ async function smokeNativeArm(): Promise<void> {
     }
     deepStrictEqual(received.map(request => [request.path, request.authorization, request.model]),
       Array.from({ length: 2 * 2 * 3 }, () => ['/v1/responses', `Bearer ${KEY}`, MODEL]), 'requests the server received')
+    if (received.some(request => request.leaked)) throw new Error('a sample read the evaluator\'s own ~/.agents')
+    console.log('pass native arm samples read no ~/.agents of the evaluator')
     deepStrictEqual(injectedBeforeEdit, [true, true], 'the stale comment was in place before each stale_edit edit was sent')
     for (const scenario of ['ordinary_edit', 'stale_edit']) {
       for (const arm of ['base', 'candidate']) {
