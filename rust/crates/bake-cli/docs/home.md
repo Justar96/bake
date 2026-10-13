@@ -12,7 +12,7 @@ The Bake home is the directory that holds bake-rs's models, keys, settings, glob
 | `AGENTS.md` | Instructions for every project (`bake-rs docs context`) |
 | `sessions/` | Saved sessions, one directory per working directory (`bake-rs docs sessions`) |
 
-bake-rs never writes `models.json`, `auth.json`, or `settings.json`. It creates `sessions/` and the session files in it.
+bake-rs never writes `models.json`, `auth.json`, or `settings.json`. It creates `sessions/`, the session files in it, and a `.lock` file beside each session it writes, which it leaves in place (`bake-rs docs sessions`).
 
 ## Settings from Bake 0.3
 
