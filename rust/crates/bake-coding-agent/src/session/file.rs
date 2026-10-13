@@ -16,9 +16,18 @@
 //!   `false`, `0`, `""`) is skipped too.
 //! - The first parsed line must be a header with a string `id`; otherwise the
 //!   file is not a session and is not modified.
-//! - When the file does not end in a newline, one is appended once the
-//!   header is valid, so the next append starts a line of its own and a
-//!   torn fragment stays an unparseable line of its own.
+//! - When the file does not end in a newline and the header is valid, a
+//!   writer opening it appends one, so the next append starts a line of its
+//!   own and a torn fragment stays an unparseable line of its own.
+//!
+//! Deviation: Pi's `loadEntriesFromFile` appends that newline too; here only
+//! a holder of the file's writer lock modifies the file
+//! ([`crate::session::durable`]), so [`load_entries_from_file`] and a fork's
+//! source are read without the repair. A reader cannot know whether a writer
+//! is mid-append, and taking the lock to find out would, on filesystems that
+//! emulate `flock` with process-wide locks, release a writer's lock in the
+//! same process. Nothing depends on the reader's repair: every Bake append
+//! starts on a new line itself.
 //!
 //! Lines are parsed as `JSON.parse` parses them
 //! ([`crate::session::json_line`]): any nesting depth, lone UTF-16 surrogate
@@ -94,9 +103,18 @@ fn is_valid_header(object: &JsonObject) -> bool {
     str_member(object, "type") == Some("session") && str_member(object, "id").is_some()
 }
 
-/// Read the objects of a session file, repairing a missing final newline.
-/// Empty when the file does not exist or is not a session.
-pub(crate) fn load_objects(path: &Path) -> io::Result<Vec<Line>> {
+/// Who may append a missing final newline to a session file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Repair {
+    /// The caller holds the file's writer lock.
+    Held,
+    /// A reader: leave the file as it is.
+    Never,
+}
+
+/// Read the objects of a session file, repairing a missing final newline as
+/// `repair` allows. Empty when the file does not exist or is not a session.
+pub(crate) fn load_objects(path: &Path, repair: Repair) -> io::Result<Vec<Line>> {
     let file = match File::open(path) {
         Ok(file) => file,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -135,7 +153,7 @@ pub(crate) fn load_objects(path: &Path) -> io::Result<Vec<Line>> {
         Some(false) => return Ok(Vec::new()),
         Some(true) => {}
     }
-    if unterminated {
+    if unterminated && repair == Repair::Held {
         OpenOptions::new()
             .append(true)
             .open(path)?
@@ -146,11 +164,11 @@ pub(crate) fn load_objects(path: &Path) -> io::Result<Vec<Line>> {
 
 /// Pi's `loadEntriesFromFile`: the lines of a session file, without
 /// migration. Empty when the file does not exist or its first parsed line is
-/// not a header with a string `id`; then the file is left as it is. When the
-/// file does not end in a newline, one is appended.
+/// not a header with a string `id`. The file is never modified: unlike Pi,
+/// a missing final newline is left for a writer to repair (module docs).
 pub fn load_entries_from_file(path: &Path) -> io::Result<Vec<FileEntry>> {
     let path = normalize_path_buf(path);
-    Ok(load_objects(&path)?
+    Ok(load_objects(&path, Repair::Never)?
         .into_iter()
         .map(|(object, verbatim)| FileEntry::from_line(object, verbatim))
         .collect())

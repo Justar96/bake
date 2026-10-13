@@ -62,16 +62,39 @@
 //!
 //! # Durability and concurrency
 //!
-//! Writes follow Pi exactly: the first write of a session creates its file
-//! exclusively (`wx`) once it holds a user or assistant message, later
-//! entries are appended with one open-append-close each, and migration
-//! rewrites the file in place by truncating it. Nothing is flushed to disk
-//! with `fsync`, and no rewrite goes through a temporary file. Pi has no
-//! writer exclusion: two managers appending to one file interleave their
-//! lines. Scope 03 adds both guarantees; this module adds neither.
+//! Pi writes without `fsync` and truncates a file to rewrite it, and two Pi
+//! managers appending to one file interleave their lines. Bake keeps Pi's
+//! file contents and adds both guarantees (the `durable` module has the
+//! details):
+//!
+//! - **One writer per file.** A persisted manager takes the file's writer
+//!   lock before it loads an existing session file and before a new
+//!   session's first write, and holds it until it moves to another file, is
+//!   dropped, or [`SessionManager::close_writer`] is called. The lock is an
+//!   exclusive `File::try_lock` on a sidecar beside the session file, named
+//!   by appending `.lock` to its name and created only for a session being
+//!   written: a second writer, in this process or another, fails with
+//!   [`SessionError::Locked`] after waiting up to a second for the lock, and
+//!   takes over once the holder releases the lock, exits, or is killed. The
+//!   sidecar is left in place and is never listed. Where the sidecar cannot
+//!   be created, an existing one is locked read-only, or on Unix the session
+//!   file itself is locked and rewritten in place. On NFS and CIFS, two
+//!   writers in one process are not excluded. Readers (listing, discovery,
+//!   and [`load_entries_from_file`]) need no lock and never modify a file.
+//! - **Durable writes.** Each append is synced, and a rewrite (migration, an
+//!   empty file's header, a branched session) goes through a synced
+//!   temporary file beside the real file, with its permissions, renamed
+//!   over it, so a crash never leaves a truncated or half-rewritten file. A
+//!   symbolic link is followed to the file it names; a file with other hard
+//!   links is rewritten in place, as Pi does, rather than split from them.
+//!   Directory entries are synced on Unix, best effort.
+//! - **Torn tails.** A writer killed mid-append leaves a partial last line,
+//!   which loading skips as Pi does. The next append starts on a new line,
+//!   so the torn fragment cannot join the new entry.
 
 pub mod context;
 pub mod cwd;
+mod durable;
 pub mod entry;
 pub mod file;
 pub mod id;
@@ -130,6 +153,10 @@ pub enum SessionError {
     /// [`SessionManager::append_message`] was given a summary message, which
     /// Pi's types exclude: summaries are entries of their own.
     SummaryMessage(String),
+    /// Another writer holds this session file's writer lock.
+    Locked(PathBuf),
+    /// A write after [`SessionManager::close_writer`].
+    WriterClosed(PathBuf),
     /// No session directory was given and the Bake home is unknown: no
     /// `BAKE_HOME` or `DSH_HOME` is set and the user's home directory cannot
     /// be found.
@@ -174,6 +201,16 @@ impl fmt::Display for SessionError {
             Self::SummaryMessage(role) => write!(
                 formatter,
                 "A {role} message is not appended as a message; append a compaction or branch summary entry"
+            ),
+            Self::Locked(path) => write!(
+                formatter,
+                "Session file is in use by another writer: {}",
+                path.display()
+            ),
+            Self::WriterClosed(path) => write!(
+                formatter,
+                "Session file is closed for writing: {}",
+                path.display()
             ),
             Self::NoHome => formatter.write_str(
                 "Cannot find the Bake home: set BAKE_HOME or give a session directory",

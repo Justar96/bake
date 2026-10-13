@@ -32,6 +32,9 @@ fn modified_uses_the_last_message_timestamp() {
         .and_then(|meta| meta.modified())
         .expect("mtime");
 
+    // Pi has no writer exclusion; Bake's first writer releases the file
+    // before it is reopened.
+    drop(first);
     let mut manager = SessionManager::open(&file, None, None).expect("open");
     let message_time = now() + 60_000;
     manager
