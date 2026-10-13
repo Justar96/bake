@@ -21,7 +21,8 @@ pub struct OutputAccumulatorOptions {
     /// Existing, trusted parent directory. Defaults to the OS temporary directory.
     /// Unix spills use a new 0700 directory and 0600 file; Windows inherits ACLs.
     pub temp_directory: PathBuf,
-    /// ASCII letters, digits, hyphens and underscores only.
+    /// ASCII letters, digits, hyphens and underscores only. Defaults to
+    /// `bake-output`, where Pi's is `pi-output`.
     pub temp_file_prefix: String,
 }
 
@@ -30,7 +31,7 @@ impl Default for OutputAccumulatorOptions {
         Self {
             limits: TruncationOptions::default(),
             temp_directory: std::env::temp_dir(),
-            temp_file_prefix: "pi-output".to_owned(),
+            temp_file_prefix: "bake-output".to_owned(),
         }
     }
 }

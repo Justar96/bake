@@ -5,7 +5,10 @@
  *
  * EVAL_ARMS    name=checkout pairs, comma-separated; each checkout must be built.
  *              name=pi, or name=pi:<bin>, runs the installed pi coding agent
- *              instead, with its own prompt, tools, and DeepSeek route
+ *              instead, with its own prompt, tools, and DeepSeek route.
+ *              name=native, name=native:<checkout>, or name=native:<bin> runs
+ *              the native bake-rs print mode, built from a checkout's rust/
+ *              workspace (this evaluator's by default) or given as a binary
  * EVAL_MODELS  model ids or set names (default: standard and extended sets); a
  *              cliproxyapi id from ~/.bake/settings.yaml, or a DeepSeek id
  *              (deepseek/<id>, or a bare deepseek-* id the gateway lacks);
@@ -30,9 +33,9 @@ import { createHash } from 'node:crypto'
 import YAML from 'yaml'
 import { reconcile } from './accounting.ts'
 import { compositionCheck, ROSTERS, systemPromptOf, type Roster } from './composition.ts'
-import { bakeCommand, bakeOverlay, parseArms, type Arm } from './arms.ts'
+import { bakeCommand, bakeOverlay, nativeCommand, nativeStaleWriter, parseArms, strayContextFiles, type Arm } from './arms.ts'
 import {
-  backgroundStarts, compactions, editCheckSplits, excessRequests, normalizeBake, normalizePi, orientationCalls, ranCheck,
+  backgroundStarts, compactions, editCheckSplits, excessRequests, jsonModeCompactions, normalizeBake, normalizePi, orientationCalls, ranCheck,
   requestsOverFloor, routingDecisions, runawayAbort, shellEdits, verifiedBeforeFinal,
 } from './metrics.ts'
 import {
@@ -101,8 +104,26 @@ interface Route {
   settings(proxyBase: string, llmDeepseek: boolean): Record<string, unknown>
   /** The same model for a pi arm: its wire, upstream, credential, and `models.json` model entry. */
   pi(arm: Arm): PiRoute
+  /** The same model for a native arm. */
+  native: NativeRoute
 }
 interface PiRoute { api: string; upstreamBase: string; keyName: string; model: Record<string, unknown> }
+/**
+ * A native arm's route: the provider `bake-rs` selects, its wire and upstream,
+ * and the private Bake home files that point it at the proxy. A `cliproxyapi`
+ * model goes through the 0.3 `settings.yaml` and `.credentials.yaml` that
+ * `bake-rs` imports read-only (D25), as a Bake arm's route does; any other
+ * model goes through Pi's `models.json` with its key in `keyName`.
+ */
+interface NativeRoute {
+  provider: string
+  api: string
+  upstreamBase: string
+  keyName?: string
+  home(proxyBase: string): { settings?: Record<string, any>; models?: Record<string, any> }
+}
+/** DeepSeek's Chat Completions endpoint, the wire pi's own DeepSeek catalog uses. */
+const DEEPSEEK_CHAT_BASE_URL = 'https://api.deepseek.com'
 
 /** Every pi thinking level, so a model entry maps the levels it lacks to null. */
 const PI_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
@@ -163,30 +184,42 @@ function routeOf(entry: string): Route {
         'agent-default-model': { provider: 'deepseek-official', model: rest, reasoningEffort: 'high' },
       }),
       pi: arm => piDeepseek(arm, rest),
+      // bake-rs ships no DeepSeek catalog or Anthropic-format DeepSeek profile,
+      // so it reaches DeepSeek as pi does, over Chat Completions; the provider
+      // id `deepseek` selects its DeepSeek compatibility. The model entry
+      // carries the shipped profile's metadata.
+      native: {
+        provider: 'deepseek', api: 'openai-completions', upstreamBase: DEEPSEEK_CHAT_BASE_URL, keyName: 'DEEPSEEK_API_KEY',
+        home: proxyBase => ({ models: { providers: { deepseek: {
+          baseUrl: proxyBase, api: 'openai-completions', apiKey: '$EVAL_API_KEY', models: [piModel(rest, shipped)],
+        } } } }),
+      },
     }
   }
   if (prefix !== undefined && prefix !== 'cliproxyapi') throw new Error(`EVAL_MODELS entry "${entry}": unknown provider ${prefix}; use cliproxyapi/<id> or deepseek/<id>`)
   if (gateway === undefined) throw new Error(`Missing configured model ${rest}`)
   const api = gateway.api ?? original.api
+  const settings = (proxyBase: string) => {
+    const route = structuredClone(original)
+    route.baseURL = proxyBase
+    route.models = [{ ...gateway, baseURL: proxyBase, maxTokens: 8192 }]
+    if (api === 'openai-responses' && route.compat !== undefined) delete route.compat.sendSessionAffinityHeaders
+    route.retryPolicy = { mode: 'normal', maxRetries: 0 }
+    delete route.modelOverrides
+    return {
+      'llm-pi-ai': { providers: { cliproxyapi: route } },
+      'agent-default-model': { provider: 'cliproxyapi', model: rest, reasoningEffort: 'medium' },
+    }
+  }
   return {
     model: rest, provider: 'cliproxyapi', api, upstreamBase: gatewayBase(api, gateway.baseURL ?? original.baseURL), effort: 'medium',
-    settings: (proxyBase) => {
-      const route = structuredClone(original)
-      route.baseURL = proxyBase
-      route.models = [{ ...gateway, baseURL: proxyBase, maxTokens: 8192 }]
-      if (api === 'openai-responses' && route.compat !== undefined) delete route.compat.sendSessionAffinityHeaders
-      route.retryPolicy = { mode: 'normal', maxRetries: 0 }
-      delete route.modelOverrides
-      return {
-        'llm-pi-ai': { providers: { cliproxyapi: route } },
-        'agent-default-model': { provider: 'cliproxyapi', model: rest, reasoningEffort: 'medium' },
-      }
-    },
+    settings,
+    native: { provider: 'cliproxyapi', api, upstreamBase: gatewayBase(api, gateway.baseURL ?? original.baseURL), home: proxyBase => ({ settings: settings(proxyBase) }) },
     pi: () => ({ api, upstreamBase: gatewayBase(api, gateway.baseURL ?? original.baseURL), keyName: original.apiKeyEnv ?? 'CLIPROXYAPI_API_KEY', model: piModel(rest, gateway) }),
   }
 }
 const routes = models.map(resolveRoute)
-/** Scenarios that need a Bake tool pi does not ship; a pi arm skips them, so they have no pair. */
+/** Scenarios that need a Bake tool pi and bake-rs do not ship; those arms skip them, so they have no pair. */
 const piUnsupported = (scenario: string) => scenario.startsWith('delegation')
 /**
  * A credential a pi arm passes to pi: the environment first, then the reference
@@ -228,8 +261,11 @@ function wireUsage(data: any): any | undefined {
 async function run(route: Route, scenario: string, trial: number, variant: string) {
   const arm = ARMS[variant]!
   const piRoute = arm.kind === 'pi' ? route.pi(arm) : undefined
+  const nativeRoute = arm.kind === 'native' ? route.native : undefined
+  // pi and bake-rs write the same `--mode json` event stream.
+  const jsonMode = piRoute !== undefined || nativeRoute !== undefined
   const { model } = route
-  const { api, upstreamBase } = piRoute ?? route
+  const { api, upstreamBase } = piRoute ?? nativeRoute ?? route
   const label = `${model}.${scenario}.${trial}.${variant}`
   const savedPath = join(out, `${label}.json`)
   if (existsSync(savedPath)) { const saved = JSON.parse(readFileSync(savedPath, 'utf8')); summaries.push(saved); return saved }
@@ -350,7 +386,36 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
     let contextWindowApplied = false
     const env: Record<string, string | undefined> = { ...process.env, NO_COLOR: '1' }
     delete env.DEEPSEEK_API_KEY
-    if (piRoute !== undefined) {
+    // bake-rs has no extensions, so a native arm's stale writer acts on its event stream instead (see the stdout reader).
+    let nativeInjection: ReturnType<typeof nativeStaleWriter> | undefined
+    // Failures of the evaluator's own work during a sample, such as the stale writer's; any one makes the sample invalid.
+    const evaluatorErrors: string[] = []
+    if (nativeRoute !== undefined) {
+      const files = nativeRoute.home(`${server.url.origin}/upstream`)
+      if (files.settings !== undefined) {
+        if (contextWindow !== undefined) contextWindowApplied = withContextWindow(files.settings, nativeRoute.provider, contextWindow)
+        writeFileSync(join(home, 'settings.yaml'), YAML.stringify({ ...files.settings, permission: { defaultPreset: 'danger-full-access' } }), { mode: 0o600 })
+        copyFileSync(credentialFile, join(home, '.credentials.yaml'))
+      }
+      if (files.models !== undefined) {
+        if (contextWindow !== undefined) {
+          for (const provider of Object.values(files.models.providers) as any[]) for (const entry of provider.models) entry.contextWindow = contextWindow
+          contextWindowApplied = true
+        }
+        writeFileSync(join(home, 'models.json'), JSON.stringify(files.models), { mode: 0o600 })
+      }
+      // As for pi: agent-level retry off, and a forced window gets compaction settings that mirror Bake's policy at it.
+      writeFileSync(join(home, 'settings.json'), JSON.stringify({
+        retry: { enabled: false }, ...contextWindow === undefined ? {} : { compaction: piCompactionFor(contextWindow) },
+      }), { mode: 0o600 })
+      if (nativeRoute.keyName !== undefined) env.EVAL_API_KEY = credential(nativeRoute.keyName)
+      Object.assign(env, { BAKE_HOME: home, DSH_HOME: home })
+      // bake-rs loads AGENTS.md and CLAUDE.md from every ancestor of its working directory and from its home.
+      const stray = strayContextFiles(workspace, home, usesAgentInstructions(scenario))
+      if (stray.length > 0) throw new Error(`${label}: bake-rs would load context files outside the fixture: ${stray.join(', ')}; move them or set TMPDIR to a directory without them`)
+      if (scenario === 'stale_edit') nativeInjection = nativeStaleWriter(workspace, join(workspace, file), injectionPath)
+      command = nativeCommand(arm.bin!, nativeRoute.provider, model, route.effort, prompts[scenario]!)
+    } else if (piRoute !== undefined) {
       const agentDir = join(root, 'pi-agent'); mkdirSync(agentDir, { mode: 0o700 })
       writeFileSync(join(agentDir, 'models.json'), JSON.stringify({ providers: { eval: {
         baseUrl: `${server.url.origin}/upstream`, api: piRoute.api, apiKey: '$EVAL_API_KEY',
@@ -390,7 +455,15 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
       pending += chunk
       const lines = pending.split('\n'); pending = lines.pop()!
       for (const line of lines) {
-        try { events.push(JSON.parse(line)) } catch { if (line.trim()) events.push({ type: 'unparsed', text: line.slice(0, 1000) }) }
+        let event: any
+        try { event = JSON.parse(line) } catch { if (line.trim()) events.push({ type: 'unparsed', text: line.slice(0, 1000) }); continue }
+        events.push(event)
+        try { nativeInjection?.onEvent(event) } catch (error) {
+          // An evaluator failure, not the agent's: record it and stop the sample rather than throw out of the stream.
+          evaluatorErrors.push(`stale writer: ${(error as Error).message}`)
+          nativeInjection = undefined
+          terminate('evaluator_error')
+        }
       }
     })
     child.stderr!.setEncoding('utf8')
@@ -400,7 +473,7 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
       child!.once('error', reject)
       child!.once('close', (code, signal) => resolve({ code, signal }))
     }))
-    const { final, steps, calls, results } = (piRoute === undefined ? normalizeBake : normalizePi)(events)
+    const { final, steps, calls, results } = (jsonMode ? normalizePi : normalizeBake)(events)
     const byTool: Record<string, number> = {}
     for (const call of calls) byTool[call.tool] = (byTool[call.tool] ?? 0) + 1
     const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0 }
@@ -411,12 +484,15 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
       code, final, toolCalls: calls.length, subagentCalls: byTool.subagent ?? 0, injectionPath,
     })
     const check = checkCommandFor(scenario)
-    const logged = piRoute === undefined ? sessionEvents(join(root, 'sessions')) : []
+    const logged = jsonMode ? [] : sessionEvents(join(root, 'sessions'))
     const workspaces = [workspace, realpathSync(workspace)]
     const toolErrors = results.filter(result => result.status === 'error').map(result => result.result)
+    // A sample whose measurement the evaluator could not trust is kept but left out of every comparison.
+    const invalid = evaluatorErrors.length > 0 ? 'evaluator_error' : nativeInjection?.state.raced === true ? 'stale_injection_raced' : null
     const summary = {
-      label, model, provider: piRoute === undefined ? route.provider : 'eval', agent: arm.kind, api, effort: route.effort, scenario, trial, variant, code, signal, abortCause: abortCause ?? null,
-      success: code === 0 && validated, validated, testsUnchanged, testExit, fixturesUnchanged,
+      label, model, provider: piRoute !== undefined ? 'eval' : nativeRoute?.provider ?? route.provider, agent: arm.kind, api, effort: route.effort, scenario, trial, variant, code, signal, abortCause: abortCause ?? null,
+      success: invalid === null && code === 0 && validated, validated, invalid, evaluatorErrors,
+      staleInjection: nativeInjection === undefined ? null : nativeInjection.state, testsUnchanged, testExit, fixturesUnchanged,
       injectedStale: scenario === 'stale_edit' && existsSync(injectionPath),
       elapsedMs: Math.round(performance.now() - started), requests: wire.length, steps: steps.length,
       toolCalls: calls.length, byTool, toolErrors: toolErrors.length,
@@ -428,10 +504,10 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
       editedLineEchoes: results.filter(result => String(result.result).includes('The edited lines now read')).length,
       subagentCalls: byTool.subagent ?? 0,
       routingDecisions: routingDecisions(logged),
-      roster: arm.kind === 'pi' ? null : roster,
-      // The rendered prompt and whether it is the shipped composition; pi brings its own prompt, so it is not checked.
+      roster: arm.kind === 'bake' ? roster : null,
+      // The rendered prompt and whether it is the shipped composition; pi and bake-rs bring their own prompts, so it is not checked.
       systemPrompt,
-      composition: arm.kind === 'pi' || systemPrompt === null ? null : compositionCheck(systemPrompt, workspaces),
+      composition: arm.kind !== 'bake' || systemPrompt === null ? null : compositionCheck(systemPrompt, workspaces),
       requestFloor: requestFloorFor(scenario),
       excessRequests: excessRequests(wire.length, requestFloorFor(scenario)),
       requestsOverFloor: requestsOverFloor(wire.length, requestFloorFor(scenario)),
@@ -441,7 +517,7 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
       verifiedBeforeFinal: verifiedBeforeFinal(calls, check),
       backgroundStarts: backgroundStarts(calls),
       contextWindow: contextWindowApplied ? contextWindow : null,
-      compactions: piRoute === undefined ? compactions(logged) : null,
+      compactions: nativeRoute !== undefined ? jsonModeCompactions(events) : piRoute === undefined ? compactions(logged) : null,
       runawayAbort: runawayAbort([stderr, final, ...events.filter(event => event.type === 'unparsed').map(event => event.text)]),
       cache: (() => {
         const logical = usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens
@@ -479,9 +555,15 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
   }
 }
 
-/** The checkout's commit and whether its tracked files differ from it; a pi arm records its package version instead. */
+/**
+ * The checkout's commit and whether its tracked files differ from it; a pi arm
+ * records its package version instead, and a native arm its binary's version
+ * and digest with the provenance read when it was resolved: the commit of the
+ * checkout it was built from, or none for a prebuilt binary.
+ */
 function revisionOf(arm: Arm) {
   if (arm.kind === 'pi') return { root: arm.root, agent: 'pi', version: arm.version, commit: null, dirty: false }
+  if (arm.kind === 'native') return { root: arm.root, agent: 'native', ...arm.revision, bin: arm.bin, version: arm.version, binarySha256: arm.binarySha256 }
   const { root } = arm
   const git = (...args: string[]) => Bun.spawnSync(['git', '-C', root, ...args]).stdout.toString().trim()
   return { root, commit: git('rev-parse', 'HEAD'), dirty: git('status', '--porcelain', '--untracked-files=no') !== '' }
@@ -500,6 +582,7 @@ writeFileSync(join(out, 'design.json'), JSON.stringify({
   composition: 'Built headless CLI with each revision\'s own headless system-prompt config (harness opener off, working-directory suffix) and its standard-preset persona prefix; host tools retained.'
     + (roster === 'tui' ? ' Roster tui: the standard preset\'s tool-fs, tool-fs-search, and tool-result-pruner configs and the terminal spill-policy inline cap; ask_user_question stays out, having no one to answer it headless.' : ' Roster headless: the headless bundle\'s own tool configs.')
     + ' Session title and ambient AGENTS disabled equally; instructions_file keeps agent-instructions for its own AGENTS.md.'
+    + (armNames.some(name => ARMS[name]!.kind === 'native') ? ' A native arm runs bake-rs -p --mode json with its own system prompt and Pi\'s default tools (read, bash, edit, write), no session file, the danger-full-access preset, and agent-level retry off; a cliproxyapi model comes through the 0.3 settings.yaml and .credentials.yaml it imports read-only, and a DeepSeek model through models.json over Chat Completions. It skips scenarios that need a Bake-only tool, and its stale writer acts on its event stream. Where a scenario forces a context window, it gets the same window and pi\'s compaction settings (piCompaction).' : '')
     + (armNames.some(name => ARMS[name]!.kind === 'pi') ? ' A pi arm runs pi --mode json with its own system prompt and default tools, no session, extensions, skills, prompt templates, or context files, agent-level retry off, and pi\'s own wire for each model; it skips scenarios that need a Bake-only tool. Where a scenario forces a context window, pi gets the same window and compaction settings that mirror Bake\'s policy at it (piCompaction).' : ''),
   cache: 'Fresh process/home/workspace/session per sample; provider cache is observed, not assumed cold. Pair order alternates by trial and scenario.',
   endpoint: 'Agent exits; external Node test passes without test modification; injected external comment is preserved.',
@@ -515,7 +598,7 @@ for (const route of routes) {
       const order = [...armNames.slice(shift), ...armNames.slice(0, shift)]
       const pair = []
       for (const variant of order) {
-        if (ARMS[variant]!.kind === 'pi' && piUnsupported(scenario)) continue
+        if (ARMS[variant]!.kind !== 'bake' && piUnsupported(scenario)) continue
         if (summaries.reduce((sum, sample) => sum + sample.logicalTotalTokens, 0) > maxLogicalTokens) throw new Error('Evaluation token limit reached; partial results retained')
         const sample = await run(route, scenario, trial, variant)
         pair.push(sample)

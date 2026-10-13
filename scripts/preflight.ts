@@ -289,7 +289,7 @@ export const STEPS: readonly Step[] = [
   },
   {
     name: 'rust-eval', phase: 'e2e', group: 'native', needsBuild: true, buildStep: 'rust',
-    summary: 'compiled Rust eval fixture arm and independent tamper rejection',
+    summary: 'compiled Rust eval fixture arm, tamper rejection, and the keyless native bake-rs arm',
     command: () => bun('run', 'test:rust:eval'),
   },
 ]

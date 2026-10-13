@@ -32,7 +32,6 @@ use crate::auth_storage::AuthStorage;
 use crate::model_registry::config::ModelConfig;
 use crate::session::messages::{COMPACTION_SUMMARY_PREFIX, COMPACTION_SUMMARY_SUFFIX};
 use crate::session::{AgentMessage as StoredMessage, NewSessionOptions, SessionEntry};
-use crate::system_prompt::DocsPaths;
 use crate::test_support::TempDir;
 
 struct Harness {
@@ -82,14 +81,8 @@ fn options(h: &Harness, session: SessionManager, settings: Settings) -> AgentSes
         tools: Vec::new(),
         active_tool_names: Vec::new(),
         tool_prompts: Vec::new(),
-        system_prompt: SystemPromptOptions::new(
-            "/tmp",
-            DocsPaths {
-                readme: "/opt/pi/README.md".into(),
-                docs: "/opt/pi/docs".into(),
-                examples: "/opt/pi/examples".into(),
-            },
-        ),
+        system_prompt: SystemPromptOptions::new("/tmp"),
+        docs_command: "bake-rs docs".into(),
     }
 }
 

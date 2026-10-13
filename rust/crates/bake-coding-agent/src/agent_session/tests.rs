@@ -20,7 +20,7 @@ use super::*;
 use crate::auth_storage::AuthStorage;
 use crate::model_registry::config::ModelConfig;
 use crate::session::NewSessionOptions;
-use crate::system_prompt::{DocsPaths, build_system_prompt};
+use crate::system_prompt::build_system_prompt;
 use crate::test_support::TempDir;
 
 struct Harness {
@@ -55,14 +55,6 @@ fn harness() -> Harness {
     }
 }
 
-fn docs() -> DocsPaths {
-    DocsPaths {
-        readme: "/opt/pi/README.md".into(),
-        docs: "/opt/pi/docs".into(),
-        examples: "/opt/pi/examples".into(),
-    }
-}
-
 fn options(harness: &Harness, session: SessionManager, cwd: &str) -> AgentSessionOptions {
     AgentSessionOptions {
         session,
@@ -74,7 +66,8 @@ fn options(harness: &Harness, session: SessionManager, cwd: &str) -> AgentSessio
         tools: Vec::new(),
         active_tool_names: Vec::new(),
         tool_prompts: Vec::new(),
-        system_prompt: SystemPromptOptions::new(cwd, docs()),
+        system_prompt: SystemPromptOptions::new(cwd),
+        docs_command: "/opt/bake/bin/bake-rs docs".into(),
     }
 }
 
@@ -168,9 +161,10 @@ async fn declares_the_prompt_once_and_reuses_it_across_resume() {
         .as_ref()
         .map(|sections| sections.0.iter().map(|(name, _)| name.clone()).collect())
         .unwrap_or_default();
-    assert_eq!(names, ["preamble", "tools", "rules", "docs", "cwd"]);
-    let mut expected = SystemPromptOptions::new(cwd.clone(), docs());
+    assert_eq!(names, ["preamble", "rules", "docs", "run", "environment"]);
+    let mut expected = SystemPromptOptions::new(cwd.clone());
     expected.selected_tools = Vec::new();
+    expected.docs_command = "/opt/bake/bin/bake-rs docs".into();
     assert_eq!(
         get_system_message_text(&head),
         build_system_prompt(&expected).expect("prompt")
@@ -453,11 +447,13 @@ async fn prompts_need_a_model_with_auth() {
     assert!(session.model().is_none());
     assert_eq!(
         session.model_fallback_message(),
-        Some(format_no_models_available_message("/opt/pi/docs").as_str())
+        Some(format_no_models_available_message("/opt/bake/bin/bake-rs docs").as_str())
     );
     assert_eq!(
         session.prompt("hi", Vec::new()).await,
-        Err(format_no_model_selected_message("/opt/pi/docs"))
+        Err(format_no_model_selected_message(
+            "/opt/bake/bin/bake-rs docs"
+        ))
     );
     session.shutdown().await;
 
@@ -471,16 +467,11 @@ async fn prompts_need_a_model_with_auth() {
     .expect("session");
     assert_eq!(
         session.prompt("hi", Vec::new()).await,
-        // Pi joins the docs paths with the platform separator.
-        Err(format!(
-            "No API key found for faux.\n\nUse /login to log into a provider via OAuth or API key. See:\n  {}\n  {}",
-            std::path::Path::new("/opt/pi/docs")
-                .join("providers.md")
-                .display(),
-            std::path::Path::new("/opt/pi/docs")
-                .join("models.md")
-                .display()
-        ))
+        // Bake names its docs command where Pi names its docs files.
+        Err(
+            "No API key found for faux.\n\nAdd a provider to models.json in the Bake home, and its API key to models.json or auth.json. See:\n  /opt/bake/bin/bake-rs docs models"
+                .into()
+        )
     );
     assert_eq!(
         session
@@ -550,8 +541,9 @@ async fn abort_and_shutdown_end_the_run() {
     assert!(session.prompt("after", Vec::new()).await.is_err());
 }
 
-// Pi `_rebuildSystemPrompt`: each tool definition's `promptSnippet` and
-// `promptGuidelines`, normalized, reach the prompt for the active tools.
+// Pi `_rebuildSystemPrompt`: each tool definition's `promptGuidelines`,
+// normalized, reach the prompt for the active tools; Bake's prompt lists no
+// `promptSnippet`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn tool_prompts_reach_the_system_prompt() {
     let h = harness();
@@ -588,10 +580,7 @@ async fn tool_prompts_reach_the_system_prompt() {
     session.prompt("hi", Vec::new()).await.expect("prompt");
     let head = session.messages()[0].as_system().cloned().expect("system");
     let text = get_system_message_text(&head);
-    assert!(
-        text.contains("<tools>\n- dummy: Run the dummy tool\n"),
-        "{text}"
-    );
+    assert!(!text.contains("Run the"), "{text}");
     assert_eq!(text.matches("- Use dummy sparingly\n").count(), 1, "{text}");
     assert!(!text.contains("Never"), "{text}");
     session.shutdown().await;
@@ -763,5 +752,37 @@ fn block_images_replaces_runs_of_images() {
             UserContentBlock::Text(TextContent::new("look")),
             UserContentBlock::Text(TextContent::new(IMAGE_READING_DISABLED)),
         ])
+    );
+}
+
+// The prompt's round-trip rule says calls in one response run in order, so
+// the tools that change files or run commands are sequential; reads and
+// tools that set their own mode keep it.
+#[test]
+fn tools_that_change_files_or_run_commands_run_in_order() {
+    let tool = |name: &str, mode: Option<ToolExecutionMode>| {
+        let mut tool = AgentTool::new(name, name, "", json!({ "type": "object" }), |_, _, _, _| {
+            Box::pin(async { Ok(AgentToolResult::default()) })
+        });
+        tool.execution_mode = mode;
+        Arc::new(tool)
+    };
+    for name in ["bash", "edit", "write"] {
+        assert_eq!(
+            run_in_order(tool(name, None)).execution_mode,
+            Some(ToolExecutionMode::Sequential),
+            "{name}"
+        );
+    }
+    for name in ["read", "grep", "find", "ls"] {
+        assert_eq!(
+            run_in_order(tool(name, None)).execution_mode,
+            None,
+            "{name}"
+        );
+    }
+    assert_eq!(
+        run_in_order(tool("bash", Some(ToolExecutionMode::Parallel))).execution_mode,
+        Some(ToolExecutionMode::Parallel)
     );
 }

@@ -366,9 +366,7 @@ pub fn resolve_cli_model(
         && provider.is_none()
     {
         return CliModel {
-            error: Some(format!(
-                "Unknown provider \"{cli_provider}\". Use --list-models to see available providers/models."
-            )),
+            error: Some(format!("Unknown provider \"{cli_provider}\".")),
             ..CliModel::default()
         };
     }
@@ -511,9 +509,7 @@ pub fn resolve_cli_model(
         model: None,
         thinking_level: None,
         warning: parsed.warning,
-        error: Some(format!(
-            "Model \"{display}\" not found. Use --list-models to see available models."
-        )),
+        error: Some(format!("Model \"{display}\" not found.")),
     }
 }
 

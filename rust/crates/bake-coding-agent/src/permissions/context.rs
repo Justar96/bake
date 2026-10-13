@@ -14,10 +14,10 @@
 //! message after the history (`diffSystemPromptSections`), so a permission
 //! change appends instead of rewriting the cached prompt prefix, which is
 //! what the TypeScript snapshot was for. The two sentences therefore form
-//! one section, [`PERMISSIONS_SECTION`], placed after Pi's `cwd` section.
-//! The TypeScript snapshot's `Runtime context (replaces any earlier
-//! snapshot):` heading is not carried: Pi's section tag already says which
-//! text replaces which.
+//! one section, [`PERMISSIONS_SECTION`], placed before the `environment`
+//! section ([`crate::system_prompt`]). The TypeScript snapshot's `Runtime
+//! context (replaces any earlier snapshot):` heading is not carried: Pi's
+//! section tag already says which text replaces which.
 
 use bake_sandbox::{SandboxMode, SandboxPolicy};
 
