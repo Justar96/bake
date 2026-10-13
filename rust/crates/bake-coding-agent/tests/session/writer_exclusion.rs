@@ -401,6 +401,7 @@ fn migration_rewrites_atomically_and_leftovers_are_not_sessions() {
     );
 }
 
+#[cfg(unix)]
 fn v1_content(cwd: &str, id: &str) -> String {
     let lines = [
         json!({"type": "session", "id": id, "timestamp": "2025-01-01T00:00:00Z", "cwd": cwd}),
