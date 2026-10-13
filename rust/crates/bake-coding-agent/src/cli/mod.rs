@@ -48,11 +48,12 @@ use crate::permissions::{
 use crate::print_mode::{PrintModeOptions, PrintOutput, SharedWriter, run_print_mode, write_out};
 use crate::session::file::default_session_dir_path;
 use crate::session::paths::{lexical_normalize, normalize_path};
+use crate::session::time::parse_date_ms;
 use crate::session::{NewSessionOptions, SessionManager};
 use crate::settings::Settings;
 use crate::skills::{LoadSkillsOptions, load_skills};
 use crate::system_prompt::{
-    DocsPaths, SystemPromptOptions, load_project_context_files, user_agents_dir,
+    Environment, SystemPromptOptions, load_project_context_files, user_agents_dir,
 };
 use crate::tools::index::{
     NoTools, ToolSelectionOptions, ToolsOptions, create_all_tool_definitions, select_tools,
@@ -74,8 +75,9 @@ pub struct CliEnvironment {
     /// The user's home directory, which holds `.agents`; `None` when it
     /// cannot be resolved.
     pub user_home: Option<PathBuf>,
-    /// Where Pi's prompt says its docs are.
-    pub docs: DocsPaths,
+    /// How to run `bake-rs docs`, which the prompt and startup errors name
+    /// ([`AgentSessionOptions::docs_command`]).
+    pub docs_command: String,
     /// Whether standard input is a terminal.
     pub stdin_is_terminal: bool,
     /// Standard input, read when it is not a terminal.
@@ -385,7 +387,7 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
         cwd,
         home,
         user_home,
-        docs,
+        docs_command,
         stdin_is_terminal,
         stdin,
         stdout,
@@ -518,10 +520,11 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
                 message: warning,
             });
         }
+        // Pi points at `--list-models`, which bake-rs does not have.
         if let Some(message) = resolved.error {
             diagnostics.push(Diagnostic {
                 kind: DiagnosticKind::Error,
-                message,
+                message: format!("{message} See:\n  {docs_command} models"),
             });
         }
         if let Some(found) = resolved.model {
@@ -545,7 +548,7 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
     // Pi's `_buildRuntime` tools and `createAgentSession` tool selection.
     // The read tool asks for the session's model when it runs.
     let session_model: Arc<std::sync::Mutex<Option<bake_ai::Model>>> = Arc::default();
-    // Bash reads the session for its `PI_*` variables when each call starts.
+    // Bash reads the session for its `BAKE_*` variables when each call starts.
     let session_thinking: Arc<std::sync::Mutex<Option<String>>> = Arc::default();
     let bash_context: crate::tools::bash::BashToolContextFn = {
         let session_model = Arc::clone(&session_model);
@@ -633,12 +636,19 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
         })
         .collect();
 
-    let mut system_prompt = SystemPromptOptions::new(session_cwd.clone(), docs.clone());
+    // The session header's start, so a resumed session states the same
+    // date and patches nothing.
+    let started_ms = session
+        .header()
+        .and_then(|header| header.timestamp())
+        .and_then(parse_date_ms)
+        .unwrap_or_else(bake_ai::now_ms);
+    let mut system_prompt = SystemPromptOptions::new(session_cwd.clone());
     system_prompt.context_files = context_files;
     system_prompt.skills = skills;
-    system_prompt
-        .sections
-        .push(permission.prompt_section(Path::new(&session_cwd)));
+    // Print mode has no one to answer an approval prompt.
+    system_prompt.permissions = permission.prompt_text(Path::new(&session_cwd), false);
+    system_prompt.environment = Environment::detect(Path::new(&session_cwd), started_ms);
     let session = match AgentSession::create(AgentSessionOptions {
         session,
         registry: Arc::new(registry),
@@ -656,6 +666,7 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
             .map(|definition| definition.prompt())
             .collect(),
         system_prompt,
+        docs_command: docs_command.clone(),
     })
     .await
     {
@@ -690,7 +701,7 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
         session.shutdown().await;
         write_out(
             &stderr,
-            &format!("{}\n", format_no_models_available_message(&docs.docs)),
+            &format!("{}\n", format_no_models_available_message(&docs_command)),
         );
         return 1;
     }

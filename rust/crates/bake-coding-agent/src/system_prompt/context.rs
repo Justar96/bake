@@ -6,9 +6,9 @@
 //! `loadProjectContextFiles`, and `resolvePromptInput`, with `findGitPaths`
 //! from `footer-data-provider.ts`.
 //!
-//! The rest of the resource loader (extensions, skills, prompt templates,
-//! themes, packages, and the `SYSTEM.md` and `APPEND_SYSTEM.md` discovery
-//! that needs project trust) is not ported.
+//! Skills are loaded by [`crate::skills`]. The rest of the resource loader
+//! (extensions, prompt templates, themes, packages, and the `SYSTEM.md` and
+//! `APPEND_SYSTEM.md` discovery that needs project trust) is not ported.
 //!
 //! # Deviations from Pi
 //!
@@ -19,7 +19,8 @@
 //!   `~/.agents` directory where Pi reads `~/.pi/agent`.
 //!
 //! A context file larger than [`MAX_CONTEXT_FILE_BYTES`] is skipped with
-//! Pi's read warning. Warnings are returned instead of printed.
+//! Pi's read warning. Warnings are returned instead of printed, without
+//! the `Warning: ` prefix the caller adds.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -60,7 +61,7 @@ fn load_context_file_from_dir(dir: &Path, warnings: &mut Vec<String>) -> Option<
             Ok(metadata) if !metadata.is_file() => continue,
             Ok(_) => {}
             Err(error) => {
-                warnings.push(format!("Warning: Could not read {display}: {error}"));
+                warnings.push(format!("Could not read {display}: {error}"));
                 continue;
             }
         }
@@ -72,7 +73,7 @@ fn load_context_file_from_dir(dir: &Path, warnings: &mut Vec<String>) -> Option<
                 });
             }
             Ok(None) => continue,
-            Err(error) => warnings.push(format!("Warning: Could not read {display}: {error}")),
+            Err(error) => warnings.push(format!("Could not read {display}: {error}")),
         }
     }
     None
@@ -209,7 +210,7 @@ pub fn resolve_prompt_input(
             Ok(None) => Some(input.to_owned()),
             Err(error) => {
                 warnings.push(format!(
-                    "Warning: Could not read {description} file {input}: {error}"
+                    "Could not read {description} file {input}: {error}"
                 ));
                 Some(input.to_owned())
             }
@@ -525,6 +526,16 @@ mod tests {
         );
         assert_eq!(resolve_prompt_input(Some(""), "x", &mut warnings), None);
         assert!(warnings.is_empty());
-        assert!(temp.path().exists());
+        // A directory exists but cannot be read as text.
+        let dir = temp.path().to_string_lossy().into_owned();
+        assert_eq!(
+            resolve_prompt_input(Some(&dir), "system prompt", &mut warnings),
+            Some(dir.clone())
+        );
+        assert_eq!(warnings.len(), 1);
+        assert!(
+            warnings[0].starts_with(&format!("Could not read system prompt file {dir}: ")),
+            "{warnings:?}"
+        );
     }
 }

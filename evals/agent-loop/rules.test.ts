@@ -32,6 +32,10 @@ describe('requests gate', () => {
 })
 
 describe('failure categories', () => {
+  test('an invalid sample names why the evaluator could not trust it', () => {
+    expect(failureOf({ success: false, invalid: 'stale_injection_raced', code: 0, final: 'done' })).toBe('invalid: stale_injection_raced')
+  })
+
   test('a runaway guard abort is its own category', () => {
     expect(failureOf({ success: false, runawayAbort: true, code: 1, abortCause: null })).toBe('runaway')
   })

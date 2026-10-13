@@ -823,8 +823,8 @@ mod hangup {
     /// Sends [`Source::Hangup`] once standard input or output reports a
     /// hangup or an error. The kernel hangs a terminal up when its emulator
     /// closes, and SIGHUP follows only for a process that the terminal
-    /// controls; meanwhile Crossterm's reader retries the failed reads
-    /// without returning, so the loop would wait forever.
+    /// controls; meanwhile Crossterm's reader may keep polling the closed
+    /// terminal without returning, so the loop would wait forever.
     pub struct Watcher {
         stop: Arc<AtomicBool>,
         thread: Option<JoinHandle<()>>,

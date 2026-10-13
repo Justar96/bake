@@ -15,6 +15,15 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
+// The command the messages name, from the source the binary uses.
+#[allow(dead_code)]
+#[path = "../src/docs.rs"]
+mod docs;
+
+fn docs_command() -> String {
+    docs::docs_command(Path::new(env!("CARGO_BIN_EXE_bake-rs")))
+}
+
 const SSE: &str = include_str!("fixtures/openai-responses-text.sse");
 const READ_CALL_SSE: &str = include_str!("fixtures/openai-responses-read-call.sse");
 
@@ -59,6 +68,41 @@ impl Reply {
             status: 200,
             content_type: "text/event-stream",
             body: format!("{body}\n"),
+        }
+    }
+
+    /// One response holding several tool calls, in order.
+    #[cfg(unix)]
+    fn tool_calls(calls: &[(&str, Value)]) -> Self {
+        let mut events = vec![
+            json!({"type": "response.created", "response": {"id": "resp_many", "object": "response", "created_at": 1_760_000_000, "status": "in_progress", "model": "loop-model", "output": []}}),
+        ];
+        let mut items = Vec::new();
+        for (index, (name, arguments)) in calls.iter().enumerate() {
+            let item = json!({"id": format!("fc_{index}"), "type": "function_call", "status": "completed", "call_id": format!("call_{index}"), "name": name, "arguments": arguments.to_string()});
+            events.push(json!({"type": "response.output_item.added", "output_index": index, "item": {"id": format!("fc_{index}"), "type": "function_call", "status": "in_progress", "call_id": format!("call_{index}"), "name": name, "arguments": ""}}));
+            events.push(json!({"type": "response.function_call_arguments.done", "item_id": format!("fc_{index}"), "output_index": index, "arguments": arguments.to_string()}));
+            events.push(
+                json!({"type": "response.output_item.done", "output_index": index, "item": item}),
+            );
+            items.push(item);
+        }
+        events.push(json!({"type": "response.completed", "response": {"id": "resp_many", "object": "response", "created_at": 1_760_000_000, "status": "completed", "model": "loop-model", "output": items, "usage": {"input_tokens": 40, "input_tokens_details": {"cached_tokens": 0}, "output_tokens": 8, "output_tokens_details": {"reasoning_tokens": 0}, "total_tokens": 48}}}));
+        let body: String = events
+            .into_iter()
+            .enumerate()
+            .map(|(sequence, mut event)| {
+                event["sequence_number"] = json!(sequence);
+                format!(
+                    "event: {}\ndata: {event}\n\n",
+                    event["type"].as_str().unwrap_or_default()
+                )
+            })
+            .collect();
+        Self {
+            status: 200,
+            content_type: "text/event-stream",
+            body,
         }
     }
 
@@ -395,23 +439,50 @@ fn transcript(request: &Request) -> Vec<String> {
         .collect()
 }
 
-/// The `tools` and `rules` sections Pi v1.1.0 builds for `selected`,
-/// recorded by `bake-coding-agent/tests/fixtures/pi-tools/generate.ts`.
-fn pi_prompt_sections(selected: &[&str]) -> (String, String) {
-    let golden: Value = serde_json::from_str(include_str!(
-        "../../bake-coding-agent/tests/fixtures/pi-tools/golden.json"
-    ))
-    .expect("golden.json");
-    let case = golden["prompts"]
-        .as_array()
-        .expect("prompts")
-        .iter()
-        .find(|case| case["selected"] == json!(selected))
-        .expect("a recorded selection");
-    (
-        case["tools"].as_str().expect("tools").to_owned(),
-        case["rules"].as_str().expect("rules").to_owned(),
-    )
+/// The first request of a `bake-rs -p` run, as the fixture under
+/// `fixtures/first-request/` holds it: the system prompt's text, then the
+/// rest of the request body with that text left out. The facts that differ
+/// between hosts and runs become placeholders: the project directory, the
+/// executable, the platform, whether the project is in a git repository,
+/// the session's start date, and its id.
+#[cfg(unix)]
+fn first_request_fixture(workspace: &Workspace, request: &Request) -> String {
+    let header = &lines(&workspace.session_files()[0])[0];
+    let cwd = header["cwd"].as_str().expect("cwd");
+    let mut body = request.body.clone();
+    let system = body["input"][0]["content"].take();
+    let system = match system {
+        Value::String(text) => text,
+        Value::Array(parts) => parts
+            .iter()
+            .filter_map(|part| part["text"].as_str())
+            .collect(),
+        other => panic!("unexpected system content {other}"),
+    };
+    body["input"][0]["content"] = json!("<the system prompt above>");
+    let git = bake_coding_agent::system_prompt::has_git_ancestor(Path::new(cwd), |path| {
+        path.symlink_metadata().is_ok()
+    });
+    let started = &header["timestamp"].as_str().expect("timestamp")[..10];
+    let text = format!(
+        "{system}\n---\n{}\n",
+        serde_json::to_string_pretty(&body).expect("body")
+    );
+    text.replace(cwd, "<project>")
+        .replace(env!("CARGO_BIN_EXE_bake-rs"), "<bake-rs>")
+        .replace(header["id"].as_str().expect("id"), "<session-id>")
+        .replace(
+            &format!("Platform: {}", std::env::consts::OS),
+            "Platform: <platform>",
+        )
+        .replace(
+            &format!("Git repository: {}", if git { "yes" } else { "no" }),
+            "Git repository: <git>",
+        )
+        .replace(
+            &format!("Session started: {started} (UTC)"),
+            "Session started: <date> (UTC)",
+        )
 }
 
 #[test]
@@ -431,22 +502,8 @@ fn print_mode_answers_saves_and_continues() {
     assert_eq!(requests[0].body["model"], "loop-model");
     let first_input = transcript(&requests[0]);
     assert_eq!(first_input.len(), 2, "{first_input:?}");
-    assert!(
-        first_input[0]
-            .starts_with("system: You are an expert coding assistant operating inside pi")
-    );
-    // Pi's default tools.
-    let (tools, rules) = pi_prompt_sections(&["read", "bash", "edit", "write"]);
-    assert!(
-        first_input[0].contains(&format!("\n{tools}\n")),
-        "{}",
-        first_input[0]
-    );
-    assert!(
-        first_input[0].contains(&format!("\n{rules}\n")),
-        "{}",
-        first_input[0]
-    );
+    // Bake's prompt; `first_request_matches_the_fixture` pins its text.
+    assert!(first_input[0].starts_with("system: You are Bake, a coding agent"));
     let declared: Vec<&str> = requests[0].body["tools"]
         .as_array()
         .expect("declared tools")
@@ -525,6 +582,44 @@ fn print_mode_answers_saves_and_continues() {
     assert_eq!(lines(&files[0]).len(), 11);
 }
 
+/// The whole first request for each permission a run can start with, the
+/// two built-in presets and the read-only sandbox, against
+/// `fixtures/first-request/`: everything the model sees before it answers.
+/// A change to it is a model-visible change that needs an eval record.
+#[cfg(unix)]
+#[test]
+fn first_request_matches_the_fixture() {
+    let cases: [(&str, &[&str]); 3] = [
+        ("workspace-write", &["--permission", "workspace-write"]),
+        (
+            "danger-full-access",
+            &["--permission", "danger-full-access"],
+        ),
+        ("read-only", &["--sandbox", "read-only"]),
+    ];
+    for (name, flags) in cases {
+        let server = Server::start(Reply::sse());
+        let workspace = Workspace::new("first-request", server.port);
+        let mut args = vec!["-p"];
+        args.extend_from_slice(flags);
+        args.push("Say hi");
+        let out = workspace.run(&args, None);
+        assert_eq!(text(&out.stderr), "", "{name}");
+        assert_eq!(out.status.code(), Some(0), "{name}");
+        let requests = server.requests();
+        let actual = first_request_fixture(&workspace, &requests[0]);
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/first-request")
+            .join(format!("{name}.txt"));
+        let expected = std::fs::read_to_string(&path).unwrap_or_default();
+        assert!(
+            actual == expected,
+            "{name}: the first request differs from {}:\n{actual}",
+            path.display()
+        );
+    }
+}
+
 #[test]
 fn piped_stdin_is_prepended_to_the_first_message() {
     let server = Server::start(Reply::sse());
@@ -600,7 +695,10 @@ fn startup_errors_follow_pi() {
     assert_eq!(out.status.code(), Some(1));
     assert_eq!(
         text(&out.stderr),
-        "Error: Model \"nope/missing\" not found. Use --list-models to see available models.\n"
+        format!(
+            "Error: Model \"nope/missing\" not found. See:\n  {} models\n",
+            docs_command()
+        )
     );
     let out = workspace.run(&["-p", "--provider", "loop", "hi"], None);
     assert_eq!(out.status.code(), Some(1));
@@ -618,7 +716,10 @@ fn startup_errors_follow_pi() {
     std::fs::remove_file(workspace.home().join("models.json")).expect("remove models.json");
     let out = workspace.run(&["-p", "hi"], None);
     assert_eq!(out.status.code(), Some(1));
-    assert!(text(&out.stderr).starts_with("No models available. "));
+    let stderr = text(&out.stderr);
+    assert!(stderr.starts_with("No models available. "));
+    // The help names this executable's `docs` command.
+    assert!(stderr.ends_with(&format!("\n  {} models\n", docs_command())));
     assert!(server.requests().is_empty());
 }
 
@@ -835,13 +936,13 @@ fn print_mode_reads_agents_instructions_and_skills() {
 }
 
 /// Pi's bash tool through `bake-rs -p`: the command runs in the project
-/// with the session's `PI_*` variables, and its output goes back to the
+/// with the session's `BAKE_*` variables, and its output goes back to the
 /// model. `danger-full-access` runs it unconfined, which needs no sandbox
 /// backend on the test host.
 #[cfg(unix)]
 #[test]
 fn print_mode_runs_the_bash_tool() {
-    let command = "printf '%s|%s|%s\\n' \"$PI_PROVIDER\" \"$PI_MODEL\" \"$(basename \"$PWD\")\"";
+    let command = "printf '%s|%s|%s|%s\\n' \"$BAKE_PROVIDER\" \"$BAKE_MODEL\" \"${PI_MODEL-unset}\" \"$(basename \"$PWD\")\"";
     let server = Server::start_sequence(vec![
         Reply::tool_call("bash", &json!({ "command": command })),
         Reply::sse(),
@@ -878,11 +979,42 @@ fn print_mode_runs_the_bash_tool() {
             .collect(),
         other => panic!("unexpected output {other}"),
     };
-    assert_eq!(sent, "loop|loop-model|project\n");
+    assert_eq!(sent, "loop|loop-model|unset|project\n");
     let entries = lines(&workspace.session_files()[0]);
     let result = &entries[7]["message"];
     assert_eq!(result["toolName"], "bash");
     assert_eq!(result["isError"], false);
+}
+
+/// The prompt says tool calls in one response run in order, so a response
+/// holding `bash` or `write` runs its calls one at a time: the write lands
+/// after the slower command before it, where Pi would run both at once and
+/// the command would overwrite the write.
+#[cfg(unix)]
+#[test]
+fn calls_in_one_response_run_in_order() {
+    let server = Server::start_sequence(vec![
+        Reply::tool_calls(&[
+            (
+                "bash",
+                json!({ "command": "sleep 0.5; printf first > order.txt" }),
+            ),
+            ("write", json!({ "path": "order.txt", "content": "second" })),
+        ]),
+        Reply::sse(),
+    ]);
+    let workspace = Workspace::new("ordered", server.port);
+    let out = workspace.run(
+        &["-p", "--permission", "danger-full-access", "Run them"],
+        None,
+    );
+    assert_eq!(text(&out.stderr), "");
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(
+        std::fs::read_to_string(workspace.project().join("order.txt")).expect("order.txt"),
+        "second"
+    );
+    assert_eq!(server.requests().len(), 2);
 }
 
 /// The tool result sent back for the first tool call of `request`.
@@ -978,8 +1110,8 @@ fn print_mode_refuses_a_write_outside_the_project() {
     )
     .expect("root");
     assert!(
-        system.ends_with(&format!(
-            "\n<permissions>\nFile sandbox: workspace-write. Sandboxed tools can modify files under {root}, and possibly in some temporary directories.\n\nApproval prompts: enabled. Actions that need approval request it before running, and fail if no one can answer.\n</permissions>"
+        system.contains(&format!(
+            "\n<permissions>\nFile sandbox: workspace-write. Sandboxed tools can modify files under {root}, and possibly in some temporary directories.\n\nApproval prompts: disabled. Actions that need approval are rejected automatically, so do not request sandbox escalation with `sandbox_permissions`.\n</permissions>\n\n<environment>\n"
         )),
         "{system}"
     );

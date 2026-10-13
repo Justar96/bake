@@ -208,14 +208,18 @@ impl SessionPermission {
         )
     }
 
-    /// The system-prompt section stating this permission for a session in
-    /// `workspace_root`: ([`context::PERMISSIONS_SECTION`], text).
-    pub fn prompt_section(&self, workspace_root: &Path) -> (String, String) {
+    /// The text of the system prompt's `permissions` section for a session
+    /// in `workspace_root`. Without anyone to answer an approval prompt,
+    /// as in `-p`, every escalation fails, so the section states the
+    /// `never` policy whatever the preset's.
+    pub fn prompt_text(&self, workspace_root: &Path, can_ask: bool) -> String {
         let policy = SandboxPolicy::new(self.sandbox, workspace_root);
-        (
-            context::PERMISSIONS_SECTION.to_owned(),
-            context::permissions_section_text(&policy, self.approval),
-        )
+        let approval = if can_ask {
+            self.approval
+        } else {
+            ApprovalPolicy::Never
+        };
+        context::permissions_section_text(&policy, approval)
     }
 }
 

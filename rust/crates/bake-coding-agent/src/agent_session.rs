@@ -48,7 +48,7 @@ use recovery::{Activity, Core, RunState};
 
 use bake_agent::{
     Agent, AgentError, AgentEvent, AgentInitialState, AgentMessage as LiveMessage, AgentOptions,
-    AgentTool, PromptInput, Subscription, hook,
+    AgentTool, PromptInput, Subscription, ToolExecutionMode, hook,
 };
 use bake_ai::transcript::get_current_system_message;
 use bake_ai::{
@@ -66,39 +66,35 @@ use crate::settings::Settings;
 use crate::skills::expand_skill_command;
 use crate::system_prompt::{
     SystemPromptOptions, build_system_prompt_sections, diff_system_prompt_sections,
-    normalize_prompt_guidelines, normalize_prompt_snippet,
+    normalize_prompt_guidelines,
 };
 
-/// Pi's `getProviderLoginHelp`, naming the docs directory Bake's prompt uses.
-fn provider_login_help(docs: &str) -> String {
-    let join = |name: &str| {
-        PathBuf::from(docs)
-            .join(name)
-            .to_string_lossy()
-            .into_owned()
-    };
+/// Bake's form of Pi's `getProviderLoginHelp`. `bake-rs` has no `/login`,
+/// so the help names the files that configure a model and the `docs` topic
+/// that describes them. `docs_command` runs `bake-rs docs`
+/// ([`AgentSessionOptions::docs_command`]).
+fn provider_login_help(docs_command: &str) -> String {
     format!(
-        "Use /login to log into a provider via OAuth or API key. See:\n  {}\n  {}",
-        join("providers.md"),
-        join("models.md")
+        "Add a provider to models.json in the Bake home, and its API key to models.json or auth.json. See:\n  {docs_command} models"
     )
 }
 
-/// Pi's `formatNoModelsAvailableMessage`.
-pub fn format_no_models_available_message(docs: &str) -> String {
-    format!("No models available. {}", provider_login_help(docs))
+/// Pi's `formatNoModelsAvailableMessage`, with Bake's help.
+pub fn format_no_models_available_message(docs_command: &str) -> String {
+    format!("No models available. {}", provider_login_help(docs_command))
 }
 
-/// Pi's `formatNoModelSelectedMessage`.
-pub fn format_no_model_selected_message(docs: &str) -> String {
+/// Pi's `formatNoModelSelectedMessage`, with Bake's help and `--model` in
+/// place of Pi's `/model`.
+pub fn format_no_model_selected_message(docs_command: &str) -> String {
     format!(
-        "No model selected.\n\n{}\n\nThen use /model to select a model.",
-        provider_login_help(docs)
+        "No model selected.\n\n{}\n\nThen select one with --model.",
+        provider_login_help(docs_command)
     )
 }
 
-/// Pi's `formatNoApiKeyFoundMessage`.
-pub fn format_no_api_key_found_message(provider: &str, docs: &str) -> String {
+/// Pi's `formatNoApiKeyFoundMessage`, with Bake's help.
+pub fn format_no_api_key_found_message(provider: &str, docs_command: &str) -> String {
     let display = if provider == "unknown" {
         "the selected model"
     } else {
@@ -106,7 +102,7 @@ pub fn format_no_api_key_found_message(provider: &str, docs: &str) -> String {
     };
     format!(
         "No API key found for {display}.\n\n{}",
-        provider_login_help(docs)
+        provider_login_help(docs_command)
     )
 }
 
@@ -129,17 +125,40 @@ pub struct AgentSessionOptions {
     pub thinking_level: Option<ModelThinkingLevel>,
     /// The executable tools.
     pub tools: Vec<Arc<AgentTool>>,
-    /// The active tools by name, Pi's `initialActiveToolNames`: the prompt
-    /// lists these, and requests declare the ones present in `tools`.
+    /// The active tools by name, Pi's `initialActiveToolNames`: the
+    /// prompt's rules follow these, and requests declare the ones present
+    /// in `tools`.
     pub active_tool_names: Vec<String>,
-    /// What the prompt says about each tool, Pi's tool-definition
-    /// `promptSnippet` and `promptGuidelines`. A tool without a snippet is
-    /// not listed under the prompt's available tools, as in Pi.
+    /// What each tool contributes to the prompt, from Pi's tool definitions;
+    /// only the guidelines reach the prompt.
     pub tool_prompts: Vec<ToolPrompt>,
     /// The system-prompt inputs; `selected_tools` is replaced by the active
-    /// tools, and [`Self::tool_prompts`] are added to `tool_snippets` and
-    /// `tool_guidelines`, winning over entries for the same tool.
+    /// tools, `docs_command` by [`Self::docs_command`], and the guidelines of
+    /// [`Self::tool_prompts`] are added to `tool_guidelines`, winning over
+    /// entries for the same tool.
     pub system_prompt: SystemPromptOptions,
+    /// How to run `bake-rs docs`, such as `/usr/local/bin/bake-rs docs`,
+    /// which the prompt's `docs` section and the no-model and no-key
+    /// messages name.
+    pub docs_command: String,
+}
+
+/// Tools whose calls change files or run commands. The prompt's round-trip
+/// rule sends an edit with the command that checks it in one response, so a
+/// batch holding one of these runs one call at a time, in the order the
+/// model wrote them; a batch of reads still runs in parallel. Pi runs every
+/// batch in parallel.
+const ORDERED_TOOLS: [&str; 3] = ["bash", "edit", "write"];
+
+/// `tool`, made sequential when it is one of the [`ORDERED_TOOLS`] and sets
+/// no mode of its own.
+fn run_in_order(tool: Arc<AgentTool>) -> Arc<AgentTool> {
+    if tool.execution_mode.is_some() || !ORDERED_TOOLS.contains(&tool.name.as_str()) {
+        return tool;
+    }
+    let mut ordered = (*tool).clone();
+    ordered.execution_mode = Some(ToolExecutionMode::Sequential);
+    Arc::new(ordered)
 }
 
 /// The prompt text of one tool, from Pi's `ToolDefinition`.
@@ -147,8 +166,8 @@ pub struct AgentSessionOptions {
 pub struct ToolPrompt {
     /// The tool name.
     pub name: String,
-    /// Pi's `promptSnippet`: the tool's line under the available tools,
-    /// collapsed to one line.
+    /// Pi's `promptSnippet`, the tool's line in Pi's list of tools, which
+    /// Bake's prompt does not have.
     pub snippet: Option<String>,
     /// Pi's `promptGuidelines`: bullets added to the guidelines, trimmed
     /// and deduplicated.
@@ -318,6 +337,7 @@ pub struct AgentSession {
     tools: Vec<Arc<AgentTool>>,
     active_tool_names: Vec<String>,
     prompt_options: SystemPromptOptions,
+    docs_command: String,
     listeners: Arc<Listeners>,
     persist_error: Arc<Mutex<Option<String>>>,
     subscription: Mutex<Option<Subscription>>,
@@ -343,7 +363,7 @@ struct Selection {
 struct SelectionInputs<'a> {
     registry: &'a ModelRegistry,
     settings: &'a Settings,
-    docs: &'a str,
+    docs_command: &'a str,
     model: Option<Model>,
     thinking_level: Option<ModelThinkingLevel>,
 }
@@ -357,7 +377,7 @@ fn select_model(
     let SelectionInputs {
         registry,
         settings,
-        docs,
+        docs_command,
         mut model,
         thinking_level: explicit_thinking,
     } = inputs;
@@ -383,7 +403,7 @@ fn select_model(
         );
         model = initial.model;
         fallback_message = match (&model, fallback_message) {
-            (None, _) => Some(format_no_models_available_message(docs)),
+            (None, _) => Some(format_no_models_available_message(docs_command)),
             (Some(model), Some(message)) => {
                 Some(format!("{message}. Using {}/{}", model.provider, model.id))
             }
@@ -597,14 +617,12 @@ impl AgentSession {
             active_tool_names,
             tool_prompts,
             mut system_prompt,
+            docs_command,
         } = options;
-        // Pi's `_toolPromptSnippets` and `_toolPromptGuidelines`.
+        system_prompt.docs_command = docs_command.clone();
+        let tools: Vec<Arc<AgentTool>> = tools.into_iter().map(run_in_order).collect();
+        // Pi's `_toolPromptGuidelines`.
         for prompt in &tool_prompts {
-            if let Some(snippet) = normalize_prompt_snippet(prompt.snippet.as_deref()) {
-                system_prompt
-                    .tool_snippets
-                    .push((prompt.name.clone(), snippet));
-            }
             let guidelines = normalize_prompt_guidelines(&prompt.guidelines);
             if !guidelines.is_empty() {
                 system_prompt
@@ -630,7 +648,7 @@ impl AgentSession {
             SelectionInputs {
                 registry: &registry,
                 settings: &settings,
-                docs: &system_prompt.docs.docs,
+                docs_command: &docs_command,
                 model,
                 thinking_level,
             },
@@ -727,6 +745,7 @@ impl AgentSession {
             tools,
             active_tool_names,
             prompt_options: system_prompt,
+            docs_command,
             listeners,
             persist_error,
             subscription: Mutex::new(None),
@@ -959,14 +978,17 @@ impl AgentSession {
         // Reset at the claim, not at the run as in Pi, so an abort during
         // the compaction before the prompt also ends the prompt.
         self.core.abort_requested.store(false, Ordering::SeqCst);
-        let docs = &self.prompt_options.docs.docs;
+        let docs_command = &self.docs_command;
         let Some(model) = self.model() else {
-            return Err(format_no_model_selected_message(docs));
+            return Err(format_no_model_selected_message(docs_command));
         };
         if !self.registry.has_configured_auth(&model.provider)
             && self.registry.check_auth(&model.provider).is_none()
         {
-            return Err(format_no_api_key_found_message(&model.provider, docs));
+            return Err(format_no_api_key_found_message(
+                &model.provider,
+                docs_command,
+            ));
         }
         // Compact before sending when the last response calls for it,
         // aborted ones included; the new prompt is sent either way.
@@ -1129,7 +1151,7 @@ impl AgentSession {
         custom_instructions: Option<&str>,
     ) -> Result<CompactionResult, String> {
         self.abort().await;
-        let no_model = format_no_model_selected_message(&self.prompt_options.docs.docs);
+        let no_model = format_no_model_selected_message(&self.docs_command);
         self.core
             .manual_compaction(custom_instructions, no_model)
             .await

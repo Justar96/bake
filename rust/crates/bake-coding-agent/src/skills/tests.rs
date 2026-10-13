@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 
 use super::*;
-use crate::system_prompt::{SystemPromptOptions, build_system_prompt};
+use crate::system_prompt::{SystemPromptOptions, build_system_prompt_sections};
 use crate::test_support::{TempDir, write};
 
 fn fixtures() -> PathBuf {
@@ -623,26 +623,24 @@ fn skill_commands_expand_to_the_skill_body() {
 }
 
 // Pi test/system-prompt.test.ts: describe("skills") and the hidden-tool
-// skill case, against prompts recorded from Pi.
+// skill case. Bake's prompt is its own (D33), so the `skills` section, and
+// whether there is one, is checked against the prompts recorded from Pi.
 
-fn recorded(case: &str) -> String {
+/// The `name` section of a whole prompt Pi recorded, with its tags.
+fn recorded_section(case: &str, name: &str) -> Option<String> {
     let recorded: serde_json::Value = serde_json::from_str(include_str!(
         "../../tests/fixtures/system_prompt/skills.json"
     ))
     .unwrap_or_default();
-    recorded[case].as_str().unwrap_or_default().to_owned()
+    let prompt = recorded[case].as_str().unwrap_or_default();
+    let (_, rest) = prompt.split_once(&format!("<{name}>\n"))?;
+    let (section, _) = rest.split_once(&format!("\n</{name}>"))?;
+    Some(format!("<{name}>\n{section}\n</{name}>"))
 }
 
-fn prompt_with_skills(tools: &[&str], snippets: &[(&str, &str)]) -> SystemPromptOptions {
-    let mut options = SystemPromptOptions::new(
-        "/work/project",
-        crate::system_prompt::DocsPaths::under(Path::new("/opt/pi")),
-    );
+fn prompt_with_skills(tools: &[&str]) -> SystemPromptOptions {
+    let mut options = SystemPromptOptions::new("/work/project");
     options.selected_tools = tools.iter().map(|tool| (*tool).to_owned()).collect();
-    options.tool_snippets = snippets
-        .iter()
-        .map(|(tool, text)| ((*tool).to_owned(), (*text).to_owned()))
-        .collect();
     options.append_system_prompt = "Appended.".into();
     options.context_files = vec![crate::system_prompt::ContextFile {
         path: "/work/project/AGENTS.md".into(),
@@ -666,42 +664,68 @@ fn prompt_with_skills(tools: &[&str], snippets: &[(&str, &str)]) -> SystemPrompt
     options
 }
 
-fn built(options: &SystemPromptOptions) -> String {
-    build_system_prompt(options).unwrap_or_else(|error| error.to_string())
+/// The built prompt's section names and its `skills` section.
+fn built(options: &SystemPromptOptions) -> (Vec<String>, Option<String>) {
+    let sections = build_system_prompt_sections(options).unwrap_or_default();
+    let skills = sections
+        .iter()
+        .find(|(name, _)| name == "skills")
+        .map(|(_, text)| text.clone());
+    (sections.into_iter().map(|(name, _)| name).collect(), skills)
 }
 
 #[test]
 fn the_skills_section_matches_pi() {
-    let read = prompt_with_skills(&["read", "bash"], &[("read", "Read"), ("bash", "Run")]);
-    assert_eq!(built(&read), recorded("read"));
+    let mut read = prompt_with_skills(&["read", "bash"]);
+    read.docs_command = "bake-rs docs".into();
+    read.permissions = "File sandbox: read-only.".into();
+    let (names, skills) = built(&read);
+    assert_eq!(skills, recorded_section("read", "skills"));
+    // Like the context files, the list changes only between runs, so it
+    // sits before the run's permissions and environment.
+    assert_eq!(
+        names,
+        [
+            "preamble",
+            "rules",
+            "docs",
+            "run",
+            "addendum",
+            "project_context",
+            "skills",
+            "permissions",
+            "environment"
+        ]
+    );
 
-    let bash = prompt_with_skills(&["bash"], &[("bash", "Run")]);
-    let text = built(&bash);
-    assert_eq!(text, recorded("bash"));
-    assert!(text.contains("<skills>"));
-    assert!(text.contains("Use bash to load a skill's file"));
+    let (_, skills) = built(&prompt_with_skills(&["bash"]));
+    assert_eq!(skills, recorded_section("bash", "skills"));
+    assert!(skills.is_some_and(|text| text.contains("Use bash to load a skill's file")));
 
-    let mut indirect = prompt_with_skills(&["read", "bash", "run"], &[("run", "Run a task")]);
+    let mut indirect = prompt_with_skills(&["read", "bash", "run"]);
     indirect.hidden_tools = vec!["read".into(), "bash".into()];
-    let text = built(&indirect);
-    assert_eq!(text, recorded("indirect"));
-    assert!(text.contains("\nLoad a skill's file when the task matches its description."));
+    let (_, skills) = built(&indirect);
+    assert_eq!(skills, recorded_section("indirect", "skills"));
+    assert!(skills.is_some_and(|text| {
+        text.contains("\nLoad a skill's file when the task matches its description.")
+    }));
 
     // "omits skills without read or bash"
-    let none = prompt_with_skills(&["write"], &[]);
-    let text = built(&none);
-    assert_eq!(text, recorded("none"));
-    assert!(!text.contains("<available_skills>"));
+    let (_, skills) = built(&prompt_with_skills(&["write"]));
+    assert_eq!(recorded_section("none", "skills"), None);
+    assert_eq!(skills, None);
 
-    let mut custom = prompt_with_skills(&["bash"], &[]);
+    let mut custom = prompt_with_skills(&["bash"]);
     custom.custom_prompt = Some("Custom.".into());
-    assert_eq!(built(&custom), recorded("custom"));
+    let (_, skills) = built(&custom);
+    assert_eq!(skills, recorded_section("custom", "skills"));
+    assert!(skills.is_some());
 
-    let mut all_hidden = prompt_with_skills(&["read"], &[]);
+    let mut all_hidden = prompt_with_skills(&["read"]);
     all_hidden
         .skills
         .retain(|skill| skill.disable_model_invocation);
-    let text = built(&all_hidden);
-    assert_eq!(text, recorded("allHidden"));
-    assert!(!text.contains("<skills>"));
+    let (_, skills) = built(&all_hidden);
+    assert_eq!(recorded_section("allHidden", "skills"), None);
+    assert_eq!(skills, None);
 }
