@@ -13,8 +13,8 @@ import { COMPACTION_DEFAULTS } from '../../packages/compaction/compaction-basic/
 
 /** The standard suite every recorded version runs; `duplicate_recovery` and the delegation cases are opt-in. */
 export const STANDARD_CASES = ['no_tools', 'ordinary_edit', 'path_discovery', 'stale_edit', 'unprompted_edit', 'multi_site_edit', 'multi_file_edit', 'shell_then_edit']
-/** Opt-in scenarios that stress what the standard suite cannot see: large files, exploration, verification habits, noisy output, background work, instructions, ambiguous edits, and compaction. */
-export const EXTENDED_CASES = ['large_file_edit', 'explore_answer', 'test_fix_loop', 'unprompted_verify', 'noisy_failure', 'background_test', 'instructions_file', 'edit_recovery', 'long_session']
+/** Opt-in scenarios that stress what the standard suite cannot see: large files, exploration, verification habits, noisy output, background work, instructions, skills, ambiguous edits, and compaction. */
+export const EXTENDED_CASES = ['large_file_edit', 'explore_answer', 'test_fix_loop', 'unprompted_verify', 'noisy_failure', 'background_test', 'instructions_file', 'skill_check', 'skill_distractors', 'edit_recovery', 'long_session']
 /** Named scenario sets; `EVAL_CASES` may list set names, scenario names, or both. */
 export const CASE_SETS: Record<string, string[]> = { standard: STANDARD_CASES, extended: EXTENDED_CASES }
 
@@ -52,6 +52,10 @@ export const prompts: Record<string, string> = {
   noisy_failure: 'node test.cjs fails and prints a lot of log output. Find the cause in the source files and fix it.' + natural,
   background_test: 'Do two independent jobs. First start node slow-check.cjs in the background: it takes about 20 seconds, so do not wait for it idly. While it runs, ' + roundMoneyTask.replace('Fix', 'fix') + ' Run node test.cjs to verify that fix. Then collect the output of slow-check.cjs and quote the line it prints in your final answer. Work only inside this fixture. Do not delegate, install packages, use the network, modify test.cjs or slow-check.cjs, or make commits.',
   instructions_file: roundMoneyTask + ' Work only inside this fixture. Do not delegate, install packages, use the network, modify test.cjs or anything under scripts/, or make commits. Verify the change the way this project requires and give a brief final result.',
+  // instructions_file's task, with the project's check in a skill instead of AGENTS.md.
+  skill_check: roundMoneyTask + ' Work only inside this fixture. Do not delegate, install packages, use the network, modify test.cjs or anything under .agents/, or make commits. Verify the change the way this project requires and give a brief final result.',
+  // unprompted_edit's task, with skills that do not apply to it.
+  skill_distractors: roundMoneyTask + natural,
   edit_recovery: roundMoneyTask + ' truncateMoney must keep truncating.' + common,
   long_session: `This task has three steps; finish all of them. 1. Read ${noteNames()[0]} in full with the read tool. Each of the ten notes holds one line that starts with "Checkpoint code:" and ends by naming the next note; read them one at a time in that chain until a note says it is the last. 2. Write codes.txt in this directory with the ten codes in chain order, one per line and nothing else. 3. ` + roundMoneyTask + ' Work only inside this fixture. Do not delegate, install packages, use the network, modify test.cjs, or make commits. Run node test.cjs to verify and give a brief final result.',
 }
@@ -98,6 +102,8 @@ export const REQUEST_FLOORS: Record<string, number> = {
   noisy_failure: 3, // test with the read of the module; edit with the test; final
   background_test: 4, // start the check with the read; edit with the test; collect the check; final
   instructions_file: 3,
+  skill_check: 3, // the module with the skill's file; edit with the check; final
+  skill_distractors: 3,
   edit_recovery: 3,
   // Ten chained reads, the first with the money read and the second with the
   // edit and its test; codes.txt; final; plus at least one summary request.
@@ -133,10 +139,20 @@ export function piCompactionFor(contextWindow: number) {
 /** Whether a scenario keeps `agent-instructions` mounted, so the agent reads the fixture's AGENTS.md. */
 export const usesAgentInstructions = (scenario: string) => scenario === 'instructions_file'
 
+/**
+ * Scenarios whose fixture holds an `.agents/skills` directory, each with the
+ * skill its task needs, or null when none of them applies.
+ */
+export const SKILL_SCENARIOS: Record<string, string | null> = { skill_check: 'money-check', skill_distractors: null }
+/** Whether a scenario's fixture provides skills, so the agent should see its `.agents/skills`. */
+export const usesSkills = (scenario: string) => scenario in SKILL_SCENARIOS
+
 /** The shell command that counts as running a scenario's check, for the verification metrics. */
 export function checkCommandFor(scenario: string): RegExp {
   // The project check counts only with `--all`, in the same command; without it the script exits before checking.
   if (scenario === 'instructions_file') return /\bnode\s+(?:\.\/)?scripts\/check\.cjs\b[^\n;&|]*\s--all\b/
+  // The skill's check lives in its own directory, so any path to a check.cjs counts.
+  if (scenario === 'skill_check') return /\bnode\s+(?:\S*\/)?check\.cjs\b[^\n;&|]*\s--all\b/
   return /\bnode\s+(?:\.\/)?test\.cjs\b/
 }
 
@@ -212,6 +228,19 @@ const slowCheck = (ms: number) => `const crypto = require('node:crypto');\nconst
 const agentsFile = '# Project notes\n\n## Checks\n\nRun `node scripts/check.cjs --all` after every change. It runs the unit tests and the API contract check, and it is the only check this project accepts: `node test.cjs` alone skips the contract.\n'
 /** The project check: the tests, a contract check, and a stamp of the source it passed on. */
 const checkScript = "const { execFileSync } = require('node:child_process');\nconst crypto = require('node:crypto');\nconst fs = require('node:fs');\nconst path = require('node:path');\nconst root = path.join(__dirname, '..');\nif (!process.argv.includes('--all')) { console.error('check: pass --all to run the full check'); process.exit(2); }\nexecFileSync(process.execPath, ['test.cjs'], { cwd: root, stdio: 'inherit' });\nconst money = require(path.join(root, 'src/money.js'));\nif (typeof money.roundMoney !== 'function' || Object.keys(money).join() !== 'roundMoney') { console.error('contract: src/money.js must export roundMoney only'); process.exit(1); }\nconst source = fs.readFileSync(path.join(root, 'src/money.js'), 'utf8');\nfs.writeFileSync(path.join(root, '.check-stamp'), crypto.createHash('sha256').update(source).digest('hex'));\nconsole.log('CHECK_OK');\n"
+
+/** The skill `skill_check` needs: the project check of `instructions_file`, bundled in the skill's own directory. */
+const moneyCheckSkill = '---\nname: money-check\ndescription: The verification this project requires after any change to src/money.js. Use it before reporting a money change as done.\n---\n\n# Money check\n\n`node test.cjs` alone is not accepted here: it skips the API contract that callers of `src/money.js` rely on.\n\nAfter your last change to `src/money.js`, run the full check:\n\n    node scripts/check.cjs --all\n\n`scripts/check.cjs` is in this skill\'s directory. It runs the unit tests and the contract check, and prints `CHECK_OK` when both pass.\n'
+/** `checkScript` from inside a skill: the project root is four levels above `scripts/`. */
+const skillCheckScript = checkScript.replace("const root = path.join(__dirname, '..');", "const root = path.join(__dirname, '..', '..', '..', '..');")
+/** Skills that apply to neither skill task, each a short real procedure. */
+const DISTRACTOR_SKILLS: Record<string, string> = {
+  'docker-deploy': '---\nname: docker-deploy\ndescription: Build the service image and deploy it to staging. Use when asked to deploy, ship, or roll back the service.\n---\n\n# Deploy\n\n1. Build with `docker build -t billing:staging .`.\n2. Push with `docker push registry.internal/billing:staging`.\n3. Roll back by redeploying the previous tag.\n',
+  'release-notes': '---\nname: release-notes\ndescription: Draft release notes and CHANGELOG.md entries from merged changes. Use when preparing a release.\n---\n\n# Release notes\n\nGroup entries under Added, Changed, and Fixed, newest release first, one line per change.\n',
+  'translations': '---\nname: translations\ndescription: Add or update user-facing strings in locales/*.json. Use when changing text that users see.\n---\n\n# Translations\n\nAdd each new key to every file in `locales/`, keep keys sorted, and leave untranslated values in English.\n',
+}
+/** The paths of a skill fixture's files, relative to the workspace. */
+const skillPath = (name: string, file = 'SKILL.md') => `.agents/skills/${name}/${file}`
 
 const twinCode = 'function roundMoney(value) {\n  return Math.floor(value * 100) / 100;\n}\n\nfunction truncateMoney(value) {\n  return Math.floor(value * 100) / 100;\n}\nmodule.exports = { roundMoney, truncateMoney };\n'
 const twinTests = fixedTests('src/money.js').replace("console.log('FIXTURE_PASS');", "const { truncateMoney } = require('./src/money.js');\nassert.equal(truncateMoney(1.239), 1.23); assert.equal(truncateMoney(2.999), 2.99);\nconsole.log('FIXTURE_PASS');")
@@ -329,6 +358,14 @@ export function fixture(root: string, scenario: string, options: FixtureOptions 
       write('src/money.js', baseCode); write('test.cjs', fixedTests('src/money.js'))
       write('AGENTS.md', agentsFile); write('scripts/check.cjs', checkScript)
       return { workspace, file: 'src/money.js', protected: protect(workspace, ['scripts/check.cjs', 'AGENTS.md']) }
+    case 'skill_check':
+    case 'skill_distractors': {
+      write('src/money.js', baseCode); write('test.cjs', fixedTests('src/money.js'))
+      const skills: [string, string][] = Object.entries(DISTRACTOR_SKILLS).map(([name, text]) => [skillPath(name), text])
+      if (scenario === 'skill_check') skills.push([skillPath('money-check'), moneyCheckSkill], [skillPath('money-check', 'scripts/check.cjs'), skillCheckScript])
+      for (const [path, text] of skills) write(path, text)
+      return { workspace, file: 'src/money.js', protected: protect(workspace, skills.map(([path]) => path)) }
+    }
     case 'edit_recovery':
       write('src/money.js', twinCode); write('test.cjs', twinTests)
       return { workspace, file: 'src/money.js' }
@@ -421,7 +458,7 @@ export function validate(scenario: string, built: Fixture, outcome: Outcome, env
     && (scenario !== 'shell_then_edit' || source.startsWith('// build: 42'))
     && (scenario !== 'background_test' || outcome.final.includes(slowCheckLine()))
     // The stamp is the hash of the source the project check last passed on, so it matches only when that check ran after the last edit.
-    && (scenario !== 'instructions_file' || read('.check-stamp') === hash(source))
+    && ((scenario !== 'instructions_file' && scenario !== 'skill_check') || read('.check-stamp') === hash(source))
     && (scenario !== 'long_session' || read('codes.txt').split(/\r?\n/).map(line => line.trim()).filter(Boolean).join('\n') === checkpointCodes().join('\n'))
   return { validated, source, testsUnchanged, testExit, fixturesUnchanged: unchanged }
 }

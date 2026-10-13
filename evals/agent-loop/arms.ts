@@ -220,17 +220,18 @@ export const NATIVE_CONTEXT_FILES = ['AGENTS.override.md', 'AGENTS.md', 'AGENTS.
  * directory between the filesystem root and its working directory, and the
  * `.agents/skills` of each directory from its working directory up to the git
  * root, or to the filesystem root outside a repository. The workspace's own
- * context file is left out when the scenario provides its own instructions.
+ * context file is left out when the scenario provides its own instructions,
+ * and its own `.agents/skills` when the scenario provides skills.
  * @returns the files found, first match per directory, then the skill directories.
  */
-export function strayContextFiles(workspace: string, userHome: string, ownsWorkspaceFile: boolean): string[] {
+export function strayContextFiles(workspace: string, userHome: string, ownsWorkspaceFile: boolean, ownsWorkspaceSkills = false): string[] {
   const start = realpathSync(workspace)
   const contextDirs = [join(userHome, '.agents')]
   const skillDirs = [join(userHome, '.agents', 'skills')]
   let collectingSkills = true
   for (let dir = start; ; dir = dirname(dir)) {
     if (!(ownsWorkspaceFile && dir === start)) contextDirs.push(dir)
-    if (collectingSkills) skillDirs.push(join(dir, '.agents', 'skills'))
+    if (collectingSkills && !(ownsWorkspaceSkills && dir === start)) skillDirs.push(join(dir, '.agents', 'skills'))
     if (existsSync(join(dir, '.git'))) collectingSkills = false
     if (dirname(dir) === dir) break
   }

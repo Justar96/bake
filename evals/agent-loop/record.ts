@@ -86,6 +86,7 @@ function compact(sample: Sample) {
     editCheckSplits: sample.editCheckSplits ?? null, orientationCalls: sample.orientationCalls ?? null,
     ranCheck: sample.ranCheck ?? null, verifiedBeforeFinal: sample.verifiedBeforeFinal ?? null,
     backgroundStarts: sample.backgroundStarts ?? null, compactions: sample.compactions ?? null,
+    skillLoads: (sample.skillLoads ?? null) as string[] | null, skillNeeded: (sample.skillNeeded ?? null) as string | null,
     contextWindow: sample.contextWindow ?? null, runaway: sample.runawayAbort === true,
   }
 }
@@ -159,6 +160,22 @@ function loopShape(own: Compact[]) {
   }
 }
 
+/**
+ * One arm's use of skills on one model, over its valid samples of the skill
+ * scenarios: how many of those whose task needs a skill loaded it, and how many
+ * samples loaded a skill their task does not need. Null without such samples.
+ */
+function skillUse(model: string, arm: string) {
+  const own = samples.filter(sample => sample.model === model && sample.arm === arm && sample.skillLoads !== null && sample.invalid === null)
+  if (own.length === 0) return null
+  const needing = own.filter(sample => sample.skillNeeded !== null)
+  return {
+    samples: own.length,
+    neededLoaded: [needing.filter(sample => sample.skillLoads!.includes(sample.skillNeeded!)).length, needing.length],
+    otherLoaded: [own.filter(sample => sample.skillLoads!.some(name => name !== sample.skillNeeded)).length, own.length],
+  }
+}
+
 const perModel: Record<string, any> = {}
 const flagged: string[] = []
 for (const model of models) {
@@ -177,6 +194,10 @@ for (const model of models) {
     })(),
     toolErrors: own.reduce((sum, s) => sum + s.toolErrors, 0),
     loop: loopShape(own),
+    skills: Object.fromEntries([...bases, candidate].flatMap(arm => {
+      const use = skillUse(model, arm)
+      return use === null ? [] : [[armLabels[arm], use]]
+    })),
     comparisons: Object.fromEntries(bases.map(baseArm => {
       const results = Object.fromEntries(Object.entries(groups).map(([name, filter]) => [name, compare(model, baseArm, filter)]))
       flagged.push(...regressions(`${model} vs ${armLabels[baseArm]}`, results['all tasks']!))
@@ -243,6 +264,12 @@ if (models.some(model => perModel[model].loop.measured > 0)) {
   for (const model of models) {
     const { loop } = perModel[model]
     lines.push(`| ${model} | ${loop.measured} | ${loop.excessRequests} | ${loop.editCheckSplits} | ${loop.orientationCalls} | ${loop.verifiedBeforeFinal[0]}/${loop.verifiedBeforeFinal[1]} | ${loop.runaways} |`)
+  }
+}
+if (models.some(model => Object.keys(perModel[model].skills).length > 0)) {
+  lines.push('', '### Skills', '', '| Model | Version | Samples | Needed skill loaded | Loaded a skill not needed |', '|---|---|---|---|---|')
+  for (const model of models) for (const [version, use] of Object.entries(perModel[model].skills) as [string, NonNullable<ReturnType<typeof skillUse>>][]) {
+    lines.push(`| ${model} | ${version} | ${use.samples} | ${use.neededLoaded.join('/')} | ${use.otherLoaded.join('/')} |`)
   }
 }
 const failed = samples.filter(sample => !sample.success)
