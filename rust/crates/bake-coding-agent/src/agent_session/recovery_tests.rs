@@ -90,6 +90,7 @@ fn options(h: &Harness, session: SessionManager, settings: Settings) -> AgentSes
                 examples: "/opt/pi/examples".into(),
             },
         ),
+        docs_command: "bake-rs docs".into(),
     }
 }
 

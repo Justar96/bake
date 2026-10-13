@@ -618,7 +618,10 @@ fn startup_errors_follow_pi() {
     std::fs::remove_file(workspace.home().join("models.json")).expect("remove models.json");
     let out = workspace.run(&["-p", "hi"], None);
     assert_eq!(out.status.code(), Some(1));
-    assert!(text(&out.stderr).starts_with("No models available. "));
+    let stderr = text(&out.stderr);
+    assert!(stderr.starts_with("No models available. "));
+    // The help names this executable's `docs` command.
+    assert!(stderr.contains("bake-rs") && stderr.ends_with(" docs models\n"));
     assert!(server.requests().is_empty());
 }
 

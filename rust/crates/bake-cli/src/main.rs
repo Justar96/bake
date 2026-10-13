@@ -2,7 +2,10 @@
 //!
 //! `bake-rs -p "prompt"` runs one headless turn through
 //! [`bake_coding_agent::cli`], a port of Pi's print mode; `bake-rs preview`
-//! opens the sample terminal preview. Help and version need no Bake home.
+//! opens the sample terminal preview, and `bake-rs docs` prints the user
+//! documentation ([`docs`]). Help, version, and docs need no Bake home.
+
+mod docs;
 
 use std::ffi::OsString;
 use std::io::{self, IsTerminal, Write};
@@ -24,6 +27,7 @@ bake-rs: Bake's native agent (Rust preview)
 Usage:
   bake-rs [options] [messages...]
   bake-rs preview [--inline]  Open the sample preview in an interactive terminal
+  bake-rs docs [topic]        List the documentation topics, or print one
 
 Options:
   -p, --print               Send the prompts, print the final answer, and exit
@@ -66,12 +70,17 @@ global AGENTS.md, and the saved sessions.
 
 The preview shows sample content only and does not connect to a model.
 Ctrl+C quits it.
+
+Run 'bake-rs docs' for the documentation: the Bake home, settings, models,
+permissions, sessions, context files, and the command line.
 ";
 
 #[derive(Debug, PartialEq, Eq)]
 enum Command {
     Help,
     Preview(ScreenMode),
+    /// `bake-rs docs`, with a topic or without one.
+    Docs(Option<String>),
     Agent(Vec<String>),
 }
 
@@ -94,6 +103,9 @@ fn parse(args: &[OsString]) -> Result<Command, String> {
             Err(format!("unexpected argument '{extra}' for 'preview'"))
         }
         ["preview", extra, ..] => Err(format!("unexpected argument '{extra}' for 'preview'")),
+        ["docs"] => Ok(Command::Docs(None)),
+        ["docs", topic] => Ok(Command::Docs(Some((*topic).to_owned()))),
+        ["docs", _, extra, ..] => Err(format!("unexpected argument '{extra}' for 'docs'")),
         _ => Ok(Command::Agent(args)),
     }
 }
@@ -111,6 +123,7 @@ fn main() -> ExitCode {
     match parse(&args) {
         Ok(Command::Help) => print(HELP),
         Ok(Command::Preview(mode)) => preview(mode),
+        Ok(Command::Docs(topic)) => show_docs(topic.as_deref()),
         Ok(Command::Agent(args)) => agent(&args),
         Err(message) => {
             eprintln!("bake-rs: {message}\n\nRun 'bake-rs --help' for usage.");
@@ -130,6 +143,37 @@ fn docs_paths() -> DocsPaths {
         .and_then(|exe| exe.parent().map(PathBuf::from))
         .unwrap_or_default();
     DocsPaths::under(&dir)
+}
+
+/// How to run `bake-rs docs` from this executable, for the messages that
+/// point at the documentation.
+fn docs_command() -> String {
+    match std::env::current_exe() {
+        Ok(exe) => docs::docs_command(&exe),
+        Err(_) => "bake-rs docs".to_owned(),
+    }
+}
+
+/// `bake-rs docs [topic]`: the topic's Markdown, or the topic list. An
+/// unknown topic fails with status 2 and the list on standard error.
+fn show_docs(topic: Option<&str>) -> ExitCode {
+    match topic {
+        None | Some("-h" | "--help") => print(&docs::topic_list()),
+        Some(name) => match docs::topic(name) {
+            Some(topic) => print(topic.text),
+            None => {
+                // A closed standard error is not a panic either.
+                let _ = io::stderr().lock().write_all(
+                    format!(
+                        "bake-rs: unknown docs topic '{name}'\n\n{}",
+                        docs::topic_list()
+                    )
+                    .as_bytes(),
+                );
+                ExitCode::from(2)
+            }
+        },
+    }
 }
 
 /// `SIGTERM` and `SIGHUP` stop print mode with Pi's exit codes, 143 and 129.
@@ -188,6 +232,7 @@ fn agent(args: &[String]) -> ExitCode {
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             home,
             docs: docs_paths(),
+            docs_command: docs_command(),
             stdin_is_terminal,
             stdin: Box::new(io::stdin()),
             stdout,

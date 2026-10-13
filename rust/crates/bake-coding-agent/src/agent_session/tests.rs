@@ -75,6 +75,7 @@ fn options(harness: &Harness, session: SessionManager, cwd: &str) -> AgentSessio
         active_tool_names: Vec::new(),
         tool_prompts: Vec::new(),
         system_prompt: SystemPromptOptions::new(cwd, docs()),
+        docs_command: "/opt/bake/bin/bake-rs docs".into(),
     }
 }
 
@@ -426,11 +427,13 @@ async fn prompts_need_a_model_with_auth() {
     assert!(session.model().is_none());
     assert_eq!(
         session.model_fallback_message(),
-        Some(format_no_models_available_message("/opt/pi/docs").as_str())
+        Some(format_no_models_available_message("/opt/bake/bin/bake-rs docs").as_str())
     );
     assert_eq!(
         session.prompt("hi", Vec::new()).await,
-        Err(format_no_model_selected_message("/opt/pi/docs"))
+        Err(format_no_model_selected_message(
+            "/opt/bake/bin/bake-rs docs"
+        ))
     );
     session.shutdown().await;
 
@@ -444,16 +447,11 @@ async fn prompts_need_a_model_with_auth() {
     .expect("session");
     assert_eq!(
         session.prompt("hi", Vec::new()).await,
-        // Pi joins the docs paths with the platform separator.
-        Err(format!(
-            "No API key found for faux.\n\nUse /login to log into a provider via OAuth or API key. See:\n  {}\n  {}",
-            std::path::Path::new("/opt/pi/docs")
-                .join("providers.md")
-                .display(),
-            std::path::Path::new("/opt/pi/docs")
-                .join("models.md")
-                .display()
-        ))
+        // Bake names its docs command where Pi names its docs files.
+        Err(
+            "No API key found for faux.\n\nAdd a provider to models.json in the Bake home, and its API key to models.json or auth.json. See:\n  /opt/bake/bin/bake-rs docs models"
+                .into()
+        )
     );
     assert_eq!(
         session

@@ -65,6 +65,9 @@ pub struct CliEnvironment {
     pub home: Option<PathBuf>,
     /// Where Pi's prompt says its docs are.
     pub docs: DocsPaths,
+    /// How to run `bake-rs docs`, which startup errors name
+    /// ([`AgentSessionOptions::docs_command`]).
+    pub docs_command: String,
     /// Whether standard input is a terminal.
     pub stdin_is_terminal: bool,
     /// Standard input, read when it is not a terminal.
@@ -374,6 +377,7 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
         cwd,
         home,
         docs,
+        docs_command,
         stdin_is_terminal,
         stdin,
         stdout,
@@ -633,6 +637,7 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
             .map(|definition| definition.prompt())
             .collect(),
         system_prompt,
+        docs_command: docs_command.clone(),
     })
     .await
     {
@@ -667,7 +672,7 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
         session.shutdown().await;
         write_out(
             &stderr,
-            &format!("{}\n", format_no_models_available_message(&docs.docs)),
+            &format!("{}\n", format_no_models_available_message(&docs_command)),
         );
         return 1;
     }
