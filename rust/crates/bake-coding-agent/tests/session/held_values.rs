@@ -89,6 +89,9 @@ fn a_deep_value_this_crate_appends_reads_back() {
     let last = session.append_message(user_msg("two")).expect("append");
     let file = session.session_file().expect("file").to_path_buf();
     assert_eq!(session.build_session_context().messages.len(), 2);
+    // Pi has no writer exclusion; Bake's first writer releases the file
+    // before it is reopened.
+    drop(session);
 
     let mut reopened = SessionManager::open(&file, Some(dir.path()), None).expect("open");
     assert_eq!(reopened.leaf_id(), Some(last.as_str()));

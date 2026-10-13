@@ -17,4 +17,8 @@ A resumed session keeps its model, thinking level, and permission unless a flag 
 
 ## The format
 
-A session file is JSON Lines: a header line (`type` `session`, `version` 3, `id`, `timestamp`, `cwd`), then one entry per line, each with an `id` and a `parentId` naming the entry it follows, so the entries form a tree. Entries are appended and never rewritten, except that a file in Pi's older versions 1 and 2 is upgraded when it is opened. Lines that are damaged or cut short are skipped. bake-rs does not take a lock on the file, so two runs must not write the same session at once. Bake 0.3 Session logs are a different format, which bake-rs does not read.
+A session file is JSON Lines: a header line (`type` `session`, `version` 3, `id`, `timestamp`, `cwd`), then one entry per line, each with an `id` and a `parentId` naming the entry it follows, so the entries form a tree. Entries are appended and never rewritten, except that a file in Pi's older versions 1 and 2 is upgraded when it is opened. Lines that are damaged or cut short are skipped.
+
+bake-rs syncs each append to disk, and a rewrite (an upgrade, or a branched session) goes through a temporary file renamed over the original, so a crash never leaves a half-written file. A line cut short by a crash stays skipped, and the next entry starts on a new line.
+
+Only one run writes a session at a time. A run that writes a session holds a lock on a file beside it, `<session>.jsonl.lock`, while it runs; the lock is released when the run ends, even when it is killed. Another run that tries to write the same session, with `--continue` or `--session`, waits up to a second and then exits with status 1 and `Session file is in use by another writer: <path>`, before sending anything. Listing and finding sessions take no lock. The `.lock` files are left in place. Bake 0.3 Session logs are a different format, which bake-rs does not read.

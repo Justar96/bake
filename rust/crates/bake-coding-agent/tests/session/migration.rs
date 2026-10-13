@@ -94,6 +94,10 @@ fn opening_a_v1_file_migrates_and_rewrites_it() {
         serde_json::from_str(rewritten.lines().next().unwrap_or("")).expect("header");
     assert_eq!(header["version"], 3);
     assert_eq!(rewritten.lines().count(), 5);
+    let ids: Vec<String> = entries.iter().map(|entry| entry.id().to_owned()).collect();
+    // Pi has no writer exclusion; Bake's first writer releases the file
+    // before it is reopened.
+    drop(session);
     let reopened = SessionManager::open(&file, Some(dir.path()), None).expect("reopen");
     assert_eq!(
         reopened
@@ -101,9 +105,6 @@ fn opening_a_v1_file_migrates_and_rewrites_it() {
             .iter()
             .map(|entry| entry.id().to_owned())
             .collect::<Vec<_>>(),
-        entries
-            .iter()
-            .map(|entry| entry.id().to_owned())
-            .collect::<Vec<_>>()
+        ids
     );
 }
