@@ -409,9 +409,11 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
         retry: { enabled: false }, ...contextWindow === undefined ? {} : { compaction: piCompactionFor(contextWindow) },
       }), { mode: 0o600 })
       if (nativeRoute.keyName !== undefined) env.EVAL_API_KEY = credential(nativeRoute.keyName)
-      Object.assign(env, { BAKE_HOME: home, DSH_HOME: home })
-      // bake-rs loads AGENTS.md and CLAUDE.md from every ancestor of its working directory and from its home.
-      const stray = strayContextFiles(workspace, home, usesAgentInstructions(scenario))
+      // bake-rs reads instructions and skills from ~/.agents, so each sample gets an empty user home of its own.
+      const userHome = join(root, 'user'); mkdirSync(userHome, { mode: 0o700 })
+      Object.assign(env, { BAKE_HOME: home, DSH_HOME: home, HOME: userHome, USERPROFILE: userHome })
+      // bake-rs also loads an AGENTS.md from every ancestor of its working directory, and .agents/skills up to the git root.
+      const stray = strayContextFiles(workspace, userHome, usesAgentInstructions(scenario))
       if (stray.length > 0) throw new Error(`${label}: bake-rs would load context files outside the fixture: ${stray.join(', ')}; move them or set TMPDIR to a directory without them`)
       if (scenario === 'stale_edit') nativeInjection = nativeStaleWriter(workspace, join(workspace, file), injectionPath)
       command = nativeCommand(arm.bin!, nativeRoute.provider, model, route.effort, prompts[scenario]!)
