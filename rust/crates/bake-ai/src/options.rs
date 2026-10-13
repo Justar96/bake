@@ -63,6 +63,11 @@ pub struct StreamOptions {
     pub session_id: Option<String>,
     /// Request metadata, such as Anthropic's `user_id`.
     pub metadata: Option<JsonObject>,
+    /// Longest run of whitespace outside JSON strings a tool call's streamed
+    /// arguments may end with before the response is abandoned;
+    /// [`crate::utils::tool_argument_guard::DEFAULT_MAX_TOOL_ARGUMENT_WHITESPACE`]
+    /// when `None`.
+    pub max_tool_argument_whitespace: Option<usize>,
 }
 
 impl fmt::Debug for StreamOptions {
@@ -77,6 +82,10 @@ impl fmt::Debug for StreamOptions {
             .field("max_tokens", &self.max_tokens)
             .field("cache_retention", &self.cache_retention)
             .field("session_id", &self.session_id)
+            .field(
+                "max_tool_argument_whitespace",
+                &self.max_tool_argument_whitespace,
+            )
             .finish_non_exhaustive()
     }
 }

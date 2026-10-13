@@ -513,6 +513,219 @@ pub fn resolve_cli_model(
     }
 }
 
+/// Pi's `ScopedModel`: a model in the `--models` / `enabledModels` scope and
+/// its optional pattern thinking level.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScopedModel {
+    /// The matched model.
+    pub model: Model,
+    /// Thinking level when the pattern ended with `:<level>`.
+    pub thinking_level: Option<ModelThinkingLevel>,
+}
+
+/// Pi's `ModelScopeDiagnostic` code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelScopeDiagnosticCode {
+    /// `no-match`
+    NoMatch,
+    /// `invalid-thinking-level`
+    InvalidThinkingLevel,
+}
+
+/// Pi's `ModelScopeDiagnostic`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelScopeDiagnostic {
+    /// Warning code.
+    pub code: ModelScopeDiagnosticCode,
+    /// Warning message.
+    pub message: String,
+    /// The input pattern that produced the diagnostic.
+    pub pattern: String,
+}
+
+/// Pi's `ResolveModelScopeResult`.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ResolveModelScopeResult {
+    /// Scoped models in first-matched order, deduplicated by provider and id.
+    pub scoped_models: Vec<ScopedModel>,
+    /// Warnings for unmatched patterns or invalid thinking suffixes.
+    pub diagnostics: Vec<ModelScopeDiagnostic>,
+}
+
+/// Case-insensitive glob match (`*` within a path segment, `**` across `/`,
+/// `?` for one non-`/` char, and `[...]` character classes), matching Pi's
+/// `minimatch(target, pattern, { nocase: true })` for model ids.
+fn glob_match_nocase(text: &str, pattern: &str) -> bool {
+    let t: Vec<char> = text.chars().flat_map(char::to_lowercase).collect();
+    let p: Vec<char> = pattern.chars().flat_map(char::to_lowercase).collect();
+    fn match_class(class: &[char], ch: char) -> bool {
+        if ch == '/' {
+            return false;
+        }
+        let (negated, rest) = match class.first() {
+            Some('!' | '^') => (true, &class[1..]),
+            _ => (false, class),
+        };
+        let mut matched = false;
+        let mut i = 0;
+        while i < rest.len() {
+            if i + 2 < rest.len() && rest[i + 1] == '-' {
+                if ch >= rest[i] && ch <= rest[i + 2] {
+                    matched = true;
+                }
+                i += 3;
+            } else {
+                if ch == rest[i] {
+                    matched = true;
+                }
+                i += 1;
+            }
+        }
+        if negated { !matched } else { matched }
+    }
+    fn step(t: &[char], p: &[char]) -> bool {
+        let Some(&first) = p.first() else {
+            return t.is_empty();
+        };
+        if first == '*' {
+            if p.get(1) == Some(&'*') {
+                let mut rest = &p[2..];
+                while rest.first() == Some(&'*') {
+                    rest = &rest[1..];
+                }
+                if rest.first() == Some(&'/') && step(t, &rest[1..]) {
+                    return true;
+                }
+                for idx in 0..=t.len() {
+                    if step(&t[idx..], rest) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+            for idx in 0..=t.len() {
+                if idx > 0 && t[idx - 1] == '/' {
+                    break;
+                }
+                if step(&t[idx..], &p[1..]) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        let Some(&ch) = t.first() else {
+            return false;
+        };
+        if first == '?' {
+            return ch != '/' && step(&t[1..], &p[1..]);
+        }
+        if first == '['
+            && let Some(close) = p[1..].iter().position(|&c| c == ']')
+        {
+            let class = &p[1..1 + close];
+            if !class.is_empty() {
+                return match_class(class, ch) && step(&t[1..], &p[2 + close..]);
+            }
+        }
+        ch == first && step(&t[1..], &p[1..])
+    }
+    step(&t, &p)
+}
+
+/// Pi's `resolveModelScopeFromModels`: resolves `--models` or `enabledModels`
+/// patterns against `models`.
+pub fn resolve_model_scope_from_models(
+    patterns: &[String],
+    models: &[Model],
+) -> ResolveModelScopeResult {
+    let mut scoped_models: Vec<ScopedModel> = Vec::new();
+    let mut diagnostics: Vec<ModelScopeDiagnostic> = Vec::new();
+
+    for pattern in patterns {
+        if pattern.contains('*') || pattern.contains('?') || pattern.contains('[') {
+            let mut glob_pattern = pattern.as_str();
+            let mut thinking_level = None;
+            if let Some(colon) = pattern.rfind(':')
+                && let Some(level) = parse_thinking_level(&pattern[colon + 1..])
+            {
+                thinking_level = Some(level);
+                glob_pattern = &pattern[..colon];
+            }
+            if let Some(exact) = find_exact_model_reference_match(glob_pattern, models) {
+                if !scoped_models
+                    .iter()
+                    .any(|scoped| models_equal(&scoped.model, exact))
+                {
+                    scoped_models.push(ScopedModel {
+                        model: exact.clone(),
+                        thinking_level,
+                    });
+                }
+                continue;
+            }
+            let matching: Vec<&Model> = models
+                .iter()
+                .filter(|model| {
+                    let full_id = format!("{}/{}", model.provider, model.id);
+                    glob_match_nocase(&full_id, glob_pattern)
+                        || glob_match_nocase(&model.id, glob_pattern)
+                })
+                .collect();
+            if matching.is_empty() {
+                diagnostics.push(ModelScopeDiagnostic {
+                    code: ModelScopeDiagnosticCode::NoMatch,
+                    message: format!("No models match pattern \"{pattern}\""),
+                    pattern: pattern.clone(),
+                });
+                continue;
+            }
+            for model in matching {
+                if !scoped_models
+                    .iter()
+                    .any(|scoped| models_equal(&scoped.model, model))
+                {
+                    scoped_models.push(ScopedModel {
+                        model: model.clone(),
+                        thinking_level,
+                    });
+                }
+            }
+            continue;
+        }
+
+        let parsed = parse_model_pattern(pattern, models, true);
+        if let Some(warning) = parsed.warning {
+            diagnostics.push(ModelScopeDiagnostic {
+                code: ModelScopeDiagnosticCode::InvalidThinkingLevel,
+                message: warning,
+                pattern: pattern.clone(),
+            });
+        }
+        let Some(model) = parsed.model else {
+            diagnostics.push(ModelScopeDiagnostic {
+                code: ModelScopeDiagnosticCode::NoMatch,
+                message: format!("No models match pattern \"{pattern}\""),
+                pattern: pattern.clone(),
+            });
+            continue;
+        };
+        if !scoped_models
+            .iter()
+            .any(|scoped| models_equal(&scoped.model, &model))
+        {
+            scoped_models.push(ScopedModel {
+                model,
+                thinking_level: parsed.thinking_level,
+            });
+        }
+    }
+
+    ResolveModelScopeResult {
+        scoped_models,
+        diagnostics,
+    }
+}
+
 /// Pi's `InitialModelResult`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct InitialModel {
@@ -524,7 +737,8 @@ pub struct InitialModel {
 
 /// Pi's `findInitialModel` without CLI arguments or scoped models: the
 /// saved default when its provider has auth, else a known provider's
-/// default among available models, else the first available model.
+/// default among available models, else the first available model. The CLI
+/// picks a `--models` / `enabledModels` model itself before calling this.
 pub fn find_initial_model(
     default_provider: Option<&str>,
     default_model_id: Option<&str>,

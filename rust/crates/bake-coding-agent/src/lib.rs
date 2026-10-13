@@ -18,12 +18,13 @@
 //! | [`compaction`] | Pi `src/core/compaction/{compaction,branch-summarization,utils}.ts` |
 //! | [`system_prompt`] | Pi `src/core/system-prompt.ts`, `src/core/resource-loader.ts` (context files) |
 //! | [`skills`] | Pi `src/core/skills.ts`, `src/utils/frontmatter.ts`, the `.agents` discovery of `src/core/package-manager.ts` (v1.2.0) |
+//! | [`prompt_templates`] | Pi `src/core/prompt-templates.ts`, `src/core/resource-loader.ts` (`dedupePrompts`, v1.2.0) |
 //! | [`model_registry`] | Pi `src/core/{model-runtime,provider-composer,model-config,model-resolver}.ts`, `src/utils/json.ts` |
 //! | [`auth_storage`] | Pi `src/core/auth-storage.ts` (read-only) |
 //! | [`config_value`] | Pi `src/core/resolve-config-value.ts` |
 //! | [`settings`] | Pi `src/core/settings-manager.ts` (default model, thinking level, tools, images, compaction with per-model overrides, branch-summary reserve, and retry) |
 //! | [`print_mode`], [`json_event`] | Pi `src/modes/print-mode.ts`, `src/modes/json-event.ts` |
-//! | [`cli`] | Pi `src/main.ts`, `src/cli/args.ts`, `src/cli/initial-message.ts` |
+//! | [`cli`] | Pi `src/main.ts`, `src/cli/args.ts`, `src/cli/initial-message.ts`, `src/cli/file-processor.ts`, `src/cli/list-models.ts`, `packages/tui/src/fuzzy.ts` |
 //! | [`owned_work`] | Bake: the gate shutdown closes over owned work |
 //! | [`permissions`] | Bake: the D24 permission presets, approvals, policy engine, and sandboxed `bash`, `write`, and `edit` (see the module's table) |
 //! | [`cliproxyapi`] | Bake: `apps/tui/packages/app/src/cliproxyapi.ts`, the retained CLIProxyAPI route and its read-only D25 import |
@@ -42,6 +43,7 @@ pub mod model_registry;
 pub mod owned_work;
 pub mod permissions;
 pub mod print_mode;
+pub mod prompt_templates;
 pub mod session;
 pub mod settings;
 pub mod skills;

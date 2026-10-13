@@ -41,6 +41,7 @@ use crate::utils::event_stream::{AssistantMessageEventSender, AssistantMessageEv
 use crate::utils::json_parse::{parse_json_with_repair, parse_streaming_json_object};
 use crate::utils::sse::ServerSentEvent;
 use crate::utils::text::{get_system_message_text, render_system_message_update};
+use crate::utils::tool_argument_guard::{ArgumentScan, DEFAULT_MAX_TOOL_ARGUMENT_WHITESPACE};
 use crate::utils::transcript::{get_current_tools, get_initial_system_message, resolve_transcript};
 
 const CLAUDE_CODE_VERSION: &str = "2.1.280";
@@ -752,8 +753,9 @@ pub struct AnthropicStreamProcessor {
     pub output: AssistantMessage,
     is_oauth: bool,
     tools: Vec<Tool>,
-    /// `(content index, provider index, partial JSON)` of open blocks.
-    open: Vec<(usize, i64, String)>,
+    /// `(content index, provider index, partial JSON, argument scan)` of open blocks.
+    open: Vec<(usize, i64, String, ArgumentScan)>,
+    max_tool_argument_whitespace: usize,
     saw_start: bool,
     saw_stop: bool,
 }
@@ -767,9 +769,17 @@ impl AnthropicStreamProcessor {
             is_oauth,
             tools,
             open: Vec::new(),
+            max_tool_argument_whitespace: DEFAULT_MAX_TOOL_ARGUMENT_WHITESPACE,
             saw_start: false,
             saw_stop: false,
         }
+    }
+
+    /// Sets the maximum trailing whitespace outside JSON strings allowed on a
+    /// streamed tool call's arguments.
+    pub fn with_max_tool_argument_whitespace(mut self, max: usize) -> Self {
+        self.max_tool_argument_whitespace = max;
+        self
     }
 
     fn emit(
@@ -783,7 +793,7 @@ impl AnthropicStreamProcessor {
     fn find(&self, provider_index: i64) -> Option<usize> {
         self.open
             .iter()
-            .position(|(_, index, _)| *index == provider_index)
+            .position(|(_, index, _, _)| *index == provider_index)
     }
 
     fn update_total(&mut self) {
@@ -893,7 +903,12 @@ impl AnthropicStreamProcessor {
                 };
                 self.output.content.push(content);
                 let index = self.output.content.len() - 1;
-                self.open.push((index, provider_index, String::new()));
+                self.open.push((
+                    index,
+                    provider_index,
+                    String::new(),
+                    ArgumentScan::default(),
+                ));
                 match kind {
                     0 => self.emit(sender, |partial| AssistantMessageEvent::TextStart {
                         content_index: index,
@@ -913,7 +928,7 @@ impl AnthropicStreamProcessor {
                 let Some(slot) = self.find(provider_index) else {
                     return Ok(());
                 };
-                let index = self.open.get(slot).map_or(0, |(index, _, _)| *index);
+                let index = self.open.get(slot).map_or(0, |(index, _, _, _)| *index);
                 let delta = event.get("delta").cloned().unwrap_or(Value::Null);
                 let text_of = |name: &str| {
                     delta
@@ -946,9 +961,16 @@ impl AnthropicStreamProcessor {
                     }
                     (Some("input_json_delta"), Some(AssistantContentBlock::ToolCall(_))) => {
                         let text = text_of("partial_json");
-                        let Some((_, _, partial_json)) = self.open.get_mut(slot) else {
+                        let tool_name = match self.output.content.get(index) {
+                            Some(AssistantContentBlock::ToolCall(call)) => call.name.clone(),
+                            _ => String::new(),
+                        };
+                        let max = self.max_tool_argument_whitespace;
+                        let model = self.model.id.clone();
+                        let Some((_, _, partial_json, scan)) = self.open.get_mut(slot) else {
                             return Ok(());
                         };
+                        scan.check_delta(&text, max, &model, &tool_name)?;
                         partial_json.push_str(&text);
                         let arguments = parse_streaming_json_object(Some(partial_json));
                         if let Some(AssistantContentBlock::ToolCall(call)) =
@@ -975,7 +997,7 @@ impl AnthropicStreamProcessor {
                 let Some(slot) = self.find(provider_index) else {
                     return Ok(());
                 };
-                let (index, _, partial_json) = self.open.remove(slot);
+                let (index, _, partial_json, _) = self.open.remove(slot);
                 match self.output.content.get_mut(index) {
                     Some(AssistantContentBlock::Text(block)) => {
                         let content = block.text.clone();
@@ -1152,7 +1174,13 @@ async fn run(
     let is_oauth = api_key.as_deref().is_some_and(is_oauth_token);
     let tools = get_current_tools(context.messages());
     let mut processor =
-        AnthropicStreamProcessor::new(&model, AssistantMessage::pending(&model), is_oauth, tools);
+        AnthropicStreamProcessor::new(&model, AssistantMessage::pending(&model), is_oauth, tools)
+            .with_max_tool_argument_whitespace(
+                options
+                    .base
+                    .max_tool_argument_whitespace
+                    .unwrap_or(DEFAULT_MAX_TOOL_ARGUMENT_WHITESPACE),
+            );
     match run_inner(
         &sender,
         &model,

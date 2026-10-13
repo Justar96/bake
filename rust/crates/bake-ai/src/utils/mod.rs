@@ -12,4 +12,5 @@ pub mod retry;
 pub mod sanitize_unicode;
 pub mod sse;
 pub mod text;
+pub mod tool_argument_guard;
 pub mod transcript;

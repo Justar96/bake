@@ -977,3 +977,192 @@ fn anthropic_maps_stop_reasons() {
         Err("Unhandled stop reason: mystery".to_owned())
     );
 }
+
+#[tokio::test]
+async fn protocols_abort_streamed_tool_arguments_with_runaway_whitespace() {
+    use crate::utils::retry::is_retryable_assistant_error;
+
+    let padding = " \n".repeat(10);
+    // OpenAI Responses: hanging server after 50 padding deltas, bound 100.
+    let mut responses_events = vec![
+        (
+            "response.created",
+            json!({ "type": "response.created", "response": { "id": "resp_1", "status": "in_progress", "output": [] } }),
+        ),
+        (
+            "response.output_item.added",
+            json!({ "type": "response.output_item.added", "output_index": 0, "item": { "type": "function_call", "id": "fc_1", "call_id": "call_1", "name": "edit", "arguments": "" } }),
+        ),
+        (
+            "response.function_call_arguments.delta",
+            json!({ "type": "response.function_call_arguments.delta", "output_index": 0, "item_id": "fc_1", "delta": "{\"file_path\":\"src/money.js\",\"edits\":[]" }),
+        ),
+    ];
+    for _ in 0..10 {
+        responses_events.push((
+            "response.function_call_arguments.delta",
+            json!({ "type": "response.function_call_arguments.delta", "output_index": 0, "item_id": "fc_1", "delta": padding }),
+        ));
+    }
+    let mut responses_reply = Reply::sse(sse_events(&responses_events));
+    responses_reply.hang = true;
+
+    // OpenAI Chat Completions: hanging server after padding deltas, bound 100.
+    let mut completions_events = vec![json!({
+        "id": "chatcmpl-1",
+        "choices": [{ "index": 0, "delta": { "tool_calls": [{ "index": 0, "id": "call_1", "function": { "name": "edit", "arguments": "{\"path\":\"a\"" } }] } }]
+    })];
+    for _ in 0..10 {
+        completions_events.push(json!({
+            "id": "chatcmpl-1",
+            "choices": [{ "index": 0, "delta": { "tool_calls": [{ "index": 0, "function": { "arguments": padding } }] } }]
+        }));
+    }
+    let mut completions_reply = Reply::sse(
+        completions_events
+            .iter()
+            .map(|data| format!("data: {data}\n\n"))
+            .collect::<String>(),
+    );
+    completions_reply.hang = true;
+
+    // Anthropic Messages: hanging server after padding deltas, bound 100.
+    let mut anthropic_events = vec![
+        (
+            "message_start",
+            json!({ "type": "message_start", "message": { "id": "msg_1", "usage": { "input_tokens": 5, "output_tokens": 0 } } }),
+        ),
+        (
+            "content_block_start",
+            json!({ "type": "content_block_start", "index": 0, "content_block": { "type": "tool_use", "id": "toolu_1", "name": "edit", "input": {} } }),
+        ),
+        (
+            "content_block_delta",
+            json!({ "type": "content_block_delta", "index": 0, "delta": { "type": "input_json_delta", "partial_json": "{\"path\":\"a\"" } }),
+        ),
+    ];
+    for _ in 0..10 {
+        anthropic_events.push((
+            "content_block_delta",
+            json!({ "type": "content_block_delta", "index": 0, "delta": { "type": "input_json_delta", "partial_json": padding } }),
+        ));
+    }
+    let mut anthropic_reply = Reply::sse(sse_events(&anthropic_events));
+    anthropic_reply.hang = true;
+
+    let server = serve(vec![responses_reply, completions_reply, anthropic_reply]).await;
+    let mut base = options();
+    base.max_tool_argument_whitespace = Some(100);
+
+    let responses_model = model("openai-responses", "gw", &server.base);
+    let (names, result) = tokio::time::timeout(
+        Duration::from_secs(2),
+        run(openai_responses::stream(
+            &responses_model,
+            &context(true),
+            openai_responses::OpenAIResponsesOptions {
+                base: base.clone(),
+                ..Default::default()
+            },
+        )),
+    )
+    .await
+    .expect("responses guard did not hang");
+    assert_eq!(result.stop_reason, StopReason::Error);
+    assert_eq!(
+        result.error_message.as_deref(),
+        Some(
+            r#"model "test-model" streamed 120 whitespace characters after the arguments of tool call "edit" without closing them"#
+        )
+    );
+    assert!(is_retryable_assistant_error(&result));
+    // Initial delta + five 20-char padding deltas forwarded; the sixth crossed 100 and stopped the stream.
+    assert_eq!(
+        names
+            .iter()
+            .filter(|name| name.as_str() == "toolcall_delta")
+            .count(),
+        6
+    );
+    assert!(!names.iter().any(|name| name == "toolcall_end"));
+
+    let completions_model = model("openai-completions", "gw", &server.base);
+    let (names, result) = tokio::time::timeout(
+        Duration::from_secs(2),
+        run(openai_completions::stream(
+            &completions_model,
+            &context(true),
+            openai_completions::OpenAICompletionsOptions {
+                base: base.clone(),
+                ..Default::default()
+            },
+        )),
+    )
+    .await
+    .expect("completions guard did not hang");
+    assert_eq!(result.stop_reason, StopReason::Error);
+    assert_eq!(
+        result.error_message.as_deref(),
+        Some(
+            r#"model "test-model" streamed 120 whitespace characters after the arguments of tool call "edit" without closing them"#
+        )
+    );
+    assert!(is_retryable_assistant_error(&result));
+    assert_eq!(
+        names
+            .iter()
+            .filter(|name| name.as_str() == "toolcall_delta")
+            .count(),
+        6
+    );
+    assert!(!names.iter().any(|name| name == "toolcall_end"));
+
+    let anthropic_model = model("anthropic-messages", "gw", &server.base);
+    let (names, result) = tokio::time::timeout(
+        Duration::from_secs(2),
+        run(anthropic_messages::stream(
+            &anthropic_model,
+            &context(true),
+            anthropic_messages::AnthropicOptions {
+                base,
+                ..Default::default()
+            },
+        )),
+    )
+    .await
+    .expect("anthropic guard did not hang");
+    assert_eq!(result.stop_reason, StopReason::Error);
+    assert_eq!(
+        result.error_message.as_deref(),
+        Some(
+            r#"model "test-model" streamed 120 whitespace characters after the arguments of tool call "edit" without closing them"#
+        )
+    );
+    assert!(is_retryable_assistant_error(&result));
+    assert_eq!(
+        names
+            .iter()
+            .filter(|name| name.as_str() == "toolcall_delta")
+            .count(),
+        6
+    );
+    assert!(!names.iter().any(|name| name == "toolcall_end"));
+}
+
+#[test]
+fn responses_check_the_initial_arguments_of_an_added_tool_call() {
+    let (mut processor, sender) = responses_processor();
+    let processor_max = crate::utils::tool_argument_guard::DEFAULT_MAX_TOOL_ARGUMENT_WHITESPACE;
+    let padded = format!("{{\"a\":1{}", " ".repeat(processor_max + 1));
+    let result = processor.handle_event(
+        &json!({ "type": "response.output_item.added", "output_index": 0, "item": { "type": "function_call", "id": "fc_1", "call_id": "call_1", "name": "edit", "arguments": padded } }),
+        &sender,
+    );
+    assert_eq!(
+        result,
+        Err(format!(
+            r#"model "test-model" streamed {} whitespace characters after the arguments of tool call "edit" without closing them"#,
+            processor_max + 1
+        ))
+    );
+}

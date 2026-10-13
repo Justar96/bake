@@ -34,8 +34,8 @@
 //! `/skill:name` slash command list and its expansion error event, prompt
 //! templates, MCP, bash `!` commands, the cache warmer, scoped
 //! models, virtual models and their failed-response routing, the
-//! `entry_appended` event, queued steering and follow-up bookkeeping,
-//! tool-loadout changes between turns, and image resizing.
+//! `entry_appended` event, queued steering and follow-up bookkeeping, and
+//! tool-loadout changes between turns.
 
 mod recovery;
 
@@ -47,8 +47,9 @@ pub use recovery::CompactionReason;
 use recovery::{Activity, Core, RunState};
 
 use bake_agent::{
-    Agent, AgentError, AgentEvent, AgentInitialState, AgentMessage as LiveMessage, AgentOptions,
-    AgentTool, PromptInput, Subscription, ToolExecutionMode, hook,
+    AfterToolCallResult, Agent, AgentError, AgentEvent, AgentInitialState,
+    AgentMessage as LiveMessage, AgentOptions, AgentTool, PromptInput, Subscription,
+    ToolExecutionMode, hook,
 };
 use bake_ai::transcript::get_current_system_message;
 use bake_ai::{
@@ -60,6 +61,7 @@ use crate::compaction::CompactionResult;
 use crate::model_registry::ModelRegistry;
 use crate::model_registry::resolver::{DEFAULT_THINKING_LEVEL, find_initial_model};
 use crate::owned_work::WorkGate;
+use crate::prompt_templates::{PromptTemplate, expand_prompt_template};
 use crate::session::SessionManager;
 use crate::session::messages::{CustomMessage, convert_to_llm};
 use crate::settings::Settings;
@@ -67,6 +69,9 @@ use crate::skills::expand_skill_command;
 use crate::system_prompt::{
     SystemPromptOptions, build_system_prompt_sections, diff_system_prompt_sections,
     normalize_prompt_guidelines,
+};
+use crate::tools::image::{
+    ImageResizeOptions, ProcessedImage, normalize_tool_result_images, process_image,
 };
 
 /// Bake's form of Pi's `getProviderLoginHelp`. `bake-rs` has no `/login`,
@@ -337,6 +342,7 @@ pub struct AgentSession {
     tools: Vec<Arc<AgentTool>>,
     active_tool_names: Vec<String>,
     prompt_options: SystemPromptOptions,
+    prompt_templates: Vec<PromptTemplate>,
     docs_command: String,
     listeners: Arc<Listeners>,
     persist_error: Arc<Mutex<Option<String>>>,
@@ -437,6 +443,62 @@ fn select_model(
         thinking_level,
         fallback_message,
     }
+}
+
+/// Pi's `_normalizePromptImages`: decodes each prompt image and runs
+/// [`process_image`] with `auto_resize_images` and the active model's
+/// `inputLimits.images.resize`.
+fn normalize_prompt_images(
+    images: &[ImageContent],
+    auto_resize_images: bool,
+    resize_options: ImageResizeOptions,
+) -> (Vec<ImageContent>, Vec<String>) {
+    use base64::Engine as _;
+    let engine = base64::engine::GeneralPurpose::new(
+        &base64::alphabet::STANDARD,
+        base64::engine::GeneralPurposeConfig::new()
+            .with_decode_padding_mode(base64::engine::DecodePaddingMode::Indifferent)
+            .with_decode_allow_trailing_bits(true),
+    );
+    let mut normalized = Vec::with_capacity(images.len());
+    let mut hints = Vec::new();
+    for image in images {
+        let cleaned: String = image
+            .data
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '/' | '-' | '_'))
+            .collect();
+        let bytes = engine
+            .decode(cleaned.replace('-', "+").replace('_', "/"))
+            .unwrap_or_default();
+        match process_image(&bytes, &image.mime_type, auto_resize_images, resize_options) {
+            ProcessedImage::Failed(message) => hints.push(message),
+            ProcessedImage::Ok {
+                data,
+                mime_type,
+                hints: image_hints,
+            } => {
+                normalized.push(ImageContent { data, mime_type });
+                hints.extend(image_hints);
+            }
+        }
+    }
+    (normalized, hints)
+}
+
+/// Applies `settings.json`'s `maxToolArgumentWhitespace` to every request
+/// whose options leave it unset.
+fn with_tool_argument_whitespace(
+    inner: bake_agent::StreamFn,
+    max: Option<usize>,
+) -> bake_agent::StreamFn {
+    let Some(max) = max else {
+        return inner;
+    };
+    Arc::new(move |model, context, mut options| {
+        options.base.max_tool_argument_whitespace.get_or_insert(max);
+        inner(model, context, options)
+    })
 }
 
 /// Pi's `convertToLlmWithBlockImages` replacement text.
@@ -667,7 +729,10 @@ impl AgentSession {
         let block = settings.block_images;
         let session_id = lock(&session).session_id().to_owned();
         let work = WorkGate::default();
-        let stream_fn = registry.stream_fn_owned(Arc::clone(&apis), Some(work.clone()));
+        let stream_fn = with_tool_argument_whitespace(
+            registry.stream_fn_owned(Arc::clone(&apis), Some(work.clone())),
+            settings.max_tool_argument_whitespace,
+        );
         let listeners = Arc::new(Listeners::default());
         let core = Arc::new(Core {
             session: Arc::clone(&session),
@@ -683,6 +748,8 @@ impl AgentSession {
             #[cfg(test)]
             session_io: tokio::sync::watch::Sender::new(0),
         });
+        let auto_resize_images = settings.image_auto_resize();
+        let after_tool_core = Arc::clone(&core);
         let agent = Agent::new(AgentOptions {
             initial_state: AgentInitialState {
                 system_prompt: None,
@@ -699,6 +766,33 @@ impl AgentSession {
                     } else {
                         converted
                     }
+                })
+            })),
+            after_tool_call: Some(hook::after_tool_call(move |context, _signal| {
+                let content = context.result.content.clone();
+                let resize_options = after_tool_core
+                    .model()
+                    .and_then(|model| {
+                        ImageResizeOptions::from_input_limits(model.input_limits.as_ref())
+                    })
+                    .unwrap_or_default();
+                Box::pin(async move {
+                    if !content
+                        .iter()
+                        .any(|block| matches!(block, UserContentBlock::Image(_)))
+                    {
+                        return Ok(None);
+                    }
+                    let normalized = tokio::task::spawn_blocking(move || {
+                        normalize_tool_result_images(&content, auto_resize_images, resize_options)
+                    })
+                    .await
+                    .ok()
+                    .flatten();
+                    Ok(normalized.map(|content| AfterToolCallResult {
+                        content: Some(content),
+                        ..AfterToolCallResult::default()
+                    }))
                 })
             })),
             stream_fn: Some(stream_fn),
@@ -745,6 +839,7 @@ impl AgentSession {
             tools,
             active_tool_names,
             prompt_options: system_prompt,
+            prompt_templates: Vec::new(),
             docs_command,
             listeners,
             persist_error,
@@ -869,6 +964,16 @@ impl AgentSession {
     /// The transcript.
     pub fn messages(&self) -> Vec<LiveMessage> {
         self.agent.messages()
+    }
+
+    /// The loaded prompt templates (`PromptTemplate`) used by [`Self::prompt`].
+    pub fn prompt_templates(&self) -> &[PromptTemplate] {
+        &self.prompt_templates
+    }
+
+    /// Sets the prompt templates expanded by [`Self::prompt`].
+    pub fn set_prompt_templates(&mut self, prompt_templates: Vec<PromptTemplate>) {
+        self.prompt_templates = prompt_templates;
     }
 
     /// Pi's `setThinkingLevel`: clamps to the model, and records and
@@ -1003,8 +1108,8 @@ impl AgentSession {
                 .check_compaction(&last, None, false, Vec::new())
                 .await?;
         }
-        // Pi's `_expandSkillCommand`; the skill file is read off the runtime.
-        let text = if text.starts_with("/skill:") {
+        // Pi's `_expandSkillCommand` and `expandPromptTemplate`.
+        let mut text = if text.starts_with("/skill:") {
             let skills = self.prompt_options.skills.clone();
             let command = text.to_owned();
             tokio::task::spawn_blocking(move || expand_skill_command(&command, &skills))
@@ -1012,6 +1117,23 @@ impl AgentSession {
                 .unwrap_or_else(|_| text.to_owned())
         } else {
             text.to_owned()
+        };
+        text = expand_prompt_template(&text, &self.prompt_templates);
+        let images = if images.is_empty() {
+            images
+        } else {
+            let auto_resize = self.settings.image_auto_resize();
+            let resize_options = ImageResizeOptions::from_input_limits(model.input_limits.as_ref())
+                .unwrap_or_default();
+            let (normalized, hints) = tokio::task::spawn_blocking(move || {
+                normalize_prompt_images(&images, auto_resize, resize_options)
+            })
+            .await
+            .map_err(|error| format!("Image processing task failed: {error}"))?;
+            if !hints.is_empty() {
+                text = format!("{text}\n\n{}", hints.join("\n"));
+            }
+            normalized
         };
         let mut content = vec![UserContentBlock::Text(TextContent::new(text))];
         content.extend(images.into_iter().map(UserContentBlock::Image));

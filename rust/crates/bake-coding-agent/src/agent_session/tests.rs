@@ -786,3 +786,35 @@ fn tools_that_change_files_or_run_commands_run_in_order() {
         Some(ToolExecutionMode::Parallel)
     );
 }
+
+// Bake `packages/llm/llm-pi-ai/src/config.ts` `maxToolArgumentWhitespace`:
+// the setting fills each request's bound unless the request sets one.
+#[test]
+fn the_tool_argument_whitespace_setting_reaches_each_request() {
+    let h = harness();
+    let model = h.registry.model("faux", "faux-1").expect("faux model");
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let inner: bake_agent::StreamFn = {
+        let seen = Arc::clone(&seen);
+        Arc::new(move |_, _, options| {
+            seen.lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(options.base.max_tool_argument_whitespace);
+            Ok(bake_ai::assistant_message_channel().1)
+        })
+    };
+    let context = bake_ai::TranscriptContext::default();
+    let unset = with_tool_argument_whitespace(Arc::clone(&inner), None);
+    let set = with_tool_argument_whitespace(inner, Some(64));
+    let _ = unset(&model, &context, bake_ai::SimpleStreamOptions::default());
+    let _ = set(&model, &context, bake_ai::SimpleStreamOptions::default());
+    let mut explicit = bake_ai::SimpleStreamOptions::default();
+    explicit.base.max_tool_argument_whitespace = Some(7);
+    let _ = set(&model, &context, explicit);
+    assert_eq!(
+        *seen
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+        [None, Some(64), Some(7)]
+    );
+}

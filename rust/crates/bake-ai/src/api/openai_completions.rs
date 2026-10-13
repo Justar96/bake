@@ -41,6 +41,7 @@ use crate::utils::event_stream::{AssistantMessageEventSender, AssistantMessageEv
 use crate::utils::hash::short_hash;
 use crate::utils::json_parse::{parse_json_strict, parse_streaming_json_object};
 use crate::utils::text::{get_system_message_text, render_system_message_update};
+use crate::utils::tool_argument_guard::{ArgumentScan, DEFAULT_MAX_TOOL_ARGUMENT_WHITESPACE};
 use crate::utils::transcript::{resolve_transcript, resolve_transcript_tools};
 
 /// Options of the completions protocol.
@@ -1130,6 +1131,7 @@ fn map_stop_reason(reason: &str) -> (StopReason, Option<String>) {
 struct ToolScratch {
     partial_args: String,
     stream_index: Option<i64>,
+    scan: ArgumentScan,
 }
 
 /// Assembles streamed chunks into an assistant message and its events.
@@ -1143,6 +1145,7 @@ pub struct CompletionsStreamProcessor {
     tools_by_index: HashMap<i64, usize>,
     tools_by_id: HashMap<String, usize>,
     scratch: HashMap<usize, ToolScratch>,
+    max_tool_argument_whitespace: usize,
     reasoning_details: Option<Vec<Value>>,
 }
 
@@ -1158,8 +1161,16 @@ impl CompletionsStreamProcessor {
             tools_by_index: HashMap::new(),
             tools_by_id: HashMap::new(),
             scratch: HashMap::new(),
+            max_tool_argument_whitespace: DEFAULT_MAX_TOOL_ARGUMENT_WHITESPACE,
             reasoning_details: None,
         }
+    }
+
+    /// Sets the maximum trailing whitespace outside JSON strings allowed on a
+    /// streamed tool call's arguments.
+    pub fn with_max_tool_argument_whitespace(mut self, max: usize) -> Self {
+        self.max_tool_argument_whitespace = max;
+        self
     }
 
     fn emit(
@@ -1235,6 +1246,7 @@ impl CompletionsStreamProcessor {
                     ToolScratch {
                         partial_args: String::new(),
                         stream_index,
+                        scan: ArgumentScan::default(),
                     },
                 );
                 if let Some(stream_index) = stream_index {
@@ -1270,10 +1282,14 @@ impl CompletionsStreamProcessor {
         index
     }
 
-    /// Applies one parsed chunk.
-    pub fn handle_chunk(&mut self, chunk: &Value, sender: &AssistantMessageEventSender) {
+    /// Applies one parsed chunk; `Err` ends the response.
+    pub fn handle_chunk(
+        &mut self,
+        chunk: &Value,
+        sender: &AssistantMessageEventSender,
+    ) -> Result<(), String> {
         if !chunk.is_object() {
-            return;
+            return Ok(());
         }
         if self.output.response_id.as_deref().is_none_or(str::is_empty)
             && let Some(id) = non_empty_str(chunk.get("id"))
@@ -1299,7 +1315,7 @@ impl CompletionsStreamProcessor {
             .and_then(Value::as_array)
             .and_then(|choices| choices.first())
         else {
-            return;
+            return Ok(());
         };
         if chunk_usage.is_none()
             && let Some(usage) = choice.get("usage").filter(|usage| truthy(Some(usage)))
@@ -1316,7 +1332,7 @@ impl CompletionsStreamProcessor {
             self.has_finish_reason = true;
         }
         let Some(delta) = choice.get("delta").filter(|delta| truthy(Some(delta))) else {
-            return;
+            return Ok(());
         };
         if let Some(text) = non_empty_str(delta.get("content")) {
             let index = self.ensure_text(sender);
@@ -1358,7 +1374,17 @@ impl CompletionsStreamProcessor {
                         .and_then(|function| function.get("arguments")),
                 ) {
                     text = arguments.to_owned();
+                    let tool_name = match self.output.content.get(index) {
+                        Some(AssistantContentBlock::ToolCall(block)) => block.name.clone(),
+                        _ => String::new(),
+                    };
                     if let Some(scratch) = self.scratch.get_mut(&index) {
+                        scratch.scan.check_delta(
+                            arguments,
+                            self.max_tool_argument_whitespace,
+                            &self.model.id,
+                            &tool_name,
+                        )?;
                         scratch.partial_args.push_str(arguments);
                         let parsed = parse_streaming_json_object(Some(&scratch.partial_args));
                         if let Some(AssistantContentBlock::ToolCall(block)) =
@@ -1384,6 +1410,7 @@ impl CompletionsStreamProcessor {
                 );
             }
         }
+        Ok(())
     }
 
     fn apply_reasoning_details(&mut self, index: usize) {
@@ -1571,7 +1598,13 @@ async fn run(
 ) {
     let compat = get_compat(&model);
     let context = resolve_transcript(&context, compat.supports_mid_convo_system_messages);
-    let mut processor = CompletionsStreamProcessor::new(&model, AssistantMessage::pending(&model));
+    let mut processor = CompletionsStreamProcessor::new(&model, AssistantMessage::pending(&model))
+        .with_max_tool_argument_whitespace(
+            options
+                .base
+                .max_tool_argument_whitespace
+                .unwrap_or(DEFAULT_MAX_TOOL_ARGUMENT_WHITESPACE),
+        );
     let result = run_inner(&sender, &model, &context, &options, &compat, &mut processor).await;
     match result {
         Ok(()) => {
@@ -1643,7 +1676,9 @@ async fn run_inner(
             if let Some(observer) = &options.base.on_provider_stream_event {
                 observer(&chunk, model);
             }
-            processor.handle_chunk(&chunk, sender);
+            processor
+                .handle_chunk(&chunk, sender)
+                .map_err(ProviderError::other)?;
         }
         if sender.is_closed() {
             return Err(ProviderError::aborted());

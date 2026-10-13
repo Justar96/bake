@@ -24,6 +24,7 @@
 //! | [`utils::text`] | `utils/text.ts` |
 //! | [`utils::estimate`] | `utils/estimate.ts` |
 //! | [`utils::sse`] | the SSE decoder in `api/anthropic-messages.ts` |
+//! | [`utils::tool_argument_guard`] | Bake `packages/llm/llm-pi-ai/src/stream.ts` (runaway tool-argument whitespace guard) |
 //! | [`transcript`] | `utils/transcript.ts` |
 //! | [`api::transform_messages`] | `api/transform-messages.ts` |
 //! | [`api::simple_options`] | `api/simple-options.ts` |
@@ -63,6 +64,7 @@ pub use utils::event_stream::{
     AssistantMessageEventSender, AssistantMessageEventStream, EventSender, EventStream,
     assistant_message_channel, event_channel,
 };
+pub use utils::tool_argument_guard::DEFAULT_MAX_TOOL_ARGUMENT_WHITESPACE;
 
 /// Unix time in milliseconds, Pi's `Date.now()`.
 pub fn now_ms() -> i64 {

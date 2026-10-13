@@ -10,7 +10,11 @@ Sessions live in `sessions/` in the Bake home, in one directory per working dire
 
 - With no session flag, a run starts a new session.
 - `-c`, `--continue` continues the most recently changed session for the working directory, or starts one when there is none.
-- `--session <path|id>` opens a session. An argument that contains `/` or `\` or ends in `.jsonl` is a path, relative to the working directory; a path to a file that does not exist starts a new session saved there. Anything else is a session id or the start of one, looked up among the working directory's sessions. An id that belongs to another project's session is an error, and one that matches nothing prints `No session found matching '<id>'`.
+- `--session <path|id>` opens a session. An argument that contains `/` or `\` or ends in `.jsonl` is a path, relative to the working directory; a path to a file that does not exist starts a new session saved there. Anything else is a session id or the start of one, looked up among the working directory's sessions. An id that belongs to another project's session is an error naming `--fork`, and one that matches nothing prints `No session found matching '<id>'`.
+- `--session-id <id>` opens the project session with that exact id, or warns and starts a new session with that id. It cannot be combined with `--session` or `--continue`.
+- `--fork <path|id>` copies a session file, including one from another project, into a new session in this working directory whose header records the source as its parent. Combine it with `--session-id` to choose the new session's id; it cannot be combined with `--session`, `--continue`, or `--no-session`.
+- `--session-dir <dir>` stores and looks up sessions in `<dir>` instead of the Bake home's `sessions/` directory.
+- `-n`, `--name <name>` records a display name entry in the session.
 - `--no-session` keeps the session in memory and saves nothing.
 
 A resumed session keeps its model, thinking level, and permission unless a flag changes them.

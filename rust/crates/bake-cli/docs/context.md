@@ -13,6 +13,6 @@ The directories are searched in this order:
 
 A file is included once even when two searches find it. In a git worktree nested inside its main repository, the main repository's file is left out when the worktree has its own. A file larger than 16 MiB, or one that cannot be read, is skipped with a warning.
 
-Only the working directory and its parents are searched: a file in a subdirectory applies only when bake-rs runs there. A resumed session searches from the working directory it was started in.
+Only the working directory and its parents are searched: a file in a subdirectory applies only when bake-rs runs there. A resumed session searches from the working directory it was started in. Pass `-nc`, `--no-context-files` to skip loading `AGENTS.md` files for a run.
 
 Skills, which the model reads only when a task calls for them, are in `bake-rs docs skills`.

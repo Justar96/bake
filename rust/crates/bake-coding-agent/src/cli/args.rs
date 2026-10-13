@@ -71,12 +71,28 @@ pub struct Args {
     pub provider: Option<String>,
     /// `--model`.
     pub model: Option<String>,
+    /// `--api-key`.
+    pub api_key: Option<String>,
+    /// `--system-prompt`.
+    pub system_prompt: Option<String>,
+    /// `--append-system-prompt`, in order.
+    pub append_system_prompt: Vec<String>,
+    /// `--name`, `-n`.
+    pub name: Option<String>,
     /// `--thinking`.
     pub thinking: Option<ModelThinkingLevel>,
     /// `--no-session`.
     pub no_session: bool,
     /// `--session`.
     pub session: Option<String>,
+    /// `--session-id`.
+    pub session_id: Option<String>,
+    /// `--fork`.
+    pub fork: Option<String>,
+    /// `--session-dir`.
+    pub session_dir: Option<String>,
+    /// `--models`, comma-separated patterns.
+    pub models: Option<Vec<String>>,
     /// `--tools`, `-t`: a checked list of names, patterns, or `+name` and
     /// `-name` changes.
     pub tools: Option<Vec<String>>,
@@ -90,6 +106,15 @@ pub struct Args {
     pub skills: Vec<String>,
     /// `--no-skills`, `-ns`.
     pub no_skills: bool,
+    /// `--prompt-template`, each path in order.
+    pub prompt_templates: Vec<String>,
+    /// `--no-prompt-templates`, `-np`.
+    pub no_prompt_templates: bool,
+    /// `--no-context-files`, `-nc`.
+    pub no_context_files: bool,
+    /// `--list-models [search]`: `Some(None)` when given without a search
+    /// pattern, `Some(Some(pattern))` with one.
+    pub list_models: Option<Option<String>>,
     /// Bake's `--permission`: the preset to select.
     pub permission: Option<String>,
     /// Bake's `--sandbox`: the sandbox mode to set.
@@ -117,6 +142,12 @@ fn tool_list(value: &str) -> Vec<String> {
 }
 
 const VALID_THINKING_LEVELS: &str = "off, minimal, low, medium, high, xhigh, max";
+
+/// Pi's `normalizeSessionName`: trimmed, or `None` when blank.
+pub fn normalize_session_name(value: &str) -> Option<String> {
+    let trimmed = crate::tools::js::trim(value);
+    (!trimmed.is_empty()).then(|| trimmed.to_owned())
+}
 
 /// Pi's `parseArgs`.
 pub fn parse_args(args: &[String]) -> Args {
@@ -164,9 +195,46 @@ pub fn parse_args(args: &[String]) -> Args {
                 result.model = next.map(str::to_owned);
                 i += 1;
             }
+            "--api-key" if next.is_some() => {
+                result.api_key = next.map(str::to_owned);
+                i += 1;
+            }
+            "--system-prompt" if next.is_some() => {
+                result.system_prompt = next.map(str::to_owned);
+                i += 1;
+            }
+            "--append-system-prompt" if next.is_some() => {
+                result.append_system_prompt.extend(next.map(str::to_owned));
+                i += 1;
+            }
+            "--name" | "-n" => match next {
+                Some(name) => {
+                    result.name = Some(name.to_owned());
+                    i += 1;
+                }
+                None => result
+                    .diagnostics
+                    .push(Diagnostic::error("--name requires a value")),
+            },
             "--no-session" => result.no_session = true,
             "--session" if next.is_some() => {
                 result.session = next.map(str::to_owned);
+                i += 1;
+            }
+            "--session-id" if next.is_some() => {
+                result.session_id = next.map(str::to_owned);
+                i += 1;
+            }
+            "--fork" if next.is_some() => {
+                result.fork = next.map(str::to_owned);
+                i += 1;
+            }
+            "--session-dir" if next.is_some() => {
+                result.session_dir = next.map(str::to_owned);
+                i += 1;
+            }
+            "--models" if next.is_some() => {
+                result.models = Some(tool_list(next.unwrap_or_default()));
                 i += 1;
             }
             "--no-tools" | "-nt" => result.no_tools = true,
@@ -176,6 +244,23 @@ pub fn parse_args(args: &[String]) -> Args {
                 i += 1;
             }
             "--no-skills" | "-ns" => result.no_skills = true,
+            "--prompt-template" if next.is_some() => {
+                result.prompt_templates.extend(next.map(str::to_owned));
+                i += 1;
+            }
+            "--no-prompt-templates" | "-np" => result.no_prompt_templates = true,
+            "--no-context-files" | "-nc" => result.no_context_files = true,
+            "--list-models" => {
+                if let Some(search) = next
+                    && !search.starts_with('-')
+                    && !search.starts_with('@')
+                {
+                    result.list_models = Some(Some(search.to_owned()));
+                    i += 1;
+                } else {
+                    result.list_models = Some(None);
+                }
+            }
             "--tools" | "-t" if next.is_some() => {
                 let tools = tool_list(next.unwrap_or_default());
                 i += 1;
@@ -447,7 +532,7 @@ mod tests {
     fn unknown_options() {
         let args = parse(&[
             "-x",
-            "--api-key",
+            "--custom-flag",
             "k",
             "--flag=v",
             "--bare",
@@ -459,7 +544,7 @@ mod tests {
         assert_eq!(
             args.unknown_flags,
             [
-                ("api-key".into(), Some("k".into())),
+                ("custom-flag".into(), Some("k".into())),
                 ("flag".into(), Some("v".into())),
                 ("bare".into(), None),
             ]
@@ -468,7 +553,7 @@ mod tests {
         assert_eq!(args.file_args, ["f"]);
         assert_eq!(
             unknown_flags_message(&args.unknown_flags).as_deref(),
-            Some("Unknown options: --api-key, --flag, --bare")
+            Some("Unknown options: --custom-flag, --flag, --bare")
         );
         assert_eq!(
             unknown_flags_message(&[("x".into(), None)]).as_deref(),
@@ -485,5 +570,28 @@ mod tests {
             unknown_flags_message(&args.unknown_flags).as_deref(),
             Some("Unknown options: --flag, --other")
         );
+    }
+
+    #[test]
+    fn prompt_template_and_list_models_flags() {
+        let args = parse(&[
+            "--prompt-template",
+            "/a/one.md",
+            "--prompt-template",
+            "/b/dir",
+            "-np",
+            "--list-models",
+            "sonnet",
+        ]);
+        assert_eq!(args.prompt_templates, ["/a/one.md", "/b/dir"]);
+        assert!(args.no_prompt_templates);
+        assert_eq!(args.list_models, Some(Some("sonnet".into())));
+        assert!(args.diagnostics.is_empty());
+
+        let bare = parse(&["--no-prompt-templates", "--list-models", "-p", "hi"]);
+        assert!(bare.no_prompt_templates);
+        assert_eq!(bare.list_models, Some(None));
+        assert!(bare.print);
+        assert_eq!(bare.messages, ["hi"]);
     }
 }
