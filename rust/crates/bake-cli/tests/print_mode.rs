@@ -72,6 +72,7 @@ impl Reply {
     }
 
     /// One response holding several tool calls, in order.
+    #[cfg(unix)]
     fn tool_calls(calls: &[(&str, Value)]) -> Self {
         let mut events = vec![
             json!({"type": "response.created", "response": {"id": "resp_many", "object": "response", "created_at": 1_760_000_000, "status": "in_progress", "model": "loop-model", "output": []}}),
