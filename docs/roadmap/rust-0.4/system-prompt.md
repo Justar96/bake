@@ -112,11 +112,11 @@ The prompt keeps Pi's mechanism: an untagged `preamble`, then named sections wra
 | 3 | `docs` | One line naming `bake-rs docs` by the executable's path | When the executable moves |
 | 4 | `run` | The run mode | Never within a session |
 | 5 | `addendum` | `--append-system-prompt` text, when scope 10 adds the flag | Never within a session |
-| 6 | `project_context` | `AGENTS.md`, `AGENTS.override.md`, or `CLAUDE.md` files, wrapped with their paths | When the files change between runs |
+| 6 | `project_context` | The loaded context files, wrapped with their paths | When the files change between runs |
 | 7 | `permissions` | The run's sandbox and approval sentences ([D24](scope-00/support.md#decision-register)) | When the permission changes |
 | 8 | `environment` | Working directory, platform, shell, git repository or not, session start date | When one of them changes between runs |
 
-Pi's `tools` section is removed: it repeats the tool schemas the request already carries, plus a sentence about custom tools that `bake-rs` cannot load. Pi's `cwd` section becomes the first line of `environment`. A custom prompt (`--system-prompt`, scope 10) replaces `preamble`, `rules`, and `docs`, as in Pi, and keeps the other sections, since they state facts the harness enforces. The `skills` section stays absent until scope 10.
+Pi's `tools` section is removed: it repeats the tool schemas the request already carries, plus a sentence about custom tools that `bake-rs` cannot load. Pi's `cwd` section becomes the first line of `environment`. A custom prompt (`--system-prompt`, scope 10) replaces `preamble`, `rules`, and `docs`, as in Pi, and keeps the other sections, since they state facts the harness enforces. Scope 10 adds Pi's `skills` section, the list of loaded skills, between `project_context` and `permissions`: like the context files, it changes only between runs.
 
 ### The text
 
