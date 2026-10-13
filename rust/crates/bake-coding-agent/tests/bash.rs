@@ -22,7 +22,8 @@ use bake_coding_agent::tools::bash::shell::{
 };
 use bake_coding_agent::tools::bash::{
     BashExecError, BashExecOptions, BashModel, BashOperations, BashToolContext, BashToolOptions,
-    LocalShellOperations, bash_tool_prompt, create_bash_tool, create_local_bash_operations,
+    LocalShellOperations, SESSION_VARIABLES, bash_tool_prompt, create_bash_tool,
+    create_local_bash_operations,
 };
 use serde_json::{Value, json};
 
@@ -310,24 +311,22 @@ fn definition_and_prompt_match_pi() {
     let declaration = tool.declaration();
     assert_eq!(declaration.parameters, definition["parameters"]);
 
-    let prompt = bash_tool_prompt(&BashToolOptions::default());
+    // Pi's one guideline names the `PI_*` variables, so Bake's tool
+    // contributes none (D33); the snippet is Pi's.
+    let prompt = bash_tool_prompt();
     assert_eq!(prompt.name, "bash");
     assert_eq!(
         prompt.snippet.as_deref(),
         definition["promptSnippet"].as_str()
     );
-    assert_eq!(json!(prompt.guidelines), definition["promptGuidelines"]);
     assert_eq!(json!(prompt.snippet), definition["contribution"]["snippet"]);
     assert_eq!(
-        json!(prompt.guidelines),
-        definition["contribution"]["guidelines"]
+        definition["promptGuidelines"],
+        json!([
+            "You can inspect PI_* environment variables for current model and session details."
+        ])
     );
-    let hidden = bash_tool_prompt(&BashToolOptions {
-        expose_session_environment: false,
-        ..BashToolOptions::default()
-    });
-    assert!(definition["promptGuidelinesWithoutSessionEnvironment"].is_null());
-    assert!(hidden.guidelines.is_empty());
+    assert!(prompt.guidelines.is_empty());
 }
 
 /// Failures Pi's local operations raise before spawning: invalid timeouts,
@@ -482,7 +481,8 @@ async fn late_output_after_exec_settles_is_ignored() {
 }
 
 /// Pi's `resolveSpawnContext`: the prefix, the context's directory and
-/// session variables, inherited `PI_*` values removed, and the hook's view.
+/// session variables under Bake's `BAKE_*` names in place of Pi's `PI_*`,
+/// and the hook's view.
 #[tokio::test]
 async fn spawn_context_carries_prefix_context_and_session_environment() {
     type Env = Vec<(OsString, OsString)>;
@@ -549,14 +549,15 @@ async fn spawn_context_carries_prefix_context_and_session_environment() {
     let (command, cwd, env) = &calls[0];
     assert_eq!(command, "export A=1\necho hi");
     assert_eq!(cwd, &dir.0.join("session"));
-    assert_eq!(lookup(env, "PI_SESSION_ID").as_deref(), Some("session-1"));
+    assert_eq!(lookup(env, "BAKE_SESSION_ID").as_deref(), Some("session-1"));
     assert_eq!(
-        lookup(env, "PI_SESSION_FILE").as_deref(),
+        lookup(env, "BAKE_SESSION_FILE").as_deref(),
         Some("/sessions/one.jsonl")
     );
-    assert_eq!(lookup(env, "PI_PROVIDER").as_deref(), Some("cliproxyapi"));
-    assert_eq!(lookup(env, "PI_MODEL").as_deref(), Some("gpt"));
-    assert_eq!(lookup(env, "PI_REASONING_LEVEL").as_deref(), Some("high"));
+    assert_eq!(lookup(env, "BAKE_PROVIDER").as_deref(), Some("cliproxyapi"));
+    assert_eq!(lookup(env, "BAKE_MODEL").as_deref(), Some("gpt"));
+    assert_eq!(lookup(env, "BAKE_REASONING_LEVEL").as_deref(), Some("high"));
+    assert!(lookup(env, "PI_SESSION_ID").is_none());
     assert_eq!(lookup(env, "FROM_HOOK").as_deref(), Some("yes"));
     let path = env
         .iter()
@@ -565,13 +566,7 @@ async fn spawn_context_carries_prefix_context_and_session_environment() {
         .unwrap();
     assert_eq!(std::env::split_paths(&path).next(), Some(dir.0.join("bin")));
     let (_, _, hidden) = &calls[1];
-    for name in [
-        "PI_SESSION_ID",
-        "PI_SESSION_FILE",
-        "PI_PROVIDER",
-        "PI_MODEL",
-        "PI_REASONING_LEVEL",
-    ] {
+    for name in SESSION_VARIABLES {
         assert!(lookup(hidden, name).is_none(), "{name}");
     }
 }

@@ -29,6 +29,10 @@ A session starts with `read`, `bash`, `edit`, and `write` (or the `defaultTools`
 
 For example, `bake-rs -t +grep,+find -p "..."` adds `grep` and `find` to the defaults.
 
+When the model sends several tool calls in one response, they run at once if they only read; a response with a `bash`, `edit`, or `write` call runs its calls one at a time, in the order the model wrote them, so a command that checks an edit sees the edited file.
+
+Commands the `bash` tool runs receive the session's details: `BAKE_SESSION_ID`, `BAKE_SESSION_FILE` (when the session is saved), `BAKE_PROVIDER`, `BAKE_MODEL`, and `BAKE_REASONING_LEVEL`. Output too long for the result is saved to a `bake-bash-…` or `bake-output-…` file in the temporary directory, which the result names.
+
 ## Exit status
 
 | Status | Meaning |

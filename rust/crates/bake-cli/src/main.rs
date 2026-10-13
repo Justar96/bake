@@ -15,7 +15,6 @@ use std::sync::{Arc, Mutex};
 
 use bake_coding_agent::cli::{self, Action, CliEnvironment, Interrupt};
 use bake_coding_agent::print_mode::SharedWriter;
-use bake_coding_agent::system_prompt::DocsPaths;
 use bake_sandbox::SandboxProvider;
 use bake_tui::{PreviewExit, ScreenMode};
 
@@ -139,17 +138,8 @@ fn exit_code(code: i32) -> ExitCode {
     ExitCode::from(u8::try_from(code).unwrap_or(1))
 }
 
-/// Pi's documentation paths, beside the executable.
-fn docs_paths() -> DocsPaths {
-    let dir = std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(PathBuf::from))
-        .unwrap_or_default();
-    DocsPaths::under(&dir)
-}
-
-/// How to run `bake-rs docs` from this executable, for the messages that
-/// point at the documentation.
+/// How to run `bake-rs docs` from this executable, for the prompt's
+/// `docs` section and the messages that point at the documentation.
 fn docs_command() -> String {
     match std::env::current_exe() {
         Ok(exe) => docs::docs_command(&exe),
@@ -234,7 +224,6 @@ fn agent(args: &[String]) -> ExitCode {
         let environment = CliEnvironment {
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             home,
-            docs: docs_paths(),
             docs_command: docs_command(),
             stdin_is_terminal,
             stdin: Box::new(io::stdin()),

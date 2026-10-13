@@ -291,7 +291,7 @@ pub fn create_sandboxed_bash_tool_definition(
                 .into(),
         );
     }
-    let prompt = bash_tool_prompt(&options);
+    let prompt = bash_tool_prompt();
     let mut tool = create_bash_tool(cwd, options.clone());
     let cwd = cwd.to_path_buf();
     let permissions = permissions.clone();

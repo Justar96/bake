@@ -46,7 +46,7 @@ use recovery::{Activity, Core, RunState};
 
 use bake_agent::{
     Agent, AgentError, AgentEvent, AgentInitialState, AgentMessage as LiveMessage, AgentOptions,
-    AgentTool, PromptInput, Subscription, hook,
+    AgentTool, PromptInput, Subscription, ToolExecutionMode, hook,
 };
 use bake_ai::transcript::get_current_system_message;
 use bake_ai::{
@@ -63,7 +63,7 @@ use crate::session::messages::{CustomMessage, convert_to_llm};
 use crate::settings::Settings;
 use crate::system_prompt::{
     SystemPromptOptions, build_system_prompt_sections, diff_system_prompt_sections,
-    normalize_prompt_guidelines, normalize_prompt_snippet,
+    normalize_prompt_guidelines,
 };
 
 /// Bake's form of Pi's `getProviderLoginHelp`. `bake-rs` has no `/login`,
@@ -122,20 +122,40 @@ pub struct AgentSessionOptions {
     pub thinking_level: Option<ModelThinkingLevel>,
     /// The executable tools.
     pub tools: Vec<Arc<AgentTool>>,
-    /// The active tools by name, Pi's `initialActiveToolNames`: the prompt
-    /// lists these, and requests declare the ones present in `tools`.
+    /// The active tools by name, Pi's `initialActiveToolNames`: the
+    /// prompt's rules follow these, and requests declare the ones present
+    /// in `tools`.
     pub active_tool_names: Vec<String>,
-    /// What the prompt says about each tool, Pi's tool-definition
-    /// `promptSnippet` and `promptGuidelines`. A tool without a snippet is
-    /// not listed under the prompt's available tools, as in Pi.
+    /// What each tool contributes to the prompt, from Pi's tool definitions;
+    /// only the guidelines reach the prompt.
     pub tool_prompts: Vec<ToolPrompt>,
     /// The system-prompt inputs; `selected_tools` is replaced by the active
-    /// tools, and [`Self::tool_prompts`] are added to `tool_snippets` and
-    /// `tool_guidelines`, winning over entries for the same tool.
+    /// tools, `docs_command` by [`Self::docs_command`], and the guidelines of
+    /// [`Self::tool_prompts`] are added to `tool_guidelines`, winning over
+    /// entries for the same tool.
     pub system_prompt: SystemPromptOptions,
     /// How to run `bake-rs docs`, such as `/usr/local/bin/bake-rs docs`,
-    /// which the no-model and no-key messages name.
+    /// which the prompt's `docs` section and the no-model and no-key
+    /// messages name.
     pub docs_command: String,
+}
+
+/// Tools whose calls change files or run commands. The prompt's round-trip
+/// rule sends an edit with the command that checks it in one response, so a
+/// batch holding one of these runs one call at a time, in the order the
+/// model wrote them; a batch of reads still runs in parallel. Pi runs every
+/// batch in parallel.
+const ORDERED_TOOLS: [&str; 3] = ["bash", "edit", "write"];
+
+/// `tool`, made sequential when it is one of the [`ORDERED_TOOLS`] and sets
+/// no mode of its own.
+fn run_in_order(tool: Arc<AgentTool>) -> Arc<AgentTool> {
+    if tool.execution_mode.is_some() || !ORDERED_TOOLS.contains(&tool.name.as_str()) {
+        return tool;
+    }
+    let mut ordered = (*tool).clone();
+    ordered.execution_mode = Some(ToolExecutionMode::Sequential);
+    Arc::new(ordered)
 }
 
 /// The prompt text of one tool, from Pi's `ToolDefinition`.
@@ -143,8 +163,8 @@ pub struct AgentSessionOptions {
 pub struct ToolPrompt {
     /// The tool name.
     pub name: String,
-    /// Pi's `promptSnippet`: the tool's line under the available tools,
-    /// collapsed to one line.
+    /// Pi's `promptSnippet`, the tool's line in Pi's list of tools, which
+    /// Bake's prompt does not have.
     pub snippet: Option<String>,
     /// Pi's `promptGuidelines`: bullets added to the guidelines, trimmed
     /// and deduplicated.
@@ -596,13 +616,10 @@ impl AgentSession {
             mut system_prompt,
             docs_command,
         } = options;
-        // Pi's `_toolPromptSnippets` and `_toolPromptGuidelines`.
+        system_prompt.docs_command = docs_command.clone();
+        let tools: Vec<Arc<AgentTool>> = tools.into_iter().map(run_in_order).collect();
+        // Pi's `_toolPromptGuidelines`.
         for prompt in &tool_prompts {
-            if let Some(snippet) = normalize_prompt_snippet(prompt.snippet.as_deref()) {
-                system_prompt
-                    .tool_snippets
-                    .push((prompt.name.clone(), snippet));
-            }
             let guidelines = normalize_prompt_guidelines(&prompt.guidelines);
             if !guidelines.is_empty() {
                 system_prompt

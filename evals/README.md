@@ -163,7 +163,7 @@ Each sample runs `bake-rs -p --mode json --no-session --permission danger-full-a
 - A DeepSeek model gets a `models.json` `deepseek` provider over Chat Completions at `api.deepseek.com`, whose model entry carries the shipped profile's metadata. `bake-rs` ships no Anthropic-format DeepSeek profile, so this arm reaches DeepSeek over the wire pi uses, not the Bake arm's. Its key, `DEEPSEEK_API_KEY` from the environment or `~/.bake/.credentials.yaml`, reaches the agent as `EVAL_API_KEY`.
 - `settings.json` turns agent-level retry off. A scenario that forces a context window also gets pi's compaction settings for that window (`piCompaction`).
 
-Every native arm uses Pi's system prompt and default tools: `read`, `bash`, `edit`, and `write`. `EVAL_ROSTER`, `EVAL_EXTRA_<ARM>`, and `EVAL_SETTINGS_<ARM>` apply to Bake arms only.
+Every native arm uses the system prompt `bake-rs` builds and Pi's default tools: `read`, `bash`, `edit`, and `write`. `EVAL_ROSTER`, `EVAL_EXTRA_<ARM>`, and `EVAL_SETTINGS_<ARM>` apply to Bake arms only.
 
 `bake-rs` has no extensions, so its stale writer runs in the evaluator. The evaluator writes the change when it reads the `tool_execution_end` line of the first successful `read` of the target file, while `bake-rs` has already moved on. An edit in a later response comes after the write. An edit in the same response as that read can run before the write lands, whichever order its `tool_execution_start` line arrives in. The evaluator then records `staleInjection.raced` and marks the sample `invalid: stale_injection_raced`, which fails it and leaves its cell out of every comparison rather than scoring it as the agent's behavior. A pi arm has a narrower form of the same race that is not detected: its extension writes synchronously on the read's `tool_result`, but an edit pi runs in parallel with that read can still finish first. An exception in the writer stops the sample and marks it `invalid: evaluator_error`, with the message in `evaluatorErrors`.
 
@@ -173,7 +173,7 @@ The `--mode json` stream is pi's, so `normalizePi` reads it. Each assistant `mes
 
 | Field | Native arm |
 |---|---|
-| `composition` | null: the prompt is Pi's, so the shipped-composition check does not apply. `systemPrompt` is still captured |
+| `composition` | null: `bake-rs` builds its own prompt, so the shipped-composition check does not apply. `systemPrompt` is still captured |
 | `roster` | null |
 | `routingDecisions`, `subagentCalls` | empty and 0; the `delegation` scenarios are skipped, since `bake-rs` has no `subagent` tool |
 | `duplicateRefusals`, `guardRefusals`, `editedLineEchoes`, `toolHelpCalls` | 0 by construction: they match Bake's tool texts and tools |

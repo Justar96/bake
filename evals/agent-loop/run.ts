@@ -505,7 +505,7 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
       subagentCalls: byTool.subagent ?? 0,
       routingDecisions: routingDecisions(logged),
       roster: arm.kind === 'bake' ? roster : null,
-      // The rendered prompt and whether it is the shipped composition; pi and bake-rs bring Pi's prompt, so it is not checked.
+      // The rendered prompt and whether it is the shipped composition; pi and bake-rs bring their own prompts, so it is not checked.
       systemPrompt,
       composition: arm.kind !== 'bake' || systemPrompt === null ? null : compositionCheck(systemPrompt, workspaces),
       requestFloor: requestFloorFor(scenario),
@@ -582,7 +582,7 @@ writeFileSync(join(out, 'design.json'), JSON.stringify({
   composition: 'Built headless CLI with each revision\'s own headless system-prompt config (harness opener off, working-directory suffix) and its standard-preset persona prefix; host tools retained.'
     + (roster === 'tui' ? ' Roster tui: the standard preset\'s tool-fs, tool-fs-search, and tool-result-pruner configs and the terminal spill-policy inline cap; ask_user_question stays out, having no one to answer it headless.' : ' Roster headless: the headless bundle\'s own tool configs.')
     + ' Session title and ambient AGENTS disabled equally; instructions_file keeps agent-instructions for its own AGENTS.md.'
-    + (armNames.some(name => ARMS[name]!.kind === 'native') ? ' A native arm runs bake-rs -p --mode json with Pi\'s system prompt and default tools (read, bash, edit, write), no session file, the danger-full-access preset, and agent-level retry off; a cliproxyapi model comes through the 0.3 settings.yaml and .credentials.yaml it imports read-only, and a DeepSeek model through models.json over Chat Completions. It skips scenarios that need a Bake-only tool, and its stale writer acts on its event stream. Where a scenario forces a context window, it gets the same window and pi\'s compaction settings (piCompaction).' : '')
+    + (armNames.some(name => ARMS[name]!.kind === 'native') ? ' A native arm runs bake-rs -p --mode json with its own system prompt and Pi\'s default tools (read, bash, edit, write), no session file, the danger-full-access preset, and agent-level retry off; a cliproxyapi model comes through the 0.3 settings.yaml and .credentials.yaml it imports read-only, and a DeepSeek model through models.json over Chat Completions. It skips scenarios that need a Bake-only tool, and its stale writer acts on its event stream. Where a scenario forces a context window, it gets the same window and pi\'s compaction settings (piCompaction).' : '')
     + (armNames.some(name => ARMS[name]!.kind === 'pi') ? ' A pi arm runs pi --mode json with its own system prompt and default tools, no session, extensions, skills, prompt templates, or context files, agent-level retry off, and pi\'s own wire for each model; it skips scenarios that need a Bake-only tool. Where a scenario forces a context window, pi gets the same window and compaction settings that mirror Bake\'s policy at it (piCompaction).' : ''),
   cache: 'Fresh process/home/workspace/session per sample; provider cache is observed, not assumed cold. Pair order alternates by trial and scenario.',
   endpoint: 'Agent exits; external Node test passes without test modification; injected external comment is preserved.',
