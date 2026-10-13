@@ -65,6 +65,11 @@ icu_normalizer = { version = "=2.3.0", default-features = false, features = ["co
 base64 = { version = "=0.22.1", default-features = false, features = ["std"] }
 libc = { version = "=0.2.190", default-features = false }
 windows-sys = { version = "=0.61.2", default-features = false }
+# The `bake-coding-agent` skill discovery: `ignore`'s gitignore matcher reads
+# the `.gitignore`, `.ignore`, and `.fdignore` files in skill directories as
+# Pi's `ignore` package does. Unlicense OR MIT; its dependencies are MIT OR
+# Apache-2.0 or Unlicense OR MIT.
+ignore = { version = "=0.4.33", default-features = false }
 
 # Image decoding, resizing, and encoding are hundreds of times slower
 # unoptimized; the read tool's image tests would take seconds per image.

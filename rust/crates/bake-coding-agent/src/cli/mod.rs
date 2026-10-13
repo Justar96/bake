@@ -5,8 +5,12 @@
 //! `readPipedStdin`, `resolveAppMode`, `createSessionManager`,
 //! `resolveSessionPath`, `buildSessionOptions`, and the print-mode branch of
 //! `main`, and from `src/cli/initial-message.ts`. Settings, `models.json`,
-//! `auth.json`, sessions, and the global `AGENTS.md` come from the Bake home
-//! (D25), the one [`CliEnvironment::home`] names, never the process's own.
+//! `auth.json`, and sessions come from the Bake home (D25), the one
+//! [`CliEnvironment::home`] names, never the process's own. The global
+//! `AGENTS.md` and the user's skills come from the universal `~/.agents`
+//! under [`CliEnvironment::user_home`], and a project's `AGENTS.md` files
+//! and `.agents/skills` from the session's working directory and its
+//! parents ([`crate::skills`]).
 //! Diagnostics go to standard error as `Error: ` and `Warning: ` lines
 //! without Pi's colors, except Pi's bare `No session found matching`
 //! line, and every failure exits with code 1, as in Pi.
@@ -20,7 +24,8 @@
 //!
 //! Not ported (deferred): interactive and RPC modes, `@file` arguments,
 //! `--resume`, `--fork`, `--session-id`, `--session-dir`, `--api-key`,
-//! `--models`, resource flags, extension and MCP tools, forking a session
+//! `--models`, resource flags other than `--skill` and `--no-skills`,
+//! extension and MCP tools, forking a session
 //! found in another project, and the missing-session-cwd prompt.
 
 pub mod args;
@@ -45,7 +50,10 @@ use crate::session::file::default_session_dir_path;
 use crate::session::paths::{lexical_normalize, normalize_path};
 use crate::session::{NewSessionOptions, SessionManager};
 use crate::settings::Settings;
-use crate::system_prompt::{DocsPaths, SystemPromptOptions, load_project_context_files};
+use crate::skills::{LoadSkillsOptions, load_skills};
+use crate::system_prompt::{
+    DocsPaths, SystemPromptOptions, load_project_context_files, user_agents_dir,
+};
 use crate::tools::index::{
     NoTools, ToolSelectionOptions, ToolsOptions, create_all_tool_definitions, select_tools,
 };
@@ -63,6 +71,9 @@ pub struct CliEnvironment {
     pub cwd: PathBuf,
     /// The Bake home; `None` when it cannot be resolved.
     pub home: Option<PathBuf>,
+    /// The user's home directory, which holds `.agents`; `None` when it
+    /// cannot be resolved.
+    pub user_home: Option<PathBuf>,
     /// Where Pi's prompt says its docs are.
     pub docs: DocsPaths,
     /// Whether standard input is a terminal.
@@ -373,6 +384,7 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
     let CliEnvironment {
         cwd,
         home,
+        user_home,
         docs,
         stdin_is_terminal,
         stdin,
@@ -438,9 +450,19 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
                 )
                 .map_err(SessionStartError::Error)?;
                 warnings.extend(permission.warnings.iter().cloned());
-                let (files, context_warnings) = load_project_context_files(session.cwd(), &home);
+                let agents_dir = user_home.as_deref().map(user_agents_dir);
+                let (files, context_warnings) =
+                    load_project_context_files(session.cwd(), agents_dir.as_deref());
                 warnings.extend(context_warnings);
-                Ok((session, files, permission))
+                // Pi's print mode does not report skill diagnostics.
+                let skills = load_skills(&LoadSkillsOptions {
+                    cwd: session.cwd().to_owned(),
+                    user_home,
+                    skill_paths: args.skills.clone(),
+                    include_defaults: !args.no_skills,
+                })
+                .skills;
+                Ok((session, files, skills, permission))
             });
             (settings, registry, warnings, session)
         })
@@ -450,7 +472,7 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
         Ok(loaded) => loaded,
         Err(join) => return error(&stderr, &format!("Startup failed: {join}")),
     };
-    let (session, context_files, permission) = match session {
+    let (session, context_files, skills, permission) = match session {
         Ok(session) => session,
         Err(SessionStartError::Error(message)) => return error(&stderr, &message),
         Err(SessionStartError::Plain(message)) => {
@@ -613,6 +635,7 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
 
     let mut system_prompt = SystemPromptOptions::new(session_cwd.clone(), docs.clone());
     system_prompt.context_files = context_files;
+    system_prompt.skills = skills;
     system_prompt
         .sections
         .push(permission.prompt_section(Path::new(&session_cwd)));

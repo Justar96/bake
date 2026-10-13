@@ -40,6 +40,8 @@ Options:
                             Disable these tools: names or patterns with *
   -nt, --no-tools           Start with no tools
   -nbt, --no-builtin-tools  Start without the built-in tools
+      --skill <path>        Load a skill file or directory (repeatable)
+  -ns, --no-skills          Do not discover skills in .agents/skills
       --permission <preset> Permission preset: workspace-write or
                             danger-full-access, or one from settings.json;
                             new sessions default to the saved preset, else
@@ -61,8 +63,11 @@ Interactive mode is not available yet: bake-rs prints when -p or --mode is
 given or a standard stream is not a terminal.
 
 Models come from models.json and keys from auth.json in the Bake home
-(BAKE_HOME, then DSH_HOME, then ~/.bake), which also holds settings.json, a
-global AGENTS.md, and the saved sessions.
+(BAKE_HOME, then DSH_HOME, then ~/.bake), which also holds settings.json and
+the saved sessions. Instructions come from ~/.agents/AGENTS.md and the
+AGENTS.md files from the filesystem root down to the working directory.
+Skills come from ~/.agents/skills and every .agents/skills from the working
+directory up to its git repository root.
 
 The preview shows sample content only and does not connect to a model.
 Ctrl+C quits it.
@@ -187,6 +192,7 @@ fn agent(args: &[String]) -> ExitCode {
         let environment = CliEnvironment {
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             home,
+            user_home: std::env::home_dir(),
             docs: docs_paths(),
             stdin_is_terminal,
             stdin: Box::new(io::stdin()),

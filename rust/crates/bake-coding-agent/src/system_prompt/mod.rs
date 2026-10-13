@@ -14,15 +14,20 @@
 //! message and later sends only the sections that changed
 //! ([`diff_system_prompt_sections`]).
 //!
-//! Not ported: skills (scope 10; the `skills` section is never present),
-//! and the forced prompt of an extension's `before_agent_start` handler.
+//! The `skills` section lists the loaded [skills](crate::skills) when a
+//! selected tool can read their files (Pi v1.2.0, unchanged since v1.1.0).
+//!
+//! Not ported: the forced prompt of an extension's `before_agent_start`
+//! handler.
 
 pub mod context;
 
 use bake_ai::utils::text::get_system_message_text;
 use bake_ai::{Sections, SystemContent, SystemMessage};
 
-pub use context::{ContextFile, load_project_context_files, resolve_prompt_input};
+use crate::skills::{Skill, SkillReader, format_skills_for_prompt};
+
+pub use context::{ContextFile, load_project_context_files, resolve_prompt_input, user_agents_dir};
 
 /// The documentation paths Pi's prompt names: its package's `README.md`,
 /// `docs`, and `examples`.
@@ -48,7 +53,7 @@ impl DocsPaths {
     }
 }
 
-/// Pi's `BuildSystemPromptOptions` without skills or a forced prompt.
+/// Pi's `BuildSystemPromptOptions` without a forced prompt.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SystemPromptOptions {
     /// Replaces the default preamble and its tool, rule, and docs sections.
@@ -72,6 +77,8 @@ pub struct SystemPromptOptions {
     pub cwd: String,
     /// Loaded context files.
     pub context_files: Vec<ContextFile>,
+    /// Loaded skills.
+    pub skills: Vec<Skill>,
     /// The documentation paths.
     pub docs: DocsPaths,
 }
@@ -92,6 +99,7 @@ impl SystemPromptOptions {
             sections: Vec::new(),
             cwd: cwd.into(),
             context_files: Vec::new(),
+            skills: Vec::new(),
             docs,
         }
     }
@@ -274,6 +282,34 @@ pub fn build_system_prompt_sections(
             "project_context",
             render_project_context(&options.context_files),
         );
+    }
+    // A hidden reader is still reachable through another tool, so skills
+    // stay but the hint names no tool.
+    let reader = ["read", "bash"]
+        .into_iter()
+        .find(|tool| declared.iter().any(|name| name == tool))
+        .map(|tool| {
+            if tool == "read" {
+                SkillReader::Read
+            } else {
+                SkillReader::Bash
+            }
+        })
+        .or_else(|| {
+            options
+                .selected_tools
+                .iter()
+                .any(|name| name == "read" || name == "bash")
+                .then_some(SkillReader::Indirect)
+        });
+    if let Some(reader) = reader
+        && !options.skills.is_empty()
+    {
+        let skills = format_skills_for_prompt(&options.skills, reader);
+        let skills = crate::tools::js::trim(&skills);
+        if !skills.is_empty() {
+            set_section(&mut sections, "skills", skills.to_owned());
+        }
     }
     set_section(&mut sections, "cwd", options.cwd.replace('\\', "/"));
     for (name, content) in &options.sections {

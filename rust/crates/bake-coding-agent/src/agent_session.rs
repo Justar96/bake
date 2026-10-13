@@ -8,7 +8,8 @@
 //! result, and custom message, as Pi's `_handleAgentEvent` does. Before
 //! each prompt it sends the system-prompt sections that differ from the
 //! ones the transcript replays, as Pi's `_preparePromptAndToolLoadout`
-//! does.
+//! does. A prompt of the form `/skill:name args` is expanded to the skill's
+//! body first, as Pi's `_expandSkillCommand` does.
 //!
 //! Session I/O is blocking and runs on Tokio's blocking pool; message
 //! persistence happens inside the agent's event listener, so a run is idle
@@ -29,8 +30,9 @@
 //!
 //! Not ported (deferred): extensions and their events (including
 //! `session_before_compact`, `session_compact`, and
-//! `session_compact_failed`), branch navigation and its summaries, skills,
-//! prompt templates, MCP, bash `!` commands, the cache warmer, scoped
+//! `session_compact_failed`), branch navigation and its summaries, the
+//! `/skill:name` slash command list and its expansion error event, prompt
+//! templates, MCP, bash `!` commands, the cache warmer, scoped
 //! models, virtual models and their failed-response routing, the
 //! `entry_appended` event, queued steering and follow-up bookkeeping,
 //! tool-loadout changes between turns, and image resizing.
@@ -61,6 +63,7 @@ use crate::owned_work::WorkGate;
 use crate::session::SessionManager;
 use crate::session::messages::{CustomMessage, convert_to_llm};
 use crate::settings::Settings;
+use crate::skills::expand_skill_command;
 use crate::system_prompt::{
     SystemPromptOptions, build_system_prompt_sections, diff_system_prompt_sections,
     normalize_prompt_guidelines, normalize_prompt_snippet,
@@ -978,6 +981,16 @@ impl AgentSession {
                 .check_compaction(&last, None, false, Vec::new())
                 .await?;
         }
+        // Pi's `_expandSkillCommand`; the skill file is read off the runtime.
+        let text = if text.starts_with("/skill:") {
+            let skills = self.prompt_options.skills.clone();
+            let command = text.to_owned();
+            tokio::task::spawn_blocking(move || expand_skill_command(&command, &skills))
+                .await
+                .unwrap_or_else(|_| text.to_owned())
+        } else {
+            text.to_owned()
+        };
         let mut content = vec![UserContentBlock::Text(TextContent::new(text))];
         content.extend(images.into_iter().map(UserContentBlock::Image));
         let mut messages: Vec<LiveMessage> = Vec::with_capacity(2);

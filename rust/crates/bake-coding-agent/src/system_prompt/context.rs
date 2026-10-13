@@ -1,16 +1,22 @@
 //! Context files and prompt inputs, from Pi's resource loader.
 //!
 //! Ported from Pi `packages/coding-agent/src/core/resource-loader.ts`
-//! (v1.1.0): `loadContextFileFromDir`, `findShadowedContextFile`,
+//! (v1.1.0, with v1.2.0's comparison of a shadowed file by its directory's
+//! real path): `loadContextFileFromDir`, `findShadowedContextFile`,
 //! `loadProjectContextFiles`, and `resolvePromptInput`, with `findGitPaths`
-//! from `footer-data-provider.ts`. The global context file comes from the
-//! Bake home where Pi reads `~/.pi/agent`.
+//! from `footer-data-provider.ts`.
 //!
 //! The rest of the resource loader (extensions, skills, prompt templates,
 //! themes, packages, and the `SYSTEM.md` and `APPEND_SYSTEM.md` discovery
 //! that needs project trust) is not ported.
 //!
 //! # Deviations from Pi
+//!
+//! - **`AGENTS.md` only.** Each directory's context file is the first of
+//!   `AGENTS.override.md`, `AGENTS.md`, and `AGENTS.MD`; Pi also falls back
+//!   to `CLAUDE.md`, which Bake does not read.
+//! - **Global file.** The global context file comes from the universal
+//!   `~/.agents` directory where Pi reads `~/.pi/agent`.
 //!
 //! A context file larger than [`MAX_CONTEXT_FILE_BYTES`] is skipped with
 //! Pi's read warning. Warnings are returned instead of printed.
@@ -33,13 +39,13 @@ pub struct ContextFile {
     pub content: String,
 }
 
-const CANDIDATES: [&str; 5] = [
-    "AGENTS.override.md",
-    "AGENTS.md",
-    "AGENTS.MD",
-    "CLAUDE.md",
-    "CLAUDE.MD",
-];
+const CANDIDATES: [&str; 3] = ["AGENTS.override.md", "AGENTS.md", "AGENTS.MD"];
+
+/// The user's universal agent directory, `~/.agents`, which holds the
+/// global `AGENTS.md` and the user's skills.
+pub fn user_agents_dir(user_home: &Path) -> PathBuf {
+    user_home.join(".agents")
+}
 
 /// Pi's `loadContextFileFromDir`: the first candidate that is a readable
 /// file.
@@ -145,17 +151,22 @@ fn find_shadowed_context_file(cwd: &Path) -> Option<PathBuf> {
     Some(main_root.join(name))
 }
 
-/// Pi's `loadProjectContextFiles`: the global file from `agent_dir`, then
-/// one file per directory from the filesystem root down to `cwd`, each path
-/// once, leaving out the main repository's file that a nested worktree
-/// shadows. Returns the files and any read warnings.
-pub fn load_project_context_files(cwd: &str, agent_dir: &Path) -> (Vec<ContextFile>, Vec<String>) {
+/// Pi's `loadProjectContextFiles`: the global file from `global_dir`
+/// (`~/.agents`; none when `None`), then one file per directory from the
+/// filesystem root down to `cwd`, each path once, leaving out the main
+/// repository's file that a nested worktree shadows. Returns the files and
+/// any read warnings.
+pub fn load_project_context_files(
+    cwd: &str,
+    global_dir: Option<&Path>,
+) -> (Vec<ContextFile>, Vec<String>) {
     let mut warnings = Vec::new();
     let cwd = PathBuf::from(resolve_path_string(cwd));
-    let agent_dir = resolve_path(agent_dir);
     let mut files = Vec::new();
     let mut seen: Vec<String> = Vec::new();
-    if let Some(global) = load_context_file_from_dir(&agent_dir, &mut warnings) {
+    if let Some(global_dir) = global_dir
+        && let Some(global) = load_context_file_from_dir(&resolve_path(global_dir), &mut warnings)
+    {
         seen.push(global.path.clone());
         files.push(global);
     }
@@ -164,9 +175,13 @@ pub fn load_project_context_files(cwd: &str, agent_dir: &Path) -> (Vec<ContextFi
     let mut dir = Some(cwd.as_path());
     while let Some(current) = dir {
         if let Some(file) = load_context_file_from_dir(current, &mut warnings) {
-            let is_shadowed = shadowed
-                .as_ref()
-                .is_some_and(|shadowed| canonicalize(Path::new(&file.path)) == *shadowed);
+            // The directory's real path, not the file's: a worktree file that
+            // links to the main repository's resolves to the shadowed path.
+            let is_shadowed = shadowed.as_ref().is_some_and(|shadowed| {
+                Path::new(&file.path)
+                    .file_name()
+                    .is_some_and(|name| canonicalize(current).join(name) == *shadowed)
+            });
             if !is_shadowed && !seen.contains(&file.path) {
                 seen.push(file.path.clone());
                 ancestors.insert(0, file);
@@ -213,7 +228,7 @@ mod tests {
     use crate::test_support::{TempDir, write};
 
     fn contents(cwd: &Path, agent_dir: &Path) -> Vec<String> {
-        let (files, warnings) = load_project_context_files(&cwd.to_string_lossy(), agent_dir);
+        let (files, warnings) = load_project_context_files(&cwd.to_string_lossy(), Some(agent_dir));
         assert_eq!(warnings, Vec::<String>::new());
         files.into_iter().map(|file| file.content).collect()
     }
@@ -231,7 +246,7 @@ mod tests {
         write(&cwd.join("AGENTS.md"), "project instructions");
         write(&nested.join("AGENTS.md"), "service instructions");
         write(&nested.join("AGENTS.override.md"), "service override");
-        let (files, _) = load_project_context_files(&nested.to_string_lossy(), &agent);
+        let (files, _) = load_project_context_files(&nested.to_string_lossy(), Some(&agent));
         let paths: Vec<(String, String)> = files
             .into_iter()
             .map(|file| (file.path, file.content))
@@ -254,16 +269,38 @@ mod tests {
     }
 
     // Pi: "should ignore context file candidates that are directories" and
-    // "should discover AGENTS.md context files".
+    // "should discover AGENTS.md context files", without Pi's `CLAUDE.md`
+    // fallback.
     #[test]
-    fn directories_are_skipped_and_claude_md_is_a_fallback() {
+    fn directories_are_skipped_and_claude_md_is_not_read() {
         let temp = TempDir::new("context-dirs");
         let agent = temp.join("agent");
         let cwd = temp.join("project");
         std::fs::create_dir_all(cwd.join("AGENTS.override.md")).expect("dir");
-        std::fs::create_dir_all(cwd.join("AGENTS.md")).expect("dir");
-        write(&cwd.join("CLAUDE.md"), "\u{feff}Fallback instructions");
-        assert_eq!(contents(&cwd, &agent), ["Fallback instructions"]);
+        write(&cwd.join("AGENTS.md"), "\u{feff}Project instructions");
+        write(&cwd.join("CLAUDE.md"), "Claude instructions");
+        assert_eq!(contents(&cwd, &agent), ["Project instructions"]);
+
+        let other = temp.join("claude-only");
+        write(&other.join("CLAUDE.md"), "Claude instructions");
+        write(&agent.join("CLAUDE.md"), "Global Claude instructions");
+        assert_eq!(contents(&other, &agent), Vec::<String>::new());
+    }
+
+    #[test]
+    fn without_a_global_directory_only_project_files_load() {
+        let temp = TempDir::new("context-no-global");
+        let cwd = temp.join("project");
+        write(&cwd.join("AGENTS.md"), "project instructions");
+        let (files, warnings) = load_project_context_files(&cwd.to_string_lossy(), None);
+        assert!(warnings.is_empty());
+        assert_eq!(
+            files
+                .into_iter()
+                .map(|file| file.content)
+                .collect::<Vec<_>>(),
+            ["project instructions"]
+        );
     }
 
     #[cfg(unix)]
@@ -330,13 +367,40 @@ mod tests {
         );
 
         // "should only skip the same filename, not a differently named
-        // context file"
+        // context file", with `AGENTS.override.md` for Pi's `CLAUDE.md`
         let n = nested("wt-names");
-        write(&n.main.join("CLAUDE.md"), "main repo instructions");
+        write(&n.main.join("AGENTS.override.md"), "main repo instructions");
         write(&n.worktree.join("AGENTS.md"), "worktree instructions");
         assert_eq!(
             contents(&n.src, &n.temp.join("agent")),
             ["main repo instructions", "worktree instructions"]
+        );
+
+        // "should load the worktree's context once when it symlinks to the
+        // main repo's file" (v1.2.0)
+        let n = nested("wt-link");
+        write(&n.main.join("AGENTS.md"), "main repo instructions");
+        std::os::unix::fs::symlink(n.main.join("AGENTS.md"), n.worktree.join("AGENTS.md"))
+            .expect("link");
+        let (files, _) =
+            load_project_context_files(&n.src.to_string_lossy(), Some(&n.temp.join("agent")));
+        assert_eq!(
+            files.into_iter().map(|file| file.path).collect::<Vec<_>>(),
+            [n.worktree.join("AGENTS.md").to_string_lossy().into_owned()]
+        );
+
+        // "should skip the main repo's duplicate when the main repo's file
+        // is a symlink" (v1.2.0)
+        let n = nested("wt-shared");
+        let shared = n.outer.join("shared-agents.md");
+        write(&shared, "shared instructions");
+        std::os::unix::fs::symlink(&shared, n.main.join("AGENTS.md")).expect("link");
+        std::os::unix::fs::symlink(&shared, n.worktree.join("AGENTS.md")).expect("link");
+        let (files, _) =
+            load_project_context_files(&n.src.to_string_lossy(), Some(&n.temp.join("agent")));
+        assert_eq!(
+            files.into_iter().map(|file| file.path).collect::<Vec<_>>(),
+            [n.worktree.join("AGENTS.md").to_string_lossy().into_owned()]
         );
 
         // "should keep loading ancestors above the main repo"
