@@ -867,18 +867,29 @@ fn print_mode_reads_agents_instructions_and_skills() {
     write(workspace.home().join("AGENTS.md"), "Bake home rules.");
     write(project.join("AGENTS.md"), "Project agents rules.");
     write(project.join("CLAUDE.md"), "Claude rules.");
+    // Built by component, as bake-rs builds them, so Windows paths match.
+    let skill_file = |root: &Path, name: &str| {
+        root.join(".agents")
+            .join("skills")
+            .join(name)
+            .join("SKILL.md")
+    };
+    let user_skill = skill_file(&user, "user-skill");
     write(
-        user.join(".agents/skills/user-skill/SKILL.md"),
+        user_skill.clone(),
         "---\nname: user-skill\ndescription: From the user.\n---\nUser body.\n",
     );
-    let project_skill = project.join(".agents/skills/project-skill/SKILL.md");
+    let project_skill = skill_file(&project, "project-skill");
     write(
         project_skill.clone(),
         "---\nname: project-skill\ndescription: From the project.\n---\n\nProject body.\n",
     );
 
-    // The session's working directory has its links resolved, as macOS's
-    // temporary directory needs.
+    // On Unix the working directory bake-rs reads has its links resolved,
+    // as macOS's temporary directory needs; Windows reports it as set, in
+    // the short form its temporary directory may use, where canonicalizing
+    // would give a `\\?\` long path.
+    #[cfg(unix)]
     let project_skill = std::fs::canonicalize(&project_skill).expect("project skill");
     let out = workspace.run(&["-p", "/skill:project-skill now"], None);
     assert_eq!(text(&out.stderr), "");
@@ -895,7 +906,6 @@ fn print_mode_reads_agents_instructions_and_skills() {
         .nth(1)
         .and_then(|rest| rest.split("\n</skills>").next())
         .expect("a skills section");
-    let user_skill = user.join(".agents/skills/user-skill/SKILL.md");
     assert!(
         skills.contains(&format!(
             "<name>project-skill</name>\n    <description>From the project.</description>\n    <location>{}</location>",
