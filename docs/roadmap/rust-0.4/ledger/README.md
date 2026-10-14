@@ -43,6 +43,7 @@ The scope 01 records cover PR #57's fake native eval arm and synthetic compariso
 
 | Attempt | Observed outcome |
 |---|---|
+| [Persistent settings and credentials](scope-05/2026-10-14-persistent-settings-credentials.json) | Pi-based storage APIs at `c0fd95a5b7`: Linux native gates, native Windows workspace checks, and Intel macOS native gates pass. Corrected lint and macOS ACL-fixture failures remain recorded. CLIProxyAPI auth wiring and lifecycle ownership remain open. |
 | [First macOS attempt](scope-01/2026-10-07-native-fixture-macos-failure.json) | The exact environment assertion failed because CoreFoundation added `__CF_USER_TEXT_ENCODING` after exec. The record retains the failed CI job. |
 | [Corrected attempt](scope-01/2026-10-07-native-fixture-evidence.json) | A clean checkout of merged commit `71805dfe1f1e7a9aef7088bd4043740e0d5b4d34` passed 60 Cargo tests, four compiled-arm cases, and three synthetic fixtures. Final CI passed the recorded native and app gates. Scope 01 remains partial. |
 | [Runtime request fixture](scope-01/2026-10-07-runtime-request-fixture.json) | A clean checkout of merged commit `586083f7545d0cf139e0a9dfc92f03d2a7d0fae8` passed 13 fixture spec tests on the TypeScript oracle. Final CI passed the Linux and macOS runtime gates. No Rust request-reconstruction arm or Windows run of this spec exists. |
