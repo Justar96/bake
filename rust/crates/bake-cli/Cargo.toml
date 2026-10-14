@@ -11,10 +11,10 @@ name = "bake-rs"
 path = "src/main.rs"
 
 [dependencies]
-bake-session.workspace = true
+bake-coding-agent.workspace = true
+bake-sandbox.workspace = true
 bake-tui.workspace = true
-serde_json.workspace = true
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "signal", "macros"] }
 
-# Opens the inspected file without blocking on a FIFO.
-[target.'cfg(unix)'.dependencies]
-libc = { version = "=0.2.190", default-features = false }
+[dev-dependencies]
+serde_json.workspace = true

@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   checkCommandFor, checkpointCodes, compactionBudget, CONTEXT_WINDOWS, EXPLORE_ANSWER, EXTENDED_CASES, fixture, LONG_SESSION_BUDGET,
-  maxRequestsFor, noteNames, piCompactionFor, prompts, REQUEST_FLOORS, requestFloorFor, slowCheckLine, STANDARD_CASES, validate,
+  maxRequestsFor, noteNames, piCompactionFor, prompts, REQUEST_FLOORS, requestFloorFor, SKILL_SCENARIOS, slowCheckLine, STANDARD_CASES, usesSkills, validate,
   type Fixture, type Outcome,
 } from './scenarios.ts'
 
@@ -181,6 +181,72 @@ describe('instructions_file', () => {
       expect(validate('instructions_file', built, outcome()).validated).toBe(true)
       patch(built.workspace, path, from, to)
       expect(validate('instructions_file', built, outcome())).toMatchObject({ validated: false, fixturesUnchanged: false })
+    }
+  })
+})
+
+describe('skill scenarios', () => {
+  const skillsOf = (built: Fixture) => readdirSync(join(built.workspace, '.agents/skills')).sort()
+
+  test('ask for the task alone: neither prompt names a skill', () => {
+    expect(prompts.skill_check).toBe(prompts.instructions_file!.replace('anything under scripts/', 'anything under .agents/'))
+    expect(prompts.skill_distractors).toBe(prompts.unprompted_edit)
+    for (const scenario of ['skill_check', 'skill_distractors']) {
+      expect(prompts[scenario]).not.toMatch(/skill/i)
+      expect(usesSkills(scenario)).toBe(true)
+    }
+    expect(usesSkills('instructions_file')).toBe(false)
+    expect(SKILL_SCENARIOS).toEqual({ skill_check: 'money-check', skill_distractors: null })
+  })
+
+  test('skill_check passes only when the skill\'s own check ran on the final source', () => {
+    const built = build('skill_check')
+    expect(skillsOf(built)).toEqual(['docker-deploy', 'money-check', 'release-notes', 'translations'])
+    const skill = readFileSync(join(built.workspace, '.agents/skills/money-check/SKILL.md'), 'utf8')
+    expect(skill).toStartWith('---\nname: money-check\ndescription: ')
+    expect(skill).toContain('node scripts/check.cjs --all')
+    // The script is in the skill's directory, not the project's, so the agent must resolve the skill's relative path.
+    expect(existsSync(join(built.workspace, 'scripts'))).toBe(false)
+    expect(existsSync(join(built.workspace, 'AGENTS.md'))).toBe(false)
+    const check = checkCommandFor('skill_check')
+    for (const command of ['node .agents/skills/money-check/scripts/check.cjs --all', 'cd .agents/skills/money-check && node scripts/check.cjs --all', 'node /w/.agents/skills/money-check/scripts/check.cjs --verbose --all 2>&1']) {
+      expect(check.test(command)).toBe(true)
+    }
+    for (const command of ['node test.cjs --all', 'node .agents/skills/money-check/scripts/check.cjs', 'node scripts/precheck.cjs --all']) expect(check.test(command)).toBe(false)
+    roundFix(built.workspace)
+    expect(node(built.workspace, 'test.cjs').exitCode).toBe(0)
+    expect(validate('skill_check', built, outcome()).validated).toBe(false)
+    expect(node(built.workspace, '.agents/skills/money-check/scripts/check.cjs').exitCode).toBe(2)
+    const run = node(join(built.workspace, '.agents/skills/money-check'), 'scripts/check.cjs', '--all')
+    expect(run.exitCode).toBe(0)
+    expect(String(run.stdout)).toContain('CHECK_OK')
+    expect(validate('skill_check', built, outcome()).validated).toBe(true)
+    // An edit after the check leaves the stamp behind the source.
+    patch(built.workspace, 'src/money.js', 'function roundMoney', '// rounds to the cent\nfunction roundMoney')
+    expect(validate('skill_check', built, outcome()).validated).toBe(false)
+  })
+
+  test('skill_distractors passes on the fix alone, with only skills its task does not need', () => {
+    const built = build('skill_distractors')
+    expect(skillsOf(built)).toEqual(['docker-deploy', 'release-notes', 'translations'])
+    expect(validate('skill_distractors', built, outcome()).validated).toBe(false)
+    roundFix(built.workspace)
+    expect(validate('skill_distractors', built, outcome()).validated).toBe(true)
+  })
+
+  test('fail when a skill file is changed', () => {
+    const tampers: [string, string, string, string][] = [
+      ['skill_check', '.agents/skills/money-check/SKILL.md', 'node scripts/check.cjs --all', 'node test.cjs'],
+      ['skill_check', '.agents/skills/money-check/scripts/check.cjs', "if (!process.argv.includes('--all'))", 'if (false)'],
+      ['skill_distractors', '.agents/skills/release-notes/SKILL.md', 'one line per change', 'two lines per change'],
+    ]
+    for (const [scenario, path, from, to] of tampers) {
+      const built = build(scenario)
+      roundFix(built.workspace)
+      if (scenario === 'skill_check') expect(node(built.workspace, '.agents/skills/money-check/scripts/check.cjs', '--all').exitCode).toBe(0)
+      expect(validate(scenario, built, outcome()).validated).toBe(true)
+      patch(built.workspace, path, from, to)
+      expect(validate(scenario, built, outcome())).toMatchObject({ validated: false, fixturesUnchanged: false })
     }
   })
 })

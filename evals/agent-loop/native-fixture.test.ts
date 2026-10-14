@@ -2,14 +2,14 @@
  * The native fixture adapter over real spawned arms: each case runs the fake
  * arm in tests/fixtures through the evaluator's real fixture, prompt, and
  * `validate()`. The fake is one process with no children, so process-group
- * teardown stays covered by the conformance driver's own launch tests.
+ * teardown stays covered by `launch.test.ts`.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readdir, readFile, realpath, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, relative } from 'node:path'
-import { MAX_TIMEOUT_MS, STDOUT_LIMIT } from '../../scripts/rust-conformance/driver.ts'
+import { MAX_TIMEOUT_MS, STDOUT_LIMIT } from './launch.ts'
 import { NATIVE_FIXTURE_CASES, runNativeFixture, type NativeFixtureOptions } from './native-fixture.ts'
 import { prompts } from './scenarios.ts'
 

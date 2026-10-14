@@ -48,13 +48,13 @@ Ratatui with Crossterm is the first implementation choice because Bake needs reu
 
 | Layer | Choice | Adoption condition |
 |---|---|---|
-| Rendering and layout | [Ratatui](https://ratatui.rs/concepts/backends/) | Its [inline viewport](https://docs.rs/ratatui/latest/ratatui/enum.Viewport.html) must preserve the bottom composer, bounded live region, committed rows, and resize behavior in a real PTY. A fullscreen demo does not qualify inline mode. |
+| Rendering and layout | [Ratatui](https://ratatui.rs/concepts/backends/) | Fixed buffers with Bake-owned output placement must preserve the bottom composer, bounded live region, committed rows, and resize behavior in a real PTY. The [inline experiment](tui-design.md#dev-note) records why the built-in inline resize path is unsuitable. A fullscreen demo does not qualify inline mode. |
 | Events and terminal modes | Crossterm, through Ratatui's supported backend | One compatible Crossterm dependency version must own input and raw mode. Verify acquisition, cancellation, and restoration on POSIX and Windows ConPTY. |
 | Draft behavior | A pure Bake-owned editor model | The [widget qualification](scope-00/editor-2026-10-07/README.md) found 15 mismatches in `ratatui-textarea` 0.9.3, including grapheme editing and caret width. Render Bake's model with Ratatui and keep terminal effects outside it. |
 
 The official backend guide warns that incompatible Crossterm versions have separate event queues and raw-mode tracking. The opt-in [native workspace](../../../rust/README.md) pins the preview's toolchain and dependencies; its locked dependency graph must contain one Crossterm version. The editor qualification's manifest and lockfile remain frozen experiment records, separate from that workspace and shipped dependencies.
 
-The first renderer experiment must exercise variable-height inline content and terminal reflow. If Ratatui's inline facilities cannot meet those obligations, evaluate a small Bake-owned inline writer over its buffers and Crossterm before committing to a larger frontend. Keep any such writer responsible for output only; agent and editor state stay with their existing owners.
+The inline preview exercises variable-height content through a Bake-owned writer over Ratatui buffers and Crossterm. The writer owns output only; agent and editor state stay with their existing owners. Linux PTY tests check the preview's resize and scrollback behavior. Real terminal reflow and the remaining platform cases still require qualification.
 
 ## Acceptance scenarios
 
@@ -79,7 +79,7 @@ Preserve the [linear scope sequence](README.md#linear-development-sequence). Sco
 
 A crate or renderer prototype may run earlier in an isolated development path. It neither changes the shipped launcher nor closes a later scope. Keep the current UI runnable until the native frontend satisfies the accepted behavior and intentional differences have their own reviewed tests.
 
-The fullscreen [Rust preview](../../../rust/README.md) is this early path: `bun run dev:rust` launches a draft editor, fixed sample-agent list, and read-only inspector. It has no runtime connection, inline mode, session persistence, or native workflow parity. Its unit and PTY checks qualify only that supported subset; the full acceptance scenarios above remain open.
+The [Rust preview](../../../rust/README.md) is this early path: `bun run dev:rust` launches a fullscreen draft editor, fixed sample-agent list, and read-only inspector. `bake-rs preview --inline` runs the same components with terminal scrollback. Both use scripted fixture turns with no model connection or session persistence. Their unit and PTY checks qualify only that supported subset; the full acceptance scenarios above remain open.
 
 ## Dev Note
 

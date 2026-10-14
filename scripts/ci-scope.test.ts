@@ -6,8 +6,7 @@ const pull = (baseRef: string, headRef = 'feat/x', sameRepository = true): Event
 
 describe('typeScriptNeed', () => {
   it('asks nothing of Rust sources and their drivers', () => {
-    expect(typeScriptNeed(['rust/crates/bake-tui/src/port.rs', 'rust/Cargo.lock', 'scripts/rust-preview-pty.ts',
-      'scripts/rust-conformance/driver.ts'])).toBe('none')
+    expect(typeScriptNeed(['rust/crates/bake-tui/src/port.rs', 'rust/Cargo.lock', 'scripts/rust-preview-pty.ts'])).toBe('none')
   })
 
   it('asks the static half of Markdown, wherever it is', () => {
@@ -15,7 +14,7 @@ describe('typeScriptNeed', () => {
   })
 
   it('asks everything of any other file, and of an empty list', () => {
-    expect(typeScriptNeed(['rust/src/a.rs', 'conformance/session/cases.json'])).toBe('full')
+    expect(typeScriptNeed(['rust/src/a.rs', 'evals/agent-loop/launch.ts'])).toBe('full')
     expect(typeScriptNeed(['scripts/rust-migration-ledger.ts'])).toBe('full')
     expect(typeScriptNeed(['docs/roadmap/rust-0.4/scope-00/inventory.json'])).toBe('full')
     expect(typeScriptNeed([])).toBe('full')
@@ -23,12 +22,12 @@ describe('typeScriptNeed', () => {
 })
 
 describe('plan', () => {
-  it('runs every job on every platform outside the Rust line', () => {
+  it('runs every job outside the Rust line, on Linux and Windows but never macOS', () => {
     const chosen = plan(pull('develop'), false, undefined)
     expect(chosen.preflight.map(job => `${job.name}/${job.os}`)).toEqual([
-      'checks/ubuntu-latest', 'runtime/ubuntu-latest', 'checks/macos-latest', 'runtime/macos-latest',
+      'checks/ubuntu-latest', 'runtime/ubuntu-latest',
     ])
-    expect(chosen.rust).toEqual(['ubuntu-latest', 'macos-latest', 'windows-latest'])
+    expect(chosen.rust).toEqual(['ubuntu-latest', 'windows-latest'])
     expect(chosen.windowsRelease).toBe(true)
     expect(plan({ name: 'push', sameRepository: true }, false, undefined)).toEqual(chosen)
   })
@@ -42,9 +41,9 @@ describe('plan', () => {
     expect(plan(pull('main', 'develop', false), false, undefined).windowsRelease).toBe(true)
   })
 
-  it('runs the native job everywhere on the Rust line and TypeScript on Linux as needed', () => {
+  it('runs the native job on Linux and Windows on the Rust line and TypeScript on Linux as needed', () => {
     const rust = plan(pull(RUST_LINE), true, ['rust/src/a.rs'])
-    expect(rust.rust).toEqual(['ubuntu-latest', 'macos-latest', 'windows-latest'])
+    expect(rust.rust).toEqual(['ubuntu-latest', 'windows-latest'])
     expect(rust.preflight).toEqual([])
     expect(rust.windowsRelease).toBe(false)
     expect(plan(pull(RUST_LINE), true, ['rust/src/a.rs', 'CHANGELOG.md']).preflight)

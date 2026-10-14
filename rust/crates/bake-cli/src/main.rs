@@ -1,238 +1,277 @@
-//! `bake-rs`: entry point for Bake's native terminal preview.
+//! `bake-rs`: Bake's native agent (Rust preview).
+//!
+//! `bake-rs -p "prompt"` runs one headless turn through
+//! [`bake_coding_agent::cli`], a port of Pi's print mode; `bake-rs preview`
+//! opens the sample terminal preview, and `bake-rs docs` prints the user
+//! documentation ([`docs`]). Help, version, and docs need no Bake home.
 
-mod inspect;
+mod docs;
 
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 use std::io::{self, IsTerminal, Write};
+use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::{Arc, Mutex};
 
-use bake_tui::PreviewExit;
-use inspect::{InspectArgs, MAX_BUDGET, Outcome, parse_count};
+use bake_coding_agent::cli::{self, Action, CliEnvironment, Interrupt};
+use bake_coding_agent::print_mode::SharedWriter;
+use bake_sandbox::SandboxProvider;
+use bake_tui::{PreviewExit, ScreenMode};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 const HELP: &str = "\
-bake-rs: Bake's native terminal preview (Rust preview)
+bake-rs: Bake's native agent (Rust preview)
 
 Usage:
-  bake-rs preview      Open the fullscreen preview in an interactive terminal
-  bake-rs session inspect --max-bytes <N> --max-source-seqs <N> [--] <file>
-                       Describe one Session log as JSON, read-only
-  bake-rs --help       Show this help
-  bake-rs --version    Show the version
-
-The preview shows sample content only. It does not connect to a model,
-read credentials, write sessions, or start agents. Ctrl+C quits.
-";
-
-const INSPECT_HELP: &str = "\
-bake-rs session inspect: describe one Session log (Rust preview)
-
-Usage:
-  bake-rs session inspect --max-bytes <N> --max-source-seqs <N> [--] <file>
+  bake-rs [options] [messages...]
+  bake-rs preview [--inline]  Open the sample preview in an interactive terminal
+  bake-rs docs [topic]        List the documentation topics, or print one
 
 Options:
-  --max-bytes <N>        Largest file size, and largest decoded Zstd size
-  --max-source-seqs <N>  Largest expanded sourceEventSeqs list of one event
-  --                     End the options, as before a path starting with '-'
-  -h, --help             Show this help
+  -p, --print               Send the prompts, print the final answer, and exit
+      --mode <mode>         Output: text (the final answer) or json (every event)
+      --provider <name>     Provider of --model
+      --model <pattern>     Model id, pattern, or provider/id, optionally :<thinking>
+      --models <patterns>   Scope available models (comma-separated patterns or globs)
+      --api-key <key>       Runtime API key for the selected model's provider
+      --thinking <level>    off, minimal, low, medium, high, xhigh, or max
+      --system-prompt <text|path>
+                            Replace the default system prompt preamble and rules
+      --append-system-prompt <text|path>
+                            Append to the system prompt (repeatable)
+  -c, --continue            Continue the most recent session in this directory
+      --session <path|id>   Use a session file, or a session id or id prefix
+      --session-id <id>     Use a specific session id, opening or creating it
+      --fork <path|id>      Fork a session into a new session in this directory
+      --session-dir <dir>   Directory for session storage and lookup
+  -n, --name <name>         Set the session display name
+      --no-session          Do not save the session
+  -t, --tools <list>        Allow these tools: names, patterns with *, or +name
+                            and -name changes to the defaults, comma-separated
+  -xt, --exclude-tools <list>
+                            Disable these tools: names or patterns with *
+  -nt, --no-tools           Start with no tools
+  -nbt, --no-builtin-tools  Start without the built-in tools
+      --skill <path>        Load a skill file or directory (repeatable)
+  -ns, --no-skills          Do not discover skills in .agents/skills
+      --prompt-template <path>
+                            Load a prompt template file or directory (repeatable)
+  -np, --no-prompt-templates
+                            Do not discover prompt templates
+  -nc, --no-context-files   Do not load AGENTS.md context files
+      --list-models [search]
+                            List available models (with optional fuzzy search)
+      --permission <preset> Permission preset: workspace-write or
+                            danger-full-access, or one from settings.json;
+                            new sessions default to the saved preset, else
+                            workspace-write
+      --sandbox <mode>      read-only, workspace-write, or danger-full-access
+      --approval <policy>   ask or never
+  -h, --help                Show this help
+  -v, --version             Show the version
 
-Both budgets are required positive integers no greater than 9007199254740991.
-<file> must be named session.v3.jsonl or session.v3.jsonl.zstd; the name
-selects plain or Zstd decoding. Other format versions are refused without
-opening the file.
+Messages are prompts, sent in order; piped standard input and @file arguments
+are prepended to the first. The agent starts with the read, bash, edit, and
+write tools; grep, find, and ls are available through --tools, and grep and
+find need rg and fd on PATH. A session keeps its permission: write and edit
+change files only where its sandbox mode allows, and bash runs only under a
+sandbox that enforces it: bubblewrap or Landlock on Linux and Seatbelt on
+macOS. Without one (Windows, for now), confined bash calls are refused.
+Escalations need approval, which print mode cannot give.
+Interactive mode is not available yet: bake-rs prints when -p or --mode is
+given or a standard stream is not a terminal.
 
-The command opens only the named file, read-only, restores it as the Session
-read path does, and prints one JSON record: counts, the header, recovery and
-closer metadata, but no message or tool content. It does not truncate, repair,
-migrate, or resume the Session, check its stored identity, or read the Bake
-home, configuration, or credentials.
+Models come from models.json and keys from auth.json in the Bake home
+(BAKE_HOME, then DSH_HOME, then ~/.bake), which also holds settings.json and
+the saved sessions. Instructions come from ~/.agents/AGENTS.md and the
+AGENTS.md files from the filesystem root down to the working directory.
+Skills come from ~/.agents/skills and every .agents/skills from the working
+directory up to its git repository root.
 
-Exit status: 0 restored, 3 refused log (a JSON record on standard output),
-1 unreadable file or unsupported name, 2 usage error.
+The preview shows sample content only and does not connect to a model.
+Ctrl+C quits it.
+
+Run 'bake-rs docs' for the documentation: the Bake home, settings, models,
+permissions, sessions, context files, skills, and the command line.
 ";
-
-const KNOWN: &[&str] = &["-h", "--help", "help", "-V", "--version", "preview"];
 
 #[derive(Debug, PartialEq, Eq)]
 enum Command {
     Help,
-    Version,
-    Preview,
-    InspectHelp,
-    Inspect(InspectArgs),
+    Preview(ScreenMode),
+    /// `bake-rs docs`, with a topic or without one.
+    Docs(Option<String>),
+    Agent(Vec<String>),
 }
 
-/// A usage error, and the help command it points to.
-#[derive(Debug, PartialEq, Eq)]
-struct Usage {
-    message: String,
-    help: &'static str,
-}
-
-fn parse(args: &[OsString]) -> Result<Command, Usage> {
-    // `session` operands are parsed as OS strings: a path need not be UTF-8.
-    if args.first().is_some_and(|first| first == "session") {
-        return parse_session(&args[1..]).map_err(|message| Usage {
-            message,
-            help: "bake-rs session inspect --help",
-        });
-    }
-    parse_top(args).map_err(|message| Usage {
-        message,
-        help: "bake-rs --help",
-    })
-}
-
-fn parse_top(args: &[OsString]) -> Result<Command, String> {
+fn parse(args: &[OsString]) -> Result<Command, String> {
     let args = args
         .iter()
         .map(|a| {
             a.to_str()
+                .map(str::to_owned)
                 .ok_or_else(|| format!("argument {a:?} is not valid UTF-8"))
         })
         .collect::<Result<Vec<_>, _>>()?;
-    match args.as_slice() {
-        [] | ["-h" | "--help" | "help"] | ["preview", "-h" | "--help"] => Ok(Command::Help),
-        ["-V" | "--version"] => Ok(Command::Version),
-        ["preview"] => Ok(Command::Preview),
+    let strs: Vec<&str> = args.iter().map(String::as_str).collect();
+    match strs.as_slice() {
+        [] | ["help"] | ["preview", "-h" | "--help"] => Ok(Command::Help),
+        ["preview"] => Ok(Command::Preview(ScreenMode::Fullscreen)),
+        ["preview", "--inline"] => Ok(Command::Preview(ScreenMode::Inline)),
+        ["preview", "--inline", "-h" | "--help"] => Ok(Command::Help),
+        ["preview", "--inline", extra, ..] => {
+            Err(format!("unexpected argument '{extra}' for 'preview'"))
+        }
         ["preview", extra, ..] => Err(format!("unexpected argument '{extra}' for 'preview'")),
-        [first, ..] if !KNOWN.contains(first) => Err(if first.starts_with('-') {
-            format!("unknown option '{first}'")
-        } else {
-            format!("unknown command '{first}'")
-        }),
-        [first, extra, ..] => Err(format!("unexpected argument '{extra}' after '{first}'")),
-        [first] => Err(format!("unexpected argument '{first}'")),
+        ["docs"] => Ok(Command::Docs(None)),
+        ["docs", topic] => Ok(Command::Docs(Some((*topic).to_owned()))),
+        ["docs", _, extra, ..] => Err(format!("unexpected argument '{extra}' for 'docs'")),
+        _ => Ok(Command::Agent(args)),
     }
-}
-
-fn parse_session(args: &[OsString]) -> Result<Command, String> {
-    let Some((command, rest)) = args.split_first() else {
-        return Err("missing a command after 'session'".into());
-    };
-    let help = |flag: &OsStr, rest: &[OsString]| match rest.first() {
-        None => Ok(Command::InspectHelp),
-        Some(extra) => Err(format!(
-            "unexpected argument {} after '{}'",
-            quoted(extra),
-            flag.display()
-        )),
-    };
-    if is_help(command) {
-        return help(command, rest);
-    }
-    if command != "inspect" {
-        return Err(format!("unknown command {} for 'session'", quoted(command)));
-    }
-    if let Some((flag, extra)) = rest.split_first().filter(|(flag, _)| is_help(flag)) {
-        return help(flag, extra);
-    }
-    let mut max_bytes = None;
-    let mut max_source_seqs = None;
-    let mut path = None;
-    let mut options = true;
-    let mut rest = rest.iter();
-    while let Some(arg) = rest.next() {
-        let slot = match arg.to_str() {
-            _ if !options => None,
-            Some("--") => {
-                options = false;
-                continue;
-            }
-            Some("--max-bytes") => Some(("--max-bytes", &mut max_bytes)),
-            Some("--max-source-seqs") => Some(("--max-source-seqs", &mut max_source_seqs)),
-            Some(flag @ ("-h" | "--help")) => {
-                return Err(format!(
-                    "option '{flag}' must be the only operand of 'session inspect'"
-                ));
-            }
-            _ if arg.as_encoded_bytes().starts_with(b"-") => {
-                return Err(format!(
-                    "unknown option {} for 'session inspect'",
-                    quoted(arg)
-                ));
-            }
-            _ => None,
-        };
-        if let Some((option, slot)) = slot {
-            let value = rest
-                .next()
-                .ok_or_else(|| format!("option '{option}' needs a value"))?;
-            if slot.is_some() {
-                return Err(format!("option '{option}' was given more than once"));
-            }
-            *slot = Some(value.to_str().and_then(parse_count).ok_or_else(|| {
-                format!(
-                    "option '{option}' needs a positive decimal integer no greater than \
-                     {MAX_BUDGET}, not {}",
-                    quoted(value)
-                )
-            })?);
-        } else if path.is_some() {
-            return Err(format!(
-                "unexpected argument {} for 'session inspect'",
-                quoted(arg)
-            ));
-        } else {
-            path = Some(arg.clone());
-        }
-    }
-    Ok(Command::Inspect(InspectArgs {
-        max_bytes: max_bytes.ok_or("missing required option '--max-bytes'")?,
-        max_source_seqs: max_source_seqs.ok_or("missing required option '--max-source-seqs'")?,
-        path: path.ok_or("missing the Session log path")?,
-    }))
-}
-
-fn is_help(arg: &OsStr) -> bool {
-    arg == "-h" || arg == "--help"
-}
-
-/// An argument for a one-line diagnostic: single-quoted when it is UTF-8,
-/// with control characters, apostrophes, and backslashes escaped as in Rust
-/// source, otherwise in Rust's escaped debug form.
-fn quoted(arg: &OsStr) -> String {
-    let Some(text) = arg.to_str() else {
-        return format!("{arg:?}");
-    };
-    let mut quoted = String::from("'");
-    for char in text.chars() {
-        if char.is_control() || char == '\'' || char == '\\' {
-            quoted.extend(char.escape_debug());
-        } else {
-            quoted.push(char);
-        }
-    }
-    quoted.push('\'');
-    quoted
 }
 
 fn main() -> ExitCode {
     let args: Vec<OsString> = std::env::args_os().skip(1).collect();
+    // The sandbox's Landlock helper re-executes this binary; it must run
+    // before anything starts a thread, and it never returns.
+    if args
+        .first()
+        .is_some_and(|arg| arg == bake_sandbox::backends::landlock::HELPER_ARG)
+    {
+        bake_sandbox::backends::landlock::helper_main(args.into_iter().skip(1));
+    }
     match parse(&args) {
         Ok(Command::Help) => print(HELP),
-        Ok(Command::Version) => print(&format!("bake-rs {VERSION}\n")),
-        Ok(Command::Preview) => preview(),
-        Ok(Command::InspectHelp) => print(INSPECT_HELP),
-        Ok(Command::Inspect(args)) => match inspect::inspect(&args) {
-            Outcome::Record { json, status } => {
-                if write_stdout(&format!("{json}\n")) {
-                    ExitCode::from(status)
-                } else {
-                    ExitCode::FAILURE
-                }
-            }
-            Outcome::Failure(message) => {
-                eprintln!("bake-rs: {message}");
-                ExitCode::FAILURE
-            }
-        },
-        Err(Usage { message, help }) => {
-            eprintln!("bake-rs: {message}\n\nRun '{help}' for usage.");
+        Ok(Command::Preview(mode)) => preview(mode),
+        Ok(Command::Docs(topic)) => show_docs(topic.as_deref()),
+        Ok(Command::Agent(args)) => agent(&args),
+        Err(message) => {
+            // A closed standard error is not a panic.
+            let _ = io::stderr().lock().write_all(
+                format!("bake-rs: {message}\n\nRun 'bake-rs --help' for usage.\n").as_bytes(),
+            );
             ExitCode::from(2)
         }
     }
+}
+
+fn exit_code(code: i32) -> ExitCode {
+    ExitCode::from(u8::try_from(code).unwrap_or(1))
+}
+
+/// How to run `bake-rs docs` from this executable, for the prompt's
+/// `docs` section and the messages that point at the documentation.
+fn docs_command() -> String {
+    match std::env::current_exe() {
+        Ok(exe) => docs::docs_command(&exe),
+        Err(_) => "bake-rs docs".to_owned(),
+    }
+}
+
+/// `bake-rs docs [topic]`: the topic's Markdown, or the topic list. An
+/// unknown topic fails with status 2 and the list on standard error.
+fn show_docs(topic: Option<&str>) -> ExitCode {
+    match topic {
+        None | Some("-h" | "--help") => print(&docs::topic_list()),
+        Some(name) => match docs::topic(name) {
+            Some(topic) => print(topic.text),
+            None => {
+                // A closed standard error is not a panic either.
+                let _ = io::stderr().lock().write_all(
+                    format!(
+                        "bake-rs: unknown docs topic '{name}'\n\n{}",
+                        docs::topic_list()
+                    )
+                    .as_bytes(),
+                );
+                ExitCode::from(2)
+            }
+        },
+    }
+}
+
+/// `SIGTERM` and `SIGHUP` stop print mode with Pi's exit codes, 143 and 129.
+#[cfg(unix)]
+fn interrupt() -> Interrupt {
+    use tokio::signal::unix::{SignalKind, signal};
+    Box::pin(async {
+        let (Ok(mut term), Ok(mut hangup)) = (
+            signal(SignalKind::terminate()),
+            signal(SignalKind::hangup()),
+        ) else {
+            return std::future::pending().await;
+        };
+        tokio::select! {
+            _ = term.recv() => 143,
+            _ = hangup.recv() => 129,
+        }
+    })
+}
+
+/// Pi registers only `SIGTERM` on Windows, which has no such signal.
+#[cfg(not(unix))]
+fn interrupt() -> Interrupt {
+    cli::no_interrupt()
+}
+
+fn agent(args: &[String]) -> ExitCode {
+    let stdout: SharedWriter = Arc::new(Mutex::new(io::stdout()));
+    let stderr: SharedWriter = Arc::new(Mutex::new(io::stderr()));
+    let stdin_is_terminal = io::stdin().is_terminal();
+    let action = cli::plan(args, stdin_is_terminal, io::stdout().is_terminal(), &stderr);
+    let (parsed, mode) = match action {
+        Action::Help => return print(HELP),
+        Action::Version => return print(&format!("bake-rs {VERSION}\n")),
+        Action::Exit(code) => return exit_code(code),
+        Action::Print(parsed, mode) => (parsed, mode),
+    };
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            eprintln!("Error: could not start the async runtime: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let home = bake_coding_agent::home::bake_home();
+    let imported = match &home {
+        Some(home) => cli::import_startup(home, &|name| std::env::var_os(name)),
+        None => cli::ImportedStartup::default(),
+    };
+    let code = runtime.block_on(async move {
+        // Signal streams register with the runtime, so they start inside it.
+        let environment = CliEnvironment {
+            cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            home,
+            user_home: std::env::home_dir(),
+            docs_command: docs_command(),
+            stdin_is_terminal,
+            stdin: Box::new(io::stdin()),
+            stdout,
+            stderr,
+            extra_providers: imported.providers,
+            imported_default_model: imported.default_model,
+            imported_default_preset: imported.default_preset,
+            sandbox_provider: sandbox_provider(),
+            warnings: imported.warnings,
+            interrupt: interrupt(),
+        };
+        cli::run(environment, *parsed, mode).await
+    });
+    // A blocked standard-input read cannot be cancelled; do not wait for it.
+    runtime.shutdown_timeout(std::time::Duration::from_secs(1));
+    exit_code(code)
+}
+
+/// The process's one sandbox provider: bubblewrap or Landlock on Linux,
+/// Seatbelt on macOS, and a fail-closed refusal elsewhere. It is built on
+/// first use and shared by every consumer, so a backend probes and caches
+/// its runner once.
+fn sandbox_provider() -> Arc<dyn SandboxProvider> {
+    bake_sandbox::default_provider()
 }
 
 /// Writes to stdout without panicking when the reader has gone away.
@@ -261,7 +300,7 @@ fn non_terminal_stream(stdin_tty: bool, stdout_tty: bool) -> Option<&'static str
     }
 }
 
-fn preview() -> ExitCode {
+fn preview(mode: ScreenMode) -> ExitCode {
     // Checked before any terminal mode changes.
     if let Some(name) = non_terminal_stream(io::stdin().is_terminal(), io::stdout().is_terminal()) {
         eprintln!(
@@ -269,8 +308,11 @@ fn preview() -> ExitCode {
         );
         return ExitCode::FAILURE;
     }
-    match bake_tui::run_preview() {
+    match bake_tui::run_preview_mode(mode) {
         Ok(PreviewExit::Quit) => ExitCode::SUCCESS,
+        // The terminal is gone, so there is nowhere to report anything; 129
+        // is the SIGHUP status the TypeScript launcher reports too.
+        Ok(PreviewExit::Hangup) => ExitCode::from(129),
         Ok(PreviewExit::Signal(signal)) => {
             ExitCode::from(u8::try_from(128 + signal).unwrap_or(u8::MAX))
         }
@@ -286,22 +328,29 @@ mod tests {
     use super::*;
 
     fn parse_strs(args: &[&str]) -> Result<Command, String> {
-        parse(&args.iter().map(OsString::from).collect::<Vec<_>>()).map_err(|usage| usage.message)
-    }
-
-    fn inspect_args(max_bytes: u64, max_source_seqs: u64, path: &str) -> Command {
-        Command::Inspect(InspectArgs {
-            max_bytes,
-            max_source_seqs,
-            path: path.into(),
-        })
+        parse(&args.iter().map(OsString::from).collect::<Vec<_>>())
     }
 
     #[test]
     fn no_arguments_print_help_instead_of_opening_the_preview() {
         assert_eq!(parse_strs(&[]), Ok(Command::Help));
         assert_eq!(parse_strs(&["preview", "--help"]), Ok(Command::Help));
-        assert_eq!(parse_strs(&["preview"]), Ok(Command::Preview));
+        assert_eq!(
+            parse_strs(&["preview"]),
+            Ok(Command::Preview(ScreenMode::Fullscreen))
+        );
+    }
+
+    #[test]
+    fn other_arguments_go_to_the_agent_command_line() {
+        assert_eq!(
+            parse_strs(&["-p", "hi"]),
+            Ok(Command::Agent(vec!["-p".into(), "hi".into()]))
+        );
+        assert_eq!(
+            parse_strs(&["--version"]),
+            Ok(Command::Agent(vec!["--version".into()]))
+        );
     }
 
     #[test]
@@ -313,174 +362,15 @@ mod tests {
     }
 
     #[test]
-    fn unexpected_arguments_name_the_offender() {
+    fn the_sandbox_provider_is_built_once() {
+        assert!(Arc::ptr_eq(&sandbox_provider(), &sandbox_provider()));
+    }
+
+    #[test]
+    fn unexpected_preview_arguments_name_the_offender() {
         assert_eq!(
             parse_strs(&["preview", "--fullscreen"]),
             Err("unexpected argument '--fullscreen' for 'preview'".into())
-        );
-        assert_eq!(
-            parse_strs(&["--bogus"]),
-            Err("unknown option '--bogus'".into())
-        );
-        assert_eq!(parse_strs(&["run"]), Err("unknown command 'run'".into()));
-        assert_eq!(
-            parse_strs(&["--version", "x"]),
-            Err("unexpected argument 'x' after '--version'".into())
-        );
-    }
-
-    #[test]
-    fn inspect_takes_both_budgets_in_either_order_and_one_path() {
-        let path = "d/session.v3.jsonl";
-        let want = Ok(inspect_args(7, 9, path));
-        assert_eq!(
-            parse_strs(&[
-                "session",
-                "inspect",
-                "--max-bytes",
-                "7",
-                "--max-source-seqs",
-                "9",
-                path
-            ]),
-            want
-        );
-        assert_eq!(
-            parse_strs(&[
-                "session",
-                "inspect",
-                path,
-                "--max-source-seqs",
-                "9",
-                "--max-bytes",
-                "7"
-            ]),
-            want
-        );
-        assert_eq!(
-            parse_strs(&[
-                "session",
-                "inspect",
-                "--max-bytes",
-                "7",
-                "--max-source-seqs",
-                "9",
-                "--",
-                "-p"
-            ]),
-            Ok(inspect_args(7, 9, "-p"))
-        );
-        assert_eq!(
-            parse_strs(&[
-                "session",
-                "inspect",
-                "--",
-                "--max-bytes",
-                "--max-bytes",
-                "7",
-                "--max-source-seqs",
-                "9"
-            ]),
-            Err("unexpected argument '--max-bytes' for 'session inspect'".into())
-        );
-        for help in [
-            &["session", "--help"][..],
-            &["session", "inspect", "-h"],
-            &["session", "inspect", "--help"],
-        ] {
-            assert_eq!(parse_strs(help), Ok(Command::InspectHelp));
-        }
-    }
-
-    #[test]
-    fn budgets_are_positive_safe_decimal_integers() {
-        assert_eq!(parse_count("1"), Some(1));
-        assert_eq!(parse_count("9007199254740991"), Some(MAX_BUDGET));
-        for bad in [
-            "",
-            "0",
-            "00",
-            "01",
-            "+1",
-            "-1",
-            " 1",
-            "1 ",
-            "1e3",
-            "1.0",
-            "0x1",
-            "1_0",
-            "9007199254740992",
-            "99999999999999999999",
-        ] {
-            assert_eq!(parse_count(bad), None, "{bad:?}");
-        }
-    }
-
-    #[test]
-    fn log_names_follow_the_typescript_generation_rule() {
-        use inspect::{Encoding, LogName, parse_log_name};
-        let canonical = |version, encoding| LogName::Canonical { version, encoding };
-        assert_eq!(
-            parse_log_name("session.jsonl"),
-            canonical(0, Encoding::None)
-        );
-        assert_eq!(
-            parse_log_name("session.v3.jsonl"),
-            canonical(3, Encoding::None)
-        );
-        assert_eq!(
-            parse_log_name("session.v3.jsonl.zstd"),
-            canonical(3, Encoding::Zstd)
-        );
-        assert_eq!(
-            parse_log_name("session.v12.jsonl.zstd"),
-            canonical(12, Encoding::Zstd)
-        );
-        for name in [
-            "session.v0.jsonl",
-            "session.v03.jsonl",
-            "Session.v3.jsonl",
-            "session.v3.jsonl.zst",
-            "session.v3.jsonl.tmp",
-            "session.jsonl.zstd.zstd",
-            "session.v.jsonl",
-            "session.v9007199254740992.jsonl",
-            "sessions.v3.jsonl",
-            "",
-        ] {
-            assert_eq!(parse_log_name(name), LogName::NotCanonical, "{name:?}");
-        }
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn inspect_paths_and_values_stay_os_strings() {
-        use std::os::unix::ffi::OsStringExt;
-        let path = OsString::from_vec(b"\xff/session.v3.jsonl".to_vec());
-        let args = |value: OsString, path: OsString| {
-            [
-                "session",
-                "inspect",
-                "--max-source-seqs",
-                "1",
-                "--max-bytes",
-            ]
-            .into_iter()
-            .map(OsString::from)
-            .chain([value, path])
-            .collect::<Vec<_>>()
-        };
-        assert_eq!(
-            parse(&args("2".into(), path.clone())),
-            Ok(Command::Inspect(InspectArgs {
-                max_bytes: 2,
-                max_source_seqs: 1,
-                path: path.clone()
-            }))
-        );
-        assert_eq!(
-            parse(&args(OsString::from_vec(vec![0xff]), path)).map_err(|usage| usage.message),
-            Err("option '--max-bytes' needs a positive decimal integer no greater than 9007199254740991, not \"\\xFF\"".into())
         );
     }
 }

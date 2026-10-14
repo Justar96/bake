@@ -18,14 +18,15 @@ concurrency:
 # commit on main is skipped. Direct pushes to main still run.
 #
 # A pull request from develop to main runs Linux alone. Every change it carries
-# already ran on every platform in its own pull request, and the release tag
-# after it builds and checks every platform again. Only the combination of
+# already ran on every CI platform in its own pull request, and the release
+# tag after it builds and checks every platform again. Only the combination of
 # those changes is new, which no earlier run has tested, so the Linux jobs stay.
 #
 # A pull request into the Rust 0.4.0 line, rust/0.4.0, directly or through a
-# stack on it, runs the native job on every OS and TypeScript checks on Linux
-# only as far as its files need. The pull request that syncs the line into
-# develop runs everything. scripts/ci-scope.ts makes these choices.
+# stack on it, runs the native job on Linux and Windows and TypeScript checks
+# on Linux only as far as its files need. The pull request that syncs the line
+# into develop runs everything. No job runs on macOS, which is checked locally
+# before a pull request opens. scripts/ci-scope.ts makes these choices.
 jobs:
   scope:
     if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Merge pull request ')
@@ -121,6 +122,14 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      # Defender scans every file Cargo creates, which makes small-file I/O
+      # several times slower than on the other hosts.
+      - name: Exclude the workspace and temp directory from Defender
+        if: runner.os == 'Windows'
+        # An image without Defender has nothing to exclude.
+        continue-on-error: true
+        shell: pwsh
+        run: Add-MpPreference -ExclusionPath "$env:GITHUB_WORKSPACE", "$env:RUNNER_TEMP", "$env:TEMP", "$env:USERPROFILE\.cargo"
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -131,7 +140,20 @@ jobs:
       - name: Install the pinned Rust toolchain
         working-directory: rust
         run: rustup toolchain install --no-self-update
+      # Reuse dependency builds across runs; the Windows job otherwise spends
+      # most of its 20 minutes compiling the workspace twice (clippy and test).
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
       - run: bun run preflight --only native
+      # Per-binary test durations, kept on success to watch the job's budget.
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: rust-log-${{ matrix.os }}
+          path: .preflight/rust.log
+          if-no-files-found: ignore
+          include-hidden-files: true
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -166,7 +188,7 @@ jobs:
       - run: bun install --frozen-lockfile --prefer-offline
       - run: bun test scripts/workspace.test.ts scripts/release apps/tui/packages/app/tests/build.test.ts apps/tui/packages/app/tests/release.test.ts
       - run: bun run build
-      - run: bun run test:runtime apps/cli/tests/bin.spec.ts packages/session/session-persistence-jsonl/tests/win32.spec.ts packages/session/session-persistence-jsonl/tests/lease.spec.ts packages/session/session-persistence-jsonl/tests/lease.two-process.spec.ts packages/session/session-persistence-jsonl/tests/header-conformance.spec.ts packages/session/session-persistence-jsonl/tests/log-scan-conformance.spec.ts packages/session/session-format-v2-to-v3/tests/source-event-seqs-conformance.spec.ts packages/session/session-format-v2-to-v3/tests/event-envelope-conformance.spec.ts packages/session/session-format-v2-to-v3/tests/v3-row-conformance.spec.ts packages/core/agent-loop/tests/request-derivation-conformance.spec.ts
+      - run: bun run test:runtime apps/cli/tests/bin.spec.ts packages/session/session-persistence-jsonl/tests/win32.spec.ts packages/session/session-persistence-jsonl/tests/lease.spec.ts packages/session/session-persistence-jsonl/tests/lease.two-process.spec.ts
       - run: bun run release:pack
       # A throwaway key: CI never holds the release signing key. verify-local
       # checks the manifest against it, then installs and updates through it.

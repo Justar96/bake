@@ -1,18 +1,31 @@
 /** Checkout resolution and launch inputs for the paired agent-loop evaluator. */
-import { existsSync, readFileSync, realpathSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { existsSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { rosterOverlay, systemPromptOverlay, type Roster } from './composition.ts'
+import { isEdit } from './metrics.ts'
 import { usesAgentInstructions } from './scenarios.ts'
 
 /**
- * A built Bake checkout or installed pi CLI. A pi root is its package directory;
- * Bake overlays and settings do not apply to pi.
+ * A built Bake checkout, an installed pi CLI, or a native `bake-rs` binary. A
+ * pi root is its package directory; a native root is the checkout whose Rust
+ * workspace built the binary, or a prebuilt binary's directory.
+ * Bake overlays and settings apply to neither.
  */
 export interface Arm {
-  kind: 'bake' | 'pi'
+  kind: 'bake' | 'pi' | 'native'
   root: string
   bin?: string
   version?: string
+  /** SHA-256 of a native arm's binary, so a record names the exact build. */
+  binarySha256?: string
+  /**
+   * A native arm's provenance: the commit and tracked-file state of the
+   * checkout it was built from, read after the build, or a prebuilt binary
+   * with neither.
+   */
+  revision?: { prebuilt: boolean; commit: string | null; dirty: boolean | null }
   extra: unknown[]
   settings: string
   llmDeepseek: boolean
@@ -36,15 +49,80 @@ function piArm(spec: string): Arm {
   return { kind: 'pi', root, bin, version, extra: [], settings: '{}', llmDeepseek: false, composition: [] }
 }
 
+/** The repository root this evaluator runs from. */
+const EVALUATOR_ROOT = resolve(import.meta.dir, '../..')
+
+/**
+ * The `bake-rs` executable a Cargo build reported, from its
+ * `--message-format=json-render-diagnostics` stdout. Cargo names the path
+ * wherever `CARGO_TARGET_DIR` or `build.target-dir` put it, so this never
+ * guesses a path that could hold an older build.
+ */
+export function builtExecutable(stdout: string): string | undefined {
+  let found: string | undefined
+  for (const line of stdout.split('\n')) {
+    if (!line.startsWith('{')) continue
+    let message: any
+    try { message = JSON.parse(line) } catch { continue }
+    if (message.reason === 'compiler-artifact' && message.target?.name === 'bake-rs'
+      && message.target.kind?.includes('bin') && typeof message.executable === 'string') found = message.executable
+  }
+  return found
+}
+
+/**
+ * Resolve `native`, `native:<checkout>`, or `native:<binary>`. A checkout,
+ * this evaluator's own by default, is built with Cargo's locked release
+ * profile from its `rust/` directory, so its pinned toolchain applies, and
+ * the arm runs the executable Cargo reports; its commit and tracked-file
+ * state are read right after the build. A file is a prebuilt binary run as
+ * given: no commit is credited to it, only its digest. Cargo's progress goes
+ * to stderr.
+ */
+function nativeArm(spec: string): Arm {
+  const target = resolve(spec.slice('native'.length).replace(/^:/, '') || EVALUATOR_ROOT)
+  if (!existsSync(target)) throw new Error(`EVAL_ARMS: native arm ${target} does not exist`)
+  const prebuilt = statSync(target).isFile()
+  let bin: string
+  let revision: NonNullable<Arm['revision']>
+  if (prebuilt) {
+    bin = realpathSync(target)
+    revision = { prebuilt: true, commit: null, dirty: null }
+  } else {
+    if (!existsSync(join(target, 'rust/Cargo.toml'))) throw new Error(`EVAL_ARMS: ${target} has no rust/Cargo.toml; pass a checkout or a bake-rs binary`)
+    const build = spawnSync('cargo', ['build', '--locked', '--release', '-p', 'bake-cli', '--message-format=json-render-diagnostics'], {
+      cwd: join(target, 'rust'), stdio: ['ignore', 'pipe', 2], encoding: 'utf8', maxBuffer: 256 * 1024 * 1024,
+    })
+    if (build.error !== undefined || build.status !== 0) throw new Error(`EVAL_ARMS: cargo build --locked --release in ${join(target, 'rust')} failed${build.error ? `: ${build.error.message}` : ''}`)
+    const executable = builtExecutable(build.stdout)
+    if (executable === undefined) throw new Error(`EVAL_ARMS: cargo build in ${join(target, 'rust')} reported no bake-rs executable`)
+    bin = realpathSync(executable)
+    const vcs = (...args: string[]) => spawnSync('git', ['-C', target, ...args], { encoding: 'utf8' })
+    const head = vcs('rev-parse', 'HEAD')
+    revision = head.status === 0
+      ? { prebuilt: false, commit: head.stdout.trim(), dirty: vcs('status', '--porcelain', '--untracked-files=no').stdout.trim() !== '' }
+      : { prebuilt: false, commit: null, dirty: null }
+  }
+  const probe = spawnSync(bin, ['--version'], { encoding: 'utf8', timeout: 10_000 })
+  if (probe.status !== 0) throw new Error(`EVAL_ARMS: ${bin} --version failed; is it a bake-rs binary?`)
+  return {
+    kind: 'native', root: prebuilt ? dirname(bin) : target, bin, version: probe.stdout.trim(),
+    binarySha256: createHash('sha256').update(readFileSync(bin)).digest('hex'), revision,
+    extra: [], settings: '{}', llmDeepseek: false, composition: [],
+  }
+}
+
 /**
  * Resolve arms and read their compositions before any sample launches. `env`
- * supplies per-arm EVAL_SETTINGS/EVAL_EXTRA values; pi lookup uses the current PATH.
+ * supplies per-arm EVAL_SETTINGS/EVAL_EXTRA values; pi lookup uses the current
+ * PATH, and a native checkout is built here.
  */
 export function parseArms(spec: string, roster: Roster, env: NodeJS.ProcessEnv): Record<string, Arm> {
   return Object.fromEntries(spec.split(',').filter(Boolean).map((entry): [string, Arm] => {
     const [name, root] = entry.split('=')
     if (!name || !root) throw new Error(`EVAL_ARMS entry "${entry}" is not name=checkout`)
     if (root === 'pi' || root.startsWith('pi:')) return [name, piArm(root)]
+    if (root === 'native' || root.startsWith('native:')) return [name, nativeArm(root)]
     if (!existsSync(join(root, 'apps/cli/lib/bin.js'))) throw new Error(`arm ${name}: ${root} has no built apps/cli/lib/bin.js; run bun run build there`)
     const settings = env[`EVAL_SETTINGS_${name.toUpperCase()}`] ?? '{}'
     JSON.parse(settings)
@@ -72,4 +150,94 @@ export function bakeOverlay(arm: Pick<Arm, 'composition' | 'extra'>, scenario: s
 /** The built Node entry point and arguments consumed by a Bake sample. */
 export function bakeCommand(root: string, patch: string, prompt: string): string[] {
   return ['node', join(root, 'apps/cli/lib/bin.js'), 'headless', '--patch', patch, '--json', prompt]
+}
+
+/**
+ * The `bake-rs` print-mode launch for one native sample: Pi's JSON event
+ * stream, no session file, the Bake arms' `danger-full-access` preset, and the
+ * route's model and effort. The prompt follows `--`, so it is never an option.
+ */
+export function nativeCommand(bin: string, provider: string, model: string, effort: string, prompt: string): string[] {
+  return [bin, '-p', '--mode', 'json', '--no-session', '--permission', 'danger-full-access',
+    '--model', `${provider}/${model}`, '--thinking', effort, '--', prompt]
+}
+
+/** What a native arm's stale writer did: whether it wrote, and whether the write raced an edit. */
+export interface StaleInjection { injected: boolean; raced: boolean }
+
+/**
+ * The stale writer for a native arm, which has no extensions: it reads
+ * `bake-rs`'s `--mode json` events as the evaluator receives them and, after
+ * the first successful `read` of `target`, prepends the comment the fix must
+ * keep and writes `injectionPath`, once.
+ *
+ * The write lands after `bake-rs` has already moved on, so it is ordered only
+ * against later model responses. An edit in the same response as that read,
+ * whether its `tool_execution_start` comes before or after the write, may run
+ * before the write lands; such an injection is `raced`, and the sample says
+ * nothing about the agent's handling of the external change.
+ * @param workspace - the directory relative `read` paths resolve against.
+ * @param target - the absolute path of the file to change.
+ * @param injectionPath - the marker the evaluator's predicate checks.
+ */
+export function nativeStaleWriter(workspace: string, target: string, injectionPath: string): { onEvent(event: any): void; state: StaleInjection } {
+  const state: StaleInjection = { injected: false, raced: false }
+  // pi's convention: each assistant `message_end` is one response, and the calls after it are its own.
+  let step = -1
+  let injectedStep: number | undefined
+  const reads = new Map<string, number>()
+  const editSteps = new Set<number>()
+  return {
+    state,
+    onEvent(event) {
+      if (event?.type === 'message_end' && event.message?.role === 'assistant') step++
+      else if (event?.type === 'tool_execution_start') {
+        if (event.toolName === 'read' && typeof event.args?.path === 'string' && resolve(workspace, event.args.path) === target) reads.set(event.toolCallId, step)
+        else if (isEdit({ tool: event.toolName, input: event.args, callId: event.toolCallId, step })) {
+          editSteps.add(step)
+          if (injectedStep === step) state.raced = true
+        }
+      } else if (event?.type === 'tool_execution_end' && event.toolName === 'read' && event.isError !== true && !state.injected) {
+        const readStep = reads.get(event.toolCallId)
+        if (readStep === undefined) return
+        writeFileSync(target, '// EXTERNAL_CHANGE_KEEP\n' + readFileSync(target, 'utf8'))
+        writeFileSync(injectionPath, JSON.stringify({ injected: true }))
+        state.injected = true
+        injectedStep = readStep
+        if (editSteps.has(readStep)) state.raced = true
+      }
+    },
+  }
+}
+
+/** The context file names `bake-rs` loads from a directory, after Pi's, in its order. */
+export const NATIVE_CONTEXT_FILES = ['AGENTS.override.md', 'AGENTS.md', 'AGENTS.MD']
+
+/**
+ * Context files and skill directories a native sample would load but the
+ * scenario does not own. `bake-rs` reads `~/.agents/AGENTS.md` and
+ * `~/.agents/skills` under the user's home, one context file from each
+ * directory between the filesystem root and its working directory, and the
+ * `.agents/skills` of each directory from its working directory up to the git
+ * root, or to the filesystem root outside a repository. The workspace's own
+ * context file is left out when the scenario provides its own instructions,
+ * and its own `.agents/skills` when the scenario provides skills.
+ * @returns the files found, first match per directory, then the skill directories.
+ */
+export function strayContextFiles(workspace: string, userHome: string, ownsWorkspaceFile: boolean, ownsWorkspaceSkills = false): string[] {
+  const start = realpathSync(workspace)
+  const contextDirs = [join(userHome, '.agents')]
+  const skillDirs = [join(userHome, '.agents', 'skills')]
+  let collectingSkills = true
+  for (let dir = start; ; dir = dirname(dir)) {
+    if (!(ownsWorkspaceFile && dir === start)) contextDirs.push(dir)
+    if (collectingSkills && !(ownsWorkspaceSkills && dir === start)) skillDirs.push(join(dir, '.agents', 'skills'))
+    if (existsSync(join(dir, '.git'))) collectingSkills = false
+    if (dirname(dir) === dir) break
+  }
+  const files = contextDirs.flatMap(dir => {
+    const found = NATIVE_CONTEXT_FILES.map(name => join(dir, name)).find(path => existsSync(path) && statSync(path).isFile())
+    return found === undefined ? [] : [found]
+  })
+  return [...files, ...skillDirs.filter(dir => existsSync(dir))]
 }

@@ -6,7 +6,7 @@
  * remains the oracle for tool-update routes; `retry-attempt` retries a failed
  * model request with another model, one request per settlement. The live composed loop must
  * dispatch exactly each hand-written `expected-requests.json`, and each
- * committed `session.jsonl`, a byte-exact capture of one such run, must
+ * committed `session.v3.jsonl`, a byte-exact capture of one such run, must
  * replay to the same requests. Only generated message ids, and in
  * `dynamic-tools` the tool-history anchors that name them, are normalized; the
  * logs keep their captured ids and timing, so a fresh run is not expected to
@@ -39,13 +39,13 @@ import {
 } from './runtime-fixture.ts'
 import type { ScenarioCapture } from './runtime-fixture.ts'
 
-const FIXTURES = new URL('../../../../conformance/runtime/request-reconstruction/', import.meta.url)
+const FIXTURES = new URL('./fixtures/request-reconstruction/', import.meta.url)
 
 async function readFixture(scenario: string): Promise<{ expected: JsonValue[]; log: Buffer }> {
   const directory = new URL(`${scenario}/`, FIXTURES)
   const [expected, log] = await Promise.all([
     readFile(new URL('expected-requests.json', directory)),
-    readFile(new URL('session.jsonl', directory)),
+    readFile(new URL('session.v3.jsonl', directory)),
   ])
   return { expected: parseExpectedRequests(expected), log }
 }

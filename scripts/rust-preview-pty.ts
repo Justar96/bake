@@ -4,13 +4,14 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { basename, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { parseArgs } from 'node:util'
 import xterm from '@xterm/headless'
+import { Unicode11Addon } from '@xterm/addon-unicode11'
 
 const root = resolve(import.meta.dir, '..')
-const { values } = parseArgs({ options: { binary: { type: 'string' } } })
+const { values } = parseArgs({ options: { binary: { type: 'string' }, filter: { type: 'string' } } })
 const binary = resolve(values.binary ?? join(root, 'rust/target/debug/bake-rs'))
 class Preview {
   private readonly terminal = new xterm.Terminal({ cols: 80, rows: 24, allowProposedApi: true })
@@ -19,16 +20,25 @@ class Preview {
   private readonly process: Bun.Subprocess
   private readonly exited: Promise<number>
   private parsed = Promise.resolve()
+  /** Whether the emulator has parsed the start of a synchronized update but not its end. */
+  private frameOpen = false
+  private parsedTail = ''
   private code: number | undefined
   private streamStatus: number | undefined
   /** Everything the preview wrote, its last MiB, for sequences the screen does not show. */
   raw = ''
 
-  constructor(cwd: string) {
+  constructor(cwd: string, readonly inline = false) {
+    // Emoji cases use Unicode 11 widths, matching modern terminal cell allocation.
+    this.terminal.loadAddon(new Unicode11Addon())
+    this.terminal.unicode.activeVersion = '11'
     const decoder = new TextDecoder()
     // The shell waits for our handshake before exec, preserving its PID. This
     // lets us read cooked modes before the native process can enable raw mode.
-    this.process = Bun.spawn(['sh', '-c', 'read -r ready; exec "$1" preview', 'rust-preview-pty', binary], {
+    const shell = inline
+      ? 'read -r ready; i=0; while [ "$i" -lt 40 ]; do printf "SHELL_HISTORY_%02d\\n" "$i"; i=$((i + 1)); done; exec "$1" preview --inline'
+      : 'read -r ready; exec "$1" preview'
+    this.process = Bun.spawn(['sh', '-c', shell, 'rust-preview-pty', binary], {
       cwd,
       // SSH_TTY sends a copy to the terminal as OSC 52, which the driver
       // reads, instead of to this machine's clipboard.
@@ -38,7 +48,10 @@ class Preview {
         data: (_terminal, bytes) => {
           const text = decoder.decode(bytes, { stream: true })
           this.raw = (this.raw + text).slice(-1_048_576)
-          this.parsed = this.parsed.then(() => new Promise<void>(done => this.terminal.write(text, done)))
+          this.parsed = this.parsed.then(() => new Promise<void>(done => this.terminal.write(text, () => {
+            this.track(text)
+            done()
+          })))
         },
         exit: (_terminal, status) => { this.streamStatus = status },
       },
@@ -46,9 +59,25 @@ class Preview {
     const pty = this.process.terminal
     assert(pty)
     this.pty = pty
+    this.terminal.onData((data) => { this.pty.write(data) })
     this.initialModes = this.modes()
     this.pty.write('start\n')
     this.exited = this.process.exited.then((code) => { this.code = code; return code })
+  }
+
+  /**
+   * Follows synchronized updates through parsed output. The headless emulator
+   * shows a frame's cells as they arrive, while a supporting terminal holds
+   * them until the update ends; a read split inside a frame would otherwise
+   * expose its text before the caret moves. The kept tail is shorter than a
+   * mode sequence, so one split across reads is still seen once whole.
+   */
+  private track(text: string): void {
+    const seen = this.parsedTail + text
+    const begin = seen.lastIndexOf('\x1b[?2026h')
+    const end = seen.lastIndexOf('\x1b[?2026l')
+    if (begin !== end) this.frameOpen = begin > end
+    this.parsedTail = seen.slice(-7)
   }
 
   private modes(): readonly number[] {
@@ -60,11 +89,43 @@ class Preview {
     return Array.from({ length: this.terminal.rows }, (_, row) => buffer.getLine(buffer.viewportY + row)?.translateToString(true) ?? '').join('\n')
   }
 
-  async wait(label: string, condition: () => boolean): Promise<void> {
+  get history(): string {
+    const buffer = this.terminal.buffer.normal
+    return Array.from({ length: buffer.length }, (_, row) => buffer.getLine(row)?.translateToString(true) ?? '').join('\n')
+  }
+
+  assertCursorAfter(text: string): void {
+    const buffer = this.terminal.buffer.active
+    const row = buffer.getLine(buffer.baseY + buffer.cursorY)
+    assert(row, 'cursor row is absent')
+    assert.equal(row.translateToString(true, 0, buffer.cursorX), `│ ❯ ${text}`, 'cursor is not at the draft caret')
+  }
+
+  assertShellHistory(): void {
+    for (let index = 0; index < 40; index++) {
+      const marker = `SHELL_HISTORY_${String(index).padStart(2, '0')}`
+      assert.equal(this.history.split(marker).length - 1, 1, `shell row ${marker} was lost or duplicated`)
+    }
+    assert(!this.raw.includes('\x1b[?1049h'), 'inline preview acquired the alternate screen')
+    assert(!this.raw.includes('\x1b[3J'), 'inline preview erased shell scrollback')
+  }
+
+  assertNoChromeResidue(exited = false): void {
+    const lines = this.history.split('\n')
+    const boxes = lines.filter(line => /^╭─.*╮$/u.test(line))
+    assert.equal(boxes.length, exited ? 0 : 1, 'obsolete composer frames remain in terminal history')
+    assert(!lines.some(line => line.includes('typing never reaches an agent')), 'obsolete inspector rows remain')
+    const buffer = this.terminal.buffer.normal
+    const scrollback = lines.slice(0, buffer.baseY).join('\n')
+    assert(!scrollback.includes('❯') && !/^ {2}Agents .*Ctrl\+G$/mu.test(scrollback), 'live controls escaped into scrollback')
+  }
+
+  /** Waits until `condition` holds of a whole frame, or of any output when `framed` is false. */
+  async wait(label: string, condition: () => boolean, framed = true): Promise<void> {
     const deadline = performance.now() + 30_000
     while (true) {
       await this.parsed
-      if (condition()) return
+      if ((!framed || !this.frameOpen) && condition()) return
       if ((this.code !== undefined && this.streamStatus !== undefined) || performance.now() > deadline) {
         throw new Error(`${label}: ${this.code === undefined ? 'timed out' : `exited ${this.code}`}\n${this.screen}`)
       }
@@ -73,7 +134,7 @@ class Preview {
   }
 
   async ready(): Promise<void> {
-    await this.wait('Rust preview ready', () => this.terminal.buffer.active.type === 'alternate'
+    await this.wait('Rust preview ready', () => this.terminal.buffer.active.type === (this.inline ? 'normal' : 'alternate')
       // The sample session's newest lines and the composer show on the first frame.
       && this.screen.includes('rejects it before splitting.') && this.screen.includes('❯ Type a draft')
       && this.raw.includes('\x1b[?2004h') && this.raw.includes('\x1b[?1000h\x1b[?1002h\x1b[?1006h'))
@@ -86,22 +147,29 @@ class Preview {
     const offset = this.raw.length
     this.terminal.resize(cols, rows)
     this.pty.resize(cols, rows)
-    await this.wait('resize redraw', () => this.raw.slice(offset).includes('\x1b[2J'))
+    await this.wait('resize redraw', () => this.inline
+      ? this.raw.length > offset && this.screen.split('\n').some(line => /^╭─.*╮$/u.test(line) && line.length === cols)
+      : this.raw.slice(offset).includes('\x1b[2J'))
   }
 
-  async resizeBurst(): Promise<void> {
+  /**
+   * Resizes twice while the preview is stopped, after typing `keys`, so it
+   * wakes to input and a resize at once and must read both.
+   */
+  async resizeBurst(keys: string): Promise<void> {
     this.process.kill('SIGSTOP')
     const offset = this.raw.length
     try {
       // Hold every application thread while the emulator reflows twice. The
       // final kernel size equals the previous frame, but that frame is stale.
-      await this.wait('preview stopped', () => /^State:\s+T/mu.test(readFileSync(`/proc/${this.process.pid}/status`, 'utf8')))
+      await this.wait('preview stopped', () => /^State:\s+T/mu.test(readFileSync(`/proc/${this.process.pid}/status`, 'utf8')), false)
+      this.send(keys)
       for (const [cols, rows] of [[40, 12], [80, 24]] as const) {
         this.terminal.resize(cols, rows)
         this.pty.resize(cols, rows)
       }
     } finally { this.process.kill('SIGCONT') }
-    await this.wait('coalesced resize redraw', () => this.raw.slice(offset).includes('\x1b[2J'))
+    await this.wait('coalesced resize redraw', () => this.raw.slice(offset).includes(this.inline ? '╭─' : '\x1b[2J'))
   }
 
   async quit(signal?: 'SIGINT' | 'SIGTERM' | 'SIGHUP'): Promise<void> {
@@ -117,7 +185,7 @@ class Preview {
       assert.equal(this.code, undefined, 'one Ctrl+C quit the preview')
       this.send('\x03')
     } else this.process.kill(signal)
-    await this.wait('preview process and PTY exit', () => this.code !== undefined && this.streamStatus !== undefined)
+    await this.wait('preview process and PTY exit', () => this.code !== undefined && this.streamStatus !== undefined, false)
     // The wait read the parse queue before its last output arrived; the
     // stream has ended now, so this queue holds every byte the preview wrote.
     await this.parsed
@@ -136,6 +204,14 @@ class Preview {
     assert.throws(() => process.kill(this.process.pid, 0), 'application remains alive after exit')
   }
 
+  /** Close the terminal under the preview, as an emulator window closing does, and expect the quiet hangup exit. */
+  async hangUp(): Promise<void> {
+    this.pty.close()
+    const code = await Promise.race([this.exited, delay(5_000).then(() => 'timed out')])
+    assert.equal(code, 129, 'a closed terminal did not end the preview as a hangup')
+    assert.equal(this.process.signalCode, null)
+  }
+
   async close(): Promise<void> {
     if (this.code === undefined) this.process.kill('SIGKILL')
     await this.exited
@@ -144,17 +220,33 @@ class Preview {
     this.terminal.dispose()
   }
 
-  async saveFailure(path: string): Promise<void> { await writeFile(path, this.raw) }
+  async saveFailure(path: string): Promise<void> {
+    await writeFile(path, this.raw)
+    // ANSI alone cannot replay the emulator's resize/reflow operations.
+    await writeFile(`${path}.screen.txt`, this.history)
+  }
 }
 
-async function scenario(name: string, run: (preview: Preview) => Promise<void>): Promise<void> {
+/** Run one scenario in a fresh working directory holding only `files`, which must be all it holds at the end. */
+async function scenario(
+  name: string, run: (preview: Preview) => Promise<void>, files: readonly string[] = [], inline = false,
+): Promise<void> {
+  if (values.filter !== undefined && !name.includes(values.filter)) {
+    console.log(`SKIP Rust PTY: ${name} (filter ${values.filter})`)
+    return
+  }
   const cwd = await mkdtemp(join(tmpdir(), 'bake-rust-pty-'))
   let preview: Preview | undefined
   try {
-    preview = new Preview(cwd)
+    for (const file of files) {
+      await mkdir(dirname(join(cwd, file)), { recursive: true })
+      await writeFile(join(cwd, file), '')
+    }
+    preview = new Preview(cwd, inline)
     await preview.ready()
     await run(preview)
-    assert.deepEqual(await readdir(cwd), [], 'preview wrote files into the working directory')
+    const seeded = [...new Set(files.map(file => file.split('/')[0]))].sort()
+    assert.deepEqual((await readdir(cwd)).sort(), seeded, 'preview wrote files into the working directory')
     console.log(`PASS Rust PTY: ${name}`)
   } catch (error) {
     if (preview !== undefined) {
@@ -231,6 +323,20 @@ await scenario('composer, agent inspection, paste, and resize', async (preview) 
   await preview.wait('command refused', () => preview.screen.includes('Commands are not available in this preview'))
   await preview.quit()
 })
+
+await scenario('an @ mention lists workspace paths, completes one, and closes on Esc', async (preview) => {
+  preview.send('read @src/')
+  await preview.wait('file menu', () => /▸ @src\/lib\.rs/u.test(preview.screen) && preview.screen.includes('@src/main.rs')
+    && preview.screen.includes('Tab completes'))
+  preview.send('\x1b[B\t')
+  await preview.wait('mention completed', () => preview.screen.includes('❯ read @src/main.rs') && !preview.screen.includes('@src/lib.rs'))
+  // A bare name is ranked against the whole tree.
+  preview.send('@READ')
+  await preview.wait('ranked match', () => /▸ @README\.md/u.test(preview.screen))
+  preview.send('\x1b')
+  await preview.wait('menu closed', () => !preview.screen.includes('@README.md') && preview.screen.includes('❯ read @src/main.rs @READ'))
+  await preview.quit()
+}, ['src/main.rs', 'src/lib.rs', 'README.md'])
 
 await scenario('transcript pages, jumps between prompts, and follows output again', async (preview) => {
   preview.send('keep')
@@ -358,12 +464,39 @@ await scenario('a prompt runs a fixture turn that streams, completes, takes a st
   await preview.quit()
 })
 
+await scenario('a resize while a turn streams redraws it once at the new width', async (preview) => {
+  preview.send('resize me\r')
+  await preview.wait('turn running', () => preview.screen.includes('Esc interrupts'))
+  await preview.resize(60, 20)
+  await preview.wait('turn completed narrow', () => preview.screen.includes('❯ Type a draft')
+    && /^ {2}✓ Completed {2}\d+s/mu.test(preview.screen))
+  assert.equal(preview.screen.split('\n').length, 20)
+  assert(preview.screen.split('\n').every(line => [...line].length <= 60), `a row is wider than the terminal\n${preview.screen}`)
+  assert.equal(preview.screen.split('> resize me').length - 1, 1, 'the prompt was drawn twice')
+  await preview.resize(80, 24)
+  await preview.wait('wide again', () => preview.screen.includes('> resize me'))
+  await preview.quit()
+})
+
+// The sample session's running call pulses, so the next frame's write can
+// see the hangup before the watcher does; the watcher has its own unit test.
+// Either way the input thread is stuck in Crossterm and must not be joined.
+await scenario('a terminal that closes while idle ends the preview quietly as a hangup', async (preview) => {
+  await preview.hangUp()
+})
+
+await scenario('a terminal that closes during a turn ends the preview quietly as a hangup', async (preview) => {
+  preview.send('hello\r')
+  await preview.wait('turn running', () => preview.screen.includes('Esc interrupts'))
+  await preview.hangUp()
+})
+
 if (process.platform === 'linux') {
   await scenario('coalesced resize invalidates stale screen', async (preview) => {
     preview.send('RESIZE_DRAFT')
     await preview.wait('draft before resize', () => preview.screen.includes('RESIZE_DRAFT'))
-    await preview.resizeBurst()
-    await preview.wait('draft after resize', () => preview.screen.includes('RESIZE_DRAFT'))
+    await preview.resizeBurst('_TYPED')
+    await preview.wait('draft after resize', () => preview.screen.includes('RESIZE_DRAFT_TYPED'))
     assert.equal(preview.screen.split('RESIZE_DRAFT').length - 1, 1, 'resize duplicated the draft')
     await preview.quit()
   })
@@ -372,3 +505,144 @@ if (process.platform === 'linux') {
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
   await scenario(`${signal} restores terminal`, async (preview) => { await preview.quit(signal) })
 }
+
+await scenario('fullscreen Unicode 11 draft keeps the terminal caret at grapheme boundaries', async (preview) => {
+  const draft = '漢字🙂e\u0301'
+  preview.send(draft)
+  await preview.wait('fullscreen Unicode draft', () => preview.screen.includes(`❯ ${draft}`))
+  preview.assertCursorAfter(draft)
+  preview.send('\x1b[DZ')
+  await preview.wait('fullscreen grapheme edit', () => preview.screen.includes('❯ 漢字🙂Ze\u0301'))
+  preview.assertCursorAfter('漢字🙂Z')
+  await preview.quit()
+})
+
+await scenario('inline preserves shell history, commits turns once, and keeps the Unicode caret', async (preview) => {
+  preview.assertShellHistory()
+  const draft = '漢字🙂e\u0301'
+  preview.send(draft)
+  await preview.wait('Unicode draft', () => preview.screen.includes(`❯ ${draft}`))
+  preview.assertCursorAfter(draft)
+  preview.send('\x1b[DZ')
+  await preview.wait('grapheme caret edit', () => preview.screen.includes('❯ 漢字🙂Ze\u0301'))
+  preview.assertCursorAfter('漢字🙂Z')
+  preview.send('\x01\x0b\x1b[200~inline line one\ninline line two\x1b[201~')
+  await preview.wait('inline multiline composer', () => preview.screen.includes('inline line one') && preview.screen.includes('inline line two'))
+  preview.assertShellHistory()
+  preview.send('\x1f')
+  await preview.wait('inline multiline undo', () => !preview.screen.includes('inline line two'))
+  preview.send('\x01\x0b')
+  for (const prompt of ['INLINE_FIRST_UNIQUE', 'INLINE_SECOND_UNIQUE']) {
+    preview.send(`${prompt}\r`)
+    await preview.wait('inline turn running', () => preview.screen.includes('Esc interrupts'))
+    if (prompt === 'INLINE_FIRST_UNIQUE') {
+      // transcript::present opens a user row with one blank and its dashed rule.
+      const lines = preview.history.split('\n')
+      const sampleEnd = lines.findIndex(line => line.trim() === 'rejects it before splitting.')
+      const userStart = lines.findIndex(line => line.trimEnd() === `> ${prompt}`)
+      assert(sampleEnd >= 0 && userStart > sampleEnd, 'the committed sample-to-prompt boundary is missing')
+      assert.deepEqual(lines.slice(sampleEnd + 1, userStart), ['', '-'.repeat(79)],
+        'publishing a prompt inserted live-region padding into the transcript')
+      await preview.resize(60, 20)
+      preview.send('kept while streaming')
+      await preview.wait('draft during streaming', () => preview.screen.includes('❯ kept while streaming'))
+    }
+    await preview.wait('inline turn completed', () => /^ {2}✓ Completed {2}\d+s/mu.test(preview.screen))
+    preview.assertShellHistory()
+    assert.equal(preview.history.split('\n').filter(line => line.trimEnd() === `> ${prompt}`).length, 1,
+      'committed user prompt was lost or duplicated')
+    if (prompt === 'INLINE_FIRST_UNIQUE') {
+      preview.send('\x01\x0b')
+      await preview.resize(80, 24)
+      await preview.wait('empty draft after streaming', () => preview.screen.includes('❯ Type a draft'))
+    }
+  }
+  preview.send('\x1b[5~')
+  await preview.wait('inline reads history', () => /↓ \d+ lines below · Ctrl\+End/u.test(preview.screen))
+  preview.send('\x1b[1;5F')
+  await preview.wait('inline follows output again', () => preview.screen.includes('PgUp scroll') && !/↓ \d+ lines below/u.test(preview.screen))
+  for (const prompt of ['INLINE_FIRST_UNIQUE', 'INLINE_SECOND_UNIQUE'])
+    assert.equal(preview.history.split('\n').filter(line => line.trimEnd() === `> ${prompt}`).length, 1,
+      'revisiting history duplicated a committed user prompt')
+  assert.equal(preview.history.split("This reply comes from the preview's fixture runtime.").length - 1, 2, 'a settled fixture answer was lost or duplicated')
+  preview.send('\x07')
+  await preview.wait('inline agent picker', () => preview.screen.includes('Fixed examples · nothing is running'))
+  preview.send('\x1b[B\r')
+  await preview.wait('inline inspection', () => preview.screen.includes('typing never reaches an agent'))
+  preview.send('forbidden\x1b')
+  await preview.wait('inline composer restored', () => !preview.screen.includes('typing never reaches an agent') && preview.screen.includes('❯ Type a draft'))
+  assert(!preview.history.includes('forbidden'), 'inspection accepted input')
+  preview.assertShellHistory()
+  preview.assertNoChromeResidue()
+  preview.send('\x14')
+  await preview.wait('inline sample running', () => preview.screen.includes('Esc interrupts'))
+  await preview.wait('inline sample calls arrive', () => /╰ [● ] tools\.bash +bun run build/u.test(preview.screen))
+  preview.send('\x14')
+  await preview.wait('inline sample settles', () => preview.history.includes('return    { manifests: 12, exitCode: 0 }')
+    || /return +\{ manifests: 12, exitCode: 0 \}/u.test(preview.history))
+  await preview.wait('inline sample compaction', () => preview.screen.includes('Compacting history…'))
+  preview.send('\x1b')
+  await preview.wait('inline sample stops', () => !preview.screen.includes('Compacting') && /^ {2}✓ Completed/mu.test(preview.screen))
+  assert.equal(preview.history.split('{ manifests: 12, exitCode: 0 }').length - 1, 1, 'sample settlement was lost or duplicated')
+  preview.assertShellHistory()
+  await preview.quit()
+  preview.assertShellHistory()
+  preview.assertNoChromeResidue(true)
+}, [], true)
+
+for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
+  await scenario(`inline ${signal} restores terminal and shell history`, async (preview) => {
+    await preview.quit(signal)
+    preview.assertShellHistory()
+    preview.assertNoChromeResidue(true)
+  }, [], true)
+}
+
+// Typing and a resize that reach the preview together must both be read; a
+// reader that took only the resize left the keys unread until the next one.
+await scenario('inline keys sent with a resize are read at once', async (preview) => {
+  let draft = ''
+  for (let round = 0; round < 40; round++) {
+    draft += String.fromCharCode(97 + round % 26)
+    preview.send(draft.at(-1) ?? '')
+    await preview.resize(round % 2 === 0 ? 79 : 80, 24)
+    await preview.wait(`key ${round} with a resize`, () => preview.screen.includes(`❯ ${draft} `))
+  }
+  await preview.quit()
+}, [], true)
+
+await scenario('inline terminal hangup while idle exits quietly', async (preview) => {
+  await preview.hangUp()
+}, [], true)
+
+await scenario('inline terminal hangup while streaming exits quietly', async (preview) => {
+  preview.send('INLINE_HANGUP\r')
+  await preview.wait('inline turn before hangup', () => preview.screen.includes('Esc interrupts'))
+  await preview.hangUp()
+}, [], true)
+
+
+if (process.platform === 'linux') {
+  await scenario('inline coalesced resize keeps shell scrollback and live controls out of history', async (preview) => {
+    preview.send('INLINE_BURST_UNIQUE\r')
+    await preview.wait('inline stream before burst', () => preview.screen.includes('Esc interrupts'))
+    preview.send('BURST_DRAFT')
+    await preview.wait('inline draft before burst', () => preview.screen.includes('❯ BURST_DRAFT'))
+    await preview.resizeBurst('_TYPED')
+    await preview.wait('inline draft after burst', () => preview.screen.includes('❯ BURST_DRAFT_TYPED'))
+    preview.assertCursorAfter('BURST_DRAFT_TYPED')
+    preview.assertShellHistory()
+    preview.assertNoChromeResidue()
+    assert.equal(preview.history.split('\n').filter(line => line.trimEnd() === '> INLINE_BURST_UNIQUE').length, 1,
+      'coalesced resize erased the already published prompt')
+    await preview.wait('inline turn after burst', () => /^ {2}✓ Completed/mu.test(preview.screen))
+    assert.equal(preview.history.split('\n').filter(line => line.trimEnd() === '> INLINE_BURST_UNIQUE').length, 1,
+      `coalesced resize lost or duplicated committed prompt\n${preview.history.split('\n').filter(line => line.includes('BURST')).join('\n')}`)
+    assert.equal(preview.history.split('BURST_DRAFT').length - 1, 1, 'coalesced resize duplicated live draft')
+    preview.assertShellHistory()
+    preview.assertNoChromeResidue()
+    await preview.quit()
+    preview.assertShellHistory()
+    preview.assertNoChromeResidue(true)
+  }, [], true)
+} else console.log('SKIP Rust PTY: inline coalesced resize barrier needs Linux /proc process state')

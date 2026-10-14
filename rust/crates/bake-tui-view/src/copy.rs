@@ -68,6 +68,13 @@ pub const LINES_BELOW: &str = "lines below";
 pub const TAB_COMPLETES: &str = "Tab completes";
 pub const MORE_MATCHES: &str = "more, keep typing to narrow";
 pub const NO_COMPLETIONS: &str = "No matching commands";
+/// The file menu's words: each row's kind when the rows mix them, and its
+/// states while discovery looks, finds nothing, or fails.
+pub const FILE: &str = "File";
+pub const DIRECTORY: &str = "Directory";
+pub const FILES_LOADING: &str = "Finding paths…";
+pub const NO_FILES: &str = "No matching paths";
+pub const FILES_ERROR: &str = "File discovery failed";
 /// A command submitted in the preview, which has no command service.
 pub const NO_COMMANDS: &str = "Commands are not available in this preview";
 /// The attachments panel's title, before the count, and its footer.

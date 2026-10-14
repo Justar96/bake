@@ -32,7 +32,7 @@ This decision rejects the tested widget version as the composer model. Ratatui r
 
 ## Reproduce the probe
 
-The manifest, lockfile, source, and output here are frozen experiment inputs and observations. Copy this directory to an ignored scratch directory before running Cargo. These files are not a workspace member, a shipped dependency, or a required CI test; the [scope-01 workspace](../../README.md#01--workspace-and-comparison-harness) remains planned.
+The manifest, lockfile, source, and output here are frozen experiment inputs and observations. Copy this directory to an ignored scratch directory before running Cargo. These files are not a workspace member, a shipped dependency, or a required CI test; the [scope-01 workspace](../../README.md#01--rust-workspace-and-native-eval-arm) remains planned.
 
 The executed environment was Linux x64, rustc 1.99.0 (`b940084d7`, LLVM 23.1.1), and cargo 1.99.0 (`5f94df478`). The locked graph resolves `ratatui-textarea` 0.9.3, Ratatui 0.30.2, Crossterm 0.29.0, `unicode-width` 0.2.2, and `unicode-segmentation` 1.13.3. The dependency tree contains one Crossterm version.
 

@@ -329,6 +329,7 @@ function expectedPiArgs(effort: string, scenario: string): string[] {
   return [
     '--mode', 'json', '--no-session', '--no-extensions', '--no-skills', '--no-prompt-templates', '--no-themes',
     ...scenario === 'instructions_file' ? [] : ['--no-context-files'],
+    ...scenario === 'skill_check' ? ['--skill', '<SAMPLE>/workspace/.agents/skills'] : [],
     '--model', 'eval/fixture-model', '--thinking', effort,
     ...scenario === 'stale_edit' ? ['-e', '<SAMPLE>/stale-writer.mjs'] : [],
     prompts[scenario]!,
@@ -493,12 +494,13 @@ contract('headless', {
 
 contract('tui', {
   models: 'fixture-model@high', effort: 'high',
-  cases: ['ordinary_edit', 'stale_edit', 'instructions_file', 'long_session'],
+  cases: ['ordinary_edit', 'stale_edit', 'instructions_file', 'long_session', 'skill_check'],
   order: [
     'ordinary_edit.0.base', 'ordinary_edit.0.cand', 'ordinary_edit.0.pi',
     'stale_edit.0.cand', 'stale_edit.0.pi', 'stale_edit.0.base',
     'instructions_file.0.pi', 'instructions_file.0.base', 'instructions_file.0.cand',
     'long_session.0.base', 'long_session.0.cand', 'long_session.0.pi',
+    'skill_check.0.cand', 'skill_check.0.pi', 'skill_check.0.base',
   ].map(label => `fixture-model.${label}`),
   env: { EVAL_EXTRA_BASE: JSON.stringify(EXTRA_BASE), EVAL_SETTINGS_BASE: SETTINGS_BASE },
   baseExtra: EXTRA_BASE,

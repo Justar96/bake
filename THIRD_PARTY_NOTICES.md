@@ -223,6 +223,86 @@ Direct dependencies of the `pyproject.toml` manifests, plus `uv` as the developm
 | [`pytest`](https://github.com/pytest-dev/pytest) | MIT | test-only |
 | [`uv`](https://github.com/astral-sh/uv) | MIT / Apache-2.0 | development workflow tool |
 
+## Ported source (`rust/crates/bake-ai`)
+
+The Rust `bake-ai` crate ports code from these MIT-licensed projects. Its [`NOTICE`](rust/crates/bake-ai/NOTICE) file reproduces both license texts, and its module documentation names each source file.
+
+| Project | Ported revision | License |
+| --- | --- | --- |
+| [Pi](https://github.com/earendil-works/pi) `packages/ai`, Copyright (c) 2025 Mario Zechner | v1.1.0 (`abe508e1b89912adde45528136c3221eb69acdd7`) | MIT |
+| [partial-json](https://github.com/promplate/partial-json-parser-js), Copyright (c) 2023 Promplate Dev Team | 0.1.7 | MIT |
+
+The crate's Cargo dependencies are locked in [`rust/Cargo.lock`](rust/Cargo.lock) and keep their own licenses.
+
+## Ported source (`rust/crates/bake-agent`)
+
+The Rust `bake-agent` crate ports Pi's agent loop and stateful agent, and the tool-argument validation of Pi's `ai` package. Its [`NOTICE`](rust/crates/bake-agent/NOTICE) file reproduces the license text, and its module documentation names each source file.
+
+| Project | Ported revision | License |
+| --- | --- | --- |
+| [Pi](https://github.com/earendil-works/pi) `packages/agent` and `packages/ai/src/utils/validation.ts`, Copyright (c) 2025 Mario Zechner | v1.1.0 (`abe508e1b89912adde45528136c3221eb69acdd7`) | MIT |
+
+## Ported source (`rust/crates/bake-coding-agent`)
+
+The Rust `bake-coding-agent` crate ports Pi's coding-agent package, and the line diff and patch of jsdiff that Pi's edit tool uses. Its [`NOTICE`](rust/crates/bake-coding-agent/NOTICE) file reproduces both license texts, and its module documentation names each source file.
+
+| Project | Ported revision | License |
+| --- | --- | --- |
+| [Pi](https://github.com/earendil-works/pi) `packages/coding-agent`, Copyright (c) 2025 Mario Zechner | v1.1.0 (`abe508e1b89912adde45528136c3221eb69acdd7`) | MIT |
+| [jsdiff](https://github.com/kpdecker/jsdiff), Copyright (c) 2009-2015 Kevin Decker | 8.0.4 | BSD-3-Clause |
+
+## Rust YAML reader (`rust/crates/bake-coding-agent`)
+
+`bake-coding-agent` reads the 0.3 Bake home's `settings.yaml` and `.credentials.yaml` with serde-saphyr. These crates entered [`rust/Cargo.lock`](rust/Cargo.lock) with it and keep their own licenses.
+
+| Crate | Version | License |
+| --- | --- | --- |
+| [`serde-saphyr`](https://github.com/bourumir-wyngs/serde-saphyr) | 1.3.0 | MIT OR Apache-2.0 |
+| [`granit-parser`](https://github.com/bourumir-wyngs/granit-parser) | 1.3.0 | MIT OR Apache-2.0 |
+| [`annotate-snippets`](https://github.com/rust-lang/annotate-snippets-rs) | 0.12.16 | MIT OR Apache-2.0 |
+| [`anstyle`](https://github.com/rust-cli/anstyle) | 1.0.14 | MIT OR Apache-2.0 |
+| [`arraydeque`](https://github.com/andylokandy/arraydeque) | 0.5.1 | MIT OR Apache-2.0 |
+| [`encoding_rs_io`](https://github.com/BurntSushi/encoding_rs_io) | 0.1.8 | MIT OR Apache-2.0 |
+| [`encoding_rs`](https://github.com/hsivonen/encoding_rs) | 0.8.42 | (Apache-2.0 OR MIT) AND BSD-3-Clause |
+| [`core_detect`](https://github.com/thomcc/core_detect) | 1.0.0 | MIT OR Apache-2.0 |
+| [`multiversion_no_op`](https://github.com/hsivonen/multiversion_no_op) | 1.0.0 | Apache-2.0 OR MIT |
+| [`simdutf8`](https://github.com/rusticstuff/simdutf8) | 0.1.5 | MIT OR Apache-2.0 |
+
+## Rust image codecs (`rust/crates/bake-coding-agent`)
+
+The `read` tool decodes, orients, resizes, and re-encodes images with the `image` crate, in place of the Photon WebAssembly module Pi uses, built with only its PNG, JPEG, GIF, WebP, and BMP codecs. These crates entered [`rust/Cargo.lock`](rust/Cargo.lock) with it and keep their own licenses. The lock also lists `zlib-rs` 0.6.8 (Zlib), an optional `flate2` backend that no Bake build enables.
+
+| Crate | Version | License |
+| --- | --- | --- |
+| [`image`](https://github.com/image-rs/image) | 0.25.10 | MIT OR Apache-2.0 |
+| [`png`](https://github.com/image-rs/image-png) | 0.18.1 | MIT OR Apache-2.0 |
+| [`gif`](https://github.com/image-rs/image-gif) | 0.14.2 | MIT OR Apache-2.0 |
+| [`image-webp`](https://github.com/image-rs/image-webp) | 0.2.4 | MIT OR Apache-2.0 |
+| [`zune-jpeg`](https://github.com/etemesi254/zune-image) | 0.5.15 | MIT OR Apache-2.0 OR Zlib |
+| [`zune-core`](https://github.com/etemesi254/zune-image) | 0.5.3 | MIT OR Apache-2.0 OR Zlib |
+| [`moxcms`](https://github.com/awxkee/moxcms) | 0.8.1 | BSD-3-Clause OR Apache-2.0 |
+| [`pxfm`](https://github.com/awxkee/pxfm) | 0.1.30 | BSD-3-Clause OR Apache-2.0 |
+| [`fdeflate`](https://github.com/image-rs/fdeflate) | 0.3.7 | MIT OR Apache-2.0 |
+| [`flate2`](https://github.com/rust-lang/flate2-rs) | 1.1.10 | MIT OR Apache-2.0 |
+| [`miniz_oxide`](https://github.com/Frommi/miniz_oxide) | 0.8.9, 0.9.1 | MIT OR Zlib OR Apache-2.0 |
+| [`adler2`](https://github.com/oyvindln/adler2) | 2.0.1 | 0BSD OR MIT OR Apache-2.0 |
+| [`crc32fast`](https://github.com/srijs/rust-crc32fast) | 1.5.2 | MIT OR Apache-2.0 |
+| [`simd-adler32`](https://github.com/mcountryman/simd-adler32) | 0.3.10 | MIT |
+| [`weezl`](https://github.com/image-rs/weezl) | 0.1.12 | MIT OR Apache-2.0 |
+| [`color_quant`](https://github.com/image-rs/color_quant) | 1.1.0 | MIT |
+| [`bytemuck`](https://github.com/Lokathor/bytemuck) | 1.25.2 | Zlib OR Apache-2.0 OR MIT |
+| [`byteorder-lite`](https://github.com/image-rs/byteorder-lite) | 0.1.0 | Unlicense OR MIT |
+| [`quick-error`](https://github.com/tailhook/quick-error) | 2.0.1 | MIT OR Apache-2.0 |
+
+## Rust process ownership (`rust/crates/bake-coding-agent`)
+
+`bake-coding-agent`'s bash tool owns each command's process tree through these crates, which were already in [`rust/Cargo.lock`](rust/Cargo.lock) for Tokio and keep their own licenses.
+
+| Crate | Version | License | Use |
+| --- | --- | --- | --- |
+| [`libc`](https://github.com/rust-lang/libc) | 0.2.190 | MIT OR Apache-2.0 | `setsid` and `kill` on Unix |
+| [`windows-sys`](https://github.com/microsoft/windows-rs) | 0.61.2 | MIT OR Apache-2.0 | job objects on Windows |
+
 ## Adapted designs
 
 Earlier terminal turn header revisions included a Braille port (`GLYPH_PULSE`) of the "Glyph Pulse" loader (`dotm-square-9`) from [dot-matrix](https://dotmatrix.zzzzshawn.cloud) ([source](https://github.com/zzzzshawn/matrix)), copyright (c) 2026 dot-matrix contributors, all rights reserved. That adaptation is covered by the project's custom license, which permits use in commercial and non-commercial products and prohibits, without written permission, publishing or distributing its components as standalone reusable components or as part of another component library, and selling or sublicensing them as a standalone offering. Bake's MIT license does not cover this adaptation; do not extract it into a reusable component or library.

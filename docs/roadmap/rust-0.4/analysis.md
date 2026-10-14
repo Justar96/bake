@@ -53,7 +53,7 @@ The [writer constant](../../../packages/core/session/src/types.ts) is currently 
 
 [Generation storage](../../../packages/session/session-persistence-jsonl/src/generation.ts) validates and publishes versioned successors while preserving predecessors. [Format helpers](../../../packages/session/session-persistence-jsonl/src/format.ts) define header omission rules, filenames, and path encoding. [Zstandard handling](../../../packages/session/session-persistence-jsonl/src/zstd.ts) has framing and truncation semantics beyond “decompress this file.” A Rust port must compare decoded rows and admission failures, not require compressed bytes to match a different compressor.
 
-[Writer leases](../../../packages/session/session-persistence-jsonl/src/lease.ts) use POSIX flock and Windows LockFileEx, with stable-file identity checks. A generic file-lock crate is acceptable only if it interoperates with these exact locks. Fresh Rust-versus-Rust lock tests alone cannot prove coexistence with an installed 0.3 process.
+[Writer leases](../../../packages/session/session-persistence-jsonl/src/lease.ts) use POSIX flock and Windows LockFileEx, with stable-file identity checks. Under [D32](scope-00/support.md#decision-register) 0.4 does not read or lock Bake Session logs, so its Pi-format sessions need writer exclusion only against other 0.4 processes, not coexistence with an installed 0.3 process.
 
 ### JavaScript semantics can change model input
 
@@ -156,7 +156,7 @@ Scope 00 must settle these points in a concrete support matrix. Recommended defa
 | Decision | Recommended default | Evidence needed before acceptance |
 |---|---|---|
 | Native completion | Native standard, minimal, and code-mode agent paths plus terminal/headless/Desktop; explicit disposition for the shipped Cordis preset; custom JavaScript/Cordis profiles excluded | Per-profile command/tool/config/provider inventory |
-| Session version | Preserve current format 3 unless a separately justified structural change is required | Cross-runtime write/read/reconstruction and historical migration tests |
+| Session version | Superseded by [D32](scope-00/support.md#decision-register): 0.4 writes Pi's session format and reads no Bake Session log | Pi's session tests, ported; resume after a killed writer |
 | Extension strategy | Built-ins in Rust; ship Rust only; custom JavaScript/Cordis profiles and their migration excluded (D5); keep TypeScript as the development oracle; require a native plugin API in 0.4.0 (D6), designed around a named consumer | Real native plugin lifecycle and unsupported-profile refusal fixtures; separate D7 disposition for shipped Cordis tooling |
 | Desktop integration | Coordinate native child spawning or test an Electron port-to-stdio adapter | Separate Desktop consumer test on supported hosts |
 | Provider breadth | Inventory catalog routes as well as three generic wire overrides; preserve claimed login flows | Fixture and live-smoke matrix with no implicit unsupported routes |

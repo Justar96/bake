@@ -1,0 +1,17 @@
+event: response.created
+data: {"type":"response.created","sequence_number":0,"response":{"id":"resp_0002","object":"response","created_at":1760000000,"status":"in_progress","model":"loop-model","output":[]}}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","sequence_number":1,"output_index":0,"item":{"id":"fc_0001","type":"function_call","status":"in_progress","call_id":"call_0001","name":"read","arguments":""}}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","sequence_number":2,"item_id":"fc_0001","output_index":0,"delta":"{\"path\":\"notes.txt\"}"}
+
+event: response.function_call_arguments.done
+data: {"type":"response.function_call_arguments.done","sequence_number":3,"item_id":"fc_0001","output_index":0,"arguments":"{\"path\":\"notes.txt\"}"}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","sequence_number":4,"output_index":0,"item":{"id":"fc_0001","type":"function_call","status":"completed","call_id":"call_0001","name":"read","arguments":"{\"path\":\"notes.txt\"}"}}
+
+event: response.completed
+data: {"type":"response.completed","sequence_number":5,"response":{"id":"resp_0002","object":"response","created_at":1760000000,"status":"completed","model":"loop-model","output":[{"id":"fc_0001","type":"function_call","status":"completed","call_id":"call_0001","name":"read","arguments":"{\"path\":\"notes.txt\"}"}],"usage":{"input_tokens":40,"input_tokens_details":{"cached_tokens":0},"output_tokens":8,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":48}}}

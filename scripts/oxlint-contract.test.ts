@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
@@ -18,24 +18,41 @@ function isUnknownArray(value: unknown): value is unknown[] {
   return Array.isArray(value)
 }
 
+interface LintRun {
+  readonly status: number | null
+  readonly signal: NodeJS.Signals | null
+  readonly stdout: string
+  readonly stderr: string
+}
+
+// An asynchronous spawn: under `bun test --parallel` on a busy host, a synchronous
+// spawn can leave its worker spinning after the child has exited.
+function run(args: readonly string[], env: NodeJS.ProcessEnv): Promise<LintRun> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, args, {
+      cwd: repositoryRoot,
+      env: { ...process.env, NO_COLOR: '1', ...env },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    let stdout = ''
+    let stderr = ''
+    child.stdout.setEncoding('utf8').on('data', (chunk: string) => { stdout += chunk })
+    child.stderr.setEncoding('utf8').on('data', (chunk: string) => { stderr += chunk })
+    child.on('error', reject)
+    child.on('close', (status, signal) => resolve({ status, signal, stdout, stderr }))
+  })
+}
+
 // Bun runs the wrapper and Oxlint here, as `bun run lint` and the pre-commit hook do.
-function runRepositoryOxlint(args: readonly string[], env: NodeJS.ProcessEnv = {}) {
-  return spawnSync(process.execPath, ['scripts/run-oxlint.ts', ...args], {
-    cwd: repositoryRoot,
-    encoding: 'utf8',
-    env: { ...process.env, NO_COLOR: '1', ...env },
-  })
+function runRepositoryOxlint(args: readonly string[], env: NodeJS.ProcessEnv = {}): Promise<LintRun> {
+  return run(['scripts/run-oxlint.ts', ...args], env)
 }
 
-function runOxlint(args: readonly string[], env: NodeJS.ProcessEnv = {}) {
-  return spawnSync(process.execPath, [oxlintCli, ...args], {
-    cwd: repositoryRoot,
-    encoding: 'utf8',
-    env: { ...process.env, NO_COLOR: '1', ...env },
-  })
+function runOxlint(args: readonly string[], env: NodeJS.ProcessEnv = {}): Promise<LintRun> {
+  return run([oxlintCli, ...args], env)
 }
 
-function normalizedOutput(result: ReturnType<typeof runOxlint>): string {
+function normalizedOutput(result: LintRun): string {
   return `${result.stdout}${result.stderr}`.replaceAll('\\', '/')
 }
 
@@ -79,7 +96,7 @@ probePromise()
         paths.set(label, relative(repositoryRoot, path).replaceAll('\\', '/'))
       }
 
-      const result = runOxlint([
+      const result = await runOxlint([
         '--config',
         relative(repositoryRoot, configPath),
         '--format',
@@ -88,7 +105,6 @@ probePromise()
       ], { OXC_LOG: 'debug' })
       const output = normalizedOutput(result)
 
-      expect(result.error).toBeUndefined()
       expect(result.status, output).toBe(1)
       // Every class still runs the type-aware rules.
       for (const [label, path] of paths) {
@@ -135,7 +151,7 @@ export const longProbe = 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 +
 
     try {
       await writeFile(path, source)
-      const result = runOxlint([
+      const result = await runOxlint([
         '--config',
         relative(repositoryRoot, configPath),
         '--format',
@@ -144,7 +160,6 @@ export const longProbe = 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 +
       ])
       const output = normalizedOutput(result)
 
-      expect(result.error).toBeUndefined()
       expect(result.status, output).toBe(1)
       expect(output).toContain('@stylistic(max-len)')
       expect(output).toContain('sonarjs(no-identical-functions)')
@@ -199,14 +214,13 @@ export const longProbe = 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 +
     })
   })
 
-  it('checks preserved TypeGraph syntax without type-aware analysis', () => {
-    const result = runOxlint([
+  it('checks preserved TypeGraph syntax without type-aware analysis', async () => {
+    const result = await runOxlint([
       '--config',
       '.oxlintrc.staged.json',
       'packages/typert/generator/tests/fixtures/type-model',
     ])
 
-    expect(result.error).toBeUndefined()
     expect(result.status, normalizedOutput(result)).toBe(0)
   })
 
@@ -251,7 +265,7 @@ export const longProbe = 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 +
 
     try {
       await writeFile(path, '// oxlint-disable-next-line no-console\nexport const value = 1\n')
-      const result = runOxlint([
+      const result = await runOxlint([
         '--config',
         relative(repositoryRoot, configPath),
         '--format',
@@ -260,7 +274,6 @@ export const longProbe = 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 +
       ])
       const output = normalizedOutput(result)
 
-      expect(result.error).toBeUndefined()
       expect(result.status, output).toBe(0)
       expect(output).toContain('Unused oxlint-disable directive')
     } finally {
@@ -326,8 +339,7 @@ export function unrelatedRead(): void {
         ...productionPaths.map(path => writeFile(join(repositoryRoot, path), existing)),
       ])
       const args = ['--config', relative(repositoryRoot, configPath), '--format', 'unix', ...paths]
-      const allowed = runRepositoryOxlint(args)
-      expect(allowed.error).toBeUndefined()
+      const allowed = await runRepositoryOxlint(args)
       expect(allowed.signal).toBeNull()
       expect(allowed.status, normalizedOutput(allowed)).toBe(0)
 
@@ -335,9 +347,8 @@ export function unrelatedRead(): void {
         ...testPaths.map(path => writeFile(join(repositoryRoot, path), reads + unrelated)),
         ...productionPaths.map(path => writeFile(join(repositoryRoot, path), reads)),
       ])
-      const rejected = runRepositoryOxlint(args)
+      const rejected = await runRepositoryOxlint(args)
       const output = normalizedOutput(rejected)
-      expect(rejected.error).toBeUndefined()
       expect(rejected.signal).toBeNull()
       expect(rejected.status, output).toBe(1)
       const diagnostics = output.split('\n').filter(line => /:\d+:\d+: `\w+` is deprecated\./.test(line))
@@ -364,14 +375,13 @@ export function unrelatedRead(): void {
     }
   }, 90_000)
 
-  it('accepts an ignored-only staged selection', () => {
-    const result = runOxlint([
+  it('accepts an ignored-only staged selection', async () => {
+    const result = await runOxlint([
       '--fix',
       '--no-error-on-unmatched-pattern',
       'scripts/install-lefthook.mjs',
     ])
 
-    expect(result.error).toBeUndefined()
     expect(result.status, normalizedOutput(result)).toBe(0)
   })
 
@@ -393,7 +403,7 @@ export function unrelatedRead(): void {
     const path = join(repositoryRoot, 'scripts', `staged-lint-probe-${suffix}.ts`)
     try {
       await writeFile(path, 'export const value={answer:1};\n')
-      const lint = runOxlint([
+      const lint = await runOxlint([
         '--config',
         relative(repositoryRoot, configPath),
         '--format',
@@ -402,7 +412,6 @@ export function unrelatedRead(): void {
       ])
       const output = normalizedOutput(lint)
 
-      expect(lint.error).toBeUndefined()
       expect(lint.status, output).toBe(1)
       expect(output).toContain('@stylistic')
       expect(output).not.toContain('typescript(')
@@ -417,7 +426,7 @@ export function unrelatedRead(): void {
 
     try {
       await writeFile(path, '// oxlint-disable-next-line no-console\nexport const value = 1\n')
-      const result = runRepositoryOxlint([
+      const result = await runRepositoryOxlint([
         '--config',
         '.oxlintrc.staged.json',
         '--format',
@@ -426,7 +435,6 @@ export function unrelatedRead(): void {
         relative(repositoryRoot, path),
       ])
 
-      expect(result.error).toBeUndefined()
       expect(result.status, normalizedOutput(result)).toBe(0)
       expect(result.stdout).toContain('Unused oxlint-disable directive')
       expect(result.stderr).toBe('')
@@ -441,7 +449,7 @@ export function unrelatedRead(): void {
 
     try {
       await writeFile(path, `export const longProbe = ${'1 + '.repeat(80)}1\n`)
-      const result = runRepositoryOxlint([
+      const result = await runRepositoryOxlint([
         '--config',
         '.oxlintrc.staged.json',
         '--format',
@@ -451,7 +459,6 @@ export function unrelatedRead(): void {
       ])
       const output = normalizedOutput(result)
 
-      expect(result.error).toBeUndefined()
       expect(result.status, output).toBe(1)
       expect(output.match(/@stylistic\(max-len\)/g)).toHaveLength(1)
     } finally {
@@ -471,9 +478,8 @@ export function unrelatedRead(): void {
         await writeFile(path, 'const value={answer:1};  \nconsole.log(value)\n')
 
         const relativePath = relative(repositoryRoot, path)
-        const lintResult = runRepositoryOxlint(['--config', '.oxlintrc.staged.json', fixFlag, relativePath])
+        const lintResult = await runRepositoryOxlint(['--config', '.oxlintrc.staged.json', fixFlag, relativePath])
 
-        expect(lintResult.error).toBeUndefined()
         expect(lintResult.status, normalizedOutput(lintResult)).toBe(0)
         expect(normalizedOutput(lintResult)).not.toContain('@stylistic')
         await expect(readFile(path, 'utf8')).resolves.toBe('const value={ answer:1 }\nconsole.log(value)\n')

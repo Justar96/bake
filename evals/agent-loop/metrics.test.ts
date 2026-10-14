@@ -1,8 +1,8 @@
 /** Loop-shape metrics over synthetic Bake and pi event streams. */
 import { describe, expect, test } from 'bun:test'
 import {
-  backgroundStarts, type Call, compactions, editCheckSplits, excessRequests, isBareGlob, normalizeBake, normalizePi, orientationCalls, ranCheck,
-  readsFile, requestsOverFloor, runawayAbort, shellEdits, verifiedBeforeFinal,
+  backgroundStarts, type Call, compactions, editCheckSplits, excessRequests, isBareGlob, jsonModeCompactions, normalizeBake, normalizePi, orientationCalls, ranCheck,
+  readsFile, requestsOverFloor, runawayAbort, shellEdits, skillLoads, verifiedBeforeFinal,
 } from './metrics.ts'
 
 const TEST = /\bnode\s+(?:\.\/)?test\.cjs\b/
@@ -133,6 +133,39 @@ describe('verification', () => {
   })
 })
 
+describe('skill loads', () => {
+  test('count the skill tool, a read of a SKILL.md under .agents/skills, and a shell print of one, each skill once in first-load order', () => {
+    expect(skillLoads([
+      call(0, 'read', { path: '/w/.agents/skills/money-check/SKILL.md' }),
+      call(0, 'read', { path: 'src/money.js' }),
+      call(1, 'skill', { name: 'release-notes' }),
+      call(1, 'read', { file_path: '.agents/skills/money-check/SKILL.md' }),
+      bash(2, 'cat .agents/skills/translations/SKILL.md .agents/skills/docker-deploy/SKILL.md'),
+    ])).toEqual(['money-check', 'release-notes', 'translations', 'docker-deploy'])
+    expect(skillLoads([bash(0, 'cd .agents/skills/money-check && cat SKILL.md')])).toEqual(['money-check'])
+    expect(skillLoads([bash(0, "head -n 40 '/w/.agents/skills/money-check/SKILL.md'")])).toEqual(['money-check'])
+  })
+
+  test('count a glob or a find that prints every skill as *, a load of all of them', () => {
+    expect(skillLoads([bash(0, 'cat .agents/skills/*/* 2>/dev/null | head -50')])).toEqual(['*'])
+    expect(skillLoads([bash(0, 'cat .agents/skills/*/SKILL.md')])).toEqual(['*'])
+    expect(skillLoads([bash(0, `cd /w && find .agents -type f | xargs -I{} sh -c 'echo "== {}"; cat "{}"'`)])).toEqual(['*'])
+    expect(skillLoads([bash(0, 'find .agents -name SKILL.md -exec cat {} +')])).toEqual(['*'])
+    expect(skillLoads([bash(0, 'find .agents -type f | head'), bash(1, 'ls .agents/skills/*')])).toEqual([])
+  })
+
+  test('do not count listing, searching, or running a skill\'s other files', () => {
+    expect(skillLoads([
+      call(0, 'ls', { path: '.agents/skills' }),
+      bash(0, 'ls -R .agents/skills'),
+      bash(0, 'grep -r description .agents/skills/*/SKILL.md'),
+      bash(1, 'node .agents/skills/money-check/scripts/check.cjs --all'),
+      call(1, 'read', { path: '.agents/skills/money-check/scripts/check.cjs' }),
+      call(2, 'read', { path: 'docs/SKILL.md' }),
+    ])).toEqual([])
+  })
+})
+
 describe('counters', () => {
   test('excess requests are those above the floor, never negative; requests over the floor keep the sign', () => {
     expect(excessRequests(7, 3)).toBe(4)
@@ -155,6 +188,14 @@ describe('counters', () => {
     expect(compactions([
       { type: 'compaction/start', data: {} }, { type: 'compaction/summary', data: {} }, { type: 'compaction/end', data: {} },
       { type: 'compaction/start', data: {} }, { type: 'compaction/end', data: { error: 'still above threshold' } },
+    ])).toEqual({ summaries: 1, errors: 1 })
+  })
+
+  test('JSON-mode compactions count completed and failed compaction_end events, not aborted ones', () => {
+    expect(jsonModeCompactions([
+      { type: 'compaction_start' }, { type: 'compaction_end', result: { summary: 's' }, aborted: false },
+      { type: 'compaction_start' }, { type: 'compaction_end', aborted: false, errorMessage: 'summary failed' },
+      { type: 'compaction_start' }, { type: 'compaction_end', aborted: true },
     ])).toEqual({ summaries: 1, errors: 1 })
   })
 })

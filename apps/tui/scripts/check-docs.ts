@@ -8,7 +8,7 @@ const root = resolve(import.meta.dirname, '../../..')
 const entryDocs = [
   'README.md', 'CONTRIBUTING.md', 'AGENTS.md', 'docs/architecture.md', 'apps/cli/README.md',
   'packages/boot/app-boot/README.md', 'packages/boot/plugin-manager/README.md', 'native/system/README.md',
-  'rust/README.md', 'conformance/README.md', 'evals/README.md',
+  'rust/README.md', 'evals/README.md',
 ]
 const missing = entryDocs.filter(file => !existsSync(resolve(root, file)))
 if (missing.length > 0) {

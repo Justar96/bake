@@ -1,1 +1,0 @@
-{"schema":"bake/synthetic-conformance/input","version":1,"prompts":[],"events":[],"permissions":[],"writes":[{"path":"result.txt","text":"invalid\n","permission":"missing"}]}

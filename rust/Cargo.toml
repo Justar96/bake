@@ -1,9 +1,12 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/bake-agent",
+    "crates/bake-ai",
     "crates/bake-cli",
+    "crates/bake-coding-agent",
     "crates/bake-conformance",
-    "crates/bake-session",
+    "crates/bake-sandbox",
     "crates/bake-tui",
     "crates/bake-tui-view",
 ]
@@ -16,16 +19,76 @@ license = "MIT"
 publish = false
 
 [workspace.dependencies]
-bake-session = { path = "crates/bake-session" }
+bake-agent = { path = "crates/bake-agent" }
+bake-ai = { path = "crates/bake-ai" }
+bake-coding-agent = { path = "crates/bake-coding-agent" }
+bake-sandbox = { path = "crates/bake-sandbox" }
 bake-tui = { path = "crates/bake-tui" }
 bake-tui-view = { path = "crates/bake-tui-view" }
 ratatui = { version = "=0.30.2", default-features = false, features = ["crossterm"] }
 # The core crate the pinned Ratatui release depends on; the view crate uses it
 # without the terminal backend.
 ratatui-core = { version = "=0.1.2", default-features = false, features = ["std"] }
-crossterm = { version = "=0.29.0", default-features = false, features = ["bracketed-paste", "events"] }
+# `use-dev-tty` swaps Crossterm's Unix reader for one that polls level-triggered.
+# The default mio reader is edge-triggered and returns after the first ready
+# source, so keys that arrive with a resize stay unread until the next key.
+crossterm = { version = "=0.29.0", default-features = false, features = ["bracketed-paste", "events", "use-dev-tty"] }
 signal-hook = { version = "=0.3.18", default-features = false }
 unicode-segmentation = "=1.13.3"
 unicode-width = "=0.2.2"
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = { version = "=1.0.151", features = ["float_roundtrip", "preserve_order"] }
+# The `bake-ai` provider runtime: Tokio for tasks and timers, reqwest over
+# rustls (ring, webpki roots) for HTTP/1.1 with chunked streaming bodies, and
+# regex for Pi's provider error classifiers. No native TLS or OpenSSL.
+tokio = { version = "=1.53.1", default-features = false }
+reqwest = { version = "=0.12.28", default-features = false, features = ["rustls-tls"] }
+regex = { version = "=1.13.1", default-features = false, features = ["std", "unicode-case", "unicode-perl"] }
+# The `bake-coding-agent` session store: OS randomness for Pi's session and
+# entry ids, and an insertion-ordered map for its JavaScript `Map` indexes.
+# Both versions are the ones the lock already carries for ring and serde_json.
+getrandom = { version = "=0.2.17", default-features = false }
+indexmap = { version = "=2.14.2", default-features = false, features = ["std"] }
+# The `bake-coding-agent` CLIProxyAPI import: a panic-free YAML reader with
+# built-in budgets (depth, aliases, nodes, input size) for the 0.3 home's
+# `settings.yaml` and `.credentials.yaml` (D25). MIT OR Apache-2.0.
+serde-saphyr = { version = "=1.3.0", default-features = false, features = ["deserialize"] }
+# The `bake-coding-agent` file tools. `image` decodes, orients, resizes
+# (Lanczos3), and re-encodes images as Pi's Photon (itself built on `image`)
+# does, for PNG, JPEG, GIF, WebP, and BMP only; MIT OR Apache-2.0.
+# `icu_normalizer` (already in the lock through `url`) gives the NFKC and NFD
+# forms Pi's edit matching and read-path fallbacks use; Unicode-3.0. `base64`
+# is the version the lock already carries; MIT OR Apache-2.0. `libc` (already in the lock) provides
+# `access(2)` for Pi's readable and writable checks on Unix, and `setsid`
+# and `kill(-pgid)` for the bash tool's process groups; MIT OR Apache-2.0.
+# `windows-sys` (already in the lock for Tokio) gives the bash tool Win32 job
+# objects; MIT OR Apache-2.0.
+image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
+icu_normalizer = { version = "=2.3.0", default-features = false, features = ["compiled_data"] }
+base64 = { version = "=0.22.1", default-features = false, features = ["std"] }
+libc = { version = "=0.2.190", default-features = false }
+windows-sys = { version = "=0.61.2", default-features = false }
+# The `bake-coding-agent` skill discovery: `ignore`'s gitignore matcher reads
+# the `.gitignore`, `.ignore`, and `.fdignore` files in skill directories as
+# Pi's `ignore` package does. Unlicense OR MIT; its dependencies are MIT OR
+# Apache-2.0 or Unlicense OR MIT.
+ignore = { version = "=0.4.33", default-features = false }
+
+# Image decoding, resizing, and encoding are hundreds of times slower
+# unoptimized; the read tool's image tests would take seconds per image.
+[profile.dev.package.image]
+opt-level = 3
+[profile.dev.package.png]
+opt-level = 3
+[profile.dev.package.zune-jpeg]
+opt-level = 3
+[profile.dev.package.fdeflate]
+opt-level = 3
+[profile.dev.package.flate2]
+opt-level = 3
+[profile.dev.package.miniz_oxide]
+opt-level = 3
+[profile.dev.package.image-webp]
+opt-level = 3
+[profile.dev.package.gif]
+opt-level = 3

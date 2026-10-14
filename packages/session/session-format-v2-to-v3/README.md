@@ -167,9 +167,6 @@ The [stage](src/migration.ts) owns synchronous per-artifact sequence maps, messa
 - [Released V1 to V2](../session-format-v1-to-v2/README.md) — frozen preceding conversion and source codec.
 - [System-prompt surface decision](../../../.agents/notes/implemented/architecture/2026-09-02-system-prompt-as-surface-node.md) — prompt ownership and protected-head rationale.
 - [Canonical V3 envelope decision](../../../.agents/notes/implemented/architecture/2026-09-06-v3-canonical-session-envelopes.md) — strict acceptance and validation ownership.
-- [Source-event seq cases](../../../conformance/README.md#source-event-seq-cases) — [shared field checks](tests/source-event-seqs-conformance.spec.ts) for TypeScript and development Rust, including one V3 fixture.
-- [Row-envelope cases](../../../conformance/README.md#row-envelope-cases) — [shared checks](tests/event-envelope-conformance.spec.ts) of one strict released v2 row decode, with V3 divergence controls.
-- [V3 row cases](../../../conformance/README.md#v3-row-cases) — [shared checks](tests/v3-row-conformance.spec.ts) of one strict V3 codec row decode, without restoration.
 
 -----
 

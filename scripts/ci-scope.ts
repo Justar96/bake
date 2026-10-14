@@ -3,14 +3,19 @@
  * runs this and the other jobs read its outputs.
  *
  * - A pull request into the Rust 0.4.0 line ({@link RUST_LINE}), directly or
- *   through a stack whose trunk it is, runs the native job on every OS. It
+ *   through a stack whose trunk it is, runs the native job on Linux and
+ *   Windows. It
  *   runs TypeScript checks on Linux only, and only as far as its files need:
  *   none for Rust sources alone, the static half for Markdown, and both parts
  *   for anything else. The pull request that syncs the line into `develop`
  *   runs everything.
  * - A release pull request from `develop` into `main` runs Linux alone; see
  *   the comment in `ci.yml`.
- * - Every other event runs every job on every platform.
+ * - Every other event runs every job on Linux, and the native job on
+ *   Windows too.
+ *
+ * No job runs on macOS: macOS is checked locally, with
+ * `bun run preflight --only native` on a Mac, before a pull request opens.
  *
  * Any failure to read the pull request's chain or files plans the full set.
  * @module scripts/ci-scope
@@ -28,13 +33,13 @@ const TRUNKS = new Set(['develop', 'main'])
 const MAX_STACK = 20
 
 /** Paths the native job alone checks: the Cargo workspace and its drivers. */
-const RUST_ONLY = /^(?:rust\/|scripts\/rust-conformance\/|scripts\/rust-preview-pty\.ts$)/u
+const RUST_ONLY = /^(?:rust\/|scripts\/rust-preview-pty\.ts$)/u
 
 /** Files the static checks cover: links, the roadmap ledger, and the changelog. */
 const MARKDOWN = /\.md$/u
 
-const ALL_OS = ['ubuntu-latest', 'macos-latest'] as const
-const RUST_OS = ['ubuntu-latest', 'macos-latest', 'windows-latest'] as const
+const ALL_OS = ['ubuntu-latest'] as const
+const RUST_OS = ['ubuntu-latest', 'windows-latest'] as const
 
 /** One preflight job: where it runs and what it runs. */
 export interface PreflightJob {
@@ -101,12 +106,12 @@ export function plan(event: Event, rustLine: boolean, files: readonly string[] |
     const parts = { none: [], static: [STATIC], full: [CHECKS, RUNTIME] }[need]
     return {
       preflight: jobs(['ubuntu-latest'], parts), rust: [...RUST_OS], windowsRelease: false,
-      reason: `a pull request into ${RUST_LINE}: native checks on every OS, TypeScript checks: ${need}${files === undefined ? ' (changed files unknown)' : ''}`,
+      reason: `a pull request into ${RUST_LINE}: native checks on Linux and Windows, TypeScript checks: ${need}${files === undefined ? ' (changed files unknown)' : ''}`,
     }
   }
   return {
     preflight: jobs(ALL_OS, [CHECKS, RUNTIME]), rust: [...RUST_OS], windowsRelease: true,
-    reason: 'every job on every platform',
+    reason: 'every job on Linux, and the native job on Windows',
   }
 }
 

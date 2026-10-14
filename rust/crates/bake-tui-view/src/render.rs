@@ -18,12 +18,13 @@ use crate::copy;
 use crate::editor::{self, display};
 use crate::frame::FrameStyle;
 use crate::layout::{self, Needs};
+use crate::mention::PathKind;
 use crate::mode::{self, HINT_MIN_COLUMNS};
 use crate::runtime::Target;
 use crate::selection::line_columns;
 use crate::state::{
-    ActivityKind, Area, DraftSpot, Focus, Notice, Outcome, SAMPLE_AGENTS, SampleAgent, ScrollTrack,
-    Spot, State, agent,
+    ActivityKind, Area, DraftSpot, FileMenu, Focus, Notice, Outcome, SAMPLE_AGENTS, SampleAgent,
+    ScrollTrack, Spot, State, agent,
 };
 use crate::status::{self, Tone};
 use crate::transcript::{self, Look, TagTone};
@@ -31,6 +32,8 @@ use crate::transcript::{self, Look, TagTone};
 /// Cells between the terminal's edges and rows drawn outside the box, so
 /// they align with the box's contents.
 const INSET: u16 = 2;
+/// Transcript rows retained in the inline live region before the controls.
+const INLINE_BODY_ROWS: u16 = 8;
 
 fn dim() -> Style {
     Style::new().add_modifier(Modifier::DIM)
@@ -40,26 +43,58 @@ fn accent() -> Style {
     Style::new().fg(Color::Cyan)
 }
 
-/// Draws one frame. The only state it changes is the composer window, which
-/// follows the caret within the rows this frame grants it.
+/// Draws one frame, records its interaction geometry, and follows the draft
+/// caret within the composer rows this frame grants it.
 pub fn render(app: &mut State, frame: &mut Frame) {
+    render_region(app, frame, None, frame.area().height);
+}
+
+/// Draws the existing preview components in an inline held region. Settled
+/// rows already in terminal scrollback are excluded while following output.
+pub fn render_inline(app: &mut State, frame: &mut Frame, published: usize, terminal_height: u16) {
+    render_region(app, frame, Some(published), terminal_height);
+}
+
+fn needs(app: &State, width: u16) -> Needs {
+    let geometry = composer::geometry(width);
+    let draft = editor::layout(app.draft.text(), app.draft.caret(), geometry.wrap_width);
+    Needs {
+        draft_rows: u16::try_from(draft.rows.len()).unwrap_or(u16::MAX),
+        standing: true,
+        notice: u16::from(app.notice.is_some() || app.quitting()),
+        pending: panel_rows(app.pending.len()),
+        panel: panel_rows(app.attachments.len()),
+        menu: menu_rows(app),
+    }
+}
+
+/// Natural controls plus a bounded transcript, with the same composer window
+/// policy as the fullscreen preview. Short terminals retain its collapse order.
+pub fn inline_height(app: &State, width: u16, terminal_height: u16) -> u16 {
+    let rows = layout::plan(terminal_height, needs(app, width));
+    // Keep navigation's measured viewport stable when live output settles;
+    // the held controls still grow with the draft and its panels.
+    let body = rows.body.min(INLINE_BODY_ROWS);
+    rows.total() - rows.body + body
+}
+
+fn render_region(
+    app: &mut State,
+    frame: &mut Frame,
+    published: Option<usize>,
+    terminal_height: u16,
+) {
     let area = frame.area();
     if area.is_empty() {
         return;
     }
     let geometry = composer::geometry(area.width);
     let draft = editor::layout(app.draft.text(), app.draft.caret(), geometry.wrap_width);
-    let rows = layout::plan(
-        area.height,
-        Needs {
-            draft_rows: u16::try_from(draft.rows.len()).unwrap_or(u16::MAX),
-            standing: true,
-            notice: u16::from(app.notice.is_some() || app.quitting()),
-            pending: panel_rows(app.pending.len()),
-            panel: panel_rows(app.attachments.len()),
-            menu: menu_rows(app),
-        },
-    );
+    let mut rows = layout::plan(terminal_height, needs(app, area.width));
+    if published.is_some() {
+        rows.body = area.height.saturating_sub(rows.total() - rows.body);
+    }
+    app.transcript_published = published.unwrap_or(0);
 
     let mut y = area.y;
     let mut next = |height: u16| {
@@ -90,7 +125,7 @@ pub fn render(app: &mut State, frame: &mut Frame) {
     let buf = frame.buffer_mut();
     app.latest = None;
     app.transcript_area = None;
-    render_body(app, body, gap, buf);
+    render_body(app, body, gap, buf, published);
     // The prompt to press Ctrl+C again takes the notice's row while it is
     // armed; the notice returns when it lapses.
     if app.quitting() {
@@ -152,7 +187,8 @@ pub fn render(app: &mut State, frame: &mut Frame) {
         Some(format!("+{below} {}", copy::BELOW))
     } else {
         // While the menu offers commands, its key takes the hint's place.
-        let completing = app.menu().is_some_and(|menu| !menu.entries.is_empty());
+        let completing = app.menu().is_some_and(|menu| !menu.entries.is_empty())
+            || app.file_menu().is_some_and(|menu| !menu.entries.is_empty());
         mode.hint
             .filter(|_| !listing)
             .map(|hint| {
@@ -374,21 +410,164 @@ fn bar_left(app: &State) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
     }
 }
 
-/// Rows the slash menu wants: up to [`completion::MENU_ROWS`] commands and
-/// a count of the rest, one row saying nothing matches, or, once the menu
-/// has closed on a typed command, its usage line.
+/// Rows a menu of `count` entries lists: up to [`completion::MENU_ROWS`]
+/// and a count of the rest.
+fn listed_rows(count: usize) -> usize {
+    count.min(completion::MENU_ROWS) + usize::from(count > completion::MENU_ROWS)
+}
+
+/// The file menu's status rows, as the oracle stacks them under its list:
+/// nothing found, still looking, and why discovery failed.
+fn file_status(menu: &FileMenu) -> Vec<(String, bool)> {
+    let mut rows = Vec::new();
+    if menu.entries.is_empty() && !menu.loading {
+        rows.push((copy::NO_FILES.to_owned(), false));
+    }
+    if menu.loading {
+        rows.push((copy::FILES_LOADING.to_owned(), false));
+    }
+    if let Some(error) = &menu.error {
+        rows.push((format!("{}: {error}", copy::FILES_ERROR), true));
+    }
+    rows
+}
+
+/// Rows the menus want: the slash menu's commands, or one row saying none
+/// match; the file menu's mentions and its status rows; or, once the slash
+/// menu has closed on a typed command, its usage line.
 fn menu_rows(app: &State) -> u16 {
-    match app.menu() {
-        Some(menu) => {
-            let count = menu.entries.len();
-            let rows =
-                count.min(completion::MENU_ROWS) + usize::from(count > completion::MENU_ROWS);
-            u16::try_from(rows.max(1)).unwrap_or(u16::MAX)
+    let rows = if let Some(menu) = app.menu() {
+        listed_rows(menu.entries.len()).max(1)
+    } else if let Some(menu) = app.file_menu() {
+        (listed_rows(menu.entries.len()) + file_status(&menu).len()).max(1)
+    } else if app.focus == Focus::Composer {
+        usize::from(completion::usage(app.draft.text()).is_some())
+    } else {
+        0
+    };
+    u16::try_from(rows).unwrap_or(u16::MAX)
+}
+
+/// One status row under a menu, past the rail: dim, or in the failed red.
+fn status_row(app: &State, text: &str, error: bool, area: Rect, buf: &mut Buffer) {
+    let style = if error {
+        match app.tones {
+            Tones::TrueColor => Style::new().fg(Color::Rgb(0xef, 0x44, 0x44)),
+            Tones::Ansi => Style::new().fg(Color::Red),
+            Tones::None => Style::new(),
         }
-        None if app.focus == Focus::Composer => {
-            u16::from(completion::usage(app.draft.text()).is_some())
+    } else {
+        dim()
+    };
+    line(
+        buf,
+        area,
+        Line::styled(fit(&format!("  {text}"), usize::from(area.width)), style),
+    );
+}
+
+/// `text` cut from its start to `width` cells, with `…` standing for what
+/// was cut, as Ink's `truncate-start` cuts a long path to keep its name.
+fn fit_start(text: &str, width: usize) -> String {
+    if text.width() <= width {
+        return text.to_owned();
+    }
+    let mut kept = Vec::new();
+    let mut used = 0;
+    for grapheme in text.graphemes(true).rev() {
+        let cells = grapheme.width();
+        if used + cells + 1 > width {
+            break;
         }
-        None => 0,
+        kept.push(grapheme);
+        used += cells;
+    }
+    if width == 0 {
+        return String::new();
+    }
+    kept.reverse();
+    format!("…{}", kept.concat())
+}
+
+/// The file menu, drawn as the slash menu is: a `▸` on the selected row, the
+/// mentions in a column sized to the longest, up to 40 cells, a long one cut
+/// from its start; each row's kind after it only when the rows shown mix
+/// files and directories. Its status rows follow.
+fn render_file_menu(app: &State, menu: &FileMenu, area: Rect, buf: &mut Buffer) {
+    let asking = tone_style(Tone::Asking, app.tones);
+    let status = file_status(menu);
+    let rows = usize::from(area.height).saturating_sub(status.len());
+    let count = menu.entries.len();
+    let mut y = area.y;
+    if count > 0 && rows > 0 {
+        let shown = if count > rows {
+            rows.saturating_sub(1).max(1)
+        } else {
+            count
+        };
+        let first = (menu.selected + 1).saturating_sub(shown).min(count - shown);
+        let visible = &menu.entries[first..first + shown];
+        let mixed = visible.iter().any(|c| c.kind != visible[0].kind);
+        let column = visible
+            .iter()
+            .map(|c| c.name.width() + 2)
+            .max()
+            .unwrap_or(0)
+            .clamp(8, 40);
+        let marker = if app.frame == FrameStyle::Classic {
+            ">"
+        } else {
+            "▸"
+        };
+        for (i, choice) in visible.iter().enumerate() {
+            let active = first + i == menu.selected;
+            let name = fit_start(&choice.name, column);
+            let pad = column.saturating_sub(name.width());
+            let kind = match (mixed, choice.kind) {
+                (false, _) => "",
+                (true, PathKind::File) => copy::FILE,
+                (true, PathKind::Directory) => copy::DIRECTORY,
+            };
+            let content = Line::from(vec![
+                Span::styled(
+                    if active {
+                        format!("{marker} ")
+                    } else {
+                        "  ".into()
+                    },
+                    asking.add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("{name}{}", " ".repeat(pad)),
+                    if active {
+                        asking.add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::new()
+                    },
+                ),
+                Span::styled(kind, if active { Style::new() } else { dim() }),
+            ]);
+            line(buf, Rect::new(area.x, y, area.width, 1), content);
+            y += 1;
+        }
+        if shown < count && rows > 1 {
+            line(
+                buf,
+                Rect::new(area.x, y, area.width, 1),
+                Line::styled(
+                    format!("  +{} {}", count - shown, copy::MORE_MATCHES),
+                    dim(),
+                ),
+            );
+            y += 1;
+        }
+    }
+    for (text, error) in status {
+        if y >= area.bottom() {
+            break;
+        }
+        status_row(app, &text, error, Rect::new(area.x, y, area.width, 1), buf);
+        y += 1;
     }
 }
 
@@ -401,6 +580,10 @@ fn render_menu(app: &State, area: Rect, buf: &mut Buffer) {
         return;
     }
     let asking = tone_style(Tone::Asking, app.tones);
+    if let Some(menu) = app.file_menu() {
+        render_file_menu(app, &menu, area, buf);
+        return;
+    }
     let Some(menu) = app.menu() else {
         if let Some(command) = completion::usage(app.draft.text()) {
             let text = format!(
@@ -418,11 +601,8 @@ fn render_menu(app: &State, area: Rect, buf: &mut Buffer) {
         return;
     };
     if menu.entries.is_empty() {
-        line(
-            buf,
-            Rect::new(area.x, area.y, area.width, 1),
-            Line::styled(copy::NO_COMPLETIONS, dim()),
-        );
+        let row = Rect::new(area.x, area.y, area.width, 1);
+        status_row(app, copy::NO_COMPLETIONS, false, row, buf);
         return;
     }
     let rows = usize::from(area.height);
@@ -659,7 +839,13 @@ fn tone_style(tone: Tone, tones: Tones) -> Style {
 /// the gap row just above the controls, so it reads with the bar and the
 /// box rather than over the text. The planner grants the gap before any
 /// viewport row, so a viewport always has one under it.
-fn render_transcript(app: &mut State, area: Rect, gap: Rect, buf: &mut Buffer) {
+fn render_transcript(
+    app: &mut State,
+    area: Rect,
+    gap: Rect,
+    buf: &mut Buffer,
+    published: Option<usize>,
+) {
     let rows = area.height;
     let hint = (gap.height > 0).then_some(gap);
     // The last column is the scrollbar's, whether or not it is drawn, so
@@ -678,8 +864,19 @@ fn render_transcript(app: &mut State, area: Rect, gap: Rect, buf: &mut Buffer) {
         },
     );
     let range = app.selecting.range();
-    for (i, (at, content)) in view.screen().into_iter().enumerate() {
-        let y = area.y + i as u16;
+    let inline_follow = published.is_some() && view.following();
+    let screen: Vec<_> = view
+        .screen()
+        .into_iter()
+        .filter(|(at, _)| !inline_follow || at.row >= published.unwrap_or(0))
+        .collect();
+    let offset = if inline_follow {
+        rows.saturating_sub(screen.len() as u16)
+    } else {
+        0
+    };
+    for (i, (at, content)) in screen.into_iter().enumerate() {
+        let y = area.y + offset + i as u16;
         // The cells a selection covers are drawn reversed, keeping their
         // own colours, as a terminal draws its own selection.
         let selected = range.and_then(|range| line_columns(range, at, &content.to_string()));
@@ -694,11 +891,14 @@ fn render_transcript(app: &mut State, area: Rect, gap: Rect, buf: &mut Buffer) {
     }
     app.transcript_area = Some(Area {
         x: area.x,
-        y: area.y,
+        y: area.y + offset,
         width,
-        rows,
-    });
-    let thumb = bar.then(|| view.thumb(usize::from(rows))).flatten();
+        rows: rows - offset,
+    })
+    .filter(|area| area.rows > 0);
+    let thumb = (bar && !inline_follow)
+        .then(|| view.thumb(usize::from(rows)))
+        .flatten();
     app.track = thumb.map(|_| ScrollTrack {
         column: area.x + width,
         top: area.y,
@@ -884,14 +1084,14 @@ fn scrollbar_look(
     (glyphs, styles)
 }
 
-fn render_body(app: &mut State, area: Rect, gap: Rect, buf: &mut Buffer) {
+fn render_body(app: &mut State, area: Rect, gap: Rect, buf: &mut Buffer, published: Option<usize>) {
     if area.is_empty() {
         return;
     }
     let width = usize::from(area.width);
     let classic = app.frame == FrameStyle::Classic;
     let lines = match app.focus {
-        Focus::Composer => return render_transcript(app, area, gap, buf),
+        Focus::Composer => return render_transcript(app, area, gap, buf, published),
         Focus::AgentList => agent_list(app.selected, width, classic, app.tones),
         Focus::Inspect(id) => inspection(
             agent(id).unwrap_or(&SAMPLE_AGENTS[0]),
@@ -1043,6 +1243,7 @@ mod tests {
     use crate::activity::Tones;
     use crate::frame::FrameStyle;
     use crate::keys::{Key, KeyInput, Mods};
+    use crate::mention::Candidate;
     use std::time::Duration;
 
     use crate::state::{
@@ -2098,6 +2299,70 @@ mod tests {
         assert!(!rows.iter().any(|r| r.contains("Staged attachments")));
     }
 
+    fn found(app: &mut State, query: &str, found: Result<Vec<Candidate>, String>) {
+        update(
+            app,
+            Msg::FilesFound {
+                query: query.into(),
+                found,
+            },
+        );
+    }
+
+    fn candidate(path: &str, kind: PathKind) -> Candidate {
+        Candidate {
+            path: path.into(),
+            kind,
+        }
+    }
+
+    #[test]
+    fn the_file_menu_lists_mentions_and_says_when_it_looks_or_fails() {
+        let mut app = State::default();
+        key(&mut app, Key::Char('@'));
+        let (rows, _) = draw(&mut app, 80, 30);
+        let bar = row_index(&rows, "no model");
+        assert_eq!(rows[bar - 1].trim_end(), "    Finding paths…");
+        // One kind: no kind column. The box's edge names Tab.
+        let files = (0..10)
+            .map(|i| candidate(&format!("f{i}.md"), PathKind::File))
+            .collect();
+        found(&mut app, "", Ok(files));
+        let (rows, _) = draw(&mut app, 80, 30);
+        let first = row_index(&rows, "@f0.md");
+        assert_eq!(rows[first].trim_end(), "  ▸ @f0.md");
+        assert_eq!(
+            rows[first + 8].trim_end(),
+            "    +2 more, keep typing to narrow"
+        );
+        assert_eq!(first + 9, bar);
+        assert!(rows.iter().any(|r| r.contains("Tab completes")));
+        // Mixed kinds name each; a long path keeps its end.
+        let long = format!("{}/name.rs", "deep".repeat(12));
+        found(
+            &mut app,
+            "",
+            Ok(vec![
+                candidate("src", PathKind::Directory),
+                candidate(&long, PathKind::File),
+            ]),
+        );
+        let (rows, _) = draw(&mut app, 80, 30);
+        assert!(rows[bar - 2].starts_with("  ▸ @src/"), "{rows:#?}");
+        assert!(rows[bar - 2].trim_end().ends_with("Directory"));
+        assert!(rows[bar - 1].starts_with("    …"));
+        assert!(rows[bar - 1].contains("deep/name.rsFile"));
+        // Nothing found, and a failure, each take a row.
+        found(&mut app, "", Err("denied".into()));
+        let (rows, _) = draw(&mut app, 80, 30);
+        assert_eq!(rows[bar - 2].trim_end(), "    No matching paths");
+        assert_eq!(
+            rows[bar - 1].trim_end(),
+            "    File discovery failed: denied"
+        );
+        assert!(!rows.iter().any(|r| r.contains("Tab completes")));
+    }
+
     #[test]
     fn the_slash_menu_sits_above_the_bar_and_keeps_its_selection_in_view() {
         let mut app = State::default();
@@ -2120,10 +2385,10 @@ mod tests {
         let (rows, _) = draw(&mut app, 80, 30);
         assert!(rows[bar - 2].starts_with("  ▸ /thinking"));
         assert!(!rows.iter().any(|r| r.contains("/model")));
-        // Nothing matching says so in one row.
+        // Nothing matching says so in one row, past the rail.
         key(&mut app, Key::Char('z'));
         let (rows, _) = draw(&mut app, 80, 30);
-        assert_eq!(rows[bar - 1].trim_end(), "  No matching commands");
+        assert_eq!(rows[bar - 1].trim_end(), "    No matching commands");
         assert!(!rows.iter().any(|r| r.contains("Tab completes")));
         // A typed command with a hint shows its usage once the menu closes.
         update(
@@ -2194,6 +2459,92 @@ mod tests {
         update(&mut app, Msg::Runtime(RuntimeUpdate::Pending(Vec::new())));
         let (rows, _) = draw(&mut app, 60, 24);
         assert!(!rows.iter().any(|r| r.contains("Pending input")));
+    }
+
+    #[test]
+    fn inline_keeps_fullscreen_composer_rows_and_absolute_mouse_geometry() {
+        use ratatui_core::terminal::{TerminalOptions, Viewport};
+        for width in [1, 12, 40, 80] {
+            for physical_height in [1, 4, 8, 24, 40] {
+                for draft_rows in [1, 2, 5, 12] {
+                    let mut app = State::default();
+                    app.draft.paste(&vec!["x"; draft_rows].join("\n"));
+                    let height = inline_height(&app, width, physical_height);
+                    let expected = layout::plan(physical_height, needs(&app, width)).composer;
+                    let published = app.settled_rows();
+                    let mut terminal = Terminal::with_options(
+                        TestBackend::new(width, physical_height),
+                        TerminalOptions {
+                            viewport: Viewport::Fixed(Rect::new(
+                                0,
+                                physical_height - height,
+                                width,
+                                height,
+                            )),
+                        },
+                    )
+                    .unwrap();
+                    terminal
+                        .draw(|frame| render_inline(&mut app, frame, published, physical_height))
+                        .unwrap();
+                    let spot = app.draft_spot.unwrap();
+                    assert_eq!(
+                        spot.rows, expected,
+                        "{width}x{physical_height}, {draft_rows} draft rows"
+                    );
+                    assert!(spot.top_row >= physical_height - height);
+                    let expected_caret =
+                        editor::layout(app.draft.text(), app.draft.caret(), spot.width).rows
+                            [spot.first]
+                            .start;
+                    update(
+                        &mut app,
+                        mouse(MouseKind::Down, spot.text_x, spot.top_row, 0),
+                    );
+                    assert_eq!(app.draft.caret(), expected_caret);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn inline_selection_copies_the_displayed_live_row_after_padding() {
+        use ratatui_core::terminal::{TerminalOptions, Viewport};
+        let mut app = State::default();
+        let published = app.settled_rows();
+        app.transcript
+            .set_live(vec![transcript::Row::Answer("live words".into())]);
+        let height = (inline_height(&app, 80, 24) + 3).min(24);
+        let mut terminal = Terminal::with_options(
+            TestBackend::new(80, 24),
+            TerminalOptions {
+                viewport: Viewport::Fixed(Rect::new(0, 24 - height, 80, height)),
+            },
+        )
+        .unwrap();
+        terminal
+            .draw(|frame| render_inline(&mut app, frame, published, 24))
+            .unwrap();
+        let area = app.transcript_area.unwrap();
+        let displayed: Vec<_> = app
+            .transcript
+            .screen()
+            .into_iter()
+            .filter(|(at, _)| at.row >= published)
+            .collect();
+        let row = displayed
+            .iter()
+            .position(|(_, text)| text.to_string().contains("live words"))
+            .unwrap();
+        let column =
+            u16::try_from(displayed[row].1.to_string().find("live words").unwrap()).unwrap();
+        let y = area.y + row as u16;
+        update(&mut app, mouse(MouseKind::Down, column, y, 0));
+        update(&mut app, mouse(MouseKind::Drag, column + 10, y, 10));
+        assert_eq!(
+            update(&mut app, mouse(MouseKind::Up, column + 10, y, 20)),
+            vec![Effect::Copy("live words".into())]
+        );
     }
 
     #[test]
