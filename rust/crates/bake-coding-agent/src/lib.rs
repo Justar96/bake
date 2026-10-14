@@ -20,9 +20,10 @@
 //! | [`skills`] | Pi `src/core/skills.ts`, `src/utils/frontmatter.ts`, the `.agents` discovery of `src/core/package-manager.ts` (v1.2.0) |
 //! | [`prompt_templates`] | Pi `src/core/prompt-templates.ts`, `src/core/resource-loader.ts` (`dedupePrompts`, v1.2.0) |
 //! | [`model_registry`] | Pi `src/core/{model-runtime,provider-composer,model-config,model-resolver}.ts`, `src/utils/json.ts` |
-//! | [`auth_storage`] | Pi `src/core/auth-storage.ts` (read-only) |
+//! | [`auth_storage`] | Pi `src/core/auth-storage.ts`, `src/core/runtime-credentials.ts` (writes from v1.2.0) |
+//! | [`json_store`] | Pi `src/core/auth-storage.ts` `FileAuthStorageBackend`, `src/core/settings-manager.ts` `FileSettingsStorage` (v1.2.0) |
 //! | [`config_value`] | Pi `src/core/resolve-config-value.ts` |
-//! | [`settings`] | Pi `src/core/settings-manager.ts` (default model, thinking level, tools, images, compaction with per-model overrides, branch-summary reserve, and retry) |
+//! | [`settings`] | Pi `src/core/settings-manager.ts` (default model, thinking level, tools, images, compaction with per-model overrides, branch-summary reserve, and retry; the global-scope setters from v1.2.0) |
 //! | [`print_mode`], [`json_event`] | Pi `src/modes/print-mode.ts`, `src/modes/json-event.ts` |
 //! | [`cli`] | Pi `src/main.ts`, `src/cli/args.ts`, `src/cli/initial-message.ts`, `src/cli/file-processor.ts`, `src/cli/list-models.ts`, `packages/tui/src/fuzzy.ts` |
 //! | [`owned_work`] | Bake: the gate shutdown closes over owned work |
@@ -39,6 +40,7 @@ pub mod config_value;
 pub mod exec;
 pub mod home;
 pub mod json_event;
+pub mod json_store;
 pub mod model_registry;
 pub mod owned_work;
 pub mod permissions;

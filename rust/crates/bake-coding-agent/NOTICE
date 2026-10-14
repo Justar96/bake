@@ -42,8 +42,14 @@ under test/ that the Rust tests name. From release v1.2.0, revision
 src/utils/frontmatter.ts, the .agents skill discovery of
 src/core/package-manager.ts, and the skill-command expansion of
 src/core/agent-session.ts), the linked-worktree fix of
-src/core/resource-loader.ts, and Pi's skill fixtures under
-test/fixtures/skills and test/fixtures/skills-collision.
+src/core/resource-loader.ts, Pi's skill fixtures under
+test/fixtures/skills and test/fixtures/skills-collision, and the settings and
+credential writes: the locked file backends and global-scope setters of
+src/core/settings-manager.ts and src/core/auth-storage.ts, the runtime-key
+overlay of src/core/runtime-credentials.ts, and the cases of
+test/auth-storage.test.ts, test/runtime-credentials.test.ts,
+test/settings-manager.test.ts, and test/settings-manager-bug.test.ts that the
+Rust tests name.
 --------------------------------------------------------------------------------
 MIT License
 
