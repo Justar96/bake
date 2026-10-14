@@ -4,7 +4,7 @@
 
 Scope 00 fixes what the Rust migration must preserve and the TypeScript evidence it will compare against. It belongs to the [Bake 0.4 Rust migration roadmap](../README.md#00--support-decisions-and-baseline); the roadmap's [verification contract](../verification.md#evidence-required-for-every-scope) defines what closes it.
 
-**State: In progress, 2026-10-07.** The inventory and initial baseline tooling landed in [PR #51](https://github.com/Justar96/bake/pull/51). Nothing here qualifies a Rust behavior. The initial comparison sources are `v0.3.8` (`dcb26d756e`, whose tree equals `develop` commit `a1ec50245e`) and `origin/develop` at `ae5eb51ab6`. A [separate terminal record](terminal-2026-10-07/README.md) measures shutdown and latency distributions with the extended diagnostic.
+**State: In progress, 2026-10-07.** The inventory and initial baseline tooling landed in [PR #51](https://github.com/Justar96/bake/pull/51). Nothing here qualifies a Rust behavior. The initial comparison sources are `v0.3.8` (`dcb26d756e`, whose tree equals `develop` commit `a1ec50245e`) and `origin/develop` at `ae5eb51ab6`. A [separate terminal record](terminal-2026-10-07/README.md) measures shutdown and latency distributions with the extended diagnostic. Since [D22](support.md#decision-register) and [D32](support.md#decision-register), the TypeScript baseline is a reference for the retained contracts and an optional 0.3 comparison, not a parity oracle, and exit criterion 1's dispositions are to keep a behavior, replace it with Pi's, or retire it by decision; the [foundation status](../verification.md#foundation-qualification-status) lists what remains open.
 
 ## Table of Contents
 

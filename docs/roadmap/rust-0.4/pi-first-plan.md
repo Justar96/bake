@@ -17,7 +17,7 @@ This page re-plans roadmap scopes 02 to 17 around [D22](scope-00/support.md#deci
 
 ## Pinned Pi revision
 
-Checked through the GitHub API on 2026-10-09; re-checked on 2026-10-11 (v1.1.0) and on 2026-10-13 for scope 10 ([Latest release v1.2.0](https://github.com/earendil-works/pi/releases/tag/v1.2.0), `06a466935536f8c9bcacb2d5efc0fc021be1bdff`).
+Checked through the GitHub API on 2026-10-09; re-checked on 2026-10-11 (v1.1.0), on 2026-10-13 for scope 10 ([Latest release v1.2.0](https://github.com/earendil-works/pi/releases/tag/v1.2.0), `06a466935536f8c9bcacb2d5efc0fc021be1bdff`), and on 2026-10-14 for the scope 01 to 03 qualification, when v1.2.0, published 2026-10-12 23:03 UTC, was still the latest. The session store that scopes 02 and 03 ported from v1.1.0 (`coding-agent/src/core/{session-manager,session-cwd,messages}.ts`, `coding-agent/src/utils/paths.ts`, `ai/src/utils/uuid.ts`, and `coding-agent/test/session-manager/`) is byte-identical in v1.2.0.
 
 | Reference | Revision | Use |
 |---|---|---|

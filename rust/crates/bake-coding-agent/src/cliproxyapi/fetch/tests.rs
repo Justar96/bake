@@ -208,40 +208,66 @@ async fn validates_the_model_response_before_setup_proceeds() {
 }
 
 // cliproxyapi.test.ts: "a proxy that does not validate" > "says which field
-// to ask again, and words each failure", against real responses: a refused
-// connection, a redirect, a timeout, 401, 404, and a body that is not JSON;
-// plus 403, another status, and a list that is not one.
-#[tokio::test]
-async fn says_which_field_to_ask_again_and_words_each_failure() {
-    let words = |error: &CliProxyCheckError| (error.field(), error.failure.text());
-
-    // Refused: bind a port, then free it.
-    let free = TcpListener::bind("127.0.0.1:0").await.expect("a port");
-    let port = free.local_addr().expect("its address").port();
-    drop(free);
-    let refused = fetch_cli_proxy_models(
-        &format!("http://127.0.0.1:{port}/v1/models"),
-        KEY,
-        None,
-        None,
-    )
-    .await;
-    let Err(FetchCliProxyModelsError::Check(refused)) = refused else {
-        panic!("expected a refused connection, got {refused:?}");
+// to ask again, and words each failure", the refused connection.
+//
+// No loopback port can be held refusing: a bound socket that never listens
+// is refused on Linux but left to time out on macOS, and a freed port can be
+// taken by any process on the host. So the OS refusal is the injected input,
+// in the error chain reqwest gives (its own line, which names the URL, over
+// hyper's connect error over the `io::Error`), and the mapping the catalog
+// read applies to it is real.
+#[test]
+fn a_refused_connection_asks_for_the_url_again() {
+    #[derive(Debug)]
+    struct Layer {
+        text: String,
+        source: Box<dyn std::error::Error + 'static>,
+    }
+    impl std::fmt::Display for Layer {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str(&self.text)
+        }
+    }
+    impl std::error::Error for Layer {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            Some(self.source.as_ref())
+        }
+    }
+    let os = std::io::Error::new(
+        std::io::ErrorKind::ConnectionRefused,
+        "Connection refused (os error 111)",
+    );
+    let error = Layer {
+        text: format!("error sending request for url (http://127.0.0.1:4141/v1/models?key={KEY})"),
+        source: Box::new(Layer {
+            text: "client error (Connect)".into(),
+            source: Box::new(os),
+        }),
     };
+    let refused = unreachable_error("127.0.0.1:4141", transport_detail(&error));
     assert_eq!(
-        words(&refused),
+        (refused.field(), refused.failure.text()),
         (
             CheckField::Url,
-            format!("Could not reach 127.0.0.1:{port} (ECONNREFUSED)")
+            "Could not reach 127.0.0.1:4141 (ECONNREFUSED)".to_owned()
         )
     );
     assert_eq!(
         refused.message,
-        format!("CLIProxyAPI at 127.0.0.1:{port} is unreachable: ECONNREFUSED")
+        "CLIProxyAPI at 127.0.0.1:4141 is unreachable: ECONNREFUSED"
     );
     assert_no_key(&refused);
+}
 
+// cliproxyapi.test.ts: "a proxy that does not validate" > "says which field
+// to ask again, and words each failure", against real responses: a redirect,
+// a timeout, 401, 404, and a body that is not JSON; plus 403, another status,
+// and a list that is not one.
+#[tokio::test]
+async fn says_which_field_to_ask_again_and_words_each_failure() {
+    let words = |error: &CliProxyCheckError| (error.field(), error.failure.text());
+
+    // A refused connection is `a_refused_connection_asks_for_the_url_again`.
     let redirect = serve(response(
         "302 Found",
         &[("location", "http://example.invalid/")],

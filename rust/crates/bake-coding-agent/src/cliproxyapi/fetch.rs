@@ -201,9 +201,11 @@ fn source_chain(error: &dyn std::error::Error) -> String {
 }
 
 /// The transport failure's detail, as undici's `cause.code` names it where
-/// the OS error has a Node code, else the cause's message.
-fn transport_detail(error: &reqwest::Error) -> String {
-    let mut source: Option<&dyn std::error::Error> = std::error::Error::source(error);
+/// the OS error has a Node code, else the cause's message. `error` is the
+/// client's error, whose own line (which names the URL) is never quoted;
+/// tests pass an error chain shaped like reqwest's.
+fn transport_detail(error: &dyn std::error::Error) -> String {
+    let mut source: Option<&dyn std::error::Error> = error.source();
     while let Some(cause) = source {
         if let Some(io) = cause.downcast_ref::<std::io::Error>() {
             use std::io::ErrorKind;
@@ -289,21 +291,24 @@ pub(crate) async fn fetch_with_timeout(
     }
 }
 
+/// The check error for a proxy the client could not reach.
+fn unreachable_error(host: &str, detail: String) -> CliProxyCheckError {
+    CliProxyCheckError::new(
+        CliProxyCheckFailure::Unreachable {
+            host: host.to_owned(),
+            detail: detail.clone(),
+        },
+        format!("CLIProxyAPI at {host} is unreachable: {detail}"),
+    )
+}
+
 async fn read_catalog(
     url: Url,
     host: &str,
     api_key: &str,
     root: Option<&str>,
 ) -> Result<Vec<CliProxyModel>, FetchCliProxyModelsError> {
-    let unreachable = |detail: String| {
-        CliProxyCheckError::new(
-            CliProxyCheckFailure::Unreachable {
-                host: host.to_owned(),
-                detail: detail.clone(),
-            },
-            format!("CLIProxyAPI at {host} is unreachable: {detail}"),
-        )
-    };
+    let unreachable = |detail: String| unreachable_error(host, detail);
     let client = client().map_err(unreachable)?;
     let mut authorization = reqwest::header::HeaderValue::from_str(&format!("Bearer {api_key}"))
         // A key no header can carry fails as `fetch` fails to build the
