@@ -6,6 +6,8 @@
 //! runners are shell scripts run through `/bin/sh`, so no test executes a
 //! file it has just written. Real enforcement is in `tests/enforcement.rs`.
 
+use std::path::Path;
+
 use super::*;
 use crate::provider::confine;
 
@@ -141,9 +143,134 @@ fn platforms_without_a_backend_refuse_with_a_detail() {
     };
     assert_eq!(error.mode, SandboxMode::WorkspaceWrite);
     let detail = error.detail.unwrap_or_default();
+    #[cfg(not(windows))]
     assert!(detail.contains("no "), "{detail}");
+    // The restricted-token runner leaves deletion unconfined.
     #[cfg(windows)]
-    assert!(detail.contains("Windows"), "{detail}");
+    assert_eq!(detail, windows_acl::DEFAULT_REFUSAL);
+}
+
+/// A workspace beside the test binary's directory: outside the temporary
+/// directory, and not an ancestor of the runner.
+struct BesideExe(std::path::PathBuf);
+
+impl BesideExe {
+    fn new(label: &str) -> Self {
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let exe = std::env::current_exe().expect("exe");
+        let base = exe.parent().and_then(Path::parent).expect("target dir");
+        let dir = base.join(format!(
+            "bake-acl-wrap-{label}-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).expect("dir");
+        Self(crate::paths::canonical_path(&dir))
+    }
+}
+
+impl Drop for BesideExe {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+#[test]
+fn a_sole_windows_acl_rung_wraps_with_the_current_executable_unprobed() {
+    let provider = LocalProvider::with_chain(vec![Runner::WindowsAcl]);
+    let workspace = BesideExe::new("sole");
+    let temp = crate::paths::canonical_path(&std::env::temp_dir());
+    for mode in [SandboxMode::ReadOnly, SandboxMode::WorkspaceWrite] {
+        let policy = SandboxPolicy::new(mode, &workspace.0);
+        let Some(Ok(command)) = poll_once(provider.confine(&os(&["cmd", "/c", "x"]), &policy))
+        else {
+            panic!("a sole candidate needs no probe");
+        };
+        assert_eq!(
+            Some(command.program.clone()),
+            std::env::current_exe().map(OsString::from).ok()
+        );
+        let mut expected = vec![OsString::from(windows_acl::HELPER_ARG)];
+        expected.extend([
+            "--workspace".into(),
+            workspace.0.clone().into_os_string(),
+            "--temp".into(),
+            temp.clone().into_os_string(),
+            "--mode".into(),
+            mode.to_string().into(),
+            "--".into(),
+        ]);
+        expected.extend(os(&["cmd", "/c", "x"]));
+        assert_eq!(command.args, expected);
+        assert_eq!(command.enforcement, Enforcement::Partial);
+        assert_eq!(
+            command.denial_signatures,
+            [
+                "access is denied",
+                "access to the path",
+                "permission denied",
+                "operation not permitted"
+            ]
+        );
+        assert_eq!(
+            command.runner_failure_rules,
+            [RunnerFailureRule {
+                allowed_exit_codes: vec![127],
+                fatal_signatures: vec!["windows-acl-run: ".into()],
+                informational_lines: Vec::new(),
+            }]
+        );
+    }
+}
+
+#[test]
+fn the_windows_acl_rung_refuses_what_it_cannot_grant_distinctly() {
+    let provider = LocalProvider::with_chain(vec![Runner::WindowsAcl]);
+    // A workspace holding the temporary directory would pass its standing
+    // capability to every private temp directory.
+    let Some(Err(error)) = poll_once(provider.confine(&os(&["x"]), &ww())) else {
+        panic!("a workspace containing the temp root must be refused");
+    };
+    assert!(
+        error.detail.as_deref().is_some_and(
+            |detail| detail.starts_with("Windows ACL temp root must be outside the workspace")
+        ),
+        "{error}"
+    );
+    // Read-only grants nothing, so the same workspace is fine there.
+    assert!(matches!(
+        poll_once(provider.confine(&os(&["x"]), &ro())),
+        Some(Ok(_))
+    ));
+    // Extra roots have no capability of their own.
+    let workspace = BesideExe::new("extra");
+    let extra = BesideExe::new("extra-root");
+    let policy = SandboxPolicy::new(SandboxMode::WorkspaceWrite, &workspace.0)
+        .with_extra_writable_roots([extra.0.clone()]);
+    let Some(Err(error)) = poll_once(provider.confine(&os(&["x"]), &policy)) else {
+        panic!("extra roots must be refused");
+    };
+    assert!(
+        error
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains("extra writable roots")),
+        "{error}"
+    );
+    // The runner is the current executable: a workspace holding it is refused.
+    let exe = std::env::current_exe().expect("exe");
+    let around_exe = crate::paths::canonical_path(exe.parent().expect("deps dir"));
+    let policy = SandboxPolicy::new(SandboxMode::WorkspaceWrite, &around_exe);
+    let Some(Err(error)) = poll_once(provider.confine(&os(&["x"]), &policy)) else {
+        panic!("a runner under the workspace must be refused");
+    };
+    assert!(
+        error
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains("Windows ACL runner")),
+        "{error}"
+    );
 }
 
 #[cfg(unix)]

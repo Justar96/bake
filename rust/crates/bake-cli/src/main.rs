@@ -141,6 +141,13 @@ fn main() -> ExitCode {
     {
         bake_sandbox::backends::landlock::helper_main(args.into_iter().skip(1));
     }
+    // The Windows sandbox runner re-executes this binary the same way.
+    if args
+        .first()
+        .is_some_and(|arg| arg == bake_sandbox::backends::windows_acl::HELPER_ARG)
+    {
+        bake_sandbox::backends::windows_acl::helper_main(args.into_iter().skip(1));
+    }
     match parse(&args) {
         Ok(Command::Help) => print(HELP),
         Ok(Command::Preview(mode)) => preview(mode),
