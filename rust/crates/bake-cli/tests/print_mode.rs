@@ -1299,7 +1299,15 @@ fn print_mode_wires_file_args_prompt_flags_session_flags_and_runtime_api_key() {
         sent[1],
         format!(
             "user: <file name=\"{}\">\nattached note\n</file>\nCheck this",
-            note.display()
+            // The child resolves `@note.txt` against its real working
+            // directory, which on macOS is under `/private/var`. Windows
+            // keeps the given path; canonicalizing there adds `\\?\`.
+            if cfg!(windows) {
+                note.clone()
+            } else {
+                std::fs::canonicalize(&note).expect("note exists")
+            }
+            .display()
         )
     );
 
