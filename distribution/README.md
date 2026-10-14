@@ -25,7 +25,7 @@ Build each target on its own host: `darwin-arm64`, `darwin-x64`, `linux-arm64`, 
 The [release workflow](../.github/workflows/release.yml) builds, checks, signs, and publishes every platform from one tag:
 
 ```sh
-# on the branch that carries the release's last change, made from develop
+# on a new branch from release/0.3, the 0.3 maintenance line
 NEXT=0.1.2                           # choose a stable version newer than the current one
 bun run release:prepare "$NEXT"       # both manifests, bun.lock, and a CHANGELOG.md section
 # write the new section in CHANGELOG.md, then:
@@ -33,17 +33,15 @@ bun run release:preflight --offline --tag "v$NEXT"
 git add package.json apps/cli/package.json bun.lock CHANGELOG.md
 git commit -m "release: $NEXT"
 git push -u origin HEAD
-gh pr create --base develop           # merge it, then:
-gh pr create --base main --head develop
-# once that pull request merges:
-git switch main && git pull --ff-only
+gh pr create --base release/0.3       # once it merges:
+git switch release/0.3 && git pull --ff-only
 git tag "v$NEXT"
 git push origin "v$NEXT"
 ```
 
-`main` takes changes only through merge-commit pull requests from `develop`, so the release commit reaches it that way and the tag goes on `main`'s merge commit. If `evals/agent-loop/versions/unreleased/` exists, rename it to `v$NEXT` in the release commit as well. `release:prepare` moves the `[Unreleased]` changelog entry under the new version, or leaves a placeholder the release refuses. It accepts stable versions with canonical numbers, such as `0.1.1`. The pushed tag starts the workflow:
+0.3 versions are released from `release/0.3`, which takes changes only through merge-commit pull requests, so the tag goes on the merge commit of the release pull request. The workflow refuses a tag that is not on `release/0.3`. If `evals/agent-loop/versions/unreleased/` exists, rename it to `v$NEXT` in the release commit as well. `release:prepare` moves the `[Unreleased]` changelog entry under the new version, or leaves a placeholder the release refuses. It accepts stable versions with canonical numbers, such as `0.1.1`. The pushed tag starts the workflow:
 
-1. **preflight** (`release:preflight`) checks that the tag points to a commit on the default branch, names the workspace version, and has a written changelog section. It compares the version with the signed download manifest, or with GitHub's latest published release when the download service is off. The deployed unsigned `0.1.0` manifest is the sole signing exception for the first transition.
+1. **preflight** (`release:preflight`) checks that the tag points to a commit on `release/0.3`, names the workspace version, and has a written changelog section. It compares the version with the signed download manifest, or with GitHub's latest published release when the download service is off. The deployed unsigned `0.1.0` manifest is the sole signing exception for the first transition.
 2. **build** runs on one runner per target — `ubuntu-24.04`, `ubuntu-24.04-arm`, `macos-15`, `macos-15-intel`, and `windows-latest` — because the native modules are compiled for the host. Each runner checks it builds its target, packs the archive, installs it with the real installer and updates through it with `bake update` (`release:verify-local`, signed with a throwaway key), and, outside Windows, runs the built-profile terminal scenarios. Every platform reports even when one fails, and publishing needs all five.
 3. **publish** runs in the `release` environment, the only place the signing key and deploy token exist. It signs the manifest (`release:assemble --complete`), runs the image's signature gate, and checks that a retry does not change any archive already served under this version. It uploads the archives, manifest, signature, and installers to a GitHub release draft and downloads them again to compare every byte. It publishes the draft and verifies it as a client reads it, because the download service redirects its archives there. It then deploys the download service without the archives, which together exceed Railway's upload limit, and waits for the manifest and every archive to become available through it. A rerun keeps an already published GitHub release's assets and only proves they match this build.
 

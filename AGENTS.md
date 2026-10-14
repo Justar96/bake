@@ -48,15 +48,16 @@ Run the checks relevant to your change while you work, and `bun run preflight` b
 
 ## Branches and releases
 
-`develop` is where work lands; `main` holds released code. [CONTRIBUTING.md](CONTRIBUTING.md) covers pull requests and [distribution/README.md](distribution/README.md#release-with-github-actions) the release workflow.
+This is `release/0.3`, the maintenance line of the TypeScript agent. The TypeScript agent is frozen: it gets bug and security fixes only, and it is removed when Bake's Rust agent ships. New work, including all Rust work, lands on `develop`. [CONTRIBUTING.md](CONTRIBUTING.md) covers pull requests and [distribution/README.md](distribution/README.md#release-with-github-actions) the release workflow.
 
-- Start every change, hotfixes included, on a new branch from an up-to-date `origin/develop`, and open its pull request against `develop`. Never commit to `main` or `develop` directly.
-- `main` accepts only a merge-commit pull request from `develop`, which the `develop only` check enforces. Open one only to ship a release.
-- To release, finish the change on its branch, then:
-  1. Run `bun run release:prepare <version>`. Check the changelog section it writes, and rename `evals/agent-loop/versions/unreleased/` to `v<version>` if it exists.
+- Start a 0.3 fix on a new branch from an up-to-date `origin/release/0.3`, and open its pull request against `release/0.3`. Never commit to `release/0.3` directly; its ruleset requires a merge-commit pull request.
+- A fix that also applies to `develop` lands there in its own pull request, unless `develop` no longer has the TypeScript code it fixes.
+- No feature lands here. A 0.3 release from this branch never merges into `main` or `develop`.
+- To release, finish the fixes on `release/0.3`, then:
+  1. On a new branch from it, run `bun run release:prepare <version>`. Check the changelog section it writes, and rename `evals/agent-loop/versions/unreleased/` to `v<version>` if it exists.
   2. Run `bun run release:preflight --offline --tag v<version>`, then commit only those edits as `release: <version>`.
-  3. Merge into `develop`, then open the pull request from `develop` to `main`.
-  4. Once that merges, tag `main`'s merge commit `v<version>` and push only the tag. The tag publishes to every install, so push it only when the user asks for that release.
+  3. Merge that pull request into `release/0.3`.
+  4. Tag the merge commit `v<version>` and push only the tag. The release workflow accepts only tags on `release/0.3`. The tag publishes to every install, so push it only when the user asks for that release.
 
 ## Evals
 
