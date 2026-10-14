@@ -2,6 +2,9 @@
 
 Bake is a keyboard-driven coding agent for the terminal. It streams the model's answer as it arrives, runs shell and file tools inside a sandbox, and saves every session as an append-only log you can resume.
 
+> [!NOTE]
+> Bake is moving to a native Rust agent, `bake-rs` ([roadmap](docs/roadmap/rust-0.4/README.md)). This TypeScript agent is what the installer below installs. It is deprecated and receives bug and security fixes only, as 0.3.x releases, until Bake 0.4.0 replaces it. The installer still requires Node.js until then.
+
 - **Slash commands** for models and reasoning effort, sign-in, sessions, goals, compaction, permissions, and settings, with argument completion.
 - **Long-running work**: goals that continue across rounds, subagents you can watch from the input row, and shell commands left running in the background.
 - **Sandboxed tools**: bash or PowerShell, file reads and edits, search, and web search and fetch, each gated by a permission preset.

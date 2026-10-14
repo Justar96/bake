@@ -2,16 +2,15 @@
  * Decide which CI jobs an event runs. The `ci.yml` workflow's `scope` job
  * runs this and the other jobs read its outputs.
  *
- * - A pull request into the Rust 0.4.0 line ({@link RUST_LINE}), directly or
- *   through a stack whose trunk it is, runs the native job on Linux and
- *   Windows. It
+ * - A pull request into `develop` ({@link SCOPED_TRUNK}), directly or through
+ *   a stack whose trunk it is, runs the native job on Linux and Windows. It
  *   runs TypeScript checks on Linux only, and only as far as its files need:
- *   none for Rust sources alone, the static half for Markdown, and both parts
- *   for anything else. The pull request that syncs the line into `develop`
- *   runs everything.
+ *   none for Rust sources alone, the static half for Markdown, and both parts,
+ *   with the Windows release check, for anything else.
  * - A release pull request from `develop` into `main` runs Linux alone; see
  *   the comment in `ci.yml`.
- * - Every other event runs every job on Linux, and the native job on
+ * - Every other event, including a pull request into `release/0.3`, runs
+ *   every job on Linux, and the native job and Windows release check on
  *   Windows too.
  *
  * No job runs on macOS: macOS is checked locally, with
@@ -23,13 +22,13 @@
 
 import { appendFileSync } from 'node:fs'
 
-/** The long-lived integration branch Rust port pull requests target. */
-export const RUST_LINE = 'rust/0.4.0'
+/** The trunk whose pull requests run only the checks their files need. */
+export const SCOPED_TRUNK = 'develop'
 
-/** Branches a stack can bottom out on other than the Rust line. */
-const TRUNKS = new Set(['develop', 'main'])
+/** Branches a stack can bottom out on other than {@link SCOPED_TRUNK}. */
+const TRUNKS = new Set(['main', 'release/0.3'])
 
-/** How far down a stack {@link onRustLine} follows bases before giving up. */
+/** How far down a stack {@link onScopedTrunk} follows bases before giving up. */
 const MAX_STACK = 20
 
 /** Paths the native job alone checks: the Cargo workspace and its drivers. */
@@ -91,22 +90,22 @@ const jobs = (os: readonly string[], parts: readonly { name: string; args: strin
 
 /**
  * @param event - the triggering event.
- * @param rustLine - whether a pull request's stack bottoms out on {@link RUST_LINE}.
+ * @param scoped - whether a pull request's stack bottoms out on {@link SCOPED_TRUNK}.
  * @param files - the pull request's changed files, or undefined when unknown.
  */
-export function plan(event: Event, rustLine: boolean, files: readonly string[] | undefined): Plan {
+export function plan(event: Event, scoped: boolean, files: readonly string[] | undefined): Plan {
   if (event.name === 'pull_request' && event.baseRef === 'main' && event.headRef === 'develop' && event.sameRepository) {
     return {
       preflight: jobs(['ubuntu-latest'], [CHECKS, RUNTIME]), rust: ['ubuntu-latest'], windowsRelease: false,
       reason: 'a release pull request from develop: Linux alone',
     }
   }
-  if (event.name === 'pull_request' && rustLine) {
+  if (event.name === 'pull_request' && scoped) {
     const need = files === undefined ? 'full' : typeScriptNeed(files)
     const parts = { none: [], static: [STATIC], full: [CHECKS, RUNTIME] }[need]
     return {
-      preflight: jobs(['ubuntu-latest'], parts), rust: [...RUST_OS], windowsRelease: false,
-      reason: `a pull request into ${RUST_LINE}: native checks on Linux and Windows, TypeScript checks: ${need}${files === undefined ? ' (changed files unknown)' : ''}`,
+      preflight: jobs(['ubuntu-latest'], parts), rust: [...RUST_OS], windowsRelease: need === 'full',
+      reason: `a pull request into ${SCOPED_TRUNK}: native checks on Linux and Windows, TypeScript checks: ${need}${files === undefined ? ' (changed files unknown)' : ''}`,
     }
   }
   return {
@@ -121,13 +120,13 @@ export function plan(event: Event, rustLine: boolean, files: readonly string[] |
  * @param base - the pull request's own base branch.
  * @param baseOf - the base of the one open pull request from a branch, or
  *   undefined when there is none or more than one.
- * @returns whether the stack's trunk is {@link RUST_LINE}.
+ * @returns whether the stack's trunk is {@link SCOPED_TRUNK}.
  */
-export function onRustLine(base: string, baseOf: (head: string) => string | undefined): boolean {
+export function onScopedTrunk(base: string, baseOf: (head: string) => string | undefined): boolean {
   const seen = new Set<string>()
   let ref: string | undefined = base
   while (ref !== undefined && seen.size < MAX_STACK) {
-    if (ref === RUST_LINE) return true
+    if (ref === SCOPED_TRUNK) return true
     if (TRUNKS.has(ref) || seen.has(ref)) return false
     seen.add(ref)
     ref = baseOf(ref)
@@ -161,11 +160,11 @@ function main(): void {
     const bases = out?.split('\n').filter(Boolean) ?? []
     return bases.length === 1 ? bases[0] : undefined
   }
-  const rustLine = isPull && onRustLine(event.baseRef ?? '', baseOf)
-  const files = rustLine
+  const scoped = isPull && onScopedTrunk(event.baseRef ?? '', baseOf)
+  const files = scoped
     ? gh(['pr', 'diff', pull ?? '', '--repo', repository, '--name-only'])?.split('\n').filter(Boolean)
     : undefined
-  const chosen = plan(event, rustLine, files)
+  const chosen = plan(event, scoped, files)
   const lines = [
     `preflight=${JSON.stringify(chosen.preflight)}`,
     `rust=${JSON.stringify(chosen.rust)}`,

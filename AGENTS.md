@@ -1,10 +1,10 @@
 # Bake
 
-Bake is an independent terminal coding agent. `origin` is Bake's own repository. `upstream` is a read-only reference: review its DeepSeek Harness releases there, then port changes selectively. Never merge from or push to `upstream` automatically.
+Bake is an independent terminal coding agent. Its product line is the Rust agent, `bake-rs` under `rust/`, built to the [Rust 0.4 roadmap](docs/roadmap/rust-0.4/README.md). The TypeScript agent is deprecated and frozen: it is what `bake` installs until the Rust release, which removes it (see [Branches and releases](#branches-and-releases)). `origin` is Bake's own repository. `upstream` is a read-only reference: review its DeepSeek Harness releases there, then port changes selectively. Never merge from or push to `upstream` automatically.
 
 ## Porting from upstream
 
-Bake removed upstream's web client, desktop app, ACP, Python SDK, docs website, benchmarks, and upstream CI and review automation, along with their Agent Notes and docs. The `desktop` profile bundle in `packages/bundle/desktop` is Bake's own: the separate Bake Desktop app launches it with `dsh --profile desktop`, so keep it and its tests. When porting:
+Upstream is TypeScript, so its fixes reach only the frozen TypeScript agent: port bug and security fixes alone, onto `release/0.3`. Bake removed upstream's web client, desktop app, ACP, Python SDK, docs website, benchmarks, and upstream CI and review automation, along with their Agent Notes and docs. The `desktop` profile bundle in `packages/bundle/desktop` is Bake's own: the separate Bake Desktop app launches it with `dsh --profile desktop`, so keep it and its tests. When porting:
 
 - A modify/delete conflict on a removed note or doc keeps the deletion (`git rm <file>`). Do not restore docs for removed products.
 - `packages/session/session-format-catalog/src/retired-vocabulary.ts` keeps event types that released Session logs carry but no plugin writes, so those logs still open. Remove an entry only with a Session-format version bump and migration; regenerate with `bun run gen-persistence-catalog` and confirm no persistence digest moves.
@@ -54,13 +54,15 @@ Run the checks relevant to your change while you work, and `bun run preflight` b
 
 ## Branches and releases
 
-`develop` is where work lands; `main` holds released code; `rust/0.4.0` collects the Rust 0.4 port. [CONTRIBUTING.md](CONTRIBUTING.md) covers pull requests and [distribution/README.md](distribution/README.md#release-with-github-actions) the release workflow.
+`develop` is where work lands, and it is Rust-first; `main` holds released code; `release/0.3` is the TypeScript agent's maintenance line, cut from v0.3.8. [CONTRIBUTING.md](CONTRIBUTING.md) covers pull requests and [distribution/README.md](distribution/README.md#release-with-github-actions) the release workflow.
 
-- Start every change, hotfixes included, on a new branch from an up-to-date `origin/develop`, and open its pull request against `develop`. Never commit to `main`, `develop`, or `rust/0.4.0` directly.
-- Rust port work, a change under the [0.4 roadmap](docs/roadmap/rust-0.4/README.md) (see [Rust 0.4 port](#rust-04-port)), starts instead from an up-to-date `origin/rust/0.4.0` and targets it. CI runs its native job on Linux and Windows and its TypeScript checks on Linux only as far as its files need. No CI job runs on macOS: before opening a pull request that touches `rust/`, native code, or terminal behavior, run `bun run preflight:mac` and paste its summary into the pull request (see [macOS checks](#macos-checks)). A pull request from `rust/0.4.0` into `develop` brings the line over with a merge commit and full CI; a pull request from `develop` into `rust/0.4.0` brings 0.3 fixes forward. A 0.3 fix still lands on `develop` first.
+- Start every change on a new branch from an up-to-date `origin/develop`, and open its pull request against `develop`. Never commit to `main`, `develop`, or `release/0.3` directly.
+- The TypeScript agent (`apps/`, `packages/`, and the profiles and bundles they build) is frozen. Add no TypeScript features. On `develop`, change TypeScript only to keep its gates passing or for tooling the Rust port uses, such as `evals/` and `scripts/`. The Rust release removes the TypeScript agent from `develop`, under roadmap scope 17.
+- A 0.3 fix starts from an up-to-date `origin/release/0.3` and targets it; that branch's AGENTS.md has its fixes-only rules and its release steps. Nothing from `release/0.3` merges into `develop` or `main`.
+- CI runs a pull request into `develop` with the native job on Linux and Windows and TypeScript checks on Linux only as far as its files need. No CI job runs on macOS: before opening a pull request that touches `rust/`, native code, or terminal behavior, run `bun run preflight:mac` and paste its summary into the pull request (see [macOS checks](#macos-checks)).
 - Split dependent changes into a stack of pull requests, each based on the one below, and link them with `gh stack link --base <trunk> <bottom> … <top>` so GitHub owns their order. The [stack review guide](docs/cookbook/responding-to-pr-review-on-a-stack.md) covers review fixes, and the `dsh-merging-stacked-prs` skill covers landing with `gh stack merge`.
-- `main` accepts only a merge-commit pull request from `develop`, which the `develop only` check enforces. Open one only to ship a release.
-- To release, finish the change on its branch, then:
+- `main` accepts only a merge-commit pull request from `develop`, which the `develop only` check enforces. Open one only to ship a release. The next release from `develop` is the Rust release, 0.4.0; until the roadmap's release qualification passes, ship 0.3 versions from `release/0.3` instead.
+- To release from `develop`, finish the change on its branch, then:
   1. Run `bun run release:prepare <version>`. Check the changelog section it writes, and rename `evals/agent-loop/versions/unreleased/` to `v<version>` if it exists.
   2. Run `bun run release:preflight --offline --tag v<version>`, then commit only those edits as `release: <version>`.
   3. Merge into `develop`, then open the pull request from `develop` to `main`.

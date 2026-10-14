@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { onRustLine, plan, RUST_LINE, typeScriptNeed, type Event } from './ci-scope.ts'
+import { onScopedTrunk, plan, SCOPED_TRUNK, typeScriptNeed, type Event } from './ci-scope.ts'
 
 const pull = (baseRef: string, headRef = 'feat/x', sameRepository = true): Event =>
   ({ name: 'pull_request', baseRef, headRef, sameRepository })
@@ -22,8 +22,8 @@ describe('typeScriptNeed', () => {
 })
 
 describe('plan', () => {
-  it('runs every job outside the Rust line, on Linux and Windows but never macOS', () => {
-    const chosen = plan(pull('develop'), false, undefined)
+  it('runs every job off develop, on Linux and Windows but never macOS', () => {
+    const chosen = plan(pull('release/0.3'), false, undefined)
     expect(chosen.preflight.map(job => `${job.name}/${job.os}`)).toEqual([
       'checks/ubuntu-latest', 'runtime/ubuntu-latest',
     ])
@@ -41,36 +41,40 @@ describe('plan', () => {
     expect(plan(pull('main', 'develop', false), false, undefined).windowsRelease).toBe(true)
   })
 
-  it('runs the native job on Linux and Windows on the Rust line and TypeScript on Linux as needed', () => {
-    const rust = plan(pull(RUST_LINE), true, ['rust/src/a.rs'])
+  it('runs the native job on Linux and Windows into develop and TypeScript on Linux as needed', () => {
+    const rust = plan(pull(SCOPED_TRUNK), true, ['rust/src/a.rs'])
     expect(rust.rust).toEqual(['ubuntu-latest', 'windows-latest'])
     expect(rust.preflight).toEqual([])
     expect(rust.windowsRelease).toBe(false)
-    expect(plan(pull(RUST_LINE), true, ['rust/src/a.rs', 'CHANGELOG.md']).preflight)
-      .toEqual([{ os: 'ubuntu-latest', name: 'checks', args: '--fast --skip native' }])
-    expect(plan(pull(RUST_LINE), true, ['packages/core/x.ts']).preflight.map(job => `${job.name}/${job.os}`))
+    const markdown = plan(pull(SCOPED_TRUNK), true, ['rust/src/a.rs', 'CHANGELOG.md'])
+    expect(markdown.preflight).toEqual([{ os: 'ubuntu-latest', name: 'checks', args: '--fast --skip native' }])
+    expect(markdown.windowsRelease).toBe(false)
+    const typescript = plan(pull(SCOPED_TRUNK), true, ['packages/core/x.ts'])
+    expect(typescript.preflight.map(job => `${job.name}/${job.os}`))
       .toEqual(['checks/ubuntu-latest', 'runtime/ubuntu-latest'])
+    expect(typescript.windowsRelease).toBe(true)
     // Unknown files run both parts.
-    expect(plan(pull(RUST_LINE), true, undefined).preflight).toHaveLength(2)
+    expect(plan(pull(SCOPED_TRUNK), true, undefined).preflight).toHaveLength(2)
   })
 })
 
-describe('onRustLine', () => {
+describe('onScopedTrunk', () => {
   const bases: Record<string, string> = {
-    'feat/top': 'feat/middle', 'feat/middle': 'feat/bottom', 'feat/bottom': RUST_LINE,
-    'feat/other': 'develop', 'loop/a': 'loop/b', 'loop/b': 'loop/a',
+    'feat/top': 'feat/middle', 'feat/middle': 'feat/bottom', 'feat/bottom': SCOPED_TRUNK,
+    'fix/other': 'release/0.3', 'loop/a': 'loop/b', 'loop/b': 'loop/a',
   }
   const baseOf = (head: string): string | undefined => bases[head]
 
-  it('follows a stack down to the Rust line', () => {
-    expect(onRustLine(RUST_LINE, baseOf)).toBe(true)
-    expect(onRustLine('feat/top', baseOf)).toBe(true)
+  it('follows a stack down to develop', () => {
+    expect(onScopedTrunk(SCOPED_TRUNK, baseOf)).toBe(true)
+    expect(onScopedTrunk('feat/top', baseOf)).toBe(true)
   })
 
   it('stops at another trunk, a broken chain, or a loop', () => {
-    expect(onRustLine('develop', baseOf)).toBe(false)
-    expect(onRustLine('feat/other', baseOf)).toBe(false)
-    expect(onRustLine('feat/orphan', baseOf)).toBe(false)
-    expect(onRustLine('loop/a', baseOf)).toBe(false)
+    expect(onScopedTrunk('main', baseOf)).toBe(false)
+    expect(onScopedTrunk('release/0.3', baseOf)).toBe(false)
+    expect(onScopedTrunk('fix/other', baseOf)).toBe(false)
+    expect(onScopedTrunk('feat/orphan', baseOf)).toBe(false)
+    expect(onScopedTrunk('loop/a', baseOf)).toBe(false)
   })
 })
