@@ -22,11 +22,12 @@ concurrency:
 # tag after it builds and checks every platform again. Only the combination of
 # those changes is new, which no earlier run has tested, so the Linux jobs stay.
 #
-# A pull request into the Rust 0.4.0 line, rust/0.4.0, directly or through a
-# stack on it, runs the native job on Linux and Windows and TypeScript checks
-# on Linux only as far as its files need. The pull request that syncs the line
-# into develop runs everything. No job runs on macOS, which is checked locally
-# before a pull request opens. scripts/ci-scope.ts makes these choices.
+# A pull request into develop, directly or through a stack on it, runs the
+# native job on Linux and Windows and TypeScript checks on Linux only as far as
+# its files need; one that changes TypeScript also runs the Windows release
+# check. A pull request into release/0.3 runs everything. No job runs on macOS,
+# which is checked locally before a pull request opens. scripts/ci-scope.ts
+# makes these choices.
 jobs:
   scope:
     if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Merge pull request ')

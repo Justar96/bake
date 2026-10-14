@@ -22,7 +22,7 @@ Build each target on its own host: `darwin-arm64`, `darwin-x64`, `linux-arm64`, 
 
 ## Release with GitHub Actions
 
-The [release workflow](../.github/workflows/release.yml) builds, checks, signs, and publishes every platform from one tag:
+The [release workflow](../.github/workflows/release.yml) builds, checks, signs, and publishes every platform from one tag. This page describes a release from `develop` through `main`, which is next used for the Rust release, 0.4.0, once the [roadmap's release qualification](../docs/roadmap/rust-0.4/README.md#release-qualification) passes. 0.3 versions of the frozen TypeScript agent are released from `release/0.3`, whose copy of this guide and of the workflow describes that path.
 
 ```sh
 # on the branch that carries the release's last change, made from develop
