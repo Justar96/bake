@@ -157,7 +157,7 @@ enum Discovery {
 /// The ignore rules in force for a directory: Pi's prefixed patterns,
 /// matched against paths relative to the root.
 #[derive(Clone, Default)]
-struct IgnoreRules {
+pub(crate) struct IgnoreRules {
     lines: Vec<String>,
     matcher: Option<Gitignore>,
 }
@@ -165,7 +165,7 @@ struct IgnoreRules {
 impl IgnoreRules {
     /// Pi's `addIgnoreRules`: the patterns of `dir`'s ignore files,
     /// prefixed with `dir`'s path below the root.
-    fn add_dir(&mut self, dir: &Path, root: &Path) {
+    pub(crate) fn add_dir(&mut self, dir: &Path, root: &Path) {
         let prefix = match dir.strip_prefix(root) {
             Ok(relative) if relative.as_os_str().is_empty() => String::new(),
             Ok(relative) => format!("{}/", to_posix(relative)),
@@ -195,7 +195,7 @@ impl IgnoreRules {
     }
 
     /// Pi's `ig.ignores(relative)`, which also checks the parents.
-    fn ignores(&self, relative: &Path, is_dir: bool) -> bool {
+    pub(crate) fn ignores(&self, relative: &Path, is_dir: bool) -> bool {
         match &self.matcher {
             Some(matcher) if !relative.has_root() => matcher
                 .matched_path_or_any_parents(relative, is_dir)

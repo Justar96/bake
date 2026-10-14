@@ -8,8 +8,10 @@ bake-rs reads its settings from `settings.json` in the Bake home, a JSON object 
 |---|---|
 | `defaultProvider`, `defaultModel` | The model a new session starts with when `--model` is not given (`bake-rs docs models`) |
 | `defaultThinkingLevel` | The thinking level when none is given: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`; `medium` when unset |
+| `enabledModels` | Model patterns or globs that scope the available models when `--models` is not passed (`bake-rs docs models`) |
 | `modelThinkingLevels` | Thinking levels for particular models, keyed `provider/id`, used when a new session is given no thinking level |
 | `defaultTools` | The tool names a session starts with, in place of `read`, `bash`, `edit`, and `write`; `+name` and `-name` add to or remove from those four |
+| `maxToolArgumentWhitespace` | The most whitespace a streamed tool call's arguments may end with, outside string values, before bake-rs abandons the response as a retryable error; a positive integer, 2000 when unset |
 | `sessionDir` | One directory to keep every project's sessions in, in place of `sessions/` in the Bake home; continuing and listing still pick the working directory's sessions |
 | `blockImages` | When `true`, images are not sent to the model |
 | `images.autoResize` | Whether the `read` tool shrinks large images before sending them; `true` when unset |

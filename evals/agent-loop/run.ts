@@ -524,7 +524,11 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
       skillNeeded: SKILL_SCENARIOS[scenario] ?? null,
       contextWindow: contextWindowApplied ? contextWindow : null,
       compactions: nativeRoute !== undefined ? jsonModeCompactions(events) : piRoute === undefined ? compactions(logged) : null,
-      runawayAbort: runawayAbort([stderr, final, ...events.filter(event => event.type === 'unparsed').map(event => event.text)]),
+      runawayAbort: runawayAbort([
+        stderr, final,
+        ...events.filter(event => event.type === 'unparsed').map(event => event.text),
+        ...events.flatMap(event => [event.errorMessage, event.finalError, event.message?.errorMessage]).filter((text): text is string => typeof text === 'string'),
+      ]),
       cache: (() => {
         const logical = usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens
         const perStep = steps.map(step => step.usage === undefined ? null : ({ read: step.usage.cacheReadTokens ?? 0, write: step.usage.cacheWriteTokens ?? 0, uncached: step.usage.inputTokens ?? 0 }))

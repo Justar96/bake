@@ -17,11 +17,12 @@ This page re-plans roadmap scopes 02 to 17 around [D22](scope-00/support.md#deci
 
 ## Pinned Pi revision
 
-Checked through the GitHub API on 2026-10-09; the latest release was re-checked for scope 04 on 2026-10-11 and remains v1.1.0.
+Checked through the GitHub API on 2026-10-09; re-checked on 2026-10-11 (v1.1.0) and on 2026-10-13 for scope 10 ([Latest release v1.2.0](https://github.com/earendil-works/pi/releases/tag/v1.2.0), `06a466935536f8c9bcacb2d5efc0fc021be1bdff`).
 
 | Reference | Revision | Use |
 |---|---|---|
-| [Latest release v1.1.0](https://github.com/earendil-works/pi/releases/tag/v1.1.0), published 2026-10-07 22:26 UTC | `abe508e1b89912adde45528136c3221eb69acdd7` | Default port source |
+| [Release v1.1.0](https://github.com/earendil-works/pi/releases/tag/v1.1.0), published 2026-10-07 22:26 UTC | `abe508e1b89912adde45528136c3221eb69acdd7` | Initial port source (scopes 02–09) |
+| [Latest release v1.2.0](https://github.com/earendil-works/pi/releases/tag/v1.2.0), re-checked 2026-10-13 | `06a466935536f8c9bcacb2d5efc0fc021be1bdff` | Current official release (scope 10 onward) |
 | [`main`](https://github.com/earendil-works/pi/commit/6fb2e7815167e6b19006fc526d1a5d0f5f998787), committed 2026-10-08 15:26 UTC | `6fb2e7815167e6b19006fc526d1a5d0f5f998787` | Unreleased changes, adopted only with a named reason |
 
 Pi's packages at that main revision:

@@ -557,7 +557,12 @@ async fn spawn_context_carries_prefix_context_and_session_environment() {
     assert_eq!(lookup(env, "BAKE_PROVIDER").as_deref(), Some("cliproxyapi"));
     assert_eq!(lookup(env, "BAKE_MODEL").as_deref(), Some("gpt"));
     assert_eq!(lookup(env, "BAKE_REASONING_LEVEL").as_deref(), Some("high"));
-    assert!(lookup(env, "PI_SESSION_ID").is_none());
+    // Only an inherited value, as when a host agent such as Pi runs the
+    // tests, may appear: the tool never sets Pi's name itself.
+    assert_eq!(
+        lookup(env, "PI_SESSION_ID"),
+        std::env::var("PI_SESSION_ID").ok()
+    );
     assert_eq!(lookup(env, "FROM_HOOK").as_deref(), Some("yes"));
     let path = env
         .iter()

@@ -7,8 +7,9 @@ use bake_ai::ModelThinkingLevel;
 use serde_json::json;
 
 use super::resolver::{
-    CliModel, ModelCatalog, find_exact_model_reference_match, find_initial_model,
-    parse_model_pattern, resolve_cli_model,
+    CliModel, ModelCatalog, ModelScopeDiagnostic, ModelScopeDiagnosticCode,
+    find_exact_model_reference_match, find_initial_model, parse_model_pattern, resolve_cli_model,
+    resolve_model_scope_from_models,
 };
 use super::*;
 
@@ -721,4 +722,69 @@ async fn a_request_aborted_before_it_starts_never_reaches_the_provider() {
         assert_eq!(result.error_message.as_deref(), Some("Request was aborted"));
     }
     assert_eq!(faux.call_count(), 0);
+}
+
+// Pi `describe("resolveModelScopeWithDiagnostics")`.
+#[test]
+fn resolve_model_scope_follows_pi() {
+    let models = all_models();
+    let result = resolve_model_scope_from_models(
+        &[
+            "sonnet:high".into(),
+            "gpt-4o:invalid".into(),
+            "missing".into(),
+        ],
+        &models,
+    );
+    assert_eq!(
+        result
+            .scoped_models
+            .iter()
+            .map(|scoped| (scoped.model.id.as_str(), scoped.thinking_level))
+            .collect::<Vec<_>>(),
+        vec![
+            ("claude-sonnet-4-5", Some(ModelThinkingLevel::High)),
+            ("gpt-4o", None),
+        ]
+    );
+    assert_eq!(
+        result.diagnostics,
+        vec![
+            ModelScopeDiagnostic {
+                code: ModelScopeDiagnosticCode::InvalidThinkingLevel,
+                message: "Invalid thinking level \"invalid\" in pattern \"gpt-4o:invalid\". Using default instead.".into(),
+                pattern: "gpt-4o:invalid".into(),
+            },
+            ModelScopeDiagnostic {
+                code: ModelScopeDiagnosticCode::NoMatch,
+                message: "No models match pattern \"missing\"".into(),
+                pattern: "missing".into(),
+            },
+        ]
+    );
+
+    // Bracketed model ids resolve as exact references before glob matching.
+    let mut with_brackets = models.clone();
+    with_brackets.push(model("custom", "bracketed-model[1m]", "Bracketed Model"));
+    let exact = resolve_model_scope_from_models(
+        &["custom/bracketed-model[1m]:high".into()],
+        &with_brackets,
+    );
+    assert_eq!(exact.scoped_models.len(), 1);
+    assert_eq!(exact.scoped_models[0].model.id, "bracketed-model[1m]");
+    assert_eq!(
+        exact.scoped_models[0].thinking_level,
+        Some(ModelThinkingLevel::High)
+    );
+    assert!(exact.diagnostics.is_empty());
+
+    // Glob patterns match both `provider/id` and `id` case-insensitively and deduplicate.
+    let globbed =
+        resolve_model_scope_from_models(&["*SONNET*:low".into(), "anthropic/*".into()], &models);
+    assert_eq!(globbed.scoped_models.len(), 1);
+    assert_eq!(globbed.scoped_models[0].model.id, "claude-sonnet-4-5");
+    assert_eq!(
+        globbed.scoped_models[0].thinking_level,
+        Some(ModelThinkingLevel::Low)
+    );
 }

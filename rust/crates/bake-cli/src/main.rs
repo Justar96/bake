@@ -33,9 +33,19 @@ Options:
       --mode <mode>         Output: text (the final answer) or json (every event)
       --provider <name>     Provider of --model
       --model <pattern>     Model id, pattern, or provider/id, optionally :<thinking>
+      --models <patterns>   Scope available models (comma-separated patterns or globs)
+      --api-key <key>       Runtime API key for the selected model's provider
       --thinking <level>    off, minimal, low, medium, high, xhigh, or max
+      --system-prompt <text|path>
+                            Replace the default system prompt preamble and rules
+      --append-system-prompt <text|path>
+                            Append to the system prompt (repeatable)
   -c, --continue            Continue the most recent session in this directory
       --session <path|id>   Use a session file, or a session id or id prefix
+      --session-id <id>     Use a specific session id, opening or creating it
+      --fork <path|id>      Fork a session into a new session in this directory
+      --session-dir <dir>   Directory for session storage and lookup
+  -n, --name <name>         Set the session display name
       --no-session          Do not save the session
   -t, --tools <list>        Allow these tools: names, patterns with *, or +name
                             and -name changes to the defaults, comma-separated
@@ -45,6 +55,13 @@ Options:
   -nbt, --no-builtin-tools  Start without the built-in tools
       --skill <path>        Load a skill file or directory (repeatable)
   -ns, --no-skills          Do not discover skills in .agents/skills
+      --prompt-template <path>
+                            Load a prompt template file or directory (repeatable)
+  -np, --no-prompt-templates
+                            Do not discover prompt templates
+  -nc, --no-context-files   Do not load AGENTS.md context files
+      --list-models [search]
+                            List available models (with optional fuzzy search)
       --permission <preset> Permission preset: workspace-write or
                             danger-full-access, or one from settings.json;
                             new sessions default to the saved preset, else
@@ -54,14 +71,14 @@ Options:
   -h, --help                Show this help
   -v, --version             Show the version
 
-Messages are prompts, sent in order; piped standard input is prepended to the
-first. The agent starts with the read, bash, edit, and write tools; grep, find,
-and ls are available through --tools, and grep and find need rg and fd on
-PATH. A session keeps its permission: write and edit change files only where
-its sandbox mode allows, and bash runs only under a sandbox that enforces it:
-bubblewrap or Landlock on Linux and Seatbelt on macOS. Without one (Windows,
-for now), confined bash calls are refused. Escalations need approval, which
-print mode cannot give.
+Messages are prompts, sent in order; piped standard input and @file arguments
+are prepended to the first. The agent starts with the read, bash, edit, and
+write tools; grep, find, and ls are available through --tools, and grep and
+find need rg and fd on PATH. A session keeps its permission: write and edit
+change files only where its sandbox mode allows, and bash runs only under a
+sandbox that enforces it: bubblewrap or Landlock on Linux and Seatbelt on
+macOS. Without one (Windows, for now), confined bash calls are refused.
+Escalations need approval, which print mode cannot give.
 Interactive mode is not available yet: bake-rs prints when -p or --mode is
 given or a standard stream is not a terminal.
 

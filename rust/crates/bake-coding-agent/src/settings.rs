@@ -6,7 +6,9 @@
 //! level, per-model thinking levels, the queue modes, the session
 //! directory, `blockImages`, `images.autoResize`, `defaultTools`, `compaction`
 //! (with per-model overrides), `branchSummary.reserveTokens`, and `retry`,
-//! and Bake's own `permission` section ([`crate::permissions`]). Pi reads `~/.pi/agent/settings.json` and
+//! and Bake's own `permission` section ([`crate::permissions`]) and
+//! `maxToolArgumentWhitespace` (Bake's route option in
+//! `packages/llm/llm-pi-ai/src/config.ts`). Pi reads `~/.pi/agent/settings.json` and
 //! merges a project's `.pi/settings.json` over it; Bake reads
 //! `$BAKE_HOME/settings.json` only. Bake 0.3's `settings.yaml` beside it is
 //! a different file, which this module does not read (D25).
@@ -48,6 +50,9 @@ pub struct Settings {
     pub default_model: Option<String>,
     /// `defaultThinkingLevel`.
     pub default_thinking_level: Option<ModelThinkingLevel>,
+    /// `enabledModels`, Pi's `getEnabledModels`: model scope patterns when
+    /// `--models` is not passed.
+    pub enabled_models: Option<Vec<String>>,
     /// `modelThinkingLevels`, keyed `provider/id`, in file order.
     pub model_thinking_levels: Vec<(String, ModelThinkingLevel)>,
     /// `steeringMode` (or the legacy `queueMode`).
@@ -74,6 +79,10 @@ pub struct Settings {
     /// `permission` as stored (`presets` and `defaultPreset`), read by
     /// [`crate::permissions`]. Bake's own section, not Pi's.
     pub permission: Option<Value>,
+    /// `maxToolArgumentWhitespace`: Bake's bound on the whitespace a streamed
+    /// tool call's arguments may end with (`config.ts`, a positive integer);
+    /// `None` uses [`bake_ai::DEFAULT_MAX_TOOL_ARGUMENT_WHITESPACE`].
+    pub max_tool_argument_whitespace: Option<usize>,
     /// Load errors, as Pi's settings diagnostics word them.
     pub warnings: Vec<String>,
 }
@@ -84,6 +93,7 @@ impl Default for Settings {
             default_provider: None,
             default_model: None,
             default_thinking_level: None,
+            enabled_models: None,
             model_thinking_levels: Vec::new(),
             steering_mode: QueueMode::default(),
             follow_up_mode: QueueMode::default(),
@@ -95,6 +105,7 @@ impl Default for Settings {
             branch_summary_reserve_tokens: DEFAULT_BRANCH_SUMMARY_RESERVE_TOKENS,
             retry: RetrySettings::default(),
             permission: None,
+            max_tool_argument_whitespace: None,
             warnings: Vec::new(),
         }
     }
@@ -226,6 +237,16 @@ impl Settings {
                 .get("defaultThinkingLevel")
                 .and_then(Value::as_str)
                 .and_then(parse_thinking_level),
+            enabled_models: object
+                .get("enabledModels")
+                .and_then(Value::as_array)
+                .map(|entries| {
+                    entries
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect()
+                }),
             model_thinking_levels: object
                 .get("modelThinkingLevels")
                 .and_then(Value::as_object)
@@ -267,6 +288,11 @@ impl Settings {
                 .unwrap_or(DEFAULT_BRANCH_SUMMARY_RESERVE_TOKENS),
             retry: RetrySettings::from_value(object.get("retry")),
             permission: object.get("permission").cloned(),
+            max_tool_argument_whitespace: object
+                .get("maxToolArgumentWhitespace")
+                .and_then(Value::as_u64)
+                .filter(|max| *max >= 1)
+                .and_then(|max| usize::try_from(max).ok()),
             warnings: Vec::new(),
         }
     }
@@ -442,6 +468,19 @@ mod tests {
         );
         let settings = Settings::parse(r#"{"defaultTools":"read"}"#, Path::new("s.json"));
         assert_eq!(settings.default_tools, Some(Vec::new()));
+    }
+
+    // Bake `packages/llm/llm-pi-ai/src/config.ts`: a positive integer.
+    #[test]
+    fn reads_the_tool_argument_whitespace_bound() {
+        let read =
+            |text: &str| Settings::parse(text, Path::new("s.json")).max_tool_argument_whitespace;
+        assert_eq!(read(r#"{"maxToolArgumentWhitespace":500}"#), Some(500));
+        assert_eq!(read(r#"{"maxToolArgumentWhitespace":0}"#), None);
+        assert_eq!(read(r#"{"maxToolArgumentWhitespace":-1}"#), None);
+        assert_eq!(read(r#"{"maxToolArgumentWhitespace":1.5}"#), None);
+        assert_eq!(read(r#"{"maxToolArgumentWhitespace":"9"}"#), None);
+        assert_eq!(read("{}"), None);
     }
 
     #[test]

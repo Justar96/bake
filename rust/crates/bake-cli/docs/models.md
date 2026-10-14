@@ -6,9 +6,12 @@ bake-rs has no built-in model catalog: every model comes from `models.json` in t
 
 - `--model <pattern>` picks a model by id, by `provider/id`, or by part of an id or name; when several match, an alias is preferred over a dated id. A `:<level>` suffix sets the thinking level, as in `--model cliproxyapi/gpt-5.5:high`.
 - `--provider <name>` limits `--model` to one provider. It needs `--model`.
+- `--models <patterns>` scopes the available models to a comma-separated list of model patterns or globs (such as `cliproxyapi/*:high,*sonnet*`). For a new session without `--model`, bake-rs picks the saved default model if it is in the scope, else the first model in the scope.
+- `--api-key <key>` sets a non-persistent runtime API key for the provider of the model selected by `--model`, `--provider`/`--model`, or `--models`.
 - `--thinking <level>` sets the thinking level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. It wins over a suffix. A level the model does not support is clamped to one it does.
+- `--list-models [search]` lists the available models (provider, model id, context window, max output tokens, thinking support, and image support), optionally filtered by a fuzzy search pattern, and exits.
 
-Without `--model`, a resumed session keeps the model it last used while that model's provider has a key. Otherwise bake-rs uses `defaultProvider` and `defaultModel` from `settings.json` (else the default model imported from Bake 0.3) when that provider has a key, else another model whose provider has one. A run with no usable model fails before sending anything. The ids `--model` accepts are the `id` members in `models.json` and the ids the imported route saved; bake-rs has no command that lists them.
+Without `--model`, a resumed session keeps the model it last used while that model's provider has a key. Otherwise bake-rs uses `defaultProvider` and `defaultModel` from `settings.json` (else the default model imported from Bake 0.3) when that provider has a key, else another model whose provider has one. A run with no usable model fails before sending anything. The ids `--model` accepts are the `id` members in `models.json` and the ids the imported route saved; `--list-models` prints them.
 
 ## models.json
 

@@ -324,6 +324,13 @@ impl Workspace {
             })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        // A host agent such as Pi exports `PI_*` variables that the bash
+        // tool test must not inherit.
+        for (key, _) in std::env::vars_os() {
+            if key.to_string_lossy().starts_with("PI_") {
+                command.env_remove(key);
+            }
+        }
         let mut child = command.spawn().expect("bake-rs starts");
         let input = child.stdin.take();
         let text = stdin.unwrap_or_default().to_owned();
@@ -1208,4 +1215,181 @@ fn workspace_write_confines_bash() {
     );
     assert!(sent.contains("[sandbox: escalation available"), "{sent}");
     let _ = std::fs::remove_dir_all(&outside);
+}
+
+#[test]
+fn print_mode_wires_file_args_prompt_flags_session_flags_and_runtime_api_key() {
+    let server = Server::start(Reply::sse());
+    let workspace = Workspace::new("cli-inputs", server.port);
+    // Remove auth.json so the provider only works when `--api-key` supplies a runtime key.
+    let _ = std::fs::remove_file(workspace.home().join("auth.json"));
+    std::fs::write(
+        workspace.home().join("models.json"),
+        serde_json::to_string_pretty(&json!({
+            "providers": {
+                "loop": {
+                    "baseUrl": format!("http://127.0.0.1:{}/v1", server.port),
+                    "api": "openai-responses",
+                    "models": [
+                        { "id": "loop-model", "name": "Loop", "reasoning": true, "input": ["text", "image"] }
+                    ]
+                }
+            }
+        }))
+        .expect("models.json"),
+    )
+    .expect("write models.json");
+
+    let note = workspace.project().join("note.txt");
+    std::fs::write(&note, "attached note").expect("write note");
+    std::fs::write(workspace.project().join("AGENTS.md"), "Project rule.").expect("write agents");
+    let custom_dir = workspace.root.join("custom-sessions");
+
+    let out = workspace.run(
+        &[
+            "-p",
+            "--models",
+            "loop/*:high",
+            "--api-key",
+            "runtime-secret",
+            "--session-dir",
+            &custom_dir.to_string_lossy(),
+            "--session-id",
+            "custom-session-1",
+            "--name",
+            "My session",
+            "--system-prompt",
+            "Custom preamble.",
+            "--append-system-prompt",
+            "Extra rule.",
+            "--no-context-files",
+            "@note.txt",
+            "Check this",
+        ],
+        None,
+    );
+    assert!(
+        text(&out.stderr).contains("Warning: No project session found with id 'custom-session-1'"),
+        "{}",
+        text(&out.stderr)
+    );
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    assert_eq!(text(&out.stdout), "Hello from the loop.\n");
+
+    let requests = server.requests();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0].header("authorization"),
+        Some("Bearer runtime-secret")
+    );
+    assert_eq!(requests[0].body["reasoning"]["effort"], json!("high"));
+    let sent = transcript(&requests[0]);
+    assert!(
+        sent[0].starts_with("developer: Custom preamble.\n\n<run>\n"),
+        "{}",
+        sent[0]
+    );
+    assert!(
+        sent[0].contains("\n<addendum>\nExtra rule.\n</addendum>\n"),
+        "{}",
+        sent[0]
+    );
+    assert!(!sent[0].contains("Project rule."), "{}", sent[0]);
+    assert_eq!(
+        sent[1],
+        format!(
+            "user: <file name=\"{}\">\nattached note\n</file>\nCheck this",
+            // The child resolves `@note.txt` against its real working
+            // directory, which on macOS is under `/private/var`. Windows
+            // keeps the given path; canonicalizing there adds `\\?\`.
+            if cfg!(windows) {
+                note.clone()
+            } else {
+                std::fs::canonicalize(&note).expect("note exists")
+            }
+            .display()
+        )
+    );
+
+    // Fork the session into a new session id inside the custom session directory.
+    let fork_out = workspace.run(
+        &[
+            "-p",
+            "--model",
+            "loop/loop-model",
+            "--api-key",
+            "runtime-secret",
+            "--session-dir",
+            &custom_dir.to_string_lossy(),
+            "--fork",
+            "custom-session-1",
+            "--session-id",
+            "forked-session-1",
+            "Follow up",
+        ],
+        None,
+    );
+    assert_eq!(
+        fork_out.status.code(),
+        Some(0),
+        "{}",
+        text(&fork_out.stderr)
+    );
+    let requests = server.requests();
+    assert_eq!(requests.len(), 2);
+    let fork_sent = transcript(&requests[1]);
+    assert!(
+        fork_sent.iter().any(|line| line.contains("Check this")),
+        "{fork_sent:?}"
+    );
+    assert_eq!(
+        fork_sent.last().map(String::as_str),
+        Some("user: Follow up")
+    );
+}
+
+#[test]
+fn print_mode_expands_prompt_templates_and_lists_models() {
+    let server = Server::start(Reply::sse());
+    let workspace = Workspace::new("templates-and-list-models", server.port);
+
+    let list_out = workspace.run(&["--list-models"], None);
+    assert_eq!(
+        list_out.status.code(),
+        Some(0),
+        "{}",
+        text(&list_out.stderr)
+    );
+    let listed = text(&list_out.stdout);
+    assert!(listed.contains("provider"), "{listed}");
+    assert!(listed.contains("loop"), "{listed}");
+    assert!(listed.contains("loop-model"), "{listed}");
+
+    let global_prompts = workspace.home().join("prompts");
+    std::fs::create_dir_all(&global_prompts).expect("global prompts");
+    std::fs::write(global_prompts.join("default-tmpl.md"), "Global: $1").expect("global template");
+
+    let custom_tmpl = workspace.project().join("review.md");
+    std::fs::write(
+        &custom_tmpl,
+        "---\ndescription: Review files\n---\nReview $1 with: ${@:2}",
+    )
+    .expect("review.md");
+
+    let out = workspace.run(
+        &[
+            "-p",
+            "--no-session",
+            "--no-prompt-templates",
+            "--prompt-template",
+            &custom_tmpl.to_string_lossy(),
+            "/review src/lib.rs \"strict mode\" fast",
+        ],
+        None,
+    );
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    let requests = server.requests();
+    assert_eq!(requests.len(), 1);
+    let sent = transcript(&requests[0]);
+    assert_eq!(sent[1], "user: Review src/lib.rs with: strict mode fast");
 }

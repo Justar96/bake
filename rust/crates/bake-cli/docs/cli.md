@@ -14,9 +14,12 @@ bake-rs --mode json -p "List the tests" > events.jsonl
 - Each message argument is a prompt, sent in order. `--` ends the options, so later arguments are messages even when they start with `-`.
 - When standard input is not a terminal, bake-rs reads it to the end before starting, up to 64 MiB, so give a run with nothing to pipe `< /dev/null`. The input is trimmed and joined to the first message with no separator, which is why the example above starts its message with a blank line.
 - `--mode text` prints the text of the final answer; `--mode json` prints the session header and then every event as one JSON line.
-- `@file` arguments are not supported yet.
+- `@file` arguments attach files to the first prompt: text files are wrapped in `<file name="...">` tags, and supported images (`png`, `jpg`, `gif`, `webp`, `bmp`) are attached and resized to the model's limits. Empty files are skipped, and a missing file stops the run with exit status 1.
+- `--system-prompt <text|path>` replaces the default system prompt preamble, rules, and docs section with literal text or the contents of a file, while keeping the run, context, skills, permissions, and environment sections.
+- `--append-system-prompt <text|path>` appends literal text or a file's contents to the system prompt. Give it more than once to join several parts with blank lines.
+- `--prompt-template <path>` loads a Markdown prompt template file or directory (repeatable); `-np`, `--no-prompt-templates` skips the default `prompts/` directories (`$BAKE_HOME/prompts` and `<cwd>/.bake/prompts`). A prompt starting with `/<name> [args...]` expands that template (`$1`, `$2`, `$@`, `$ARGUMENTS`, `${N:-default}`, `${@:N}`, `${@:N:L}`).
 
-Model flags are in `bake-rs docs models`, session flags in `bake-rs docs sessions`, permission flags in `bake-rs docs permissions`, and `--skill`, `--no-skills`, and `/skill:<name>` prompts in `bake-rs docs skills`.
+Model flags are in `bake-rs docs models`, session flags in `bake-rs docs sessions`, context flags in `bake-rs docs context`, permission flags in `bake-rs docs permissions`, and `--skill`, `--no-skills`, and `/skill:<name>` prompts in `bake-rs docs skills`.
 
 ## Tools
 

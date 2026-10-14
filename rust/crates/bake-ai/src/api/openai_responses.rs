@@ -30,6 +30,7 @@ use crate::types::{
 use crate::utils::abort::is_aborted;
 use crate::utils::error_body::{ProviderError, format_provider_error, normalize_provider_error};
 use crate::utils::event_stream::{AssistantMessageEventSender, AssistantMessageEventStream};
+use crate::utils::tool_argument_guard::DEFAULT_MAX_TOOL_ARGUMENT_WHITESPACE;
 use crate::utils::transcript::{get_current_tools, resolve_transcript};
 
 const OPENAI_TOOL_CALL_PROVIDERS: [&str; 3] = ["openai", "openai-codex", "opencode"];
@@ -273,6 +274,12 @@ async fn run(
         AssistantMessage::pending(&model),
         options.service_tier.clone(),
         Some(pricing),
+    )
+    .with_max_tool_argument_whitespace(
+        options
+            .base
+            .max_tool_argument_whitespace
+            .unwrap_or(DEFAULT_MAX_TOOL_ARGUMENT_WHITESPACE),
     );
     match run_inner(&sender, &model, &context, &options, &compat, &mut processor).await {
         Ok(()) => sender.finish(processor.output.clone()),

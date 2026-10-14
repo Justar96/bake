@@ -24,6 +24,7 @@ use crate::utils::event_stream::AssistantMessageEventSender;
 use crate::utils::hash::short_hash;
 use crate::utils::json_parse::parse_streaming_json_object;
 use crate::utils::text::{get_system_message_text, render_system_message_update};
+use crate::utils::tool_argument_guard::{ArgumentScan, DEFAULT_MAX_TOOL_ARGUMENT_WHITESPACE};
 use crate::utils::transcript::resolve_transcript;
 
 fn encode_text_signature_v1(id: &str, phase: Option<&str>) -> String {
@@ -338,6 +339,8 @@ pub struct ResponsesStreamProcessor {
     saw_terminal: bool,
     slots: HashMap<Option<i64>, (SlotKind, usize)>,
     partial_json: HashMap<usize, String>,
+    scans: HashMap<usize, ArgumentScan>,
+    max_tool_argument_whitespace: usize,
     reasoning_by_id: HashMap<String, usize>,
     service_tier: Option<String>,
     pricing: Option<ServiceTierPricing>,
@@ -404,10 +407,36 @@ impl ResponsesStreamProcessor {
             saw_terminal: false,
             slots: HashMap::new(),
             partial_json: HashMap::new(),
+            scans: HashMap::new(),
+            max_tool_argument_whitespace: DEFAULT_MAX_TOOL_ARGUMENT_WHITESPACE,
             reasoning_by_id: HashMap::new(),
             service_tier,
             pricing,
         }
+    }
+
+    /// Sets the maximum trailing whitespace outside JSON strings allowed on a
+    /// streamed tool call's arguments.
+    pub fn with_max_tool_argument_whitespace(mut self, max: usize) -> Self {
+        self.max_tool_argument_whitespace = max;
+        self
+    }
+
+    fn tool_name(&self, index: usize) -> String {
+        match self.output.content.get(index) {
+            Some(AssistantContentBlock::ToolCall(call)) => call.name.clone(),
+            _ => String::new(),
+        }
+    }
+
+    fn check_argument_delta(&mut self, index: usize, delta: &str) -> Result<(), String> {
+        let name = self.tool_name(index);
+        let max = self.max_tool_argument_whitespace;
+        let model = self.model.id.clone();
+        self.scans
+            .entry(index)
+            .or_default()
+            .check_delta(delta, max, &model, &name)
     }
 
     fn emit(
@@ -475,6 +504,9 @@ impl ResponsesStreamProcessor {
                     }));
                 let index = self.output.content.len() - 1;
                 let initial = item.get("arguments").and_then(Value::as_str).unwrap_or("");
+                let mut scan = ArgumentScan::default();
+                scan.scan_arguments(initial);
+                self.scans.insert(index, scan);
                 self.partial_json.insert(index, initial.to_owned());
                 SlotKind::ToolCall
             }
@@ -647,8 +679,12 @@ impl ResponsesStreamProcessor {
                     .map(str::to_owned);
             }
             "response.output_item.added" => {
-                if let Some(item) = event.get("item") {
-                    self.create_slot(output_index, item, sender);
+                if let Some(item) = event.get("item")
+                    && let Some((SlotKind::ToolCall, index)) =
+                        self.create_slot(output_index, item, sender)
+                {
+                    // The item's initial arguments count toward the bound too.
+                    self.check_argument_delta(index, "")?;
                 }
             }
             "response.reasoning_summary_text.delta" | "response.reasoning_text.delta" => {
@@ -668,9 +704,12 @@ impl ResponsesStreamProcessor {
             }
             "response.function_call_arguments.delta" => {
                 if let Some(index) = self.slot(output_index, SlotKind::ToolCall)
-                    && let Some(partial) = self.partial_json.get_mut(&index)
+                    && self.partial_json.contains_key(&index)
                 {
-                    partial.push_str(delta);
+                    self.check_argument_delta(index, delta)?;
+                    if let Some(partial) = self.partial_json.get_mut(&index) {
+                        partial.push_str(delta);
+                    }
                     self.set_arguments(index);
                     self.emit(sender, |partial| AssistantMessageEvent::ToolCallDelta {
                         content_index: index,
@@ -688,13 +727,16 @@ impl ResponsesStreamProcessor {
                         .and_then(Value::as_str)
                         .unwrap_or("")
                         .to_owned();
-                    self.partial_json.insert(index, arguments.clone());
-                    self.set_arguments(index);
-                    if let Some(rest) = arguments
+                    let rest = arguments
                         .strip_prefix(previous.as_str())
                         .filter(|rest| !rest.is_empty())
-                    {
-                        let rest = rest.to_owned();
+                        .map(str::to_owned);
+                    if let Some(rest) = &rest {
+                        self.check_argument_delta(index, rest)?;
+                    }
+                    self.partial_json.insert(index, arguments);
+                    self.set_arguments(index);
+                    if let Some(rest) = rest {
                         self.emit(sender, |partial| AssistantMessageEvent::ToolCallDelta {
                             content_index: index,
                             delta: rest,
@@ -831,6 +873,7 @@ impl ResponsesStreamProcessor {
                 self.slots.remove(&output_index);
             }
             (Some("function_call"), Some((SlotKind::ToolCall, index))) => {
+                self.scans.remove(&index);
                 let Some(partial) = self.partial_json.remove(&index) else {
                     return;
                 };

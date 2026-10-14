@@ -22,13 +22,13 @@
 //! fail closed (no one can answer in print mode), and the permission is
 //! stated in the system prompt's `permissions` section.
 //!
-//! Not ported (deferred): interactive and RPC modes, `@file` arguments,
-//! `--resume`, `--fork`, `--session-id`, `--session-dir`, `--api-key`,
-//! `--models`, resource flags other than `--skill` and `--no-skills`,
-//! extension and MCP tools, forking a session
-//! found in another project, and the missing-session-cwd prompt.
+//! Not ported (deferred): interactive and RPC modes, `--resume`,
+//! theme and extension flags, extension and MCP tools, and the
+//! missing-session-cwd prompt.
 
 pub mod args;
+pub mod file_processor;
+pub mod list_models;
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -38,29 +38,39 @@ use bake_ai::ApiRegistry;
 use bake_sandbox::SandboxProvider;
 
 use crate::agent_session::{AgentSession, AgentSessionOptions, format_no_models_available_message};
+use crate::cli::file_processor::{ProcessFileOptions, process_file_arguments};
+use crate::cli::list_models::list_models;
 use crate::home::sessions_dir;
 use crate::model_registry::ModelRegistry;
-use crate::model_registry::resolver::resolve_cli_model;
+use crate::model_registry::resolver::{
+    ScopedModel, resolve_cli_model, resolve_model_scope_from_models,
+};
 use crate::permissions::{
     NoApprover, PermissionInputs, ToolPermissions, prepare_session_permission, sandbox_file_tools,
     sandboxed_bash_tool,
 };
 use crate::print_mode::{PrintModeOptions, PrintOutput, SharedWriter, run_print_mode, write_out};
+use crate::prompt_templates::{LoadPromptTemplatesOptions, load_prompt_templates};
 use crate::session::file::default_session_dir_path;
+use crate::session::id::assert_valid_session_id;
 use crate::session::paths::{lexical_normalize, normalize_path};
 use crate::session::time::parse_date_ms;
 use crate::session::{NewSessionOptions, SessionManager};
 use crate::settings::Settings;
 use crate::skills::{LoadSkillsOptions, load_skills};
 use crate::system_prompt::{
-    Environment, SystemPromptOptions, load_project_context_files, user_agents_dir,
+    Environment, SystemPromptOptions, load_project_context_files, resolve_prompt_input,
+    user_agents_dir,
 };
 use crate::tools::index::{
     NoTools, ToolSelectionOptions, ToolsOptions, create_all_tool_definitions, select_tools,
 };
 use crate::tools::read::ReadToolOptions;
 
-pub use args::{Args, Diagnostic, DiagnosticKind, Mode, parse_args, unknown_flags_message};
+pub use args::{
+    Args, Diagnostic, DiagnosticKind, Mode, normalize_session_name, parse_args,
+    unknown_flags_message,
+};
 
 /// The most piped standard input read for a prompt.
 pub const MAX_STDIN_BYTES: u64 = 64 * 1024 * 1024;
@@ -230,15 +240,26 @@ pub fn plan(
     if let Some(message) = unknown_flags_message(&parsed.unknown_flags) {
         return Action::Exit(error(stderr, &message));
     }
-    if !parsed.file_args.is_empty() {
-        return Action::Exit(error(
-            stderr,
-            "@file arguments are not supported by bake-rs yet",
-        ));
+    if let Some(message) = validate_fork_flags(&parsed) {
+        return Action::Exit(error(stderr, &message));
+    }
+    if let Some(message) = validate_session_id_flags(&parsed) {
+        return Action::Exit(error(stderr, &message));
+    }
+    if let Some(name) = &parsed.name
+        && normalize_session_name(name).is_none()
+    {
+        return Action::Exit(error(stderr, "--name requires a non-empty value"));
     }
     let mode = match parsed.mode {
         Some(mode) => mode,
-        None if parsed.print || !stdin_is_terminal || !stdout_is_terminal => Mode::Text,
+        None if parsed.print
+            || parsed.list_models.is_some()
+            || !stdin_is_terminal
+            || !stdout_is_terminal =>
+        {
+            Mode::Text
+        }
         None => {
             return Action::Exit(error(
                 stderr,
@@ -266,10 +287,55 @@ fn read_piped_stdin(stdin: Box<dyn Read + Send>) -> Result<Option<String>, Strin
     Ok((!trimmed.is_empty()).then(|| trimmed.to_owned()))
 }
 
-/// Pi's `buildInitialMessage` without files: stdin, then the first
-/// message; the rest stay prompts of their own.
-fn build_initial_message(stdin: Option<String>, messages: &mut Vec<String>) -> Option<String> {
+/// Pi's `validateForkFlags`.
+fn validate_fork_flags(parsed: &Args) -> Option<String> {
+    parsed.fork.as_ref()?;
+    let mut conflicts = Vec::new();
+    if parsed.session.is_some() {
+        conflicts.push("--session");
+    }
+    if parsed.continue_session {
+        conflicts.push("--continue");
+    }
+    if parsed.no_session {
+        conflicts.push("--no-session");
+    }
+    (!conflicts.is_empty())
+        .then(|| format!("--fork cannot be combined with {}", conflicts.join(", ")))
+}
+
+/// Pi's `validateSessionIdFlags`.
+fn validate_session_id_flags(parsed: &Args) -> Option<String> {
+    let session_id = parsed.session_id.as_ref()?;
+    let mut conflicts = Vec::new();
+    if parsed.session.is_some() {
+        conflicts.push("--session");
+    }
+    if parsed.continue_session {
+        conflicts.push("--continue");
+    }
+    if !conflicts.is_empty() {
+        return Some(format!(
+            "--session-id cannot be combined with {}",
+            conflicts.join(", ")
+        ));
+    }
+    assert_valid_session_id(session_id)
+        .err()
+        .map(|error| error.to_string())
+}
+
+/// Pi's `buildInitialMessage`: stdin, `@file` text, then the first CLI
+/// message; later CLI messages stay separate prompts.
+fn build_initial_message(
+    stdin: Option<String>,
+    file_text: &str,
+    messages: &mut Vec<String>,
+) -> Option<String> {
     let mut parts: Vec<String> = stdin.into_iter().collect();
+    if !file_text.is_empty() {
+        parts.push(file_text.to_owned());
+    }
     if !messages.is_empty() {
         parts.push(messages.remove(0));
     }
@@ -279,7 +345,7 @@ fn build_initial_message(stdin: Option<String>, messages: &mut Vec<String>) -> O
 /// Pi's `resolveSessionPath` result.
 enum ResolvedSession {
     Path(PathBuf),
-    Global { cwd: String },
+    Global { path: PathBuf, cwd: String },
     NotFound,
 }
 
@@ -309,6 +375,9 @@ fn resolve_session_path(
     }
     let local_dir =
         session_dir.map_or_else(|| default_session_dir_path(cwd, home), Path::to_path_buf);
+    if let Ok(Some(exact)) = SessionManager::find_by_id(cwd, arg, Some(&local_dir)) {
+        return ResolvedSession::Path(exact);
+    }
     let local = SessionManager::list(cwd, Some(&local_dir), None, None).unwrap_or_default();
     if let Some(found) = local
         .iter()
@@ -328,6 +397,7 @@ fn resolve_session_path(
         .or_else(|| all.iter().find(|info| info.id.starts_with(arg)))
     {
         Some(found) => ResolvedSession::Global {
+            path: found.path.clone(),
             cwd: found.cwd.clone(),
         },
         None => ResolvedSession::NotFound,
@@ -350,34 +420,89 @@ fn create_session_manager(
     cwd: &str,
     session_dir: Option<&Path>,
     home: &Path,
+    warnings: &mut Vec<String>,
 ) -> Result<SessionManager, SessionStartError> {
     let failed = |error: crate::session::SessionError| SessionStartError::Error(error.to_string());
     if args.no_session {
-        return SessionManager::in_memory(Some(cwd), NewSessionOptions::default(), Vec::new())
-            .map_err(failed);
+        return SessionManager::in_memory(
+            Some(cwd),
+            NewSessionOptions {
+                id: args.session_id.clone(),
+                parent_session: None,
+            },
+            Vec::new(),
+        )
+        .map_err(failed);
+    }
+    let dir = match session_dir {
+        Some(dir) => dir.to_path_buf(),
+        None => default_session_dir_path(cwd, home),
+    };
+    if let Some(fork) = &args.fork {
+        if let Some(session_id) = &args.session_id
+            && SessionManager::find_by_id(cwd, session_id, Some(&dir))
+                .ok()
+                .flatten()
+                .is_some()
+        {
+            return Err(SessionStartError::Plain(format!(
+                "Session already exists with id '{session_id}'"
+            )));
+        }
+        return match resolve_session_path(fork, cwd, session_dir, home) {
+            ResolvedSession::Path(path) | ResolvedSession::Global { path, .. } => {
+                SessionManager::fork_from(
+                    &path,
+                    cwd,
+                    Some(&dir),
+                    NewSessionOptions {
+                        id: args.session_id.clone(),
+                        parent_session: None,
+                    },
+                )
+                .map_err(failed)
+            }
+            ResolvedSession::NotFound => Err(SessionStartError::Plain(format!(
+                "No session found matching '{fork}'"
+            ))),
+        };
     }
     if let Some(arg) = &args.session {
         return match resolve_session_path(arg, cwd, session_dir, home) {
             ResolvedSession::Path(path) => {
-                SessionManager::open(&path, session_dir, None).map_err(failed)
+                SessionManager::open(&path, Some(&dir), None).map_err(failed)
             }
-            // Pi asks whether to fork the session; forking is not ported.
-            ResolvedSession::Global { cwd } => Err(SessionStartError::Error(format!(
-                "Session found in different project: {cwd}. Forking it is not supported by bake-rs yet."
+            // Print mode cannot prompt whether to fork; point at `--fork`.
+            ResolvedSession::Global { cwd, .. } => Err(SessionStartError::Error(format!(
+                "Session found in different project: {cwd}. Use --fork {arg} to fork it into this directory."
             ))),
             ResolvedSession::NotFound => Err(SessionStartError::Plain(format!(
                 "No session found matching '{arg}'"
             ))),
         };
     }
-    let dir = match session_dir {
-        Some(dir) => dir.to_path_buf(),
-        None => default_session_dir_path(cwd, home),
-    };
     if args.continue_session {
         return SessionManager::continue_recent(cwd, Some(&dir)).map_err(failed);
     }
-    SessionManager::create(cwd, Some(&dir), NewSessionOptions::default()).map_err(failed)
+    if let Some(session_id) = &args.session_id {
+        if let Some(existing) =
+            SessionManager::find_by_id(cwd, session_id, Some(&dir)).map_err(failed)?
+        {
+            return SessionManager::open(&existing, Some(&dir), None).map_err(failed);
+        }
+        warnings.push(format!(
+            "No project session found with id '{session_id}'; creating a new session with that id."
+        ));
+    }
+    SessionManager::create(
+        cwd,
+        Some(&dir),
+        NewSessionOptions {
+            id: args.session_id.clone(),
+            parent_session: None,
+        },
+    )
+    .map_err(failed)
 }
 
 /// Runs `bake-rs` print mode; returns the exit code. Must run inside a
@@ -408,7 +533,36 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
     };
     let cwd = cwd.to_string_lossy().into_owned();
 
-    // Settings, models, and the session store are blocking file work.
+    if let Some(search_pattern) = &args.list_models {
+        let loaded = {
+            let home = home.clone();
+            tokio::task::spawn_blocking(move || {
+                let settings = Settings::load(&home);
+                let mut registry = ModelRegistry::load(&home);
+                let mut warnings = startup_warnings;
+                warnings.extend(settings.warnings);
+                for (id, config, key) in extra_providers {
+                    if let Err(message) = registry.add_provider_config(&id, config, key) {
+                        warnings.push(message);
+                    }
+                }
+                if let Some(message) = registry.error() {
+                    warnings.push(format!("errors loading models.json:\n{message}"));
+                }
+                (registry, warnings)
+            })
+            .await
+        };
+        let (registry, warnings) = match loaded {
+            Ok(loaded) => loaded,
+            Err(join) => return error(&stderr, &format!("Startup failed: {join}")),
+        };
+        for warning in &warnings {
+            warn(&stderr, warning);
+        }
+        list_models(&registry, search_pattern.as_deref(), &docs_command, &stdout);
+        return 0;
+    }
     let loaded = {
         let home = home.clone();
         let cwd = cwd.clone();
@@ -435,9 +589,19 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
             if let Some(message) = registry.error() {
                 warnings.push(message);
             }
+            let session_dir = args
+                .session_dir
+                .as_deref()
+                .map(normalize_path)
+                .or_else(|| settings.session_dir.clone());
             let session =
-                create_session_manager(&args, &cwd, settings.session_dir.as_deref(), &home);
+                create_session_manager(&args, &cwd, session_dir.as_deref(), &home, &mut warnings);
             let session = session.and_then(|mut session| {
+                if let Some(name) = args.name.as_deref().and_then(normalize_session_name) {
+                    session
+                        .append_session_info(&name)
+                        .map_err(|error| SessionStartError::Error(error.to_string()))?;
+                }
                 // D24: the session's permission is settled, and stored in
                 // its file, before anything can run.
                 let permission = prepare_session_permission(
@@ -452,11 +616,16 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
                 )
                 .map_err(SessionStartError::Error)?;
                 warnings.extend(permission.warnings.iter().cloned());
-                let agents_dir = user_home.as_deref().map(user_agents_dir);
-                let (files, context_warnings) =
-                    load_project_context_files(session.cwd(), agents_dir.as_deref());
-                warnings.extend(context_warnings);
-                // Pi's print mode does not report skill diagnostics.
+                let files = if args.no_context_files {
+                    Vec::new()
+                } else {
+                    let agents_dir = user_home.as_deref().map(user_agents_dir);
+                    let (files, context_warnings) =
+                        load_project_context_files(session.cwd(), agents_dir.as_deref());
+                    warnings.extend(context_warnings);
+                    files
+                };
+                // Pi's print mode does not report skill or prompt-template diagnostics.
                 let skills = load_skills(&LoadSkillsOptions {
                     cwd: session.cwd().to_owned(),
                     user_home,
@@ -464,17 +633,69 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
                     include_defaults: !args.no_skills,
                 })
                 .skills;
-                Ok((session, files, skills, permission))
+                let prompt_templates = load_prompt_templates(&LoadPromptTemplatesOptions {
+                    cwd: session.cwd().to_owned(),
+                    agent_dir: home.clone(),
+                    prompt_paths: args.prompt_templates.clone(),
+                    include_defaults: !args.no_prompt_templates,
+                })
+                .templates;
+                let custom_prompt = resolve_prompt_input(
+                    args.system_prompt.as_deref(),
+                    session.cwd(),
+                    &mut warnings,
+                );
+                let append_parts: Vec<String> = args
+                    .append_system_prompt
+                    .iter()
+                    .filter_map(|input| {
+                        resolve_prompt_input(Some(input), session.cwd(), &mut warnings)
+                    })
+                    .collect();
+                let append_system_prompt =
+                    (!append_parts.is_empty()).then(|| append_parts.join("\n\n"));
+                let processed_files = if args.file_args.is_empty() {
+                    Ok(file_processor::ProcessedFiles::default())
+                } else {
+                    // AgentSession resizes prompt images against the selected model's limits.
+                    process_file_arguments(
+                        &args.file_args,
+                        Path::new(&cwd),
+                        ProcessFileOptions {
+                            auto_resize_images: false,
+                        },
+                    )
+                    .map_err(SessionStartError::Error)
+                }?;
+                Ok((
+                    session,
+                    files,
+                    skills,
+                    prompt_templates,
+                    permission,
+                    custom_prompt,
+                    append_system_prompt,
+                    processed_files,
+                ))
             });
             (settings, registry, warnings, session)
         })
         .await
     };
-    let (settings, registry, warnings, session) = match loaded {
+    let (settings, mut registry, warnings, session) = match loaded {
         Ok(loaded) => loaded,
         Err(join) => return error(&stderr, &format!("Startup failed: {join}")),
     };
-    let (session, context_files, skills, permission) = match session {
+    let (
+        session,
+        context_files,
+        skills,
+        prompt_templates,
+        permission,
+        custom_prompt,
+        append_system_prompt,
+        processed_files,
+    ) = match session {
         Ok(session) => session,
         Err(SessionStartError::Error(message)) => return error(&stderr, &message),
         Err(SessionStartError::Plain(message)) => {
@@ -482,6 +703,7 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
             return 1;
         }
     };
+    let has_existing_session = !session.build_session_context().messages.is_empty();
     let session_cwd = session.cwd().to_owned();
     let session_id = session.session_id().to_owned();
     let tool_permissions = ToolPermissions::new(
@@ -493,8 +715,30 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
         .session_file()
         .map(|file| file.to_string_lossy().into_owned());
 
-    // Pi's `buildSessionOptions`.
+    // Pi's `resolveModelScope` and `buildSessionOptions`.
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
+    let scoped_models: Vec<ScopedModel> = match args
+        .models
+        .as_deref()
+        .or(settings.enabled_models.as_deref())
+    {
+        Some(patterns) if !patterns.is_empty() => {
+            let candidates = if args.api_key.is_some() {
+                registry.models()
+            } else {
+                registry.available()
+            };
+            let scope = resolve_model_scope_from_models(patterns, &candidates);
+            for diagnostic in scope.diagnostics {
+                diagnostics.push(Diagnostic {
+                    kind: DiagnosticKind::Warning,
+                    message: diagnostic.message,
+                });
+            }
+            scope.scoped_models
+        }
+        _ => Vec::new(),
+    };
     let mut model = None;
     let mut thinking_level = args.thinking;
     if let Some(provider) = &args.provider
@@ -532,6 +776,32 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
             if args.thinking.is_none() && resolved.thinking_level.is_some() {
                 thinking_level = resolved.thinking_level;
             }
+        }
+    }
+    if model.is_none() && !scoped_models.is_empty() && !has_existing_session {
+        let saved_in_scope = settings
+            .default_provider
+            .as_deref()
+            .zip(settings.default_model.as_deref())
+            .and_then(|(provider, id)| registry.model(provider, id))
+            .and_then(|saved| {
+                scoped_models.iter().find(|scoped| {
+                    scoped.model.provider == saved.provider && scoped.model.id == saved.id
+                })
+            });
+        let chosen = saved_in_scope.unwrap_or(&scoped_models[0]);
+        model = Some(chosen.model.clone());
+        if args.thinking.is_none() && chosen.thinking_level.is_some() {
+            thinking_level = chosen.thinking_level;
+        }
+    }
+    if let Some(api_key) = &args.api_key {
+        match &model {
+            Some(selected) => registry.set_runtime_api_key(&selected.provider, api_key),
+            None => diagnostics.push(Diagnostic {
+                kind: DiagnosticKind::Error,
+                message: "--api-key requires a model to be specified via --model, --provider/--model, or --models".into(),
+            }),
         }
     }
     for warning in &warnings {
@@ -644,12 +914,16 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
         .and_then(parse_date_ms)
         .unwrap_or_else(bake_ai::now_ms);
     let mut system_prompt = SystemPromptOptions::new(session_cwd.clone());
+    system_prompt.custom_prompt = custom_prompt;
+    if let Some(append) = append_system_prompt {
+        system_prompt.append_system_prompt = append;
+    }
     system_prompt.context_files = context_files;
     system_prompt.skills = skills;
     // Print mode has no one to answer an approval prompt.
     system_prompt.permissions = permission.prompt_text(Path::new(&session_cwd), false);
     system_prompt.environment = Environment::detect(Path::new(&session_cwd), started_ms);
-    let session = match AgentSession::create(AgentSessionOptions {
+    let mut session = match AgentSession::create(AgentSessionOptions {
         session,
         registry: Arc::new(registry),
         apis: Arc::new(ApiRegistry::with_builtins()),
@@ -673,6 +947,7 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
         Ok(session) => session,
         Err(message) => return error(&stderr, &message),
     };
+    session.set_prompt_templates(prompt_templates);
     *session_model
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner) = session.model();
@@ -695,7 +970,7 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
             return error(&stderr, &message);
         }
     };
-    let initial_message = build_initial_message(piped, &mut args.messages);
+    let initial_message = build_initial_message(piped, &processed_files.text, &mut args.messages);
 
     if session.model().is_none() {
         session.shutdown().await;
@@ -711,7 +986,7 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
             Mode::Json => PrintOutput::Json,
         },
         initial_message,
-        initial_images: Vec::new(),
+        initial_images: processed_files.images,
         messages: args.messages,
     };
     // Pi's print-mode signal handlers: dispose of the runtime, then exit.
@@ -774,16 +1049,39 @@ mod tests {
             Action::Exit(1)
         );
         assert_eq!(
-            plan(&strings(&["--api-key", "k", "-p"]), false, false, &stderr),
+            plan(
+                &strings(&["--unknown-flag", "k", "-p"]),
+                false,
+                false,
+                &stderr
+            ),
             Action::Exit(1)
         );
         assert_eq!(
-            plan(&strings(&["-p", "@f"]), false, false, &stderr),
+            plan(
+                &strings(&["--fork", "a", "--continue", "-p"]),
+                false,
+                false,
+                &stderr
+            ),
+            Action::Exit(1)
+        );
+        assert_eq!(
+            plan(
+                &strings(&["--session-id", "bad/id", "-p"]),
+                false,
+                false,
+                &stderr
+            ),
+            Action::Exit(1)
+        );
+        assert_eq!(
+            plan(&strings(&["--name", "   ", "-p"]), false, false, &stderr),
             Action::Exit(1)
         );
         assert_eq!(
             text(&errors),
-            "Error: Unknown option: -x\nError: Unknown option: --api-key\nError: @file arguments are not supported by bake-rs yet\n"
+            "Error: Unknown option: -x\nError: Unknown option: --unknown-flag\nError: --fork cannot be combined with --continue\nError: Session id must be non-empty, contain only alphanumeric characters, '-', '_', and '.', and start and end with an alphanumeric character\nError: --name requires a non-empty value\n"
         );
         assert_eq!(
             plan(&strings(&["-v", "-h"]), true, true, &stderr),
@@ -795,17 +1093,28 @@ mod tests {
         );
     }
 
-    // Pi `test/initial-message.test.ts`: stdin comes first, then the first
-    // message; later messages stay separate prompts.
+    // Pi `test/initial-message.test.ts`: stdin comes first, then `@file` text,
+    // then the first message; later messages stay separate prompts.
     #[test]
-    fn initial_message_joins_stdin_and_the_first_message() {
+    fn initial_message_joins_stdin_file_text_and_the_first_message() {
         let mut messages = strings(&["first", "second"]);
         assert_eq!(
-            build_initial_message(Some("piped".into()), &mut messages).as_deref(),
+            build_initial_message(Some("piped".into()), "", &mut messages).as_deref(),
             Some("pipedfirst")
         );
         assert_eq!(messages, ["second"]);
-        assert_eq!(build_initial_message(None, &mut Vec::new()), None);
+        let mut messages = strings(&["review"]);
+        assert_eq!(
+            build_initial_message(
+                Some("stdin\n".into()),
+                "<file name=\"a\">\nhi\n</file>\n",
+                &mut messages,
+            )
+            .as_deref(),
+            Some("stdin\n<file name=\"a\">\nhi\n</file>\nreview")
+        );
+        assert!(messages.is_empty());
+        assert_eq!(build_initial_message(None, "", &mut Vec::new()), None);
         assert_eq!(
             read_piped_stdin(Box::new(&b"  hello \n"[..])),
             Ok(Some("hello".into()))
@@ -846,9 +1155,12 @@ mod tests {
         let cwd = cwd.to_string_lossy().into_owned();
         let dir = default_session_dir_path(&cwd, &home);
 
+        let mut warnings = Vec::new();
         let created =
-            create_session_manager(&session_args(|_| {}), &cwd, None, &home).expect("create");
+            create_session_manager(&session_args(|_| {}), &cwd, None, &home, &mut warnings)
+                .expect("create");
         assert_eq!(created.session_dir(), dir);
+        drop(created);
 
         let file = write_session(&dir, "0193aaaa-0000-7000-8000-000000000000", &cwd);
         let continued = create_session_manager(
@@ -856,6 +1168,7 @@ mod tests {
             &cwd,
             None,
             &home,
+            &mut warnings,
         )
         .expect("continue");
         assert_eq!(continued.session_file(), Some(file.as_path()));
@@ -867,6 +1180,7 @@ mod tests {
             &cwd,
             None,
             &home,
+            &mut warnings,
         )
         .expect("by id");
         assert_eq!(by_prefix.session_file(), Some(file.as_path()));
@@ -881,7 +1195,7 @@ mod tests {
             session_args(|args| args.continue_session = true),
         ] {
             assert_eq!(
-                create_session_manager(&args, &cwd, None, &home).err(),
+                create_session_manager(&args, &cwd, None, &home, &mut warnings).err(),
                 locked
             );
         }
@@ -901,11 +1215,41 @@ mod tests {
                 &cwd,
                 None,
                 &home,
+                &mut warnings,
             )
             .err(),
             Some(SessionStartError::Error(format!(
-                "Session found in different project: {other}. Forking it is not supported by bake-rs yet."
+                "Session found in different project: {other}. Use --fork 0193bbbb to fork it into this directory."
             )))
+        );
+        let forked = create_session_manager(
+            &session_args(|args| {
+                args.fork = Some("0193bbbb".into());
+                args.session_id = Some("forked-id".into());
+            }),
+            &cwd,
+            None,
+            &home,
+            &mut warnings,
+        )
+        .expect("forked");
+        assert_eq!(forked.session_id(), "forked-id");
+        drop(forked);
+        assert_eq!(
+            create_session_manager(
+                &session_args(|args| {
+                    args.fork = Some("0193bbbb".into());
+                    args.session_id = Some("forked-id".into());
+                }),
+                &cwd,
+                None,
+                &home,
+                &mut warnings,
+            )
+            .err(),
+            Some(SessionStartError::Plain(
+                "Session already exists with id 'forked-id'".into()
+            ))
         );
         // Pi prints a missing id without the `Error: ` prefix.
         assert_eq!(
@@ -914,6 +1258,7 @@ mod tests {
                 &cwd,
                 None,
                 &home,
+                &mut warnings,
             )
             .err(),
             Some(SessionStartError::Plain(
