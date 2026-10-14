@@ -324,6 +324,13 @@ impl Workspace {
             })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        // A host agent such as Pi exports `PI_*` variables that the bash
+        // tool test must not inherit.
+        for (key, _) in std::env::vars_os() {
+            if key.to_string_lossy().starts_with("PI_") {
+                command.env_remove(key);
+            }
+        }
         let mut child = command.spawn().expect("bake-rs starts");
         let input = child.stdin.take();
         let text = stdin.unwrap_or_default().to_owned();

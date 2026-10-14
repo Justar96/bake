@@ -1028,8 +1028,14 @@ mod tests {
             .map(|c| c.loser_path.as_str())
             .collect();
         assert_eq!(losers.len(), 2, "{:?}", loaded.diagnostics);
-        assert!(losers[0].ends_with("agent/prompts/review.md"), "{losers:?}");
-        assert!(losers[1].ends_with("explicit/review.md"), "{losers:?}");
+        assert!(
+            Path::new(losers[0]).ends_with(Path::new("agent").join("prompts").join("review.md")),
+            "{losers:?}"
+        );
+        assert!(
+            Path::new(losers[1]).ends_with(Path::new("explicit").join("review.md")),
+            "{losers:?}"
+        );
     }
 
     #[test]
