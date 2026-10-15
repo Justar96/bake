@@ -49,7 +49,10 @@ src/core/settings-manager.ts and src/core/auth-storage.ts, the runtime-key
 overlay of src/core/runtime-credentials.ts, and the cases of
 test/auth-storage.test.ts, test/runtime-credentials.test.ts,
 test/settings-manager.test.ts, and test/settings-manager-bug.test.ts that the
-Rust tests name.
+Rust tests name; the steering and follow-up queue of src/core/agent-session.ts
+(steer, followUp, _queueUserInput, _queueSteer, _queueFollowUp, clearQueue,
+_emitQueueUpdate, and the queue bookkeeping on message_start), its
+queue_update event, and its pre-prompt model and API-key check.
 --------------------------------------------------------------------------------
 MIT License
 

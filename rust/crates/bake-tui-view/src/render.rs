@@ -60,7 +60,8 @@ fn needs(app: &State, width: u16) -> Needs {
     let draft = editor::layout(app.draft.text(), app.draft.caret(), geometry.wrap_width);
     Needs {
         draft_rows: u16::try_from(draft.rows.len()).unwrap_or(u16::MAX),
-        standing: true,
+        // The sample agents' row belongs to the preview.
+        standing: !app.live,
         notice: u16::from(app.notice.is_some() || app.quitting()),
         pending: panel_rows(app.pending.len()),
         panel: panel_rows(app.attachments.len()),
@@ -135,7 +136,8 @@ fn render_region(
             Line::styled(copy::QUIT, tone_style(Tone::Waiting, app.tones)),
         );
     } else if let Some(kind) = app.notice {
-        let text = match kind {
+        let text: &str = match kind {
+            Notice::Refused => app.refusal.as_deref().unwrap_or(copy::RETURNED),
             Notice::SampleOnly => copy::SAMPLE_ONLY,
             Notice::NoImages => copy::NO_IMAGES,
             Notice::ReadOnly => copy::READ_ONLY,
@@ -144,6 +146,9 @@ fn render_region(
             Notice::NoCommands => copy::NO_COMMANDS,
             Notice::PendingSent => copy::PENDING_SENT,
             Notice::NoPending => copy::NO_PENDING,
+            Notice::ImagesWhileRunning => copy::IMAGES_WHILE_RUNNING,
+            Notice::PreviewOnly => copy::PREVIEW_ONLY,
+            Notice::Returned => copy::RETURNED,
         };
         line(
             buf,
@@ -379,6 +384,7 @@ fn bar_left(app: &State) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
                 let (head, color) = match summary.outcome {
                     Outcome::Completed => (format!("✓ {}", copy::COMPLETED), Color::Green),
                     Outcome::Interrupted => (format!("■ {}", copy::INTERRUPTED), Color::Yellow),
+                    Outcome::Failed => (format!("✗ {}", copy::FAILED_TURN), Color::Red),
                 };
                 let details = format!("  {}", activity::format_elapsed(summary.elapsed));
                 (
@@ -2272,6 +2278,7 @@ mod tests {
                 media_type: "image/png",
                 bytes: 10,
                 size: Some((2, 1)),
+                data: crate::paste::ImageData::default(),
             };
             update(
                 &mut app,
@@ -2444,6 +2451,7 @@ mod tests {
                 media_type: "image/png",
                 bytes: 1,
                 size: None,
+                data: crate::paste::ImageData::default(),
             },
         ));
         let (rows, _) = draw(&mut app, 60, 24);

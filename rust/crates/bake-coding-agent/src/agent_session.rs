@@ -28,14 +28,20 @@
 //! by a context edit, so the file keeps it and a resumed session sends
 //! exactly what the live one would.
 //!
+//! The steering and follow-up queues ([`AgentSession::steer`],
+//! [`AgentSession::follow_up`], [`AgentSession::clear_queue`], and
+//! [`SessionEvent::QueueUpdate`]) are ported from Pi v1.2.0's
+//! `steer`, `followUp`, `_queueSteer`, `_queueFollowUp`, `clearQueue`, and
+//! `message_start` queue bookkeeping, without extension-command checks or
+//! input handlers.
+//!
 //! Not ported (deferred): extensions and their events (including
 //! `session_before_compact`, `session_compact`, and
 //! `session_compact_failed`), branch navigation and its summaries, the
 //! `/skill:name` slash command list and its expansion error event, prompt
 //! templates, MCP, bash `!` commands, the cache warmer, scoped
 //! models, virtual models and their failed-response routing, the
-//! `entry_appended` event, queued steering and follow-up bookkeeping, and
-//! tool-loadout changes between turns.
+//! `entry_appended` event, and tool-loadout changes between turns.
 
 mod recovery;
 
@@ -255,6 +261,107 @@ pub enum SessionEvent<'a> {
     },
     /// Pi's `summarization_retry_finished`.
     SummarizationRetryFinished,
+    /// Pi's `queue_update`: the steering and follow-up prompts still
+    /// waiting, in the order they will be delivered.
+    QueueUpdate {
+        /// Prompts for the running turn's next step ([`AgentSession::steer`]).
+        steering: &'a [String],
+        /// Prompts for when the agent would stop ([`AgentSession::follow_up`]).
+        follow_up: &'a [String],
+    },
+}
+
+/// The session's queue of undelivered prompts and the order its updates
+/// are announced in.
+///
+/// No lock is held while listeners run, so a listener may read or change
+/// the queue. One caller at a time drains announcements: a change made
+/// while another caller is announcing, from a listener or another thread,
+/// only marks the queue changed, and the announcing caller announces the
+/// latest queue again once its listeners return. Every listener therefore
+/// sees the queue's states in order, ending with the latest, and never an
+/// older queue after a newer one.
+#[derive(Default)]
+struct Queue {
+    messages: Mutex<QueuedMessages>,
+    drain: Mutex<Drain>,
+}
+
+/// Whether a caller is announcing, and whether the queue changed since its
+/// last snapshot.
+#[derive(Default)]
+struct Drain {
+    announcing: bool,
+    changed: bool,
+}
+
+impl Queue {
+    fn lock(&self) -> MutexGuard<'_, QueuedMessages> {
+        self.messages.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn drain(&self) -> MutexGuard<'_, Drain> {
+        self.drain.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Pi's `_emitQueueUpdate`: tells the listeners what waits now, or
+    /// leaves that to the caller already announcing.
+    fn announce(&self, core: &Core) {
+        {
+            let mut drain = self.drain();
+            if drain.announcing {
+                drain.changed = true;
+                return;
+            }
+            drain.announcing = true;
+        }
+        loop {
+            self.drain().changed = false;
+            let snapshot = self.lock().clone();
+            core.emit(&SessionEvent::QueueUpdate {
+                steering: &snapshot.steering,
+                follow_up: &snapshot.follow_up,
+            });
+            let mut drain = self.drain();
+            if !drain.changed {
+                drain.announcing = false;
+                return;
+            }
+        }
+    }
+}
+
+/// The prompts [`AgentSession::steer`] and [`AgentSession::follow_up`]
+/// queued that the agent has not delivered yet, Pi's `_steeringMessages`
+/// and `_followUpMessages`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct QueuedMessages {
+    /// Steering prompts, oldest first.
+    pub steering: Vec<String>,
+    /// Follow-up prompts, oldest first.
+    pub follow_up: Vec<String>,
+}
+
+impl QueuedMessages {
+    /// Whether nothing waits.
+    pub fn is_empty(&self) -> bool {
+        self.steering.is_empty() && self.follow_up.is_empty()
+    }
+
+    /// Pi's `message_start` bookkeeping: a delivered user prompt leaves the
+    /// steering queue first, else the follow-up queue. Returns whether the
+    /// queue changed.
+    fn delivered(&mut self, text: &str) -> bool {
+        if let Some(index) = self.steering.iter().position(|queued| queued == text) {
+            self.steering.remove(index);
+            return true;
+        }
+        if let Some(index) = self.follow_up.iter().position(|queued| queued == text) {
+            self.follow_up.remove(index);
+            return true;
+        }
+        false
+    }
 }
 
 type Listener = Arc<dyn Fn(&SessionEvent<'_>) + Send + Sync>;
@@ -348,6 +455,10 @@ pub struct AgentSession {
     persist_error: Arc<Mutex<Option<String>>>,
     subscription: Mutex<Option<Subscription>>,
     model_fallback_message: Option<String>,
+    queue: Arc<Queue>,
+    /// The first session write that failed. The file then misses a
+    /// message, so no later prompt is accepted.
+    write_failure: Arc<Mutex<Option<String>>>,
 }
 
 impl std::fmt::Debug for AgentSession {
@@ -845,6 +956,8 @@ impl AgentSession {
             persist_error,
             subscription: Mutex::new(None),
             model_fallback_message: selection.fallback_message,
+            queue: Arc::default(),
+            write_failure: Arc::default(),
         };
         created.connect();
         Ok(created)
@@ -855,17 +968,28 @@ impl AgentSession {
     fn connect(&self) {
         let core = Arc::clone(&self.core);
         let persist_error = Arc::clone(&self.persist_error);
+        let queue = Arc::clone(&self.queue);
+        let write_failure = Arc::clone(&self.write_failure);
         // Weak: the agent owns this listener.
         let agent = Arc::downgrade(&self.agent);
         let subscription = self.agent.subscribe(move |event, _signal| {
             let core = Arc::clone(&core);
             let persist_error = Arc::clone(&persist_error);
+            let queue = Arc::clone(&queue);
+            let write_failure = Arc::clone(&write_failure);
             let agent = agent.clone();
             Box::pin(async move {
                 if let AgentEvent::MessageStart { message } = event
-                    && message.role() == "user"
+                    && let Some(user) = message.as_user()
                 {
                     core.state().overflow_recovery_attempted = false;
+                    // Pi removes a delivered prompt from its queue before
+                    // emitting the message, so listeners see the new queue.
+                    let text = bake_ai::utils::text::user_content_text(&user.content, "");
+                    let delivered = !text.is_empty() && queue.lock().delivered(&text);
+                    if delivered {
+                        queue.announce(&core);
+                    }
                 }
                 match event {
                     AgentEvent::AgentEnd { messages } => {
@@ -880,10 +1004,18 @@ impl AgentSession {
                 match event {
                     AgentEvent::MessageEnd { message } => {
                         let entry_id = persist_message(&core, &persist_error, message).await;
-                        if entry_id.is_err()
-                            && let Some(agent) = agent.upgrade()
-                        {
-                            agent.abort();
+                        if entry_id.is_err() {
+                            let failed = persist_error
+                                .lock()
+                                .unwrap_or_else(PoisonError::into_inner)
+                                .clone();
+                            write_failure
+                                .lock()
+                                .unwrap_or_else(PoisonError::into_inner)
+                                .get_or_insert(failed.unwrap_or_default());
+                            if let Some(agent) = agent.upgrade() {
+                                agent.abort();
+                            }
                         }
                         track_message(&core, message, entry_id.unwrap_or_default());
                     }
@@ -1084,6 +1216,9 @@ impl AgentSession {
         // the compaction before the prompt also ends the prompt.
         self.core.abort_requested.store(false, Ordering::SeqCst);
         let docs_command = &self.docs_command;
+        if let Some(reason) = self.closed_reason() {
+            return Err(reason);
+        }
         let Some(model) = self.model() else {
             return Err(format_no_model_selected_message(docs_command));
         };
@@ -1108,33 +1243,11 @@ impl AgentSession {
                 .check_compaction(&last, None, false, Vec::new())
                 .await?;
         }
-        // Pi's `_expandSkillCommand` and `expandPromptTemplate`.
-        let mut text = if text.starts_with("/skill:") {
-            let skills = self.prompt_options.skills.clone();
-            let command = text.to_owned();
-            tokio::task::spawn_blocking(move || expand_skill_command(&command, &skills))
-                .await
-                .unwrap_or_else(|_| text.to_owned())
-        } else {
-            text.to_owned()
-        };
-        text = expand_prompt_template(&text, &self.prompt_templates);
-        let images = if images.is_empty() {
-            images
-        } else {
-            let auto_resize = self.settings.image_auto_resize();
-            let resize_options = ImageResizeOptions::from_input_limits(model.input_limits.as_ref())
-                .unwrap_or_default();
-            let (normalized, hints) = tokio::task::spawn_blocking(move || {
-                normalize_prompt_images(&images, auto_resize, resize_options)
-            })
-            .await
-            .map_err(|error| format!("Image processing task failed: {error}"))?;
-            if !hints.is_empty() {
-                text = format!("{text}\n\n{}", hints.join("\n"));
-            }
-            normalized
-        };
+        let (text, images) = self.prepare_user_input(text, images, Some(model)).await?;
+        // Preparation may outlast a shutdown or a failed write.
+        if let Some(reason) = self.closed_reason() {
+            return Err(reason);
+        }
         let mut content = vec![UserContentBlock::Text(TextContent::new(text))];
         content.extend(images.into_iter().map(UserContentBlock::Image));
         let mut messages: Vec<LiveMessage> = Vec::with_capacity(2);
@@ -1262,6 +1375,162 @@ impl AgentSession {
         // The loop drains both queues before `agent_end`; messages queued
         // by `agent_end` listeners need a fresh run.
         Ok(!core.aborted() && self.agent.has_queued_messages())
+    }
+
+    /// Pi's `steer`: expands a `/skill:` command and prompt templates and
+    /// normalizes images as [`Self::prompt`] does, then queues the prompt for
+    /// the running turn's next step, after its tool calls and before its next
+    /// model request. A prompt queued while the agent is idle is delivered
+    /// with the next prompt's first turn. Refused once the session is shut
+    /// down or a session write has failed.
+    pub async fn steer(&self, text: &str, images: Vec<ImageContent>) -> Result<(), String> {
+        self.queue_user_input(text, images, true).await
+    }
+
+    /// Pi's `followUp`: like [`Self::steer`], but delivered only when the
+    /// agent would otherwise stop.
+    pub async fn follow_up(&self, text: &str, images: Vec<ImageContent>) -> Result<(), String> {
+        self.queue_user_input(text, images, false).await
+    }
+
+    /// The prompts queued and not delivered yet, Pi's
+    /// `getSteeringMessages` and `getFollowUpMessages`.
+    pub fn queued_messages(&self) -> QueuedMessages {
+        self.queue.lock().clone()
+    }
+
+    /// Pi's `clearQueue`: empties both queues, the agent's included, and
+    /// returns what they held, so an interface can give the text back.
+    pub fn clear_queue(&self) -> QueuedMessages {
+        let taken = {
+            let mut queued = self.queue.lock();
+            self.agent.clear_all_queues();
+            std::mem::take(&mut *queued)
+        };
+        self.queue.announce(&self.core);
+        taken
+    }
+
+    /// Why the session takes no more prompts: it is shut down, or a write
+    /// to its file failed, so the file would miss a message.
+    fn closed_reason(&self) -> Option<String> {
+        // Listeners close first thing in shutdown, before the work gate.
+        if self.listeners.closed.load(Ordering::SeqCst) || self.work.is_closed() {
+            return Some("The session is shut down.".into());
+        }
+        self.write_failure
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .map(|error| {
+                format!("The session file could not be written ({error}), so the session takes no more prompts.")
+            })
+    }
+
+    /// Pi's `_queueUserInput`, `_queueSteer`, and `_queueFollowUp`. The
+    /// preparation's blocking work holds work permits, so shutdown waits
+    /// for it; the session is checked again once it is done, and the prompt
+    /// is queued under a permit, so admission cannot outlive shutdown.
+    async fn queue_user_input(
+        &self,
+        text: &str,
+        images: Vec<ImageContent>,
+        steer: bool,
+    ) -> Result<(), String> {
+        if let Some(reason) = self.closed_reason() {
+            return Err(reason);
+        }
+        let (text, images) = self.prepare_user_input(text, images, self.model()).await?;
+        let permit = self.work.enter();
+        if let Some(reason) = self.closed_reason() {
+            return Err(reason);
+        }
+        let Some(_permit) = permit else {
+            return Err("The session is shut down.".into());
+        };
+        let mut content = vec![UserContentBlock::Text(TextContent::new(text.clone()))];
+        content.extend(images.into_iter().map(UserContentBlock::Image));
+        let message = UserMessage {
+            content: UserContent::Blocks(content),
+            timestamp: bake_ai::now_ms(),
+        };
+        {
+            let mut queued = self.queue.lock();
+            if steer {
+                queued.steering.push(text);
+                self.agent.steer(message);
+            } else {
+                queued.follow_up.push(text);
+                self.agent.follow_up(message);
+            }
+        }
+        self.queue.announce(&self.core);
+        Ok(())
+    }
+
+    /// The preparation every user prompt gets, Pi's `_expandSkillCommand`,
+    /// `expandPromptTemplate`, and `_normalizePromptImages`: the expanded
+    /// text, with any image hints appended, and the images resized for
+    /// `model`'s limits.
+    async fn prepare_user_input(
+        &self,
+        text: &str,
+        images: Vec<ImageContent>,
+        model: Option<Model>,
+    ) -> Result<(String, Vec<ImageContent>), String> {
+        let shut_down = || "The session is shut down.".to_owned();
+        let mut text = if text.starts_with("/skill:") {
+            let skills = self.prompt_options.skills.clone();
+            let command = text.to_owned();
+            // The permit moves into the blocking work, so shutdown waits for
+            // it even when this future is dropped.
+            let permit = self.work.enter().ok_or_else(shut_down)?;
+            tokio::task::spawn_blocking(move || {
+                let _permit = permit;
+                expand_skill_command(&command, &skills)
+            })
+            .await
+            .unwrap_or_else(|_| text.to_owned())
+        } else {
+            text.to_owned()
+        };
+        text = expand_prompt_template(&text, &self.prompt_templates);
+        if images.is_empty() {
+            return Ok((text, images));
+        }
+        let auto_resize = self.settings.image_auto_resize();
+        let resize_options = model
+            .and_then(|model| ImageResizeOptions::from_input_limits(model.input_limits.as_ref()))
+            .unwrap_or_default();
+        let permit = self.work.enter().ok_or_else(shut_down)?;
+        let (normalized, hints) = tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            normalize_prompt_images(&images, auto_resize, resize_options)
+        })
+        .await
+        .map_err(|error| format!("Image processing task failed: {error}"))?;
+        if !hints.is_empty() {
+            text = format!("{text}\n\n{}", hints.join("\n"));
+        }
+        Ok((text, normalized))
+    }
+
+    /// Pi's `prompt` check before a request: a model is selected and its
+    /// provider has an API key. Interactive mode runs it before it takes
+    /// the terminal.
+    pub fn check_model_auth(&self) -> Result<(), String> {
+        let Some(model) = self.model() else {
+            return Err(format_no_model_selected_message(&self.docs_command));
+        };
+        if !self.registry.has_configured_auth(&model.provider)
+            && self.registry.check_auth(&model.provider).is_none()
+        {
+            return Err(format_no_api_key_found_message(
+                &model.provider,
+                &self.docs_command,
+            ));
+        }
+        Ok(())
     }
 
     /// Pi's `compact`: aborts the current run, then summarizes the history

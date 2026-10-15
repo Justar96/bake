@@ -1,20 +1,21 @@
 //! The runtime port: where the loop sends the view's runtime effects and
-//! where runtime updates come from. Until a native runtime exists, the
-//! only port is [`FixturePort`], which runs [`Fixture`] on its own thread.
+//! where runtime updates come from. The preview's [`FixturePort`] runs
+//! [`Fixture`] on its own thread; a live session's port is
+//! [`crate::live::LivePort`].
 
 use std::io;
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::thread::{self, JoinHandle};
 use std::time::Instant;
 
-use bake_tui_view::runtime::{RuntimeUpdate, Submission};
+use bake_tui_view::runtime::{Prompt, RuntimeUpdate};
 
 use crate::fixture::Fixture;
 
 /// What the loop asks of the runtime.
 #[derive(Debug)]
 pub enum Request {
-    Submit(Submission),
+    Submit(Prompt),
     Cancel,
     /// Send every waiting prompt now.
     SendPending,
@@ -62,8 +63,8 @@ impl FixturePort {
                     // where the timeline had reached.
                     let mut updates = fixture.advance(now);
                     match request {
-                        Some(Request::Submit(submission)) => {
-                            updates.extend(fixture.submit(submission, now));
+                        Some(Request::Submit(prompt)) => {
+                            updates.extend(fixture.submit(prompt.submission, now));
                         }
                         Some(Request::Cancel) => updates.extend(fixture.cancel(now)),
                         Some(Request::SendPending) => updates.extend(fixture.send_pending(now)),
@@ -112,6 +113,7 @@ impl Drop for FixturePort {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bake_tui_view::runtime::Submission;
     use bake_tui_view::state::Outcome;
     use std::time::Duration;
 
@@ -122,7 +124,7 @@ mod tests {
     fn a_submitted_prompt_runs_to_its_end_and_stop_joins_the_thread() {
         let (sender, updates) = mpsc::channel();
         let port = FixturePort::start(Instant::now(), move |u| sender.send(u).is_ok()).unwrap();
-        port.request(Request::Submit(Submission::FollowUp("hi".into())));
+        port.request(Request::Submit(Submission::FollowUp("hi".into()).into()));
         let mut seen = Vec::new();
         loop {
             let update = updates.recv_timeout(PATIENCE).expect("an update");
@@ -142,7 +144,7 @@ mod tests {
     fn a_cancel_ends_the_turn_at_once() {
         let (sender, updates) = mpsc::channel();
         let port = FixturePort::start(Instant::now(), move |u| sender.send(u).is_ok()).unwrap();
-        port.request(Request::Submit(Submission::FollowUp("hi".into())));
+        port.request(Request::Submit(Submission::FollowUp("hi".into()).into()));
         port.request(Request::Cancel);
         let ended = std::iter::from_fn(|| updates.recv_timeout(PATIENCE).ok())
             .find(|u| matches!(u, RuntimeUpdate::TurnEnded(_)));

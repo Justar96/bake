@@ -1,6 +1,23 @@
 # The command line
 
-bake-rs runs one headless turn per invocation: it sends the prompts, prints the result, and exits. It has no interactive mode yet. `bake-rs --help` lists every option, and `bake-rs docs` lists these topics.
+In a terminal, bake-rs opens an interactive session; with `-p`, or when standard input or output is not a terminal, it runs one headless turn, prints the result, and exits. `bake-rs --help` lists every option, and `bake-rs docs` lists these topics.
+
+## Interactive sessions
+
+```sh
+bake-rs                       # a new session, fullscreen
+bake-rs --inline -c           # continue the latest session, in the terminal's scrollback
+bake-rs "Explain src/main.rs" # send a first prompt, then keep the session open
+```
+
+- The session is set up before the terminal changes: the same model, session, tool, and permission flags as `-p` apply, and an error such as no usable model or a missing API key exits with status 1 and leaves the terminal as it was.
+- Message arguments and `@file` attachments are sent first, in order, each after the previous turn ends.
+- Enter sends the draft. While a turn runs, Enter steers it: the prompt joins the turn at its next step. A steer takes text only: a draft with staged images (Ctrl+V or an image path) is kept until the turn ends. Alt+↑ sends prompts that wait.
+- Esc stops the turn. Steers it had not taken yet go back into the draft.
+- A prompt the session refuses, such as one sent without an API key, goes back into the draft with its images and the reason.
+- `/skill:<name>` and prompt-template prompts are expanded as in `-p`. Pi's other slash commands, such as `/model` or `/compact`, are not available yet; they are refused and the draft is kept. Choose the model and thinking level with the command-line flags.
+- Ctrl+C twice quits. Quitting, `SIGINT`, `SIGTERM`, and `SIGHUP` stop the turn and close the session before the terminal is restored.
+- Approvals cannot be answered in the terminal yet, so a call that needs one is refused, as with `--approval never`.
 
 ## Running a prompt
 
@@ -40,15 +57,15 @@ Commands the `bash` tool runs receive the session's details: `BAKE_SESSION_ID`, 
 
 | Status | Meaning |
 |---|---|
-| 0 | The turn finished |
+| 0 | The turn finished, or the interactive session was quit |
 | 1 | An error: a bad option, a startup failure, no usable model, or, in text mode, a model error (JSON mode reports it as an event) |
 | 2 | An argument bake-rs cannot parse: one that is not UTF-8, or a bad argument to `preview` or `docs` |
-| 129, 143 | Stopped by `SIGHUP` or `SIGTERM`; the session is closed first |
+| 129, 130, 143 | Stopped by `SIGHUP` or a closed terminal, `SIGINT` (interactive only), or `SIGTERM`; the session is closed first |
 
 Startup errors and warnings go to standard error, most as `Error: ` and `Warning: ` lines; `No models available` and `No session found matching` print without the prefix, as in Pi. A model error in text mode prints as its message.
 
 ## Other commands
 
 - `bake-rs docs [topic]` prints this documentation. It needs no terminal, model, or Bake home.
-- `bake-rs preview [--inline]` opens a sample of the terminal interface with sample content. It needs an interactive terminal and connects to no model; Ctrl+C quits.
+- `bake-rs preview [--inline]` opens a sample of the terminal interface with sample content and scripted turns. It needs an interactive terminal and connects to no model; Ctrl+C twice quits.
 - `bake-rs --version` prints the version.

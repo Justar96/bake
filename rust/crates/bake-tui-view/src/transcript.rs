@@ -53,6 +53,10 @@ pub enum Row {
     Reasoning(String),
     /// The model's answer.
     Answer(String),
+    /// A failure the session reports, such as a provider error, drawn red.
+    Error(String),
+    /// A note from the session itself, such as where it is saved, drawn dim.
+    Info(String),
     /// A tool call and its result as one block.
     Call {
         tool: String,
@@ -719,6 +723,15 @@ pub fn present(rows: &[Row], index: usize, width: usize, look: Look) -> Vec<Line
             dim().add_modifier(Modifier::ITALIC),
         )),
         Row::Answer(text) => lines.extend(hang(text, prose, RAIL, rail(), rail(), Style::new())),
+        Row::Error(text) => lines.extend(hang(
+            text,
+            prose,
+            RAIL,
+            rail(),
+            rail(),
+            colour(look.tones, (0xef, 0x44, 0x44), Color::Red),
+        )),
+        Row::Info(text) => lines.extend(hang(text, prose, RAIL, rail(), rail(), dim())),
         Row::Call {
             tool,
             argument,

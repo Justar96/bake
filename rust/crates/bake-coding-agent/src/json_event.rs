@@ -211,6 +211,15 @@ pub fn session_event_json(event: &SessionEvent<'_>) -> Value {
         SessionEvent::SummarizationRetryFinished => {
             Value::Object(object("summarization_retry_finished"))
         }
+        SessionEvent::QueueUpdate {
+            steering,
+            follow_up,
+        } => {
+            let mut out = object("queue_update");
+            out.insert("steering".into(), (*steering).into());
+            out.insert("followUp".into(), (*follow_up).into());
+            Value::Object(out)
+        }
     }
 }
 

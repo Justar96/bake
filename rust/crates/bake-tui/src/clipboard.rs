@@ -165,6 +165,7 @@ impl Clipboard {
             media_type,
             bytes: data.len() as u64,
             size: paste::pixel_size(&data),
+            data: paste::ImageData::new(data),
         })
     }
 }
@@ -253,25 +254,31 @@ fn run(program: &str, args: &[&str]) -> Option<Vec<u8>> {
     (status?.success() && data.len() <= MAX_IMAGE).then_some(data)
 }
 
-/// Reads the image a pasted path names: its header for the type and size,
-/// and its length. `~/` is the home directory. `None` when the file cannot
-/// be read or is not an image the preview stages.
+/// Reads the image a pasted path names: its type and size from its header,
+/// and its bytes, up to [`MAX_IMAGE`]. `~/` is the home directory. `None`
+/// when the file cannot be read, is larger than that, or is not an image
+/// the composer stages.
 pub fn read_image_file(path: &str, home: Option<&str>) -> Option<Image> {
     let path = match (path.strip_prefix("~/"), home) {
         (Some(rest), Some(home)) => Path::new(home).join(rest),
         _ => Path::new(path).to_path_buf(),
     };
-    let mut file = std::fs::File::open(&path).ok()?;
-    let bytes = file.metadata().ok().filter(|m| m.is_file())?.len();
-    let mut header = [0; 32];
-    let read = file.read(&mut header).ok()?;
-    let header = &header[..read];
-    let media_type = paste::sniff(header)?;
+    let file = std::fs::File::open(&path).ok()?;
+    file.metadata().ok().filter(|m| m.is_file())?;
+    let mut data = Vec::new();
+    file.take(MAX_IMAGE as u64 + 1)
+        .read_to_end(&mut data)
+        .ok()?;
+    if data.len() > MAX_IMAGE {
+        return None;
+    }
+    let media_type = paste::sniff(&data)?;
     Some(Image {
         name: path.file_name()?.to_string_lossy().into_owned(),
         media_type,
-        bytes,
-        size: paste::pixel_size(header),
+        bytes: data.len() as u64,
+        size: paste::pixel_size(&data),
+        data: paste::ImageData::new(data),
     })
 }
 

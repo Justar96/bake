@@ -1,5 +1,8 @@
 #!/usr/bin/env bun
-/** Drive the built Rust preview in a real PTY and check its return to the shell. */
+/**
+ * Drive the built Rust preview, and live `bake-rs` sessions against a fake
+ * streaming model, in a real PTY and check their return to the shell.
+ */
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
@@ -13,6 +16,10 @@ import { Unicode11Addon } from '@xterm/addon-unicode11'
 const root = resolve(import.meta.dir, '..')
 const { values } = parseArgs({ options: { binary: { type: 'string' }, filter: { type: 'string' } } })
 const binary = resolve(values.binary ?? join(root, 'rust/target/debug/bake-rs'))
+
+/** A live session's command line and the isolated environment it runs in. */
+interface Live { readonly args: readonly string[]; readonly env: Readonly<Record<string, string>> }
+
 class Preview {
   private readonly terminal = new xterm.Terminal({ cols: 80, rows: 24, allowProposedApi: true })
   private readonly pty: Bun.Terminal
@@ -28,21 +35,21 @@ class Preview {
   /** Everything the preview wrote, its last MiB, for sequences the screen does not show. */
   raw = ''
 
-  constructor(cwd: string, readonly inline = false) {
+  constructor(cwd: string, readonly inline = false, readonly live?: Live) {
     // Emoji cases use Unicode 11 widths, matching modern terminal cell allocation.
     this.terminal.loadAddon(new Unicode11Addon())
     this.terminal.unicode.activeVersion = '11'
     const decoder = new TextDecoder()
     // The shell waits for our handshake before exec, preserving its PID. This
     // lets us read cooked modes before the native process can enable raw mode.
-    const shell = inline
-      ? 'read -r ready; i=0; while [ "$i" -lt 40 ]; do printf "SHELL_HISTORY_%02d\\n" "$i"; i=$((i + 1)); done; exec "$1" preview --inline'
-      : 'read -r ready; exec "$1" preview'
-    this.process = Bun.spawn(['sh', '-c', shell, 'rust-preview-pty', binary], {
+    const history = 'i=0; while [ "$i" -lt 40 ]; do printf "SHELL_HISTORY_%02d\\n" "$i"; i=$((i + 1)); done; '
+    const shell = `read -r ready; ${inline ? history : ''}exec "$@"`
+    const args = live?.args ?? (inline ? ['preview', '--inline'] : ['preview'])
+    this.process = Bun.spawn(['sh', '-c', shell, 'rust-preview-pty', binary, ...args], {
       cwd,
       // SSH_TTY sends a copy to the terminal as OSC 52, which the driver
       // reads, instead of to this machine's clipboard.
-      env: { PATH: process.env.PATH, TERM: 'xterm-256color', LANG: 'C.UTF-8', SSH_TTY: '/dev/pts/bake-pty' },
+      env: { PATH: process.env.PATH, TERM: 'xterm-256color', LANG: 'C.UTF-8', SSH_TTY: '/dev/pts/bake-pty', ...live?.env },
       terminal: {
         cols: 80, rows: 24,
         data: (_terminal, bytes) => {
@@ -135,8 +142,8 @@ class Preview {
 
   async ready(): Promise<void> {
     await this.wait('Rust preview ready', () => this.terminal.buffer.active.type === (this.inline ? 'normal' : 'alternate')
-      // The sample session's newest lines and the composer show on the first frame.
-      && this.screen.includes('rejects it before splitting.') && this.screen.includes('❯ Type a draft')
+      // The sample session's newest lines show on the first frame, and so does the composer.
+      && (this.live !== undefined || this.screen.includes('rejects it before splitting.')) && this.screen.includes('❯ ')
       && this.raw.includes('\x1b[?2004h') && this.raw.includes('\x1b[?1000h\x1b[?1002h\x1b[?1006h'))
     assert.notDeepEqual(this.modes(), this.initialModes, 'preview did not acquire raw mode')
   }
@@ -173,7 +180,7 @@ class Preview {
   }
 
   async quit(signal?: 'SIGINT' | 'SIGTERM' | 'SIGHUP'): Promise<void> {
-    if (signal === 'SIGTERM') {
+    if (signal === 'SIGTERM' && this.live === undefined) {
       this.send('\x07')
       await this.wait('agent list with hidden cursor', () => this.screen.includes('Fixed examples · nothing is running')
         && this.raw.lastIndexOf('\x1b[?25l') > this.raw.lastIndexOf('\x1b[?25h'))
@@ -203,6 +210,17 @@ class Preview {
     assert(this.raw.lastIndexOf('\x1b[?25h') > this.raw.lastIndexOf('\x1b[?25l'), 'cursor was not restored')
     assert.throws(() => process.kill(this.process.pid, 0), 'application remains alive after exit')
   }
+
+  /** Waits for the process to exit by itself and returns its status, for a run that never takes the terminal. */
+  async exit(): Promise<number> {
+    const code = await Promise.race([this.exited, delay(30_000).then(() => 'timed out')])
+    assert.equal(typeof code, 'number', 'the process did not exit')
+    await this.wait('PTY drained', () => this.streamStatus !== undefined, false)
+    await this.parsed
+    return code as number
+  }
+
+  get unchangedModes(): boolean { return JSON.stringify(this.modes()) === JSON.stringify(this.initialModes) }
 
   /** Close the terminal under the preview, as an emulator window closing does, and expect the quiet hangup exit. */
   async hangUp(): Promise<void> {
@@ -646,3 +664,336 @@ if (process.platform === 'linux') {
     preview.assertNoChromeResidue(true)
   }, [], true)
 } else console.log('SKIP Rust PTY: inline coalesced resize barrier needs Linux /proc process state')
+
+/**
+ * A fake OpenAI Responses model on a loopback port. It answers by the last
+ * user prompt: `ECHO <words>` streams `Echo: <words>.`; `READ <path>` calls
+ * `read`, then answers with the file's first line; `SLEEP` calls bash
+ * `sleep 30`; `HOLD` streams `Holding` and finishes only on `release()` or
+ * when the request is aborted; `STEER <words>` answers `Steered: <words>.`.
+ */
+class FakeModel {
+  readonly requests: { input: unknown[] }[] = []
+  private releases: (() => void)[] = []
+  aborted = 0
+  private readonly server: ReturnType<typeof Bun.serve>
+
+  constructor() {
+    this.server = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: request => this.answer(request) })
+  }
+
+  get port(): number { return this.server.port ?? 0 }
+
+  /** Lets every held response finish. */
+  release(): void {
+    for (const done of this.releases.splice(0)) done()
+  }
+
+  get holding(): number { return this.releases.length }
+
+  async stop(): Promise<void> { await this.server.stop(true) }
+
+  private async answer(request: Request): Promise<Response> {
+    const body = await request.json() as { input: { role?: string; type?: string; content?: { text?: string }[]; output?: string }[] }
+    this.requests.push(body)
+    const input = body.input
+    const last = input.at(-1)
+    const prompt = [...input].reverse().find(item => item.role === 'user')?.content?.map(part => part.text ?? '').join('') ?? ''
+    const toolOutput = last?.type === 'function_call_output' ? String(last.output ?? '') : undefined
+    const n = this.requests.length
+    if (toolOutput !== undefined) {
+      if (prompt.startsWith('READ ')) return sse(text(n, `Read it: ${toolOutput.split('\n')[0]}`))
+      return sse(text(n, 'Slept.'))
+    }
+    if (prompt.startsWith('READ ')) return sse(call(n, 'read', { path: prompt.slice(5).trim() }))
+    if (prompt.startsWith('SLEEP')) return sse(call(n, 'bash', { command: 'sleep 30' }))
+    if (prompt.startsWith('STEER ')) return sse(text(n, `Steered: ${prompt.slice(6).trim()}.`))
+    if (prompt.startsWith('HOLD')) {
+      const events = text(n, 'Holding until released.')
+      const encoder = new TextEncoder()
+      let release: () => void = () => {}
+      const released = new Promise<void>((done) => { release = done })
+      this.releases.push(release)
+      request.signal.addEventListener('abort', () => { this.aborted++; release() })
+      return new Response(new ReadableStream({
+        start: async (controller) => {
+          // The first delta streams at once; the rest waits for the release.
+          controller.enqueue(encoder.encode(events.slice(0, 5).join('')))
+          await released
+          if (request.signal.aborted) {
+            controller.close()
+            return
+          }
+          controller.enqueue(encoder.encode(events.slice(5).join('')))
+          controller.close()
+        },
+      }), { headers: { 'content-type': 'text/event-stream' } })
+    }
+    return sse(text(n, `Echo: ${prompt.replace(/^ECHO\s*/u, '')}.`))
+  }
+}
+
+function event(sequence: number, value: Record<string, unknown>): string {
+  return `event: ${String(value.type)}\ndata: ${JSON.stringify({ ...value, sequence_number: sequence })}\n\n`
+}
+
+const usage = {
+  input_tokens: 40,
+  input_tokens_details: { cached_tokens: 0 },
+  output_tokens: 8,
+  output_tokens_details: { reasoning_tokens: 0 },
+  total_tokens: 48,
+}
+
+/** A text response in SSE events: its first five open the message and stream `Holding`'s first word. */
+function text(n: number, answer: string): string[] {
+  const id = `msg_${n}`
+  const [head, ...rest] = answer.split(' ')
+  const tail = rest.length > 0 ? ` ${rest.join(' ')}` : ''
+  const item = { id, type: 'message', status: 'completed', role: 'assistant', content: [{ type: 'output_text', annotations: [], text: answer }] }
+  return [
+    { type: 'response.created', response: { id: `resp_${n}`, object: 'response', created_at: 1_760_000_000, status: 'in_progress', model: 'loop-model', output: [] } },
+    { type: 'response.output_item.added', output_index: 0, item: { id, type: 'message', status: 'in_progress', role: 'assistant', content: [] } },
+    { type: 'response.content_part.added', item_id: id, output_index: 0, content_index: 0, part: { type: 'output_text', annotations: [], text: '' } },
+    { type: 'response.output_text.delta', item_id: id, output_index: 0, content_index: 0, delta: head },
+    { type: 'response.in_progress', response: { id: `resp_${n}`, object: 'response', created_at: 1_760_000_000, status: 'in_progress', model: 'loop-model', output: [] } },
+    { type: 'response.output_text.delta', item_id: id, output_index: 0, content_index: 0, delta: tail },
+    { type: 'response.output_text.done', item_id: id, output_index: 0, content_index: 0, text: answer },
+    { type: 'response.content_part.done', item_id: id, output_index: 0, content_index: 0, part: { type: 'output_text', annotations: [], text: answer } },
+    { type: 'response.output_item.done', output_index: 0, item },
+    { type: 'response.completed', response: { id: `resp_${n}`, object: 'response', created_at: 1_760_000_000, status: 'completed', model: 'loop-model', output: [item], usage } },
+  ].map((value, sequence) => event(sequence, value))
+}
+
+/** A response holding one tool call. */
+function call(n: number, name: string, args: Record<string, unknown>): string[] {
+  const id = `fc_${n}`
+  const item = { id, type: 'function_call', status: 'completed', call_id: `call_${n}`, name, arguments: JSON.stringify(args) }
+  return [
+    { type: 'response.created', response: { id: `resp_${n}`, object: 'response', created_at: 1_760_000_000, status: 'in_progress', model: 'loop-model', output: [] } },
+    { type: 'response.output_item.added', output_index: 0, item: { ...item, status: 'in_progress', arguments: '' } },
+    { type: 'response.function_call_arguments.done', item_id: id, output_index: 0, arguments: item.arguments },
+    { type: 'response.output_item.done', output_index: 0, item },
+    { type: 'response.completed', response: { id: `resp_${n}`, object: 'response', created_at: 1_760_000_000, status: 'completed', model: 'loop-model', output: [item], usage } },
+  ].map((value, sequence) => event(sequence, value))
+}
+
+function sse(events: string[]): Response {
+  return new Response(events.join(''), { headers: { 'content-type': 'text/event-stream' } })
+}
+
+/** An isolated Bake home, user home, and project for live sessions, all removed afterwards. */
+interface LiveWorld {
+  readonly root: string
+  readonly home: string
+  readonly project: string
+  readonly model: FakeModel
+  launch(args?: readonly string[], inline?: boolean): Preview
+}
+
+/** The session files the home holds, each as its parsed entries. */
+async function sessionEntries(home: string): Promise<Record<string, unknown>[][]> {
+  const found: Record<string, unknown>[][] = []
+  const walk = async (dir: string): Promise<void> => {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name)
+      if (entry.isDirectory()) await walk(path)
+      else if (entry.name.endsWith('.jsonl')) found.push(readFileSync(path, 'utf8').trim().split('\n').map(line => JSON.parse(line) as Record<string, unknown>))
+    }
+  }
+  await walk(join(home, 'sessions')).catch(() => {})
+  return found
+}
+
+function messageTexts(entries: Record<string, unknown>[], role: string): string[] {
+  return entries.flatMap((entry) => {
+    const message = entry.message as { role?: string; content?: string | { type: string; text?: string }[] } | undefined
+    if (entry.type !== 'message' || message?.role !== role) return []
+    const content = message.content
+    return [typeof content === 'string' ? content : (content ?? []).map(part => part.text ?? '').join('')]
+  })
+}
+
+/** Run one live scenario against a fresh fake model and isolated homes. */
+async function liveScenario(name: string, run: (world: LiveWorld) => Promise<void>): Promise<void> {
+  if (values.filter !== undefined && !name.includes(values.filter)) {
+    console.log(`SKIP Rust PTY: ${name} (filter ${values.filter})`)
+    return
+  }
+  const root = await mkdtemp(join(tmpdir(), 'bake-rust-live-'))
+  const home = join(root, 'home')
+  const project = join(root, 'project')
+  const user = join(root, 'user')
+  for (const dir of [home, project, user]) await mkdir(dir, { recursive: true })
+  const model = new FakeModel()
+  await writeFile(join(home, 'models.json'), JSON.stringify({
+    providers: { loop: { baseUrl: `http://127.0.0.1:${model.port}/v1`, api: 'openai-responses', apiKey: 'test-key', models: [{ id: 'loop-model', name: 'Loop', contextWindow: 1000, input: ['text', 'image'] }] } },
+  }))
+  const launched: Preview[] = []
+  const world: LiveWorld = {
+    root, home, project, model,
+    launch: (args = [], inline = false) => {
+      const preview = new Preview(project, inline, { args: inline ? ['--inline', ...args] : args, env: { BAKE_HOME: home, HOME: user, USERPROFILE: user } })
+      launched.push(preview)
+      return preview
+    },
+  }
+  try {
+    await run(world)
+    console.log(`PASS Rust PTY: ${name}`)
+  } catch (error) {
+    const last = launched.at(-1)
+    if (last !== undefined) {
+      await mkdir(join(root, '..', basename(root)), { recursive: true })
+      await mkdir(join(join(import.meta.dir, '..'), '.preflight'), { recursive: true })
+      const transcript = join(import.meta.dir, '..', '.preflight', `${basename(root)}.ansi`)
+      await last.saveFailure(transcript)
+      console.error(`Rust PTY transcript: ${transcript}`)
+    }
+    throw error
+  } finally {
+    for (const preview of launched) await preview.close()
+    await model.stop()
+    await rm(root, { recursive: true, force: true })
+  }
+}
+
+await liveScenario('a live session streams an answer and a tool call, takes a second prompt, and resumes', async (world) => {
+  await writeFile(join(world.project, 'notes.txt'), 'alpha line\nbeta line\n')
+  const session = world.launch()
+  await session.ready()
+  await session.wait('model in the status line', () => session.screen.includes('loop-model'))
+  session.send('READ notes.txt\r')
+  await session.wait('tool call and answer', () => session.screen.includes('Read it:') && /notes\.txt/u.test(session.screen)
+    && /^ {2}✓ Completed/mu.test(session.screen) && session.screen.includes('❯ Type a draft'))
+  assert(/✓ Read: notes\.txt +2 lines/u.test(session.screen) && session.screen.includes('│ alpha line'), `the read card is missing\n${session.screen}`)
+  session.send('ECHO second prompt\r')
+  await session.wait('second answer', () => session.screen.includes('Echo: second prompt.'))
+  assert.equal(session.screen.split('Echo: second prompt.').length - 1, 1, 'the streamed answer was drawn twice')
+  // A pasted image path stages the image, and an idle prompt sends it with the text.
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64')
+  const imagePath = join(world.root, 'dot.png')
+  await writeFile(imagePath, png)
+  session.send('ECHO picture ')
+  session.send(`\x1b[200~${imagePath}\x1b[201~`)
+  await session.wait('image staged', () => session.screen.includes('❯ ECHO picture [Image #1]') && session.screen.includes('Staged attachments: 1'))
+  const sentBefore = world.model.requests.length
+  session.send('\r')
+  await session.wait('image prompt answered', () => session.screen.includes('Echo: picture [Image #1].') && !session.screen.includes('Staged attachments'))
+  assert(JSON.stringify(world.model.requests[sentBefore]?.input).includes('input_image'), 'the staged image was not sent')
+  await session.quit()
+  const [entries] = await sessionEntries(world.home)
+  assert(entries, 'no session file was written')
+  assert.deepEqual(messageTexts(entries, 'user'), ['READ notes.txt', 'ECHO second prompt', 'ECHO picture [Image #1]'])
+  assert(messageTexts(entries, 'toolResult').some(text => text.includes('alpha line')), 'the tool result was not persisted')
+  assert(messageTexts(entries, 'assistant').includes('Echo: second prompt.'))
+
+  // Resumed, the transcript replays from the session file and the next request carries the history.
+  const resumed = world.launch(['--continue'])
+  await resumed.ready()
+  await resumed.wait('replayed transcript', () => resumed.screen.includes('Echo: second prompt.') && resumed.screen.includes('> ECHO second prompt'))
+  const before = world.model.requests.length
+  resumed.send('ECHO third\r')
+  await resumed.wait('resumed answer', () => resumed.screen.includes('Echo: third.'))
+  const sent = JSON.stringify(world.model.requests[before]?.input)
+  assert(sent.includes('READ notes.txt') && sent.includes('Echo: second prompt.'), 'the resumed request lost its history')
+  await resumed.quit()
+  const files = await sessionEntries(world.home)
+  assert.equal(files.length, 1, '--continue started a new session file')
+  assert.deepEqual(messageTexts(files[0] ?? [], 'user'), ['READ notes.txt', 'ECHO second prompt', 'ECHO picture [Image #1]', 'ECHO third'])
+  assert.deepEqual(await readdir(world.project), ['notes.txt'], 'the session wrote into the project')
+})
+
+await liveScenario('inline live session steers a held turn, cancels another, and returns the unsent steer', async (world) => {
+  const session = world.launch([], true)
+  await session.ready()
+  session.assertShellHistory()
+  session.send('HOLD first\r')
+  await session.wait('held stream', () => session.screen.includes('Holding') && session.screen.includes('Esc interrupts'))
+  session.send('STEER left\r')
+  await session.wait('steer waits for the next step', () => session.screen.includes('Next step: STEER left'))
+  world.model.release()
+  await session.wait('steer answered', () => session.history.includes('Steered: left.') && /^ {2}✓ Completed/mu.test(session.screen))
+  assert(!session.screen.includes('Pending input'), 'the delivered steer stayed pending')
+  session.send('HOLD second\r')
+  await session.wait('second held stream', () => world.model.holding === 1 && session.screen.includes('Esc interrupts'))
+  session.send('STEER keep me\r')
+  await session.wait('second steer pending', () => session.screen.includes('Next step: STEER keep me'))
+  session.send('\x1b')
+  await session.wait('turn interrupted and steer returned', () => /^ {2}■ Interrupted/mu.test(session.screen)
+    && session.screen.includes('❯ STEER keep me') && session.screen.includes('Unsent prompts are back in your draft'))
+  assert.equal(world.model.aborted, 1, 'the held request was not aborted')
+  // The returned draft is not sent again by itself.
+  const requests = world.model.requests.length
+  await delay(300)
+  assert.equal(world.model.requests.length, requests, 'the cancelled steer reached the model')
+  assert.equal(session.history.split('\n').filter(line => line.trimEnd() === '> HOLD first').length, 1, 'a committed prompt was lost or duplicated')
+  session.assertShellHistory()
+  await session.quit()
+  session.assertShellHistory()
+  session.assertNoChromeResidue(true)
+  const [entries] = await sessionEntries(world.home)
+  assert.deepEqual(messageTexts(entries ?? [], 'user'), ['HOLD first', 'STEER left', 'HOLD second'])
+})
+
+await liveScenario('a live bash call cancelled by Esc fails its card and leaves no process', async (world) => {
+  const session = world.launch()
+  await session.ready()
+  session.send('SLEEP\r')
+  await session.wait('bash running', () => session.screen.includes('running bash') && session.screen.includes('sleep 30'))
+  session.send('\x1b')
+  await session.wait('bash interrupted', () => /^ {2}■ Interrupted/mu.test(session.screen))
+  const sleeping = Bun.spawnSync(['pgrep', '-f', '^sleep 30$']).stdout.toString().trim()
+  assert.equal(sleeping, '', `the cancelled bash call left a process: ${sleeping}`)
+  await session.quit()
+})
+
+for (const [signal, inline] of [['SIGTERM', false], ['SIGHUP', true], ['SIGINT', false]] as const) {
+  await liveScenario(`${inline ? 'inline ' : ''}live ${signal} mid-turn shuts the session down and restores the terminal`, async (world) => {
+    const session = world.launch([], inline)
+    await session.ready()
+    session.send('HOLD signal\r')
+    await session.wait('held stream', () => session.screen.includes('Holding'))
+    await session.quit(signal)
+    if (inline) session.assertShellHistory()
+    assert.equal(world.model.aborted, 1, 'shutdown did not abort the request')
+    const [entries] = await sessionEntries(world.home)
+    assert.deepEqual(messageTexts(entries ?? [], 'user'), ['HOLD signal'])
+  })
+}
+
+await liveScenario('a live terminal hangup mid-turn exits quietly', async (world) => {
+  const session = world.launch()
+  await session.ready()
+  session.send('HOLD hangup\r')
+  await session.wait('held stream', () => session.screen.includes('Holding'))
+  await session.hangUp()
+})
+
+await liveScenario('live command-line prompts run first, and a setup failure exits before the terminal changes', async (world) => {
+  const session = world.launch(['ECHO from args', 'ECHO later arg'])
+  await session.ready()
+  await session.wait('both prompts answered', () => session.screen.includes('Echo: from args.') && session.screen.includes('Echo: later arg.')
+    && /^ {2}✓ Completed/mu.test(session.screen))
+  // A refused command keeps the draft.
+  session.send('/model other\r')
+  await session.wait('command refused', () => session.screen.includes('/model is not available in bake-rs yet')
+    && session.screen.includes('❯ /model other'))
+  await session.quit()
+
+  const failed = world.launch(['--model', 'missing-model'])
+  assert.equal(await failed.exit(), 1)
+  assert(failed.raw.includes('missing-model'), `the error was not reported\n${failed.raw}`)
+  assert(!failed.raw.includes('\x1b[?2004h') && !failed.raw.includes('\x1b[?1049h'), 'setup failure changed the terminal')
+  assert(failed.unchangedModes, 'setup failure left terminal modes changed')
+
+  // A model without a key fails the same way, before raw mode.
+  await writeFile(join(world.home, 'models.json'), JSON.stringify({
+    providers: { loop: { baseUrl: `http://127.0.0.1:${world.model.port}/v1`, api: 'openai-responses', models: [{ id: 'loop-model' }] } },
+  }))
+  const keyless = world.launch(['--model', 'loop/loop-model'])
+  assert.equal(await keyless.exit(), 1)
+  assert(keyless.raw.includes('No API key found'), `the missing key was not reported\n${keyless.raw}`)
+  assert(!keyless.raw.includes('\x1b[?2004h'), 'a missing key changed the terminal')
+  assert(keyless.unchangedModes, 'a missing key left terminal modes changed')
+})

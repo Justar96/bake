@@ -9,7 +9,8 @@
 //!
 //! Bake adds `--permission <preset>`, `--sandbox <mode>`, and
 //! `--approval <policy>`, which select the session's permission (D24) the
-//! way Pi's `--thinking` selects its thinking level.
+//! way Pi's `--thinking` selects its thinking level, and `--inline`, which
+//! keeps interactive mode in the terminal's scrollback.
 
 use bake_ai::ModelThinkingLevel;
 
@@ -121,6 +122,10 @@ pub struct Args {
     pub sandbox: Option<SandboxMode>,
     /// Bake's `--approval`: the approval policy to set.
     pub approval: Option<ApprovalPolicy>,
+    /// Bake's `--inline`: interactive mode keeps its transcript in the
+    /// terminal's scrollback instead of the alternate screen. Print mode
+    /// ignores it.
+    pub inline: bool,
     /// Positional prompts.
     pub messages: Vec<String>,
     /// `@file` arguments.
@@ -217,6 +222,7 @@ pub fn parse_args(args: &[String]) -> Args {
                     .push(Diagnostic::error("--name requires a value")),
             },
             "--no-session" => result.no_session = true,
+            "--inline" => result.inline = true,
             "--session" if next.is_some() => {
                 result.session = next.map(str::to_owned);
                 i += 1;

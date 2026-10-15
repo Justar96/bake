@@ -49,6 +49,7 @@ use crate::files::{Ask, Finder};
 use crate::git;
 use crate::inline::{self, Inline};
 use crate::input;
+use crate::live::{LivePort, LiveSession};
 use crate::port::{FixturePort, Request};
 
 /// How often the loop looks for a finished copy while one is pending.
@@ -430,22 +431,85 @@ pub fn run_preview() -> io::Result<PreviewExit> {
 
 /// Runs the existing sample preview in the selected terminal screen.
 pub fn run_preview_mode(mode: ScreenMode) -> io::Result<PreviewExit> {
+    run(mode, Runtime::Fixture)
+}
+
+/// Runs a live agent session in the selected terminal screen: the same
+/// loop, composer, and transcript as the preview, answered by the session
+/// instead of the fixture. The caller must have checked that stdin and
+/// stdout are terminals. The session is shut down, awaiting its run and
+/// writes, before the terminal is restored and this returns.
+pub fn run_live(mode: ScreenMode, live: LiveSession) -> io::Result<PreviewExit> {
+    run(mode, Runtime::Live(Box::new(live)))
+}
+
+/// What answers the composer.
+enum Runtime {
+    Fixture,
+    Live(Box<LiveSession>),
+}
+
+/// The running runtime port.
+enum Port {
+    Fixture(FixturePort),
+    Live(LivePort),
+}
+
+impl Port {
+    fn request(&self, request: Request) {
+        match self {
+            Self::Fixture(port) => port.request(request),
+            Self::Live(port) => port.request(request),
+        }
+    }
+
+    fn stop(self) -> io::Result<()> {
+        match self {
+            Self::Fixture(port) => port.stop(),
+            Self::Live(port) => port.stop(),
+        }
+    }
+}
+
+/// A port before the terminal is set up: a live one that owns its session,
+/// or the fixture's update sender.
+enum Unstarted<F> {
+    Live(LivePort),
+    Fixture(F),
+}
+
+fn run(mode: ScreenMode, runtime: Runtime) -> io::Result<PreviewExit> {
+    let env = |name: &str| std::env::var(name).ok();
+    let (frame_style, tones) = (frame::resolve(env, cfg!(windows)), Tones::resolve(env));
+    // The session's rows are read before the terminal changes mode.
+    let mut state = match &runtime {
+        Runtime::Fixture => State::new(frame_style, tones),
+        Runtime::Live(live) => State::live(frame_style, tones, live.initial_rows()),
+    };
     let (sender, inputs) = mpsc::channel();
-    // Declared first so it is dropped last: signals stay handled until the
-    // terminal is restored.
+    // One clock for the loop's ticks, the reader's timestamps, and the
+    // fixture's timeline.
+    let clock = Instant::now();
+    let updates = sender.clone();
+    let send = move |update| updates.send(Source::Msg(Msg::Runtime(update))).is_ok();
+    // A live port owns the session from here on, but runs nothing until the
+    // terminal is set up: if setup fails, dropping it shuts the session
+    // down.
+    let unstarted = match runtime {
+        Runtime::Fixture => Unstarted::Fixture(send),
+        Runtime::Live(live) => Unstarted::Live(LivePort::start(*live, send)),
+    };
+    // Declared before the terminal session so it is dropped after it:
+    // signals stay handled until the terminal is restored.
     let signals = signals::Forwarder::start(sender.clone())?;
     let mut session = TerminalSession::acquire_mode(mode)?;
-    let env = |name: &str| std::env::var(name).ok();
-    let mut state = State::new(frame::resolve(env, cfg!(windows)), Tones::resolve(env));
     state.status.cwd = working_directory(env);
     state.wheel = WheelSteps::new(wheel::reports(env, cfg!(target_os = "macos")));
     state.status.branch = std::env::current_dir()
         .ok()
         .and_then(|cwd| git::branch(&cwd));
-    // One clock for the loop's ticks and the reader's timestamps.
-    let clock = Instant::now();
     // Started only once raw mode is on, so it never reads cooked input.
-    let updates = sender.clone();
+    let found = sender.clone();
     let watched = sender.clone();
     let outcome = Reader::start(sender, clock).and_then(|reader| {
         let watcher = match hangup::Watcher::start(watched) {
@@ -457,10 +521,15 @@ pub fn run_preview_mode(mode: ScreenMode) -> io::Result<PreviewExit> {
         };
         let clipboard = Clipboard::new(Platform::current(), env);
         let home = env(if cfg!(windows) { "USERPROFILE" } else { "HOME" });
-        let found = updates.clone();
-        let port = FixturePort::start(clock, move |update| {
-            updates.send(Source::Msg(Msg::Runtime(update))).is_ok()
-        })?;
+        // Declared after the terminal session, so even a panic shuts a live
+        // session down before the terminal is restored.
+        let port = match unstarted {
+            Unstarted::Live(mut live) => {
+                live.begin();
+                Port::Live(live)
+            }
+            Unstarted::Fixture(send) => Port::Fixture(FixturePort::start(clock, send)?),
+        };
         let root = std::env::current_dir().unwrap_or_else(|_| ".".into());
         let finder = Finder::start(root, move |query, found_paths| {
             let msg = Msg::FilesFound {
@@ -1105,7 +1174,12 @@ mod tests {
             &mut State::default(),
             &inputs,
             Instant::now(),
-            owners(&|request| requests.borrow_mut().push(format!("{request:?}"))),
+            owners(&|request| {
+                requests.borrow_mut().push(match request {
+                    Request::Submit(prompt) => format!("Submit({:?})", prompt.submission),
+                    other => format!("{other:?}"),
+                });
+            }),
         );
         assert_eq!(exit.unwrap(), PreviewExit::Quit);
         assert_eq!(requests.into_inner(), ["Submit(FollowUp(\"h\"))", "Cancel"]);

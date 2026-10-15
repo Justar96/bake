@@ -104,6 +104,15 @@ pub const SAMPLE_ONLY: &str =
     "The sample activity takes no prompt. Esc stops it; your draft is kept.";
 /// Enter with staged images: the fixture runtime takes text alone.
 pub const NO_IMAGES: &str = "Images are not sent in this preview. Your draft is kept.";
+/// Enter with staged images while a live turn runs.
+pub const IMAGES_WHILE_RUNNING: &str =
+    "Wait for the turn to end before sending images. Your draft is kept.";
+/// Ctrl+T or Ctrl+G in a live session: they open the preview's samples.
+pub const PREVIEW_ONLY: &str = "Sample activity and sample agents are only in `bake-rs preview`.";
+/// The runtime gave prompts back to the draft.
+pub const RETURNED: &str = "Unsent prompts are back in your draft.";
+/// The header's word for a live turn that ended with an error.
+pub const FAILED_TURN: &str = "Failed";
 /// The phase a runtime turn shows until the runtime names one.
 pub const FIRST_PHASE: &str = "thinking";
 pub const READ_ONLY: &str =

@@ -19,10 +19,14 @@
 //! the session's permission is settled and stored in its session file
 //! before the agent starts, `bash`, `write`, and `edit` are wrapped by the
 //! permission engine over [`CliEnvironment::sandbox_provider`], approvals
-//! fail closed (no one can answer in print mode), and the permission is
-//! stated in the system prompt's `permissions` section.
+//! fail closed (neither print nor interactive mode answers them yet), and
+//! the permission is stated in the system prompt's `permissions` section.
 //!
-//! Not ported (deferred): interactive and RPC modes, `--resume`,
+//! [`start`] is the setup print mode and interactive mode share: the
+//! binary runs print mode through [`run`] and hands an interactive
+//! session to the terminal frontend (`bake-tui`).
+//!
+//! Not ported (deferred): RPC mode, `--resume`,
 //! theme and extension flags, extension and MCP tools, and the
 //! missing-session-cwd prompt.
 
@@ -191,6 +195,9 @@ pub enum Action {
     Version,
     /// Run print mode.
     Print(Box<Args>, Mode),
+    /// Run interactive mode: both standard streams are terminals and
+    /// neither `--print` nor `--mode` was given.
+    Interactive(Box<Args>),
     /// Stop with this exit code; the diagnostics are written.
     Exit(i32),
 }
@@ -215,7 +222,9 @@ fn warn(stderr: &SharedWriter, message: &str) {
     write_out(stderr, &format!("Warning: {message}\n"));
 }
 
-/// Pi's argument checks and `resolveAppMode`, before anything is loaded.
+/// Pi's argument checks and `resolveAppMode`, before anything is loaded:
+/// print mode when asked for or when a standard stream is not a terminal,
+/// and interactive mode otherwise.
 pub fn plan(
     args: &[String],
     stdin_is_terminal: bool,
@@ -260,12 +269,7 @@ pub fn plan(
         {
             Mode::Text
         }
-        None => {
-            return Action::Exit(error(
-                stderr,
-                "Interactive mode is not available in bake-rs yet. Use -p or --mode json.",
-            ));
-        }
+        None => return Action::Interactive(Box::new(parsed)),
     };
     Action::Print(Box::new(parsed), mode)
 }
@@ -472,7 +476,7 @@ fn create_session_manager(
             ResolvedSession::Path(path) => {
                 SessionManager::open(&path, Some(&dir), None).map_err(failed)
             }
-            // Print mode cannot prompt whether to fork; point at `--fork`.
+            // Neither mode prompts whether to fork yet; point at `--fork`.
             ResolvedSession::Global { cwd, .. } => Err(SessionStartError::Error(format!(
                 "Session found in different project: {cwd}. Use --fork {arg} to fork it into this directory."
             ))),
@@ -505,9 +509,116 @@ fn create_session_manager(
     .map_err(failed)
 }
 
+/// A session set up from the command line, ready for print or interactive
+/// mode: Pi's `main` up to the mode branch.
+pub struct Started {
+    /// The session, with its model, tools, permission, and prompt.
+    pub session: AgentSession,
+    /// The first prompt: piped standard input, `@file` text, and the first
+    /// message, as Pi's `buildInitialMessage` joins them.
+    pub initial_message: Option<String>,
+    /// Images from `@file` arguments, for the first prompt.
+    pub initial_images: Vec<bake_ai::ImageContent>,
+    /// The later messages, each its own prompt.
+    pub messages: Vec<String>,
+    /// Standard output.
+    pub stdout: SharedWriter,
+    /// Standard error.
+    pub stderr: SharedWriter,
+    /// The stop request from [`CliEnvironment::interrupt`].
+    pub interrupt: Interrupt,
+}
+
 /// Runs `bake-rs` print mode; returns the exit code. Must run inside a
 /// multi-threaded Tokio runtime.
 pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
+    if let Some(search_pattern) = args.list_models.clone() {
+        return run_list_models(environment, search_pattern.as_deref()).await;
+    }
+    let started = match start(environment, args).await {
+        Ok(started) => started,
+        Err(code) => return code,
+    };
+    let Started {
+        session,
+        initial_message,
+        initial_images,
+        messages,
+        stdout,
+        stderr,
+        interrupt,
+    } = started;
+    let options = PrintModeOptions {
+        mode: match mode {
+            Mode::Text => PrintOutput::Text,
+            Mode::Json => PrintOutput::Json,
+        },
+        initial_message,
+        initial_images,
+        messages,
+    };
+    // Pi's print-mode signal handlers: dispose of the runtime, then exit.
+    tokio::select! {
+        code = run_print_mode(&session, options, stdout, stderr) => code,
+        code = interrupt => {
+            session.shutdown().await;
+            code
+        }
+    }
+}
+
+/// `--list-models`: loads the registry and lists its models.
+async fn run_list_models(environment: CliEnvironment, search_pattern: Option<&str>) -> i32 {
+    let CliEnvironment {
+        home,
+        docs_command,
+        stdout,
+        stderr,
+        extra_providers,
+        warnings: startup_warnings,
+        ..
+    } = environment;
+    let Some(home) = home else {
+        return error(
+            &stderr,
+            "Cannot find the Bake home: set BAKE_HOME or make the user's home directory resolvable",
+        );
+    };
+    let loaded = tokio::task::spawn_blocking(move || {
+        let settings = Settings::load(&home);
+        let mut registry = ModelRegistry::load(&home);
+        let mut warnings = startup_warnings;
+        warnings.extend(settings.warnings);
+        for (id, config, key) in extra_providers {
+            if let Err(message) = registry.add_provider_config(&id, config, key) {
+                warnings.push(message);
+            }
+        }
+        if let Some(message) = registry.error() {
+            warnings.push(format!("errors loading models.json:\n{message}"));
+        }
+        (registry, warnings)
+    })
+    .await;
+    let (registry, warnings) = match loaded {
+        Ok(loaded) => loaded,
+        Err(join) => return error(&stderr, &format!("Startup failed: {join}")),
+    };
+    for warning in &warnings {
+        warn(&stderr, warning);
+    }
+    list_models(&registry, search_pattern, &docs_command, &stdout);
+    0
+}
+
+/// Sets the session up from the command line as Pi's `main` does before
+/// it picks a mode: settings, models, the session file and its permission,
+/// context files, skills, prompt templates, tools, the system prompt, and
+/// the first prompt. Print and interactive mode share it, so both run the
+/// same session. Reports a failure on standard error and returns its exit
+/// code; nothing has touched the terminal by then. Must run inside a
+/// multi-threaded Tokio runtime.
+pub async fn start(environment: CliEnvironment, args: Args) -> Result<Started, i32> {
     let CliEnvironment {
         cwd,
         home,
@@ -526,43 +637,13 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
     } = environment;
     let mut args = args;
     let Some(home) = home else {
-        return error(
+        return Err(error(
             &stderr,
             "Cannot find the Bake home: set BAKE_HOME or make the user's home directory resolvable",
-        );
+        ));
     };
     let cwd = cwd.to_string_lossy().into_owned();
 
-    if let Some(search_pattern) = &args.list_models {
-        let loaded = {
-            let home = home.clone();
-            tokio::task::spawn_blocking(move || {
-                let settings = Settings::load(&home);
-                let mut registry = ModelRegistry::load(&home);
-                let mut warnings = startup_warnings;
-                warnings.extend(settings.warnings);
-                for (id, config, key) in extra_providers {
-                    if let Err(message) = registry.add_provider_config(&id, config, key) {
-                        warnings.push(message);
-                    }
-                }
-                if let Some(message) = registry.error() {
-                    warnings.push(format!("errors loading models.json:\n{message}"));
-                }
-                (registry, warnings)
-            })
-            .await
-        };
-        let (registry, warnings) = match loaded {
-            Ok(loaded) => loaded,
-            Err(join) => return error(&stderr, &format!("Startup failed: {join}")),
-        };
-        for warning in &warnings {
-            warn(&stderr, warning);
-        }
-        list_models(&registry, search_pattern.as_deref(), &docs_command, &stdout);
-        return 0;
-    }
     let loaded = {
         let home = home.clone();
         let cwd = cwd.clone();
@@ -684,7 +765,7 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
     };
     let (settings, mut registry, warnings, session) = match loaded {
         Ok(loaded) => loaded,
-        Err(join) => return error(&stderr, &format!("Startup failed: {join}")),
+        Err(join) => return Err(error(&stderr, &format!("Startup failed: {join}"))),
     };
     let (
         session,
@@ -697,10 +778,10 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
         processed_files,
     ) = match session {
         Ok(session) => session,
-        Err(SessionStartError::Error(message)) => return error(&stderr, &message),
+        Err(SessionStartError::Error(message)) => return Err(error(&stderr, &message)),
         Err(SessionStartError::Plain(message)) => {
             write_out(&stderr, &format!("{message}\n"));
-            return 1;
+            return Err(1);
         }
     };
     let has_existing_session = !session.build_session_context().messages.is_empty();
@@ -812,7 +893,7 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
         .iter()
         .any(|diagnostic| diagnostic.kind == DiagnosticKind::Error)
     {
-        return 1;
+        return Err(1);
     }
 
     // Pi's `_buildRuntime` tools and `createAgentSession` tool selection.
@@ -865,7 +946,7 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
             &tool_permissions,
         ) {
             Ok(definition) => Some(definition),
-            Err(message) => return error(&stderr, &message),
+            Err(message) => return Err(error(&stderr, &message)),
         },
     };
     let definitions = sandbox_file_tools(
@@ -894,7 +975,7 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
     );
     let selection = match selection {
         Ok(selection) => selection,
-        Err(message) => return error(&stderr, &message),
+        Err(message) => return Err(error(&stderr, &message)),
     };
     let registered: Vec<_> = definitions
         .into_iter()
@@ -920,7 +1001,8 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
     }
     system_prompt.context_files = context_files;
     system_prompt.skills = skills;
-    // Print mode has no one to answer an approval prompt.
+    // Neither mode answers approval prompts yet: escalations fail closed
+    // (D24), and the prompt says so, the same in print and interactive mode.
     system_prompt.permissions = permission.prompt_text(Path::new(&session_cwd), false);
     system_prompt.environment = Environment::detect(Path::new(&session_cwd), started_ms);
     let mut session = match AgentSession::create(AgentSessionOptions {
@@ -945,7 +1027,7 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
     .await
     {
         Ok(session) => session,
-        Err(message) => return error(&stderr, &message),
+        Err(message) => return Err(error(&stderr, &message)),
     };
     session.set_prompt_templates(prompt_templates);
     *session_model
@@ -967,7 +1049,7 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
         Ok(piped) => piped,
         Err(message) => {
             session.shutdown().await;
-            return error(&stderr, &message);
+            return Err(error(&stderr, &message));
         }
     };
     let initial_message = build_initial_message(piped, &processed_files.text, &mut args.messages);
@@ -978,25 +1060,17 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
             &stderr,
             &format!("{}\n", format_no_models_available_message(&docs_command)),
         );
-        return 1;
+        return Err(1);
     }
-    let options = PrintModeOptions {
-        mode: match mode {
-            Mode::Text => PrintOutput::Text,
-            Mode::Json => PrintOutput::Json,
-        },
+    Ok(Started {
+        session,
         initial_message,
         initial_images: processed_files.images,
         messages: args.messages,
-    };
-    // Pi's print-mode signal handlers: dispose of the runtime, then exit.
-    tokio::select! {
-        code = run_print_mode(&session, options, stdout, stderr) => code,
-        code = interrupt => {
-            session.shutdown().await;
-            code
-        }
-    }
+        stdout,
+        stderr,
+        interrupt,
+    })
 }
 
 #[cfg(test)]
@@ -1034,11 +1108,15 @@ mod tests {
             plan(&strings(&["-p", "hi"]), true, true, &stderr),
             Action::Print(_, Mode::Text)
         ));
-        assert_eq!(
-            plan(&strings(&["hi"]), true, true, &stderr),
-            Action::Exit(1)
-        );
-        assert!(text(&errors).contains("Interactive mode is not available"));
+        assert!(matches!(
+            plan(&strings(&["hi", "--inline"]), true, true, &stderr),
+            Action::Interactive(args) if args.inline && args.messages == ["hi"]
+        ));
+        assert!(matches!(
+            plan(&strings(&[]), true, true, &stderr),
+            Action::Interactive(_)
+        ));
+        assert_eq!(text(&errors), "");
     }
 
     #[test]

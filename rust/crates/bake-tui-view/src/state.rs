@@ -14,7 +14,7 @@ use crate::live;
 use crate::mention::{self, Candidate, Choice};
 use crate::mode::Mode;
 use crate::paste::{self, Image};
-use crate::runtime::{Pending, RuntimeUpdate, Submission};
+use crate::runtime::{Pending, Prompt, RuntimeUpdate, Submission};
 use crate::selection::{self, Granularity, Point, Range};
 use crate::status::StatusInput;
 use crate::transcript::{self, Transcript};
@@ -243,9 +243,9 @@ pub enum Effect {
     Copy(String),
     /// Read an image, then report with [`Msg::ImageRead`].
     ReadImage(ImageSource),
-    /// Send a prompt to the runtime. The draft is cleared; the prompt
-    /// appears once the runtime commits it.
-    Submit(Submission),
+    /// Send a prompt, with any staged images, to the runtime. The draft is
+    /// cleared; the prompt appears once the runtime commits it.
+    Submit(Prompt),
     /// Stop the running turn; the runtime reports when it has ended.
     Cancel,
     /// Send every waiting prompt now; the runtime reports the turn it starts.
@@ -317,6 +317,17 @@ pub enum Notice {
     PendingSent,
     /// Alt+↑ with nothing waiting.
     NoPending,
+    /// Enter with staged images while a live turn runs: a steer takes text
+    /// alone, so the draft waits for the turn to end.
+    ImagesWhileRunning,
+    /// A preview-only key, the sample activity or the sample agent list,
+    /// in a live session.
+    PreviewOnly,
+    /// The runtime gave prompts back to the draft.
+    Returned,
+    /// The runtime refused a prompt, for the reason in [`State::refusal`];
+    /// its draft is back.
+    Refused,
 }
 
 /// Where a pasted image is read from: the clipboard, or a file whose path
@@ -359,6 +370,8 @@ pub enum Outcome {
     Completed,
     /// Esc stopped it.
     Interrupted,
+    /// A live turn ended with an error, which the transcript shows.
+    Failed,
 }
 
 /// The header's line about the last sample turn, held until the next starts.
@@ -438,6 +451,26 @@ pub struct State {
     /// While a first Ctrl+C is armed, when it lapses; a second before then
     /// quits. The prompt to press again shows until then.
     pub quit_until: Option<Duration>,
+    /// Whether a live agent session answers the composer instead of the
+    /// preview's fixture: the transcript starts with the session's rows,
+    /// staged images are sent, slash prompts reach the runtime, and the
+    /// sample activity and agent list are refused.
+    pub live: bool,
+    /// Prompts sent to a live runtime that it has not admitted yet, each
+    /// with the draft and staged images it came from.
+    unadmitted: Vec<Unadmitted>,
+    /// Prompts submitted so far; the next takes the next id.
+    submitted: u64,
+    /// Why the runtime last refused a prompt, for [`Notice::Refused`].
+    pub refusal: Option<String>,
+}
+
+/// A submitted prompt's draft, kept until the runtime admits the prompt.
+#[derive(Debug)]
+struct Unadmitted {
+    id: u64,
+    draft: Draft,
+    attachments: Vec<(u32, Image)>,
 }
 
 impl Default for State {
@@ -490,6 +523,20 @@ impl State {
             files: Files::default(),
             dragging: false,
             quit_until: None,
+            live: false,
+            unadmitted: Vec::new(),
+            submitted: 0,
+            refusal: None,
+        }
+    }
+
+    /// The state of a live session whose transcript starts with `rows`:
+    /// what a resumed session replays, or what startup reported.
+    pub fn live(frame: FrameStyle, tones: Tones, rows: Vec<transcript::Row>) -> Self {
+        Self {
+            transcript: Transcript::new(rows),
+            live: true,
+            ..Self::new(frame, tones)
         }
     }
 
@@ -527,6 +574,11 @@ impl State {
     /// The slash menu, while the draft up to the caret is a leading slash
     /// token and Esc has not closed it there.
     pub fn menu(&self) -> Option<Menu> {
+        // The menu lists the preview's commands, which a live session does
+        // not run; a slash prompt there goes to the runtime as typed.
+        if self.live {
+            return None;
+        }
         let (draft, caret) = self.menu_here()?;
         let entries = completion::matches(draft, caret)?;
         let selected = self.remembered(entries.iter().map(|c| c.name));
@@ -724,6 +776,38 @@ fn runtime(state: &mut State, update: RuntimeUpdate) {
         RuntimeUpdate::Pending(pending) => state.pending = pending,
         RuntimeUpdate::Live(rows) => state.transcript.set_live(rows),
         RuntimeUpdate::Commit(rows) => state.transcript.commit(rows),
+        RuntimeUpdate::Admitted(id) => state.unadmitted.retain(|kept| kept.id != id),
+        RuntimeUpdate::Refused { id, reason } => {
+            if let Some(index) = state.unadmitted.iter().position(|kept| kept.id == id) {
+                let kept = state.unadmitted.remove(index);
+                state.draft.restore(&kept.draft);
+                state.attachments.extend(kept.attachments);
+                state.attachments.sort_by_key(|(id, _)| *id);
+            }
+            state.refusal = Some(reason);
+            state.notice = Some(Notice::Refused);
+        }
+        RuntimeUpdate::Returned(texts) => {
+            // Pi's `restoreQueuedMessagesToEditor`: the returned prompts,
+            // then the draft, each non-blank part a paragraph.
+            let current = state.draft.text().to_owned();
+            let combined = texts
+                .iter()
+                .map(String::as_str)
+                .chain(std::iter::once(current.as_str()))
+                .filter(|text| !text.trim().is_empty())
+                .collect::<Vec<_>>()
+                .join("\n\n");
+            if combined != current {
+                state.draft.replace(&combined, combined.len());
+                state.notice = Some(Notice::Returned);
+            }
+        }
+        RuntimeUpdate::Status(status) => {
+            state.status.model = status.model;
+            state.status.thinking = status.thinking;
+            state.status.context = status.context;
+        }
         RuntimeUpdate::TurnEnded(outcome) => {
             if let Some(turn) = state.activity.filter(|a| a.runtime) {
                 state.summary = Some(TurnSummary {
@@ -751,12 +835,15 @@ fn submit(state: &mut State) -> Vec<Effect> {
     if text.trim().is_empty() {
         return Vec::new();
     }
-    let refused = if text.starts_with('/') {
+    let running = turn_running(state);
+    let refused = if text.starts_with('/') && !state.live {
         Some(Notice::NoCommands)
     } else if state.activity.is_some_and(|a| !a.runtime) {
         Some(Notice::SampleOnly)
-    } else if !state.attachments.is_empty() {
+    } else if !state.attachments.is_empty() && !state.live {
         Some(Notice::NoImages)
+    } else if !state.attachments.is_empty() && running {
+        Some(Notice::ImagesWhileRunning)
     } else {
         None
     };
@@ -765,13 +852,32 @@ fn submit(state: &mut State) -> Vec<Effect> {
         return Vec::new();
     }
     state.notice = None;
+    state.submitted += 1;
+    let id = state.submitted;
+    // A live runtime may refuse the prompt; until it admits it, the draft
+    // and its images are kept to put back.
+    if state.live {
+        state.unadmitted.push(Unadmitted {
+            id,
+            draft: state.draft.clone(),
+            attachments: state.attachments.clone(),
+        });
+    }
+    // The images go in the order their placeholders appear in the draft.
+    let placed = state.draft.attached();
+    let mut images: Vec<_> = std::mem::take(&mut state.attachments);
+    images.sort_by_key(|(id, _)| placed.iter().position(|p| p == id).unwrap_or(usize::MAX));
     state.draft.replace("", 0);
-    let submission = if turn_running(state) {
+    let submission = if running {
         Submission::Steer(text)
     } else {
         Submission::FollowUp(text)
     };
-    vec![Effect::Submit(submission)]
+    vec![Effect::Submit(Prompt {
+        id,
+        submission,
+        images: images.into_iter().map(|(_, image)| image).collect(),
+    })]
 }
 
 /// Applies a mouse report. The wheel scrolls what the arrows would: the
@@ -1248,6 +1354,10 @@ fn composer_key(state: &mut State, bound: Option<Action>, input: KeyInput) -> Ve
     let running = turn_running(state);
     let draft = &mut state.draft;
     let complete = match bound {
+        Some(Action::ToggleAgentList) if state.live => {
+            state.notice = Some(Notice::PreviewOnly);
+            return Vec::new();
+        }
         Some(Action::ToggleAgentList) => {
             state.focus = Focus::AgentList;
             state.notice = None;
@@ -1268,6 +1378,10 @@ fn composer_key(state: &mut State, bound: Option<Action>, input: KeyInput) -> Ve
             return Vec::new();
         }
         // The sample stands in for a turn, so it waits while a real one runs.
+        Some(Action::ToggleSampleActivity) if state.live => {
+            state.notice = Some(Notice::PreviewOnly);
+            return Vec::new();
+        }
         Some(Action::ToggleSampleActivity) => {
             if !running {
                 toggle_activity(state);
@@ -1499,7 +1613,7 @@ fn end_turn(state: &mut State, outcome: Outcome) {
     };
     let how = match outcome {
         Outcome::Completed => live::Settle::Completed,
-        Outcome::Interrupted => live::Settle::Interrupted,
+        Outcome::Interrupted | Outcome::Failed => live::Settle::Interrupted,
     };
     if let Some(row) = state.transcript.rows.get_mut(index) {
         *row = live::settle(elapsed, how);
@@ -1545,6 +1659,17 @@ mod tests {
     use crate::runtime::{RuntimeUpdate, Submission};
     use crate::transcript::{CallState, Row};
 
+    /// The submissions among `effects`.
+    fn submitted(effects: Vec<Effect>) -> Vec<Submission> {
+        effects
+            .into_iter()
+            .filter_map(|effect| match effect {
+                Effect::Submit(prompt) => Some(prompt.submission),
+                _ => None,
+            })
+            .collect()
+    }
+
     fn press(state: &mut State, key: Key) -> Vec<Effect> {
         update(state, Msg::Key(KeyInput::plain(key)))
     }
@@ -1570,8 +1695,8 @@ mod tests {
         type_str(&mut state, "hello");
         press(&mut state, Key::Left);
         assert_eq!(
-            press(&mut state, Key::Enter),
-            [Effect::Submit(Submission::FollowUp("hello".into()))]
+            submitted(press(&mut state, Key::Enter)),
+            [Submission::FollowUp("hello".into())]
         );
         assert_eq!((state.draft.text(), state.notice), ("", None));
         // The prompt shows only once the runtime commits it.
@@ -1579,6 +1704,219 @@ mod tests {
         // Undo brings a sent draft back, as the oracle's does.
         chord(&mut state, Key::Char('-'), Mods::CTRL);
         assert_eq!(state.draft.text(), "hello");
+    }
+
+    fn live() -> State {
+        State::live(FrameStyle::default(), Tones::default(), Vec::new())
+    }
+
+    fn live_image(state: &mut State, name: &str) {
+        let image = Image {
+            name: name.into(),
+            media_type: "image/png",
+            bytes: 3,
+            size: None,
+            data: crate::paste::ImageData::new(name.as_bytes().to_vec()),
+        };
+        update(
+            state,
+            Msg::ImageRead {
+                source: ImageSource::Clipboard,
+                image: Some(image),
+            },
+        );
+    }
+
+    #[test]
+    fn a_live_session_opens_on_its_own_rows_without_the_samples() {
+        let state = State::live(
+            FrameStyle::default(),
+            Tones::default(),
+            vec![Row::Info("Session s".into())],
+        );
+        assert!(state.live);
+        assert_eq!(state.transcript.rows, [Row::Info("Session s".into())]);
+    }
+
+    #[test]
+    fn a_live_prompt_sends_its_images_in_placeholder_order() {
+        let mut state = live();
+        type_str(&mut state, "a ");
+        live_image(&mut state, "first.png");
+        type_str(&mut state, " b ");
+        live_image(&mut state, "second.png");
+        let effects = press(&mut state, Key::Enter);
+        let [Effect::Submit(prompt)] = &effects[..] else {
+            panic!("{effects:?}");
+        };
+        assert_eq!(
+            prompt.submission,
+            Submission::FollowUp("a [Image #1] b [Image #2]".into())
+        );
+        let names: Vec<_> = prompt.images.iter().map(|i| i.name.as_str()).collect();
+        assert_eq!(names, ["first.png", "second.png"]);
+        assert!(state.attachments.is_empty());
+        assert_eq!(state.draft.text(), "");
+    }
+
+    #[test]
+    fn a_live_turn_refuses_images_and_keeps_the_draft_and_steers_text() {
+        let mut state = live();
+        runtime(&mut state, RuntimeUpdate::TurnStarted { seed: "s".into() });
+        type_str(&mut state, "look ");
+        live_image(&mut state, "shot.png");
+        assert_eq!(press(&mut state, Key::Enter), []);
+        assert_eq!(state.notice, Some(Notice::ImagesWhileRunning));
+        assert_eq!(state.draft.text(), "look [Image #1]");
+        assert_eq!(state.attachments.len(), 1);
+        // Without the image, Enter steers.
+        press(&mut state, Key::Backspace);
+        assert!(state.attachments.is_empty());
+        assert_eq!(
+            submitted(press(&mut state, Key::Enter)),
+            [Submission::Steer("look ".into())]
+        );
+    }
+
+    #[test]
+    fn live_slash_prompts_reach_the_runtime_and_preview_keys_are_refused() {
+        let mut state = live();
+        type_str(&mut state, "/skill:review now");
+        assert_eq!(state.menu(), None);
+        assert_eq!(
+            submitted(press(&mut state, Key::Enter)),
+            [Submission::FollowUp("/skill:review now".into())]
+        );
+        assert_eq!(chord(&mut state, Key::Char('t'), Mods::CTRL), []);
+        assert_eq!(
+            (state.activity, state.notice),
+            (None, Some(Notice::PreviewOnly))
+        );
+        assert_eq!(chord(&mut state, Key::Char('g'), Mods::CTRL), []);
+        assert_eq!(state.focus, Focus::Composer);
+    }
+
+    #[test]
+    fn a_refused_prompt_restores_its_editing_history() {
+        let mut state = live();
+        type_str(&mut state, "first");
+        state.draft.paste(" second");
+        let undo_len = state.draft.undo_len();
+        let [Effect::Submit(sent)] = &press(&mut state, Key::Enter)[..] else {
+            panic!("no submission");
+        };
+        runtime(
+            &mut state,
+            RuntimeUpdate::Refused {
+                id: sent.id,
+                reason: "no key".into(),
+            },
+        );
+        assert_eq!(state.draft.undo_len(), undo_len);
+        chord(&mut state, Key::Char('-'), Mods::CTRL);
+        assert_eq!(state.draft.text(), "first");
+        chord(&mut state, Key::Char('-'), Mods::CTRL);
+        assert_eq!(state.draft.text(), "");
+    }
+
+    #[test]
+    fn a_refused_prompt_puts_its_draft_images_and_caret_back() {
+        let mut state = live();
+        type_str(&mut state, "see ");
+        live_image(&mut state, "shot.png");
+        press(&mut state, Key::Left);
+        let caret = state.draft.caret();
+        let [Effect::Submit(sent)] = &press(&mut state, Key::Enter)[..] else {
+            panic!("no submission");
+        };
+        let sent = sent.clone();
+        assert_eq!((state.draft.text(), state.attachments.len()), ("", 0));
+        // Refused with nothing typed since: the draft returns as it was.
+        runtime(
+            &mut state,
+            RuntimeUpdate::Refused {
+                id: sent.id,
+                reason: "no key".into(),
+            },
+        );
+        assert_eq!(state.draft.text(), "see [Image #1]");
+        assert_eq!(state.draft.caret(), caret);
+        assert_eq!(state.attachments.len(), 1);
+        assert_eq!(
+            (state.notice, state.refusal.as_deref()),
+            (Some(Notice::Refused), Some("no key"))
+        );
+        // Sent again, it carries the same image bytes.
+        let [Effect::Submit(again)] = &press(&mut state, Key::Enter)[..] else {
+            panic!("no submission");
+        };
+        assert_eq!(again.images, sent.images);
+        assert_eq!(again.images[0].data.bytes(), b"shot.png");
+        // Typing while it waits survives a refusal, after the prompt.
+        type_str(&mut state, "more");
+        runtime(
+            &mut state,
+            RuntimeUpdate::Refused {
+                id: again.id,
+                reason: "still no key".into(),
+            },
+        );
+        assert_eq!(state.draft.text(), "see [Image #1]\n\nmore");
+        assert_eq!(state.attachments.len(), 1);
+        // An admitted prompt's draft is forgotten: a late refusal changes nothing.
+        state.draft.replace("", 0);
+        unstage(&mut state);
+        let effects = press(&mut state, Key::Enter);
+        assert_eq!(effects, []);
+        type_str(&mut state, "ok");
+        let [Effect::Submit(admitted)] = &press(&mut state, Key::Enter)[..] else {
+            panic!("no submission");
+        };
+        let id = admitted.id;
+        runtime(&mut state, RuntimeUpdate::Admitted(id));
+        runtime(
+            &mut state,
+            RuntimeUpdate::Refused {
+                id,
+                reason: "late".into(),
+            },
+        );
+        assert_eq!(state.draft.text(), "");
+    }
+
+    #[test]
+    fn returned_prompts_go_back_ahead_of_the_draft() {
+        let mut state = live();
+        type_str(&mut state, "typed");
+        runtime(
+            &mut state,
+            RuntimeUpdate::Returned(vec!["one".into(), "two".into()]),
+        );
+        assert_eq!(state.draft.text(), "one\n\ntwo\n\ntyped");
+        assert_eq!(state.notice, Some(Notice::Returned));
+        // Nothing returned changes nothing.
+        let mut state = live();
+        runtime(&mut state, RuntimeUpdate::Returned(Vec::new()));
+        assert_eq!((state.draft.text(), state.notice), ("", None));
+    }
+
+    #[test]
+    fn the_runtime_sets_the_status_and_a_failed_turn_says_so() {
+        let mut state = live();
+        runtime(
+            &mut state,
+            RuntimeUpdate::Status(crate::runtime::SessionStatus {
+                model: Some("p/m".into()),
+                thinking: Some("high".into()),
+                context: None,
+            }),
+        );
+        assert_eq!(state.status.model.as_deref(), Some("p/m"));
+        assert_eq!(state.status.thinking.as_deref(), Some("high"));
+        runtime(&mut state, RuntimeUpdate::TurnStarted { seed: "s".into() });
+        runtime(&mut state, RuntimeUpdate::TurnEnded(Outcome::Failed));
+        assert_eq!(state.summary.map(|s| s.outcome), Some(Outcome::Failed));
+        assert_eq!(state.activity, None);
     }
 
     #[test]
@@ -1626,6 +1964,7 @@ mod tests {
             media_type: "image/png",
             bytes: 1,
             size: None,
+            data: crate::paste::ImageData::default(),
         };
         update(
             &mut state,
@@ -1694,8 +2033,8 @@ mod tests {
         // While it runs, Enter steers, Esc asks to stop, and Ctrl+T waits.
         type_str(&mut state, "also");
         assert_eq!(
-            press(&mut state, Key::Enter),
-            [Effect::Submit(Submission::Steer("also".into()))]
+            submitted(press(&mut state, Key::Enter)),
+            [Submission::Steer("also".into())]
         );
         chord(&mut state, Key::Char('t'), Mods::CTRL);
         assert!(state.activity.unwrap().runtime);
@@ -1897,6 +2236,7 @@ mod tests {
             media_type: "image/png",
             bytes: 10,
             size: Some((2, 1)),
+            data: crate::paste::ImageData::default(),
         }
     }
 
@@ -2051,8 +2391,8 @@ mod tests {
         press(&mut state, Key::Tab);
         assert_eq!(state.draft.text(), "a\t");
         assert_eq!(
-            press(&mut state, Key::Enter),
-            [Effect::Submit(Submission::FollowUp("a\t".into()))]
+            submitted(press(&mut state, Key::Enter)),
+            [Submission::FollowUp("a\t".into())]
         );
     }
 
@@ -2166,8 +2506,8 @@ mod tests {
         );
         // Enter sends the draft as typed, menu or not.
         assert_eq!(
-            press(&mut state, Key::Enter),
-            [Effect::Submit(Submission::FollowUp("@src/m".into()))]
+            submitted(press(&mut state, Key::Enter)),
+            [Submission::FollowUp("@src/m".into())]
         );
     }
 

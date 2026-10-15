@@ -32,7 +32,8 @@ bun run build             # Node runtime and TUI artifacts
 bun run start             # built terminal agent
 bun run dev               # hot component preview, no agent or model key
 bun run dev:tui           # build and run the real Node agent
-bun run dev:rust          # build and run the Rust TUI preview (no model connection)
+bun run dev:rust          # build and run the interactive Rust agent (bake-rs) against the Bake home
+bun run dev:rust:preview  # build and run the Rust TUI preview (fixture runtime, no model connection)
 bun run check:rust        # locked Rust format, lint, test, and build checks
 bun run check             # TUI types, tests, layout, peer identity, and docs
 bun run test              # pure and Node integration tests

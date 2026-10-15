@@ -93,6 +93,7 @@ dependencies = [
 name = "bake-cli"
 version = "0.4.0-dev"
 dependencies = [
+ "bake-ai",
  "bake-coding-agent",
  "bake-sandbox",
  "bake-tui",
@@ -145,11 +146,17 @@ dependencies = [
 name = "bake-tui"
 version = "0.4.0-dev"
 dependencies = [
+ "bake-agent",
+ "bake-ai",
+ "bake-coding-agent",
  "bake-tui-view",
+ "base64 0.22.1",
  "crossterm",
  "libc",
  "ratatui",
+ "serde_json",
  "signal-hook",
+ "tokio",
 ]
 
 [[package]]
