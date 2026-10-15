@@ -1019,3 +1019,149 @@ fn the_tool_argument_whitespace_setting_reaches_each_request() {
         [None, Some(64), Some(7)]
     );
 }
+
+// Pi v1.2.0 test/suite/agent-session-queue.test.ts: multiple steering and
+// follow-up messages in one-at-a-time/all mode, and queue removal before
+// message_start. A held tool makes queue admission deterministic.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pi_queue_modes_and_pending_message_start() {
+    use bake_agent::{AgentEvent, AgentTool, QueueMode};
+    use bake_ai::utils::text::{assistant_text, user_content_text};
+
+    for mode in [QueueMode::OneAtATime, QueueMode::All] {
+        for steer in [true, false] {
+            let dir = TempDir::new("pi-queue-modes");
+            let cwd = dir.path().to_string_lossy().into_owned();
+            let h = harness();
+            let started = Arc::new(Notify::new());
+            let release = Arc::new(Notify::new());
+            let tool = {
+                let started = Arc::clone(&started);
+                let release = Arc::clone(&release);
+                Arc::new(AgentTool::new(
+                    "wait",
+                    "Wait",
+                    "Wait for release",
+                    json!({"type": "object", "properties": {}}),
+                    move |_, _, signal, _| {
+                        let started = Arc::clone(&started);
+                        let release = Arc::clone(&release);
+                        Box::pin(async move {
+                            started.notify_one();
+                            if let Some(signal) = signal {
+                                tokio::select! {
+                                    () = release.notified() => {},
+                                    () = signal.cancelled() => return Err("cancelled".into()),
+                                }
+                            } else {
+                                release.notified().await;
+                            }
+                            Ok(AgentToolResult::text("released"))
+                        })
+                    },
+                ))
+            };
+            let mut responses = vec![
+                faux_assistant_blocks(
+                    vec![faux_tool_call("wait", json!({}), Some("wait-1"))],
+                    StopReason::ToolUse,
+                )
+                .into(),
+            ];
+            let mut expected = vec!["user:start", "assistant:"];
+            if !steer {
+                responses.push(faux_assistant_message("original complete").into());
+                expected.push("assistant:original complete");
+            }
+            if mode == QueueMode::All {
+                responses.push(faux_assistant_message("batch").into());
+                expected.extend(["user:one", "user:two", "assistant:batch"]);
+            } else {
+                responses.extend([
+                    faux_assistant_message("handled one").into(),
+                    faux_assistant_message("handled two").into(),
+                ]);
+                expected.extend([
+                    "user:one",
+                    "assistant:handled one",
+                    "user:two",
+                    "assistant:handled two",
+                ]);
+            }
+            h.faux.set_responses(responses);
+            let mut opts = options(&h, new_file_session(&dir), &cwd);
+            opts.settings.steering_mode = mode;
+            opts.settings.follow_up_mode = mode;
+            opts.tools = vec![tool];
+            opts.active_tool_names = vec!["wait".into()];
+            let session = Arc::new(AgentSession::create(opts).await.expect("session"));
+            let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let subscription = {
+                let weak = Arc::downgrade(&session);
+                let seen = Arc::clone(&seen);
+                session.subscribe(move |event| {
+                    if let SessionEvent::Agent(AgentEvent::MessageStart { message }) = event
+                        && let Some(user) = message.as_user()
+                        && ["one", "two"].contains(&user_content_text(&user.content, "").as_str())
+                        && let Some(session) = weak.upgrade()
+                    {
+                        seen.lock().unwrap().push(session.queued_messages());
+                    }
+                })
+            };
+            let run = async {
+                let (result, ()) = tokio::join!(session.prompt("start", Vec::new()), async {
+                    started.notified().await;
+                    for text in ["one", "two"] {
+                        if steer {
+                            session.steer(text, Vec::new()).await.expect("steer");
+                        } else {
+                            session
+                                .follow_up(text, Vec::new())
+                                .await
+                                .expect("follow up");
+                        }
+                    }
+                    release.notify_one();
+                });
+                result
+            };
+            let result = tokio::time::timeout(std::time::Duration::from_secs(10), run).await;
+            session.shutdown().await;
+            result.expect("queue run settled").expect("prompt");
+            subscription.unsubscribe();
+            let actual: Vec<String> = session
+                .messages()
+                .iter()
+                .filter_map(|message| {
+                    if let Some(user) = message.as_user() {
+                        Some(format!("user:{}", user_content_text(&user.content, "")))
+                    } else {
+                        message
+                            .as_assistant()
+                            .map(|assistant| format!("assistant:{}", assistant_text(assistant)))
+                    }
+                })
+                .collect();
+            assert_eq!(actual, expected, "mode={mode:?}, steer={steer}");
+            let remaining: Vec<Vec<String>> = seen
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|queued| {
+                    if steer {
+                        queued.steering.clone()
+                    } else {
+                        queued.follow_up.clone()
+                    }
+                })
+                .collect();
+            assert_eq!(
+                remaining,
+                [vec!["two".to_owned()], vec![]],
+                "mode={mode:?}, steer={steer}"
+            );
+            assert!(session.queued_messages().is_empty());
+        }
+    }
+}

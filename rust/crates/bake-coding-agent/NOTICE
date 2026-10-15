@@ -53,6 +53,9 @@ Rust tests name; the steering and follow-up queue of src/core/agent-session.ts
 (steer, followUp, _queueUserInput, _queueSteer, _queueFollowUp, clearQueue,
 _emitQueueUpdate, and the queue bookkeeping on message_start), its
 queue_update event, and its pre-prompt model and API-key check.
+The queue-mode and pre-message_start bookkeeping cases of
+test/suite/agent-session-queue.test.ts are adapted in agent_session/tests.rs;
+extension-command, input-handler, and custom-message cases remain deferred.
 --------------------------------------------------------------------------------
 MIT License
 
