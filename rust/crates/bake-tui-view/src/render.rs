@@ -15,7 +15,7 @@ use crate::activity::{self, Hue, Tones};
 use crate::completion;
 use crate::composer::{self, Edge};
 use crate::copy;
-use crate::dialog::{Dialog, DialogKind, InfoLine, ListLine};
+use crate::dialog::{Dialog, DialogKind, InfoLine, ListLine, SearchOrder};
 use crate::editor::{self, display};
 use crate::frame::FrameStyle;
 use crate::layout::{self, Needs};
@@ -100,6 +100,7 @@ fn sheet_chrome(dialog: &Dialog) -> usize {
     match &dialog.request.kind {
         DialogKind::List(list) => {
             2 + usize::from(list.note.is_some())
+                + usize::from(list.search.is_some())
                 + usize::from(list.filterable)
                 + usize::from(list.items.iter().any(|item| item.about.is_some()))
         }
@@ -445,17 +446,47 @@ fn render_dialog(app: &mut State, area: Rect, buf: &mut Buffer) {
             if let Some(note) = &list.note {
                 head.push(Line::styled(fit(&clean(note), w), dim()));
             }
+            // A session search's state, or why its query matches nothing.
+            let search = dialog.search.clone().filter(|_| list.search.is_some());
+            if let Some(view) = &search {
+                head.push(match &view.error {
+                    Some(error) => Line::styled(
+                        fit(&clean(&error.message()), w),
+                        Style::new().fg(Color::Yellow),
+                    ),
+                    None => Line::styled(
+                        fit(
+                            &copy::SESSION_SEARCH_STATE
+                                .replace(
+                                    "{order}",
+                                    match view.order {
+                                        SearchOrder::Recent => copy::SESSION_SEARCH_RECENT,
+                                        SearchOrder::Relevance => copy::SESSION_SEARCH_RELEVANCE,
+                                    },
+                                )
+                                .replace("{named}", if view.named_only { "on" } else { "off" }),
+                            w,
+                        ),
+                        dim(),
+                    ),
+                });
+            }
             if list.filterable {
                 let prompt = Span::styled("> ", accent().add_modifier(Modifier::BOLD));
-                head.push(if dialog.filter.is_empty() {
+                let placeholder = if search.is_some() {
+                    copy::SESSION_SEARCH_FILTER
+                } else {
+                    copy::DIALOG_FILTER
+                };
+                head.push(if dialog.filter().is_empty() {
                     Line::from(vec![
                         prompt,
-                        Span::styled(fit(copy::DIALOG_FILTER, w.saturating_sub(2)), dim()),
+                        Span::styled(fit(placeholder, w.saturating_sub(2)), dim()),
                     ])
                 } else {
                     Line::from(vec![
                         prompt,
-                        Span::raw(fit_start(&clean(&dialog.filter), w.saturating_sub(2))),
+                        Span::raw(fit_start(&clean(dialog.filter()), w.saturating_sub(2))),
                     ])
                 });
             }
@@ -504,10 +535,14 @@ fn render_dialog(app: &mut State, area: Rect, buf: &mut Buffer) {
                 ])
             };
             if rows.is_empty() {
-                body.push(Line::styled(
-                    fit(&format!("  {}", copy::DIALOG_NO_MATCH), w),
-                    dim(),
-                ));
+                let empty = match &search {
+                    Some(view) if view.named_only && dialog.filter().trim().is_empty() => {
+                        copy::SESSION_SEARCH_NO_NAMED
+                    }
+                    Some(_) => copy::SESSION_SEARCH_NO_MATCH,
+                    None => copy::DIALOG_NO_MATCH,
+                };
+                body.push(Line::styled(fit(&format!("  {empty}"), w), dim()));
             }
             if edges {
                 let above = hidden(&lines[..top]);
@@ -2265,6 +2300,7 @@ mod tests {
                 filterable: true,
                 saves_default: true,
                 note: None,
+                search: None,
             },
         );
         let (rows, _) = draw(&mut app, 80, 24);
@@ -2289,6 +2325,130 @@ mod tests {
         assert!(rows[row_index(&rows, "current-model")].contains("  current-model  Current  faux"));
         assert!(rows[row_index(&rows, "browsed-model")].contains("▸ browsed-model           faux"));
         assert!(rows.iter().any(|r| r.contains("2/2")));
+    }
+
+    /// A session search for render tests: `bad` is an invalid pattern,
+    /// and otherwise a row is listed when its label holds the query.
+    struct LabelSearch(Vec<(&'static str, bool)>);
+
+    impl crate::dialog::SessionFilter for LabelSearch {
+        fn search(
+            &self,
+            query: &str,
+            _: crate::dialog::SearchOrder,
+            named_only: bool,
+        ) -> crate::dialog::SearchResult {
+            if query == "bad" {
+                return crate::dialog::SearchResult {
+                    rows: Vec::new(),
+                    error: Some(crate::dialog::SearchError::InvalidRegex(
+                        "look-around, including look-ahead and look-behind, is not supported"
+                            .into(),
+                    )),
+                };
+            }
+            crate::dialog::SearchResult {
+                rows: (0..self.0.len())
+                    .filter(|&i| (!named_only || self.0[i].1) && self.0[i].0.contains(query))
+                    .collect(),
+                error: None,
+            }
+        }
+    }
+
+    // Pi session-selector.ts's header and hints, drawn in the shared sheet:
+    // the order and named state with their keys, the search syntax in the
+    // empty search row, the current mark apart from the selection, and an
+    // invalid pattern's reason, all legible in a 42-column terminal.
+    #[test]
+    fn the_session_sheet_shows_its_search_state_at_42_columns() {
+        use crate::dialog::{ListDialog, ListItem, SessionSearch};
+        let labels = vec![("Release prep", true), ("Fix flaky test", false)];
+        for width in [42u16, 80] {
+            let mut app = State::live(FrameStyle::default(), Tones::None, Vec::new());
+            open_list(
+                &mut app,
+                ListDialog {
+                    title: "Resume session · 2 saved here".into(),
+                    items: labels
+                        .iter()
+                        .map(|(label, _)| ListItem {
+                            value: (*label).into(),
+                            label: (*label).into(),
+                            detail: Some("2h ago · 01a13e27".into()),
+                            ..ListItem::default()
+                        })
+                        .collect(),
+                    current: Some(0),
+                    selected: None,
+                    filterable: true,
+                    saves_default: false,
+                    note: None,
+                    search: Some(SessionSearch::new(LabelSearch(labels.clone()))),
+                },
+            );
+            arm(&mut app, width, 24);
+            let (rows, _) = draw(&mut app, width, 24);
+            assert!(
+                rows.iter()
+                    .any(|r| r.contains("^S sort: Recent · ^N named: off")),
+                "{rows:#?}"
+            );
+            assert!(
+                rows.iter()
+                    .any(|r| r.contains("> Search · re:<regex> · \"phrase\"")),
+                "{rows:#?}"
+            );
+            assert!(
+                rows.iter().any(|r| r.contains("▸ Release prep")),
+                "{rows:#?}"
+            );
+            key(&mut app, Key::Down);
+            let (rows, _) = draw(&mut app, width, 24);
+            assert!(rows[row_index(&rows, "Release prep")].contains("Current"));
+            assert!(
+                rows.iter().any(|r| r.contains("▸ Fix flaky test")),
+                "{rows:#?}"
+            );
+            update(
+                &mut app,
+                Msg::Key(KeyInput {
+                    key: Key::Char('s'),
+                    mods: Mods::CTRL,
+                }),
+            );
+            update(
+                &mut app,
+                Msg::Key(KeyInput {
+                    key: Key::Char('n'),
+                    mods: Mods::CTRL,
+                }),
+            );
+            let (rows, _) = draw(&mut app, width, 24);
+            assert!(
+                rows.iter()
+                    .any(|r| r.contains("^S sort: Relevance · ^N named: on")),
+                "{rows:#?}"
+            );
+            assert!(
+                !rows.iter().any(|r| r.contains("Fix flaky test")),
+                "{rows:#?}"
+            );
+            for c in "bad".chars() {
+                key(&mut app, Key::Char(c));
+            }
+            let (rows, _) = draw(&mut app, width, 24);
+            assert!(
+                rows.iter()
+                    .any(|r| r.contains("Invalid regex: look-around")),
+                "{rows:#?}"
+            );
+            assert!(
+                rows.iter().any(|r| r.contains("No matching sessions")),
+                "{rows:#?}"
+            );
+            assert!(rows.iter().all(|r| r.chars().count() == usize::from(width)));
+        }
     }
 
     /// Thirty models of two providers, readable names sharing prefixes.
@@ -2316,6 +2476,7 @@ mod tests {
             filterable: true,
             saves_default: true,
             note: None,
+            search: None,
         }
     }
 

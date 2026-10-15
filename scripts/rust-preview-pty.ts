@@ -1614,6 +1614,118 @@ for (const inline of [false, true]) {
   })
 }
 
+// ---- Session search in /resume ----
+
+/** Every session file under the home, by path, as its text; the sessions directory must exist. */
+async function sessionBytes(home: string): Promise<Map<string, string>> {
+  const found = new Map<string, string>()
+  const walk = async (dir: string): Promise<void> => {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name)
+      if (entry.isDirectory()) await walk(path)
+      else if (entry.name.endsWith('.jsonl')) found.set(path, readFileSync(path, 'utf8'))
+    }
+  }
+  await walk(join(home, 'sessions'))
+  return found
+}
+
+/** Writes a Pi session file beside `beside`: a first ask, then a later answer holding `later`. */
+async function seedSession(beside: string, id: string, cwd: string, later: string): Promise<string> {
+  const path = join(dirname(beside), `2026-01-01T00-00-00-000Z_${id}.jsonl`)
+  const cost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+  const usage = { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost }
+  const lines = [
+    { type: 'session', version: 3, id, timestamp: '2026-01-01T00:00:00.000Z', cwd },
+    { type: 'message', id: 'a1', parentId: null, timestamp: '2026-01-01T00:00:01.000Z', message: { role: 'user', content: 'first ask', timestamp: 1_767_225_601_000 } },
+    { type: 'message', id: 'a2', parentId: 'a1', timestamp: '2026-01-01T00:00:02.000Z', message: { role: 'assistant', content: [{ type: 'text', text: 'short reply' }], api: 'openai-responses', provider: 'loop', model: 'loop-model', stopReason: 'stop', timestamp: 1_767_225_602_000, usage } },
+    { type: 'message', id: 'a3', parentId: 'a2', timestamp: '2026-01-01T00:00:03.000Z', message: { role: 'user', content: 'and then?', timestamp: 1_767_225_603_000 } },
+    { type: 'message', id: 'a4', parentId: 'a3', timestamp: '2026-01-01T00:00:04.000Z', message: { role: 'assistant', content: [{ type: 'text', text: later }], api: 'openai-responses', provider: 'loop', model: 'loop-model', stopReason: 'stop', timestamp: 1_767_225_604_000, usage } },
+  ]
+  await writeFile(path, lines.map(line => `${JSON.stringify(line)}\n`).join(''))
+  return path
+}
+
+for (const inline of [false, true]) {
+  await liveScenario(`${inline ? 'inline ' : ''}resume search finds later answers, refuses a bad pattern, filters named sessions, and opens the chosen id`, async (world) => {
+    const session = world.launch([], inline)
+    await session.ready()
+    session.send('ECHO alpha\r')
+    await turnSettled(session, 'Echo: alpha.')
+    session.send('/name Alpha work\r')
+    await session.wait('named', () => session.screen.includes('Session name set: Alpha work'))
+    await composerReady(session)
+    const [own] = [...(await sessionBytes(world.home)).keys()]
+    assert(own, 'no session file was written')
+    const header = JSON.parse(readFileSync(own, 'utf8').split('\n')[0] ?? '{}') as { cwd?: string }
+    assert(typeof header.cwd === 'string', 'the session header has no cwd')
+    const target = await seedSession(own, '01dddddd-0000-7000-8000-000000000001', header.cwd, 'Zebra\n\n   crossing notes')
+    await seedSession(own, '01ffffff-0000-7000-8000-000000000002', join(world.root, 'elsewhere'), 'zebra crossing notes elsewhere')
+    const before = await sessionBytes(world.home)
+    const requests = world.model.requests.length
+
+    session.send('/resume\r')
+    await sheetReady(session, 'Resume session')
+    assert(session.screen.includes('^S sort: Recent · ^N named: off') && session.screen.includes('> Search · re:<regex> · "phrase"'), session.screen)
+    assert(session.screen.includes('Alpha work') && session.screen.includes('Current') && session.screen.includes('first ask'), session.screen)
+    assert(!session.screen.includes('elsewhere'), `another directory's session is listed\n${session.screen}`)
+    // A phrase only a later answer holds, its whitespace collapsed, finds that session.
+    const phrase = '"zebra crossing"'
+    await type(session, phrase, typed => session.screen.includes(`> ${phrase.slice(0, typed)}`))
+    await session.wait('phrase match', () => session.screen.includes('▸ first ask') && session.screen.includes('1/1') && !session.screen.includes('Current'))
+    // A bad pattern lists nothing, says why, and Enter chooses nothing.
+    session.send('\x15')
+    await session.wait('search cleared', () => session.screen.includes('> Search · re:<regex>'))
+    await type(session, 're:(', typed => session.screen.includes(`> ${'re:('.slice(0, typed)}`))
+    await session.wait('invalid pattern', () => session.screen.includes('Invalid regex:') && session.screen.includes('No matching sessions'))
+    session.send('\r')
+    session.send('\x15')
+    await session.wait('pattern cleared', () => session.screen.includes('^S sort: Recent') && session.screen.includes('first ask') && session.screen.includes('Alpha work'))
+    assert(session.screen.includes('Resume session') && !session.screen.includes('Resumed session'), `Enter on no rows answered\n${session.screen}`)
+    // Ctrl+N keeps named sessions only; Ctrl+S switches the order.
+    session.send('\x0e')
+    await session.wait('named only', () => session.screen.includes('^N named: on') && session.screen.includes('Current') && session.screen.includes('1/1') && !session.screen.includes('first ask'))
+    session.send('\x13')
+    await session.wait('relevance', () => session.screen.includes('^S sort: Relevance'))
+    session.send('\x0e')
+    await session.wait('all names', () => session.screen.includes('^N named: off') && session.screen.includes('first ask'))
+    if (!inline) {
+      await session.resize(42, 20)
+      // Narrow, the keys take their short form; the search state stays whole.
+      await session.wait('narrow sheet', () => session.screen.includes('Resume session') && session.screen.includes('↑↓ · Enter · Esc')
+        && session.screen.includes('^S sort: Relevance · ^N named: off') && session.screen.includes('> Search · re:<regex> · "phrase"')
+        && !session.screen.includes('Preparing'))
+      await session.resize(80, 24)
+      await sheetReady(session, 'Resume session')
+    }
+    session.send('\x1b')
+    await session.wait('resume cancelled', () => session.screen.includes('Cancelled') && !session.screen.includes('Resume session'))
+    await composerReady(session)
+    assert.deepEqual(await sessionBytes(world.home), before, 'searching or cancelling wrote a session file')
+    assert.equal(world.model.requests.length, requests, 'the sheet sent a model request')
+
+    // The chosen search result opens by its id.
+    session.send('\x15')
+    session.send('/resume\r')
+    await sheetReady(session, 'Resume session')
+    await type(session, 're:crossing\\s+NOTES', typed => session.screen.includes(`> ${'re:crossing\\s+NOTES'.slice(0, typed)}`))
+    await session.wait('regex match', () => session.screen.includes('▸ first ask') && session.screen.includes('1/1'))
+    session.send('\r')
+    await session.wait('resumed', () => session.screen.includes('crossing notes') && session.screen.includes('first ask')
+      && !session.screen.includes('Echo: alpha.') && !session.screen.includes('Resume session'))
+    await composerReady(session)
+    assert.equal(world.model.requests.length, requests, 'resuming sent a model request')
+    await session.quit()
+    if (inline) session.assertShellHistory()
+    const after = await sessionBytes(world.home)
+    for (const [path, bytes] of before) {
+      if (path !== target) assert.equal(after.get(path), bytes, `${basename(path)} changed`)
+    }
+    assert((after.get(target) ?? '').startsWith(before.get(target) ?? '\0'), 'the resumed session lost entries')
+    assert.deepEqual(await readdir(world.project), [], 'the session wrote into the project')
+  })
+}
+
 // ---- Session tree navigation and forks: /tree, /fork ----
 
 /** Waits until `answer` is on screen and the turn that wrote it has settled: its completed status sits below it. */

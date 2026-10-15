@@ -16,6 +16,18 @@
 //! default where the list offers it (`app.models.save`/`app.thinking.save`).
 //! Esc cancels.
 //!
+//! `/resume`'s list instead searches with the runtime's [`SessionSearch`],
+//! Pi's session search (`session-selector-search.ts`): words matched
+//! fuzzily, `"quoted phrases"`, and `re:` patterns over each session's id,
+//! name, messages, and directory. Ctrl+S switches its order between recent
+//! and relevance and Ctrl+N shows only named sessions (Pi's
+//! `app.session.toggleSort` and `app.session.toggleNamedFilter`), so Ctrl+N
+//! does not move the selection there; ↓ does. A toggle keeps the selected
+//! session selected while it is still listed. The search runs once per
+//! change of the query or a toggle and its rows are kept, never once per
+//! frame; a query that cannot match, such as an invalid pattern, lists
+//! nothing and says why, and Enter then chooses nothing.
+//!
 //! The runtime owns every dialog. It opens one with
 //! [`crate::runtime::RuntimeUpdate::Dialog`], and the view answers it once
 //! by its `id` with [`crate::state::Effect::Dialog`]. The runtime ignores
@@ -39,6 +51,7 @@
 //! answer.
 
 use std::fmt;
+use std::sync::Arc;
 
 use crate::keys::{Key, KeyInput, Mods};
 
@@ -69,6 +82,79 @@ impl fmt::Debug for SecretText {
         write!(f, "SecretText(<{} chars>)", self.chars())
     }
 }
+
+/// The order of a session search.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SearchOrder {
+    /// The listing's order, newest first.
+    #[default]
+    Recent,
+    /// Best match first, then newest.
+    Relevance,
+}
+
+/// Why a session search's query cannot match.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SearchError {
+    /// `re:` with no pattern.
+    EmptyRegex,
+    /// A `re:` pattern refused, and the reason, on one line.
+    InvalidRegex(String),
+}
+
+impl SearchError {
+    /// What the sheet says.
+    pub fn message(&self) -> String {
+        match self {
+            Self::EmptyRegex => crate::copy::SESSION_SEARCH_EMPTY_REGEX.to_owned(),
+            Self::InvalidRegex(reason) => {
+                crate::copy::SESSION_SEARCH_INVALID_REGEX.replace("{reason}", reason)
+            }
+        }
+    }
+}
+
+/// What a session search found.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SearchResult {
+    /// Indexes into the list's items, best first.
+    pub rows: Vec<usize>,
+    /// Why the query matches nothing, when it cannot match.
+    pub error: Option<SearchError>,
+}
+
+/// A search over a session list's items, supplied by the runtime. It must
+/// be pure: the same query, order, and filter always find the same rows.
+pub trait SessionFilter: Send + Sync {
+    /// The items `query` finds under `order`, only named sessions when
+    /// `named_only`.
+    fn search(&self, query: &str, order: SearchOrder, named_only: bool) -> SearchResult;
+}
+
+/// A list's [`SessionFilter`]. Two are equal only when they are the same
+/// search; `Debug` shows nothing of what it searches.
+#[derive(Clone)]
+pub struct SessionSearch(Arc<dyn SessionFilter>);
+
+impl SessionSearch {
+    pub fn new(filter: impl SessionFilter + 'static) -> Self {
+        Self(Arc::new(filter))
+    }
+}
+
+impl fmt::Debug for SessionSearch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("SessionSearch(..)")
+    }
+}
+
+impl PartialEq for SessionSearch {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for SessionSearch {}
 
 /// One row of a list dialog.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -107,6 +193,9 @@ pub struct ListDialog {
     pub saves_default: bool,
     /// A dim line under the title, such as why a list is short.
     pub note: Option<String>,
+    /// Searches the list as `/resume` does instead of filtering by words;
+    /// see the module's documentation.
+    pub search: Option<SessionSearch>,
 }
 
 /// One line of an information sheet.
@@ -177,12 +266,25 @@ pub enum ListLine {
     Row { row: usize, index: usize },
 }
 
+/// A session search's state in an open list.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SearchView {
+    pub order: SearchOrder,
+    pub named_only: bool,
+    /// Why the query matches nothing, when it cannot match.
+    pub error: Option<SearchError>,
+    /// What the search found for the dialog's filter and these toggles.
+    rows: Vec<usize>,
+}
+
 /// An open dialog and what the person has done in it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Dialog {
     pub request: DialogRequest,
-    /// The list's filter.
-    pub filter: String,
+    /// The list's filter. Changed only through [`Dialog::key`],
+    /// [`Dialog::paste`], and [`Dialog::set_filter`], which keep a session
+    /// search's rows and error in step with it.
+    filter: String,
     /// The selected row among the filtered ones.
     pub selected: usize,
     /// The field's text.
@@ -199,6 +301,8 @@ pub struct Dialog {
     /// Body lines in all as the last frame laid them out, which bound an
     /// information sheet's scroll.
     pub total: usize,
+    /// A session search's order, filter, and last result.
+    pub search: Option<SearchView>,
 }
 
 impl Dialog {
@@ -216,7 +320,7 @@ impl Dialog {
             DialogKind::Field(field) => (0, field.initial.clone()),
             DialogKind::Info(_) => (0, String::new()),
         };
-        Self {
+        let mut dialog = Self {
             request,
             filter: String::new(),
             selected,
@@ -226,16 +330,93 @@ impl Dialog {
             top: 0,
             page: 1,
             total: 0,
+            search: None,
+        };
+        if let DialogKind::List(list) = &dialog.request.kind
+            && list.search.is_some()
+        {
+            let first = list.selected.or(list.current);
+            dialog.search = Some(SearchView::default());
+            dialog.refresh_search();
+            dialog.selected = first
+                .and_then(|item| dialog.rows().iter().position(|&row| row == item))
+                .unwrap_or(0);
         }
+        dialog
+    }
+
+    /// The list's filter.
+    pub fn filter(&self) -> &str {
+        &self.filter
+    }
+
+    /// Replaces the list's filter, as typing would: the first row is
+    /// selected and a session search runs again.
+    pub fn set_filter(&mut self, filter: impl Into<String>) {
+        self.filter = filter.into();
+        self.selected = 0;
+        self.refresh_search();
+    }
+
+    /// The session search's result for the current query and toggles, its
+    /// rows kept in range and each item at most once.
+    fn run_search(&self) -> Option<SearchResult> {
+        let (DialogKind::List(list), Some(view)) = (&self.request.kind, &self.search) else {
+            return None;
+        };
+        let search = list.search.as_ref()?;
+        let mut found = search.0.search(&self.filter, view.order, view.named_only);
+        let mut seen = vec![false; list.items.len()];
+        found.rows.retain(|&row| {
+            let fresh = seen.get(row).is_some_and(|seen| !seen);
+            if fresh {
+                seen[row] = true;
+            }
+            fresh
+        });
+        if found.error.is_some() {
+            found.rows.clear();
+        }
+        Some(found)
+    }
+
+    /// Searches again after the query or a toggle changed, replacing the
+    /// rows and the error together.
+    fn refresh_search(&mut self) {
+        let Some(found) = self.run_search() else {
+            return;
+        };
+        if let Some(view) = self.search.as_mut() {
+            view.rows = found.rows;
+            view.error = found.error;
+        }
+    }
+
+    /// Changes a session search's order or filter, keeping the selected
+    /// item selected while it is still listed.
+    fn toggle_search(&mut self, change: impl FnOnce(&mut SearchView)) {
+        let chosen = self.rows().get(self.selected).copied();
+        if let Some(view) = self.search.as_mut() {
+            change(view);
+        }
+        self.refresh_search();
+        self.selected = chosen
+            .and_then(|item| self.rows().iter().position(|&row| row == item))
+            .unwrap_or(0);
     }
 
     /// The list's rows that match the filter, as indexes into its items.
     /// Every word of the filter must appear, in any case, in the row's
     /// label, detail, group, description ([`ListItem::about`]), or value.
+    /// A session search's rows are those its last run found, which every
+    /// change of the filter or a toggle replaces; drawing never searches.
     pub fn rows(&self) -> Vec<usize> {
         let DialogKind::List(list) = &self.request.kind else {
             return Vec::new();
         };
+        if let Some(view) = &self.search {
+            return view.rows.clone();
+        }
         let words: Vec<String> = self
             .filter
             .split_whitespace()
@@ -307,6 +488,21 @@ impl Dialog {
         let page = self.page.max(1);
         match self.request.kind.clone() {
             DialogKind::List(list) => {
+                if list.search.is_some() {
+                    if ctrl('s') {
+                        self.toggle_search(|view| {
+                            view.order = match view.order {
+                                SearchOrder::Recent => SearchOrder::Relevance,
+                                SearchOrder::Relevance => SearchOrder::Recent,
+                            }
+                        });
+                        return None;
+                    }
+                    if ctrl('n') {
+                        self.toggle_search(|view| view.named_only = !view.named_only);
+                        return None;
+                    }
+                }
                 let rows = self.rows();
                 let count = rows.len();
                 if count > 0 {
@@ -335,20 +531,21 @@ impl Dialog {
                         return self.choose(&rows, &list, true);
                     }
                     Key::Backspace if list.filterable && plain => {
-                        if self.filter.pop().is_some() {
-                            self.selected = 0;
+                        let mut filter = self.filter.clone();
+                        if filter.pop().is_some() {
+                            self.set_filter(filter);
                         }
                     }
                     Key::Char('u') if list.filterable && input.mods == Mods::CTRL => {
                         if !self.filter.is_empty() {
-                            self.filter.clear();
-                            self.selected = 0;
+                            self.set_filter(String::new());
                         }
                     }
                     _ => {
                         if let Some(c) = typed(input).filter(|_| list.filterable) {
-                            self.filter.push(c);
-                            self.selected = 0;
+                            let mut filter = self.filter.clone();
+                            filter.push(c);
+                            self.set_filter(filter);
                         }
                     }
                 }
@@ -404,8 +601,8 @@ impl Dialog {
         match &self.request.kind {
             DialogKind::Field(_) => self.text.0.extend(clean),
             DialogKind::List(list) if list.filterable => {
-                self.filter.extend(clean);
-                self.selected = 0;
+                let filter: String = self.filter.chars().chain(clean).collect();
+                self.set_filter(filter);
             }
             DialogKind::List(_) | DialogKind::Info(_) => {}
         }
@@ -473,6 +670,7 @@ mod tests {
                 filterable,
                 saves_default: true,
                 note: None,
+                search: None,
             }),
         })
     }
@@ -661,11 +859,12 @@ mod tests {
                 filterable: true,
                 saves_default: false,
                 note: None,
+                search: None,
             }),
         });
         dialog.paste("CHANGELOG draft");
         assert_eq!(dialog.rows(), [0]);
-        dialog.filter = "01b0".into();
+        dialog.set_filter("01b0");
         assert_eq!(dialog.rows(), [1]);
     }
 
@@ -689,7 +888,7 @@ mod tests {
                 ListLine::Row { row: 2, index: 2 },
             ]
         );
-        dialog.filter = "b".into();
+        dialog.set_filter("b");
         assert_eq!(
             dialog.lines(),
             [
@@ -727,5 +926,210 @@ mod tests {
             Some(DialogAnswer::Cancel)
         );
         assert_eq!(dialog.key(key(Key::Esc), true), None);
+    }
+
+    /// A pure search over fixed texts, standing in for the runtime's index:
+    /// words must appear in a text; `re:` alone, `re:(`, and a `dup` query
+    /// answer as the runtime's would or worse, so the dialog's guards show.
+    struct Texts {
+        texts: Vec<(&'static str, bool)>,
+        runs: std::sync::atomic::AtomicUsize,
+    }
+
+    impl SessionFilter for Texts {
+        fn search(&self, query: &str, order: SearchOrder, named_only: bool) -> SearchResult {
+            self.runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let query = query.trim();
+            if query == "re:" {
+                return SearchResult {
+                    rows: vec![0],
+                    error: Some(SearchError::EmptyRegex),
+                };
+            }
+            if query == "re:(" {
+                return SearchResult {
+                    rows: Vec::new(),
+                    error: Some(SearchError::InvalidRegex("unclosed group".into())),
+                };
+            }
+            if query == "dup" {
+                return SearchResult {
+                    rows: vec![2, 99, 2, 0],
+                    error: None,
+                };
+            }
+            let mut rows: Vec<usize> = (0..self.texts.len())
+                .filter(|&i| !named_only || self.texts[i].1)
+                .filter(|&i| self.texts[i].0.contains(query))
+                .collect();
+            if order == SearchOrder::Relevance {
+                rows.reverse();
+            }
+            SearchResult { rows, error: None }
+        }
+    }
+
+    fn sessions(current: Option<usize>) -> (Dialog, Arc<Texts>) {
+        let texts = Arc::new(Texts {
+            texts: vec![
+                ("alpha one", true),
+                ("beta two", false),
+                ("alpha three", false),
+            ],
+            runs: std::sync::atomic::AtomicUsize::new(0),
+        });
+        struct Shared(Arc<Texts>);
+        impl SessionFilter for Shared {
+            fn search(&self, query: &str, order: SearchOrder, named: bool) -> SearchResult {
+                self.0.search(query, order, named)
+            }
+        }
+        let dialog = Dialog::open(DialogRequest {
+            id: 9,
+            kind: DialogKind::List(ListDialog {
+                title: "Resume".into(),
+                items: ["s0", "s1", "s2"]
+                    .iter()
+                    .map(|id| ListItem {
+                        value: (*id).into(),
+                        label: (*id).into(),
+                        ..ListItem::default()
+                    })
+                    .collect(),
+                current,
+                selected: None,
+                filterable: true,
+                saves_default: false,
+                note: None,
+                search: Some(SessionSearch::new(Shared(Arc::clone(&texts)))),
+            }),
+        });
+        (dialog, texts)
+    }
+
+    fn ctrl(c: char) -> KeyInput {
+        KeyInput {
+            key: Key::Char(c),
+            mods: Mods::CTRL,
+        }
+    }
+
+    fn typing(dialog: &mut Dialog, text: &str) {
+        for c in text.chars() {
+            dialog.key(key(Key::Char(c)), true);
+        }
+    }
+
+    // Pi session-selector.ts: Ctrl+S switches the order and Ctrl+N the
+    // named filter; Bake keeps the selected session selected while it is
+    // listed, and the current one stays marked wherever the selection is.
+    #[test]
+    fn session_search_toggles_keep_the_selection() {
+        let (mut dialog, _) = sessions(Some(2));
+        assert_eq!(dialog.rows(), [0, 1, 2]);
+        assert_eq!(dialog.selected, 2);
+        dialog.key(ctrl('s'), true);
+        let view = dialog.search.clone().expect("search");
+        assert_eq!(view.order, SearchOrder::Relevance);
+        assert_eq!(dialog.rows(), [2, 1, 0]);
+        assert_eq!(dialog.selected, 0, "s2 is still selected, now first");
+        // Ctrl+N filters here; it does not move the selection.
+        dialog.key(key(Key::Down), true);
+        assert_eq!(dialog.rows()[dialog.selected], 1);
+        dialog.key(ctrl('n'), true);
+        assert!(dialog.search.as_ref().expect("search").named_only);
+        assert_eq!(dialog.rows(), [0]);
+        assert_eq!(dialog.selected, 0, "s1 is not named; the first row is");
+        dialog.key(ctrl('n'), true);
+        dialog.key(ctrl('s'), true);
+        assert_eq!(dialog.rows(), [0, 1, 2]);
+        assert_eq!(dialog.selected, 0, "s0 stays selected");
+        let DialogKind::List(list) = &dialog.request.kind else {
+            unreachable!()
+        };
+        assert_eq!(list.current, Some(2));
+    }
+
+    // Bake: an invalid or empty pattern lists nothing and says why; Enter
+    // then answers nothing, and fixing the query brings the rows back.
+    #[test]
+    fn an_invalid_query_lists_nothing_and_enter_chooses_nothing() {
+        let (mut dialog, _) = sessions(Some(0));
+        dialog.key(key(Key::Down), true);
+        typing(&mut dialog, "re:(");
+        assert!(dialog.rows().is_empty());
+        assert_eq!(
+            dialog.search.as_ref().and_then(|view| view.error.clone()),
+            Some(SearchError::InvalidRegex("unclosed group".into()))
+        );
+        assert_eq!(
+            SearchError::InvalidRegex("unclosed group".into()).message(),
+            "Invalid regex: unclosed group"
+        );
+        assert_eq!(dialog.key(key(Key::Enter), true), None);
+        assert!(!dialog.answered);
+        // An error's rows are dropped even when the search returned some.
+        dialog.key(key(Key::Backspace), true);
+        assert!(dialog.rows().is_empty());
+        assert_eq!(
+            dialog.search.as_ref().and_then(|view| view.error.clone()),
+            Some(SearchError::EmptyRegex)
+        );
+        assert_eq!(dialog.key(key(Key::Enter), true), None);
+        dialog.key(ctrl('u'), true);
+        assert_eq!(dialog.rows(), [0, 1, 2]);
+        assert_eq!(
+            dialog.search.as_ref().and_then(|view| view.error.clone()),
+            None
+        );
+        typing(&mut dialog, "alpha");
+        assert_eq!(dialog.rows(), [0, 2]);
+        dialog.key(key(Key::Down), true);
+        assert_eq!(
+            dialog.key(key(Key::Enter), true),
+            Some(DialogAnswer::Chose {
+                value: "s2".into(),
+                save_default: false,
+            })
+        );
+    }
+
+    // Bake: the search runs once per change of the query or a toggle, never
+    // to draw or to move; rows out of range or repeated are dropped.
+    #[test]
+    fn the_search_runs_per_change_and_its_rows_are_checked() {
+        let (mut dialog, texts) = sessions(None);
+        let runs = || texts.runs.load(std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(runs(), 1);
+        for _ in 0..5 {
+            let _ = dialog.rows();
+            let _ = dialog.lines();
+            dialog.key(key(Key::Down), true);
+        }
+        assert_eq!(runs(), 1);
+        typing(&mut dialog, "dup");
+        assert_eq!(runs(), 4);
+        assert_eq!(dialog.rows(), [2, 0]);
+        dialog.paste(" x");
+        assert_eq!(runs(), 5);
+        dialog.key(ctrl('s'), true);
+        assert_eq!(runs(), 6);
+        let shown = format!("{dialog:?}");
+        assert!(shown.contains("SessionSearch(..)"), "{shown}");
+        assert!(!shown.contains("alpha"), "{shown}");
+    }
+
+    // Bake: lists without a session search keep Ctrl+N as down and Ctrl+S
+    // as nothing unless they save a default.
+    #[test]
+    fn other_lists_keep_their_keys() {
+        let mut dialog = list(&["a", "b"], Some(0), true);
+        if let DialogKind::List(list) = &mut dialog.request.kind {
+            list.saves_default = false;
+        }
+        dialog.key(ctrl('n'), true);
+        assert_eq!(dialog.selected, 1);
+        assert_eq!(dialog.key(ctrl('s'), true), None);
+        assert!(dialog.search.is_none());
     }
 }

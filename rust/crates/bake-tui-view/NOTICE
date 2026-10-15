@@ -15,6 +15,11 @@ regression test 7209-model-selector-filter-resets-selection.test.ts that its
 tests name, and the first selection of
 components/user-message-selector.ts (the latest message, not marked
 current).
+The session search state of components/session-selector.ts (the sort and
+named-only toggles on Ctrl+S and Ctrl+N, app.session.toggleSort and
+app.session.toggleNamedFilter in src/core/keybindings.ts, and its
+'re:<pattern> regex · "phrase" exact' hint) is adapted in src/dialog.rs and
+src/render.rs.
 --------------------------------------------------------------------------------
 MIT License
 

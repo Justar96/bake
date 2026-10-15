@@ -38,6 +38,19 @@ pub const DIALOG_KEYS_TINY: &str = "↵ · Esc";
 /// What an empty filter row says.
 pub const DIALOG_FILTER: &str = "Type to filter";
 pub const DIALOG_NO_MATCH: &str = "No matching choices";
+/// What `/resume`'s empty search row says; its keys and state, `{order}`
+/// one of the order names and `{named}` `on` or `off`; and what it lists
+/// when nothing matches.
+pub const SESSION_SEARCH_FILTER: &str = "Search · re:<regex> · \"phrase\"";
+pub const SESSION_SEARCH_STATE: &str = "^S sort: {order} · ^N named: {named}";
+pub const SESSION_SEARCH_RECENT: &str = "Recent";
+pub const SESSION_SEARCH_RELEVANCE: &str = "Relevance";
+pub const SESSION_SEARCH_NO_MATCH: &str = "No matching sessions";
+pub const SESSION_SEARCH_NO_NAMED: &str = "No named sessions · ^N shows all";
+/// Why a `re:` query matches nothing: none given, or `{reason}` the
+/// pattern was refused.
+pub const SESSION_SEARCH_EMPTY_REGEX: &str = "Empty regex: type a pattern after re:";
+pub const SESSION_SEARCH_INVALID_REGEX: &str = "Invalid regex: {reason}";
 /// The status of the item in effect now.
 pub const DIALOG_CURRENT: &str = "Current";
 /// After the count of rows a scrolled list hides above or below.

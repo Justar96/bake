@@ -623,6 +623,177 @@ fn a_resume_whose_choice_no_longer_holds_is_refused() {
     assert_eq!(texts(&file, "user"), ["mine", "still mine"]);
 }
 
+/// Writes a session file whose later assistant message, `later`, sits on
+/// a branch the file's leaf has left: the leaf is a final user message,
+/// `main line`, after the first exchange, named `name` when given.
+fn searchable(
+    world: &World,
+    file: &str,
+    id: &str,
+    cwd: &str,
+    later: &str,
+    name: Option<&str>,
+) -> PathBuf {
+    let path = fixture(world, file, id, cwd, "first ask");
+    let usage = json!({"input": 1, "output": 1, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 2,
+        "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0}});
+    let mut lines = vec![
+        json!({"type": "message", "id": "b1", "parentId": "a2", "timestamp": "2026-01-01T00:00:03.000Z",
+            "message": {"role": "toolResult", "toolCallId": "t", "toolName": "read",
+                "content": [{"type": "text", "text": "tool-only okapi"}], "isError": false, "timestamp": 1_767_225_603_000_i64}}),
+        json!({"type": "message", "id": "b2", "parentId": "a1", "timestamp": "2026-01-01T00:00:04.000Z",
+            "message": {"role": "assistant", "content": [{"type": "text", "text": later}],
+                "api": "faux", "provider": "faux", "model": "faux-1", "stopReason": "stop",
+                "timestamp": 1_767_225_604_000_i64, "usage": usage}}),
+        json!({"type": "message", "id": "c1", "parentId": "a2", "timestamp": "2026-01-01T00:00:05.000Z",
+            "message": {"role": "user", "content": "main line", "timestamp": 1_767_225_605_000_i64}}),
+    ];
+    if let Some(name) = name {
+        lines.push(json!({"type": "session_info", "id": "n1", "parentId": "c1",
+            "timestamp": "2026-01-01T00:00:06.000Z", "name": name}));
+    }
+    let mut body = std::fs::read_to_string(&path).expect("fixture");
+    for line in lines {
+        body.push_str(&format!("{line}\n"));
+    }
+    std::fs::write(&path, body).expect("fixture");
+    path
+}
+
+/// Every session file's bytes, by path.
+fn snapshot(world: &World) -> Vec<(PathBuf, Vec<u8>)> {
+    let mut files: Vec<(PathBuf, Vec<u8>)> = std::fs::read_dir(world.sessions())
+        .expect("sessions")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "jsonl"))
+        .map(|path| {
+            let bytes = std::fs::read(&path).expect("read");
+            (path, bytes)
+        })
+        .collect();
+    files.sort();
+    files
+}
+
+// Pi session-selector-search.ts over Pi's listing: `/resume` searches every
+// user and assistant message of this directory's sessions, a branch the
+// leaf has left included, tool results not; phrases and `re:` patterns work, a
+// bad pattern lists nothing and chooses nothing, and Ctrl+N keeps only
+// named sessions. Searching, toggling, and cancelling write nothing and
+// send nothing; the chosen id opens as before.
+#[test]
+fn resume_searches_every_message_and_opens_the_chosen_id() {
+    use bake_tui_view::dialog::Dialog;
+    use bake_tui_view::keys::{Key, KeyInput, Mods};
+    let world = World::new("search");
+    let manager = persisted(&world);
+    let file = manager.session_file().expect("file").to_path_buf();
+    let (h, requests) = session_harness(&world, manager, Vec::new(), None);
+    h.turn(1, "mine");
+    let project = world.project();
+    searchable(
+        &world,
+        "target.jsonl",
+        "01dddddd-target",
+        &project,
+        "Zebra\n\n  crossing notes",
+        None,
+    );
+    searchable(
+        &world,
+        "named.jsonl",
+        "01eeeeee-named",
+        &project,
+        "plain words",
+        Some("Release prep"),
+    );
+    let foreign = world.root.join("elsewhere");
+    std::fs::create_dir_all(&foreign).expect("foreign dir");
+    searchable(
+        &world,
+        "foreign.jsonl",
+        "01ffffff-foreign",
+        foreign.to_str().expect("utf-8"),
+        "zebra crossing notes",
+        Some("Foreign"),
+    );
+    let before = snapshot(&world);
+    let sent = h_requests(&requests);
+    let key = |dialog: &mut Dialog, key: Key, mods: Mods| dialog.key(KeyInput { key, mods }, true);
+    let values = |dialog: &Dialog| -> Vec<String> {
+        let DialogKind::List(list) = &dialog.request.kind else {
+            unreachable!()
+        };
+        dialog
+            .rows()
+            .iter()
+            .map(|&i| list.items[i].value.clone())
+            .collect()
+    };
+
+    // A cancelled search changes nothing.
+    h.submit_id(2, Submission::FollowUp("/resume".into()));
+    let mut dialog = Dialog::open(h.next_dialog());
+    assert_eq!(
+        values(&dialog).len(),
+        3,
+        "the foreign session is not listed"
+    );
+    dialog.paste("\"zebra crossing\"");
+    assert_eq!(values(&dialog), ["01dddddd-target"]);
+    let answer = key(&mut dialog, Key::Esc, Mods::NONE).expect("cancel");
+    h.choose_answer(dialog.request.id, answer);
+    assert_eq!(refused(&h.ended(2)).as_deref(), Some(commands::CANCELLED));
+
+    h.submit_id(3, Submission::FollowUp("/resume".into()));
+    let mut dialog = Dialog::open(h.next_dialog());
+    dialog.paste("\"tool-only okapi\"");
+    assert!(values(&dialog).is_empty(), "tool results are not searched");
+    dialog.set_filter("re:(");
+    assert!(values(&dialog).is_empty());
+    assert!(
+        dialog
+            .search
+            .as_ref()
+            .is_some_and(|view| view.error.is_some())
+    );
+    assert_eq!(key(&mut dialog, Key::Enter, Mods::NONE), None);
+    dialog.set_filter("re:CROSSING\\s+NOTES");
+    assert_eq!(values(&dialog), ["01dddddd-target"]);
+    dialog.set_filter("");
+    key(&mut dialog, Key::Char('n'), Mods::CTRL);
+    assert_eq!(values(&dialog), ["01eeeeee-named"]);
+    key(&mut dialog, Key::Char('s'), Mods::CTRL);
+    key(&mut dialog, Key::Char('n'), Mods::CTRL);
+    dialog.set_filter("zebra");
+    assert_eq!(values(&dialog), ["01dddddd-target"]);
+    assert_eq!(snapshot(&world), before, "searching wrote nothing");
+    assert_eq!(h_requests(&requests), sent, "searching sent nothing");
+    let answer = key(&mut dialog, Key::Enter, Mods::NONE).expect("chosen");
+    assert_eq!(
+        answer,
+        DialogAnswer::Chose {
+            value: "01dddddd-target".into(),
+            save_default: false,
+        }
+    );
+    h.choose_answer(dialog.request.id, answer);
+    let rows = replaced(&h.ended(3)).expect("replaced");
+    assert!(rows.contains(&Row::User("first ask".into())), "{rows:#?}");
+    assert!(rows.contains(&Row::User("main line".into())), "{rows:#?}");
+    // The match was on the branch the leaf left, which does not replay.
+    assert!(
+        !rows
+            .iter()
+            .any(|row| format!("{row:?}").contains("crossing")),
+        "{rows:#?}"
+    );
+    assert_eq!(h_requests(&requests), sent);
+    h.stop();
+    assert_eq!(texts(&file, "user"), ["mine"]);
+}
+
 // Bake: the factory refuses a session whose header names another
 // directory, even in this one's session directory, so the tools never
 // work in a workspace the terminal does not show.

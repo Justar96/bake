@@ -19,6 +19,7 @@ mod regressions;
 mod robustness;
 mod save_entry;
 mod scaling;
+mod search;
 mod session_cwd;
 mod session_id;
 mod session_info;

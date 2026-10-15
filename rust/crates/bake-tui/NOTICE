@@ -31,6 +31,9 @@ prefix, getEntryDisplayText, and formatToolCall) and
 components/user-message-selector.ts, with cases of test/tree-selector.test.ts
 and test/agent-session-branching.test.ts in src/live/tests/tree_rows.rs and
 src/live/tests/sessions_live.rs.
+/resume's search wires the session-selector search of
+src/modes/interactive/components/session-selector.ts and
+session-selector-search.ts into src/live/commands.rs (ResumeSearch).
 --------------------------------------------------------------------------------
 MIT License
 

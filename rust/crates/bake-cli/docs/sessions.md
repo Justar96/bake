@@ -24,12 +24,23 @@ A resumed session keeps its model, thinking level, and permission unless a flag 
 - `/session` shows the session's name, file, id, and message and token counts. It changes nothing.
 - `/name <name>` records a display name, with line breaks turned into spaces; `/name` alone asks for a name, starting from the current one. A name that would be blank is refused.
 - `/new` starts a new session in a new file, keeping the current model and thinking level.
-- `/resume` lists the working directory's saved sessions, newest first, by name or first message, with the running one marked `Current`. Typing filters the list by words. Enter opens the chosen session with its own transcript, model, thinking level, and permission; Esc keeps the running session.
-
+- `/resume` lists the working directory's saved sessions, newest first, by name or first message, with the running one marked `Current`. Typing searches them (see [Searching sessions](#searching-sessions)). Enter opens the chosen session with its own transcript, model, thinking level, and permission; Esc keeps the running session.
 - `/tree` shows the session's entries as a tree, the branch you are on first and marked with `•`, the current point marked `Current`. Settings entries and replies that only call tools are hidden; typing filters the rows. Enter on an earlier entry continues from there in the same file: on a user message, the session goes back to just before it and puts its text in your draft to edit and send; on any other entry, the session continues after it. Nothing is sent, and the navigation itself writes nothing: the next entry written, such as your next prompt, starts a new branch there, and the branch you left stays in the file. The model, thinking level, and permission stay as they are.
 - `/fork` lists the session's user messages, the latest selected. Enter starts a new session in a new file, in the same session directory, holding the conversation up to just before the chosen message, and puts that message in your draft. The new file names the running session's file as its parent, and the running session's file is left unchanged. A fork that holds earlier messages uses the model, thinking level, and permission they were recorded with.
 
-A turn that is running refuses `/new`, `/resume`, `/tree`, and `/fork`, and a failed or cancelled command keeps the running session where it was; the draft is kept in each case. The new session is set up before the running one is closed. `/resume` shows only sessions recorded for this working directory, does not support Pi's quoted-phrase or `re:` search, and cannot go to a session in another directory. With `--no-session`, `/new` and `/fork` start unsaved sessions and `/resume` is refused. A fork cancelled after it was set up may leave its new file behind. `/tree` does not offer Pi's branch summaries, labels, filter modes, or folding, and there is no `/clone`.
+A turn that is running refuses `/new`, `/resume`, `/tree`, and `/fork`, and a failed or cancelled command keeps the running session where it was; the draft is kept in each case. The new session is set up before the running one is closed. `/resume` shows only sessions recorded for this working directory, has no threaded order, path display, rename, or delete, and cannot go to a session in another directory. With `--no-session`, `/new` and `/fork` start unsaved sessions and `/resume` is refused. A fork cancelled after it was set up may leave its new file behind. `/tree` does not offer Pi's branch summaries, labels, filter modes, or folding, and there is no `/clone`.
+
+### Searching sessions
+
+`/resume` searches each session's id, name, working directory, and the text of every message you or the model wrote in it, including on branches you left. Tool output and thinking are not searched.
+
+| Type | Matches |
+|---|---|
+| `word other` | Sessions holding every word's letters in order, ignoring case |
+| `"a phrase"` | Sessions holding those words together, whatever whitespace separates them |
+| `re:pattern` | Sessions matching the regular expression, ignoring case |
+
+Ctrl+S switches between newest first and best match first, and Ctrl+N shows only named sessions; the line under the title shows both. Regular expressions do not support look-around or backreferences, and a pattern may be at most 8 KiB. A pattern that cannot be used lists nothing, the line under the title says why, and Enter opens nothing. Searching, switching the order or filter, and Esc never change a session file or send a request.
 
 ## The format
 

@@ -83,6 +83,13 @@ test/suite/regressions/tree-during-streaming.test.ts,
 test/suite/regressions/9178-tree-during-compaction.test.ts, and
 test/suite/regressions/8724-in-memory-fork-active-tool.test.ts are adapted
 in agent_session/navigation_tests.rs.
+Also from v1.2.0, session search: src/modes/interactive/components/
+session-selector-search.ts (parseSearchQuery, matchSession,
+filterAndSortSessions, hasSessionName, without the threaded sort), adapted in
+src/session/search.rs, with the cases of
+test/session-selector-search.test.ts in src/session/search_tests.rs; and the
+fuzzy matching of packages/tui/src/fuzzy.ts (fuzzyMatch, fuzzyFilter) in
+src/cli/list_models.rs, with the cases of packages/tui/test/fuzzy.test.ts.
 --------------------------------------------------------------------------------
 MIT License
 

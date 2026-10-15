@@ -65,10 +65,11 @@ use bake_coding_agent::cliproxyapi::{
     cli_proxy_models_in_use,
 };
 use bake_coding_agent::session::SessionManager;
+use bake_coding_agent::session::search::{NameFilter, QueryError, SessionSearchIndex, SortMode};
 use bake_coding_agent::settings::Settings;
 use bake_tui_view::dialog::{
     DialogAnswer, DialogKind, DialogRequest, FieldDialog, InfoDialog, InfoLine, ListDialog,
-    ListItem,
+    ListItem, SearchError, SearchOrder, SearchResult, SessionFilter, SessionSearch,
 };
 use bake_tui_view::runtime::RuntimeUpdate;
 use bake_tui_view::transcript::Row;
@@ -502,6 +503,7 @@ async fn model(context: &mut Context, argument: &str) -> Outcome {
                     saves_default: true,
                     note: (!argument.is_empty())
                         .then(|| format!("No model is named {argument}; choose one.")),
+                    search: None,
                 }))
                 .await;
             let DialogAnswer::Chose {
@@ -549,6 +551,7 @@ async fn thinking(context: &mut Context, argument: &str) -> Outcome {
                     saves_default: true,
                     note: (!argument.is_empty())
                         .then(|| format!("This model has no thinking level {argument}.")),
+                    search: None,
                 }))
                 .await;
             let DialogAnswer::Chose {
@@ -616,6 +619,7 @@ async fn settings(context: &mut Context) -> Outcome {
             filterable: false,
             saves_default: false,
             note: Some("Saved to settings.json; applies now.".into()),
+            search: None,
         }))
         .await;
     let DialogAnswer::Chose { value: setting, .. } = answer else {
@@ -651,6 +655,7 @@ async fn settings(context: &mut Context) -> Outcome {
             filterable: false,
             saves_default: false,
             note: None,
+            search: None,
         }))
         .await;
     let DialogAnswer::Chose { value, .. } = answer else {
@@ -883,11 +888,42 @@ fn list_sessions(
         .map_err(|error| format!("Could not list sessions: {error}"))
 }
 
+/// `/resume`'s search: Pi's session search over the listed sessions, each
+/// one's text prepared once when the sheet opens. It reads nothing and
+/// writes nothing.
+struct ResumeSearch(SessionSearchIndex);
+
+impl SessionFilter for ResumeSearch {
+    fn search(&self, query: &str, order: SearchOrder, named_only: bool) -> SearchResult {
+        let sort = match order {
+            SearchOrder::Recent => SortMode::Recent,
+            SearchOrder::Relevance => SortMode::Relevance,
+        };
+        let name = if named_only {
+            NameFilter::Named
+        } else {
+            NameFilter::All
+        };
+        let found = self.0.search(query, sort, name);
+        SearchResult {
+            rows: found.indexes,
+            error: found.error.map(|error| match error {
+                QueryError::EmptyRegex => SearchError::EmptyRegex,
+                QueryError::InvalidRegex(reason) => SearchError::InvalidRegex(reason),
+            }),
+        }
+    }
+}
+
 /// `/resume`, Pi's `showSessionSelector` and `handleResumeSession`, laid
 /// out as the TypeScript session picker: this directory's saved sessions,
 /// newest first, each by its name or first message, with its age and short
 /// id, and its first message under the list while selected; the running
-/// session is marked current. Typing filters by name, message, or id. The
+/// session is marked current, wherever the selection is. Typing searches
+/// as Pi's session selector does ([`ResumeSearch`]): fuzzy words, quoted
+/// phrases, and `re:` patterns over each session's id, name, every user
+/// and assistant message, and directory, with Ctrl+S switching between
+/// recent and relevance order and Ctrl+N showing only named sessions. The
 /// answer names a session id; its file is looked up again in a fresh
 /// listing and opened only when it still holds that id, so neither a label
 /// nor a stale path decides what opens. The driver commits it
@@ -903,11 +939,16 @@ async fn resume(context: &mut Context) -> Outcome {
     }
     let cwd = context.session.cwd();
     let current = context.session.session_id();
-    let listed = {
+    let (listed, index) = {
         let (cwd, place) = (cwd.clone(), place.clone());
-        tokio::task::spawn_blocking(move || list_sessions(&cwd, &place))
-            .await
-            .map_err(|error| error.to_string())??
+        tokio::task::spawn_blocking(move || {
+            list_sessions(&cwd, &place).map(|listed| {
+                let index = SessionSearchIndex::new(&listed);
+                (listed, index)
+            })
+        })
+        .await
+        .map_err(|error| error.to_string())??
     };
     let others = listed.iter().filter(|info| info.id != current).count();
     if others == 0 {
@@ -950,15 +991,20 @@ async fn resume(context: &mut Context) -> Outcome {
         })
         .collect();
     let current_index = listed.iter().position(|info| info.id == current);
+    let title = format!("Resume session · {} saved here", listed.len());
+    // The index holds what the search needs; the listing's own copy of
+    // every message's text is not kept while the sheet is open.
+    drop(listed);
     let answer = context
         .ask(DialogKind::List(ListDialog {
-            title: format!("Resume session · {} saved here", listed.len()),
+            title,
             items,
             current: current_index,
             selected: None,
             filterable: true,
             saves_default: false,
             note: None,
+            search: Some(SessionSearch::new(ResumeSearch(index))),
         }))
         .await;
     let DialogAnswer::Chose { value: id, .. } = answer else {
@@ -1059,6 +1105,7 @@ async fn tree(context: &mut Context) -> Outcome {
                 "Continue from an earlier point in this session; • marks the current path. A user message goes back into the draft."
                     .into(),
             ),
+            search: None,
         }))
         .await;
     let DialogAnswer::Chose { value: id, .. } = answer else {
@@ -1127,6 +1174,7 @@ async fn fork(context: &mut Context) -> Outcome {
                 "Copies the path up to the chosen message into a new session; the message goes back into the draft."
                     .into(),
             ),
+            search: None,
         }))
         .await;
     let DialogAnswer::Chose { value: id, .. } = answer else {
