@@ -12,6 +12,7 @@ pub const HEADER_LIST_HINT: &str = "↑↓ select · Enter inspect · Esc back";
 pub const PLACEHOLDER: &[&str] = &["Type a draft", "Alt+Enter newline", "Ctrl+- undo"];
 /// While a turn runs, Enter steers instead of sending.
 pub const PLACEHOLDER_RUNNING: &[&str] = &["Enter steers the next step · Alt+↑ sends now"];
+pub const PLACEHOLDER_APPROVAL: &[&str] = &["Approval pending"];
 /// While history is compacted, Enter queues a prompt to run afterwards.
 pub const PLACEHOLDER_COMPACTING: &[&str] = &["Compacting… Enter queues · Esc cancels"];
 /// An inspection whose parent draft is empty.
@@ -20,6 +21,7 @@ pub const PLACEHOLDER_INSPECTING: &[&str] = &["Read-only · Esc returns to paren
 pub const PLACEHOLDER_SEP: &str = " · ";
 pub const HINT_SEND: &str = "Enter sends";
 pub const HINT_INTERRUPT: &str = "Esc interrupts";
+pub const HINT_APPROVAL: &str = "Esc cancels request";
 pub const DRAFT_KEPT: &str = "draft kept · Esc returns";
 /// Phases a sample turn steps through, one every [`PHASE_SECONDS`].
 pub const SAMPLE_PHASES: &[&str] = &["thinking", "writing", "running bash", "running subagent +2"];

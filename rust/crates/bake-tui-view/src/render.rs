@@ -330,13 +330,19 @@ fn render_region(
     // The sample-agent list holds focus outside the composer, so the
     // composer names no key while it is open.
     let listing = app.focus == Focus::AgentList;
-    let mode = mode::view(app.mode(), !app.draft.is_empty(), area.width);
+    let asking = app.approval().is_some();
+    let mut mode = mode::view(app.mode(), !app.draft.is_empty(), area.width);
+    if asking {
+        mode.placeholder = copy::PLACEHOLDER_APPROVAL;
+        mode.hint = (area.width >= mode::HINT_MIN_COLUMNS).then_some(copy::HINT_APPROVAL);
+    }
     let below_label = if below > 0 {
         Some(format!("+{below} {}", copy::BELOW))
     } else {
         // While the menu offers commands, its key takes the hint's place.
-        let completing = app.menu().is_some_and(|menu| !menu.entries.is_empty())
-            || app.file_menu().is_some_and(|menu| !menu.entries.is_empty());
+        let completing = !asking
+            && (app.menu().is_some_and(|menu| !menu.entries.is_empty())
+                || app.file_menu().is_some_and(|menu| !menu.entries.is_empty()));
         mode.hint
             .filter(|_| !listing)
             .map(|hint| {
@@ -360,7 +366,6 @@ fn render_region(
 
     // A waiting approval takes the keyboard: the draft stays, dimmed and
     // without a caret, until the request is settled.
-    let asking = app.approval().is_some();
     let editing = app.focus == Focus::Composer && !asking;
     let quiet = mode.dim || listing || asking;
     let text_style = if quiet { dim() } else { Style::new() };
@@ -2773,6 +2778,18 @@ mod tests {
         let (rows, _) = draw(&mut app, 80, 24);
         assert!(rows.join("\n").contains(copy::APPROVAL_KEYS));
         assert_eq!(app.approval_drawn(), None, "still the same showing");
+        app.draft = crate::editor::Draft::default();
+        update(
+            &mut app,
+            Msg::Runtime(crate::runtime::RuntimeUpdate::TurnStarted {
+                seed: "approval".into(),
+            }),
+        );
+        let (rows, _) = draw(&mut app, 80, 24);
+        let screen = rows.join("\n");
+        assert!(screen.contains("Approval pending"));
+        assert!(screen.contains(copy::HINT_APPROVAL));
+        assert!(!screen.contains("Enter steers") && !screen.contains(copy::HINT_INTERRUPT));
     }
 
     #[test]
