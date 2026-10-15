@@ -4,7 +4,7 @@
  * streaming model, in a real PTY and check their return to the shell.
  */
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
@@ -670,7 +670,11 @@ if (process.platform === 'linux') {
  * user prompt: `ECHO <words>` streams `Echo: <words>.`; `READ <path>` calls
  * `read`, then answers with the file's first line; `SLEEP` calls bash
  * `sleep 30`; `HOLD` streams `Holding` and finishes only on `release()` or
- * when the request is aborted; `STEER <words>` answers `Steered: <words>.`.
+ * when the request is aborted; `STEER <words>` answers `Steered: <words>.`;
+ * `WRITE <files…>` calls `write` once per file, in order, each asking to
+ * escalate to workspace-write and all with the one call id `call_write`,
+ * then answers with the last result's first line; `HOLDWRITE <file>` is
+ * `WRITE` whose call is held until `release()`.
  */
 class FakeModel {
   readonly requests: { input: unknown[] }[] = []
@@ -693,6 +697,27 @@ class FakeModel {
 
   async stop(): Promise<void> { await this.server.stop(true) }
 
+  /** A held response: its first events stream at once, the rest on `release()`; an abort ends it. */
+  private held(request: Request, events: string[], head: number): Response {
+    const encoder = new TextEncoder()
+    let release: () => void = () => {}
+    const released = new Promise<void>((done) => { release = done })
+    this.releases.push(release)
+    request.signal.addEventListener('abort', () => { this.aborted++; release() })
+    return new Response(new ReadableStream({
+      start: async (controller) => {
+        controller.enqueue(encoder.encode(events.slice(0, head).join('')))
+        await released
+        if (request.signal.aborted) {
+          controller.close()
+          return
+        }
+        controller.enqueue(encoder.encode(events.slice(head).join('')))
+        controller.close()
+      },
+    }), { headers: { 'content-type': 'text/event-stream' } })
+  }
+
   private async answer(request: Request): Promise<Response> {
     const body = await request.json() as { input: { role?: string; type?: string; content?: { text?: string }[]; output?: string }[] }
     this.requests.push(body)
@@ -701,6 +726,18 @@ class FakeModel {
     const prompt = [...input].reverse().find(item => item.role === 'user')?.content?.map(part => part.text ?? '').join('') ?? ''
     const toolOutput = last?.type === 'function_call_output' ? String(last.output ?? '') : undefined
     const n = this.requests.length
+    const write = /^(HOLD)?WRITE (.+)$/u.exec(prompt)
+    if (write !== null) {
+      const targets = write[2]
+      assert(targets !== undefined)
+      const files = targets.trim().split(/\s+/u)
+      const since = input.length - 1 - [...input].reverse().findIndex(item => item.role === 'user')
+      const done = input.slice(since).filter(item => item.type === 'function_call_output').length
+      const file = files[done]
+      if (file === undefined) return sse(text(n, `Wrote: ${(toolOutput ?? '').split('\n')[0]}`))
+      const events = call(n, 'write', { path: file, content: `${file} body`, sandbox_permissions: 'workspace-write', justification: `create ${file}` }, 'call_write')
+      return write[1] === undefined ? sse(events) : this.held(request, events, 1)
+    }
     if (toolOutput !== undefined) {
       if (prompt.startsWith('READ ')) return sse(text(n, `Read it: ${toolOutput.split('\n')[0]}`))
       return sse(text(n, 'Slept.'))
@@ -765,10 +802,10 @@ function text(n: number, answer: string): string[] {
   ].map((value, sequence) => event(sequence, value))
 }
 
-/** A response holding one tool call. */
-function call(n: number, name: string, args: Record<string, unknown>): string[] {
+/** A response holding one tool call, with its call id `call_<n>` unless one is given. */
+function call(n: number, name: string, args: Record<string, unknown>, callId = `call_${n}`): string[] {
   const id = `fc_${n}`
-  const item = { id, type: 'function_call', status: 'completed', call_id: `call_${n}`, name, arguments: JSON.stringify(args) }
+  const item = { id, type: 'function_call', status: 'completed', call_id: callId, name, arguments: JSON.stringify(args) }
   return [
     { type: 'response.created', response: { id: `resp_${n}`, object: 'response', created_at: 1_760_000_000, status: 'in_progress', model: 'loop-model', output: [] } },
     { type: 'response.output_item.added', output_index: 0, item: { ...item, status: 'in_progress', arguments: '' } },
@@ -997,3 +1034,180 @@ await liveScenario('live command-line prompts run first, and a setup failure exi
   assert(!keyless.raw.includes('\x1b[?2004h'), 'a missing key changed the terminal')
   assert(keyless.unchangedModes, 'a missing key left terminal modes changed')
 })
+
+/** Every tool result the home's sessions hold, as text. */
+async function toolResults(home: string): Promise<string[]> {
+  return (await sessionEntries(home)).flatMap(entries => messageTexts(entries, 'toolResult'))
+}
+
+const ALLOWED_PROMPT = 'Approval prompts: enabled.'
+const REFUSED_PROMPT = 'Approval prompts: disabled.'
+
+const CHOOSE_FIRST = 'Press Y first, then Enter'
+const KEYS_ONLY = 'To answer, press Y then Enter'
+const CONFIRM = 'Allow this call once?'
+
+const PREPARING = 'Preparing approval…'
+const KEYS = 'Y then Enter allows once · N rejects · Esc cancels'
+
+/**
+ * Waits until a freshly shown prompt takes keys. The input thread arms it
+ * only after reading every key that was waiting once it was drawn; until
+ * then the panel offers only Esc, and its keys row appears once armed.
+ */
+async function armed(session: Preview): Promise<void> {
+  await session.wait('prompt armed', () => session.screen.includes(KEYS) && !session.screen.includes(PREPARING))
+}
+
+await liveScenario('an approval allows one write once, and typeahead, paste, a burst, and Enter alone do not', async (world) => {
+  const session = world.launch(['--sandbox', 'read-only'])
+  await session.ready()
+  // Typed ahead with the prompt: read long before the request exists.
+  session.send('WRITE ahead.txt\ry')
+  await session.wait('first approval', () => session.screen.includes('Approval required: write  call_write')
+    && session.screen.includes('escalate sandbox to workspace-write: create ahead.txt')
+    && session.screen.includes('path: ahead.txt') && session.screen.includes('content: ahead.txt body')
+    && (session.screen.includes(PREPARING) || session.screen.includes(KEYS)))
+  assert(JSON.stringify(world.model.requests[0]).includes(ALLOWED_PROMPT), 'the interactive prompt does not offer approvals')
+  await armed(session)
+  // Enter alone does not allow: it says to press Y first.
+  session.send('\r')
+  await session.wait('Enter refused', () => session.screen.includes(CHOOSE_FIRST))
+  // A pasted `y` decides nothing and says how to answer.
+  session.send('\x1b[200~y\x1b[201~')
+  await session.wait('paste refused', () => session.screen.includes(KEYS_ONLY))
+  session.send('\r')
+  await session.wait('Enter refused', () => session.screen.includes(CHOOSE_FIRST))
+  // Text typed in one burst, as an unbracketed paste arrives, decides nothing.
+  session.send('yes')
+  await session.wait('burst refused', () => session.screen.includes(KEYS_ONLY))
+  session.send('n')
+  await session.wait('rejected write answered', () => session.screen.includes('Wrote:') && /^ {2}✓ Completed/mu.test(session.screen))
+  assert(!existsSync(join(world.project, 'ahead.txt')), 'typeahead, a paste, a burst, or Enter approved the write')
+  assert(session.screen.includes('❯ y'), `the typed-ahead key left the draft\n${session.screen}`)
+  session.send('\x7f')
+
+  // Two writes with one call id: the first answer allows only the first.
+  session.send('WRITE one.txt two.txt\r')
+  await session.wait('first of two', () => session.screen.includes('create one.txt') && session.screen.includes('Approval required: write'))
+  await armed(session)
+  session.send('y')
+  await session.wait('allow chosen', () => session.screen.includes(CONFIRM))
+  session.send('\r')
+  await session.wait('second of two', () => session.screen.includes('create two.txt') && session.screen.includes('Approval required: write'))
+  assert.equal(readFileSync(join(world.project, 'one.txt'), 'utf8'), 'one.txt body')
+  assert(!existsSync(join(world.project, 'two.txt')), 'the first answer approved the second request')
+  // The second prompt needs its own arming and choice: Enter alone, again, does not allow it.
+  assert(!session.screen.includes(CONFIRM), 'the first choice carried over')
+  await armed(session)
+  session.send('\r')
+  await session.wait('Enter refused again', () => session.screen.includes(CHOOSE_FIRST))
+  assert(!existsSync(join(world.project, 'two.txt')), 'Enter allowed the second request')
+  session.send('y')
+  await session.wait('allow chosen again', () => session.screen.includes(CONFIRM))
+  session.send('n')
+  await session.wait('turn after two', () => /^ {2}✓ Completed/mu.test(session.screen) && !session.screen.includes('Approval required'))
+  assert(!existsSync(join(world.project, 'two.txt')), 'a rejected write ran')
+  await session.quit()
+  const results = await toolResults(world.home)
+  assert.equal(results.filter(text => text.includes('the user rejected escalating this operation to "workspace-write"')).length, 2, results.join('\n'))
+  assert.deepEqual((await readdir(world.project)).sort(), ['one.txt'])
+})
+
+await liveScenario('an approval keeps the draft, its caret, and a pasted image, and Esc cancels it', async (world) => {
+  const session = world.launch(['--sandbox', 'read-only'])
+  await session.ready()
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64')
+  const imagePath = join(world.root, 'dot.png')
+  await writeFile(imagePath, png)
+  session.send('HOLDWRITE held.txt\r')
+  await session.wait('held write call', () => world.model.holding === 1)
+  session.send('keep ')
+  session.send(`\x1b[200~${imagePath}\x1b[201~`)
+  // The image is read off the loop and lands at the caret once read.
+  await session.wait('image staged', () => session.screen.includes('❯ keep [Image #1]'))
+  session.send('ZZ\x1b[D')
+  await session.wait('draft with image', () => session.screen.includes('❯ keep [Image #1]ZZ') && session.screen.includes('Staged attachments: 1'))
+  world.model.release()
+  await session.wait('approval over the draft', () => session.screen.includes('create held.txt') && session.screen.includes('Approval required'))
+  assert(session.screen.includes('keep [Image #1]ZZ') && session.screen.includes('Staged attachments: 1'), `the draft was not kept\n${session.screen}`)
+  await armed(session)
+  // Typing through the prompt is a burst, which answers nothing.
+  session.send('xyz\x7f')
+  await session.wait('typing refused', () => session.screen.includes(KEYS_ONLY))
+  session.send('\x1b')
+  await session.wait('cancelled', () => !session.screen.includes('Approval required') && /^ {2}✓ Completed/mu.test(session.screen))
+  assert(!existsSync(join(world.project, 'held.txt')), 'a cancelled write ran')
+  // The caret is where it was: typing lands before the last character.
+  session.send('!')
+  await session.wait('caret kept', () => session.screen.includes('❯ keep [Image #1]Z!Z'))
+  await session.quit()
+  const results = await toolResults(world.home)
+  assert(results.some(text => text.includes('approval for escalating to "workspace-write" was cancelled')), results.join('\n'))
+})
+
+await liveScenario('a resize disarms a chosen approval until it is shown and armed again', async (world) => {
+  const session = world.launch(['--sandbox', 'read-only'])
+  await session.ready()
+  session.send('WRITE resized.txt\r')
+  await session.wait('approval', () => session.screen.includes('create resized.txt') && session.screen.includes('Approval required: write'))
+  await armed(session)
+  session.send('y')
+  await session.wait('allow chosen', () => session.screen.includes(CONFIRM))
+  // Too short to show the request whole: the choice is gone, and Enter does nothing.
+  await session.resize(80, 3)
+  session.send('\r')
+  await session.resize(80, 24)
+  await session.wait('shown again', () => session.screen.includes('create resized.txt'))
+  assert(!session.screen.includes(CONFIRM), 'the choice survived the resize')
+  assert(!existsSync(join(world.project, 'resized.txt')), 'Enter after the resize allowed the write')
+  await armed(session)
+  session.send('y')
+  await session.wait('allow chosen again', () => session.screen.includes(CONFIRM))
+  session.send('\r')
+  await session.wait('allowed', () => /Wrote: Successfully wrote/u.test(session.screen))
+  assert.equal(readFileSync(join(world.project, 'resized.txt'), 'utf8'), 'resized.txt body')
+  await session.quit()
+})
+
+await liveScenario('inline approvals under the never policy show no prompt, and an approved write runs', async (world) => {
+  const never = world.launch(['--sandbox', 'read-only', '--approval', 'never'], true)
+  await never.ready()
+  never.send('WRITE never.txt\r')
+  await never.wait('refused write answered', () => never.screen.includes('Wrote:') && /^ {2}✓ Completed/mu.test(never.screen))
+  assert(!never.raw.includes('Approval required'), 'the never policy showed a prompt')
+  assert(JSON.stringify(world.model.requests[0]).includes(REFUSED_PROMPT), 'the never policy offered approvals')
+  assert(!existsSync(join(world.project, 'never.txt')))
+  await never.quit()
+  never.assertShellHistory()
+
+  const ask = world.launch(['--sandbox', 'read-only'], true)
+  await ask.ready()
+  ask.send('WRITE inline.txt\r')
+  await ask.wait('inline approval', () => ask.screen.includes('Approval required: write  call_write'))
+  await armed(ask)
+  ask.send('y')
+  await ask.wait('allow chosen', () => ask.screen.includes(CONFIRM))
+  ask.send('\r')
+  await ask.wait('approved write answered', () => /Wrote: Successfully wrote/u.test(ask.screen) && /^ {2}✓ Completed/mu.test(ask.screen))
+  assert.equal(readFileSync(join(world.project, 'inline.txt'), 'utf8'), 'inline.txt body')
+  await ask.quit()
+  ask.assertShellHistory()
+  ask.assertNoChromeResidue(true)
+})
+
+for (const [how, inline] of [['Ctrl+C', false], ['SIGTERM', true], ['hangup', false], ['inline hangup', true]] as const) {
+  await liveScenario(`${how} with an approval waiting restores the terminal and the write never runs`, async (world) => {
+    const session = world.launch(['--sandbox', 'read-only'], inline)
+    await session.ready()
+    session.send('WRITE pending.txt\r')
+    await session.wait('approval waiting', () => session.screen.includes('Approval required: write'))
+    const requests = world.model.requests.length
+    if (how.endsWith('hangup')) await session.hangUp()
+    else await session.quit(how === 'SIGTERM' ? 'SIGTERM' : undefined)
+    if (inline && how === 'SIGTERM') session.assertShellHistory()
+    assert(!existsSync(join(world.project, 'pending.txt')), 'the write ran after exit')
+    assert.equal(world.model.requests.length, requests, 'the withdrawn call went on to another model request')
+    assert.deepEqual(await readdir(world.project), [], 'the session wrote into the project')
+  })
+}

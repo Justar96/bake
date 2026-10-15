@@ -1,7 +1,7 @@
 //! Draws [`State`] into a Ratatui frame. Rows from the top: body, gap, notice,
-//! the bar (activity and status), the composer box (top edge, draft rows,
-//! bottom edge), and the sample-agents row, in the heights
-//! [`crate::layout::plan`] grants them.
+//! the approval panel while a request waits, the bar (activity and status),
+//! the composer box (top edge, draft rows, bottom edge), and the
+//! sample-agents row, in the heights [`crate::layout::plan`] grants them.
 
 use ratatui_core::buffer::Buffer;
 use ratatui_core::layout::{Position, Rect};
@@ -66,7 +66,146 @@ fn needs(app: &State, width: u16) -> Needs {
         pending: panel_rows(app.pending.len()),
         panel: panel_rows(app.attachments.len()),
         menu: menu_rows(app),
+        approval: approval_rows(app, inner_width(width)),
     }
+}
+
+/// The columns rows outside the box get at `width`, inside its insets.
+fn inner_width(width: u16) -> u16 {
+    if composer::geometry(width).boxed {
+        width.saturating_sub(2 * INSET)
+    } else {
+        width
+    }
+}
+
+/// Detail rows the approval panel asks for; a longer detail scrolls.
+const APPROVAL_DETAIL_ROWS: usize = 12;
+
+/// The rows the approval panel wants: its title, its detail up to
+/// [`APPROVAL_DETAIL_ROWS`], and its keys.
+fn approval_rows(app: &State, width: u16) -> u16 {
+    if app.approval().is_none() {
+        return 0;
+    }
+    let detail = approval_detail(app, width)
+        .len()
+        .clamp(1, APPROVAL_DETAIL_ROWS);
+    u16::try_from(detail + 2).unwrap_or(u16::MAX)
+}
+
+/// The displayed request's detail as rows of at most `width` cells: the
+/// reason, then the call's arguments under a heading, each in full. The
+/// text is sanitized, so model-written text cannot reach the terminal as
+/// an escape sequence; tabs become spaces.
+fn approval_detail(app: &State, width: u16) -> Vec<String> {
+    let Some(approval) = app.approval() else {
+        return Vec::new();
+    };
+    let width = usize::from(width.max(1));
+    let wrap = |text: &str| -> Vec<String> {
+        editor::sanitize(text)
+            .replace('\t', "  ")
+            .split('\n')
+            .flat_map(|part| transcript::wrap(part, width))
+            .collect()
+    };
+    let mut rows = wrap(&approval.reason);
+    if !approval.arguments.trim().is_empty() {
+        rows.push(copy::APPROVAL_ARGUMENTS.to_owned());
+        rows.extend(wrap(&approval.arguments));
+    }
+    rows
+}
+
+/// The approval panel for the displayed request, as the TypeScript
+/// `ApprovalView` orders it: what is asked (the tool and its exact call
+/// id, with the queue's length when others wait), its detail, scrolled to
+/// [`State::approval_scroll`] with a row that says where while it does not
+/// all fit, then the keys. Records which request it showed whole: its
+/// title, at least one detail row, and its keys.
+fn render_approval(app: &mut State, area: Rect, buf: &mut Buffer) {
+    app.approval_on_screen = None;
+    let Some(approval) = app.approval().cloned() else {
+        return;
+    };
+    if area.is_empty() {
+        return;
+    }
+    let clean = |text: &str| editor::sanitize(text).replace(['\n', '\t'], " ");
+    let waiting = tone_style(Tone::Waiting, app.tones).add_modifier(Modifier::BOLD);
+    let mut head = vec![
+        Span::styled(
+            format!("{}: {}", copy::APPROVAL_TITLE, clean(&approval.tool)),
+            waiting,
+        ),
+        Span::styled(format!("  {}", clean(&approval.call_id)), dim()),
+    ];
+    if app.approvals.len() > 1 {
+        head.push(Span::styled(format!("  1/{}", app.approvals.len()), dim()));
+    }
+    line(
+        buf,
+        Rect::new(area.x, area.y, area.width, 1),
+        Line::from(head),
+    );
+    if area.height < 3 {
+        return;
+    }
+    let detail = approval_detail(app, area.width);
+    let rows = usize::from(area.height - 2);
+    // A detail longer than its rows gives its last row to where the view
+    // is and the keys that move it, cut to fit, so even a narrow terminal
+    // shows that more is there.
+    let more = detail.len() > rows && rows >= 2;
+    let page = rows - usize::from(more);
+    let last = detail.len().saturating_sub(page);
+    app.approval_scroll = app.approval_scroll.min(last);
+    app.approval_page = page;
+    let first = app.approval_scroll;
+    for (i, row) in detail.iter().skip(first).take(page).enumerate() {
+        let style = if row == copy::APPROVAL_ARGUMENTS {
+            dim()
+        } else {
+            Style::new()
+        };
+        line(
+            buf,
+            Rect::new(area.x, area.y + 1 + i as u16, area.width, 1),
+            Line::styled(row.clone(), style),
+        );
+    }
+    if more {
+        let position = format!(
+            "{}-{}/{} · {}",
+            first + 1,
+            (first + page).min(detail.len()),
+            detail.len(),
+            copy::APPROVAL_SCROLL
+        );
+        line(
+            buf,
+            Rect::new(area.x, area.y + 1 + page as u16, area.width, 1),
+            Line::styled(fit(&position, usize::from(area.width)), dim()),
+        );
+    }
+    let keys = if app.approval_chosen() {
+        Line::from(vec![
+            Span::styled(copy::APPROVAL_CONFIRM, waiting),
+            Span::styled(format!(" · {}", copy::APPROVAL_CONFIRM_KEYS), dim()),
+        ])
+    } else if app.approval_armed() {
+        Line::styled(copy::APPROVAL_KEYS, dim())
+    } else {
+        // Not armed yet: keys cannot answer, so none are offered but Esc.
+        Line::styled(copy::APPROVAL_PREPARING, dim())
+    };
+    line(
+        buf,
+        Rect::new(area.x, area.bottom() - 1, area.width, 1),
+        keys,
+    );
+    app.approval_on_screen = Some(approval.generation);
 }
 
 /// Natural controls plus a bounded transcript, with the same composer window
@@ -109,6 +248,7 @@ fn render_region(
     let panel = next(rows.panel);
     let notice = next(rows.notice);
     let menu_area = next(rows.menu);
+    let approval_area = next(rows.approval);
     let bar = next(rows.bar);
     let rule = next(rows.top_edge);
     let band = next(rows.composer);
@@ -149,6 +289,8 @@ fn render_region(
             Notice::ImagesWhileRunning => copy::IMAGES_WHILE_RUNNING,
             Notice::PreviewOnly => copy::PREVIEW_ONLY,
             Notice::Returned => copy::RETURNED,
+            Notice::ApprovalKeys => copy::APPROVAL_KEYS_ONLY,
+            Notice::ApprovalChooseFirst => copy::APPROVAL_CHOOSE_FIRST,
         };
         line(
             buf,
@@ -159,6 +301,7 @@ fn render_region(
     render_pending(app, inset(pending), buf);
     render_attachments(app, inset(panel), buf);
     render_menu(app, inset(menu_area), buf);
+    render_approval(app, inset(approval_area), buf);
     let columns = area.width;
     render_bar(app, inset(bar), buf);
     render_agents_row(columns, inset(agents), buf);
@@ -215,8 +358,11 @@ fn render_region(
         below_label.as_deref(),
     );
 
-    let editing = app.focus == Focus::Composer;
-    let quiet = mode.dim || listing;
+    // A waiting approval takes the keyboard: the draft stays, dimmed and
+    // without a caret, until the request is settled.
+    let asking = app.approval().is_some();
+    let editing = app.focus == Focus::Composer && !asking;
+    let quiet = mode.dim || listing || asking;
     let text_style = if quiet { dim() } else { Style::new() };
     let prompt_style = if quiet { dim() } else { accent() };
     let limit = geometry.wrap_width.saturating_sub(1).max(1);
@@ -2575,5 +2721,89 @@ mod tests {
         let bar = row_index(&rows, "no model");
         assert!(rows[bar - 1].contains("Commands are not available"));
         assert!(rows[bar - 2].contains("lines below · Ctrl+End"));
+    }
+
+    // ---- Approvals ----
+
+    fn asking(reason: &str, arguments: &str) -> State {
+        let mut app = State::live(FrameStyle::default(), Tones::None, Vec::new());
+        update(&mut app, Msg::Key(KeyInput::plain(Key::Char('d'))));
+        update(
+            &mut app,
+            Msg::Runtime(crate::runtime::RuntimeUpdate::Approvals(vec![
+                crate::runtime::Approval {
+                    generation: 4,
+                    tool: "bash\x1b[31m".into(),
+                    call_id: "call\x07-4".into(),
+                    reason: reason.into(),
+                    arguments: arguments.into(),
+                },
+            ])),
+        );
+        app
+    }
+
+    #[test]
+    fn the_approval_panel_shows_the_call_its_reason_and_arguments_without_escapes() {
+        let mut app = asking(
+            "escalate sandbox to danger-full-access: \x1b]52;c;aGk=\x07fetch",
+            "command: curl -fsS https://example.com",
+        );
+        let (rows, _) = draw(&mut app, 80, 24);
+        let screen = rows.join("\n");
+        assert!(
+            !screen.contains('\x1b') && !screen.contains('\x07'),
+            "{screen}"
+        );
+        assert!(
+            screen.contains("Approval required: bash[31m  call-4"),
+            "{screen}"
+        );
+        assert!(screen.contains("escalate sandbox to danger-full-access: ]52;c;aGk=fetch"));
+        assert!(screen.contains("Arguments:"));
+        assert!(screen.contains("command: curl -fsS https://example.com"));
+        // Not armed yet: no key but Esc is offered.
+        assert!(screen.contains(copy::APPROVAL_PREPARING), "{screen}");
+        assert!(!screen.contains(copy::APPROVAL_KEYS), "{screen}");
+        // The draft stays, dimmed, below the panel.
+        assert!(screen.contains("❯ d"), "{screen}");
+        assert_eq!(app.approval_drawn(), Some(1), "a new showing");
+        // The preparing frame counts as shown; once armed, the keys show.
+        update(&mut app, Msg::ApprovalArmed(1));
+        let (rows, _) = draw(&mut app, 80, 24);
+        assert!(rows.join("\n").contains(copy::APPROVAL_KEYS));
+        assert_eq!(app.approval_drawn(), None, "still the same showing");
+    }
+
+    #[test]
+    fn a_long_detail_scrolls_on_a_narrow_terminal_and_a_short_one_does_not_arm() {
+        let content: Vec<String> = (1..=40).map(|n| format!("  line {n}")).collect();
+        let arguments = format!("path: notes.txt\ncontent:\n{}", content.join("\n"));
+        let mut app = asking(&"needs it ".repeat(20), &arguments);
+        let (rows, _) = draw(&mut app, 40, 30);
+        let screen = rows.join("\n");
+        // Eleven detail rows, then where they are in the whole.
+        assert!(screen.contains("1-11/"), "{screen}");
+        assert_eq!(app.approval_drawn(), Some(1));
+        // Paging reaches the last line, and no further.
+        for _ in 0..20 {
+            update(&mut app, Msg::Key(KeyInput::plain(Key::PageDown)));
+        }
+        let (rows, _) = draw(&mut app, 40, 30);
+        let screen = rows.join("\n");
+        assert!(screen.contains("line 40"), "{screen}");
+        let total = approval_detail(&app, 36).len();
+        assert_eq!(app.approval_scroll, total - 11);
+        assert_eq!(app.approval_drawn(), None, "still the same showing");
+        // Title and keys alone, without a detail row, are not shown whole.
+        let mut short = asking("why", "command: x");
+        let (rows, _) = draw(&mut short, 80, 2);
+        assert!(rows.join("\n").contains("Approval required"));
+        assert_eq!(short.approval_drawn(), None);
+        // Four rows: the draft's first row, then title, one detail row, keys.
+        let (_, _) = draw(&mut short, 80, 3);
+        assert_eq!(short.approval_drawn(), None);
+        let (_, _) = draw(&mut short, 80, 4);
+        assert_eq!(short.approval_drawn(), Some(1));
     }
 }

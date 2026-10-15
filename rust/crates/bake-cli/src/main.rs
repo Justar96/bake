@@ -17,6 +17,7 @@ use std::sync::{Arc, Mutex};
 
 use bake_ai::ImageContent;
 use bake_coding_agent::cli::{self, Action, CliEnvironment, Interrupt};
+use bake_coding_agent::permissions::{ApprovalBroker, Approver};
 use bake_coding_agent::print_mode::SharedWriter;
 use bake_sandbox::SandboxProvider;
 use bake_tui::{LiveSession, PreviewExit, ScreenMode};
@@ -85,8 +86,8 @@ find need rg and fd on PATH. A session keeps its permission: write and edit
 change files only where its sandbox mode allows, and bash runs only under a
 sandbox that enforces it: bubblewrap or Landlock on Linux and Seatbelt on
 macOS. Without one (Windows, for now), confined bash calls are refused.
-Escalations need approval, which neither mode can give yet, so they are
-refused.
+Escalations need approval: under --approval ask an interactive session asks,
+Y then Enter allowing that one call; print mode cannot ask, so it refuses.
 
 bake-rs is interactive when both standard streams are terminals and neither
 -p nor --mode is given; otherwise it prints. Interactive messages run in
@@ -265,7 +266,7 @@ fn agent(args: &[String]) -> ExitCode {
     let code = match mode {
         Some(mode) => runtime.block_on(async move {
             // Signal streams register with the runtime, so they start inside it.
-            let environment = environment(stdin_is_terminal, stderr, interrupt());
+            let environment = environment(stdin_is_terminal, stderr, interrupt(), None);
             cli::run(environment, *parsed, mode).await
         }),
         None => interactive(&runtime, *parsed, stderr),
@@ -275,11 +276,13 @@ fn agent(args: &[String]) -> ExitCode {
     exit_code(code)
 }
 
-/// The process as the command line sees it.
+/// The process as the command line sees it. `approvals` is interactive
+/// mode's broker; print mode has none, so its escalations fail closed.
 fn environment(
     stdin_is_terminal: bool,
     stderr: SharedWriter,
     interrupt: Interrupt,
+    approvals: Option<ApprovalBroker>,
 ) -> CliEnvironment {
     let home = bake_coding_agent::home::bake_home();
     let imported = match &home {
@@ -299,6 +302,7 @@ fn environment(
         imported_default_model: imported.default_model,
         imported_default_preset: imported.default_preset,
         sandbox_provider: sandbox_provider(),
+        approver: approvals.map(|broker| Arc::new(broker) as Arc<dyn Approver>),
         warnings: imported.warnings,
         interrupt,
     }
@@ -315,8 +319,13 @@ fn interactive(runtime: &tokio::runtime::Runtime, args: cli::Args, stderr: Share
     } else {
         ScreenMode::Fullscreen
     };
-    let started = runtime
-        .block_on(async { cli::start(environment(true, stderr, cli::no_interrupt()), args).await });
+    // The terminal answers the session's approval requests (D24); until it
+    // is connected, and once it is gone, nobody can, so they fail closed.
+    let approvals = ApprovalBroker::new();
+    let started = runtime.block_on(async {
+        let environment = environment(true, stderr, cli::no_interrupt(), Some(approvals.clone()));
+        cli::start(environment, args).await
+    });
     let started = match started {
         Ok(started) => started,
         Err(code) => return code,
@@ -346,6 +355,7 @@ fn interactive(runtime: &tokio::runtime::Runtime, args: cli::Args, stderr: Share
         runtime: runtime.handle().clone(),
         prompts,
         notes,
+        approvals: Some(approvals),
     };
     match bake_tui::run_live(screen, live) {
         Ok(exit) => exit_status(exit),

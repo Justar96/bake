@@ -22,4 +22,5 @@ libc.workspace = true
 signal-hook = { workspace = true, features = ["iterator"] }
 
 [dev-dependencies]
+bake-sandbox.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "macros", "time"] }

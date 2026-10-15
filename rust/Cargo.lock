@@ -149,6 +149,7 @@ dependencies = [
  "bake-agent",
  "bake-ai",
  "bake-coding-agent",
+ "bake-sandbox",
  "bake-tui-view",
  "base64 0.22.1",
  "crossterm",

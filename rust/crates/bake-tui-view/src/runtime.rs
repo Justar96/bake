@@ -5,7 +5,9 @@
 //!
 //! The runtime owns the transcript's content: a submitted prompt reaches the
 //! transcript only when the runtime commits it, and a turn starts and ends
-//! only when the runtime says so.
+//! only when the runtime says so. It also owns the approval queue: the view
+//! shows the requests [`RuntimeUpdate::Approvals`] lists and answers the
+//! displayed one with [`crate::state::Effect::Answer`].
 
 use crate::paste::Image;
 use crate::state::Outcome;
@@ -80,6 +82,35 @@ pub struct Pending {
     pub target: Target,
 }
 
+/// One approval request the runtime is waiting on a person to answer: a
+/// tool call that asks for more access than the session's sandbox gives.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Approval {
+    /// The request's identity. An answer names it, so an answer meant for
+    /// one request never settles another, even for the same call id.
+    pub generation: u64,
+    /// The tool that asks.
+    pub tool: String,
+    /// The exact tool call the request is for.
+    pub call_id: String,
+    /// Why the tool asks, such as `escalate sandbox to …: <justification>`.
+    pub reason: String,
+    /// The call's arguments as the runtime words them, one line each, so
+    /// the person sees what would run.
+    pub arguments: String,
+}
+
+/// A person's answer to the displayed approval request.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ApprovalAnswer {
+    /// The one call runs with the access it asked for.
+    AllowOnce,
+    /// The call is refused.
+    Reject,
+    /// The request is withdrawn without a decision, which also refuses it.
+    Cancel,
+}
+
 /// One change the runtime reports.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RuntimeUpdate {
@@ -112,4 +143,8 @@ pub enum RuntimeUpdate {
     Returned(Vec<String>),
     /// The session's model, thinking level, and context use changed.
     Status(SessionStatus),
+    /// Every approval request still waiting, oldest first; the first is
+    /// the one displayed. Sent whenever the list changes; an empty list
+    /// gives the keyboard back to the composer.
+    Approvals(Vec<Approval>),
 }

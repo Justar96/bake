@@ -19,8 +19,9 @@
 //! the session's permission is settled and stored in its session file
 //! before the agent starts, `bash`, `write`, and `edit` are wrapped by the
 //! permission engine over [`CliEnvironment::sandbox_provider`], approvals
-//! fail closed (neither print nor interactive mode answers them yet), and
-//! the permission is stated in the system prompt's `permissions` section.
+//! go to [`CliEnvironment::approver`] (interactive mode's terminal; print
+//! mode has none, so they fail closed), and the permission is stated in the
+//! system prompt's `permissions` section.
 //!
 //! [`start`] is the setup print mode and interactive mode share: the
 //! binary runs print mode through [`run`] and hands an interactive
@@ -50,8 +51,8 @@ use crate::model_registry::resolver::{
     ScopedModel, resolve_cli_model, resolve_model_scope_from_models,
 };
 use crate::permissions::{
-    NoApprover, PermissionInputs, ToolPermissions, prepare_session_permission, sandbox_file_tools,
-    sandboxed_bash_tool,
+    Approver, NoApprover, PermissionInputs, ToolPermissions, prepare_session_permission,
+    sandbox_file_tools, sandboxed_bash_tool,
 };
 use crate::print_mode::{PrintModeOptions, PrintOutput, SharedWriter, run_print_mode, write_out};
 use crate::prompt_templates::{LoadPromptTemplatesOptions, load_prompt_templates};
@@ -113,6 +114,11 @@ pub struct CliEnvironment {
     /// [`bake_sandbox::default_provider`], which fails every confined call
     /// closed on a host without a backend.
     pub sandbox_provider: Arc<dyn SandboxProvider>,
+    /// Who answers approval requests (D24): interactive mode passes its
+    /// terminal's [`crate::permissions::ApprovalBroker`]; `None`, as in
+    /// print mode, means nobody can, so every escalation fails closed and
+    /// the system prompt states the `never` policy.
+    pub approver: Option<Arc<dyn Approver>>,
     /// Startup warnings found before [`run`], printed with its own.
     pub warnings: Vec<String>,
     /// Resolves with an exit code when the process should stop, such as on
@@ -632,6 +638,7 @@ pub async fn start(environment: CliEnvironment, args: Args) -> Result<Started, i
         imported_default_model,
         imported_default_preset,
         sandbox_provider,
+        approver,
         warnings: startup_warnings,
         interrupt,
     } = environment;
@@ -787,9 +794,10 @@ pub async fn start(environment: CliEnvironment, args: Args) -> Result<Started, i
     let has_existing_session = !session.build_session_context().messages.is_empty();
     let session_cwd = session.cwd().to_owned();
     let session_id = session.session_id().to_owned();
+    let can_ask = approver.is_some();
     let tool_permissions = ToolPermissions::new(
         Arc::new(permission.standing(Path::new(&session_cwd), Some(session_id.clone()))),
-        Arc::new(NoApprover),
+        approver.unwrap_or_else(|| Arc::new(NoApprover)),
         sandbox_provider,
     );
     let session_file = session
@@ -1001,9 +1009,9 @@ pub async fn start(environment: CliEnvironment, args: Args) -> Result<Started, i
     }
     system_prompt.context_files = context_files;
     system_prompt.skills = skills;
-    // Neither mode answers approval prompts yet: escalations fail closed
-    // (D24), and the prompt says so, the same in print and interactive mode.
-    system_prompt.permissions = permission.prompt_text(Path::new(&session_cwd), false);
+    // Without an approver, escalations fail closed (D24), and the prompt
+    // states the `never` policy whatever the session's.
+    system_prompt.permissions = permission.prompt_text(Path::new(&session_cwd), can_ask);
     system_prompt.environment = Environment::detect(Path::new(&session_cwd), started_ms);
     let mut session = match AgentSession::create(AgentSessionOptions {
         session,

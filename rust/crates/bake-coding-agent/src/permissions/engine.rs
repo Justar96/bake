@@ -413,6 +413,7 @@ impl PermissionEngine {
                                 tool_name: call.tool_name.to_owned(),
                                 call_id: call.call_id.to_owned(),
                                 reason: need.reason,
+                                arguments: call.args.clone(),
                             },
                             signal.cloned(),
                         )

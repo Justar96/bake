@@ -114,6 +114,7 @@ fn setup(
         runtime: runtime.handle().clone(),
         prompts,
         notes: Vec::new(),
+        approvals: None,
     };
     (runtime, faux, live)
 }
@@ -683,4 +684,269 @@ fn commands_are_refused_but_skills_templates_and_paths_are_not() {
         None
     );
     assert_eq!(refused_command("plain", &templates), None);
+}
+
+// ---- Approvals (D24) ----
+//
+// The session's real sandboxed `write` tool under a read-only session asks
+// the broker to escalate to workspace-write; what the view answers decides
+// whether the file appears. Fixtures follow
+// `apps/tui/packages/app/tests/interactions.spec.ts` and
+// `packages/interaction/user-approval/tests/approval.spec.ts`.
+
+use bake_coding_agent::permissions::{
+    ApprovalBroker, ApprovalPolicy, StandingPermissions, ToolPermissions,
+    fs::create_sandboxed_write_tool_definition,
+};
+use bake_sandbox::SandboxMode;
+use bake_sandbox::provider::UnavailableProvider;
+use bake_tui_view::runtime::{Approval, ApprovalAnswer};
+
+/// A project directory this test alone owns, removed when dropped.
+struct Project(std::path::PathBuf);
+
+impl Project {
+    fn new(name: &str) -> Self {
+        let dir = std::env::temp_dir().join(format!(
+            "bake-tui-approval-{name}-{}-{}",
+            std::process::id(),
+            bake_ai::now_ms()
+        ));
+        std::fs::create_dir(&dir).expect("a fresh project directory");
+        Self(dir)
+    }
+
+    fn file(&self, name: &str) -> std::path::PathBuf {
+        self.0.join(name)
+    }
+}
+
+impl Drop for Project {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// A started port whose `write` tool asks `broker` under `policy`.
+fn approval_harness(project: &Project, policy: ApprovalPolicy) -> (Harness, ApprovalBroker) {
+    let broker = ApprovalBroker::new();
+    let permissions = ToolPermissions::new(
+        Arc::new(StandingPermissions::new(
+            SandboxMode::ReadOnly,
+            policy,
+            "custom",
+            &project.0,
+            None,
+        )),
+        Arc::new(broker.clone()),
+        Arc::new(UnavailableProvider::new(None)),
+    );
+    let write = Arc::new(create_sandboxed_write_tool_definition(&project.0, &permissions).tool);
+    let (runtime, faux, mut live) = setup(vec![write], Vec::new(), Some("test-key"));
+    live.approvals = Some(broker.clone());
+    let (sender, updates) = std_mpsc::channel();
+    let mut port = LivePort::start(live, move |update| sender.send(update).is_ok());
+    port.begin();
+    let harness = Harness {
+        runtime,
+        faux,
+        port: Some(port),
+        updates,
+    };
+    (harness, broker)
+}
+
+/// A write of `name` that asks to escalate, as call `call_id`.
+fn escalating_write(project: &Project, name: &str, call_id: &str) -> FauxResponseStep {
+    faux_assistant_blocks(
+        vec![faux_tool_call(
+            "write",
+            json!({
+                "path": project.file(name).to_string_lossy(),
+                "content": format!("{name} body"),
+                "sandbox_permissions": "workspace-write",
+                "justification": format!("create {name}"),
+            }),
+            Some(call_id),
+        )],
+        StopReason::ToolUse,
+    )
+    .into()
+}
+
+impl Harness {
+    /// Waits for the queue to list exactly one request, and returns it.
+    fn displayed(&self) -> Approval {
+        let updates = self
+            .until(|update| matches!(update, RuntimeUpdate::Approvals(queue) if queue.len() == 1));
+        let Some(RuntimeUpdate::Approvals(queue)) = updates.last() else {
+            unreachable!()
+        };
+        queue[0].clone()
+    }
+
+    fn answer(&self, generation: u64, answer: ApprovalAnswer) {
+        self.port().request(Request::Answer { generation, answer });
+    }
+}
+
+fn committed_text(updates: &[RuntimeUpdate]) -> String {
+    format!("{:?}", committed(updates))
+}
+
+#[test]
+fn an_approval_shows_the_call_and_allows_only_that_call_once() {
+    let project = Project::new("once");
+    let (h, broker) = approval_harness(&project, ApprovalPolicy::Ask);
+    // Two escalating writes with the same call id, one after the other.
+    h.faux.set_responses(vec![
+        escalating_write(&project, "first.txt", "dup"),
+        escalating_write(&project, "second.txt", "dup"),
+        faux_assistant_message("Done.").into(),
+    ]);
+    h.submit(Submission::FollowUp("write two files".into()));
+    let first = h.displayed();
+    assert_eq!(
+        (first.tool.as_str(), first.call_id.as_str()),
+        ("write", "dup")
+    );
+    assert_eq!(
+        first.reason,
+        "escalate sandbox to workspace-write: create first.txt"
+    );
+    // The arguments show what would run; the escalation pair is the reason.
+    assert_eq!(
+        first.arguments,
+        format!(
+            "path: {}\ncontent: first.txt body",
+            project.file("first.txt").display()
+        )
+    );
+    assert!(
+        !project.file("first.txt").exists(),
+        "the write ran before its answer"
+    );
+    // A stale or unknown generation settles nothing.
+    h.answer(first.generation + 100, ApprovalAnswer::AllowOnce);
+    assert_eq!(broker.pending().len(), 1);
+    h.answer(first.generation, ApprovalAnswer::AllowOnce);
+    let second = h.displayed();
+    assert_eq!(second.call_id, "dup");
+    assert_ne!(second.generation, first.generation);
+    assert_eq!(
+        std::fs::read_to_string(project.file("first.txt")).unwrap(),
+        "first.txt body"
+    );
+    // The first prompt's answer, sent again, cannot approve the second.
+    h.answer(first.generation, ApprovalAnswer::AllowOnce);
+    assert_eq!(broker.pending()[0].generation, second.generation);
+    h.answer(second.generation, ApprovalAnswer::Reject);
+    let updates = h.until_turn_end();
+    assert!(!project.file("second.txt").exists(), "a rejected write ran");
+    assert!(
+        committed_text(&updates)
+            .contains("the user rejected escalating this operation to \\\"workspace-write\\\""),
+        "{updates:#?}"
+    );
+    h.stop();
+    assert!(broker.is_closed());
+}
+
+#[test]
+fn the_never_policy_rejects_without_showing_a_prompt() {
+    let project = Project::new("never");
+    let (h, _broker) = approval_harness(&project, ApprovalPolicy::Never);
+    h.faux.set_responses(vec![
+        escalating_write(&project, "never.txt", "call-1"),
+        faux_assistant_message("Done.").into(),
+    ]);
+    h.submit(Submission::FollowUp("write".into()));
+    let updates = h.until_turn_end();
+    assert!(
+        !updates
+            .iter()
+            .any(|u| matches!(u, RuntimeUpdate::Approvals(queue) if !queue.is_empty())),
+        "a prompt was shown: {updates:#?}"
+    );
+    assert!(!project.file("never.txt").exists());
+    assert!(committed_text(&updates).contains("the user rejected escalating"));
+    h.stop();
+}
+
+#[test]
+fn cancelling_the_turn_withdraws_the_prompt_and_a_late_answer_does_nothing() {
+    let project = Project::new("cancel");
+    let (h, broker) = approval_harness(&project, ApprovalPolicy::Ask);
+    h.faux
+        .set_responses(vec![escalating_write(&project, "late.txt", "call-1")]);
+    h.submit(Submission::FollowUp("write".into()));
+    let shown = h.displayed();
+    h.port().request(Request::Cancel);
+    h.until(|update| update == &RuntimeUpdate::Approvals(Vec::new()));
+    h.until_turn_end();
+    h.answer(shown.generation, ApprovalAnswer::AllowOnce);
+    assert!(broker.pending().is_empty());
+    assert!(
+        !project.file("late.txt").exists(),
+        "a withdrawn request ran"
+    );
+    h.stop();
+    assert!(!project.file("late.txt").exists());
+}
+
+#[test]
+fn an_answer_that_withdraws_the_prompt_reports_it_cancelled() {
+    let project = Project::new("esc");
+    let (h, _broker) = approval_harness(&project, ApprovalPolicy::Ask);
+    h.faux.set_responses(vec![
+        escalating_write(&project, "esc.txt", "call-1"),
+        faux_assistant_message("Done.").into(),
+    ]);
+    h.submit(Submission::FollowUp("write".into()));
+    let shown = h.displayed();
+    h.answer(shown.generation, ApprovalAnswer::Cancel);
+    let updates = h.until_turn_end();
+    assert!(!project.file("esc.txt").exists());
+    assert!(
+        committed_text(&updates)
+            .contains("approval for escalating to \\\"workspace-write\\\" was cancelled"),
+        "{updates:#?}"
+    );
+    h.stop();
+}
+
+#[test]
+fn stopping_with_a_prompt_waiting_cancels_it_and_shuts_down_without_its_effect() {
+    let project = Project::new("stop");
+    let (h, broker) = approval_harness(&project, ApprovalPolicy::Ask);
+    h.faux
+        .set_responses(vec![escalating_write(&project, "stop.txt", "call-1")]);
+    h.submit(Submission::FollowUp("write".into()));
+    let shown = h.displayed();
+    // `stop` returns only once the session has shut down.
+    h.stop();
+    assert!(broker.is_closed());
+    assert!(!broker.answer(
+        shown.generation,
+        bake_coding_agent::permissions::ApprovalAnswer::AllowOnce
+    ));
+    assert!(
+        !project.file("stop.txt").exists(),
+        "the write ran after the session stopped"
+    );
+}
+
+#[test]
+fn arguments_show_every_character_that_would_run() {
+    let text = super::arguments_text(&json!({
+        "command": "printf 'a\\tb'\u{1b}[2J\u{202e}txt",
+        "content": "one\r\ntwo",
+        "sandbox_permissions": "danger-full-access",
+        "justification": "why",
+        "limit": 3,
+    }));
+    assert_eq!(
+        text,
+        "command: printf 'a\\tb'\\u{1b}[2J\\u{202e}txt\ncontent:\n  one\\u{d}\n  two\nlimit: 3"
+    );
 }

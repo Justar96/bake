@@ -15,9 +15,20 @@
 //! runtime port's thread, and, on Unix, a signal thread and a hangup watcher
 //! only send it messages over one channel; the loop waits for the next message or the
 //! view's next timed change, applies every waiting message, and draws once.
+//!
+//! An approval request is armed across both threads. Once a frame has
+//! drawn the displayed request whole, the loop publishes the token of that
+//! showing ([`State::approval_drawn`]);
+//! the input thread then reads every event already waiting, in Crossterm's
+//! buffer or the terminal's, sends those ahead, and only then sends
+//! [`Msg::ApprovalArmed`]. The channel keeps that order, so a key typed
+//! before the prompt appeared, whether still queued for the loop or not
+//! yet read, reaches the view before the arming and cannot answer it; no
+//! delay stands in for that order.
 
 use std::io::{self, Stdout};
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, Ordering};
+use std::mem::ManuallyDrop;
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Once};
 use std::thread::{self, JoinHandle};
@@ -253,7 +264,8 @@ trait Screen {
 /// them and reports failures; dropping it restores them silently if `close`
 /// did not run.
 pub struct TerminalSession {
-    terminal: Terminal<CrosstermBackend<Stdout>>,
+    /// Dropped only through [`release`], never by Ratatui's own drop alone.
+    terminal: ManuallyDrop<Terminal<CrosstermBackend<Stdout>>>,
     inline: Option<Inline>,
 }
 
@@ -298,7 +310,7 @@ impl TerminalSession {
         };
         match setup() {
             Ok(terminal) => Ok(Self {
-                terminal,
+                terminal: ManuallyDrop::new(terminal),
                 inline: (mode == ScreenMode::Inline).then(Inline::default),
             }),
             Err(err) => {
@@ -357,6 +369,22 @@ impl Screen for TerminalSession {
 impl Drop for TerminalSession {
     fn drop(&mut self) {
         let _ = restore();
+        release(&mut self.terminal);
+    }
+}
+
+/// Drops `terminal` once the modes are restored. Ratatui's drop shows a
+/// cursor it hid, such as while an approval takes the keyboard, and prints
+/// a failure to standard error, which panics on a terminal that has gone
+/// away. [`restore`] has already shown the cursor, so a terminal that
+/// cannot show it again is left undropped. This retains its screen buffers
+/// and standard-output handle until process exit after terminal loss; no
+/// worker or runtime task is owned by this terminal value.
+fn release(terminal: &mut ManuallyDrop<Terminal<CrosstermBackend<Stdout>>>) {
+    if terminal.show_cursor().is_ok() {
+        // SAFETY: `terminal` is not used again: this runs once, from the
+        // session's drop.
+        unsafe { ManuallyDrop::drop(terminal) };
     }
 }
 
@@ -511,7 +539,8 @@ fn run(mode: ScreenMode, runtime: Runtime) -> io::Result<PreviewExit> {
     // Started only once raw mode is on, so it never reads cooked input.
     let found = sender.clone();
     let watched = sender.clone();
-    let outcome = Reader::start(sender, clock).and_then(|reader| {
+    let shown = Arc::new(AtomicU64::new(0));
+    let outcome = Reader::start(sender, clock, Arc::clone(&shown)).and_then(|reader| {
         let watcher = match hangup::Watcher::start(watched) {
             Ok(watcher) => watcher,
             Err(err) => {
@@ -548,6 +577,7 @@ fn run(mode: ScreenMode, runtime: Runtime) -> io::Result<PreviewExit> {
                 home,
                 runtime: &|request| port.request(request),
                 files: &|ask| finder.ask(ask),
+                shown: &shown,
             },
         );
         // Joined before the terminal leaves raw mode, so it reads nothing
@@ -586,12 +616,14 @@ fn hung_up(err: &io::Error) -> bool {
 }
 
 /// What the loop hands effects to: the clipboard and image jobs, the
-/// runtime port, and path discovery.
+/// runtime port, and path discovery; and the token of the approval
+/// request's latest showing, which the input thread arms.
 struct Owners<'a> {
     clipboard: Clipboard,
     home: Option<String>,
     runtime: &'a dyn Fn(Request),
     files: &'a dyn Fn(Ask),
+    shown: &'a AtomicU64,
 }
 
 /// Draws, waits for the next message or the view's next timed change, applies
@@ -634,6 +666,11 @@ fn drive(
         jobs.settle(screen, state)?;
         if first_frame || !deferred || now >= drawn + RUNTIME_FRAME {
             screen.draw(state, stale)?;
+            // Published only once the frame is out: the input thread arms
+            // the showing after it has read every key waiting by then.
+            if let Some(token) = state.approval_drawn() {
+                owners.shown.store(token, Ordering::SeqCst);
+            }
             (stale, deferred, first_frame, drawn) = (false, false, false, now);
         }
         // While a copy is pending, the loop also wakes to report it, and
@@ -686,6 +723,9 @@ fn drive(
                             Effect::Cancel => (owners.runtime)(Request::Cancel),
                             Effect::SendPending => (owners.runtime)(Request::SendPending),
                             Effect::FindFiles(query) => (owners.files)(Ask::Find(query)),
+                            Effect::Answer { generation, answer } => {
+                                (owners.runtime)(Request::Answer { generation, answer });
+                            }
                         }
                     }
                 }
@@ -727,12 +767,14 @@ struct Reader {
 }
 
 impl Reader {
-    fn start(sender: Sender<Source>, clock: Instant) -> io::Result<Self> {
+    fn start(sender: Sender<Source>, clock: Instant, shown: Arc<AtomicU64>) -> io::Result<Self> {
         let stop = Arc::new(AtomicBool::new(false));
         let flag = Arc::clone(&stop);
         let thread = thread::Builder::new()
             .name("bake-tui-input".into())
-            .spawn(move || read_input(Stopped(sender), &flag, clock))?;
+            .spawn(move || {
+                read_input(Stopped(sender), &flag, clock, &shown, &mut Crossterm);
+            })?;
         Ok(Self {
             stop,
             thread: Some(thread),
@@ -794,27 +836,139 @@ impl Drop for Stopped {
     }
 }
 
-fn read_input(out: Stopped, stop: &AtomicBool, clock: Instant) {
+/// Where the input thread reads events: the terminal through Crossterm,
+/// or a test's script.
+trait Events {
+    /// Whether an event is ready within `wait`.
+    fn poll(&mut self, wait: Duration) -> io::Result<bool>;
+    /// The next event, waiting for one.
+    fn read(&mut self) -> io::Result<event::Event>;
+}
+
+/// The terminal's events.
+struct Crossterm;
+
+impl Events for Crossterm {
+    fn poll(&mut self, wait: Duration) -> io::Result<bool> {
+        event::poll(wait)
+    }
+
+    fn read(&mut self) -> io::Result<event::Event> {
+        event::read()
+    }
+}
+
+/// Events the input thread reads in one sweep before it sends them.
+const SWEEP: usize = 1024;
+/// How long a sweep polls for the next waiting event. Crossterm 0.29's
+/// `/dev/tty` source answers a zero timeout without looking, not even at
+/// an event it has already parsed, so the sweep asks with the shortest
+/// wait it honours. Events already waiting, parsed or in the terminal's
+/// buffer, are found at once; the wait only lets a key that arrives during
+/// it join the sweep, which never lets a key count as later than it was.
+const SWEEP_POLL: Duration = Duration::from_millis(1);
+
+/// Reads events until stopped, in sweeps: every event already waiting is
+/// read before any is sent, so a sweep with more than one key marks its
+/// keys as a burst ([`stamp`]).
+///
+/// Before each wait for input, the thread checks `shown`, the token of
+/// the approval request's latest showing. A showing not armed yet is armed
+/// here: every waiting event is swept and sent first, until the input
+/// observably runs dry, and [`Msg::ApprovalArmed`] follows. Input found
+/// while a request is waiting to be armed is left for that sweep, so it
+/// too goes ahead of the arming.
+fn read_input(
+    out: Stopped,
+    stop: &AtomicBool,
+    clock: Instant,
+    shown: &AtomicU64,
+    events: &mut impl Events,
+) {
     let fail = |err| {
         let _ = out.0.send(Source::Failed(err));
     };
+    let send = |msgs: Vec<Msg>| {
+        msgs.into_iter()
+            .all(|msg| out.0.send(Source::Msg(msg)).is_ok())
+    };
+    let mut armed = 0;
     while !stop.load(Ordering::SeqCst) {
-        match event::poll(READER_WAKE) {
+        let drawn = shown.load(Ordering::SeqCst);
+        if drawn != armed {
+            loop {
+                // A stream that never runs dry must not hold up a stop.
+                if stop.load(Ordering::SeqCst) {
+                    return;
+                }
+                let (sweep, dry) = match sweep(events, clock) {
+                    Ok(swept) => swept,
+                    Err(err) => return fail(err),
+                };
+                if !send(stamp(sweep)) {
+                    return;
+                }
+                if dry {
+                    break;
+                }
+            }
+            if !send(vec![Msg::ApprovalArmed(drawn)]) {
+                return;
+            }
+            armed = drawn;
+            continue;
+        }
+        match events.poll(READER_WAKE) {
             Ok(true) => {}
             Ok(false) => continue,
             Err(err) => return fail(err),
         }
-        match event::read() {
-            Ok(event) => {
-                if let Some(msg) = input::decode(event, clock.elapsed())
-                    && out.0.send(Source::Msg(msg)).is_err()
-                {
+        if shown.load(Ordering::SeqCst) != armed {
+            continue;
+        }
+        match sweep(events, clock) {
+            Ok((swept, _)) => {
+                if !send(stamp(swept)) {
                     return;
                 }
             }
             Err(err) => return fail(err),
         }
     }
+}
+
+/// Reads every waiting event, up to [`SWEEP`] events read, whether or not
+/// they decode to anything; `true` with them when the input then ran dry,
+/// `false` when the sweep stopped at its size.
+fn sweep(events: &mut impl Events, clock: Instant) -> io::Result<(Vec<Msg>, bool)> {
+    let mut swept = Vec::new();
+    let mut read = 0;
+    while events.poll(SWEEP_POLL)? {
+        swept.extend(input::decode(events.read()?, clock.elapsed()));
+        read += 1;
+        if read >= SWEEP {
+            return Ok((swept, false));
+        }
+    }
+    Ok((swept, true))
+}
+
+/// Marks the keys of one sweep as a burst when it holds more than one key.
+fn stamp(sweep: Vec<Msg>) -> Vec<Msg> {
+    let keys = sweep
+        .iter()
+        .filter(|msg| matches!(msg, Msg::Key(_) | Msg::KeyRepeat(_)))
+        .count();
+    sweep
+        .into_iter()
+        .map(|msg| match msg {
+            Msg::Key(key) => Msg::KeyRead {
+                key,
+                burst: keys > 1,
+            },
+            other => other,
+        })
+        .collect()
 }
 
 #[cfg(unix)]
@@ -1140,6 +1294,8 @@ mod tests {
             home: None,
             runtime,
             files: &|_| {},
+            // Each loop publishes to its own.
+            shown: Box::leak(Box::new(AtomicU64::new(0))),
         }
     }
 
@@ -1404,5 +1560,429 @@ mod tests {
         let (now, started) = screen.frames[2];
         assert_eq!(started, screen.frames[1].1);
         assert!(now >= started.unwrap() + bake_tui_view::activity::BEAT);
+    }
+
+    // ---- Approvals ----
+
+    /// Renders every frame with the real view into a test backend, records
+    /// the request the loop published after it, then sends the next batch
+    /// of the script, as [`Scripted`] does.
+    struct Rendered {
+        terminal: Terminal<ratatui::backend::TestBackend>,
+        sender: Option<Sender<Source>>,
+        script: Vec<Vec<Source>>,
+        screens: Vec<String>,
+        /// The terminal's size from a frame on, by frame index.
+        sizes: Vec<(usize, u16, u16)>,
+    }
+
+    impl Rendered {
+        fn new(script: Vec<Vec<Source>>) -> (Self, Receiver<Source>) {
+            let (sender, inputs) = mpsc::channel();
+            let screen = Self {
+                terminal: Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap(),
+                sender: Some(sender),
+                script: script.into_iter().rev().collect(),
+                screens: Vec::new(),
+                sizes: Vec::new(),
+            };
+            (screen, inputs)
+        }
+    }
+
+    impl Screen for Rendered {
+        fn write(&mut self, _sequence: &str) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn draw(&mut self, state: &mut State, _stale: bool) -> io::Result<()> {
+            let frame = self.screens.len();
+            if let Some(&(_, cols, rows)) = self.sizes.iter().find(|(at, ..)| *at == frame) {
+                self.terminal.backend_mut().resize(cols, rows);
+            }
+            self.terminal.draw(|frame| render(state, frame)).unwrap();
+            let buffer = self.terminal.backend().buffer();
+            let text: String = buffer
+                .content()
+                .chunks(usize::from(buffer.area.width))
+                .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>() + "\n")
+                .collect();
+            self.screens.push(text);
+            match self.script.pop() {
+                Some(batch) => {
+                    for source in batch {
+                        self.sender.as_ref().unwrap().send(source).unwrap();
+                    }
+                }
+                None => self.sender = None,
+            }
+            Ok(())
+        }
+    }
+
+    fn approval(generation: u64, call_id: &str) -> bake_tui_view::runtime::Approval {
+        bake_tui_view::runtime::Approval {
+            generation,
+            tool: "write".into(),
+            call_id: call_id.into(),
+            reason: "escalate sandbox to workspace-write: create notes.txt".into(),
+            arguments: "path: notes.txt\ncontent: hello".into(),
+        }
+    }
+
+    fn approvals(list: Vec<bake_tui_view::runtime::Approval>) -> Source {
+        runtime(RuntimeUpdate::Approvals(list))
+    }
+
+    fn read(key: Key) -> Source {
+        Source::Msg(Msg::KeyRead {
+            key: KeyInput::plain(key),
+            burst: false,
+        })
+    }
+
+    fn armed(generation: u64) -> Source {
+        Source::Msg(Msg::ApprovalArmed(generation))
+    }
+
+    /// Runs the loop to its quit; returns the requests and what the loop
+    /// published for the input thread to arm.
+    fn answers(
+        screen: &mut Rendered,
+        inputs: &Receiver<Source>,
+        state: &mut State,
+    ) -> (Vec<String>, u64) {
+        let requests = std::cell::RefCell::new(Vec::new());
+        let shown = AtomicU64::new(0);
+        let exit = run_loop(
+            screen,
+            state,
+            inputs,
+            Instant::now(),
+            Owners {
+                shown: &shown,
+                ..owners(&|request| requests.borrow_mut().push(format!("{request:?}")))
+            },
+        );
+        assert_eq!(exit.unwrap(), PreviewExit::Quit);
+        (requests.into_inner(), shown.into_inner())
+    }
+
+    fn live_state() -> State {
+        State::live(Default::default(), Tones::None, Vec::new())
+    }
+
+    #[test]
+    fn keys_queued_before_the_arming_answer_nothing_and_the_draft_stays() {
+        let (mut screen, inputs) = Rendered::new(vec![
+            // Typing for the draft, then the request arrives with typed-ahead
+            // keys queued behind it in the same batch.
+            vec![
+                read(Key::Char('k')),
+                approvals(vec![approval(7, "call-7")]),
+                read(Key::Char('y')),
+                read(Key::Enter),
+                Source::Msg(Msg::Paste("y".into())),
+            ],
+            // Frame 2 drew the request; keys the input thread swept before
+            // arming it reach the loop only now, ahead of the arming.
+            vec![read(Key::Char('y')), read(Key::Enter), armed(1)],
+            vec![read(Key::Char('y'))],
+            vec![read(Key::Enter), read(Key::Enter)],
+            vec![ctrl('c'), ctrl('c')],
+        ]);
+        let mut state = live_state();
+        let (requests, shown) = answers(&mut screen, &inputs, &mut state);
+        assert_eq!(
+            requests,
+            ["Answer { generation: 7, answer: AllowOnce }"],
+            "only y then Enter after the arming answered it, once"
+        );
+        assert_eq!(shown, 1, "the loop published the request's showing");
+        let drawn = &screen.screens[1];
+        assert!(
+            drawn.contains("Approval required: write  call-7"),
+            "{drawn}"
+        );
+        assert!(drawn.contains("escalate sandbox to workspace-write: create notes.txt"));
+        assert!(drawn.contains("path: notes.txt") && drawn.contains("content: hello"));
+        assert!(
+            drawn.contains("Preparing approval… · Esc cancels"),
+            "{drawn}"
+        );
+        let armed = &screen.screens[2];
+        assert!(
+            armed.contains("Y then Enter allows once · N rejects · Esc cancels"),
+            "{armed}"
+        );
+        assert!(screen.screens[3].contains("Allow this call once?"));
+        // The draft and its caret stayed as typed before the prompt.
+        assert_eq!((state.draft.text(), state.draft.caret()), ("k", 1));
+    }
+
+    #[test]
+    fn the_answer_to_one_prompt_cannot_answer_the_next() {
+        let (mut screen, inputs) = Rendered::new(vec![
+            vec![approvals(vec![approval(1, "a"), approval(2, "b")])],
+            vec![armed(1), read(Key::Char('y'))],
+            vec![read(Key::Enter)],
+            // The runtime settles 1; the same keys again, before 2's arming,
+            // and its arming for the old request, decide nothing.
+            vec![
+                approvals(vec![approval(2, "b")]),
+                read(Key::Char('y')),
+                read(Key::Enter),
+                armed(1),
+                read(Key::Char('y')),
+                read(Key::Enter),
+            ],
+            vec![armed(2), read(Key::Char('n')), read(Key::Esc)],
+            vec![approvals(Vec::new())],
+            vec![ctrl('c'), ctrl('c')],
+        ]);
+        let (requests, shown) = answers(&mut screen, &inputs, &mut live_state());
+        assert_eq!(
+            requests,
+            [
+                "Answer { generation: 1, answer: AllowOnce }",
+                "Answer { generation: 2, answer: Reject }",
+            ]
+        );
+        assert_eq!(shown, 2);
+        assert!(screen.screens[1].contains("1/2"), "{}", screen.screens[1]);
+        assert!(
+            screen.screens.last().unwrap().contains("Type a draft"),
+            "the composer came back"
+        );
+    }
+
+    #[test]
+    fn a_shrink_disarms_a_chosen_prompt_and_only_a_fresh_arming_after_it_grows_allows() {
+        let resize = |cols, rows| Source::Msg(Msg::Resize { cols, rows });
+        let (mut screen, inputs) = Rendered::new(vec![
+            vec![approvals(vec![approval(7, "call-7")])],
+            // Frame 2 showed it (showing 1); armed, `y` chooses.
+            vec![armed(1), read(Key::Char('y'))],
+            // The terminal shrinks; frame 4 cannot show the request.
+            vec![resize(80, 3)],
+            // Enter, a stale arming, and `y` then Enter allow nothing.
+            vec![
+                read(Key::Enter),
+                armed(1),
+                read(Key::Char('y')),
+                read(Key::Enter),
+            ],
+            // It grows back; frame 6 shows the request again (showing 2).
+            vec![resize(80, 24)],
+            vec![armed(1), read(Key::Char('y')), read(Key::Enter)],
+            vec![armed(2), read(Key::Char('y'))],
+            vec![read(Key::Enter)],
+            vec![ctrl('c'), ctrl('c')],
+        ]);
+        screen.sizes = vec![(3, 80, 3), (5, 80, 24)];
+        let (requests, shown) = answers(&mut screen, &inputs, &mut live_state());
+        assert_eq!(requests, ["Answer { generation: 7, answer: AllowOnce }"]);
+        assert_eq!(shown, 2, "growing back published a new showing");
+        assert!(
+            screen.screens[2].contains(CONFIRM_LINE),
+            "{}",
+            screen.screens[2]
+        );
+        // Shrunk: the title alone, without its detail or keys.
+        assert!(
+            !screen.screens[3].contains("Y then Enter"),
+            "{}",
+            screen.screens[3]
+        );
+        assert!(
+            !screen.screens[5].contains(CONFIRM_LINE),
+            "{}",
+            screen.screens[5]
+        );
+    }
+
+    const CONFIRM_LINE: &str = "Allow this call once?";
+
+    #[test]
+    fn esc_withdraws_a_prompt_even_before_it_is_armed() {
+        let (mut screen, inputs) = Rendered::new(vec![
+            vec![approvals(vec![approval(3, "c")]), read(Key::Esc)],
+            vec![ctrl('c'), ctrl('c')],
+        ]);
+        let (requests, _) = answers(&mut screen, &inputs, &mut live_state());
+        assert_eq!(requests, ["Answer { generation: 3, answer: Cancel }"]);
+    }
+
+    #[test]
+    fn a_prompt_too_short_to_show_its_detail_is_never_published() {
+        let (mut screen, inputs) = Rendered::new(vec![
+            vec![approvals(vec![approval(4, "d")])],
+            vec![ctrl('c'), ctrl('c')],
+        ]);
+        screen.terminal = Terminal::new(ratatui::backend::TestBackend::new(80, 3)).unwrap();
+        let (requests, shown) = answers(&mut screen, &inputs, &mut live_state());
+        assert!(requests.is_empty(), "{requests:?}");
+        assert_eq!(shown, 0, "a title and keys alone are not armed");
+    }
+
+    /// Terminal input as the input thread meets it: events already waiting
+    /// in the terminal, and a hook that runs at the thread's first read, as
+    /// the loop may draw at any point while it reads.
+    struct Typed {
+        waiting: std::collections::VecDeque<event::Event>,
+        on_read: Option<Box<dyn FnMut()>>,
+        stop: Arc<AtomicBool>,
+        dry: u8,
+    }
+
+    impl Events for Typed {
+        /// Nothing more is typed: the second time input is found dry, the
+        /// thread is told to stop once it gets back to its loop.
+        fn poll(&mut self, _wait: Duration) -> io::Result<bool> {
+            if self.waiting.is_empty() {
+                self.dry += 1;
+                if self.dry == 2 {
+                    self.stop.store(true, Ordering::SeqCst);
+                }
+            }
+            Ok(!self.waiting.is_empty())
+        }
+
+        fn read(&mut self) -> io::Result<event::Event> {
+            if let Some(mut hook) = self.on_read.take() {
+                hook();
+            }
+            Ok(self.waiting.pop_front().expect("polled"))
+        }
+    }
+
+    fn typed(c: char) -> event::Event {
+        event::Event::Key(event::KeyEvent::new(
+            event::KeyCode::Char(c),
+            event::KeyModifiers::NONE,
+        ))
+    }
+
+    /// What the input thread sent: keys as `c` or `c*` for a burst, an
+    /// arming as `armed N`.
+    fn sent(inputs: &Receiver<Source>) -> Vec<String> {
+        inputs
+            .try_iter()
+            .filter_map(|source| match source {
+                Source::Msg(Msg::KeyRead { key, burst }) => {
+                    let Key::Char(c) = key.key else { return None };
+                    Some(format!("{c}{}", if burst { "*" } else { "" }))
+                }
+                Source::Msg(Msg::ApprovalArmed(generation)) => Some(format!("armed {generation}")),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_key_waiting_in_the_terminal_when_the_prompt_is_drawn_goes_ahead_of_its_arming() {
+        // The reader is late: `y` was typed before the prompt appeared and
+        // is still in the terminal when the loop publishes the request.
+        let stop = Arc::new(AtomicBool::new(false));
+        let shown = AtomicU64::new(5);
+        let (sender, inputs) = mpsc::channel();
+        let mut events = Typed {
+            waiting: [typed('y')].into(),
+            on_read: None,
+            stop: Arc::clone(&stop),
+            dry: 0,
+        };
+        read_input(Stopped(sender), &stop, Instant::now(), &shown, &mut events);
+        assert_eq!(sent(&inputs), ["y", "armed 5"]);
+    }
+
+    #[test]
+    fn a_prompt_drawn_while_the_reader_sweeps_is_armed_only_after_that_sweep() {
+        // The reader found `y` waiting and is reading it when the loop draws
+        // the prompt and publishes it; `n` arrives after the arming's sweep.
+        let stop = Arc::new(AtomicBool::new(false));
+        let shown = Arc::new(AtomicU64::new(0));
+        let published = Arc::clone(&shown);
+        let (sender, inputs) = mpsc::channel();
+        let mut events = Typed {
+            waiting: [typed('y'), typed('e')].into(),
+            on_read: Some(Box::new(move || published.store(6, Ordering::SeqCst))),
+            stop: Arc::clone(&stop),
+            dry: 0,
+        };
+        read_input(Stopped(sender), &stop, Instant::now(), &shown, &mut events);
+        // The sweep in progress is sent before the arming, as a burst.
+        assert_eq!(sent(&inputs), ["y*", "e*", "armed 6"]);
+    }
+
+    /// Input that never runs dry: focus events, which decode to nothing,
+    /// without end. The thread is told to stop after `stop_after` reads.
+    struct Endless {
+        reads: usize,
+        stop_after: usize,
+        stop: Arc<AtomicBool>,
+    }
+
+    impl Events for Endless {
+        fn poll(&mut self, _wait: Duration) -> io::Result<bool> {
+            Ok(true)
+        }
+
+        fn read(&mut self) -> io::Result<event::Event> {
+            self.reads += 1;
+            if self.reads == self.stop_after {
+                self.stop.store(true, Ordering::SeqCst);
+            }
+            Ok(event::Event::FocusGained)
+        }
+    }
+
+    #[test]
+    fn a_sweep_counts_events_read_even_when_they_decode_to_nothing() {
+        let stop = Arc::new(AtomicBool::new(false));
+        let mut events = Endless {
+            reads: 0,
+            stop_after: usize::MAX,
+            stop,
+        };
+        let (swept, dry) = sweep(&mut events, Instant::now()).unwrap();
+        assert!(swept.is_empty());
+        assert!(!dry);
+        assert_eq!(events.reads, SWEEP);
+    }
+
+    #[test]
+    fn input_that_never_runs_dry_does_not_hold_up_a_stop_while_arming() {
+        let stop = Arc::new(AtomicBool::new(false));
+        let shown = AtomicU64::new(1);
+        let (sender, inputs) = mpsc::channel();
+        let mut events = Endless {
+            reads: 0,
+            stop_after: SWEEP + 3,
+            stop: Arc::clone(&stop),
+        };
+        read_input(Stopped(sender), &stop, Instant::now(), &shown, &mut events);
+        assert!(events.reads < 3 * SWEEP, "{}", events.reads);
+        assert!(sent(&inputs).is_empty(), "never armed");
+    }
+
+    #[test]
+    fn a_sweep_with_more_than_one_key_is_a_burst() {
+        let key = |k| Msg::Key(KeyInput::plain(k));
+        let burst = |msgs: Vec<Msg>| -> Vec<bool> {
+            msgs.into_iter()
+                .filter_map(|msg| match msg {
+                    Msg::KeyRead { burst, .. } => Some(burst),
+                    _ => None,
+                })
+                .collect()
+        };
+        assert_eq!(burst(stamp(vec![key(Key::Char('y'))])), [false]);
+        let paste = Msg::Paste("yes".into());
+        assert_eq!(burst(stamp(vec![paste, key(Key::Enter)])), [false]);
+        assert_eq!(
+            burst(stamp(vec![key(Key::Char('y')), key(Key::Enter)])),
+            [true, true]
+        );
     }
 }

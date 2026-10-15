@@ -144,3 +144,20 @@ pub const CONTEXT: &str = "ctx";
 /// The header's word for a sample turn that ran to its end, and for one Esc stopped.
 pub const COMPLETED: &str = "Completed";
 pub const INTERRUPTED: &str = "Interrupted";
+/// The approval panel's words: its title, before the tool's name; the
+/// heading over the call's arguments; its keys, as the TypeScript copy's
+/// `approval` and `approve`, with `y` choosing and Enter confirming, and
+/// the cancel key; the line once `y` has chosen; the scroll keys; and the
+/// line shown until the request is armed and keys can answer it.
+pub const APPROVAL_TITLE: &str = "Approval required";
+pub const APPROVAL_ARGUMENTS: &str = "Arguments:";
+pub const APPROVAL_KEYS: &str = "Y then Enter allows once · N rejects · Esc cancels";
+pub const APPROVAL_CONFIRM: &str = "Allow this call once?";
+pub const APPROVAL_CONFIRM_KEYS: &str = "Enter allows · N rejects · Esc cancels";
+pub const APPROVAL_SCROLL: &str = "↑↓ PgUp/PgDn";
+pub const APPROVAL_PREPARING: &str = "Preparing approval… · Esc cancels";
+/// Why a key or paste did not answer the waiting approval.
+pub const APPROVAL_KEYS_ONLY: &str =
+    "To answer, press Y then Enter, or N, each on its own once the request shows; Esc cancels";
+/// Why Enter did not allow the waiting approval.
+pub const APPROVAL_CHOOSE_FIRST: &str = "Press Y first, then Enter, to allow this call once";

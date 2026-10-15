@@ -8,7 +8,7 @@ use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::thread::{self, JoinHandle};
 use std::time::Instant;
 
-use bake_tui_view::runtime::{Prompt, RuntimeUpdate};
+use bake_tui_view::runtime::{ApprovalAnswer, Prompt, RuntimeUpdate};
 
 use crate::fixture::Fixture;
 
@@ -19,6 +19,11 @@ pub enum Request {
     Cancel,
     /// Send every waiting prompt now.
     SendPending,
+    /// Answer the approval request `generation` names.
+    Answer {
+        generation: u64,
+        answer: ApprovalAnswer,
+    },
 }
 
 /// Runs the fixture on a thread. Requests go in over a channel; updates
@@ -68,7 +73,8 @@ impl FixturePort {
                         }
                         Some(Request::Cancel) => updates.extend(fixture.cancel(now)),
                         Some(Request::SendPending) => updates.extend(fixture.send_pending(now)),
-                        None => {}
+                        // The fixture asks for no approval.
+                        Some(Request::Answer { .. }) | None => {}
                     }
                     updates.extend(fixture.advance(now));
                     if !emit(updates) {

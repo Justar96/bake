@@ -701,6 +701,18 @@ impl Approver for Pending {
 
 struct Panics;
 
+struct PanicsBeforeReturning;
+
+impl Approver for PanicsBeforeReturning {
+    fn request(
+        &self,
+        _request: ApprovalRequest,
+        _cancel: Option<bake_ai::AbortSignal>,
+    ) -> ApprovalFuture {
+        panic!("answerer construction bug")
+    }
+}
+
 impl Approver for Panics {
     fn request(
         &self,
@@ -726,6 +738,7 @@ fn request() -> ApprovalRequest {
         tool_name: "bash".into(),
         call_id: "call-1".into(),
         reason: "escalate sandbox to workspace-write: needed".into(),
+        arguments: serde_json::json!({ "command": "make" }),
     }
 }
 
@@ -810,11 +823,16 @@ async fn cancellation_withdraws_the_question() {
 // user-approval.spec: "contains a throwing answerer as unavailable".
 #[tokio::test]
 async fn a_panicking_answerer_fails_closed() {
-    let approver = PolicyApprover::new(standing(WW, ASK), Arc::new(Panics));
-    assert_eq!(
-        approver.request(request(), None).await,
-        EscalationOutcome::Unavailable
-    );
+    for answerer in [
+        Arc::new(Panics) as Arc<dyn Approver>,
+        Arc::new(PanicsBeforeReturning),
+    ] {
+        let approver = PolicyApprover::new(standing(WW, ASK), answerer);
+        assert_eq!(
+            approver.request(request(), None).await,
+            EscalationOutcome::Unavailable
+        );
+    }
 }
 
 /// The root a session pins for `root`: canonicalized once at start, so

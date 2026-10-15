@@ -17,7 +17,7 @@ bake-rs "Explain src/main.rs" # send a first prompt, then keep the session open
 - A prompt the session refuses, such as one sent without an API key, goes back into the draft with its images and the reason.
 - `/skill:<name>` and prompt-template prompts are expanded as in `-p`. Pi's other slash commands, such as `/model` or `/compact`, are not available yet; they are refused and the draft is kept. Choose the model and thinking level with the command-line flags.
 - Ctrl+C twice quits. Quitting, `SIGINT`, `SIGTERM`, and `SIGHUP` stop the turn and close the session before the terminal is restored.
-- Approvals cannot be answered in the terminal yet, so a call that needs one is refused, as with `--approval never`.
+- Under `--approval ask`, a call that asks for wider access shows an approval panel with the tool, the call id, the reason, and the call's arguments. Once its keys show, press `y` then Enter to allow that call once, `n` to reject it, or Esc to cancel it. Keys typed before the panel appeared, a paste, and Enter alone never approve. Nothing is granted for the rest of the session. Quitting or closing the terminal while a request waits refuses it. See [Permissions](permissions.md#approvals).
 
 ## Running a prompt
 

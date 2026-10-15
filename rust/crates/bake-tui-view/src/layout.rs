@@ -26,11 +26,13 @@ pub struct Needs {
     pub panel: u16,
     /// Rows the slash menu or a command's usage line wants; zero without.
     pub menu: u16,
+    /// Rows the approval panel wants; zero while no request waits.
+    pub approval: u16,
 }
 
 /// Rows granted to each region, top to bottom as drawn: body, gap, the
 /// pending-input panel, the attachments panel, notice, the slash menu,
-/// the bar, which holds the activity and the status line, the box's top
+/// the approval panel, the bar, which holds the activity and the status line, the box's top
 /// edge, the draft, its bottom edge, and the standing row.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Rows {
@@ -40,6 +42,7 @@ pub struct Rows {
     pub panel: u16,
     pub notice: u16,
     pub menu: u16,
+    pub approval: u16,
     pub bar: u16,
     pub top_edge: u16,
     pub composer: u16,
@@ -55,6 +58,7 @@ impl Rows {
             + self.panel
             + self.notice
             + self.menu
+            + self.approval
             + self.bar
             + self.top_edge
             + self.composer
@@ -63,7 +67,9 @@ impl Rows {
     }
 }
 
-/// Grants rows in claim order: the draft's first row, the bar, the box's top
+/// Grants rows in claim order: the draft's first row, the approval panel,
+/// which a waiting request needs on screen before it can be answered, the
+/// bar, the box's top
 /// edge and then its bottom edge, the standing row, the gap,
 /// further draft rows up to [`composer::window_rows`] while the body keeps
 /// [`MIN_BODY_ROWS`], panels such as the notice, and the body last.
@@ -81,6 +87,7 @@ pub fn plan(height: u16, needs: Needs) -> Rows {
         got
     };
     let composer = take(1);
+    let approval = take(needs.approval);
     let bar = take(1);
     let top_edge = take(1);
     let bottom_edge = take(1);
@@ -89,7 +96,7 @@ pub fn plan(height: u16, needs: Needs) -> Rows {
     let extra = needs.draft_rows.clamp(1, composer::window_rows(height)) - 1;
     let more = take(extra.min(left_after_body(
         height,
-        composer + bar + top_edge + bottom_edge + standing + gap,
+        composer + approval + bar + top_edge + bottom_edge + standing + gap,
     )));
     let notice = take(needs.notice);
     let menu = take(needs.menu);
@@ -104,6 +111,7 @@ pub fn plan(height: u16, needs: Needs) -> Rows {
         panel,
         notice,
         menu,
+        approval,
         bar,
         top_edge,
         composer: composer + more,
@@ -129,6 +137,7 @@ mod tests {
             pending: 0,
             panel: 0,
             menu: 0,
+            approval: 0,
         }
     }
 
@@ -181,6 +190,29 @@ mod tests {
     }
 
     #[test]
+    fn an_approval_panel_claims_its_rows_before_the_rest_of_the_chrome() {
+        let rows = plan(
+            6,
+            Needs {
+                approval: 3,
+                ..needs(4)
+            },
+        );
+        assert_eq!((rows.composer, rows.approval, rows.bar), (1, 3, 1));
+        assert_eq!(rows.total(), 6);
+        assert_eq!(rows.body, 0);
+        let rows = plan(
+            30,
+            Needs {
+                approval: 4,
+                ..needs(1)
+            },
+        );
+        assert_eq!(rows.approval, 4);
+        assert!(rows.body >= MIN_BODY_ROWS);
+    }
+
+    #[test]
     fn without_a_standing_row_its_row_goes_to_the_others() {
         let rows = plan(
             6,
@@ -191,6 +223,7 @@ mod tests {
                 pending: 0,
                 panel: 0,
                 menu: 0,
+                approval: 0,
             },
         );
         assert_eq!((rows.standing, rows.gap, rows.body), (0, 1, 1));

@@ -22,8 +22,16 @@
 //! back. Steers a cancel takes off the session's queue come back as
 //! [`RuntimeUpdate::Returned`], so no submission is lost.
 //!
-//! Approvals are not answered here: the session's tools keep the fail-closed
-//! approver they were built with (D24).
+//! Approvals (D24) are answered through the [`ApprovalBroker`] the command
+//! line built the session's tools with ([`LiveSession::approvals`]): the
+//! port connects the broker to the view, so its queue arrives as
+//! [`RuntimeUpdate::Approvals`] in order with the other updates, and
+//! passes the view's answers to it directly, not through the driver, so an
+//! answer never waits behind a request the driver is handling. The broker
+//! settles an answer only for the displayed request it names. Stopping the
+//! port, or a loop that no longer takes updates, aborts the run, which
+//! withdraws a waiting request, and closes the broker, so any later request
+//! is `unavailable`.
 //!
 //! The port owns the session from [`LivePort::start`], but runs nothing
 //! until [`LivePort::begin`], so no prompt starts before the terminal is
@@ -41,8 +49,9 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use bake_ai::{ImageContent, StopReason};
 use bake_coding_agent::agent_session::AgentSession;
+use bake_coding_agent::permissions::{self, ApprovalBroker, ApprovalPrompt};
 use bake_tui_view::paste::Image;
-use bake_tui_view::runtime::{RuntimeUpdate, SessionStatus};
+use bake_tui_view::runtime::{Approval, ApprovalAnswer, RuntimeUpdate, SessionStatus};
 use bake_tui_view::state::Outcome;
 use bake_tui_view::status::ContextUsage;
 use bake_tui_view::transcript::Row;
@@ -95,6 +104,10 @@ pub struct LiveSession {
     pub prompts: Vec<(String, Vec<ImageContent>)>,
     /// Notes for the top of the transcript, such as the session file.
     pub notes: Vec<String>,
+    /// The broker the session's tools ask for approval, which the view
+    /// answers; `None` when the session was built without one, so its
+    /// escalations fail closed.
+    pub approvals: Option<ApprovalBroker>,
 }
 
 impl LiveSession {
@@ -112,6 +125,7 @@ type Send = Arc<dyn Fn(RuntimeUpdate) -> bool + std::marker::Send + Sync>;
 /// The live port. Requests go to the driver task; updates come out through
 /// the `send` given to [`LivePort::start`].
 pub struct LivePort {
+    approvals: Option<ApprovalBroker>,
     requests: Option<mpsc::UnboundedSender<Request>>,
     begin: Option<oneshot::Sender<()>>,
     done: Option<std_mpsc::Receiver<Result<(), String>>>,
@@ -130,6 +144,7 @@ impl LivePort {
             runtime,
             prompts,
             notes: _,
+            approvals,
         } = live;
         let session = Arc::new(session);
         // A receiver that is gone stops the driver, as a closed request
@@ -145,6 +160,14 @@ impl LivePort {
                 sent
             })
         };
+        if let Some(broker) = &approvals {
+            let send = Arc::clone(&send);
+            broker.connect(Box::new(move |queue| {
+                send(RuntimeUpdate::Approvals(
+                    queue.into_iter().map(approval).collect(),
+                ))
+            }));
+        }
         let projector = Arc::new(Mutex::new(Projector::default()));
         let subscription = {
             let projector = Arc::clone(&projector);
@@ -177,11 +200,13 @@ impl LivePort {
                 .collect(),
             aborts: Vec::new(),
             turns: 0,
+            approvals: approvals.clone(),
         };
+        let closing = approvals.clone();
         runtime.spawn(async move {
             let result = if begun.await.is_err() {
                 // Dropped before it began: the session only shuts down.
-                session.shutdown().await;
+                shut_down(&session, closing.as_ref()).await;
                 Ok(())
             } else {
                 // The driver runs as its own task, so its panic reaches
@@ -190,7 +215,7 @@ impl LivePort {
                 match tokio::spawn(driver.run(inbox)).await {
                     Ok(()) => Ok(()),
                     Err(error) => {
-                        session.shutdown().await;
+                        shut_down(&session, closing.as_ref()).await;
                         Err(format!("the agent session driver failed: {error}"))
                     }
                 }
@@ -199,6 +224,7 @@ impl LivePort {
             let _ = finished.send(result);
         });
         Self {
+            approvals,
             requests: Some(requests),
             begin: Some(begin),
             done: Some(done),
@@ -213,8 +239,15 @@ impl LivePort {
         }
     }
 
-    /// Passes a request on; one sent after the driver ended is dropped.
+    /// Passes a request on; one sent after the driver ended is dropped. An
+    /// approval answer goes straight to the broker.
     pub fn request(&self, request: Request) {
+        if let Request::Answer { generation, answer } = request {
+            if let Some(broker) = &self.approvals {
+                broker.answer(generation, broker_answer(answer));
+            }
+            return;
+        }
         if let Some(requests) = &self.requests {
             let _ = requests.send(request);
         }
@@ -317,6 +350,7 @@ struct Driver {
     /// an abort never reaches a later run.
     aborts: Vec<JoinHandle<()>>,
     turns: u64,
+    approvals: Option<ApprovalBroker>,
 }
 
 impl Driver {
@@ -357,7 +391,7 @@ impl Driver {
         }
         // Pi's `dispose`, awaited: the run, its writes, and its requests end
         // before the terminal is given back.
-        self.session.shutdown().await;
+        shut_down(&self.session, self.approvals.as_ref()).await;
         if let Some(run) = running {
             let _ = run.task.await;
         }
@@ -457,6 +491,8 @@ impl Driver {
             }
             // Waiting prompts join the running turn at its next step; one
             // with images keeps waiting for its own turn.
+            // The port answers approvals itself.
+            Request::Answer { .. } => {}
             Request::SendPending => {
                 if running.as_ref().is_none_or(|run| run.cancelled) {
                     return;
@@ -623,6 +659,87 @@ fn refused_command(text: &str, templates: &[String]) -> Option<String> {
         ))
     } else {
         None
+    }
+}
+
+/// Shuts `session` down and closes `approvals`. The shutdown's first step,
+/// taken before it first waits, aborts the run, so a request it holds is
+/// withdrawn with the run and its call never goes on to another model
+/// request; the broker closes right after, so any request nothing aborted
+/// is cancelled, and nobody is asked again.
+async fn shut_down(session: &AgentSession, approvals: Option<&ApprovalBroker>) {
+    tokio::join!(session.shutdown(), async {
+        if let Some(broker) = approvals {
+            broker.close();
+        }
+    });
+}
+
+/// A queued approval request as the view shows it.
+fn approval(prompt: ApprovalPrompt) -> Approval {
+    Approval {
+        generation: prompt.generation,
+        tool: prompt.tool_name,
+        call_id: prompt.call_id,
+        reason: prompt.reason,
+        arguments: arguments_text(&prompt.arguments),
+    }
+}
+
+/// The escalation arguments, which the reason already states.
+const ESCALATION_ARGUMENTS: [&str; 2] = ["sandbox_permissions", "justification"];
+
+/// A call's arguments for review, one argument per line as `name: value`,
+/// apart from the escalation pair. A string shows as written, a string of
+/// several lines on the lines under its name, each indented; any other
+/// value as compact JSON. Control characters other than tab show as
+/// `\u{…}` escapes, so nothing a call would run is hidden and nothing
+/// reaches the terminal as an escape sequence.
+fn arguments_text(arguments: &serde_json::Value) -> String {
+    let Some(object) = arguments.as_object() else {
+        return visible(&arguments.to_string());
+    };
+    let mut lines = Vec::new();
+    for (name, value) in object {
+        if ESCALATION_ARGUMENTS.contains(&name.as_str()) {
+            continue;
+        }
+        let name = visible(name);
+        match value.as_str() {
+            Some(text) if text.contains('\n') => {
+                lines.push(format!("{name}:"));
+                lines.extend(text.split('\n').map(|line| format!("  {}", visible(line))));
+            }
+            Some(text) => lines.push(format!("{name}: {}", visible(text))),
+            None => lines.push(format!("{name}: {}", visible(&value.to_string()))),
+        }
+    }
+    lines.join("\n")
+}
+
+/// `text` with every control character but tab, and every invisible
+/// format character that reorders or hides text (bidirectional controls,
+/// zero-width characters, the byte-order mark), written as a `\u{…}`
+/// escape.
+fn visible(text: &str) -> String {
+    let hidden = |c: char| matches!(c, '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2060}'..='\u{2069}' | '\u{feff}');
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if (c.is_control() && c != '\t') || hidden(c) {
+            out.push_str(&format!("\\u{{{:x}}}", u32::from(c)));
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// The view's answer as the broker takes it.
+fn broker_answer(answer: ApprovalAnswer) -> permissions::ApprovalAnswer {
+    match answer {
+        ApprovalAnswer::AllowOnce => permissions::ApprovalAnswer::AllowOnce,
+        ApprovalAnswer::Reject => permissions::ApprovalAnswer::Reject,
+        ApprovalAnswer::Cancel => permissions::ApprovalAnswer::Cancel,
     }
 }
 
