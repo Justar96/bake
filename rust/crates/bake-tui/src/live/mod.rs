@@ -40,6 +40,7 @@
 //! down, awaiting its run, its writes, and its model requests, before
 //! [`LivePort::stop`] returns. No update is sent after that.
 
+pub mod commands;
 pub mod projection;
 
 use std::collections::VecDeque;
@@ -47,9 +48,10 @@ use std::io;
 use std::sync::mpsc as std_mpsc;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use bake_ai::{ImageContent, StopReason};
+use bake_ai::{AbortController, ImageContent, StopReason};
 use bake_coding_agent::agent_session::AgentSession;
 use bake_coding_agent::permissions::{self, ApprovalBroker, ApprovalPrompt};
+use bake_tui_view::dialog::DialogAnswer;
 use bake_tui_view::paste::Image;
 use bake_tui_view::runtime::{Approval, ApprovalAnswer, RuntimeUpdate, SessionStatus};
 use bake_tui_view::state::Outcome;
@@ -63,14 +65,11 @@ use tokio::task::JoinHandle;
 use crate::port::Request;
 use projection::Projector;
 
-/// Pi v1.2.0's built-in slash commands (`core/slash-commands.ts`), none of
-/// which `bake-rs` runs yet. A prompt that names one is refused instead of
-/// reaching the model.
+/// Pi v1.2.0's built-in slash commands (`core/slash-commands.ts`) that
+/// `bake-rs` does not run yet; [`commands::COMMANDS`] are the ones it
+/// runs. A prompt that names one is refused instead of reaching the model.
 const PI_COMMANDS: &[&str] = &[
-    "settings",
-    "model",
     "tree",
-    "thinking",
     "scoped-models",
     "export",
     "import",
@@ -84,8 +83,6 @@ const PI_COMMANDS: &[&str] = &[
     "fork",
     "clone",
     "trust",
-    "login",
-    "logout",
     "new",
     "compact",
     "resume",
@@ -108,6 +105,12 @@ pub struct LiveSession {
     /// answers; `None` when the session was built without one, so its
     /// escalations fail closed.
     pub approvals: Option<ApprovalBroker>,
+    /// The Bake home, whose CLIProxyAPI account `/login`, `/logout`, and
+    /// `/refresh-models` change; `None` when it cannot be resolved.
+    pub home: Option<std::path::PathBuf>,
+    /// Holds `/login` at its commit, for tests of that boundary.
+    #[cfg(test)]
+    pub commit_gate: Option<commands::CommitGate>,
 }
 
 impl LiveSession {
@@ -145,6 +148,9 @@ impl LivePort {
             prompts,
             notes: _,
             approvals,
+            home,
+            #[cfg(test)]
+            commit_gate,
         } = live;
         let session = Arc::new(session);
         // A receiver that is gone stops the driver, as a closed request
@@ -201,8 +207,16 @@ impl LivePort {
             aborts: Vec::new(),
             turns: 0,
             approvals: approvals.clone(),
+            home,
+            #[cfg(test)]
+            commit_gate,
+            command: None,
+            dialog_ids: Arc::default(),
+            startup: None,
+            orphans: Arc::default(),
         };
         let closing = approvals.clone();
+        let orphans = Arc::clone(&driver.orphans);
         runtime.spawn(async move {
             let result = if begun.await.is_err() {
                 // Dropped before it began: the session only shuts down.
@@ -210,12 +224,19 @@ impl LivePort {
                 Ok(())
             } else {
                 // The driver runs as its own task, so its panic reaches
-                // here; the session still shuts down, and the panic is
-                // reported once it has.
+                // here; the session still shuts down, the tasks the driver
+                // owned are awaited as its own shutdown awaits them, and
+                // the panic is reported once they have ended.
                 match tokio::spawn(driver.run(inbox)).await {
                     Ok(()) => Ok(()),
                     Err(error) => {
                         shut_down(&session, closing.as_ref()).await;
+                        let owned = std::mem::take(
+                            &mut *orphans.lock().unwrap_or_else(PoisonError::into_inner),
+                        );
+                        for task in owned {
+                            task.await;
+                        }
                         Err(format!("the agent session driver failed: {error}"))
                     }
                 }
@@ -331,9 +352,22 @@ struct Running {
     cancelled: bool,
 }
 
+/// A command that is running ([`commands`]), and the prompt that named it,
+/// whose draft comes back unless it succeeds.
+struct CommandRun {
+    task: JoinHandle<commands::Outcome>,
+    /// The dialog this command shows ([`commands::Context::shown`]).
+    shown: Arc<std::sync::atomic::AtomicU64>,
+    answers: mpsc::UnboundedSender<(u64, DialogAnswer)>,
+    abort: AbortController,
+    id: Option<u64>,
+    text: String,
+}
+
 /// What the driver does next.
 enum Next {
     Settled(Result<Result<(), String>, tokio::task::JoinError>),
+    Commanded(Result<commands::Outcome, tokio::task::JoinError>),
     Request(Option<Request>),
 }
 
@@ -351,12 +385,65 @@ struct Driver {
     aborts: Vec<JoinHandle<()>>,
     turns: u64,
     approvals: Option<ApprovalBroker>,
+    home: Option<std::path::PathBuf>,
+    /// The command that is running; one at a time.
+    command: Option<CommandRun>,
+    /// The id of the last dialog opened, shared by every command.
+    dialog_ids: Arc<std::sync::atomic::AtomicU64>,
+    /// The once-per-launch CLIProxyAPI refresh, and its abort.
+    startup: Option<(JoinHandle<()>, AbortController)>,
+    /// Where a panicking driver leaves `command` and `startup`.
+    orphans: Orphans,
+    #[cfg(test)]
+    commit_gate: Option<commands::CommitGate>,
+}
+
+/// The tasks a driver owned when it was dropped without its shutdown.
+type Orphans = Arc<Mutex<Vec<std::pin::Pin<Box<dyn Future<Output = ()> + std::marker::Send>>>>>;
+
+impl Drop for Driver {
+    /// A driver ends through its shutdown, which leaves nothing here; one
+    /// that panicked aborts its command and startup refresh, as that
+    /// shutdown does, and hands them to the port's handler to await, so a
+    /// commit already started still finishes and no fetch outlives the
+    /// port.
+    fn drop(&mut self) {
+        let mut orphans = self.orphans.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(command) = self.command.take() {
+            command.abort.abort();
+            let task = command.task;
+            orphans.push(Box::pin(async move {
+                let _ = task.await;
+            }));
+        }
+        if let Some((task, abort)) = self.startup.take() {
+            abort.abort();
+            orphans.push(Box::pin(async move {
+                let _ = task.await;
+            }));
+        }
+    }
 }
 
 impl Driver {
     async fn run(mut self, mut inbox: mpsc::UnboundedReceiver<Request>) {
         let mut running: Option<Running> = None;
         self.status();
+        if let Some(home) = self.home.clone() {
+            let abort = AbortController::new();
+            let session = Arc::clone(&self.session);
+            let signal = abort.signal();
+            let send = Arc::clone(&self.send);
+            self.startup = Some((
+                tokio::spawn(commands::startup_refresh(
+                    session,
+                    home,
+                    signal,
+                    Arc::new(move |update| send(update)),
+                )),
+                abort,
+            ));
+        }
         if let Some(next) = self.waiting.pop_front() {
             running = Some(self.begin(next));
         }
@@ -369,8 +456,15 @@ impl Driver {
                         None => std::future::pending().await,
                     }
                 };
+                let commanded = async {
+                    match self.command.as_mut() {
+                        Some(command) => (&mut command.task).await,
+                        None => std::future::pending().await,
+                    }
+                };
                 tokio::select! {
                     joined = settle => Next::Settled(joined),
+                    done = commanded => Next::Commanded(done),
                     request = inbox.recv() => Next::Request(request),
                     () = self.gone.notify.notified() => Next::Request(None),
                 }
@@ -385,13 +479,31 @@ impl Driver {
                         self.publish_pending();
                     }
                 }
+                Next::Commanded(done) => self.commanded(done),
                 Next::Request(None) => break,
                 Next::Request(Some(request)) => self.request(request, &mut running).await,
             }
         }
+        // A command's dialog reads as cancelled and its fetch is aborted;
+        // a commit it has started runs on, and is awaited below.
+        let command = self.command.take().map(|command| {
+            command.abort.abort();
+            drop(command.answers);
+            command.task
+        });
+        let startup = self.startup.take().map(|(task, abort)| {
+            abort.abort();
+            task
+        });
         // Pi's `dispose`, awaited: the run, its writes, and its requests end
         // before the terminal is given back.
         shut_down(&self.session, self.approvals.as_ref()).await;
+        if let Some(command) = command {
+            let _ = command.await;
+        }
+        if let Some(startup) = startup {
+            let _ = startup.await;
+        }
         if let Some(run) = running {
             let _ = run.task.await;
         }
@@ -444,6 +556,26 @@ impl Driver {
                     .iter()
                     .map(|template| template.name.clone())
                     .collect();
+                if let Some((name, argument)) = commands::parse(&text) {
+                    if self.command.is_some() {
+                        return self.refuse(
+                            id,
+                            text,
+                            "Another command is running; your draft is kept.".into(),
+                        );
+                    }
+                    if !prompt.images.is_empty() {
+                        return self.refuse(
+                            id,
+                            text,
+                            format!("/{name} takes no images; your draft is kept."),
+                        );
+                    }
+                    if let Some(reason) = commands::refuse_argument(name, &argument) {
+                        return self.refuse(id, text, reason);
+                    }
+                    return self.command(id, text, name, argument);
+                }
                 if let Some(reason) = refused_command(&text, &templates) {
                     return self.refuse(id, text, reason);
                 }
@@ -493,6 +625,20 @@ impl Driver {
             // with images keeps waiting for its own turn.
             // The port answers approvals itself.
             Request::Answer { .. } => {}
+            // To the running command, which drops an answer for a dialog
+            // it no longer shows.
+            Request::Dialog { id, answer } => {
+                if let Some(command) = &self.command {
+                    // Esc on the dialog shown now also aborts the work on
+                    // its answer, such as a held check of the proxy; a
+                    // commit already started runs on to its result.
+                    let shown = command.shown.load(std::sync::atomic::Ordering::SeqCst);
+                    if answer == DialogAnswer::Cancel && shown != 0 && id == shown {
+                        command.abort.abort();
+                    }
+                    let _ = command.answers.send((id, answer));
+                }
+            }
             Request::SendPending => {
                 if running.as_ref().is_none_or(|run| run.cancelled) {
                     return;
@@ -581,6 +727,55 @@ impl Driver {
             }
             self.publish_pending();
         }
+    }
+
+    /// Starts the command `name` names as an owned task.
+    fn command(&mut self, id: Option<u64>, text: String, name: &'static str, argument: String) {
+        let (answers, inbox) = mpsc::unbounded_channel();
+        let abort = AbortController::new();
+        let send = Arc::clone(&self.send);
+        let shown = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let context = commands::Context::new(
+            Arc::clone(&self.session),
+            self.home.clone(),
+            Arc::new(move |update| send(update)),
+            inbox,
+            abort.signal(),
+            Arc::clone(&self.dialog_ids),
+            Arc::clone(&shown),
+        );
+        #[cfg(test)]
+        let context = context.with_commit_gate(self.commit_gate.clone());
+        let task = tokio::spawn(commands::run(name, argument, context));
+        self.command = Some(CommandRun {
+            task,
+            shown,
+            answers,
+            abort,
+            id,
+            text,
+        });
+    }
+
+    /// A command ended: its note goes to the transcript and its prompt is
+    /// admitted, or its draft comes back with why.
+    fn commanded(&mut self, done: Result<commands::Outcome, tokio::task::JoinError>) {
+        let Some(command) = self.command.take() else {
+            return;
+        };
+        let outcome = done.unwrap_or_else(|error| Err(format!("The command failed: {error}")));
+        // The command closed its dialog; a panicked one could not have.
+        self.send(RuntimeUpdate::Dialog(None));
+        match outcome {
+            Ok(note) => {
+                if let Some(id) = command.id {
+                    self.send(RuntimeUpdate::Admitted(id));
+                }
+                self.send(RuntimeUpdate::Commit(vec![Row::Info(note)]));
+            }
+            Err(reason) => self.refuse(command.id, command.text, reason),
+        }
+        self.status();
     }
 
     /// Sends the pending panel: the session's queues and the driver's own.

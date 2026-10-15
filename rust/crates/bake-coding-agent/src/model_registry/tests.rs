@@ -788,3 +788,316 @@ fn resolve_model_scope_follows_pi() {
         Some(ModelThinkingLevel::Low)
     );
 }
+
+// Bake: no key, header value, or scoped environment value of any layer
+// reaches `Debug`: `models.json`, an added provider, `auth.json` with its
+// `env`, a runtime key, and a resolved request's auth.
+#[test]
+fn debug_output_shows_no_secret() {
+    let mut registry = registry(
+        json!({ "providers": {
+            "config": {
+                "baseUrl": "http://localhost:1/v1",
+                "api": "openai-responses",
+                "apiKey": "sk-config-secret",
+                "headers": { "x-config": "hdr-config-secret" },
+                "models": [{ "id": "m1", "headers": { "x-model": "hdr-model-secret" } }],
+            },
+            "stored": custom_provider(None),
+        } }),
+        r#"{ "stored": { "type": "api_key", "key": "sk-stored-secret", "env": { "TOKEN": "env-secret" } } }"#,
+    );
+    registry
+        .add_provider_config(
+            "added",
+            json!({
+                "baseUrl": "http://localhost:1/v1",
+                "api": "openai-responses",
+                "headers": { "x-added": "hdr-added-secret" },
+                "models": [{ "id": "a1" }],
+            }),
+            Some("sk-added-secret".into()),
+        )
+        .expect("added");
+    registry.set_runtime_api_key("config", "sk-runtime-secret");
+    let auth = auth_of(&registry, "config", "m1")
+        .expect("auth")
+        .expect("some");
+    assert_eq!(auth.api_key.as_deref(), Some("sk-runtime-secret"));
+    let stored = auth_of(&registry, "stored", "m1")
+        .expect("auth")
+        .expect("some");
+    let runtime = ModelRuntime::new(registry.clone());
+    let shown = format!(
+        "{registry:?}\n{registry:#?}\n{auth:?}\n{stored:#?}\n{runtime:?}\n{:?}",
+        ModelConfig::from_value(
+            json!({ "providers": { "c": { "apiKey": "sk-config-secret", "baseUrl": "http://x", "api": "a", "models": [{ "id": "m" }] } } }),
+            "models.json"
+        )
+    );
+    for secret in [
+        "sk-config-secret",
+        "hdr-config-secret",
+        "hdr-model-secret",
+        "sk-stored-secret",
+        "env-secret",
+        "sk-added-secret",
+        "hdr-added-secret",
+        "sk-runtime-secret",
+    ] {
+        assert!(!shown.contains(secret), "{secret} leaked:\n{shown}");
+    }
+    // Names stay visible for diagnosis.
+    assert!(shown.contains("x-config") && shown.contains("TOKEN") && shown.contains("added"));
+}
+
+fn faux_runtime(
+    key: &str,
+) -> (
+    Arc<bake_ai::providers::faux::FauxProvider>,
+    Arc<ApiRegistry>,
+    ModelRuntime,
+) {
+    use bake_ai::providers::faux::{FauxProvider, FauxProviderOptions};
+    let faux = Arc::new(FauxProvider::new(FauxProviderOptions::default()));
+    let apis = Arc::new(ApiRegistry::new());
+    apis.register(faux.clone());
+    let mut registry = registry(json!({}), "{}");
+    registry
+        .add_provider_config(
+            "faux",
+            json!({
+                "baseUrl": "http://127.0.0.1:9/unused",
+                "api": faux.model().api,
+                "models": [{ "id": "faux-1" }],
+            }),
+            Some(key.into()),
+        )
+        .expect("faux provider");
+    (faux, apis, ModelRuntime::new(registry))
+}
+
+/// A faux response that records the request's API key.
+fn recording_key(
+    seen: &Arc<std::sync::Mutex<Vec<Option<String>>>>,
+) -> bake_ai::providers::faux::FauxResponseStep {
+    let seen = Arc::clone(seen);
+    bake_ai::providers::faux::FauxResponseStep::from_fn(move |_, options, _, _| {
+        seen.lock()
+            .expect("seen")
+            .push(options.base.api_key.clone());
+        Ok(bake_ai::providers::faux::faux_assistant_message("ok"))
+    })
+}
+
+// Bake: a request owns the registry snapshot current when it starts. An
+// update committed after the request started, before its auth resolved,
+// reaches only the next request.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_request_keeps_its_snapshot_and_the_next_sees_the_update() {
+    let (faux, apis, runtime) = faux_runtime("old-key");
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    faux.set_responses(vec![recording_key(&seen), recording_key(&seen)]);
+    let stream_fn = runtime.stream_fn_owned(apis, None);
+    let model = runtime.snapshot().model("faux", "faux-1").expect("model");
+    let first = stream_fn(
+        &model,
+        &TranscriptContext::default(),
+        SimpleStreamOptions::default(),
+    )
+    .expect("stream");
+    runtime.update(|registry| registry.set_runtime_api_key("faux", "new-key"));
+    first.result().await.expect("first");
+    let second = stream_fn(
+        &model,
+        &TranscriptContext::default(),
+        SimpleStreamOptions::default(),
+    )
+    .expect("stream");
+    second.result().await.expect("second");
+    assert_eq!(
+        *seen.lock().expect("seen"),
+        [Some("old-key".to_owned()), Some("new-key".to_owned())]
+    );
+}
+
+// Bake: concurrent updates are serialized, so none is lost.
+#[test]
+fn concurrent_updates_lose_nothing() {
+    let runtime = ModelRuntime::new(registry(json!({}), "{}"));
+    let barrier = Arc::new(std::sync::Barrier::new(8));
+    let writers: Vec<_> = (0..8)
+        .map(|n| {
+            let runtime = runtime.clone();
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                barrier.wait();
+                runtime.update(|registry| {
+                    registry
+                        .add_provider_config(&format!("p{n}"), custom_provider(Some("k")), None)
+                        .expect("add");
+                });
+            })
+        })
+        .collect();
+    for writer in writers {
+        writer.join().expect("writer");
+    }
+    let snapshot = runtime.snapshot();
+    for n in 0..8 {
+        assert!(snapshot.has_provider(&format!("p{n}")), "p{n} lost");
+    }
+}
+
+// Bake: rereading `auth.json` keeps the runtime key (`--api-key`) and the
+// providers added below `models.json`, and sees the file's new
+// credentials.
+#[test]
+fn reloading_auth_keeps_runtime_keys_and_added_providers() {
+    let dir = crate::test_support::TempDir::new("registry-reload");
+    let auth = dir.join("auth.json");
+    std::fs::write(
+        &auth,
+        r#"{ "b": { "type": "api_key", "key": "stored-b" } }"#,
+    )
+    .expect("auth");
+    let mut registry = ModelRegistry::new(
+        ModelConfig::from_value(
+            json!({ "providers": { "b": custom_provider(None) } }),
+            "models.json",
+        ),
+        AuthStorage::load(&auth),
+    );
+    registry
+        .add_provider_config("a", custom_provider(None), None)
+        .expect("added");
+    registry.set_runtime_api_key("a", "runtime-a");
+    let runtime = ModelRuntime::new(registry);
+    std::fs::write(&auth, r#"{ "a": { "type": "api_key", "key": "stored-a" }, "b": { "type": "api_key", "key": "stored-b2" } }"#)
+        .expect("auth");
+    runtime
+        .try_update(ModelRegistry::reload_auth)
+        .expect("reload");
+    let snapshot = runtime.snapshot();
+    assert!(snapshot.has_added_provider("a"));
+    assert_eq!(
+        snapshot.provider_api_key("a").expect("a").as_deref(),
+        Some("runtime-a")
+    );
+    assert_eq!(
+        snapshot.provider_api_key("b").expect("b").as_deref(),
+        Some("stored-b2")
+    );
+    // Removing the added provider leaves models.json's.
+    runtime.update(|registry| assert!(registry.remove_provider_config("a")));
+    assert!(!runtime.snapshot().has_provider("a"));
+    assert!(runtime.snapshot().has_provider("b"));
+}
+
+// Bake: a change that fails publishes nothing, though it changed the copy
+// before failing.
+#[test]
+fn a_failed_update_publishes_nothing() {
+    let runtime = ModelRuntime::new(registry(json!({}), "{}"));
+    let failed: Result<(), String> = runtime.try_update(|registry| {
+        registry
+            .add_provider_config("half", custom_provider(Some("k")), None)
+            .expect("add");
+        Err("later step failed".into())
+    });
+    assert_eq!(failed, Err("later step failed".into()));
+    assert!(!runtime.snapshot().has_provider("half"));
+    runtime
+        .try_update(|registry| {
+            registry.add_provider_config("whole", custom_provider(Some("k")), None)
+        })
+        .expect("publish");
+    assert!(runtime.snapshot().has_provider("whole"));
+}
+
+// Bake: a request takes its model's definition and auth from one snapshot.
+// A route replaced while a response streams (a new proxy and key for the
+// same model id) reaches the next request whole: the held request keeps
+// the old endpoint with the old key, the next has the new with the new.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_replaced_route_pairs_each_request_with_its_own_key() {
+    use bake_ai::providers::faux::{FauxResponseStep, faux_assistant_message};
+    let (faux, apis, runtime) = faux_runtime("old-key");
+    type Seen = Vec<(String, Option<String>)>;
+    let seen: Arc<std::sync::Mutex<Seen>> = Arc::default();
+    let started = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let record = {
+        let seen = Arc::clone(&seen);
+        move |model: &Model, options: &SimpleStreamOptions| {
+            seen.lock()
+                .expect("seen")
+                .push((model.base_url.clone(), options.base.api_key.clone()));
+        }
+    };
+    let held = {
+        let (record, started, release) = (record.clone(), started.clone(), release.clone());
+        FauxResponseStep::Factory(Arc::new(move |_, options, _, model| {
+            record(model, options);
+            let (started, release) = (started.clone(), release.clone());
+            Box::pin(async move {
+                started.notify_one();
+                release.notified().await;
+                Ok(faux_assistant_message("old"))
+            })
+        }))
+    };
+    faux.set_responses(vec![
+        held,
+        FauxResponseStep::from_fn(move |_, options, _, model| {
+            record(model, options);
+            Ok(faux_assistant_message("new"))
+        }),
+    ]);
+    let stream_fn = runtime.stream_fn_owned(apis, None);
+    let stale = runtime.snapshot().model("faux", "faux-1").expect("model");
+    let first = stream_fn(
+        &stale,
+        &TranscriptContext::default(),
+        SimpleStreamOptions::default(),
+    )
+    .expect("stream");
+    started.notified().await;
+    let api = faux.model().api.clone();
+    runtime
+        .try_update(|registry| {
+            registry.add_provider_config(
+                "faux",
+                json!({
+                    "baseUrl": "http://127.0.0.2:9/new",
+                    "api": api,
+                    "models": [{ "id": "faux-1" }],
+                }),
+                Some("new-key".into()),
+            )
+        })
+        .expect("replace");
+    release.notify_one();
+    first.result().await.expect("first");
+    // The caller still holds the old definition; the request does not.
+    let second = stream_fn(
+        &stale,
+        &TranscriptContext::default(),
+        SimpleStreamOptions::default(),
+    )
+    .expect("stream");
+    second.result().await.expect("second");
+    assert_eq!(
+        *seen.lock().expect("seen"),
+        [
+            (
+                "http://127.0.0.1:9/unused".to_owned(),
+                Some("old-key".to_owned())
+            ),
+            (
+                "http://127.0.0.2:9/new".to_owned(),
+                Some("new-key".to_owned())
+            ),
+        ]
+    );
+}

@@ -82,7 +82,10 @@ fn setup(
             json!({
                 "baseUrl": "http://127.0.0.1:9/unused",
                 "api": faux.model().api,
-                "models": [{ "id": "faux-1", "contextWindow": 1000 }],
+                "models": [
+                    { "id": "faux-1", "contextWindow": 1000 },
+                    { "id": "faux-2", "contextWindow": 1000, "reasoning": true },
+                ],
             }),
             key.map(str::to_owned),
         )
@@ -98,7 +101,9 @@ fn setup(
             )
             .expect("session"),
             model: registry.model("faux", "faux-1"),
-            registry,
+            registry: registry.into(),
+            settings_store: None,
+            selection: None,
             apis,
             settings: Settings::default(),
             thinking_level: None,
@@ -115,6 +120,8 @@ fn setup(
         prompts,
         notes: Vec::new(),
         approvals: None,
+        home: None,
+        commit_gate: None,
     };
     (runtime, faux, live)
 }
@@ -469,11 +476,11 @@ fn quitting_mid_turn_shuts_the_session_down_before_stop_returns() {
 fn pi_commands_are_refused_and_the_draft_comes_back() {
     let h = harness(Vec::new(), Vec::new());
     h.until(|update| matches!(update, RuntimeUpdate::Status(_)));
-    h.submit_id(4, Submission::FollowUp("/model gpt".into()));
+    h.submit_id(4, Submission::FollowUp("/tree gpt".into()));
     let updates = h.until(|update| matches!(update, RuntimeUpdate::Refused { .. }));
     assert!(matches!(
         updates.last(),
-        Some(RuntimeUpdate::Refused { id: 4, reason }) if reason.starts_with("/model is not available")
+        Some(RuntimeUpdate::Refused { id: 4, reason }) if reason.starts_with("/tree is not available")
     ));
     assert!(!updates.iter().any(|u| matches!(
         u,
@@ -673,7 +680,7 @@ fn a_driver_panic_still_shuts_the_session_down_and_is_reported() {
 fn commands_are_refused_but_skills_templates_and_paths_are_not() {
     let templates = ["review".to_owned()];
     assert!(refused_command("/quit", &templates).is_some_and(|r| r.contains("not available")));
-    assert!(refused_command("  /model x", &templates).is_some());
+    assert!(refused_command("  /tree x", &templates).is_some());
     assert!(
         refused_command("/goal ship it", &templates).is_some_and(|r| r.contains("not a command"))
     );
@@ -950,3 +957,5 @@ fn arguments_show_every_character_that_would_run() {
         "command: printf 'a\\tb'\\u{1b}[2J\\u{202e}txt\ncontent:\n  one\\u{d}\n  two\nlimit: 3"
     );
 }
+
+mod commands_live;

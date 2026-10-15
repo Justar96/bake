@@ -58,7 +58,9 @@ fn harness() -> Harness {
 fn options(harness: &Harness, session: SessionManager, cwd: &str) -> AgentSessionOptions {
     AgentSessionOptions {
         session,
-        registry: Arc::clone(&harness.registry),
+        registry: Arc::clone(&harness.registry).into(),
+        settings_store: None,
+        selection: None,
         apis: Arc::clone(&harness.apis),
         settings: Settings::default(),
         model: harness.registry.model("faux", "faux-1"),
@@ -104,8 +106,8 @@ fn new_file_session(dir: &TempDir) -> SessionManager {
     .expect("session")
 }
 
-// Bake: shutdown releases the session file for good. A later change stays
-// in memory, takes no lock, and writes nothing.
+// Bake: shutdown releases the session file for good. A later model change
+// is refused: it takes no lock, writes nothing, and leaves the model.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn shutdown_closes_the_session_file() {
     let dir = TempDir::new("shutdown-closes");
@@ -121,11 +123,17 @@ async fn shutdown_closes_the_session_file() {
     session.shutdown().await;
     let written = std::fs::read(&file).expect("read");
     let model = session.model().expect("model");
-    let error = session.set_model(model).await.expect_err("closed");
-    assert!(
-        error.starts_with("Session file is closed for writing"),
-        "{error}"
-    );
+    let error = session
+        .set_model(model.clone(), false)
+        .await
+        .expect_err("closed");
+    assert_eq!(error, "The session is shut down.");
+    let error = session
+        .set_thinking_level(ModelThinkingLevel::Low, false)
+        .await
+        .expect_err("closed");
+    assert_eq!(error, "The session is shut down.");
+    assert_eq!(session.model(), Some(model));
     assert_eq!(std::fs::read(&file).expect("read"), written);
     // Another writer takes the file at once.
     drop(SessionManager::open(&file, None, None).expect("open"));
@@ -595,7 +603,7 @@ async fn new_sessions_record_the_model_and_clamped_thinking_level() {
     .expect("session");
     assert_eq!(session.thinking_level(), ModelThinkingLevel::Low);
     session
-        .set_thinking_level(ModelThinkingLevel::High)
+        .set_thinking_level(ModelThinkingLevel::High, false)
         .await
         .expect("set");
     assert_eq!(
@@ -608,7 +616,7 @@ async fn new_sessions_record_the_model_and_clamped_thinking_level() {
     );
     // Setting the same level records nothing.
     session
-        .set_thinking_level(ModelThinkingLevel::High)
+        .set_thinking_level(ModelThinkingLevel::High, false)
         .await
         .expect("set");
     assert_eq!(entry_kinds(&session).len(), 3);
@@ -626,7 +634,7 @@ async fn prompts_need_a_model_with_auth() {
         .expect("session");
     let h = harness();
     let session = AgentSession::create(AgentSessionOptions {
-        registry: Arc::clone(&empty),
+        registry: Arc::clone(&empty).into(),
         model: None,
         ..options(&h, manager, "/tmp")
     })
@@ -648,7 +656,7 @@ async fn prompts_need_a_model_with_auth() {
     let manager = SessionManager::in_memory(Some("/tmp"), NewSessionOptions::default(), Vec::new())
         .expect("session");
     let session = AgentSession::create(AgentSessionOptions {
-        registry: empty,
+        registry: empty.into(),
         ..options(&h, manager, "/tmp")
     })
     .await
@@ -663,7 +671,7 @@ async fn prompts_need_a_model_with_auth() {
     );
     assert_eq!(
         session
-            .set_model(h.registry.model("faux", "faux-1").expect("model"))
+            .set_model(h.registry.model("faux", "faux-1").expect("model"), false)
             .await,
         Err("No API key for faux/faux-1".into())
     );
@@ -905,7 +913,7 @@ async fn shutdown_ends_a_request_waiting_for_auth() {
     let session = Arc::new(
         AgentSession::create(AgentSessionOptions {
             model: registry.model("slow", "slow-1"),
-            registry,
+            registry: registry.into(),
             ..options(&h, manager, "/tmp")
         })
         .await

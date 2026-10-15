@@ -726,6 +726,9 @@ fn drive(
                             Effect::Answer { generation, answer } => {
                                 (owners.runtime)(Request::Answer { generation, answer });
                             }
+                            Effect::Dialog { id, answer } => {
+                                (owners.runtime)(Request::Dialog { id, answer });
+                            }
                         }
                     }
                 }
@@ -1670,6 +1673,85 @@ mod tests {
 
     fn live_state() -> State {
         State::live(Default::default(), Tones::None, Vec::new())
+    }
+
+    fn field(id: u64, secret: bool) -> Source {
+        use bake_tui_view::dialog::{DialogKind, DialogRequest, FieldDialog};
+        runtime(RuntimeUpdate::Dialog(Some(DialogRequest {
+            id,
+            kind: DialogKind::Field(FieldDialog {
+                title: "Sign in · CLIProxyAPI".into(),
+                prompt: if secret { "API key" } else { "Base URL" }.into(),
+                secret,
+                initial: String::new(),
+                error: None,
+            }),
+        })))
+    }
+
+    fn typed_keys(text: &str) -> Vec<Source> {
+        text.chars().map(|c| read(Key::Char(c))).collect()
+    }
+
+    /// The sources of `parts`, in order.
+    fn batch(parts: Vec<Vec<Source>>) -> Vec<Source> {
+        parts.into_iter().flatten().collect()
+    }
+
+    // Bake: keys queued behind each dialog change reach the loop ahead of
+    // that change's arming and go nowhere: Enter typed ahead of the key
+    // field does not answer it, the end of an unbracketed paste after the
+    // key does not reach the closed dialog's composer, and nothing of the
+    // key is ever drawn.
+    #[test]
+    fn keys_queued_across_dialog_changes_reach_neither_the_next_field_nor_the_draft() {
+        let mut batches: Vec<Vec<Source>> = vec![
+            // URL field opens; typeahead behind it.
+            batch(vec![
+                vec![field(1, false)],
+                typed_keys("early"),
+                vec![read(Key::Enter)],
+            ]),
+            // Frame drew it: swept keys, then the arming, then the URL.
+            batch(vec![
+                vec![armed(1)],
+                typed_keys("http://x"),
+                vec![read(Key::Enter)],
+            ]),
+            // Key field replaces it, with the URL step's held Enter queued.
+            vec![field(2, true), read(Key::Enter), read(Key::Enter)],
+            batch(vec![
+                vec![armed(2)],
+                typed_keys("sk-fake-queued"),
+                vec![read(Key::Enter)],
+            ]),
+            // Closed, and the rest of an unbracketed paste queued behind it.
+            batch(vec![
+                vec![runtime(RuntimeUpdate::Dialog(None))],
+                typed_keys("tail"),
+                vec![read(Key::Enter)],
+            ]),
+            // The composer's arming; only now does typing reach the draft.
+            batch(vec![vec![armed(3)], typed_keys("ok")]),
+            vec![ctrl('c'), ctrl('c')],
+        ];
+        let (mut screen, inputs) = Rendered::new(std::mem::take(&mut batches));
+        let mut state = live_state();
+        let (requests, shown) = answers(&mut screen, &inputs, &mut state);
+        assert_eq!(shown, 3);
+        assert_eq!(requests.len(), 2, "{requests:?}");
+        assert!(
+            requests[0].contains("Entered(SecretText(<8 chars>))"),
+            "{requests:?}"
+        );
+        assert!(
+            requests[1].contains("Entered(SecretText(<14 chars>))"),
+            "{requests:?}"
+        );
+        assert!(requests.iter().all(|r| !r.contains("sk-fake")));
+        assert_eq!(state.draft.text(), "ok");
+        assert!(screen.screens.iter().all(|s| !s.contains("sk-fake")));
+        assert!(screen.screens.iter().any(|s| s.contains("Preparing")));
     }
 
     #[test]

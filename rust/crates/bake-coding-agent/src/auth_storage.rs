@@ -148,8 +148,23 @@ pub(crate) fn read_text_file(path: &Path, limit: u64) -> std::io::Result<Option<
     Ok(Some(String::from_utf8_lossy(&bytes).into_owned()))
 }
 
-fn parse_credential(value: &Value) -> Option<Credential> {
+/// The member that binds a record to a Bake account route
+/// ([`crate::cliproxyapi::account`]).
+pub(crate) const ACCOUNT_BINDING: &str = "account";
+
+/// The provider whose records [`ACCOUNT_BINDING`] binds.
+const BOUND_PROVIDER: &str = "cliproxyapi";
+
+/// `provider`'s credential in `value`. A `cliproxyapi` record bound to the
+/// Bake account's route is no credential here: only a verified account
+/// read uses its key, so it never reaches another route of that provider,
+/// such as the 0.3 import. Other providers' records are read as Pi reads
+/// them, whatever members they carry.
+fn parse_credential(provider: &str, value: &Value) -> Option<Credential> {
     let object = value.as_object()?;
+    if provider == BOUND_PROVIDER && object.contains_key(ACCOUNT_BINDING) {
+        return None;
+    }
     match object.get("type").and_then(Value::as_str)? {
         "api_key" => Some(Credential::ApiKey {
             key: object.get("key").and_then(Value::as_str).map(str::to_owned),
@@ -168,7 +183,9 @@ fn parse_credential(value: &Value) -> Option<Credential> {
 fn credentials(object: &Map<String, Value>) -> BTreeMap<String, Credential> {
     object
         .iter()
-        .filter_map(|(provider, value)| Some((provider.clone(), parse_credential(value)?)))
+        .filter_map(|(provider, value)| {
+            Some((provider.clone(), parse_credential(provider, value)?))
+        })
         .collect()
 }
 
@@ -226,6 +243,13 @@ impl AuthStorage {
             runtime: BTreeMap::new(),
             file: Some(JsonFileStore::new(path.to_path_buf(), MAX_AUTH_FILE_BYTES)),
         }
+    }
+
+    /// The storage with a failure injected into each write.
+    #[cfg(test)]
+    pub(crate) fn with_fault(mut self, fault: crate::json_store::Fault) -> Self {
+        self.file = self.file.map(|file| file.with_fault(fault));
+        self
     }
 
     /// Pi's `reload`: rereads the file. On an error the credentials read
@@ -308,6 +332,52 @@ impl AuthStorage {
         result.map(|()| removed)
     }
 
+    /// Replaces `provider`'s stored record with `next` (`None` removes it)
+    /// under the file's lock, and returns the record it replaced, read under
+    /// that same lock, with the write's outcome. After an error for which
+    /// [`StoreError::is_committed`] holds, `next` is stored. Bake's
+    /// account transactions use it to restore exactly what they replaced.
+    pub(crate) fn swap_record(
+        &mut self,
+        provider: &str,
+        next: Option<Value>,
+    ) -> (Option<Value>, Result<(), StoreError>) {
+        let mut previous = None;
+        let result = self.update(|object| {
+            previous = object.get(provider).cloned();
+            match next {
+                Some(record) => set_member(object, provider, record),
+                None => remove_member(object, provider),
+            }
+        });
+        (previous, result)
+    }
+
+    /// Replaces `provider`'s record with `next` only while it is still
+    /// `expected`, under the file's lock: a rollback that must not undo a
+    /// newer writer's credential. Returns whether it replaced the record,
+    /// with the write's outcome: after an error for which
+    /// [`StoreError::is_committed`] holds, the replacement is in the file.
+    pub(crate) fn replace_if(
+        &mut self,
+        provider: &str,
+        expected: &Value,
+        next: Option<Value>,
+    ) -> (bool, Result<(), StoreError>) {
+        let mut replaced = false;
+        let result = self.update(|object| {
+            if object.get(provider) != Some(expected) {
+                return false;
+            }
+            replaced = true;
+            match next {
+                Some(record) => set_member(object, provider, record),
+                None => remove_member(object, provider),
+            }
+        });
+        (replaced, result)
+    }
+
     /// Pi's `setRuntimeApiKey`: a key for this process that takes priority
     /// over the stored credential and is never written.
     pub fn set_runtime_api_key(&mut self, provider: &str, key: &str) {
@@ -317,6 +387,11 @@ impl AuthStorage {
     /// Pi's `removeRuntimeApiKey`.
     pub fn remove_runtime_api_key(&mut self, provider: &str) {
         self.runtime.remove(provider);
+    }
+
+    /// `provider`'s runtime key (`--api-key`), if set.
+    pub fn runtime_api_key(&self, provider: &str) -> Option<&str> {
+        self.runtime.get(provider).map(String::as_str)
     }
 
     /// Whether a runtime key is set for `provider`.
@@ -354,6 +429,28 @@ impl AuthStorage {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Bake: only the CLIProxyAPI account's own record is bound; other
+    // providers' records with an `account` member read as Pi reads them.
+    #[test]
+    fn only_the_cliproxyapi_record_is_bound() {
+        let storage = AuthStorage::from_json(
+            "{\"other\":{\"type\":\"api_key\",\"key\":\"sk-fake-other\",\"account\":\"x\"},\
+             \"oauthy\":{\"type\":\"oauth\",\"account\":\"x\"},\
+             \"cliproxyapi\":{\"type\":\"api_key\",\"key\":\"sk-fake-bound\",\"account\":\"x\"}}",
+        );
+        assert_eq!(
+            storage.read("other"),
+            Some(Credential::ApiKey {
+                key: Some("sk-fake-other".into()),
+                env: None,
+            })
+        );
+        assert_eq!(storage.read("oauthy"), Some(Credential::OAuth));
+        assert!(storage.has_credential("other") && storage.has_credential("oauthy"));
+        assert_eq!(storage.read("cliproxyapi"), None);
+        assert!(!storage.has_credential("cliproxyapi"));
+    }
 
     #[test]
     fn reads_api_keys_with_their_env() {

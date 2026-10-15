@@ -220,6 +220,9 @@ class Preview {
     return code as number
   }
 
+  /** The preview's process id: the shell that `exec`s the binary. */
+  get pid(): number { return this.process.pid }
+
   get unchangedModes(): boolean { return JSON.stringify(this.modes()) === JSON.stringify(this.initialModes) }
 
   /** Close the terminal under the preview, as an emulator window closing does, and expect the quiet hangup exit. */
@@ -676,8 +679,21 @@ if (process.platform === 'linux') {
  * then answers with the last result's first line; `HOLDWRITE <file>` is
  * `WRITE` whose call is held until `release()`.
  */
+/** CLIProxyAPI scenario text; the key is fake. */
+const UNCONFIGURED = 'No model is ready yet. Run /login'
+const FIELD_KEYS = 'Enter continue · Esc cancel'
+const PROXY_KEY = 'sk-fake-pty-0123456789'
+
 class FakeModel {
   readonly requests: { input: unknown[] }[] = []
+  /** The Authorization header of each request, model lists included, in order. */
+  readonly authorizations: string[] = []
+  /** The model lists served, as a CLIProxyAPI lists them. */
+  readonly modelLists: string[] = []
+  /** Holds each model list until `release()`, as a slow proxy would. */
+  holdModels = false
+  /** Settles when a held model list is aborted by its client. */
+  readonly listAborted = Promise.withResolvers<void>()
   private releases: (() => void)[] = []
   aborted = 0
   private readonly server: ReturnType<typeof Bun.serve>
@@ -719,6 +735,21 @@ class FakeModel {
   }
 
   private async answer(request: Request): Promise<Response> {
+    this.authorizations.push(request.headers.get('authorization') ?? '')
+    if (request.method === 'GET' && new URL(request.url).pathname === '/v1/models') {
+      this.modelLists.push(request.url)
+      const list = JSON.stringify({ data: [
+        { id: 'gpt-loop', owned_by: 'openai' },
+        { id: 'gpt-two', owned_by: 'openai', supported_reasoning_levels: [{ effort: 'low' }, { effort: 'high' }] },
+      ] })
+      if (!this.holdModels) return new Response(list, { headers: { 'content-type': 'application/json' } })
+      let release: () => void = () => {}
+      const released = new Promise<void>((done) => { release = done })
+      this.releases.push(release)
+      request.signal.addEventListener('abort', () => { this.listAborted.resolve(); release() })
+      await released
+      return new Response(list, { headers: { 'content-type': 'application/json' } })
+    }
     const body = await request.json() as { input: { role?: string; type?: string; content?: { text?: string }[]; output?: string }[] }
     this.requests.push(body)
     const input = body.input
@@ -973,16 +1004,78 @@ await liveScenario('inline live session steers a held turn, cancels another, and
   assert.deepEqual(messageTexts(entries ?? [], 'user'), ['HOLD first', 'STEER left', 'HOLD second'])
 })
 
+/** A process `ps` listed. */
+type Listed = { parent: number; command: string }
+
+/**
+ * Each live process (not a zombie) as pid → parent pid and command
+ * line. A listing that failed, or that misses this process, is an error, so
+ * no check reads it as "nothing left".
+ */
+function processTable(): Map<number, Listed> {
+  const listed = Bun.spawnSync(['ps', '-A', '-o', 'pid=,ppid=,stat=,args='])
+  assert.equal(listed.exitCode, 0, `ps failed: ${listed.stderr.toString()}`)
+  const listing = listed.stdout.toString()
+  const table = new Map<number, Listed>()
+  for (const line of listing.split('\n')) {
+    const [, pid, parent, state, command] = /^\s*(\d+)\s+(\d+)\s+(\S+)\s*(.*)$/u.exec(line) ?? []
+    if (pid === undefined || parent === undefined || state === undefined || state.startsWith('Z')) continue
+    table.set(Number(pid), { parent: Number(parent), command: (command ?? '').trimEnd() })
+  }
+  assert(table.has(process.pid), 'ps listed no usable rows')
+  return table
+}
+
+/** The live descendants of `root`, with their command lines. */
+function descendants(root: number): Map<number, string> {
+  const table = processTable()
+  const found = new Map<number, string>()
+  const queue = [root]
+  for (let parent = queue.shift(); parent !== undefined; parent = queue.shift()) {
+    for (const [pid, entry] of table) {
+      if (entry.parent !== parent) continue
+      queue.push(pid)
+      found.set(pid, entry.command)
+    }
+  }
+  return found
+}
+
+/** Which of `owned` (pid → command line) are still live: the same pid with the same command line. */
+function survivors(owned: Map<number, string>): number[] {
+  const table = processTable()
+  return [...owned].filter(([pid, command]) => table.get(pid)?.command === command).map(([pid]) => pid)
+}
+
 await liveScenario('a live bash call cancelled by Esc fails its card and leaves no process', async (world) => {
   const session = world.launch()
   await session.ready()
   session.send('SLEEP\r')
-  await session.wait('bash running', () => session.screen.includes('running bash') && session.screen.includes('sleep 30'))
-  session.send('\x1b')
-  await session.wait('bash interrupted', () => /^ {2}■ Interrupted/mu.test(session.screen))
-  const sleeping = Bun.spawnSync(['pgrep', '-f', '^sleep 30$']).stdout.toString().trim()
-  assert.equal(sleeping, '', `the cancelled bash call left a process: ${sleeping}`)
-  await session.quit()
+  // The call's own process tree (its sandbox runner, shell, and `sleep 30`),
+  // found under this session's process; other processes on the host with
+  // the same command line are not this test's.
+  let owned = new Map<number, string>()
+  await session.wait('bash running', () => {
+    if (!session.screen.includes('running bash') || !session.screen.includes('sleep 30')) return false
+    owned = descendants(session.pid)
+    return [...owned.values()].includes('sleep 30')
+  })
+  try {
+    session.send('\x1b')
+    await session.wait('bash interrupted', () => /^ {2}■ Interrupted/mu.test(session.screen))
+    const left = survivors(owned)
+    assert.deepEqual(left, [], `the cancelled bash call left its process: ${left.join(', ')}`)
+    await session.quit()
+  } finally {
+    for (const pid of survivors(owned)) {
+      try {
+        process.kill(pid, 'SIGKILL')
+      } catch (error) {
+        // It exited after the listing, or with a parent killed before it.
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
+      }
+    }
+  }
 })
 
 for (const [signal, inline] of [['SIGTERM', false], ['SIGHUP', true], ['SIGINT', false]] as const) {
@@ -1012,10 +1105,10 @@ await liveScenario('live command-line prompts run first, and a setup failure exi
   await session.ready()
   await session.wait('both prompts answered', () => session.screen.includes('Echo: from args.') && session.screen.includes('Echo: later arg.')
     && /^ {2}✓ Completed/mu.test(session.screen))
-  // A refused command keeps the draft.
-  session.send('/model other\r')
-  await session.wait('command refused', () => session.screen.includes('/model is not available in bake-rs yet')
-    && session.screen.includes('❯ /model other'))
+  // A command bake-rs does not run is refused, and the draft is kept.
+  session.send('/tree other\r')
+  await session.wait('command refused', () => session.screen.includes('/tree is not available in bake-rs yet')
+    && session.screen.includes('❯ /tree other'))
   await session.quit()
 
   const failed = world.launch(['--model', 'missing-model'])
@@ -1024,15 +1117,19 @@ await liveScenario('live command-line prompts run first, and a setup failure exi
   assert(!failed.raw.includes('\x1b[?2004h') && !failed.raw.includes('\x1b[?1049h'), 'setup failure changed the terminal')
   assert(failed.unchangedModes, 'setup failure left terminal modes changed')
 
-  // A model without a key fails the same way, before raw mode.
+  // A model without a key opens the terminal, so /login can set one up; a
+  // prompt is refused with its draft kept, and no session file is written.
   await writeFile(join(world.home, 'models.json'), JSON.stringify({
     providers: { loop: { baseUrl: `http://127.0.0.1:${world.model.port}/v1`, api: 'openai-responses', models: [{ id: 'loop-model' }] } },
   }))
+  const before = (await sessionEntries(world.home)).length
   const keyless = world.launch(['--model', 'loop/loop-model'])
-  assert.equal(await keyless.exit(), 1)
-  assert(keyless.raw.includes('No API key found'), `the missing key was not reported\n${keyless.raw}`)
-  assert(!keyless.raw.includes('\x1b[?2004h'), 'a missing key changed the terminal')
-  assert(keyless.unchangedModes, 'a missing key left terminal modes changed')
+  await keyless.ready()
+  await keyless.wait('unconfigured note', () => keyless.screen.includes(UNCONFIGURED))
+  keyless.send('ECHO nope\r')
+  await keyless.wait('prompt refused', () => keyless.screen.includes('No API key found') && keyless.screen.includes('❯ ECHO nope'))
+  await keyless.quit()
+  assert.equal((await sessionEntries(world.home)).length, before, 'a refused prompt wrote a session file')
 })
 
 /** Every tool result the home's sessions hold, as text. */
@@ -1211,3 +1308,214 @@ for (const [how, inline] of [['Ctrl+C', false], ['SIGTERM', true], ['hangup', fa
     assert.deepEqual(await readdir(world.project), [], 'the session wrote into the project')
   })
 }
+
+// ---- CLIProxyAPI sign-in, model and thinking controls, refresh, sign-out ----
+//
+// The fake model also answers `GET /v1/models` as a CLIProxyAPI lists its
+// models, so the account's route sends prompts back to it. Keys are fake.
+
+
+/** Waits until the open field takes keys: drawn whole and armed. */
+async function fieldReady(session: Preview, prompt: string): Promise<void> {
+  await session.wait(`${prompt} field ready`, () => session.screen.includes(`${prompt} (`) && session.screen.includes(FIELD_KEYS)
+    && !session.screen.includes('Preparing'))
+}
+
+/** Waits until the composer takes keys again after a dialog closed. */
+async function composerReady(session: Preview): Promise<void> {
+  await session.wait('composer ready', () => !session.screen.includes('Preparing') && !session.screen.includes(FIELD_KEYS))
+}
+
+/** Types `text` one key per write, each after the last was drawn, as a person types. */
+async function type(session: Preview, text: string, shown: (typed: number) => boolean): Promise<void> {
+  for (let typed = 1; typed <= text.length; typed++) {
+    session.send(text[typed - 1] ?? '')
+    await session.wait(`typed ${typed}`, () => shown(typed))
+  }
+}
+
+/** Awaits `promise`, failing with `message` after 10 seconds. */
+async function bounded(promise: Promise<void>, message: string): Promise<void> {
+  const timeout = Symbol('timeout')
+  assert.notEqual(await Promise.race([promise, delay(10_000).then(() => timeout)]), timeout, message)
+}
+
+/** Clears the open field with Ctrl+U and waits until it is drawn empty. */
+async function clearField(session: Preview): Promise<void> {
+  session.send('\x15')
+  await session.wait('field cleared', () => session.screen.split('\n').some(line => line.trimEnd() === '  >'))
+}
+
+/** Enters the fake model's address in the open address field. */
+async function enterUrl(session: Preview, world: LiveWorld): Promise<void> {
+  await fieldReady(session, 'Base URL')
+  await clearField(session)
+  const url = `http://127.0.0.1:${world.model.port}`
+  await type(session, url, typed => session.screen.includes(`> ${url.slice(0, typed)}`))
+  session.send('\r')
+  await session.wait('address answered', () => session.screen.includes('Working…') || session.screen.includes('API key ('))
+}
+
+/** Signs in through the dialogs with the fake model as the proxy. */
+async function signIn(session: Preview, world: LiveWorld): Promise<void> {
+  session.send('/login\r')
+  await fieldReady(session, 'Base URL')
+  await clearField(session)
+  const url = `http://127.0.0.1:${world.model.port}`
+  await type(session, url, typed => session.screen.includes(`> ${url.slice(0, typed)}`))
+  session.send('\r')
+  await fieldReady(session, 'API key')
+  await type(session, PROXY_KEY, typed => session.screen.includes(`> ${'•'.repeat(typed)}`))
+  session.send('\r')
+}
+
+function readJson(path: string): Record<string, unknown> {
+  return JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>
+}
+
+for (const inline of [false, true]) {
+  await liveScenario(`${inline ? 'inline ' : ''}a keyless home signs in, prompts, changes model and thinking, refreshes, resumes, and signs out`, async (world) => {
+    await rm(join(world.home, 'models.json'))
+    const session = world.launch([], inline)
+    await session.ready()
+    await session.wait('unconfigured note', () => session.screen.includes(UNCONFIGURED))
+    session.send('ECHO early\r')
+    await session.wait('prompt refused', () => session.screen.includes('❯ ECHO early') && /No model/u.test(session.screen))
+    session.send('\x15')
+    await session.wait('draft cleared', () => !session.screen.includes('ECHO early'))
+    await signIn(session, world)
+    await session.wait('signed in', () => session.screen.includes('Signed in to CLIProxyAPI') && session.screen.includes('now using cliproxyapi/gpt-loop'))
+    await composerReady(session)
+    assert(!session.raw.includes(PROXY_KEY) && !session.history.includes(PROXY_KEY), 'the key reached the terminal')
+    assert.equal(world.model.authorizations.at(-1), `Bearer ${PROXY_KEY}`)
+    const auth = readJson(join(world.home, 'auth.json')) as { cliproxyapi?: { key?: string } }
+    assert.equal(auth.cliproxyapi?.key, PROXY_KEY)
+    assert(!readFileSync(join(world.home, 'settings.json'), 'utf8').includes(PROXY_KEY), 'the key reached settings.json')
+
+    session.send('ECHO signed in\r')
+    await session.wait('answer through the route', () => session.screen.includes('Echo: signed in.'))
+    assert.equal(world.model.authorizations.at(-1), `Bearer ${PROXY_KEY}`)
+
+    session.send('/model gpt-two\r')
+    await session.wait('model changed', () => session.screen.includes('Model: cliproxyapi/gpt-two'))
+    await composerReady(session)
+    session.send('/thinking\r')
+    await session.wait('thinking list', () => session.screen.includes('Thinking level') && session.screen.includes('Ctrl+S to set as default')
+      && !session.screen.includes('Preparing'))
+    session.send('\x1b[B')
+    await session.wait('next level selected', () => /→ {3}\w+/u.test(session.screen))
+    session.send('\x13')
+    await session.wait('thinking saved', () => /Thinking level: \w+, saved as the default/u.test(session.screen))
+    const level = /Thinking level: (\w+),/u.exec(session.screen)?.[1]
+    assert(level, 'no thinking level shown')
+    await composerReady(session)
+    session.send('/refresh-models\r')
+    await session.wait('refreshed', () => /CLIProxyAPI model list/u.test(session.screen))
+    await composerReady(session)
+    session.send('ECHO with two\r')
+    await session.wait('answer with gpt-two', () => session.screen.includes('Echo: with two.'))
+    await session.quit()
+    if (inline) session.assertShellHistory()
+    assert(!session.raw.includes(PROXY_KEY), 'the key reached the terminal')
+    const [entries] = await sessionEntries(world.home)
+    assert(entries, 'no session file was written')
+    assert(!JSON.stringify(entries).includes(PROXY_KEY), 'the key reached the session file')
+    const changes = entries.filter(entry => entry.type === 'model_change').map(entry => `${String(entry.provider)}/${String(entry.modelId)}`)
+    assert.deepEqual(changes.slice(-2), ['cliproxyapi/gpt-loop', 'cliproxyapi/gpt-two'])
+    assert(entries.some(entry => entry.type === 'thinking_level_change' && entry.thinkingLevel === level), 'the thinking change was not recorded')
+
+    // Resumed: the session's model and level come back, and the route still works.
+    const resumed = world.launch(['--continue'], inline)
+    await resumed.ready()
+    await resumed.wait('resumed status', () => resumed.screen.includes('gpt-two') && resumed.screen.includes(level))
+    resumed.send('/logout\r')
+    await resumed.wait('signed out', () => resumed.screen.includes('Signed out of CLIProxyAPI'))
+    await composerReady(resumed)
+    resumed.send('ECHO after\r')
+    await resumed.wait('prompt refused after sign-out', () => resumed.screen.includes('❯ ECHO after') && resumed.screen.includes('No API key found'))
+    await resumed.quit()
+    const signedOut = readJson(join(world.home, 'auth.json'))
+    assert.equal(signedOut.cliproxyapi, undefined, 'the key stayed in auth.json')
+    assert.equal(readJson(join(world.home, 'settings.json')).cliproxyapi, null)
+    assert.deepEqual(await readdir(world.project), [], 'the session wrote into the project')
+  })
+}
+
+await liveScenario('a sign-in cancelled at each step, during its check, or by a signal writes nothing and keeps the draft', async (world) => {
+  await rm(join(world.home, 'models.json'))
+  const session = world.launch([], true)
+  await session.ready()
+  // Esc at the address.
+  session.send('/login\r')
+  await fieldReady(session, 'Base URL')
+  session.send('\x1b')
+  await session.wait('cancelled at the address', () => session.screen.includes('❯ /login') && session.screen.includes('Cancelled'))
+  await composerReady(session)
+  session.send('\x15')
+  await session.wait('draft cleared', () => !session.screen.includes('❯ /login'))
+  // The address with typeahead behind its Enter: the queued keys reach
+  // neither the key field nor the draft.
+  session.send('/login\r')
+  await fieldReady(session, 'Base URL')
+  await clearField(session)
+  const url = `http://127.0.0.1:${world.model.port}`
+  await type(session, url, typed => session.screen.includes(`> ${url.slice(0, typed)}`))
+  // Enter must arrive alone to answer: one in a burst with typing never does.
+  session.send('\r')
+  await session.wait('address answered', () => session.screen.includes('Working…') || session.screen.includes('API key ('))
+  session.send('typed-ahead')
+  await fieldReady(session, 'API key')
+  assert(!/> •/u.test(session.screen), `typeahead reached the key field\n${session.screen}`)
+  // Esc at the key.
+  session.send('\x1b')
+  await session.wait('cancelled at the key', () => session.screen.includes('❯ /login') && session.screen.includes('Cancelled'))
+  await composerReady(session)
+  assert(!session.screen.includes('typed-ahead'), 'typeahead reached the draft')
+  session.send('\x15')
+  // Esc while the proxy check is held: it is aborted.
+  world.model.holdModels = true
+  session.send('/login\r')
+  await enterUrl(session, world)
+  await fieldReady(session, 'API key')
+  await type(session, PROXY_KEY, typed => session.screen.includes(`> ${'•'.repeat(typed)}`))
+  session.send('\r')
+  await session.wait('check held', () => world.model.holding === 1 && session.screen.includes('Working…'))
+  session.send('spill')
+  session.send('\x1b')
+  await session.wait('cancelled during the check', () => session.screen.includes('❯ /login') && session.screen.includes('Cancelled'))
+  await bounded(world.model.listAborted.promise, 'the held check was not aborted')
+  await composerReady(session)
+  assert(!session.screen.includes('spill'), 'keys typed while waiting reached the draft')
+  // A signal during secret input restores the terminal and saves nothing.
+  world.model.holdModels = false
+  session.send('\x15')
+  session.send('/login\r')
+  await enterUrl(session, world)
+  await fieldReady(session, 'API key')
+  await type(session, PROXY_KEY.slice(0, 6), typed => session.screen.includes(`> ${'•'.repeat(typed)}`))
+  await session.quit('SIGTERM')
+  session.assertShellHistory()
+  assert(!session.raw.includes(PROXY_KEY.slice(0, 6)) && !session.history.includes(PROXY_KEY.slice(0, 6)), 'the key reached the terminal')
+  assert(!existsSync(join(world.home, 'auth.json')), 'a cancelled sign-in wrote auth.json')
+  assert(!existsSync(join(world.home, 'settings.json')), 'a cancelled sign-in wrote settings.json')
+  assert.deepEqual(await sessionEntries(world.home), [], 'a cancelled sign-in wrote a session file')
+})
+
+await liveScenario('a terminal hangup while a sign-in check is held aborts the check, restores the terminal, and saves nothing', async (world) => {
+  await rm(join(world.home, 'models.json'))
+  world.model.holdModels = true
+  const session = world.launch([], true)
+  await session.ready()
+  session.send('/login\r')
+  await enterUrl(session, world)
+  await fieldReady(session, 'API key')
+  await type(session, PROXY_KEY, typed => session.screen.includes(`> ${'•'.repeat(typed)}`))
+  session.send('\r')
+  await session.wait('check held', () => world.model.holding === 1 && session.screen.includes('Working…'))
+  await session.hangUp()
+  await bounded(world.model.listAborted.promise, 'the held check was not aborted')
+  assert(!session.raw.includes(PROXY_KEY), 'the key reached the terminal')
+  assert(!existsSync(join(world.home, 'auth.json')), 'a hung-up sign-in wrote auth.json')
+  assert(!existsSync(join(world.home, 'settings.json')), 'a hung-up sign-in wrote settings.json')
+  assert.deepEqual(await sessionEntries(world.home), [], 'a hung-up sign-in wrote a session file')
+})

@@ -310,7 +310,8 @@ fn environment(
 
 /// Interactive mode: the session print mode would run, set up the same way
 /// and before the terminal changes mode, so a setup failure is reported as
-/// print mode reports it. The terminal frontend handles SIGINT, SIGTERM,
+/// print mode reports it. Unlike print mode, it starts without a model or
+/// key, so `/login` and `/model` can set one up. The terminal frontend handles SIGINT, SIGTERM,
 /// and SIGHUP itself, shutting the session down before it restores the
 /// terminal.
 fn interactive(runtime: &tokio::runtime::Runtime, args: cli::Args, stderr: SharedWriter) -> i32 {
@@ -324,25 +325,24 @@ fn interactive(runtime: &tokio::runtime::Runtime, args: cli::Args, stderr: Share
     let approvals = ApprovalBroker::new();
     let started = runtime.block_on(async {
         let environment = environment(true, stderr, cli::no_interrupt(), Some(approvals.clone()));
-        cli::start(environment, args).await
+        cli::start_interactive(environment, args).await
     });
     let started = match started {
         Ok(started) => started,
         Err(code) => return code,
     };
     let session = started.session;
-    // A prompt would fail without a model and key; say so before the
-    // terminal changes mode, as a setup failure.
-    if let Err(message) = session.check_model_auth() {
-        runtime.block_on(session.shutdown());
-        eprintln!("Error: {message}");
-        return 1;
-    }
     let mut notes = vec![match session.session_file() {
         Some(file) => format!("Session saved to {}", file.display()),
         None => "Session not saved (--no-session)".to_owned(),
     }];
     notes.extend(session.model_fallback_message().map(str::to_owned));
+    // Without a model or key the terminal still starts, so /login and
+    // /model can set one up; a prompt is refused with its draft kept until
+    // then. Print mode stays strict.
+    if session.check_model_auth().is_err() {
+        notes.push(UNCONFIGURED_NOTE.to_owned());
+    }
     let mut prompts: Vec<(String, Vec<ImageContent>)> = started
         .initial_message
         .filter(|text| !text.is_empty())
@@ -356,6 +356,7 @@ fn interactive(runtime: &tokio::runtime::Runtime, args: cli::Args, stderr: Share
         prompts,
         notes,
         approvals: Some(approvals),
+        home: Some(started.home),
     };
     match bake_tui::run_live(screen, live) {
         Ok(exit) => exit_status(exit),
@@ -365,6 +366,9 @@ fn interactive(runtime: &tokio::runtime::Runtime, args: cli::Args, stderr: Share
         }
     }
 }
+
+/// The note an interactive session without a usable model opens with.
+const UNCONFIGURED_NOTE: &str = "No model is ready yet. Run /login to sign in to CLIProxyAPI, or /model to choose a model with a key.";
 
 /// The process's one sandbox provider: bubblewrap or Landlock on Linux,
 /// Seatbelt on macOS, and a fail-closed refusal elsewhere. It is built on

@@ -15,6 +15,7 @@ use crate::activity::{self, Hue, Tones};
 use crate::completion;
 use crate::composer::{self, Edge};
 use crate::copy;
+use crate::dialog::DialogKind;
 use crate::editor::{self, display};
 use crate::frame::FrameStyle;
 use crate::layout::{self, Needs};
@@ -66,7 +67,147 @@ fn needs(app: &State, width: u16) -> Needs {
         pending: panel_rows(app.pending.len()),
         panel: panel_rows(app.attachments.len()),
         menu: menu_rows(app),
-        approval: approval_rows(app, inner_width(width)),
+        approval: approval_rows(app, inner_width(width)).max(dialog_rows(app)),
+    }
+}
+
+/// Rows a list dialog shows at most; a longer list scrolls with its
+/// selection.
+const DIALOG_LIST_ROWS: usize = 8;
+
+/// The rows the open dialog wants while no approval waits: its title, its
+/// filter, rows, and note, or its prompt, field, and error, then its keys.
+fn dialog_rows(app: &State) -> u16 {
+    let Some(dialog) = app.dialog.as_ref().filter(|_| app.approval().is_none()) else {
+        return 0;
+    };
+    let body = match &dialog.request.kind {
+        DialogKind::List(list) => {
+            usize::from(list.filterable)
+                + dialog.rows().len().clamp(1, DIALOG_LIST_ROWS)
+                + usize::from(list.note.is_some())
+        }
+        DialogKind::Field(field) => 2 + usize::from(field.error.is_some()),
+    };
+    u16::try_from(body + 2).unwrap_or(u16::MAX)
+}
+
+/// The open dialog ([`crate::dialog`]), in the approval panel's place. A
+/// secret field is drawn as one `•` per character typed, at every width.
+///
+/// Records the dialog as on screen only when every row and its keys fit,
+/// so the keyboard is handed to it only once it is shown whole.
+fn render_dialog(app: &mut State, area: Rect, buf: &mut Buffer) {
+    app.dialog_on_screen = None;
+    let Some(dialog) = app.dialog.as_ref() else {
+        return;
+    };
+    if area.is_empty() || app.approval().is_some() {
+        return;
+    }
+    let clean = |text: &str| editor::sanitize(text).replace(['\n', '\t'], " ");
+    let width = usize::from(area.width);
+    let title_style = tone_style(Tone::Waiting, app.tones).add_modifier(Modifier::BOLD);
+    let mut rows: Vec<Line> = Vec::new();
+    let keys = match &dialog.request.kind {
+        DialogKind::List(list) => {
+            rows.push(Line::styled(fit(&clean(&list.title), width), title_style));
+            if list.filterable {
+                rows.push(Line::from(vec![
+                    Span::styled(format!("{} ", copy::DIALOG_FILTER), dim()),
+                    Span::raw(fit(&clean(&dialog.filter), width.saturating_sub(8))),
+                ]));
+            }
+            let shown = dialog.rows();
+            if shown.is_empty() {
+                rows.push(Line::styled(copy::DIALOG_NO_MATCH, dim()));
+            }
+            let first = dialog
+                .selected
+                .saturating_sub(DIALOG_LIST_ROWS - 1)
+                .min(shown.len().saturating_sub(DIALOG_LIST_ROWS));
+            for (offset, &index) in shown.iter().enumerate().skip(first).take(DIALOG_LIST_ROWS) {
+                let item = &list.items[index];
+                let pointer = if offset == dialog.selected {
+                    "→ "
+                } else {
+                    "  "
+                };
+                let mark = if list.current == Some(index) {
+                    "✓ "
+                } else {
+                    "  "
+                };
+                let mut spans = vec![
+                    Span::styled(pointer, accent()),
+                    Span::raw(format!("{mark}{}", clean(&item.label))),
+                ];
+                if let Some(detail) = &item.detail {
+                    spans.push(Span::styled(format!(" [{}]", clean(detail)), dim()));
+                }
+                rows.push(Line::from(spans));
+            }
+            if let Some(note) = &list.note {
+                rows.push(Line::styled(fit(&clean(note), width), dim()));
+            }
+            if list.saves_default {
+                copy::DIALOG_LIST_SAVE_KEYS
+            } else {
+                copy::DIALOG_LIST_KEYS
+            }
+        }
+        DialogKind::Field(field) => {
+            rows.push(Line::styled(fit(&clean(&field.title), width), title_style));
+            rows.push(Line::raw(fit(&clean(&field.prompt), width)));
+            let shown = if field.secret {
+                "•".repeat(dialog.text.chars())
+            } else {
+                clean(dialog.text.expose())
+            };
+            // The end of a long entry stays in view, where typing goes.
+            let room = width.saturating_sub(2).max(1);
+            let tail: String = {
+                let chars: Vec<char> = shown.chars().collect();
+                let skip = chars.len().saturating_sub(room);
+                chars[skip..].iter().collect()
+            };
+            rows.push(Line::from(vec![
+                Span::styled("> ", accent()),
+                Span::raw(tail),
+            ]));
+            if let Some(error) = &field.error {
+                rows.push(Line::styled(
+                    fit(&clean(error), width),
+                    Style::new().fg(Color::Yellow),
+                ));
+            }
+            copy::DIALOG_FIELD_KEYS
+        }
+    };
+    let keys = if dialog.answered {
+        copy::DIALOG_WAITING
+    } else if !app.dialog_ready() {
+        copy::DIALOG_PREPARING
+    } else {
+        keys
+    };
+    let room = usize::from(area.height).saturating_sub(1);
+    let whole = rows.len() <= room;
+    let id = dialog.request.id;
+    for (i, row) in rows.into_iter().take(room).enumerate() {
+        line(
+            buf,
+            Rect::new(area.x, area.y + i as u16, area.width, 1),
+            row,
+        );
+    }
+    line(
+        buf,
+        Rect::new(area.x, area.bottom() - 1, area.width, 1),
+        Line::styled(fit(keys, width), dim()),
+    );
+    if whole {
+        app.dialog_on_screen = Some(id);
     }
 }
 
@@ -302,6 +443,7 @@ fn render_region(
     render_attachments(app, inset(panel), buf);
     render_menu(app, inset(menu_area), buf);
     render_approval(app, inset(approval_area), buf);
+    render_dialog(app, inset(approval_area), buf);
     let columns = area.width;
     render_bar(app, inset(bar), buf);
     render_agents_row(columns, inset(agents), buf);
@@ -330,17 +472,27 @@ fn render_region(
     // The sample-agent list holds focus outside the composer, so the
     // composer names no key while it is open.
     let listing = app.focus == Focus::AgentList;
-    let asking = app.approval().is_some();
+    let approving = app.approval().is_some();
+    let asking = approving || app.dialog.is_some();
     let mut mode = mode::view(app.mode(), !app.draft.is_empty(), area.width);
-    if asking {
+    if approving {
         mode.placeholder = copy::PLACEHOLDER_APPROVAL;
         mode.hint = (area.width >= mode::HINT_MIN_COLUMNS).then_some(copy::HINT_APPROVAL);
+    } else if asking {
+        mode.placeholder = copy::PLACEHOLDER_DIALOG;
+        mode.hint = (area.width >= mode::HINT_MIN_COLUMNS).then_some(copy::HINT_DIALOG);
+    } else if app.handing_off() {
+        // A dialog closed: the composer takes keys once this frame is
+        // armed, and says so until then.
+        mode.placeholder = copy::PLACEHOLDER_PREPARING;
+        mode.hint = (area.width >= mode::HINT_MIN_COLUMNS).then_some(copy::HINT_PREPARING);
     }
     let below_label = if below > 0 {
         Some(format!("+{below} {}", copy::BELOW))
     } else {
         // While the menu offers commands, its key takes the hint's place.
         let completing = !asking
+            && !app.handing_off()
             && (app.menu().is_some_and(|menu| !menu.entries.is_empty())
                 || app.file_menu().is_some_and(|menu| !menu.entries.is_empty()));
         mode.hint
@@ -366,8 +518,8 @@ fn render_region(
 
     // A waiting approval takes the keyboard: the draft stays, dimmed and
     // without a caret, until the request is settled.
-    let editing = app.focus == Focus::Composer && !asking;
-    let quiet = mode.dim || listing || asking;
+    let editing = app.focus == Focus::Composer && !asking && !app.handing_off();
+    let quiet = mode.dim || listing || asking || app.handing_off();
     let text_style = if quiet { dim() } else { Style::new() };
     let prompt_style = if quiet { dim() } else { accent() };
     let limit = geometry.wrap_width.saturating_sub(1).max(1);
@@ -598,7 +750,7 @@ fn menu_rows(app: &State) -> u16 {
     } else if let Some(menu) = app.file_menu() {
         (listed_rows(menu.entries.len()) + file_status(&menu).len()).max(1)
     } else if app.focus == Focus::Composer {
-        usize::from(completion::usage(app.draft.text()).is_some())
+        usize::from(completion::usage(app.draft.text(), app.catalog()).is_some())
     } else {
         0
     };
@@ -742,7 +894,7 @@ fn render_menu(app: &State, area: Rect, buf: &mut Buffer) {
         return;
     }
     let Some(menu) = app.menu() else {
-        if let Some(command) = completion::usage(app.draft.text()) {
+        if let Some(command) = completion::usage(app.draft.text(), app.catalog()) {
             let text = format!(
                 "/{} {}  {}",
                 command.name,
@@ -1452,6 +1604,135 @@ mod tests {
             app.draft.type_text(&format!("line{i}"));
         }
         app
+    }
+
+    // Bake: a secret field is drawn masked at every width and frame style,
+    // and the draft stays in the dimmed composer.
+    #[test]
+    fn a_secret_field_is_masked_at_every_width() {
+        use crate::dialog::{DialogKind, DialogRequest, FieldDialog};
+        use crate::runtime::RuntimeUpdate;
+        for style in [FrameStyle::default(), FrameStyle::Classic] {
+            for (w, h) in [(12, 8), (20, 10), (40, 12), (80, 24), (200, 40)] {
+                let mut app = State::live(style, Tones::None, Vec::new());
+                app.draft.type_text("kept");
+                update(
+                    &mut app,
+                    Msg::Runtime(RuntimeUpdate::Dialog(Some(DialogRequest {
+                        id: 1,
+                        kind: DialogKind::Field(FieldDialog {
+                            title: "Sign in".into(),
+                            prompt: "API key".into(),
+                            secret: true,
+                            initial: String::new(),
+                            error: None,
+                        }),
+                    }))),
+                );
+                let _ = draw(&mut app, w, h);
+                if let Some(token) = app.approval_drawn() {
+                    update(&mut app, Msg::ApprovalArmed(token));
+                }
+                update(&mut app, Msg::Paste("sk-fake-secret-value".into()));
+                let (rows, _) = draw(&mut app, w, h);
+                let screen = rows.join("\n");
+                for part in ["sk-fake", "secret", "value"] {
+                    assert!(!screen.contains(part), "{w}x{h}: {screen}");
+                }
+                // Where the field fits whole it holds the paste, masked.
+                if app.dialog_ready() {
+                    assert!(screen.contains("••••"), "{w}x{h}: {screen}");
+                }
+            }
+        }
+    }
+
+    // Bake: a terminal too short for the whole dialog does not hand it the
+    // keyboard; once it is tall enough, the next frame does.
+    #[test]
+    fn a_dialog_cut_short_is_not_handed_the_keyboard() {
+        use crate::dialog::{DialogKind, DialogRequest, FieldDialog};
+        use crate::runtime::RuntimeUpdate;
+        let mut app = State::live(FrameStyle::default(), Tones::None, Vec::new());
+        update(
+            &mut app,
+            Msg::Runtime(RuntimeUpdate::Dialog(Some(DialogRequest {
+                id: 1,
+                kind: DialogKind::Field(FieldDialog {
+                    title: "Sign in".into(),
+                    prompt: "API key".into(),
+                    secret: true,
+                    initial: String::new(),
+                    error: Some("Try again".into()),
+                }),
+            }))),
+        );
+        let _ = draw(&mut app, 80, 5);
+        assert_eq!(app.approval_drawn(), None);
+        let (rows, _) = draw(&mut app, 80, 24);
+        assert!(rows.iter().any(|r| r.contains("Preparing")), "{rows:#?}");
+        let token = app.approval_drawn().expect("a handoff");
+        update(&mut app, Msg::ApprovalArmed(token));
+        assert!(app.dialog_ready());
+    }
+
+    // Bake: after a dialog closes, the composer says it is preparing until
+    // the handoff is armed, then shows its usual prompt and takes keys.
+    #[test]
+    fn the_composer_says_it_is_preparing_until_it_has_the_keyboard() {
+        use crate::runtime::RuntimeUpdate;
+        let mut app = State::live(FrameStyle::default(), Tones::None, Vec::new());
+        update(&mut app, Msg::Runtime(RuntimeUpdate::Dialog(None)));
+        let (rows, _) = draw(&mut app, 80, 24);
+        assert!(rows.iter().any(|r| r.contains("Preparing")), "{rows:#?}");
+        key(&mut app, Key::Char('x'));
+        assert_eq!(app.draft.text(), "");
+        let token = app.approval_drawn().expect("a handoff");
+        update(&mut app, Msg::ApprovalArmed(token));
+        let (rows, _) = draw(&mut app, 80, 24);
+        assert!(!rows.iter().any(|r| r.contains("Preparing")), "{rows:#?}");
+        key(&mut app, Key::Char('x'));
+        assert_eq!(app.draft.text(), "x");
+    }
+
+    // Pi model-selector.test.ts "keeps the current model marked while
+    // browsing": rows read `→ ✓ id [provider]`, and the mark stays on the
+    // current model as the selection moves.
+    #[test]
+    fn a_list_dialog_marks_the_current_item_while_browsing() {
+        use crate::dialog::{DialogKind, DialogRequest, ListDialog, ListItem};
+        use crate::runtime::RuntimeUpdate;
+        let mut app = State::live(FrameStyle::default(), Tones::None, Vec::new());
+        let item = |id: &str| ListItem {
+            value: id.into(),
+            label: id.into(),
+            detail: Some("faux".into()),
+        };
+        update(
+            &mut app,
+            Msg::Runtime(RuntimeUpdate::Dialog(Some(DialogRequest {
+                id: 1,
+                kind: DialogKind::List(ListDialog {
+                    title: "Model".into(),
+                    items: vec![item("current-model"), item("browsed-model")],
+                    current: Some(0),
+                    filterable: true,
+                    saves_default: true,
+                    note: None,
+                }),
+            }))),
+        );
+        let (rows, _) = draw(&mut app, 80, 24);
+        assert!(rows.iter().any(|r| r.contains("Preparing")));
+        let token = app.approval_drawn().expect("a handoff");
+        update(&mut app, Msg::ApprovalArmed(token));
+        let (rows, _) = draw(&mut app, 80, 24);
+        assert!(rows[row_index(&rows, "current-model")].contains("→ ✓ current-model [faux]"));
+        assert!(rows.iter().any(|r| r.contains("Ctrl+S to set as default")));
+        key(&mut app, Key::Down);
+        let (rows, _) = draw(&mut app, 80, 24);
+        assert!(rows[row_index(&rows, "current-model")].contains("  ✓ current-model [faux]"));
+        assert!(rows[row_index(&rows, "browsed-model")].contains("→   browsed-model [faux]"));
     }
 
     #[test]

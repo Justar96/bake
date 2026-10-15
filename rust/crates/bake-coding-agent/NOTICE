@@ -56,6 +56,12 @@ queue_update event, and its pre-prompt model and API-key check.
 The queue-mode and pre-message_start bookkeeping cases of
 test/suite/agent-session-queue.test.ts are adapted in agent_session/tests.rs;
 extension-command, input-handler, and custom-message cases remain deferred.
+Also from v1.2.0: the session controls of src/core/agent-session.ts
+(setModel, setThinkingLevel, setSteeringMode, setFollowUpMode, and
+_installAgentNextTurnRefresh, the next request reading the current model),
+the model runtime's snapshot and update of src/core/model-runtime.ts, and the
+cases of those files' tests that agent_session/control_tests.rs and
+model_registry/tests.rs name.
 --------------------------------------------------------------------------------
 MIT License
 

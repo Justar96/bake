@@ -61,7 +61,7 @@ use crate::session::id::assert_valid_session_id;
 use crate::session::paths::{lexical_normalize, normalize_path};
 use crate::session::time::parse_date_ms;
 use crate::session::{NewSessionOptions, SessionManager};
-use crate::settings::Settings;
+use crate::settings::{Settings, SettingsStore};
 use crate::skills::{LoadSkillsOptions, load_skills};
 use crate::system_prompt::{
     Environment, SystemPromptOptions, load_project_context_files, resolve_prompt_input,
@@ -146,16 +146,23 @@ pub struct ImportedStartup {
 /// [`import_default_preset`](crate::permissions::import::import_default_preset).
 /// A home without them contributes nothing; an unreadable one contributes
 /// a warning, so a `models.json` route still runs.
+///
+/// A `bake-rs` sign-in ([`crate::cliproxyapi::account`]) comes first:
+/// while `settings.json` has a `cliproxyapi` member, the 0.3 route and key
+/// are not imported. The account itself is applied to the registry later,
+/// from its own read ([`apply_account`]).
 pub fn import_startup(
     home: &std::path::Path,
     env: &dyn Fn(&str) -> Option<std::ffi::OsString>,
 ) -> ImportedStartup {
+    use crate::cliproxyapi::account::{AccountView, read_account};
     use crate::cliproxyapi::{CLIPROXYAPI_ID, import_cliproxyapi};
     let mut startup = ImportedStartup::default();
+    let owned = !matches!(read_account(home), AccountView::Absent);
     match import_cliproxyapi(home, env) {
         Ok(imported) => {
             startup.default_model = imported.default_model;
-            if let Some(route) = imported.route {
+            if let (false, Some(route)) = (owned, imported.route) {
                 let key = route.key.map(|key| key.key.expose().to_owned());
                 let mut config = route.provider.config;
                 // The config names the key's variable (`$CLIPROXYAPI_API_KEY`),
@@ -182,6 +189,15 @@ pub fn import_startup(
         )),
     }
     startup
+}
+
+/// Applies the home's CLIProxyAPI account to `registry`, from one
+/// coherent read ([`crate::cliproxyapi::account::read_account`]); returns
+/// a warning when the account is off or its route is refused. Blocks.
+pub fn apply_account(home: &std::path::Path, registry: &mut ModelRegistry) -> Option<String> {
+    crate::cliproxyapi::account::CliProxyAccount::new(home)
+        .apply_to(registry)
+        .unwrap_or_else(Some)
 }
 
 /// A stop request: resolves with the exit code to stop with.
@@ -533,6 +549,8 @@ pub struct Started {
     pub stderr: SharedWriter,
     /// The stop request from [`CliEnvironment::interrupt`].
     pub interrupt: Interrupt,
+    /// The Bake home the session's settings and credentials come from.
+    pub home: PathBuf,
 }
 
 /// Runs `bake-rs` print mode; returns the exit code. Must run inside a
@@ -553,6 +571,7 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
         stdout,
         stderr,
         interrupt,
+        home: _,
     } = started;
     let options = PrintModeOptions {
         mode: match mode {
@@ -600,6 +619,7 @@ async fn run_list_models(environment: CliEnvironment, search_pattern: Option<&st
                 warnings.push(message);
             }
         }
+        warnings.extend(apply_account(&home, &mut registry));
         if let Some(message) = registry.error() {
             warnings.push(format!("errors loading models.json:\n{message}"));
         }
@@ -624,7 +644,25 @@ async fn run_list_models(environment: CliEnvironment, search_pattern: Option<&st
 /// same session. Reports a failure on standard error and returns its exit
 /// code; nothing has touched the terminal by then. Must run inside a
 /// multi-threaded Tokio runtime.
+///
+/// Without a model, print mode stops here with Pi's no-models message.
 pub async fn start(environment: CliEnvironment, args: Args) -> Result<Started, i32> {
+    start_with(environment, args, false).await
+}
+
+/// [`start`] for interactive mode, which, as Pi's `main` does, starts
+/// without a model, or with one that has no key, so the person can sign in
+/// from the session; a prompt is then refused with Pi's message. Invalid
+/// flags and an explicit `--model` that matches nothing still fail.
+pub async fn start_interactive(environment: CliEnvironment, args: Args) -> Result<Started, i32> {
+    start_with(environment, args, true).await
+}
+
+async fn start_with(
+    environment: CliEnvironment,
+    args: Args,
+    allow_no_model: bool,
+) -> Result<Started, i32> {
     let CliEnvironment {
         cwd,
         home,
@@ -674,6 +712,7 @@ pub async fn start(environment: CliEnvironment, args: Args) -> Result<Started, i
                     warnings.push(message);
                 }
             }
+            warnings.extend(apply_account(&home, &mut registry));
             if let Some(message) = registry.error() {
                 warnings.push(message);
             }
@@ -905,30 +944,26 @@ pub async fn start(environment: CliEnvironment, args: Args) -> Result<Started, i
     }
 
     // Pi's `_buildRuntime` tools and `createAgentSession` tool selection.
-    // The read tool asks for the session's model when it runs.
-    let session_model: Arc<std::sync::Mutex<Option<bake_ai::Model>>> = Arc::default();
-    // Bash reads the session for its `BAKE_*` variables when each call starts.
-    let session_thinking: Arc<std::sync::Mutex<Option<String>>> = Arc::default();
+    // The read tool asks for the session's model when it runs, and bash
+    // reads the model and thinking level for its `BAKE_*` variables when
+    // each call starts; both read what the session publishes now, so a
+    // model change reaches the next call.
+    let published = crate::agent_session::SessionSelection::default();
     let bash_context: crate::tools::bash::BashToolContextFn = {
-        let session_model = Arc::clone(&session_model);
-        let session_thinking = Arc::clone(&session_thinking);
+        let selection = published.clone();
         let session_cwd = PathBuf::from(&session_cwd);
-        Arc::new(move || crate::tools::bash::BashToolContext {
-            cwd: Some(session_cwd.clone()),
-            session_id: session_id.clone(),
-            session_file: session_file.clone(),
-            model: session_model
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .as_ref()
-                .map(|model| crate::tools::bash::BashModel {
-                    provider: model.provider.clone(),
-                    id: model.id.clone(),
+        Arc::new(move || {
+            let selected = selection.get();
+            crate::tools::bash::BashToolContext {
+                cwd: Some(session_cwd.clone()),
+                session_id: session_id.clone(),
+                session_file: session_file.clone(),
+                thinking_level: Some(selected.thinking_level.as_str().to_owned()),
+                model: selected.model.map(|model| crate::tools::bash::BashModel {
+                    provider: model.provider,
+                    id: model.id,
                 }),
-            thinking_level: session_thinking
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .clone(),
+            }
         })
     };
     let tools_options = ToolsOptions {
@@ -936,13 +971,8 @@ pub async fn start(environment: CliEnvironment, args: Args) -> Result<Started, i
             auto_resize_images: settings.image_auto_resize(),
             resize_options: None,
             model: Some({
-                let session_model = Arc::clone(&session_model);
-                Arc::new(move || {
-                    session_model
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .clone()
-                })
+                let selection = published.clone();
+                Arc::new(move || selection.get().model)
             }),
         },
         bash: match sandboxed_bash_tool(
@@ -1015,9 +1045,11 @@ pub async fn start(environment: CliEnvironment, args: Args) -> Result<Started, i
     system_prompt.environment = Environment::detect(Path::new(&session_cwd), started_ms);
     let mut session = match AgentSession::create(AgentSessionOptions {
         session,
-        registry: Arc::new(registry),
+        registry: registry.into(),
         apis: Arc::new(ApiRegistry::with_builtins()),
         settings,
+        settings_store: Some(SettingsStore::new(&home)),
+        selection: Some(published),
         model,
         thinking_level,
         tools: registered
@@ -1038,13 +1070,6 @@ pub async fn start(environment: CliEnvironment, args: Args) -> Result<Started, i
         Err(message) => return Err(error(&stderr, &message)),
     };
     session.set_prompt_templates(prompt_templates);
-    *session_model
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) = session.model();
-    *session_thinking
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) =
-        Some(session.thinking_level().as_str().to_owned());
 
     let piped = if stdin_is_terminal {
         Ok(None)
@@ -1062,7 +1087,7 @@ pub async fn start(environment: CliEnvironment, args: Args) -> Result<Started, i
     };
     let initial_message = build_initial_message(piped, &processed_files.text, &mut args.messages);
 
-    if session.model().is_none() {
+    if session.model().is_none() && !allow_no_model {
         session.shutdown().await;
         write_out(
             &stderr,
@@ -1078,6 +1103,7 @@ pub async fn start(environment: CliEnvironment, args: Args) -> Result<Started, i
         stdout,
         stderr,
         interrupt,
+        home,
     })
 }
 

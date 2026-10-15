@@ -10,12 +10,15 @@ bake-rs --inline -c           # continue the latest session, in the terminal's s
 bake-rs "Explain src/main.rs" # send a first prompt, then keep the session open
 ```
 
-- The session is set up before the terminal changes: the same model, session, tool, and permission flags as `-p` apply, and an error such as no usable model or a missing API key exits with status 1 and leaves the terminal as it was.
+- The session is set up before the terminal changes: the same model, session, tool, and permission flags as `-p` apply, and an error such as an unreadable file exits with status 1 and leaves the terminal as it was. With no usable model or no API key, the session opens anyway with a note, so you can run `/login` or `/model`; prompts are refused until a model is ready. `-p` still exits with status 1.
 - Message arguments and `@file` attachments are sent first, in order, each after the previous turn ends.
 - Enter sends the draft. While a turn runs, Enter steers it: the prompt joins the turn at its next step. A steer takes text only: a draft with staged images (Ctrl+V or an image path) is kept until the turn ends. Alt+↑ sends prompts that wait.
 - Esc stops the turn. Steers it had not taken yet go back into the draft.
 - A prompt the session refuses, such as one sent without an API key, goes back into the draft with its images and the reason.
-- `/skill:<name>` and prompt-template prompts are expanded as in `-p`. Pi's other slash commands, such as `/model` or `/compact`, are not available yet; they are refused and the draft is kept. Choose the model and thinking level with the command-line flags.
+- `/skill:<name>` and prompt-template prompts are expanded as in `-p`.
+- `/model [pattern]` sets a model that matches exactly, or opens a list; `/thinking` opens the thinking levels. In either list, Enter changes this session, and Ctrl+S also saves it as the default in `settings.json`. `/settings` changes the steering mode, follow-up mode, and auto-compaction, saving each change in `settings.json`.
+- `/login` signs in to CLIProxyAPI: it asks for the proxy address, then the API key (shown as dots), checks the key against the proxy's model list, and saves the account (see [Models](models.md#the-cliproxyapi-account)). `/refresh-models` reads the model list again, and `/logout` signs out. Esc cancels a command until it saves; once the check has passed, the save always finishes and is reported.
+- Pi's other slash commands, such as `/compact` or `/resume`, are not available yet; they are refused and the draft is kept. Only one command runs at a time.
 - Ctrl+C twice quits. Quitting, `SIGINT`, `SIGTERM`, and `SIGHUP` stop the turn and close the session before the terminal is restored.
 - Under `--approval ask`, a call that asks for wider access shows an approval panel with the tool, the call id, the reason, and the call's arguments. Once its keys show, press `y` then Enter to allow that call once, `n` to reject it, or Esc to cancel it. Keys typed before the panel appeared, a paste, and Enter alone never approve. Nothing is granted for the rest of the session. Quitting or closing the terminal while a request waits refuses it. See [Permissions](permissions.md#approvals).
 

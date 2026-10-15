@@ -101,8 +101,88 @@ pub struct Settings {
     /// tool call's arguments may end with (`config.ts`, a positive integer);
     /// `None` uses [`bake_ai::DEFAULT_MAX_TOOL_ARGUMENT_WHITESPACE`].
     pub max_tool_argument_whitespace: Option<usize>,
+    /// `cliproxyapi`: Bake's own member, the CLIProxyAPI route a Rust
+    /// login wrote, or `null` after a logout (see [`CliProxySetting`]).
+    pub cliproxyapi: CliProxySetting,
     /// Load errors, as Pi's settings diagnostics word them.
     pub warnings: Vec<String>,
+}
+
+/// The `cliproxyapi` member of `settings.json`, which `bake-rs` owns: a
+/// login writes the route there, a logout writes `null`, and a refresh
+/// replaces its `models`. Any present value, `null` included, takes the
+/// route's place in the read-only 0.3 import (D25), so a signed-out route
+/// is not imported again.
+#[derive(Clone, Default, PartialEq)]
+pub enum CliProxySetting {
+    /// No member: the 0.3 import applies.
+    #[default]
+    Absent,
+    /// `null`: signed out; no route.
+    SignedOut,
+    /// An object: the route as `CliProxyRoute::to_settings_json` writes it.
+    /// It is checked when it is used.
+    Route(Value),
+    /// Any other value: no route, with a warning.
+    Invalid,
+}
+
+impl std::fmt::Debug for CliProxySetting {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Absent => f.write_str("Absent"),
+            Self::SignedOut => f.write_str("SignedOut"),
+            Self::Route(route) => f.debug_tuple("Route").field(&RouteShape(route)).finish(),
+            Self::Invalid => f.write_str("Invalid"),
+        }
+    }
+}
+
+/// A saved route's shape for `Debug`: its member names and how many
+/// models it lists. Values stay out, since a route may hold header
+/// values.
+pub(crate) struct RouteShape<'a>(pub &'a Value);
+
+impl std::fmt::Debug for RouteShape<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let members: Vec<&str> = self
+            .0
+            .as_object()
+            .map(|object| object.keys().map(String::as_str).collect())
+            .unwrap_or_default();
+        let models = self.0.get("models").and_then(Value::as_array).map(Vec::len);
+        f.debug_struct("Route")
+            .field("members", &members)
+            .field("models", &models)
+            .finish()
+    }
+}
+
+impl CliProxySetting {
+    fn from_value(value: Option<&Value>) -> Self {
+        match value {
+            None => Self::Absent,
+            Some(Value::Null) => Self::SignedOut,
+            Some(route @ Value::Object(_)) => Self::Route(route.clone()),
+            Some(_) => Self::Invalid,
+        }
+    }
+}
+
+/// The `settings.json` member [`CliProxySetting`] reads.
+pub const CLIPROXYAPI_MEMBER: &str = "cliproxyapi";
+
+/// Pi's `setCompactionEnabled` on a settings value: `compaction.enabled`,
+/// keeping the section's other members.
+pub fn set_compaction_enabled_in(settings: &mut Settings, enabled: bool) {
+    let mut compaction = settings
+        .compaction
+        .as_ref()
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    compaction.insert("enabled".into(), Value::Bool(enabled));
+    settings.compaction = Some(Value::Object(compaction));
 }
 
 impl Default for Settings {
@@ -124,6 +204,7 @@ impl Default for Settings {
             retry: RetrySettings::default(),
             permission: None,
             max_tool_argument_whitespace: None,
+            cliproxyapi: CliProxySetting::Absent,
             warnings: Vec::new(),
         }
     }
@@ -311,6 +392,7 @@ impl Settings {
                 .and_then(Value::as_u64)
                 .filter(|max| *max >= 1)
                 .and_then(|max| usize::try_from(max).ok()),
+            cliproxyapi: CliProxySetting::from_value(object.get(CLIPROXYAPI_MEMBER)),
             warnings: Vec::new(),
         }
     }
@@ -486,6 +568,13 @@ impl SettingsStore {
         self.file.path()
     }
 
+    /// The store with a failure injected into each update.
+    #[cfg(test)]
+    pub(crate) fn with_fault(mut self, fault: crate::json_store::Fault) -> Self {
+        self.file = self.file.with_fault(fault);
+        self
+    }
+
     /// Pi's `reload`: the settings now in the file, read as
     /// [`Settings::load`] reads them.
     pub fn load(&self) -> Settings {
@@ -588,6 +677,50 @@ impl SettingsStore {
     /// Pi's `setFollowUpMode`.
     pub fn set_follow_up_mode(&self, mode: QueueMode) -> Result<Settings, StoreError> {
         self.update(|object| set_member(object, "followUpMode", queue_mode_name(mode).into()))
+    }
+
+    /// Pi's `setCompactionEnabled`: `compaction.enabled`, keeping the
+    /// section's other members. A `compaction` that is not an object is
+    /// replaced.
+    pub fn set_compaction_enabled(&self, enabled: bool) -> Result<Settings, StoreError> {
+        self.update(|object| {
+            let section = object
+                .entry("compaction")
+                .or_insert_with(|| Value::Object(Map::new()));
+            if !section.is_object() {
+                *section = Value::Object(Map::new());
+            }
+            match section.as_object_mut() {
+                Some(section) => set_member(section, "enabled", Value::Bool(enabled)),
+                None => false,
+            }
+        })
+    }
+
+    /// Changes the `cliproxyapi` member ([`CliProxySetting`]) under the
+    /// file's lock: `change` sees the member as stored now (`None` when
+    /// absent) and returns `None` to leave the file as it is, `Some(None)`
+    /// to remove the member, or `Some(Some(value))` to set it. Returns the
+    /// settings now stored and whether the member changed. After
+    /// [`StoreError::is_committed`] the change is in the file. Bake's own
+    /// member; Pi has no setter for it.
+    pub fn update_cliproxyapi(
+        &self,
+        change: impl FnOnce(Option<&Value>) -> Option<Option<Value>>,
+    ) -> Result<(Settings, bool), StoreError> {
+        let mut written = false;
+        let settings = self.update(|object| {
+            written = match change(object.get(CLIPROXYAPI_MEMBER)) {
+                None => false,
+                Some(None) => remove_member(object, CLIPROXYAPI_MEMBER),
+                Some(Some(next)) => set_member(object, CLIPROXYAPI_MEMBER, next),
+            };
+            written
+        });
+        match settings {
+            Ok(settings) => Ok((settings, written)),
+            Err(error) => Err(error),
+        }
     }
 }
 

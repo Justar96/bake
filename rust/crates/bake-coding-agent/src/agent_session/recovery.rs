@@ -36,7 +36,6 @@ use crate::session::time::js_date_ms;
 use crate::session::{
     AgentMessage, SessionEntry, SessionManager, SessionProjection, get_latest_compaction_entry,
 };
-use crate::settings::Settings;
 
 /// What started a compaction, Pi's `reason`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -282,7 +281,7 @@ impl Drop for AbortSlot<'_> {
 /// What the session, its agent listener, and its next-turn hook share.
 pub(super) struct Core {
     pub session: SharedSession,
-    pub settings: Settings,
+    pub settings: super::SharedSettings,
     pub listeners: Arc<Listeners>,
     /// The session's request path, also used for summaries.
     pub stream_fn: StreamFn,
@@ -293,6 +292,14 @@ pub(super) struct Core {
     pub abort_requested: AtomicBool,
     pub state: Mutex<RunState>,
     pub activity: watch::Sender<Activity>,
+    /// Why the session file lacks an entry, once a write to it failed.
+    /// Set and read only while the session lock is held
+    /// ([`super::write_session`]), so no write lands after a failed one,
+    /// whichever task gets the lock next.
+    pub gap: Arc<Mutex<Option<String>>>,
+    /// Failures tests inject at the session's write boundary.
+    #[cfg(test)]
+    pub hooks: Mutex<super::TestHooks>,
     /// Counts [`Self::with_session`] calls, so tests can tell when the
     /// session's I/O has started.
     #[cfg(test)]
@@ -314,6 +321,11 @@ impl Drop for ActivityGuard<'_> {
 impl Core {
     pub fn state(&self) -> MutexGuard<'_, RunState> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    #[cfg(test)]
+    pub fn hooks(&self) -> MutexGuard<'_, super::TestHooks> {
+        self.hooks.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     pub fn agent(&self) -> Option<Arc<Agent>> {
@@ -370,7 +382,8 @@ impl Core {
     }
 
     /// Runs `work` on the session off the Tokio workers, holding a permit
-    /// of the session's gate: after shutdown nothing is written.
+    /// of the session's gate: after shutdown nothing is written, and after
+    /// a failed write ([`Self::gap`]) nothing more is.
     pub async fn with_session<R: Send + 'static>(
         &self,
         work: impl FnOnce(&mut SessionManager) -> R + Send + 'static,
@@ -381,16 +394,23 @@ impl Core {
         #[cfg(test)]
         self.session_io.send_modify(|count| *count += 1);
         let session = Arc::clone(&self.session);
+        let gap = Arc::clone(&self.gap);
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
-            work(&mut lock(&session))
+            let mut session = lock(&session);
+            if let Some(error) = super::lock_gap(&gap).clone() {
+                return Err(format!(
+                    "The session file could not be written ({error}), so nothing more is written to it"
+                ));
+            }
+            Ok(work(&mut session))
         })
         .await
-        .map_err(|error| format!("Session I/O task failed: {error}"))
+        .map_err(|error| format!("Session I/O task failed: {error}"))?
     }
 
     fn compaction_settings(&self, model: Option<&Model>) -> Result<CompactionSettings, String> {
-        self.settings
+        super::read_settings(&self.settings)
             .compaction_settings(model.map(|model| (model.provider.as_str(), model.id.as_str())))
     }
 
@@ -423,7 +443,7 @@ impl Core {
         if self.aborted() {
             return false;
         }
-        let retry = self.settings.retry;
+        let retry = super::read_settings(&self.settings).retry;
         if !retry.enabled || self.state().retry_attempt >= retry.max_retries {
             return false;
         }
@@ -561,7 +581,7 @@ impl Core {
         let options = SummarizationOptions {
             signal: Some(controller.signal()),
             thinking_level: self.agent().map(|agent| agent.thinking_level()),
-            retry: Some(self.settings.retry.policy()),
+            retry: Some(super::read_settings(&self.settings).retry.policy()),
             on_retry: Some(self.summarization_observer(reason)),
             ..SummarizationOptions::default()
         };
@@ -910,7 +930,7 @@ impl Core {
         message: &AssistantMessage,
         entry_id: Option<String>,
     ) -> Result<bool, String> {
-        let retry = self.settings.retry;
+        let retry = super::read_settings(&self.settings).retry;
         if !retry.enabled {
             return Ok(false);
         }

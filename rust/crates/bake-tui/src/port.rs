@@ -8,6 +8,7 @@ use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::thread::{self, JoinHandle};
 use std::time::Instant;
 
+use bake_tui_view::dialog::DialogAnswer;
 use bake_tui_view::runtime::{ApprovalAnswer, Prompt, RuntimeUpdate};
 
 use crate::fixture::Fixture;
@@ -23,6 +24,12 @@ pub enum Request {
     Answer {
         generation: u64,
         answer: ApprovalAnswer,
+    },
+    /// Answer the dialog `id` names. `Debug` shows a secret answer only as
+    /// its length ([`bake_tui_view::dialog::SecretText`]).
+    Dialog {
+        id: u64,
+        answer: DialogAnswer,
     },
 }
 
@@ -73,8 +80,8 @@ impl FixturePort {
                         }
                         Some(Request::Cancel) => updates.extend(fixture.cancel(now)),
                         Some(Request::SendPending) => updates.extend(fixture.send_pending(now)),
-                        // The fixture asks for no approval.
-                        Some(Request::Answer { .. }) | None => {}
+                        // The fixture asks for no approval and opens no dialog.
+                        Some(Request::Answer { .. } | Request::Dialog { .. }) | None => {}
                     }
                     updates.extend(fixture.advance(now));
                     if !emit(updates) {

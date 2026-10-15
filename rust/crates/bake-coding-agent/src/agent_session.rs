@@ -54,7 +54,7 @@ use recovery::{Activity, Core, RunState};
 
 use bake_agent::{
     AfterToolCallResult, Agent, AgentError, AgentEvent, AgentInitialState,
-    AgentMessage as LiveMessage, AgentOptions, AgentTool, PromptInput, Subscription,
+    AgentMessage as LiveMessage, AgentOptions, AgentTool, PromptInput, QueueMode, Subscription,
     ToolExecutionMode, hook,
 };
 use bake_ai::transcript::get_current_system_message;
@@ -64,13 +64,13 @@ use bake_ai::{
 };
 
 use crate::compaction::CompactionResult;
-use crate::model_registry::ModelRegistry;
 use crate::model_registry::resolver::{DEFAULT_THINKING_LEVEL, find_initial_model};
-use crate::owned_work::WorkGate;
+use crate::model_registry::{ModelRegistry, ModelRuntime};
+use crate::owned_work::{WorkGate, WorkPermit};
 use crate::prompt_templates::{PromptTemplate, expand_prompt_template};
 use crate::session::SessionManager;
 use crate::session::messages::{CustomMessage, convert_to_llm};
-use crate::settings::Settings;
+use crate::settings::{Settings, SettingsStore};
 use crate::skills::expand_skill_command;
 use crate::system_prompt::{
     SystemPromptOptions, build_system_prompt_sections, diff_system_prompt_sections,
@@ -123,12 +123,23 @@ pub struct AgentSessionOptions {
     /// The session store; its transcript, model, and thinking level are
     /// restored.
     pub session: SessionManager,
-    /// The models and their auth.
-    pub registry: Arc<ModelRegistry>,
+    /// The models and their auth, which a login or logout may replace
+    /// while the session runs; each request uses the snapshot current when
+    /// it starts.
+    pub registry: ModelRuntime,
     /// The provider APIs requests stream through.
     pub apis: Arc<ApiRegistry>,
-    /// Settings from the Bake home.
+    /// Settings from the Bake home. The session keeps a live copy, which
+    /// its own setters change.
     pub settings: Settings,
+    /// Where [`AgentSession::set_model`] and the other setters save a
+    /// default or a setting when asked; `None` saves nothing and reports
+    /// that.
+    pub settings_store: Option<SettingsStore>,
+    /// The cell the session publishes its model and thinking level in, for
+    /// tools that read them when they run (bash's `BAKE_MODEL`, read's
+    /// image limits); `None` makes a private one.
+    pub selection: Option<SessionSelection>,
     /// An explicit model, such as `--model`; otherwise restored or the
     /// default.
     pub model: Option<Model>,
@@ -183,6 +194,63 @@ pub struct ToolPrompt {
     /// Pi's `promptGuidelines`: bullets added to the guidelines, trimmed
     /// and deduplicated.
     pub guidelines: Vec<String>,
+}
+
+/// The model and thinking level a session runs with.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Selected {
+    /// The model, unless none is selected.
+    pub model: Option<Model>,
+    /// The thinking level.
+    pub thinking_level: ModelThinkingLevel,
+}
+
+impl Default for Selected {
+    fn default() -> Self {
+        Self {
+            model: None,
+            thinking_level: ModelThinkingLevel::Off,
+        }
+    }
+}
+
+/// Where a session publishes its [`Selected`] model and thinking level.
+/// The session writes it under the same lock as it changes its agent, so a
+/// reader, such as a tool when it runs or the hook before the next model
+/// request, sees the model and level of one change, never a mix.
+#[derive(Debug, Clone, Default)]
+pub struct SessionSelection(Arc<Mutex<Selected>>);
+
+impl SessionSelection {
+    /// The model and thinking level now.
+    pub fn get(&self) -> Selected {
+        self.lock().clone()
+    }
+
+    fn lock(&self) -> MutexGuard<'_, Selected> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+/// Whether a setter saved its default or setting to `settings.json`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DefaultSave {
+    /// Nothing was asked to be saved.
+    NotRequested,
+    /// Saved.
+    Saved,
+    /// Written to `settings.json`, but its directory could not be flushed,
+    /// so a power loss may still undo it; the reason says why.
+    Unsynced(String),
+    /// The session changed, but saving failed, for this reason.
+    Failed(String),
+}
+
+impl DefaultSave {
+    /// Whether the file now holds the setting.
+    pub fn is_written(&self) -> bool {
+        matches!(self, Self::Saved | Self::Unsynced(_))
+    }
 }
 
 /// An event of the session, Pi's `AgentSessionEvent` without the deferred
@@ -423,6 +491,17 @@ impl SessionSubscription {
 
 type SharedSession = Arc<Mutex<SessionManager>>;
 
+/// Settings the session and its core read at each use.
+pub(crate) type SharedSettings = Arc<std::sync::RwLock<Settings>>;
+
+fn read_settings(settings: &SharedSettings) -> std::sync::RwLockReadGuard<'_, Settings> {
+    settings.read().unwrap_or_else(PoisonError::into_inner)
+}
+
+fn write_settings(settings: &SharedSettings) -> std::sync::RwLockWriteGuard<'_, Settings> {
+    settings.write().unwrap_or_else(PoisonError::into_inner)
+}
+
 fn lock(session: &SharedSession) -> MutexGuard<'_, SessionManager> {
     session.lock().unwrap_or_else(PoisonError::into_inner)
 }
@@ -444,8 +523,15 @@ pub struct AgentSession {
     core: Arc<Core>,
     work: WorkGate,
     session: SharedSession,
-    registry: Arc<ModelRegistry>,
-    settings: Settings,
+    registry: ModelRuntime,
+    /// The live settings, shared with the core: the setters change them,
+    /// and every use reads them then.
+    settings: SharedSettings,
+    settings_store: Option<SettingsStore>,
+    selection: SessionSelection,
+    /// Serializes the model, thinking-level, and settings changes, so the
+    /// order of their log entries is the order they apply in.
+    control: Arc<tokio::sync::Mutex<()>>,
     tools: Vec<Arc<AgentTool>>,
     active_tool_names: Vec<String>,
     prompt_options: SystemPromptOptions,
@@ -688,13 +774,32 @@ fn persist(session: &mut SessionManager, message: &LiveMessage) -> Result<Option
     result.map_err(|error| error.to_string())
 }
 
-/// Pi's `prepareNextTurnWithContext` hook: threshold compaction between
-/// turns.
-fn next_turn_hook(core: Arc<Core>) -> bake_agent::agent::AgentPrepareNextTurnWithContext {
+/// Pi's `prepareNextTurnWithContext` hook (`_installAgentNextTurnRefresh`):
+/// threshold compaction between turns, then the model and thinking level
+/// selected now, so a change made while a run streams takes effect at its
+/// next model request. The request already streaming keeps the model and
+/// level it started with.
+fn next_turn_hook(
+    core: Arc<Core>,
+    selection: SessionSelection,
+) -> bake_agent::agent::AgentPrepareNextTurnWithContext {
     Arc::new(move |turn, signal| {
         let tools = turn.context.tools.clone();
         let core = Arc::clone(&core);
-        Box::pin(async move { core.compact_before_next_response(tools, signal).await })
+        let selection = selection.clone();
+        Box::pin(async move {
+            let mut update = core
+                .compact_before_next_response(tools, signal)
+                .await
+                .unwrap_or_default();
+            // One read, so the model and level come from one change.
+            let selected = selection.get();
+            if let Some(model) = selected.model {
+                update.model = Some(model);
+                update.thinking_level = Some(selected.thinking_level);
+            }
+            Some(update)
+        })
     })
 }
 
@@ -706,33 +811,103 @@ async fn persist_message(
     persist_error: &Mutex<Option<String>>,
     message: &LiveMessage,
 ) -> Result<Option<String>, ()> {
-    // After a failed write, later messages would leave a gap.
-    if persist_error
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .is_some()
-    {
-        return Ok(None);
-    }
     let Some(permit) = core.work.enter() else {
         return Ok(None);
     };
     let message = message.clone();
     let session = Arc::clone(&core.session);
+    let gap = Arc::clone(&core.gap);
     // The permit lives in the blocking work, which keeps running if this
     // run is cancelled.
     let result = tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        persist(&mut lock(&session), &message)
+        persist_after_gap_check(&session, &gap, &message)
     })
     .await
     .unwrap_or_else(|error| Err(format!("Session I/O task failed: {error}")));
-    result.map_err(|error| {
-        persist_error
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .get_or_insert(error);
+    match result {
+        Ok(Persisted::Written(entry_id)) => Ok(entry_id),
+        // After a failed write, a later message would cross the gap.
+        Ok(Persisted::AfterGap) => Err(()),
+        Err(error) => {
+            persist_error
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .get_or_insert(error);
+            Err(())
+        }
+    }
+}
+
+/// What [`persist_after_gap_check`] did.
+#[derive(Debug, PartialEq, Eq)]
+enum Persisted {
+    Written(Option<String>),
+    /// Refused: an earlier write failed.
+    AfterGap,
+}
+
+/// Writes `message` through [`write_session`]. Blocks.
+fn persist_after_gap_check(
+    session: &SharedSession,
+    gap: &Mutex<Option<String>>,
+    message: &LiveMessage,
+) -> Result<Persisted, String> {
+    match write_session(session, gap, |session| persist(session, message)) {
+        Ok(entry_id) => Ok(Persisted::Written(entry_id)),
+        Err(WriteRefused::AfterGap(_)) => Ok(Persisted::AfterGap),
+        Err(WriteRefused::Failed(error)) => Err(error),
+    }
+}
+
+/// Why [`write_session`] wrote nothing more.
+#[derive(Debug)]
+enum WriteRefused {
+    /// An earlier write failed; its reason.
+    AfterGap(String),
+    /// This write failed; the session now has a gap.
+    Failed(String),
+}
+
+/// The session's write boundary: under the session lock, refuses once a
+/// write has failed, and records this write's failure before the lock is
+/// released, so a write queued behind a failing one sees it. Blocks.
+fn write_session<R>(
+    session: &SharedSession,
+    gap: &Mutex<Option<String>>,
+    write: impl FnOnce(&mut SessionManager) -> Result<R, String>,
+) -> Result<R, WriteRefused> {
+    let mut session = lock(session);
+    if let Some(error) = lock_gap(gap).clone() {
+        return Err(WriteRefused::AfterGap(error));
+    }
+    write(&mut session).map_err(|error| {
+        lock_gap(gap).get_or_insert_with(|| error.clone());
+        WriteRefused::Failed(error)
     })
+}
+
+/// The gap's lock, taken after the session lock and never before it.
+fn lock_gap(gap: &Mutex<Option<String>>) -> std::sync::MutexGuard<'_, Option<String>> {
+    gap.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Runs under the session lock as an injected failure happens; what it
+/// returns runs before the change goes on.
+#[cfg(test)]
+pub(crate) type FailHook = Box<dyn FnOnce() -> Box<dyn FnOnce() + Send> + Send>;
+
+/// Failures tests inject at the session's write boundary.
+#[cfg(test)]
+#[derive(Default)]
+pub(crate) struct TestHooks {
+    /// Fails the next thinking-level entry of a model change.
+    pub fail_level_entry: bool,
+    /// Fails the next model-change entry. Runs under the session lock as
+    /// it fails; what it returns runs before the change goes on.
+    pub fail_model_entry: Option<FailHook>,
+    /// What [`Self::fail_model_entry`] returned.
+    pub before_continuing: Option<Box<dyn FnOnce() + Send>>,
 }
 
 /// Pi's bookkeeping after persisting: the last assistant message and the
@@ -773,6 +948,116 @@ fn track_message(core: &Core, message: &LiveMessage, entry_id: Option<String>) {
     }
 }
 
+/// What one change ([`AgentSession::run_change`]) works with: the parts
+/// of the session it reads and changes, owned by its task.
+struct Control {
+    agent: Arc<Agent>,
+    core: Arc<Core>,
+    session: SharedSession,
+    registry: ModelRuntime,
+    settings: SharedSettings,
+    settings_store: Option<SettingsStore>,
+    selection: SessionSelection,
+    listeners: Arc<Listeners>,
+    persist_error: Arc<Mutex<Option<String>>>,
+}
+
+impl Control {
+    /// Appends to the session file on the blocking pool. The change's task
+    /// holds the work permit while this runs, so shutdown waits for it.
+    async fn append(
+        &self,
+        write: impl FnOnce(&mut SessionManager) -> Result<(), crate::session::SessionError>
+        + Send
+        + 'static,
+    ) -> Result<(), String> {
+        let session = Arc::clone(&self.session);
+        let core = Arc::clone(&self.core);
+        let agent = Arc::clone(&self.agent);
+        let written = tokio::task::spawn_blocking(move || {
+            let written = write_session(&session, &core.gap, |session| {
+                write(session).map_err(|error| error.to_string())
+            });
+            // The run stops here, as soon as the write has failed and the
+            // session lock is released, so a turn between steps takes no
+            // further step while this change's task waits for a worker.
+            if written.is_err() {
+                core.abort_requested.store(true, Ordering::SeqCst);
+                agent.abort();
+            }
+            written
+        })
+        .await
+        .map_err(|error| format!("Session I/O task failed: {error}"))?;
+        // Off the async workers, with the hooks' lock released, so a test
+        // that holds the change here never holds up the run it watches.
+        #[cfg(test)]
+        {
+            let before = self.core.hooks().before_continuing.take();
+            if let Some(before) = before {
+                tokio::task::spawn_blocking(before)
+                    .await
+                    .expect("the test hook");
+            }
+        }
+        written.map_err(|refused| match refused {
+            WriteRefused::AfterGap(error) | WriteRefused::Failed(error) => error,
+        })
+    }
+
+    /// A change's session write failed: the file now lacks an entry, so the
+    /// running turn stops before its next request, no later message is
+    /// written past the gap, and no later prompt is accepted. Returns the
+    /// reason, naming `what` failed.
+    fn stop_after_failed_write(&self, error: &str, what: &str) -> String {
+        // The gap is recorded, and the run stopped, at the write boundary
+        // ([`Self::append`]); this reports the failure to the run's prompt.
+        self.persist_error
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get_or_insert_with(|| error.to_owned());
+        format!(
+            "{what} could not be written to the session file ({error}), so the session stopped and takes no more prompts."
+        )
+    }
+
+    /// Applies a model and thinking level to the agent and the published
+    /// selection together, so the next request reads one change.
+    fn apply(&self, model: Option<Model>, level: ModelThinkingLevel) {
+        let mut published = self.selection.lock();
+        match &model {
+            Some(model) => {
+                self.agent
+                    .set_model_and_thinking_level(model.clone(), level);
+                self.core.has_model.store(true, Ordering::SeqCst);
+            }
+            None => self.agent.set_thinking_level(level),
+        }
+        *published = Selected {
+            model: model.or_else(|| self.core.model()),
+            thinking_level: level,
+        };
+    }
+
+    /// Saves a setting on the blocking pool.
+    async fn save(
+        &self,
+        save: impl FnOnce(&SettingsStore) -> Result<Settings, crate::json_store::StoreError>
+        + Send
+        + 'static,
+    ) -> DefaultSave {
+        let Some(store) = self.settings_store.clone() else {
+            return DefaultSave::Failed("no settings file to save to".to_owned());
+        };
+        match tokio::task::spawn_blocking(move || save(&store)).await {
+            Ok(Ok(_)) => DefaultSave::Saved,
+            Ok(Err(error)) if error.is_committed() => DefaultSave::Unsynced(error.to_string()),
+            Ok(Err(error)) => DefaultSave::Failed(error.to_string()),
+            Err(error) => DefaultSave::Failed(format!("Settings task failed: {error}")),
+        }
+    }
+}
+
 impl AgentSession {
     /// Pi's `createAgentSession`: selects the model and thinking level,
     /// restores the transcript, records a new session's initial model and
@@ -784,6 +1069,8 @@ impl AgentSession {
             registry,
             apis,
             settings,
+            settings_store,
+            selection: published,
             model,
             thinking_level,
             tools,
@@ -817,9 +1104,10 @@ impl AgentSession {
         })
         .await?;
         let has_existing_session = !context.messages.is_empty();
+        let snapshot = registry.snapshot();
         let selection = select_model(
             SelectionInputs {
-                registry: &registry,
+                registry: &snapshot,
                 settings: &settings,
                 docs_command: &docs_command,
                 model,
@@ -845,9 +1133,18 @@ impl AgentSession {
             settings.max_tool_argument_whitespace,
         );
         let listeners = Arc::new(Listeners::default());
+        let steering_mode = settings.steering_mode;
+        let follow_up_mode = settings.follow_up_mode;
+        let auto_resize_images = settings.image_auto_resize();
+        let settings: SharedSettings = Arc::new(std::sync::RwLock::new(settings));
+        let published = published.unwrap_or_default();
+        *published.lock() = Selected {
+            model: selection.model.clone(),
+            thinking_level: selection.thinking_level,
+        };
         let core = Arc::new(Core {
             session: Arc::clone(&session),
-            settings: settings.clone(),
+            settings: Arc::clone(&settings),
             listeners: Arc::clone(&listeners),
             stream_fn: Arc::clone(&stream_fn),
             work: work.clone(),
@@ -856,10 +1153,12 @@ impl AgentSession {
             abort_requested: AtomicBool::new(false),
             state: Mutex::new(RunState::default()),
             activity: tokio::sync::watch::Sender::new(Activity::default()),
+            gap: Arc::default(),
+            #[cfg(test)]
+            hooks: Mutex::default(),
             #[cfg(test)]
             session_io: tokio::sync::watch::Sender::new(0),
         });
-        let auto_resize_images = settings.image_auto_resize();
         let after_tool_core = Arc::clone(&core);
         let agent = Agent::new(AgentOptions {
             initial_state: AgentInitialState {
@@ -907,9 +1206,12 @@ impl AgentSession {
                 })
             })),
             stream_fn: Some(stream_fn),
-            prepare_next_turn_with_context: Some(next_turn_hook(Arc::clone(&core))),
-            steering_mode: settings.steering_mode,
-            follow_up_mode: settings.follow_up_mode,
+            prepare_next_turn_with_context: Some(next_turn_hook(
+                Arc::clone(&core),
+                published.clone(),
+            )),
+            steering_mode,
+            follow_up_mode,
             session_id: Some(session_id),
             ..AgentOptions::default()
         })
@@ -940,6 +1242,7 @@ impl AgentSession {
             .filter(|name| tools.iter().any(|tool| &tool.name == name))
             .collect();
         let persist_error = Arc::new(Mutex::new(None));
+        let gap = Arc::clone(&core.gap);
         let created = Self {
             agent,
             core,
@@ -947,6 +1250,9 @@ impl AgentSession {
             session,
             registry,
             settings,
+            settings_store,
+            selection: published,
+            control: Arc::default(),
             tools,
             active_tool_names,
             prompt_options: system_prompt,
@@ -957,7 +1263,7 @@ impl AgentSession {
             subscription: Mutex::new(None),
             model_fallback_message: selection.fallback_message,
             queue: Arc::default(),
-            write_failure: Arc::default(),
+            write_failure: gap,
         };
         created.connect();
         Ok(created)
@@ -1108,47 +1414,279 @@ impl AgentSession {
         self.prompt_templates = prompt_templates;
     }
 
-    /// Pi's `setThinkingLevel`: clamps to the model, and records and
-    /// announces a change.
-    pub async fn set_thinking_level(&self, level: ModelThinkingLevel) -> Result<(), String> {
-        let effective = match self.model() {
-            Some(model) => bake_ai::models::clamp_thinking_level(&model, level),
-            None => level,
-        };
-        let previous = self.agent.thinking_level();
-        self.agent.set_thinking_level(effective);
-        if effective != previous {
-            with_session(&self.session, move |session| {
-                session.append_thinking_level_change(effective.as_str())
-            })
-            .await?
-            .map_err(|error| error.to_string())?;
-            self.listeners
-                .emit(&SessionEvent::ThinkingLevelChanged(effective));
-        }
-        Ok(())
+    /// The models and their auth, which the frontend replaces after a
+    /// login, logout, or catalog refresh.
+    pub fn model_runtime(&self) -> &ModelRuntime {
+        &self.registry
     }
 
-    /// Pi's `setModel` without persisting the default: refuses a model
-    /// without auth, records the change, then applies the thinking level
-    /// the model's settings choose.
-    pub async fn set_model(&self, model: Model) -> Result<(), String> {
-        if self.registry.check_auth(&model.provider).is_none() {
-            return Err(format!("No API key for {}/{}", model.provider, model.id));
+    /// The live settings, including the changes the setters made.
+    pub fn settings(&self) -> Settings {
+        read_settings(&self.settings).clone()
+    }
+
+    /// The cell the session publishes its model and thinking level in.
+    pub fn selection(&self) -> &SessionSelection {
+        &self.selection
+    }
+
+    /// Pi's `getAvailableThinkingLevels`: the levels the model supports,
+    /// or every level without a model.
+    pub fn available_thinking_levels(&self) -> Vec<ModelThinkingLevel> {
+        match self.model() {
+            Some(model) => bake_ai::models::get_supported_thinking_levels(&model),
+            None => vec![
+                ModelThinkingLevel::Off,
+                ModelThinkingLevel::Minimal,
+                ModelThinkingLevel::Low,
+                ModelThinkingLevel::Medium,
+                ModelThinkingLevel::High,
+                ModelThinkingLevel::Xhigh,
+                ModelThinkingLevel::Max,
+            ],
         }
-        let level = self
-            .settings
-            .model_thinking_level(&model.provider, &model.id)
-            .or(self.settings.default_thinking_level)
-            .unwrap_or_else(|| self.agent.thinking_level());
-        self.agent.set_model(model.clone());
-        self.core.has_model.store(true, Ordering::SeqCst);
-        with_session(&self.session, move |session| {
-            session.append_model_change(&model.provider, &model.id)
+    }
+
+    /// A work permit for a change, unless the session takes no more: a
+    /// change after shutdown is refused rather than kept in memory.
+    fn change_permit(&self) -> Result<WorkPermit, String> {
+        if let Some(reason) = self.closed_reason() {
+            return Err(reason);
+        }
+        self.work
+            .enter()
+            .ok_or_else(|| "The session is shut down.".to_owned())
+    }
+
+    /// Runs one change as owned work: it waits its turn behind the other
+    /// changes, is admitted once with a work permit (refused after
+    /// shutdown), and then runs to completion on its own task, which holds
+    /// the turn and the permit. A caller that stops waiting therefore
+    /// neither abandons a half-written change nor lets the next change
+    /// start before it ends, and shutdown waits for it.
+    async fn run_change<R, F>(&self, change: impl FnOnce(Control) -> F) -> Result<R, String>
+    where
+        R: Send + 'static,
+        F: std::future::Future<Output = Result<R, String>> + Send + 'static,
+    {
+        let turn = Arc::clone(&self.control).lock_owned().await;
+        let permit = self.change_permit()?;
+        let work = change(Control {
+            agent: Arc::clone(&self.agent),
+            core: Arc::clone(&self.core),
+            session: Arc::clone(&self.session),
+            registry: self.registry.clone(),
+            settings: Arc::clone(&self.settings),
+            settings_store: self.settings_store.clone(),
+            selection: self.selection.clone(),
+            listeners: Arc::clone(&self.listeners),
+            persist_error: Arc::clone(&self.persist_error),
+        });
+        tokio::spawn(async move {
+            let _turn = turn;
+            let _permit = permit;
+            work.await
         })
-        .await?
-        .map_err(|error| error.to_string())?;
-        self.set_thinking_level(level).await
+        .await
+        .map_err(|error| format!("The change failed: {error}"))?
+    }
+
+    /// Pi's `setThinkingLevel`: clamps to the model, records a change in the
+    /// session file, then applies and announces it, and saves `level` as
+    /// the default when `persist` is set.
+    ///
+    /// Serialized with the other changes and owned as [`Self::run_change`]
+    /// describes; refused once the session is shut down. A change takes
+    /// effect at the next model request, including the next request of a
+    /// run that is streaming. When the session write fails, the change is
+    /// not applied, the running turn stops, nothing more is written, and
+    /// later prompts are refused, since the file would otherwise miss an
+    /// entry. A failed save of the default leaves the session changed and
+    /// is reported as [`DefaultSave::Failed`].
+    pub async fn set_thinking_level(
+        &self,
+        level: ModelThinkingLevel,
+        persist: bool,
+    ) -> Result<DefaultSave, String> {
+        self.run_change(move |control| async move {
+            let effective = match control.core.model() {
+                Some(model) => bake_ai::models::clamp_thinking_level(&model, level),
+                None => level,
+            };
+            if effective != control.agent.thinking_level() {
+                let written = control
+                    .append(move |session| {
+                        session
+                            .append_thinking_level_change(effective.as_str())
+                            .map(|_| ())
+                    })
+                    .await;
+                if let Err(error) = written {
+                    return Err(control.stop_after_failed_write(&error, "The thinking level"));
+                }
+                control.apply(None, effective);
+                control
+                    .listeners
+                    .emit(&SessionEvent::ThinkingLevelChanged(effective));
+            }
+            if !persist {
+                return Ok(DefaultSave::NotRequested);
+            }
+            let saved = control
+                .save(move |store| store.set_default_thinking_level(level))
+                .await;
+            if saved.is_written() {
+                write_settings(&control.settings).default_thinking_level = Some(level);
+            }
+            Ok(saved)
+        })
+        .await
+    }
+
+    /// Pi's `setModel`: refuses a model without auth, records the change and
+    /// the thinking level the model's settings choose (a per-model level,
+    /// else the default level, else the current one), applies both
+    /// together, and saves the model as the default when `persist` is set.
+    /// Serialized, owned, refused after shutdown, and effective from the
+    /// next model request, as [`Self::set_thinking_level`] is. When the
+    /// model entry is written but the thinking-level entry is not, the
+    /// session applies what its file holds, the new model with the previous
+    /// level clamped to it, then stops as for any failed write.
+    pub async fn set_model(&self, model: Model, persist: bool) -> Result<DefaultSave, String> {
+        self.run_change(move |control| async move {
+            if control
+                .registry
+                .snapshot()
+                .check_auth(&model.provider)
+                .is_none()
+            {
+                return Err(format!("No API key for {}/{}", model.provider, model.id));
+            }
+            let previous = control.agent.thinking_level();
+            let level = {
+                let settings = read_settings(&control.settings);
+                settings
+                    .model_thinking_level(&model.provider, &model.id)
+                    .or(settings.default_thinking_level)
+                    .unwrap_or(previous)
+            };
+            let effective = bake_ai::models::clamp_thinking_level(&model, level);
+            let changes_level = effective != previous;
+            let (provider, id) = (model.provider.clone(), model.id.clone());
+            #[cfg(test)]
+            let injected = control.core.hooks().fail_model_entry.take();
+            #[cfg(test)]
+            let core = Arc::clone(&control.core);
+            let model_written = control
+                .append(move |session| {
+                    #[cfg(test)]
+                    if let Some(hook) = injected {
+                        core.hooks().before_continuing = Some(hook());
+                        return Err(injected_failure());
+                    }
+                    session.append_model_change(&provider, &id).map(|_| ())
+                })
+                .await;
+            if let Err(error) = model_written {
+                return Err(control.stop_after_failed_write(&error, "The model change"));
+            }
+            if changes_level {
+                #[cfg(test)]
+                let injected = std::mem::take(&mut control.core.hooks().fail_level_entry);
+                let level_written = control
+                    .append(move |session| {
+                        #[cfg(test)]
+                        if injected {
+                            return Err(injected_failure());
+                        }
+                        session
+                            .append_thinking_level_change(effective.as_str())
+                            .map(|_| ())
+                    })
+                    .await;
+                if let Err(error) = level_written {
+                    // The file holds the model change alone.
+                    let kept = bake_ai::models::clamp_thinking_level(&model, previous);
+                    control.apply(Some(model.clone()), kept);
+                    return Err(control.stop_after_failed_write(
+                        &error,
+                        "The model change was recorded, but its thinking level",
+                    ));
+                }
+            }
+            control.apply(Some(model.clone()), effective);
+            if changes_level {
+                control
+                    .listeners
+                    .emit(&SessionEvent::ThinkingLevelChanged(effective));
+            }
+            if !persist {
+                return Ok(DefaultSave::NotRequested);
+            }
+            let (provider, id) = (model.provider.clone(), model.id.clone());
+            let saved = control
+                .save(move |store| store.set_default_model_and_provider(&provider, &id))
+                .await;
+            if saved.is_written() {
+                let mut settings = write_settings(&control.settings);
+                settings.default_provider = Some(model.provider);
+                settings.default_model = Some(model.id);
+            }
+            Ok(saved)
+        })
+        .await
+    }
+
+    /// Pi's `setSteeringMode`: applies the mode to the agent's steering
+    /// queue now and saves it. Serialized and owned as the other changes.
+    pub async fn set_steering_mode(&self, mode: QueueMode) -> Result<DefaultSave, String> {
+        self.run_change(move |control| async move {
+            control.agent.set_steering_mode(mode);
+            write_settings(&control.settings).steering_mode = mode;
+            Ok(control
+                .save(move |store| store.set_steering_mode(mode))
+                .await)
+        })
+        .await
+    }
+
+    /// Pi's `setFollowUpMode`: as [`Self::set_steering_mode`], for the
+    /// follow-up queue.
+    pub async fn set_follow_up_mode(&self, mode: QueueMode) -> Result<DefaultSave, String> {
+        self.run_change(move |control| async move {
+            control.agent.set_follow_up_mode(mode);
+            write_settings(&control.settings).follow_up_mode = mode;
+            Ok(control
+                .save(move |store| store.set_follow_up_mode(mode))
+                .await)
+        })
+        .await
+    }
+
+    /// Pi's `setAutoCompactionEnabled`: threshold and overflow compaction
+    /// follow `enabled` from the next check, and it is saved as
+    /// `compaction.enabled`.
+    pub async fn set_auto_compaction_enabled(&self, enabled: bool) -> Result<DefaultSave, String> {
+        self.run_change(move |control| async move {
+            crate::settings::set_compaction_enabled_in(
+                &mut write_settings(&control.settings),
+                enabled,
+            );
+            Ok(control
+                .save(move |store| store.set_compaction_enabled(enabled))
+                .await)
+        })
+        .await
+    }
+
+    /// Pi's `steeringMode`.
+    pub fn steering_mode(&self) -> QueueMode {
+        self.agent.steering_mode()
+    }
+
+    /// Pi's `followUpMode`.
+    pub fn follow_up_mode(&self) -> QueueMode {
+        self.agent.follow_up_mode()
     }
 
     /// The system message patching the sections the transcript replays,
@@ -1222,8 +1760,9 @@ impl AgentSession {
         let Some(model) = self.model() else {
             return Err(format_no_model_selected_message(docs_command));
         };
-        if !self.registry.has_configured_auth(&model.provider)
-            && self.registry.check_auth(&model.provider).is_none()
+        let registry = self.registry.snapshot();
+        if !registry.has_configured_auth(&model.provider)
+            && registry.check_auth(&model.provider).is_none()
         {
             return Err(format_no_api_key_found_message(
                 &model.provider,
@@ -1316,12 +1855,15 @@ impl AgentSession {
         drop(run);
         core.emit(&SessionEvent::AgentSettled { aborted });
         result?;
-        match self
+        let persisted = self
             .persist_error
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .take()
-        {
+            .take();
+        // A prompt starts only without a gap, so one now opened during this
+        // run, even when the change that failed has not reported it yet.
+        let gap = || lock_gap(&self.core.gap).clone();
+        match persisted.or_else(gap) {
             Some(error) => Err(error),
             None => Ok(()),
         }
@@ -1498,7 +2040,7 @@ impl AgentSession {
         if images.is_empty() {
             return Ok((text, images));
         }
-        let auto_resize = self.settings.image_auto_resize();
+        let auto_resize = read_settings(&self.settings).image_auto_resize();
         let resize_options = model
             .and_then(|model| ImageResizeOptions::from_input_limits(model.input_limits.as_ref()))
             .unwrap_or_default();
@@ -1522,8 +2064,9 @@ impl AgentSession {
         let Some(model) = self.model() else {
             return Err(format_no_model_selected_message(&self.docs_command));
         };
-        if !self.registry.has_configured_auth(&model.provider)
-            && self.registry.check_auth(&model.provider).is_none()
+        let registry = self.registry.snapshot();
+        if !registry.has_configured_auth(&model.provider)
+            && registry.check_auth(&model.provider).is_none()
         {
             return Err(format_no_api_key_found_message(
                 &model.provider,
@@ -1589,12 +2132,12 @@ impl AgentSession {
 
     /// Pi's `autoCompactionEnabled`.
     pub fn auto_compaction_enabled(&self) -> bool {
-        self.settings.compaction_enabled()
+        read_settings(&self.settings).compaction_enabled()
     }
 
     /// Pi's `autoRetryEnabled`.
     pub fn auto_retry_enabled(&self) -> bool {
-        self.settings.retry.enabled
+        read_settings(&self.settings).retry.enabled
     }
 
     /// Pi's `abort`: signals the run, cancels a retry wait and a
@@ -1650,6 +2193,17 @@ impl Drop for RunGuard<'_> {
 }
 
 #[cfg(test)]
+mod control_tests;
+#[cfg(test)]
 mod recovery_tests;
 #[cfg(test)]
 mod tests;
+
+/// The failure a test injects into a session write.
+#[cfg(test)]
+fn injected_failure() -> crate::session::SessionError {
+    crate::session::SessionError::Io {
+        path: "injected".into(),
+        source: std::io::Error::other("injected failure"),
+    }
+}

@@ -9,6 +9,7 @@
 //! shows the requests [`RuntimeUpdate::Approvals`] lists and answers the
 //! displayed one with [`crate::state::Effect::Answer`].
 
+use crate::dialog::DialogRequest;
 use crate::paste::Image;
 use crate::state::Outcome;
 use crate::status::ContextUsage;
@@ -147,4 +148,8 @@ pub enum RuntimeUpdate {
     /// the one displayed. Sent whenever the list changes; an empty list
     /// gives the keyboard back to the composer.
     Approvals(Vec<Approval>),
+    /// Opens a dialog over the composer ([`crate::dialog`]), replacing
+    /// any open one, or closes it (`None`). A waiting approval request
+    /// still takes the keyboard first.
+    Dialog(Option<DialogRequest>),
 }

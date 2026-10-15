@@ -681,6 +681,15 @@ impl Agent {
         self.inner.lock().thinking_level = level;
     }
 
+    /// Sets the model and thinking level for future turns together, so a
+    /// run that starts meanwhile takes both old or both new. Bake's
+    /// addition: Pi's single-threaded state assignment needs no pairing.
+    pub fn set_model_and_thinking_level(&self, model: Model, level: ModelThinkingLevel) {
+        let mut inner = self.inner.lock();
+        inner.model = model;
+        inner.thinking_level = level;
+    }
+
     /// Whether a run is processing, until its `agent_end` listeners settle.
     pub fn is_streaming(&self) -> bool {
         self.inner.lock().is_streaming

@@ -7,6 +7,7 @@ use std::time::Duration;
 use crate::activity::{self, Tones};
 use crate::completion::{self, Command};
 use crate::composer::ComposerWindow;
+use crate::dialog::{Dialog, DialogAnswer};
 use crate::editor::Draft;
 use crate::frame::FrameStyle;
 use crate::keys::{self, Action, Key, KeyInput, Mods, Scope};
@@ -277,6 +278,12 @@ pub enum Effect {
         generation: u64,
         answer: ApprovalAnswer,
     },
+    /// Answer the dialog `id` names ([`crate::dialog`]). The runtime takes
+    /// it only while that dialog is open.
+    Dialog {
+        id: u64,
+        answer: DialogAnswer,
+    },
 }
 
 /// A fixed example row for the agent list; it describes no running work.
@@ -497,6 +504,22 @@ pub struct State {
     /// reported. While any waits, the first takes the keyboard: the draft,
     /// its caret, and its staged images stay as they were.
     pub approvals: Vec<Approval>,
+    /// The dialog the runtime opened over the composer, if any.
+    pub dialog: Option<Dialog>,
+    /// A dialog opened, replaced, or closed since the last frame, so the
+    /// keyboard changes hands at the next one ([`Self::approval_drawn`]).
+    handoff_due: bool,
+    /// The token of a keyboard handoff not armed yet. Until it is
+    /// ([`Msg::ApprovalArmed`]), keys and pastes go to neither the dialog
+    /// nor the draft, so input typed for what had the keyboard before
+    /// never reaches what has it now.
+    handoff: Option<u64>,
+    /// The dialog the last frame drew whole, set by rendering.
+    pub(crate) dialog_on_screen: Option<u64>,
+    /// The dialog whose current showing holds, or is being handed, the
+    /// keyboard. Cleared when a frame hides it, an approval covers it, or
+    /// the terminal is resized, so it is handed over afresh.
+    dialog_showing: Option<u64>,
     /// The displayed request's current showing: its generation and the
     /// token the showing was published under, from the first frame that
     /// drew it whole until one does not, a resize, or another request.
@@ -582,6 +605,11 @@ impl State {
             submitted: 0,
             refusal: None,
             approvals: Vec::new(),
+            dialog: None,
+            handoff_due: false,
+            handoff: None,
+            dialog_on_screen: None,
+            dialog_showing: None,
             approval_showing: None,
             approval_showings: 0,
             approval_armed: None,
@@ -637,15 +665,21 @@ impl State {
     /// The slash menu, while the draft up to the caret is a leading slash
     /// token and Esc has not closed it there.
     pub fn menu(&self) -> Option<Menu> {
-        // The menu lists the preview's commands, which a live session does
-        // not run; a slash prompt there goes to the runtime as typed.
-        if self.live {
-            return None;
-        }
+        // A live session lists the commands it runs; the preview, its
+        // sample catalog.
         let (draft, caret) = self.menu_here()?;
-        let entries = completion::matches(draft, caret)?;
+        let entries = completion::matches(draft, caret, self.catalog())?;
         let selected = self.remembered(entries.iter().map(|c| c.name));
         Some(Menu { entries, selected })
+    }
+
+    /// The commands the slash menu lists.
+    pub fn catalog(&self) -> &'static [Command] {
+        if self.live {
+            completion::LIVE_CATALOG
+        } else {
+            completion::CATALOG
+        }
     }
 
     /// The `@` token the file menu completes, with where it ends, while the
@@ -653,7 +687,7 @@ impl State {
     /// the menu there.
     fn file_token(&self) -> Option<(mention::AtToken, usize)> {
         let (draft, caret) = self.menu_here()?;
-        if completion::matches(draft, caret).is_some() {
+        if completion::matches(draft, caret, self.catalog()).is_some() {
             return None;
         }
         let token = mention::active_at_token(draft, caret)?;
@@ -692,10 +726,26 @@ impl State {
     /// request is disarmed and its choice dropped, and the next showing
     /// needs a new arming, and starts without the last one's key notice.
     /// Call once after each frame.
+    ///
+    /// With no approval waiting, a frame drawn after a dialog opened,
+    /// changed, or closed starts a keyboard handoff the same way: its token
+    /// is returned for arming, and until then keys and pastes are dropped
+    /// ([`Self::handing_off`]).
     pub fn approval_drawn(&mut self) -> Option<u64> {
         let on_screen = self.approval_on_screen.take();
+        let dialog_on_screen = self.dialog_on_screen.take();
         let front = self.approval().map(|a| a.generation);
-        if front.is_none() || on_screen != front {
+        if front.is_none() {
+            self.end_showing();
+            return self.dialog_drawn(dialog_on_screen);
+        }
+        // The request covers any dialog, which is handed over afresh once
+        // it shows again.
+        if self.dialog.is_some() {
+            self.dialog_showing = None;
+            self.handoff = None;
+        }
+        if on_screen != front {
             self.end_showing();
             return None;
         }
@@ -716,6 +766,54 @@ impl State {
             self.notice = None;
         }
         Some(self.approval_showings)
+    }
+
+    /// [`Self::approval_drawn`] with no approval waiting: a dialog drawn
+    /// whole that does not hold the keyboard yet, or the composer after a
+    /// dialog closed, starts a handoff. A dialog the frame did not draw
+    /// whole loses the keyboard.
+    fn dialog_drawn(&mut self, on_screen: Option<u64>) -> Option<u64> {
+        match self.dialog.as_ref().map(|dialog| dialog.request.id) {
+            Some(id) => {
+                if on_screen != Some(id) {
+                    self.dialog_showing = None;
+                    self.handoff = None;
+                    return None;
+                }
+                if self.dialog_showing == Some(id) && !self.handoff_due {
+                    return None;
+                }
+                self.dialog_showing = Some(id);
+            }
+            None => {
+                if !self.handoff_due {
+                    return None;
+                }
+                self.dialog_showing = None;
+            }
+        }
+        self.handoff_due = false;
+        self.approval_showings += 1;
+        self.handoff = Some(self.approval_showings);
+        self.handoff
+    }
+
+    /// Whether the composer is waiting for the keyboard after a dialog
+    /// closed.
+    pub fn handing_off(&self) -> bool {
+        self.dialog.is_none() && (self.handoff_due || self.handoff.is_some())
+    }
+
+    /// Whether the open dialog holds the keyboard: drawn whole, handed
+    /// over, and armed, with no approval waiting.
+    pub fn dialog_ready(&self) -> bool {
+        self.approvals.is_empty()
+            && !self.handoff_due
+            && self.handoff.is_none()
+            && self
+                .dialog
+                .as_ref()
+                .is_some_and(|dialog| self.dialog_showing == Some(dialog.request.id))
     }
 
     /// Ends the displayed request's showing: disarmed, with no choice.
@@ -841,6 +939,24 @@ fn apply(state: &mut State, msg: Msg) -> Vec<Effect> {
             return approval_key(state, key, burst);
         }
         Msg::KeyRepeat(_) if !state.approvals.is_empty() => {}
+        // Typed for what had the keyboard before the handoff: dropped, but
+        // Ctrl+C keeps its quit gesture.
+        Msg::Key(input) | Msg::KeyRepeat(input) | Msg::KeyRead { key: input, .. }
+            if state.handing_off() =>
+        {
+            let bound = keys::action(Scope::Composer, input);
+            if let Some(effects) = quit_key(state, bound) {
+                return effects;
+            }
+        }
+        Msg::Paste(_) if state.approvals.is_empty() && state.handing_off() => {}
+        Msg::Key(input) if state.dialog.is_some() => return dialog_key(state, input, true),
+        Msg::KeyRepeat(input) if state.dialog.is_some() => {
+            return dialog_key(state, input, false);
+        }
+        Msg::KeyRead { key, burst } if state.dialog.is_some() => {
+            return dialog_key(state, key, !burst);
+        }
         Msg::Key(input) | Msg::KeyRepeat(input) | Msg::KeyRead { key: input, .. } => {
             return key(state, input);
         }
@@ -848,12 +964,22 @@ fn apply(state: &mut State, msg: Msg) -> Vec<Effect> {
             if state.showing() == Some(token) {
                 state.approval_armed = Some(token);
             }
+            if state.handoff == Some(token) {
+                state.handoff = None;
+            }
         }
         // A paste is taken and dropped while an approval waits: pasted text
         // that happens to read `y` is not a decision.
         Msg::Paste(_) if !state.approvals.is_empty() => {
             state.approval_chosen = None;
             state.notice = Some(Notice::ApprovalKeys);
+        }
+        Msg::Paste(text) if state.dialog.is_some() => {
+            if state.dialog_ready()
+                && let Some(dialog) = state.dialog.as_mut()
+            {
+                dialog.paste(&text);
+            }
         }
         Msg::Paste(text) => match state.focus {
             // A terminal pastes nothing for a clipboard that holds only an
@@ -879,6 +1005,10 @@ fn apply(state: &mut State, msg: Msg) -> Vec<Effect> {
             // whole and armed again before a key answers it.
             if !state.approvals.is_empty() {
                 state.end_showing();
+            }
+            if state.dialog.is_some() {
+                state.dialog_showing = None;
+                state.handoff = None;
             }
             // The first resize only learns the width.
             if state.columns != 0 && cols != state.columns {
@@ -991,6 +1121,16 @@ fn runtime(state: &mut State, update: RuntimeUpdate) {
                 state.notice = None;
             }
             state.approvals = approvals;
+        }
+        RuntimeUpdate::Dialog(request) => {
+            state.handoff_due = true;
+            state.handoff = None;
+            state.dialog_showing = None;
+            state.dialog = request.map(Dialog::open);
+            if state.dialog.is_some() {
+                state.selecting.clear();
+                state.dragging = false;
+            }
         }
         RuntimeUpdate::TurnEnded(outcome) => {
             if let Some(turn) = state.activity.filter(|a| a.runtime) {
@@ -1364,6 +1504,29 @@ fn edge_scroll(state: &mut State) {
 /// A first Ctrl+C arms the quit and a second within the window quits, so a
 /// stray press never ends the session. Returns `None` for any other key,
 /// which disarms it.
+/// A key while a dialog is open and no approval waits: Ctrl+C keeps its
+/// quit gesture, and every other key goes to the dialog, never to the
+/// draft. `fresh` as [`Dialog::key`] takes it.
+fn dialog_key(state: &mut State, input: KeyInput, fresh: bool) -> Vec<Effect> {
+    let bound = keys::action(Scope::Composer, input);
+    if let Some(effects) = quit_key(state, bound) {
+        return effects;
+    }
+    // Until the dialog holds the keyboard, only Esc reaches it, to cancel.
+    let cancel = input.key == Key::Esc && input.mods == Mods::NONE;
+    if !state.dialog_ready() && !cancel {
+        return Vec::new();
+    }
+    let Some(dialog) = state.dialog.as_mut() else {
+        return Vec::new();
+    };
+    let id = dialog.request.id;
+    dialog
+        .key(input, fresh)
+        .map(|answer| vec![Effect::Dialog { id, answer }])
+        .unwrap_or_default()
+}
+
 fn quit_key(state: &mut State, bound: Option<Action>) -> Option<Vec<Effect>> {
     if bound == Some(Action::Quit) {
         if state.quitting() {
@@ -1510,6 +1673,10 @@ fn menu_key(state: &mut State, bound: Option<Action>) -> bool {
             let name = text.trim_end();
             if state.draft.text() != name {
                 state.draft.replace(name, name.len());
+            }
+            // A live session runs it: the composer submits the name.
+            if state.live {
+                return false;
             }
             state.notice = Some(Notice::NoCommands);
             true
@@ -2052,6 +2219,196 @@ mod tests {
         );
         assert_eq!(chord(&mut state, Key::Char('g'), Mods::CTRL), []);
         assert_eq!(state.focus, Focus::Composer);
+    }
+
+    /// Draws nothing, but takes the keyboard handoff a frame would start,
+    /// and arms it, as the terminal owner's input thread does.
+    fn hand_off(state: &mut State) {
+        state.dialog_on_screen = state.dialog.as_ref().map(|dialog| dialog.request.id);
+        let token = state.approval_drawn().expect("a handoff");
+        update(state, Msg::ApprovalArmed(token));
+    }
+
+    fn secret_field(id: u64) -> RuntimeUpdate {
+        RuntimeUpdate::Dialog(Some(crate::dialog::DialogRequest {
+            id,
+            kind: crate::dialog::DialogKind::Field(crate::dialog::FieldDialog {
+                title: "Sign in to CLIProxyAPI".into(),
+                prompt: "API key".into(),
+                secret: true,
+                initial: String::new(),
+                error: None,
+            }),
+        }))
+    }
+
+    // Bake: a secret typed or pasted into a dialog field never reaches the
+    // draft, its undo, the prompt history, or the transcript, and leaves
+    // only in the dialog's answer; the draft is untouched throughout.
+    #[test]
+    fn a_secret_field_keeps_its_text_out_of_the_draft_and_history() {
+        let mut state = live();
+        type_str(&mut state, "draft");
+        let undo = state.draft.undo_len();
+        let rows = state.transcript.rows.clone();
+        runtime(&mut state, secret_field(7));
+        hand_off(&mut state);
+        type_str(&mut state, "sk-fake-typed");
+        update(&mut state, Msg::Paste("-pasted\nrest".into()));
+        // A paste's line break did not answer the field.
+        assert!(!state.dialog.as_ref().unwrap().answered);
+        let effects = press(&mut state, Key::Enter);
+        let [Effect::Dialog { id: 7, answer }] = &effects[..] else {
+            panic!("{effects:?}");
+        };
+        assert_eq!(
+            answer,
+            &DialogAnswer::Entered("sk-fake-typed-pastedrest".to_owned().into())
+        );
+        let shown = format!("{effects:?} {state:?}");
+        assert!(!shown.contains("sk-fake"), "{shown}");
+        assert_eq!(state.draft.text(), "draft");
+        assert_eq!(state.draft.undo_len(), undo);
+        assert_eq!(state.transcript.rows, rows);
+        // The runtime closes it; keys reach the composer again.
+        runtime(&mut state, RuntimeUpdate::Dialog(None));
+        hand_off(&mut state);
+        type_str(&mut state, "!");
+        assert_eq!(state.draft.text(), "draft!");
+    }
+
+    // Bake: a repeated or burst Enter never answers, an answered field
+    // takes nothing more until the runtime's next dialog, and keys typed
+    // across that transition do not spill into the draft.
+    #[test]
+    fn enter_bursts_and_repeats_do_not_carry_across_dialogs() {
+        let mut state = live();
+        runtime(&mut state, secret_field(1));
+        // Keys queued before the handoff is armed go nowhere.
+        type_str(&mut state, "early");
+        assert_eq!(press(&mut state, Key::Enter), []);
+        hand_off(&mut state);
+        assert_eq!(state.dialog.as_ref().unwrap().text.chars(), 0);
+        update(
+            &mut state,
+            Msg::KeyRead {
+                key: KeyInput::plain(Key::Char('a')),
+                burst: true,
+            },
+        );
+        assert_eq!(
+            update(
+                &mut state,
+                Msg::KeyRead {
+                    key: KeyInput::plain(Key::Enter),
+                    burst: true,
+                },
+            ),
+            []
+        );
+        assert_eq!(
+            update(&mut state, Msg::KeyRepeat(KeyInput::plain(Key::Enter))),
+            []
+        );
+        assert_eq!(press(&mut state, Key::Enter).len(), 1);
+        // Waiting: a held Enter and typing go nowhere.
+        assert_eq!(
+            update(&mut state, Msg::KeyRepeat(KeyInput::plain(Key::Enter))),
+            []
+        );
+        type_str(&mut state, "late");
+        assert_eq!(state.draft.text(), "");
+        runtime(&mut state, secret_field(2));
+        type_str(&mut state, "typeahead");
+        assert_eq!(press(&mut state, Key::Enter), []);
+        hand_off(&mut state);
+        assert_eq!(
+            update(&mut state, Msg::KeyRepeat(KeyInput::plain(Key::Enter))),
+            []
+        );
+        assert_eq!(state.dialog.as_ref().unwrap().text.chars(), 0);
+        // Esc cancels the new one, once, even before it holds the keyboard.
+        runtime(&mut state, secret_field(2));
+        assert!(!state.dialog_ready());
+        assert_eq!(
+            press(&mut state, Key::Esc),
+            [Effect::Dialog {
+                id: 2,
+                answer: DialogAnswer::Cancel,
+            }]
+        );
+        assert_eq!(press(&mut state, Key::Esc), []);
+        // Closed: typeahead before the handoff does not reach the draft.
+        runtime(&mut state, RuntimeUpdate::Dialog(None));
+        type_str(&mut state, "spill");
+        hand_off(&mut state);
+        assert_eq!(state.draft.text(), "");
+        type_str(&mut state, "ok");
+        assert_eq!(state.draft.text(), "ok");
+    }
+
+    // Bake: an approval request takes the keyboard first; the dialog keeps
+    // what was typed and takes keys again once the request is settled.
+    #[test]
+    fn an_approval_takes_precedence_over_a_dialog() {
+        let mut state = live();
+        runtime(&mut state, secret_field(3));
+        hand_off(&mut state);
+        type_str(&mut state, "ab");
+        runtime(
+            &mut state,
+            RuntimeUpdate::Approvals(vec![Approval {
+                generation: 9,
+                tool: "bash".into(),
+                call_id: "c".into(),
+                reason: "r".into(),
+                arguments: String::new(),
+            }]),
+        );
+        assert_eq!(
+            press(&mut state, Key::Esc),
+            [Effect::Answer {
+                generation: 9,
+                answer: ApprovalAnswer::Cancel,
+            }]
+        );
+        assert_eq!(state.dialog.as_ref().unwrap().text.chars(), 2);
+        // The approval covered the dialog: once it clears, keys queued
+        // before the dialog is handed back go nowhere.
+        state.approval_on_screen = Some(9);
+        assert!(state.approval_drawn().is_some());
+        runtime(&mut state, RuntimeUpdate::Approvals(Vec::new()));
+        type_str(&mut state, "queued");
+        assert_eq!(state.dialog.as_ref().unwrap().text.expose(), "ab");
+        hand_off(&mut state);
+        type_str(&mut state, "c");
+        assert_eq!(state.dialog.as_ref().unwrap().text.expose(), "abc");
+        // A resize keeps its text but takes the keyboard back until the
+        // next frame shows it whole and is armed.
+        update(&mut state, Msg::Resize { cols: 40, rows: 10 });
+        assert_eq!(state.dialog.as_ref().unwrap().text.chars(), 3);
+        type_str(&mut state, "x");
+        assert_eq!(state.dialog.as_ref().unwrap().text.chars(), 3);
+        // A frame that does not show it whole hands nothing over.
+        state.dialog_on_screen = None;
+        assert_eq!(state.approval_drawn(), None);
+        hand_off(&mut state);
+        type_str(&mut state, "d");
+        assert_eq!(state.dialog.as_ref().unwrap().text.expose(), "abcd");
+    }
+
+    // Bake: a live session's slash menu lists the commands it runs, and
+    // Enter on one submits its name.
+    #[test]
+    fn a_live_slash_menu_submits_the_chosen_command() {
+        let mut state = live();
+        type_str(&mut state, "/thi");
+        let menu = state.menu().expect("menu");
+        assert_eq!(menu.entries[0].name, "thinking");
+        assert_eq!(
+            submitted(press(&mut state, Key::Enter)),
+            [Submission::FollowUp("/thinking".into())]
+        );
     }
 
     #[test]
@@ -2602,7 +2959,7 @@ mod tests {
         assert_eq!((state.draft.text(), state.draft.caret()), ("/logout ", 8));
         assert!(state.menu().is_none());
         assert_eq!(
-            completion::usage(state.draft.text()).map(|c| c.name),
+            completion::usage(state.draft.text(), state.catalog()).map(|c| c.name),
             Some("logout")
         );
         // One undo takes the completion back; at the same draft and caret

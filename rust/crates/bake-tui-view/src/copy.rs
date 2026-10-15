@@ -22,6 +22,19 @@ pub const PLACEHOLDER_SEP: &str = " · ";
 pub const HINT_SEND: &str = "Enter sends";
 pub const HINT_INTERRUPT: &str = "Esc interrupts";
 pub const HINT_APPROVAL: &str = "Esc cancels request";
+pub const PLACEHOLDER_DIALOG: &[&str] = &["Answer the dialog above"];
+pub const HINT_DIALOG: &str = "Esc cancels";
+pub const PLACEHOLDER_PREPARING: &[&str] = &["Preparing…"];
+pub const HINT_PREPARING: &str = "Preparing…";
+/// The keys of a list dialog, with and without its save key.
+pub const DIALOG_LIST_KEYS: &str = "↑↓ choose · Enter select · Esc cancel";
+pub const DIALOG_LIST_SAVE_KEYS: &str =
+    "↑↓ choose · Enter select · Ctrl+S to set as default · Esc cancel";
+pub const DIALOG_FILTER: &str = "Filter:";
+pub const DIALOG_NO_MATCH: &str = "No match";
+pub const DIALOG_FIELD_KEYS: &str = "Enter continue · Esc cancel";
+pub const DIALOG_WAITING: &str = "Working… · Esc cancels";
+pub const DIALOG_PREPARING: &str = "Preparing… · Esc cancels";
 pub const DRAFT_KEPT: &str = "draft kept · Esc returns";
 /// Phases a sample turn steps through, one every [`PHASE_SECONDS`].
 pub const SAMPLE_PHASES: &[&str] = &["thinking", "writing", "running bash", "running subagent +2"];
