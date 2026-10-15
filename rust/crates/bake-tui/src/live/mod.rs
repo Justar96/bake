@@ -81,7 +81,6 @@ const PI_COMMANDS: &[&str] = &[
     "hotkeys",
     "clone",
     "trust",
-    "compact",
     "reload",
     "quit",
 ];
@@ -408,6 +407,8 @@ struct CommandRun {
     abort: AbortController,
     id: Option<u64>,
     text: String,
+    /// The command's name.
+    name: &'static str,
     /// Whether it replaces the session ([`commands::TRANSITIONS`]).
     transition: bool,
 }
@@ -646,18 +647,15 @@ impl Driver {
                 if let Some(reason) = refused_command(&text, &templates) {
                     return self.refuse(id, text, reason);
                 }
-                // While a session is being replaced, nothing reaches the
-                // session that is going away.
-                if self
-                    .command
-                    .as_ref()
-                    .is_some_and(|command| command.transition)
-                {
-                    return self.refuse(
-                        id,
-                        text,
-                        "The session is being replaced; your draft is kept.".into(),
-                    );
+                // While a session is being replaced or compacted, nothing
+                // reaches it.
+                if let Some(command) = self.command.as_ref().filter(|command| command.transition) {
+                    let reason = if command.name == commands::COMPACT {
+                        "The session is being compacted; your draft is kept."
+                    } else {
+                        "The session is being replaced; your draft is kept."
+                    };
+                    return self.refuse(id, text, reason.into());
                 }
                 let images: Vec<ImageContent> = prompt.images.iter().map(image_content).collect();
                 match running {
@@ -680,6 +678,16 @@ impl Driver {
             }
             // Pi's `onEscape` while streaming.
             Request::Cancel => {
+                // `/compact` runs as the session's work: Esc cancels it, as
+                // Pi's `abortCompaction` does.
+                if let Some(command) = self
+                    .command
+                    .as_ref()
+                    .filter(|command| command.name == commands::COMPACT)
+                {
+                    command.abort.abort();
+                    return;
+                }
                 let Some(run) = running.as_mut().filter(|run| !run.cancelled) else {
                     return;
                 };
@@ -827,6 +835,18 @@ impl Driver {
         let context = context.with_factory(self.factory.clone());
         #[cfg(test)]
         let context = context.with_commit_gate(self.commit_gate.clone());
+        // The bar shows `/compact` as the running work, so Esc reaches it
+        // as a cancel and Enter as a prompt the barrier refuses.
+        if name == commands::COMPACT {
+            self.projector
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .begin(None);
+            self.turns += 1;
+            self.send(RuntimeUpdate::TurnStarted {
+                seed: format!("{}-{}", self.session.session_id(), self.turns),
+            });
+        }
         let task = tokio::spawn(commands::run(name, argument, context));
         self.command = Some(CommandRun {
             task,
@@ -835,6 +855,7 @@ impl Driver {
             abort,
             id,
             text,
+            name,
             transition: commands::TRANSITIONS.contains(&name),
         });
     }
@@ -871,8 +892,14 @@ impl Driver {
             return;
         };
         let outcome = done.unwrap_or_else(|error| Err(format!("The command failed: {error}")));
-        // The command closed its dialog; a panicked one could not have.
-        self.send(RuntimeUpdate::Dialog(None));
+        if command.name == commands::COMPACT {
+            // It opens no dialog, so no keyboard handoff starts and the
+            // draft typed while it ran keeps taking keys.
+            self.send(RuntimeUpdate::TurnEnded(work_outcome(&outcome)));
+        } else {
+            // The command closed its dialog; a panicked one could not have.
+            self.send(RuntimeUpdate::Dialog(None));
+        }
         match outcome {
             Ok(commands::Done::Replace {
                 replacement,
@@ -918,6 +945,22 @@ impl Driver {
                 if let Some(draft) = draft {
                     self.send(RuntimeUpdate::Restored(draft));
                 }
+                self.publish_pending();
+            }
+            // The compaction is written and the agent's transcript is the
+            // compacted context: the transcript starts over with it, as
+            // Pi's `compaction_end` handler renders it.
+            Ok(commands::Done::Compacted { note }) => {
+                if let Some(id) = command.id {
+                    self.send(RuntimeUpdate::Admitted(id));
+                }
+                *self
+                    .projector
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner) = Projector::default();
+                let mut rows = projection::replay_compacted(&self.session.messages());
+                rows.push(Row::Info(note));
+                self.send(RuntimeUpdate::Replaced(rows));
                 self.publish_pending();
             }
             Ok(done) => {
@@ -1010,6 +1053,17 @@ impl Driver {
             model: model.map(|model| format!("{}/{}", model.provider, model.id)),
             context,
         }));
+    }
+}
+
+/// How a command that ran as the session's work ended, for the bar. Only
+/// the command's own cancellation is an interruption: a failure, such as a
+/// compaction whose write failed before a late Esc, stays a failure.
+fn work_outcome(outcome: &commands::Outcome) -> Outcome {
+    match outcome {
+        Ok(_) => Outcome::Completed,
+        Err(reason) if reason == commands::CANCELLED => Outcome::Interrupted,
+        Err(_) => Outcome::Failed,
     }
 }
 

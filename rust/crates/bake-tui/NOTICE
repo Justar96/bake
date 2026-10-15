@@ -34,6 +34,12 @@ src/live/tests/sessions_live.rs.
 /resume's search wires the session-selector search of
 src/modes/interactive/components/session-selector.ts and
 session-selector-search.ts into src/live/commands.rs (ResumeSearch).
+/compact follows v1.2.0 src/modes/interactive/interactive-mode.ts (the
+/compact parsing, handleCompactCommand, and the compaction_end rendering of
+the kept entries with the summary below them), in src/live/commands.rs,
+src/live/mod.rs, and src/live/projection.rs (replay_compacted), with the case
+of test/interactive-mode-compaction.test.ts that renders retained entries in
+src/live/tests/compact_live.rs.
 --------------------------------------------------------------------------------
 MIT License
 

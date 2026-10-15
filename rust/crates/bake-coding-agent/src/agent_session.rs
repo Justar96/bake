@@ -59,8 +59,10 @@ pub use navigation::{
     ForkPoint, ForkedSession, NAVIGATION_CANCELLED, NAVIGATION_WHILE_BUSY,
     NAVIGATION_WHILE_STREAMING, TreeNavigation,
 };
-pub use recovery::CompactionReason;
 use recovery::{Activity, Core, RunState};
+pub use recovery::{
+    COMPACTION_CANCELLED, COMPACTION_WHILE_BUSY, COMPACTION_WHILE_STREAMING, CompactionReason,
+};
 
 use bake_agent::{
     AfterToolCallResult, Agent, AgentError, AgentEvent, AgentInitialState,
@@ -69,8 +71,8 @@ use bake_agent::{
 };
 use bake_ai::transcript::get_current_system_message;
 use bake_ai::{
-    ApiRegistry, ImageContent, Message, Model, ModelThinkingLevel, SystemContent, SystemMessage,
-    TextContent, UserContent, UserContentBlock, UserMessage,
+    AbortSignal, ApiRegistry, ImageContent, Message, Model, ModelThinkingLevel, SystemContent,
+    SystemMessage, TextContent, UserContent, UserContentBlock, UserMessage,
 };
 
 use crate::compaction::CompactionResult;
@@ -981,6 +983,15 @@ pub(crate) struct TestHooks {
     /// Runs on the blocking pool after a navigation claimed the session
     /// and before it takes the session lock to move the leaf.
     pub before_navigation: Option<Box<dyn FnOnce() + Send>>,
+    /// Runs on the blocking pool after a compaction's summary and before
+    /// it takes the session lock to write its entry.
+    pub before_compaction_commit: Option<Box<dyn FnOnce() + Send>>,
+    /// Runs under the session lock right after a compaction's entry was
+    /// written.
+    pub after_compaction_commit: Option<Box<dyn FnOnce() + Send>>,
+    /// Fails the next compaction entry at the session's write boundary,
+    /// running the hook under the session lock as it fails.
+    pub fail_compaction_entry: Option<Box<dyn FnOnce() + Send>>,
 }
 
 /// Pi's bookkeeping after persisting: the last assistant message and the
@@ -2276,9 +2287,62 @@ impl AgentSession {
     ) -> Result<CompactionResult, String> {
         self.abort().await;
         let no_model = format_no_model_selected_message(&self.docs_command);
+        let busy = self.core.busy(
+            |activity| activity.manual_compaction = true,
+            |activity| activity.manual_compaction = false,
+        );
         self.core
-            .manual_compaction(custom_instructions, no_model)
+            .manual_compaction(custom_instructions, no_model, None, busy)
             .await
+    }
+
+    /// Pi's `compact` for interactive `/compact`, idle only: rather than
+    /// aborting a running response, it is refused with
+    /// [`COMPACTION_WHILE_STREAMING`] while one runs, and with
+    /// [`COMPACTION_WHILE_BUSY`] while a compaction or tree navigation
+    /// runs. The claim is atomic with the prompt's, so no prompt starts
+    /// while it runs ([`Self::prompt`] refuses with Pi's message) and it
+    /// never starts while one does.
+    ///
+    /// `signal` cancels it until its entry is written: a cancel before the
+    /// claim, during the branch read, during the summary request, or while
+    /// the write waits for the session lock fails with
+    /// [`COMPACTION_CANCELLED`] and writes nothing, leaving the session
+    /// and the agent's transcript as they were. A compaction whose entry
+    /// was written reports success even when the cancel came after. A
+    /// preparation or summary error, such as Pi's `Nothing to compact
+    /// (session too small)`, `Already compacted`, or a failed summary
+    /// request, writes nothing and leaves the session usable. A failed
+    /// write of the entry is reported as that failure, even when a cancel
+    /// came after it, and stops the session as every failed write does:
+    /// the entry stays in memory, as in Pi, nothing more is written, and
+    /// later prompts are refused.
+    ///
+    /// It runs as owned work on its own task, holding a work permit, so a
+    /// caller that stops waiting neither abandons it nor outlives it:
+    /// shutdown cancels it and waits for it. Refused once the session is
+    /// shut down.
+    pub async fn compact_when_idle(
+        &self,
+        custom_instructions: Option<&str>,
+        signal: AbortSignal,
+    ) -> Result<CompactionResult, String> {
+        let permit = self.change_permit()?;
+        let core = Arc::clone(&self.core);
+        let agent = Arc::clone(&self.agent);
+        let instructions = custom_instructions.map(str::to_owned);
+        let no_model = format_no_model_selected_message(&self.docs_command);
+        tokio::spawn(async move {
+            let _permit = permit;
+            if signal.aborted() {
+                return Err(COMPACTION_CANCELLED.to_owned());
+            }
+            let busy = core.claim_manual_compaction(agent.is_streaming())?;
+            core.manual_compaction(instructions.as_deref(), no_model, Some(signal), busy)
+                .await
+        })
+        .await
+        .map_err(|error| format!("The compaction task failed: {error}"))?
     }
 
     /// Pi's `abortCompaction`: cancels a running compaction.

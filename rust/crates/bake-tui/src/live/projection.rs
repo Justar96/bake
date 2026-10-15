@@ -17,7 +17,7 @@ use std::collections::HashMap;
 
 use bake_agent::{AgentEvent, AgentMessage, AgentToolResult};
 use bake_ai::{AssistantContentBlock, AssistantMessage, StopReason, UserContent, UserContentBlock};
-use bake_coding_agent::agent_session::SessionEvent;
+use bake_coding_agent::agent_session::{CompactionReason, SessionEvent};
 use bake_tui_view::runtime::{Pending, RuntimeUpdate, Target};
 use bake_tui_view::transcript::{CallState, Row};
 use serde_json::Value;
@@ -96,6 +96,11 @@ impl Projector {
                 &self.waiting,
             ))],
             SessionEvent::CompactionStart { .. } => self.set_phase("compacting"),
+            // `/compact` reports its own outcome, with its draft.
+            SessionEvent::CompactionEnd {
+                reason: CompactionReason::Manual,
+                ..
+            } => Vec::new(),
             SessionEvent::CompactionEnd {
                 result,
                 aborted,
@@ -551,6 +556,24 @@ pub fn replay(messages: &[AgentMessage]) -> Vec<Row> {
         }
     }
     rows
+}
+
+/// The transcript after `/compact`, Pi's `compaction_end` rendering: the
+/// kept history the compacted context holds, without the latest summary,
+/// which the caller notes below it at its place in time. Without a summary
+/// it is [`replay`].
+pub fn replay_compacted(messages: &[AgentMessage]) -> Vec<Row> {
+    match messages
+        .iter()
+        .position(|message| message.role() == "compactionSummary")
+    {
+        Some(index) => {
+            let mut kept = messages.to_vec();
+            kept.remove(index);
+            replay(&kept)
+        }
+        None => replay(messages),
+    }
 }
 
 #[cfg(test)]

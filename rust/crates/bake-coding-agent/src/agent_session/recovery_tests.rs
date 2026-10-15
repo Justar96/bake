@@ -1367,3 +1367,6 @@ async fn disabled_retry_and_compaction_leave_errors_alone() {
     assert!(retry_log(&events).is_empty());
     session.shutdown().await;
 }
+
+#[path = "idle_compaction_tests.rs"]
+mod idle_compaction;

@@ -1,6 +1,6 @@
 //! The commands a live session runs: `/model`, `/thinking`, `/settings`,
-//! `/session`, `/name`, `/new`, `/resume`, `/tree`, `/fork`, `/login`,
-//! `/logout`, and `/refresh-models`.
+//! `/session`, `/name`, `/new`, `/resume`, `/tree`, `/fork`, `/compact`,
+//! `/login`, `/logout`, and `/refresh-models`.
 //!
 //! `/model`, `/thinking`, and `/settings` follow Pi v1.2.0
 //! `packages/coding-agent/src/modes/interactive/interactive-mode.ts`
@@ -32,6 +32,24 @@
 //! with the same busy rule as `/new`. `/tree` moves the running session's
 //! leaf in place; `/fork` is staged like `/resume`. Both put a chosen user
 //! message back into the draft and never send it.
+//!
+//! `/compact [instructions]` follows Pi v1.2.0 `interactive-mode.ts`
+//! (`handleCompactCommand`, the `compaction_end` handler) and
+//! `agent-session.ts` (`compact`) through
+//! [`AgentSession::compact_when_idle`]: the instructions, trimmed, go to
+//! the summary request, and on success the transcript starts over with the
+//! kept history and `Compacted from N tokens` below it. Unlike Pi, which
+//! aborts a running response first, it is idle only, with the busy rule of
+//! `/new`: Esc stays the one key that stops a turn, and a running turn or
+//! waiting prompt is never dropped by a compaction. While it runs, the bar
+//! shows it as the running work, Esc cancels it, and prompts are refused
+//! with their drafts kept. A cancel, a preparation error, or a failed
+//! summary request writes nothing and gives the draft back, leaving the
+//! session usable; a cancel that arrives after the entry was written is
+//! reported as the success it is. A failed write of the entry is reported
+//! as a failure, never as a cancel, and stops the session as every failed
+//! session write does: nothing more is written and later prompts are
+//! refused.
 //!
 //! `/login`, `/logout`, and `/refresh-models` keep Bake's CLIProxyAPI
 //! contract: `apps/tui/packages/app/src/cliproxyapi.ts`
@@ -89,12 +107,18 @@ pub const COMMANDS: &[&str] = &[
     "resume",
     "tree",
     "fork",
+    "compact",
 ];
 
-/// The commands that replace the running session ([`Done::Replace`]) or
-/// move its leaf ([`Done::Navigated`]). Each starts only while the session
-/// is idle, and no prompt is admitted while one runs.
-pub const TRANSITIONS: &[&str] = &["new", "resume", "tree", "fork"];
+/// The commands that replace the running session ([`Done::Replace`]), move
+/// its leaf ([`Done::Navigated`]), or compact it ([`Done::Compacted`]).
+/// Each starts only while the session is idle, and no prompt is admitted
+/// while one runs.
+pub const TRANSITIONS: &[&str] = &["new", "resume", "tree", "fork", "compact"];
+
+/// The command that runs as the session's work, as a turn does: the bar
+/// shows it, and Esc cancels it rather than a dialog.
+pub const COMPACT: &str = "compact";
 
 /// The command a prompt names, with its argument, when it names one of
 /// [`COMMANDS`].
@@ -215,6 +239,9 @@ pub enum Done {
     /// over with this note and the new path's replay, and `draft`, the
     /// chosen user message's text, goes back into the draft.
     Navigated { note: String, draft: Option<String> },
+    /// `/compact` wrote its compaction: the transcript starts over with
+    /// the kept history and this note below it.
+    Compacted { note: String },
 }
 
 impl std::fmt::Debug for Done {
@@ -226,6 +253,7 @@ impl std::fmt::Debug for Done {
             Self::Navigated { note, .. } => {
                 f.debug_struct("Navigated").field("note", note).finish()
             }
+            Self::Compacted { note } => f.debug_struct("Compacted").field("note", note).finish(),
         }
     }
 }
@@ -351,10 +379,15 @@ pub async fn run(name: &str, argument: String, mut context: Context) -> Outcome 
         "resume" => resume(&mut context).await,
         "tree" => tree(&mut context).await,
         "fork" => fork(&mut context).await,
+        "compact" => compact(&context, &argument).await,
         _ => Err(format!("/{name} is not a command.")),
     };
     context.shown.store(0, std::sync::atomic::Ordering::SeqCst);
-    (context.send)(RuntimeUpdate::Dialog(None));
+    // `/compact` opens no dialog, so there is none to close: closing one
+    // hands the keyboard over afresh and drops the keys typed meanwhile.
+    if name != COMPACT {
+        (context.send)(RuntimeUpdate::Dialog(None));
+    }
     outcome
 }
 
@@ -1143,6 +1176,41 @@ async fn tree(context: &mut Context) -> Outcome {
         note: "Navigated to selected point".into(),
         draft: navigated.editor_text.filter(|text| !text.trim().is_empty()),
     })
+}
+
+/// `/compact [instructions]`, Pi's `handleCompactCommand` with an idle-only
+/// [`AgentSession::compact_when_idle`]: the command's abort signal, which
+/// Esc fires, cancels it until its entry is written. A refusal, a cancel,
+/// or an error keeps the draft; only the session's own cancellation reads
+/// as [`CANCELLED`], so a failed write followed by a late Esc is reported
+/// as the failure. A cancel that came after the entry was written is
+/// reported with the success.
+async fn compact(context: &Context, argument: &str) -> Outcome {
+    use bake_coding_agent::agent_session::{
+        COMPACTION_CANCELLED, COMPACTION_WHILE_BUSY, COMPACTION_WHILE_STREAMING,
+    };
+    let instructions = (!argument.is_empty()).then_some(argument);
+    match context
+        .session
+        .compact_when_idle(instructions, context.signal.clone())
+        .await
+    {
+        Ok(result) => {
+            let mut note = format!(
+                "Compacted from {} tokens",
+                group_digits(result.tokens_before)
+            );
+            if context.signal.aborted() {
+                note.push_str("; it was saved before the cancel arrived");
+            }
+            Ok(Done::Compacted { note })
+        }
+        Err(error) if error == COMPACTION_CANCELLED => Err(CANCELLED.into()),
+        Err(error) if error == COMPACTION_WHILE_STREAMING || error == COMPACTION_WHILE_BUSY => {
+            Err(format!("{error} Your draft is kept."))
+        }
+        Err(error) => Err(format!("Compaction failed: {error} Your draft is kept.")),
+    }
 }
 
 /// `/fork`, Pi's `showUserMessageSelector` and runtime `fork`: the

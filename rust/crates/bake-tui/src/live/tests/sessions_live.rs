@@ -158,6 +158,18 @@ fn panicking_session_harness(
     gate: Option<commands::CommitGate>,
     panic_on: Option<u64>,
 ) -> (Harness, Requests, std::sync::Weak<()>) {
+    settings_harness(world, manager, tools, gate, panic_on, Settings::default())
+}
+
+/// [`panicking_session_harness`] with the session's `settings`.
+fn settings_harness(
+    world: &World,
+    manager: SessionManager,
+    tools: Vec<Arc<AgentTool>>,
+    gate: Option<commands::CommitGate>,
+    panic_on: Option<u64>,
+    settings: Settings,
+) -> (Harness, Requests, std::sync::Weak<()>) {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
@@ -197,7 +209,7 @@ fn panicking_session_harness(
             settings_store: None,
             selection: None,
             apis,
-            settings: Settings::default(),
+            settings,
             thinking_level: None,
             tools,
             active_tool_names: active,
@@ -451,7 +463,7 @@ fn h_requests(requests: &Requests) -> usize {
 }
 
 // TS navigation `unavailable`: a running turn refuses `/new`, `/resume`,
-// `/tree`, and `/fork` with the draft kept, and the turn goes on in its own session.
+// `/tree`, `/fork`, and `/compact` with the draft kept, and the turn goes on in its own session.
 #[test]
 fn a_running_turn_refuses_a_replacement_and_keeps_the_draft() {
     let world = World::new("busy");
@@ -483,7 +495,13 @@ fn a_running_turn_refuses_a_replacement_and_keeps_the_draft() {
     ]);
     h.submit_id(1, Submission::FollowUp("hold".into()));
     h.until(|u| matches!(u, RuntimeUpdate::Live(rows) if rows.iter().any(|r| matches!(r, Row::Call { .. }))));
-    for (id, text) in [(2, "/new"), (3, "/resume"), (4, "/tree"), (5, "/fork")] {
+    for (id, text) in [
+        (2, "/new"),
+        (3, "/resume"),
+        (4, "/tree"),
+        (5, "/fork"),
+        (6, "/compact"),
+    ] {
         h.submit_id(id, Submission::FollowUp(text.into()));
         let updates = h.ended(id);
         let reason = refused(&updates).expect("refused");
@@ -1314,3 +1332,6 @@ fn an_esc_before_the_tree_commit_moves_nothing() {
     h.stop();
     assert_eq!(texts(&file, "user"), ["alpha", "beta", "gamma"]);
 }
+
+#[path = "compact_live.rs"]
+mod compact_live;

@@ -757,6 +757,15 @@ class FakeModel {
     const prompt = [...input].reverse().find(item => item.role === 'user')?.content?.map(part => part.text ?? '').join('') ?? ''
     const toolOutput = last?.type === 'function_call_output' ? String(last.output ?? '') : undefined
     const n = this.requests.length
+    // A compaction's summary requests: the history (with `/compact`'s instructions) and a split turn's prefix.
+    if (prompt.startsWith('<conversation>') || prompt.startsWith('# Conversation\n')) {
+      if (prompt.includes('FAIL-SUMMARY')) {
+        return new Response(JSON.stringify({ error: { message: 'summary refused by the fake model', type: 'invalid_request_error' } }),
+          { status: 400, headers: { 'content-type': 'application/json' } })
+      }
+      const events = text(n, 'Summary: the greek letters so far.')
+      return prompt.includes('HOLD-SUMMARY') ? this.held(request, events, 1) : sse(events)
+    }
     const write = /^(HOLD)?WRITE (.+)$/u.exec(prompt)
     if (write !== null) {
       const targets = write[2]
@@ -1811,6 +1820,88 @@ for (const inline of [false, true]) {
     assert.equal(parentOf('ECHO beta'), parentOf('ECHO gamma'), 'beta and gamma are not siblings in the source log')
     const header = fork[0] as { type?: string; parentSession?: string }
     assert(header.type === 'session' && typeof header.parentSession === 'string' && header.parentSession.endsWith('.jsonl'), 'the fork does not name its source')
+    assert.deepEqual(await readdir(world.project), [], 'the session wrote into the project')
+  })
+}
+
+// ---- Manual compaction: /compact [instructions] ----
+
+for (const inline of [false, true]) {
+  await liveScenario(`${inline ? 'inline ' : ''}compact cancels on Esc, keeps drafts on failure, rebuilds the transcript, continues from the summary, and quits mid-summary`, async (world) => {
+    // Automatic compaction is off and one token is kept, so only /compact compacts and a short session has history to summarize.
+    await writeFile(join(world.home, 'settings.json'), JSON.stringify({ compaction: { enabled: false, keepRecentTokens: 1 }, retry: { enabled: false } }))
+    const session = world.launch([], inline)
+    await session.ready()
+    for (const word of ['alpha', 'beta', 'gamma']) {
+      session.send(`ECHO ${word}\r`)
+      await turnSettled(session, `Echo: ${word}.`)
+    }
+    await composerReady(session)
+    const compactions = async (): Promise<number> => (await sessionEntries(world.home)).flat().filter(entry => entry.type === 'compaction').length
+
+    // Esc cancels a held summary; a prompt typed meanwhile is refused and both drafts come back.
+    let requests = world.model.requests.length
+    session.send('/compact HOLD-SUMMARY\r')
+    await session.wait('compaction running', () => world.model.holding === 1 && session.screen.includes('compacting') && session.screen.includes('Esc'))
+    await type(session, 'kept draft', typed => session.screen.includes(`❯ ${'kept draft'.slice(0, typed)}`))
+    session.send('\r')
+    await session.wait('prompt refused while compacting', () => session.screen.includes('being compacted') && session.screen.includes('❯ kept draft'))
+    session.send('\x1b')
+    await session.wait('compaction cancelled', () => /■ Interrupted/u.test(session.screen) && session.screen.includes('/compact HOLD-SUMMARY')
+      && session.screen.includes('kept draft') && session.screen.includes('Cancelled; your draft is back.'))
+    assert.equal(world.model.aborted, 1, 'the summary request was not aborted')
+    assert.equal(world.model.requests.length, requests + 1, 'a cancelled compaction sent more than its summary request')
+    assert.equal(await compactions(), 0, 'a cancelled compaction was written')
+    // Clear the two-paragraph draft one key at a time: each line, then the blank lines between them.
+    // /compact opens no dialog, so no keyboard handoff drops the next keys: they reach the draft at once.
+    await composerReady(session)
+    session.send('\x15')
+    await session.wait('second paragraph cleared', () => !session.screen.includes('kept draft'))
+    session.send('\x7f\x7f')
+    await session.wait('paragraphs joined', () => session.screen.includes('❯ /compact HOLD-SUMMARY'))
+    session.send('\x15')
+    await session.wait('draft cleared', () => !session.screen.includes('❯ /compact'))
+
+    // A failed summary keeps the draft and the session.
+    session.send('/compact FAIL-SUMMARY\r')
+    await session.wait('compaction failed', () => session.screen.includes('Compaction failed') && session.screen.includes('❯ /compact FAIL-SUMMARY'))
+    assert.equal(await compactions(), 0, 'a failed compaction was written')
+    session.send('\x15')
+    await session.wait('draft cleared', () => !session.screen.includes('❯ /compact'))
+
+    // Success: the instructions reach the summary request and the transcript starts over with the kept history.
+    requests = world.model.requests.length
+    session.send('/compact keep the greek letters\r')
+    await session.wait('compacted', () => /Compacted from [\d,]+ tokens/u.test(session.screen) && !session.screen.includes('compacting'))
+    await composerReady(session)
+    const summaries = world.model.requests.slice(requests).map(request => JSON.stringify(request.input))
+    assert.equal(summaries.length, 2, 'expected the history and turn-prefix summary requests')
+    assert(summaries[0]?.includes('Additional focus: keep the greek letters'), `the instructions are missing: ${summaries[0]}`)
+    const lines = session.screen.split('\n')
+    assert(lines.findIndex(line => line.includes('Echo: gamma.')) < lines.findIndex(line => /Compacted from/u.test(line)), 'the note is not below the kept history')
+    if (!inline) assert(!session.screen.includes('Echo: alpha.'), `the summarized history is still shown\n${session.screen}`)
+    assert.equal(await compactions(), 1)
+
+    // The next prompt is sent with the summary instead of the summarized history.
+    requests = world.model.requests.length
+    session.send('ECHO delta\r')
+    await turnSettled(session, 'Echo: delta.')
+    const sent = JSON.stringify(world.model.requests[requests]?.input)
+    assert(sent.includes('Summary: the greek letters so far.') && !sent.includes('ECHO alpha') && sent.includes('ECHO delta'), `the continued request: ${sent}`)
+    await composerReady(session)
+
+    // Quitting while a summary is held aborts it, writes nothing, and restores the terminal.
+    const aborted = world.model.aborted
+    session.send('/compact HOLD-SUMMARY\r')
+    await session.wait('second compaction running', () => world.model.holding >= 1 && session.screen.includes('compacting'))
+    await session.quit()
+    if (inline) session.assertShellHistory()
+    assert.equal(world.model.aborted, aborted + 1, 'quitting did not abort the summary request')
+    const [entries, ...others] = await sessionEntries(world.home)
+    assert(entries && others.length === 0, 'expected one session file')
+    assert.equal(entries.filter(entry => entry.type === 'compaction').length, 1, 'quitting mid-summary wrote a compaction')
+    assert.deepEqual(messageTexts(entries, 'user'), ['ECHO alpha', 'ECHO beta', 'ECHO gamma', 'ECHO delta'], 'slash text reached the log')
+    assert(!world.model.requests.some(request => JSON.stringify(request.input).includes('/compact')), 'slash text reached the model')
     assert.deepEqual(await readdir(world.project), [], 'the session wrote into the project')
   })
 }

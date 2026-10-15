@@ -90,6 +90,14 @@ src/session/search.rs, with the cases of
 test/session-selector-search.test.ts in src/session/search_tests.rs; and the
 fuzzy matching of packages/tui/src/fuzzy.ts (fuzzyMatch, fuzzyFilter) in
 src/cli/list_models.rs, with the cases of packages/tui/test/fuzzy.test.ts.
+Also from v1.2.0, interactive compaction: src/core/agent-session.ts (compact,
+abortCompaction, and the prompt's refusal during compaction), adapted as
+AgentSession::compact_when_idle in src/agent_session.rs and
+src/agent_session/recovery.rs, with cases of
+test/agent-session-compaction.test.ts,
+test/suite/regressions/7150-rpc-prompt-during-compaction.test.ts, and
+test/suite/regressions/9340-9777-auto-compaction-cancellation.test.ts in
+src/agent_session/idle_compaction_tests.rs.
 --------------------------------------------------------------------------------
 MIT License
 

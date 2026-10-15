@@ -959,5 +959,19 @@ fn arguments_show_every_character_that_would_run() {
     );
 }
 
+// Bake: `/compact`'s bar result reads only its own cancellation as an
+// interruption. A failed write that a late Esc followed is a failure: the
+// command reports the write failure, not `CANCELLED`, and the bar agrees.
+#[test]
+fn only_the_commands_own_cancellation_interrupts_its_work() {
+    assert_eq!(work_outcome(&Ok(commands::Done::Quiet)), Outcome::Completed);
+    assert_eq!(
+        work_outcome(&Err(commands::CANCELLED.into())),
+        Outcome::Interrupted
+    );
+    let write_failed = "Compaction failed: The compaction could not be written to the session file (disk full), so the session stopped and takes no more prompts. Your draft is kept.";
+    assert_eq!(work_outcome(&Err(write_failed.into())), Outcome::Failed);
+}
+
 mod commands_live;
 mod sessions_live;

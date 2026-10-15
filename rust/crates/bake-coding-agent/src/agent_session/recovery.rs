@@ -59,6 +59,41 @@ impl CompactionReason {
     }
 }
 
+/// The refusal of an idle-only manual compaction while a response runs
+/// ([`super::AgentSession::compact_when_idle`]).
+pub const COMPACTION_WHILE_STREAMING: &str =
+    "Wait for the current response to finish before compacting the session.";
+
+/// The refusal of an idle-only manual compaction while another compaction
+/// or a tree navigation runs.
+pub const COMPACTION_WHILE_BUSY: &str =
+    "Wait for the current compaction or tree navigation to finish before compacting the session.";
+
+/// Pi's error for a manual compaction cancelled before its entry was
+/// written.
+pub const COMPACTION_CANCELLED: &str = "Compaction cancelled";
+
+/// Why [`Core::run_compaction`] or a manual compaction wrote no entry.
+#[derive(Debug)]
+pub(super) enum CompactionError {
+    /// Cancelled before the entry was written.
+    Cancelled,
+    /// Nothing was written: a preparation, summary, or session-read error.
+    Failed(String),
+    /// Writing the entry failed: it stays in the session's memory, the
+    /// session has a gap, and nothing more is written.
+    WriteFailed(String),
+}
+
+impl CompactionError {
+    fn message(self) -> String {
+        match self {
+            Self::Cancelled => COMPACTION_CANCELLED.to_owned(),
+            Self::Failed(message) | Self::WriteFailed(message) => message,
+        }
+    }
+}
+
 /// Pi's error when overflow recovery already ran once.
 pub(super) const OVERFLOW_RECOVERY_FAILED: &str = "Context overflow recovery failed after one compact-and-retry attempt. Try reducing context or switching to a larger-context model.";
 /// Pi's error when truncated-response recovery already ran once.
@@ -369,6 +404,33 @@ impl Core {
         (controller, AbortSlot { core: self, slot })
     }
 
+    /// Claims the session for a manual compaction only while it is idle,
+    /// atomically with the prompt's and the navigation's claims, so none of
+    /// them overlap; the guard releases it. `streaming` is whether the
+    /// agent still streams.
+    pub fn claim_manual_compaction(&self, streaming: bool) -> Result<ActivityGuard<'_>, String> {
+        let mut refusal = None;
+        self.activity.send_if_modified(|activity| {
+            if activity.run || streaming {
+                refusal = Some(COMPACTION_WHILE_STREAMING);
+                false
+            } else if !activity.idle() {
+                refusal = Some(COMPACTION_WHILE_BUSY);
+                false
+            } else {
+                activity.manual_compaction = true;
+                true
+            }
+        });
+        if let Some(refusal) = refusal {
+            return Err(refusal.to_owned());
+        }
+        Ok(ActivityGuard {
+            activity: &self.activity,
+            clear: |activity| activity.manual_compaction = false,
+        })
+    }
+
     /// Marks work active until the guard drops.
     pub fn busy(&self, set: fn(&mut Activity), clear: fn(&mut Activity)) -> ActivityGuard<'_> {
         self.activity.send_modify(set);
@@ -572,15 +634,27 @@ impl Core {
     }
 
     /// Pi's `_runDefaultCompaction`, appending the result and refreshing
-    /// the transcript; `None` when the signal aborted.
+    /// the transcript.
+    ///
+    /// The cancellation (`controller` or `cancel`) is checked again under
+    /// the session lock, immediately before the append, so an abort that
+    /// arrives while the write waits for the blocking pool or the lock
+    /// writes nothing ([`CompactionError::Cancelled`]). Once the append
+    /// starts it completes, and the result reports it. The append goes
+    /// through the session's write boundary ([`super::write_session`]): a
+    /// failed write leaves the entry in memory, as every failed append
+    /// does, records the session's gap so nothing more is written and later
+    /// prompts are refused, stops a run, and is reported as
+    /// [`CompactionError::WriteFailed`], never as a cancellation.
     async fn run_compaction(
         self: &Arc<Self>,
         preparation: &crate::compaction::CompactionPreparation,
         model: &Model,
         custom_instructions: Option<&str>,
         controller: &AbortController,
+        cancel: Option<&AbortSignal>,
         reason: CompactionReason,
-    ) -> Result<CompactionResult, String> {
+    ) -> Result<CompactionResult, CompactionError> {
         let options = SummarizationOptions {
             signal: Some(controller.signal()),
             thinking_level: self.agent().map(|agent| agent.thinking_level()),
@@ -595,25 +669,90 @@ impl Core {
             &self.stream_fn,
             &options,
         )
-        .await?;
-        if controller.signal().aborted() {
-            return Err("Compaction cancelled".to_owned());
+        .await
+        .map_err(CompactionError::Failed)?;
+        let signals = [Some(controller.signal()), cancel.cloned()];
+        let cancelled = move || signals.iter().flatten().any(AbortSignal::aborted);
+        if cancelled() {
+            return Err(CompactionError::Cancelled);
         }
+        let Some(permit) = self.work.enter() else {
+            return Err(CompactionError::Failed(
+                "The session is shut down".to_owned(),
+            ));
+        };
+        #[cfg(test)]
+        self.session_io.send_modify(|count| *count += 1);
         let entry = result.clone();
-        let projection = self
-            .with_session(move |session| {
-                session.append_compaction(
-                    &entry.summary,
-                    Some(&entry.first_kept_entry_id),
-                    entry.tokens_before,
-                    entry.details.clone(),
-                    Some(false),
-                    entry.usage.as_ref(),
-                )?;
-                Ok::<_, crate::session::SessionError>(session.build_session_projection())
-            })
-            .await?
-            .map_err(|error| error.to_string())?;
+        let core = Arc::clone(self);
+        let committed = tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            #[cfg(test)]
+            {
+                let hook = core.hooks().before_compaction_commit.take();
+                if let Some(hook) = hook {
+                    hook();
+                }
+            }
+            let written = super::write_session(&core.session, &core.gap, |session| {
+                // The commit boundary: a cancel seen here writes nothing.
+                if cancelled() {
+                    return Ok(None);
+                }
+                #[cfg(test)]
+                {
+                    let hook = core.hooks().fail_compaction_entry.take();
+                    if let Some(hook) = hook {
+                        hook();
+                        return Err(super::injected_failure().to_string());
+                    }
+                }
+                session
+                    .append_compaction(
+                        &entry.summary,
+                        Some(&entry.first_kept_entry_id),
+                        entry.tokens_before,
+                        entry.details.clone(),
+                        Some(false),
+                        entry.usage.as_ref(),
+                    )
+                    .map_err(|error| error.to_string())?;
+                let projection = session.build_session_projection();
+                #[cfg(test)]
+                {
+                    let hook = core.hooks().after_compaction_commit.take();
+                    if let Some(hook) = hook {
+                        hook();
+                    }
+                }
+                Ok(Some(projection))
+            });
+            // As every failed write does: a run stops here, as soon as the
+            // session lock is released.
+            if matches!(written, Err(super::WriteRefused::Failed(_))) {
+                core.abort_requested.store(true, Ordering::SeqCst);
+                if let Some(agent) = core.agent() {
+                    agent.abort();
+                }
+            }
+            written
+        })
+        .await
+        .map_err(|error| CompactionError::Failed(format!("Session I/O task failed: {error}")))?;
+        let projection = match committed {
+            Ok(Some(projection)) => projection,
+            Ok(None) => return Err(CompactionError::Cancelled),
+            Err(super::WriteRefused::AfterGap(error)) => {
+                return Err(CompactionError::Failed(format!(
+                    "The session file could not be written ({error}), so nothing more is written to it"
+                )));
+            }
+            Err(super::WriteRefused::Failed(error)) => {
+                return Err(CompactionError::WriteFailed(format!(
+                    "The compaction could not be written to the session file ({error}), so the session stopped and takes no more prompts."
+                )));
+            }
+        };
         self.refresh_context(&projection);
         result.estimated_tokens_after = Some(projection.messages.iter().map(estimate_tokens).sum());
         Ok(result)
@@ -659,9 +798,11 @@ impl Core {
         );
         self.emit(&SessionEvent::CompactionStart { reason });
         let result = if controller.signal().aborted() {
-            Err("This operation was aborted".to_owned())
+            Err(CompactionError::Failed(
+                "This operation was aborted".to_owned(),
+            ))
         } else {
-            let work = self.run_compaction(&preparation, &model, None, &controller, reason);
+            let work = self.run_compaction(&preparation, &model, None, &controller, None, reason);
             match run_signal {
                 None => work.await,
                 Some(run_signal) => {
@@ -697,8 +838,12 @@ impl Core {
                     .agent()
                     .is_some_and(|agent| agent.has_queued_messages()))
             }
-            Err(message) => {
-                let aborted = controller.signal().aborted();
+            Err(error) => {
+                // A failed write is reported as one, whatever aborted.
+                let aborted = !matches!(error, CompactionError::WriteFailed(_))
+                    && (matches!(error, CompactionError::Cancelled)
+                        || controller.signal().aborted());
+                let message = error.message();
                 let error_message = (!aborted).then(|| match reason {
                     CompactionReason::Overflow => {
                         format!("Context overflow recovery failed: {message}")
@@ -718,26 +863,47 @@ impl Core {
     }
 
     /// Pi's `compact`: manual compaction, never retried or continued. The
-    /// caller aborted the current run first.
+    /// caller claimed the session for it (`busy`); for Pi's `compact`, it
+    /// aborted the current run first.
+    ///
+    /// Its abort controller is registered before anything is awaited, so
+    /// [`super::AgentSession::abort_compaction`], `abort`, and `shutdown`
+    /// cancel it from here on; shutdown closes the listeners before it reads
+    /// the slot, so a compaction registered after that starts aborted.
+    /// `cancel`, the caller's own signal, cancels it as well: before the
+    /// branch is read, before the summary request, during it, and at the
+    /// commit boundary under the session lock. A cancelled compaction
+    /// writes nothing and fails with [`COMPACTION_CANCELLED`]; one whose
+    /// entry was written succeeds, however late the cancel came. A failed
+    /// write of the entry is reported as that failure, never as a cancel,
+    /// and stops the session ([`Self::run_compaction`]).
     pub async fn manual_compaction(
         self: &Arc<Self>,
         custom_instructions: Option<&str>,
         no_model_message: String,
+        cancel: Option<AbortSignal>,
+        busy: ActivityGuard<'_>,
     ) -> Result<CompactionResult, String> {
         let controller = AbortController::new();
         self.state().compaction_abort = Some(controller.clone());
-        let busy = self.busy(
-            |activity| activity.manual_compaction = true,
-            |activity| activity.manual_compaction = false,
-        );
+        if self.listeners.closed.load(Ordering::SeqCst) {
+            controller.abort();
+        }
         self.emit(&SessionEvent::CompactionStart {
             reason: CompactionReason::Manual,
         });
-        let result = async {
+        let cancelled =
+            || controller.signal().aborted() || cancel.as_ref().is_some_and(AbortSignal::aborted);
+        let work = async {
             let Some(model) = self.model() else {
-                return Err(no_model_message);
+                return Err(CompactionError::Failed(no_model_message));
             };
-            let settings = self.compaction_settings(Some(&model))?;
+            let settings = self
+                .compaction_settings(Some(&model))
+                .map_err(CompactionError::Failed)?;
+            if cancelled() {
+                return Err(CompactionError::Cancelled);
+            }
             let branch = self
                 .with_session(|session| {
                     session
@@ -746,26 +912,47 @@ impl Core {
                         .cloned()
                         .collect::<Vec<_>>()
                 })
-                .await?;
+                .await
+                .map_err(CompactionError::Failed)?;
             let Some(preparation) = prepare_compaction(&branch, settings) else {
-                if branch
+                let message = if branch
                     .last()
                     .is_some_and(|entry| entry.entry_type() == "compaction")
                 {
-                    return Err("Already compacted".to_owned());
-                }
-                return Err("Nothing to compact (session too small)".to_owned());
+                    "Already compacted"
+                } else {
+                    "Nothing to compact (session too small)"
+                };
+                return Err(CompactionError::Failed(message.to_owned()));
             };
+            // No summary request is sent once cancelled.
+            if cancelled() {
+                return Err(CompactionError::Cancelled);
+            }
             self.run_compaction(
                 &preparation,
                 &model,
                 custom_instructions,
                 &controller,
+                cancel.as_ref(),
                 CompactionReason::Manual,
             )
             .await
-        }
-        .await;
+        };
+        let result = match &cancel {
+            None => work.await,
+            Some(cancel) => {
+                tokio::pin!(work);
+                tokio::select! {
+                    biased;
+                    result = &mut work => result,
+                    () = cancel.cancelled() => {
+                        controller.abort();
+                        work.await
+                    }
+                }
+            }
+        };
         // `compaction_end` listeners may prompt, so the session is idle
         // before they run.
         self.state().compaction_abort = None;
@@ -781,8 +968,15 @@ impl Core {
                 });
                 Ok(result)
             }
-            Err(message) => {
-                let aborted = controller.signal().aborted();
+            Err(error) => {
+                // A failed write is reported as one even when a cancel came
+                // after it; a provider error after a cancel is the cancel.
+                let aborted = match &error {
+                    CompactionError::Cancelled => true,
+                    CompactionError::WriteFailed(_) => false,
+                    CompactionError::Failed(_) => cancelled(),
+                };
+                let message = error.message();
                 self.emit(&SessionEvent::CompactionEnd {
                     reason: CompactionReason::Manual,
                     result: None,
@@ -790,7 +984,11 @@ impl Core {
                     will_retry: false,
                     error_message: (!aborted).then(|| format!("Compaction failed: {message}")),
                 });
-                Err(message)
+                Err(if aborted {
+                    COMPACTION_CANCELLED.to_owned()
+                } else {
+                    message
+                })
             }
         }
     }

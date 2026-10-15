@@ -74,6 +74,11 @@ pub const LIVE_CATALOG: &[Command] = &[
     command("resume", None, "Resume a saved session from this directory"),
     command("tree", None, "Navigate the session tree (switch branches)"),
     command("fork", None, "Fork a new session from an earlier message"),
+    command(
+        "compact",
+        Some("[instructions]"),
+        "Manually compact the session context",
+    ),
 ];
 
 /// Commands listed ahead of the rest, in this order, as the oracle ranks them.
@@ -172,7 +177,10 @@ mod tests {
         assert!(live.contains(&"refresh-models"));
         assert!(live.contains(&"resume") && live.contains(&"new"));
         assert!(live.contains(&"tree") && live.contains(&"fork"));
-        assert!(!live.contains(&"clone") && !live.contains(&"compact"));
+        assert!(live.contains(&"compact") && !live.contains(&"clone"));
+        // `/compact`'s instructions are optional, so Enter on it submits.
+        let compact = LIVE_CATALOG.iter().find(|c| c.name == "compact").unwrap();
+        assert!(!requires_input(compact));
     }
 
     fn names(found: Option<Vec<Command>>) -> Option<Vec<&'static str>> {
