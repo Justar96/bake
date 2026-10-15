@@ -253,6 +253,61 @@ impl DefaultSave {
     }
 }
 
+/// Pi's `SessionStats`, without its context usage.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SessionStats {
+    /// The session file, when the session persists.
+    pub session_file: Option<PathBuf>,
+    pub session_id: String,
+    /// The display name.
+    pub name: Option<String>,
+    pub user_messages: usize,
+    pub assistant_messages: usize,
+    pub tool_calls: usize,
+    pub tool_results: usize,
+    pub total_messages: usize,
+    /// Uncached input tokens.
+    pub input: u64,
+    pub output: u64,
+    pub cache_read: u64,
+    pub cache_write: u64,
+    /// The cost in dollars.
+    pub cost: f64,
+}
+
+impl SessionStats {
+    /// The four token counts' sum, Pi's `tokens.total`.
+    pub fn total_tokens(&self) -> u64 {
+        self.input
+            .saturating_add(self.output)
+            .saturating_add(self.cache_read)
+            .saturating_add(self.cache_write)
+    }
+
+    /// Pi's `addUsageToTotals` over a stored usage object.
+    fn add_usage(&mut self, usage: &serde_json::Value) {
+        let count = |key: &str| {
+            usage
+                .get(key)
+                .and_then(serde_json::Value::as_f64)
+                .filter(|value| value.is_finite() && *value > 0.0)
+                .map_or(0, |value| value as u64)
+        };
+        self.input = self.input.saturating_add(count("input"));
+        self.output = self.output.saturating_add(count("output"));
+        self.cache_read = self.cache_read.saturating_add(count("cacheRead"));
+        self.cache_write = self.cache_write.saturating_add(count("cacheWrite"));
+        if let Some(cost) = usage
+            .get("cost")
+            .and_then(|cost| cost.get("total"))
+            .and_then(serde_json::Value::as_f64)
+            .filter(|cost| cost.is_finite())
+        {
+            self.cost += cost;
+        }
+    }
+}
+
 /// An event of the session, Pi's `AgentSessionEvent` without the deferred
 /// features' events.
 #[derive(Debug)]
@@ -273,6 +328,9 @@ pub enum SessionEvent<'a> {
     },
     /// The thinking level changed, Pi's `thinking_level_changed`.
     ThinkingLevelChanged(ModelThinkingLevel),
+    /// The session's name changed, Pi's `session_info_changed`, with the
+    /// name it now has.
+    SessionInfoChanged(Option<String>),
     /// Pi's `compaction_start`.
     CompactionStart {
         /// What started it.
@@ -519,6 +577,8 @@ async fn with_session<R: Send + 'static>(
 
 /// Pi's `AgentSession`, headless.
 pub struct AgentSession {
+    /// The provider APIs requests stream through.
+    apis: Arc<ApiRegistry>,
     agent: Arc<Agent>,
     core: Arc<Core>,
     work: WorkGate,
@@ -1244,6 +1304,7 @@ impl AgentSession {
         let persist_error = Arc::new(Mutex::new(None));
         let gap = Arc::clone(&core.gap);
         let created = Self {
+            apis,
             agent,
             core,
             work,
@@ -1394,6 +1455,110 @@ impl AgentSession {
             .flatten()
     }
 
+    /// The session's working directory.
+    pub fn cwd(&self) -> String {
+        lock(&self.session).cwd().to_owned()
+    }
+
+    /// Where the session's new sessions go, and whether it persists:
+    /// Pi's `getSessionDir` and `isPersisted`.
+    pub fn session_place(&self) -> (PathBuf, bool) {
+        let session = lock(&self.session);
+        (session.session_dir().to_path_buf(), session.is_persisted())
+    }
+
+    /// The display name, Pi's `getSessionName`.
+    pub fn session_name(&self) -> Option<String> {
+        lock(&self.session).session_name()
+    }
+
+    /// Pi's `setSessionName`: records `name` in a `session_info` entry,
+    /// line breaks as spaces and trimmed, announces the name the session
+    /// now has ([`SessionEvent::SessionInfoChanged`]), and returns it. Serialized and owned as the other changes
+    /// ([`Self::run_change`]) and refused after shutdown; a failed write
+    /// stops the session as any failed write does.
+    pub async fn set_session_name(&self, name: &str) -> Result<Option<String>, String> {
+        let name = name.to_owned();
+        self.run_change(move |control| async move {
+            let written = control
+                .append(move |session| session.append_session_info(&name).map(|_| ()))
+                .await;
+            if let Err(error) = written {
+                return Err(control.stop_after_failed_write(&error, "The session name"));
+            }
+            let session = Arc::clone(&control.session);
+            let name = tokio::task::spawn_blocking(move || lock(&session).session_name())
+                .await
+                .map_err(|error| format!("Session I/O task failed: {error}"))?;
+            control
+                .listeners
+                .emit(&SessionEvent::SessionInfoChanged(name.clone()));
+            Ok(name)
+        })
+        .await
+    }
+
+    /// Pi's `getSessionStats`, read from the session's entries: message
+    /// counts by role, tool calls, and the token and cost totals of every
+    /// usage the log records. Reads only; a malformed member counts as
+    /// absent.
+    pub fn session_stats(&self) -> SessionStats {
+        let session = lock(&self.session);
+        let mut stats = SessionStats {
+            session_file: session
+                .is_persisted()
+                .then(|| session.session_file().map(PathBuf::from))
+                .flatten(),
+            session_id: session.session_id().to_owned(),
+            name: session.session_name(),
+            ..SessionStats::default()
+        };
+        for entry in session.entries() {
+            let kind = entry.entry_type();
+            if matches!(kind, "usage" | "branch_summary" | "compaction")
+                && let Some(usage) = entry.get("usage")
+            {
+                stats.add_usage(usage);
+            }
+            if kind != "message" {
+                continue;
+            }
+            let Some(message) = entry.get("message").and_then(serde_json::Value::as_object) else {
+                continue;
+            };
+            stats.total_messages += 1;
+            match message.get("role").and_then(serde_json::Value::as_str) {
+                Some("user") => stats.user_messages += 1,
+                Some("toolResult") => {
+                    stats.tool_results += 1;
+                    if let Some(usage) = message.get("usage") {
+                        stats.add_usage(usage);
+                    }
+                }
+                Some("assistant") => {
+                    stats.assistant_messages += 1;
+                    stats.tool_calls += message
+                        .get("content")
+                        .and_then(serde_json::Value::as_array)
+                        .map_or(0, |blocks| {
+                            blocks
+                                .iter()
+                                .filter(|block| {
+                                    block.get("type").and_then(serde_json::Value::as_str)
+                                        == Some("toolCall")
+                                })
+                                .count()
+                        });
+                    if let Some(usage) = message.get("usage") {
+                        stats.add_usage(usage);
+                    }
+                }
+                _ => {}
+            }
+        }
+        stats
+    }
+
     /// The session id.
     pub fn session_id(&self) -> String {
         lock(&self.session).session_id().to_owned()
@@ -1412,6 +1577,11 @@ impl AgentSession {
     /// Sets the prompt templates expanded by [`Self::prompt`].
     pub fn set_prompt_templates(&mut self, prompt_templates: Vec<PromptTemplate>) {
         self.prompt_templates = prompt_templates;
+    }
+
+    /// The provider APIs the session's requests stream through.
+    pub fn apis(&self) -> &Arc<ApiRegistry> {
+        &self.apis
     }
 
     /// The models and their auth, which the frontend replaces after a

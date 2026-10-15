@@ -465,6 +465,10 @@ pub struct State {
     pub transcript_area: Option<Area>,
     /// Settled rows excluded from the inline live region while following.
     pub(crate) transcript_published: usize,
+    /// How many times the runtime replaced the transcript
+    /// ([`RuntimeUpdate::Replaced`]). A normal-screen writer that counts
+    /// published rows starts its count over when this changes.
+    pub transcript_epoch: u64,
     /// The transcript selection.
     pub selecting: Selecting,
     /// The terminal's columns at the last resize; a change drops the
@@ -591,6 +595,7 @@ impl State {
             draft_spot: None,
             transcript_area: None,
             transcript_published: 0,
+            transcript_epoch: 0,
             selecting: Selecting::default(),
             columns: 0,
             copied: None,
@@ -1065,6 +1070,24 @@ fn runtime(state: &mut State, update: RuntimeUpdate) {
         RuntimeUpdate::Pending(pending) => state.pending = pending,
         RuntimeUpdate::Live(rows) => state.transcript.set_live(rows),
         RuntimeUpdate::Commit(rows) => state.transcript.commit(rows),
+        RuntimeUpdate::Replaced(rows) => {
+            // What the old session's view held goes with it: its rows, the
+            // selection over them, its turn, and its pending prompts. The
+            // draft, its staged images, and any dialog stay.
+            state.transcript = Transcript::new(rows);
+            state.transcript_epoch = state.transcript_epoch.wrapping_add(1);
+            state.transcript_published = 0;
+            state.selecting.clear();
+            state.dragging = false;
+            state.track = None;
+            state.latest = None;
+            state.transcript_area = None;
+            state.live_call = None;
+            state.activity = None;
+            state.phase = None;
+            state.summary = None;
+            state.pending.clear();
+        }
         RuntimeUpdate::Admitted(id) => state.unadmitted.retain(|kept| kept.id != id),
         RuntimeUpdate::Refused { id, reason } => {
             if let Some(index) = state.unadmitted.iter().position(|kept| kept.id == id) {
@@ -2275,6 +2298,46 @@ mod tests {
         hand_off(&mut state);
         type_str(&mut state, "!");
         assert_eq!(state.draft.text(), "draft!");
+    }
+
+    // Pi `AgentSessionRuntime` replacement and its interactive mode's
+    // `renderInitialMessages`: the transcript starts over with the new
+    // session's rows, its epoch moves so a normal-screen writer publishes
+    // them from the first, and the draft and its images stay.
+    #[test]
+    fn a_replaced_session_starts_the_transcript_over_and_keeps_the_draft() {
+        let mut state = live();
+        runtime(
+            &mut state,
+            RuntimeUpdate::Commit(vec![Row::User("old".into())]),
+        );
+        runtime(
+            &mut state,
+            RuntimeUpdate::Pending(vec![crate::runtime::Pending {
+                text: "queued".into(),
+                target: crate::runtime::Target::NextTurn,
+            }]),
+        );
+        type_str(&mut state, "draft");
+        let epoch = state.transcript_epoch;
+        runtime(
+            &mut state,
+            RuntimeUpdate::Replaced(vec![
+                Row::Info("Resumed session x".into()),
+                Row::User("new".into()),
+            ]),
+        );
+        assert_eq!(state.transcript_epoch, epoch + 1);
+        assert_eq!(
+            state.transcript.rows,
+            [
+                Row::Info("Resumed session x".into()),
+                Row::User("new".into())
+            ]
+        );
+        assert_eq!(state.settled_rows(), 2);
+        assert!(state.pending.is_empty());
+        assert_eq!(state.draft.text(), "draft");
     }
 
     // Bake: a repeated or burst Enter never answers, an answered field

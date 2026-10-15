@@ -15,7 +15,14 @@ session), the built-in command names of src/core/slash-commands.ts, which
 bake-rs refuses until they are ported, and, in src/live/commands.rs, the
 /model, /thinking, and /settings commands of interactive-mode.ts
 (handleModelCommand, its exact match from regression 7443,
-showModelSelector, the thinking selector, and showSettingsSelector).
+showModelSelector, the thinking selector, and showSettingsSelector), and
+the /session, /name, /new, and /resume commands of interactive-mode.ts
+(handleSessionCommand, handleNameCommand, handleClearCommand,
+showSessionSelector, and handleResumeSession) with the session switch of
+src/core/agent-session-runtime.ts (newSession, switchSession). The case
+"restores model and thinking state from the destination session" of
+test/suite/agent-session-runtime.test.ts is adapted in
+src/live/tests/sessions_live.rs.
 --------------------------------------------------------------------------------
 MIT License
 

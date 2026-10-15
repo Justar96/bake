@@ -800,3 +800,116 @@ async fn a_failed_change_write_stops_the_run_before_the_change_goes_on() {
 
 /// The longest a test waits on a barrier before it fails instead of hanging.
 const PATIENCE: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// The names `session_info_changed` announced, in order.
+fn name_events(session: &AgentSession) -> (SessionSubscription, Arc<Mutex<Vec<Option<String>>>>) {
+    let names: Arc<Mutex<Vec<Option<String>>>> = Arc::default();
+    let seen = Arc::clone(&names);
+    let subscription = session.subscribe(move |event| {
+        if let SessionEvent::SessionInfoChanged(name) = event {
+            seen.lock().expect("names").push(name.clone());
+        }
+    });
+    (subscription, names)
+}
+
+// Pi test/suite/regressions/5996-session-name-newlines.test.ts "filters
+// newlines when AgentSession.setSessionName is called" and
+// 3686-session-name-event.test.ts "emits session_info_changed when
+// AgentSession.setSessionName is called". The extension cases are not
+// ported: bake-rs has no extensions.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_session_name_is_normalized_recorded_and_announced() {
+    let h = harness();
+    let session = h
+        .session(in_memory(), Settings::default(), None, Vec::new())
+        .await;
+    let (subscription, names) = name_events(&session);
+    let named = session
+        .set_session_name("hello\nworld\r\nagain")
+        .await
+        .expect("named");
+    assert_eq!(named.as_deref(), Some("hello world again"));
+    assert_eq!(session.session_name().as_deref(), Some("hello world again"));
+    session
+        .set_session_name("hello world")
+        .await
+        .expect("named");
+    assert_eq!(
+        *names.lock().expect("names"),
+        [
+            Some("hello world again".to_owned()),
+            Some("hello world".to_owned())
+        ]
+    );
+    subscription.unsubscribe();
+    session.shutdown().await;
+    // After shutdown a name is refused, not kept in memory.
+    assert!(session.set_session_name("late").await.is_err());
+    assert_eq!(session.session_name().as_deref(), Some("hello world"));
+}
+
+// Pi `getSessionStats`: counts by role and tool calls, and token and cost
+// totals from every recorded usage, read from the log; a malformed usage
+// counts as absent rather than failing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn session_stats_read_the_log() {
+    let h = harness();
+    let usage = json!({"input": 10, "output": 5, "cacheRead": 20, "cacheWrite": 2,
+        "totalTokens": 37, "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0.25}});
+    let message = |value: Value| {
+        crate::session::AgentMessage::from_json(value.as_object().expect("object").clone())
+    };
+    let mut manager = in_memory();
+    manager
+        .append_message(message(
+            json!({"role": "user", "content": "go", "timestamp": 1}),
+        ))
+        .expect("user");
+    manager
+        .append_message(message(json!({"role": "assistant", "content": [
+            {"type": "text", "text": "ok"},
+            {"type": "toolCall", "id": "c1", "name": "read", "arguments": {}},
+        ], "api": "faux", "provider": "faux", "model": "faux-1", "usage": usage,
+            "stopReason": "toolUse", "timestamp": 2})))
+        .expect("assistant");
+    manager
+        .append_message(message(
+            json!({"role": "toolResult", "toolCallId": "c1", "toolName": "read",
+            "content": [{"type": "text", "text": "x"}], "isError": false, "timestamp": 3}),
+        ))
+        .expect("tool result");
+    manager
+        .append_message(message(json!({"role": "assistant", "content": [{"type": "text", "text": "done"}],
+            "api": "faux", "provider": "faux", "model": "faux-1", "usage": {"input": "bad", "cost": null},
+            "stopReason": "stop", "timestamp": 4})))
+        .expect("assistant");
+    let session = h
+        .session(manager, Settings::default(), None, Vec::new())
+        .await;
+    let stats = session.session_stats();
+    assert_eq!(
+        (
+            stats.total_messages,
+            stats.user_messages,
+            stats.assistant_messages,
+            stats.tool_calls,
+            stats.tool_results
+        ),
+        (4, 1, 2, 1, 1)
+    );
+    assert_eq!(
+        (
+            stats.input,
+            stats.output,
+            stats.cache_read,
+            stats.cache_write
+        ),
+        (10, 5, 20, 2)
+    );
+    assert_eq!(stats.total_tokens(), 37);
+    assert!((stats.cost - 0.25).abs() < 1e-9);
+    assert_eq!(stats.session_file, None);
+    assert_eq!(stats.session_id, session.session_id());
+    session.shutdown().await;
+}

@@ -26,13 +26,27 @@ pub const PLACEHOLDER_DIALOG: &[&str] = &["Answer the dialog above"];
 pub const HINT_DIALOG: &str = "Esc cancels";
 pub const PLACEHOLDER_PREPARING: &[&str] = &["Preparing…"];
 pub const HINT_PREPARING: &str = "Preparing…";
-/// The keys of a list dialog, with and without its save key.
+/// The keys of a list dialog, with and without its save key, and their
+/// short forms for a narrow sheet.
 pub const DIALOG_LIST_KEYS: &str = "↑↓ choose · Enter select · Esc cancel";
 pub const DIALOG_LIST_SAVE_KEYS: &str =
     "↑↓ choose · Enter select · Ctrl+S to set as default · Esc cancel";
-pub const DIALOG_FILTER: &str = "Filter:";
-pub const DIALOG_NO_MATCH: &str = "No match";
+pub const DIALOG_LIST_KEYS_SHORT: &str = "↑↓ · Enter · Esc";
+pub const DIALOG_LIST_SAVE_KEYS_SHORT: &str = "↑↓ · Enter · ^S save · Esc";
+/// The keys a sheet too narrow for the others still names.
+pub const DIALOG_KEYS_TINY: &str = "↵ · Esc";
+/// What an empty filter row says.
+pub const DIALOG_FILTER: &str = "Type to filter";
+pub const DIALOG_NO_MATCH: &str = "No matching choices";
+/// The status of the item in effect now.
+pub const DIALOG_CURRENT: &str = "Current";
+/// After the count of rows a scrolled list hides above or below.
+pub const DIALOG_MORE: &str = "more";
 pub const DIALOG_FIELD_KEYS: &str = "Enter continue · Esc cancel";
+pub const DIALOG_FIELD_KEYS_SHORT: &str = "Enter · Esc";
+/// The keys of an information sheet, when it scrolls and when it fits.
+pub const DIALOG_INFO_SCROLL_KEYS: &str = "↑↓ scroll · Enter or Esc close";
+pub const DIALOG_INFO_KEYS: &str = "Enter or Esc close";
 pub const DIALOG_WAITING: &str = "Working… · Esc cancels";
 pub const DIALOG_PREPARING: &str = "Preparing… · Esc cancels";
 pub const DRAFT_KEPT: &str = "draft kept · Esc returns";

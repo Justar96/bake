@@ -6,8 +6,8 @@
 //! while streaming; `onEscape` gives the queued prompts back to the editor
 //! and aborts (`restoreQueuedMessagesToEditor({ abort: true })`); the
 //! initial message and the later command-line messages run in order, each
-//! after the previous one settles. Pi's built-in slash commands are not
-//! ported, so each is refused with the draft kept, as is any other
+//! after the previous one settles. Pi's built-in slash commands that
+//! [`commands`] does not run are refused with the draft kept, as is any other
 //! `/word` that names no prompt template; `/skill:name` and prompt
 //! templates reach the session, which expands them.
 //!
@@ -63,6 +63,7 @@ use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::task::JoinHandle;
 
 use crate::port::Request;
+use bake_coding_agent::cli::SessionFactory;
 use projection::Projector;
 
 /// Pi v1.2.0's built-in slash commands (`core/slash-commands.ts`) that
@@ -76,16 +77,12 @@ const PI_COMMANDS: &[&str] = &[
     "share",
     "bug",
     "copy",
-    "name",
-    "session",
     "changelog",
     "hotkeys",
     "fork",
     "clone",
     "trust",
-    "new",
     "compact",
-    "resume",
     "reload",
     "quit",
 ];
@@ -108,6 +105,9 @@ pub struct LiveSession {
     /// The Bake home, whose CLIProxyAPI account `/login`, `/logout`, and
     /// `/refresh-models` change; `None` when it cannot be resolved.
     pub home: Option<std::path::PathBuf>,
+    /// Builds the sessions `/new` and `/resume` replace this one with;
+    /// `None` refuses both.
+    pub factory: Option<SessionFactory>,
     /// Holds `/login` at its commit, for tests of that boundary.
     #[cfg(test)]
     pub commit_gate: Option<commands::CommitGate>,
@@ -117,10 +117,39 @@ impl LiveSession {
     /// The rows the transcript opens with: the notes, then what the session
     /// already holds.
     pub fn initial_rows(&self) -> Vec<Row> {
-        let mut rows: Vec<Row> = self.notes.iter().cloned().map(Row::Info).collect();
-        rows.extend(projection::replay(&self.session.messages()));
-        rows
+        opening_rows(&self.notes, &self.session)
     }
+}
+
+/// A session's opening rows: `notes`, then what its log holds, replayed.
+fn opening_rows(notes: &[String], session: &AgentSession) -> Vec<Row> {
+    let mut rows: Vec<Row> = notes.iter().cloned().map(Row::Info).collect();
+    rows.extend(projection::replay(&session.messages()));
+    rows
+}
+
+/// The note a replacement session opens with: what the command did, where
+/// the session is saved, why its model fell back, its setup's warnings,
+/// and that no model is ready when none is.
+fn replacement_notes(note: String, session: &AgentSession, warnings: Vec<String>) -> Vec<String> {
+    let mut notes = vec![note];
+    notes.push(match session.session_file() {
+        Some(file) => format!("Session saved to {}", file.display()),
+        None => "Session not saved (--no-session)".to_owned(),
+    });
+    notes.extend(session.model_fallback_message().map(str::to_owned));
+    notes.extend(
+        warnings
+            .into_iter()
+            .map(|warning| format!("Warning: {warning}")),
+    );
+    if session.check_model_auth().is_err() {
+        notes.push(
+            "No model is ready yet. Run /login to sign in to CLIProxyAPI, or /model to choose a model with a key."
+                .to_owned(),
+        );
+    }
+    notes
 }
 
 type Send = Arc<dyn Fn(RuntimeUpdate) -> bool + std::marker::Send + Sync>;
@@ -149,10 +178,14 @@ impl LivePort {
             notes: _,
             approvals,
             home,
+            factory,
             #[cfg(test)]
             commit_gate,
         } = live;
         let session = Arc::new(session);
+        // The session in use, which `/new` and `/resume` replace; what a
+        // panicking driver's handler shuts down.
+        let current = Arc::new(Mutex::new(Arc::clone(&session)));
         // A receiver that is gone stops the driver, as a closed request
         // channel does.
         let gone = Arc::new(Gone::default());
@@ -175,19 +208,7 @@ impl LivePort {
             }));
         }
         let projector = Arc::new(Mutex::new(Projector::default()));
-        let subscription = {
-            let projector = Arc::clone(&projector);
-            let send = Arc::clone(&send);
-            session.subscribe(move |event| {
-                let updates = projector
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .apply(event);
-                for update in updates {
-                    send(update);
-                }
-            })
-        };
+        let subscription = subscribe(&session, &projector, &send);
         let (requests, inbox) = mpsc::unbounded_channel();
         let (begin, begun) = oneshot::channel();
         let (finished, done) = std_mpsc::channel();
@@ -208,6 +229,9 @@ impl LivePort {
             turns: 0,
             approvals: approvals.clone(),
             home,
+            factory,
+            current: Arc::clone(&current),
+            subscription: Some(subscription),
             #[cfg(test)]
             commit_gate,
             command: None,
@@ -220,16 +244,21 @@ impl LivePort {
         runtime.spawn(async move {
             let result = if begun.await.is_err() {
                 // Dropped before it began: the session only shuts down.
+                drop(driver);
                 shut_down(&session, closing.as_ref()).await;
                 Ok(())
             } else {
+                drop(session);
                 // The driver runs as its own task, so its panic reaches
-                // here; the session still shuts down, the tasks the driver
-                // owned are awaited as its own shutdown awaits them, and
+                // here; the session in use then still shuts down, the
+                // tasks the driver owned are awaited as its own shutdown
+                // awaits them (shutting down a replacement one built), and
                 // the panic is reported once they have ended.
                 match tokio::spawn(driver.run(inbox)).await {
                     Ok(()) => Ok(()),
                     Err(error) => {
+                        let session =
+                            Arc::clone(&current.lock().unwrap_or_else(PoisonError::into_inner));
                         shut_down(&session, closing.as_ref()).await;
                         let owned = std::mem::take(
                             &mut *orphans.lock().unwrap_or_else(PoisonError::into_inner),
@@ -241,7 +270,6 @@ impl LivePort {
                     }
                 }
             };
-            subscription.unsubscribe();
             let _ = finished.send(result);
         });
         Self {
@@ -318,6 +346,25 @@ impl Drop for LivePort {
     }
 }
 
+/// Subscribes the loop to `session`'s events, projected by `projector`.
+fn subscribe(
+    session: &AgentSession,
+    projector: &Arc<Mutex<Projector>>,
+    send: &Send,
+) -> bake_coding_agent::agent_session::SessionSubscription {
+    let projector = Arc::clone(projector);
+    let send = Arc::clone(send);
+    session.subscribe(move |event| {
+        let updates = projector
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .apply(event);
+        for update in updates {
+            send(update);
+        }
+    })
+}
+
 /// Set once the loop no longer takes updates.
 #[derive(Default)]
 struct Gone {
@@ -362,6 +409,8 @@ struct CommandRun {
     abort: AbortController,
     id: Option<u64>,
     text: String,
+    /// Whether it replaces the session ([`commands::TRANSITIONS`]).
+    transition: bool,
 }
 
 /// What the driver does next.
@@ -386,6 +435,11 @@ struct Driver {
     turns: u64,
     approvals: Option<ApprovalBroker>,
     home: Option<std::path::PathBuf>,
+    factory: Option<SessionFactory>,
+    /// The session in use, shared with the port's handler.
+    current: Arc<Mutex<Arc<AgentSession>>>,
+    /// The loop's subscription to `session`.
+    subscription: Option<bake_coding_agent::agent_session::SessionSubscription>,
     /// The command that is running; one at a time.
     command: Option<CommandRun>,
     /// The id of the last dialog opened, shared by every command.
@@ -413,7 +467,10 @@ impl Drop for Driver {
             command.abort.abort();
             let task = command.task;
             orphans.push(Box::pin(async move {
-                let _ = task.await;
+                // A replacement the command built is never used.
+                if let Ok(Ok(done)) = task.await {
+                    done.discard().await;
+                }
             }));
         }
         if let Some((task, abort)) = self.startup.take() {
@@ -479,7 +536,7 @@ impl Driver {
                         self.publish_pending();
                     }
                 }
-                Next::Commanded(done) => self.commanded(done),
+                Next::Commanded(done) => self.commanded(done, running.as_ref()).await,
                 Next::Request(None) => break,
                 Next::Request(Some(request)) => self.request(request, &mut running).await,
             }
@@ -498,8 +555,14 @@ impl Driver {
         // Pi's `dispose`, awaited: the run, its writes, and its requests end
         // before the terminal is given back.
         shut_down(&self.session, self.approvals.as_ref()).await;
-        if let Some(command) = command {
-            let _ = command.await;
+        if let Some(subscription) = self.subscription.take() {
+            subscription.unsubscribe();
+        }
+        if let Some(command) = command
+            && let Ok(Ok(done)) = command.await
+        {
+            // A replacement the command built is never used.
+            done.discard().await;
         }
         if let Some(startup) = startup {
             let _ = startup.await;
@@ -574,10 +637,28 @@ impl Driver {
                     if let Some(reason) = commands::refuse_argument(name, &argument) {
                         return self.refuse(id, text, reason);
                     }
+                    if commands::TRANSITIONS.contains(&name)
+                        && let Some(reason) = self.busy(running.as_ref())
+                    {
+                        return self.refuse(id, text, reason);
+                    }
                     return self.command(id, text, name, argument);
                 }
                 if let Some(reason) = refused_command(&text, &templates) {
                     return self.refuse(id, text, reason);
+                }
+                // While a session is being replaced, nothing reaches the
+                // session that is going away.
+                if self
+                    .command
+                    .as_ref()
+                    .is_some_and(|command| command.transition)
+                {
+                    return self.refuse(
+                        id,
+                        text,
+                        "The session is being replaced; your draft is kept.".into(),
+                    );
                 }
                 let images: Vec<ImageContent> = prompt.images.iter().map(image_content).collect();
                 match running {
@@ -744,6 +825,7 @@ impl Driver {
             Arc::clone(&self.dialog_ids),
             Arc::clone(&shown),
         );
+        let context = context.with_factory(self.factory.clone());
         #[cfg(test)]
         let context = context.with_commit_gate(self.commit_gate.clone());
         let task = tokio::spawn(commands::run(name, argument, context));
@@ -754,12 +836,38 @@ impl Driver {
             abort,
             id,
             text,
+            transition: commands::TRANSITIONS.contains(&name),
         });
     }
 
+    /// Why the session cannot be replaced now, as the TypeScript
+    /// navigation's `unavailable`: a turn runs, prompts wait, or the
+    /// session compacts or retries. `None` when it can.
+    fn busy(&self, running: Option<&Running>) -> Option<String> {
+        if running.is_some() || self.session.is_streaming() {
+            return Some(
+                "A turn is running; stop it with Esc or wait, and your draft is kept.".into(),
+            );
+        }
+        if !self.waiting.is_empty() || !self.session.queued_messages().is_empty() {
+            return Some("Prompts are waiting to be sent; your draft is kept.".into());
+        }
+        if self.session.is_compacting() || self.session.is_retrying() {
+            return Some(
+                "The session is busy; try again when it is idle. Your draft is kept.".into(),
+            );
+        }
+        None
+    }
+
     /// A command ended: its note goes to the transcript and its prompt is
-    /// admitted, or its draft comes back with why.
-    fn commanded(&mut self, done: Result<commands::Outcome, tokio::task::JoinError>) {
+    /// admitted, or its draft comes back with why. A replacement session is
+    /// committed here ([`Self::replace`]).
+    async fn commanded(
+        &mut self,
+        done: Result<commands::Outcome, tokio::task::JoinError>,
+        running: Option<&Running>,
+    ) {
         let Some(command) = self.command.take() else {
             return;
         };
@@ -767,15 +875,74 @@ impl Driver {
         // The command closed its dialog; a panicked one could not have.
         self.send(RuntimeUpdate::Dialog(None));
         match outcome {
-            Ok(note) => {
+            Ok(commands::Done::Replace { replacement, note }) => {
+                // Prompts were refused while it ran, so the session is
+                // idle; anything else keeps it, and its draft comes back,
+                // as does an Esc that arrived after the replacement was
+                // built: the commit is here, and nothing has changed yet.
+                let busy = if command.abort.signal().aborted() {
+                    Some(commands::CANCELLED.to_owned())
+                } else {
+                    self.busy(running)
+                };
+                if let Some(reason) = busy {
+                    replacement.session.shutdown().await;
+                    self.refuse(command.id, command.text, reason);
+                } else {
+                    self.replace(*replacement, note).await;
+                    if let Some(id) = command.id {
+                        self.send(RuntimeUpdate::Admitted(id));
+                    }
+                }
+            }
+            Ok(done) => {
                 if let Some(id) = command.id {
                     self.send(RuntimeUpdate::Admitted(id));
                 }
-                self.send(RuntimeUpdate::Commit(vec![Row::Info(note)]));
+                if let commands::Done::Note(note) = done {
+                    self.send(RuntimeUpdate::Commit(vec![Row::Info(note)]));
+                }
             }
             Err(reason) => self.refuse(command.id, command.text, reason),
         }
         self.status();
+    }
+
+    /// Replaces the idle session with `replacement`, as Pi's
+    /// `AgentSessionRuntime` does after `teardownCurrent`: the startup
+    /// refresh, which works for the old session, is aborted and awaited; the
+    /// old session is shut down, awaiting its writes and releasing its file;
+    /// then the new one takes its place, its events reach the loop through
+    /// a fresh projector, and the transcript starts over with its replay.
+    /// The old session's listeners are closed by its shutdown, so none of
+    /// its events reach the new transcript.
+    async fn replace(&mut self, replacement: bake_coding_agent::cli::Replacement, note: String) {
+        if let Some((task, abort)) = self.startup.take() {
+            abort.abort();
+            let _ = task.await;
+        }
+        for abort in self.aborts.drain(..) {
+            let _ = abort.await;
+        }
+        let bake_coding_agent::cli::Replacement { session, warnings } = replacement;
+        let session = Arc::new(session);
+        // The approval broker stays connected: the new session's tools ask
+        // the same broker, which the old session's shutdown leaves open.
+        self.session.shutdown().await;
+        if let Some(subscription) = self.subscription.take() {
+            subscription.unsubscribe();
+        }
+        *self
+            .projector
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Projector::default();
+        self.session = Arc::clone(&session);
+        *self.current.lock().unwrap_or_else(PoisonError::into_inner) = Arc::clone(&session);
+        self.subscription = Some(subscribe(&session, &self.projector, &self.send));
+        self.turns = 0;
+        let notes = replacement_notes(note, &session, warnings);
+        self.send(RuntimeUpdate::Replaced(opening_rows(&notes, &session)));
+        self.publish_pending();
     }
 
     /// Sends the pending panel: the session's queues and the driver's own.

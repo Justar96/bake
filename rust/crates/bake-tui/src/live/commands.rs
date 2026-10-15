@@ -1,5 +1,6 @@
 //! The commands a live session runs: `/model`, `/thinking`, `/settings`,
-//! `/login`, `/logout`, and `/refresh-models`.
+//! `/session`, `/name`, `/new`, `/resume`, `/login`, `/logout`, and
+//! `/refresh-models`.
 //!
 //! `/model`, `/thinking`, and `/settings` follow Pi v1.2.0
 //! `packages/coding-agent/src/modes/interactive/interactive-mode.ts`
@@ -10,6 +11,19 @@
 //! `app.thinking.save` do. `/settings` saves what it changes, as Pi's
 //! settings selector does, and offers only settings the running session
 //! applies at once.
+//!
+//! `/session`, `/name`, `/new`, and `/resume` follow Pi v1.2.0
+//! `interactive-mode.ts` (`handleSessionCommand`, `handleNameCommand`,
+//! `handleClearCommand`, `showSessionSelector`, `handleResumeSession`) and
+//! `core/agent-session-runtime.ts` (`newSession`, `switchSession`), with the
+//! TypeScript navigation's rules (`apps/tui/packages/app/src/navigation.ts`):
+//! a running turn refuses a replacement, an untitled session is listed as
+//! such, and `/resume` lists only the working directory's sessions. A
+//! replacement is staged: [`bake_coding_agent::cli::SessionFactory`] builds
+//! the new session apart from the running one, and the driver swaps them
+//! only while idle and not cancelled ([`Done::Replace`]). `/resume` answers
+//! with a session id, which a fresh listing resolves to its file. No sheet
+//! sends a model request. `/tree` and `/fork` are not ported.
 //!
 //! `/login`, `/logout`, and `/refresh-models` keep Bake's CLIProxyAPI
 //! contract: `apps/tui/packages/app/src/cliproxyapi.ts`
@@ -34,6 +48,7 @@ use std::sync::Arc;
 use bake_agent::QueueMode;
 use bake_ai::{AbortSignal, Model, ModelThinkingLevel};
 use bake_coding_agent::agent_session::{AgentSession, DefaultSave};
+use bake_coding_agent::cli::{Replacement, SessionFactory, SessionTarget};
 use bake_coding_agent::cliproxyapi::account::{
     AccountView, CliProxyAccount, RefreshOutcome, disabled_warning, refresh_account,
 };
@@ -41,9 +56,11 @@ use bake_coding_agent::cliproxyapi::{
     CLIPROXYAPI_ID, ConfigureCliProxyError, LoginPrompt, LoginPromptKind, check_cli_proxy_login,
     cli_proxy_models_in_use,
 };
+use bake_coding_agent::session::SessionManager;
 use bake_coding_agent::settings::Settings;
 use bake_tui_view::dialog::{
-    DialogAnswer, DialogKind, DialogRequest, FieldDialog, ListDialog, ListItem,
+    DialogAnswer, DialogKind, DialogRequest, FieldDialog, InfoDialog, InfoLine, ListDialog,
+    ListItem,
 };
 use bake_tui_view::runtime::RuntimeUpdate;
 use bake_tui_view::transcript::Row;
@@ -57,7 +74,16 @@ pub const COMMANDS: &[&str] = &[
     "login",
     "logout",
     "refresh-models",
+    "session",
+    "name",
+    "new",
+    "resume",
 ];
+
+/// The commands that replace the running session ([`Done::Replace`]).
+/// Each starts only while the session is idle, and no prompt is admitted
+/// while one runs.
+pub const TRANSITIONS: &[&str] = &["new", "resume"];
 
 /// The command a prompt names, with its argument, when it names one of
 /// [`COMMANDS`].
@@ -88,13 +114,17 @@ pub struct Context {
     /// it closes. It stays while the answer is worked on, so Esc there
     /// aborts this command.
     pub shown: Arc<std::sync::atomic::AtomicU64>,
+    /// Builds the sessions `/new` and `/resume` replace this one with;
+    /// `None` when the command line gave none.
+    pub factory: Option<SessionFactory>,
     /// The asker once made, which then holds `answers`.
     shared: Option<Asker>,
     #[cfg(test)]
     commit_gate: Option<CommitGate>,
 }
 
-/// Holds `/login` once its check has passed, before its commit: the
+/// Holds `/login` once its check has passed, before its commit, and `/resume`
+/// once its replacement is built and checked, before the driver commits it: the
 /// command says so on `reached` and goes on when `release` lets it.
 #[cfg(test)]
 #[derive(Clone)]
@@ -132,10 +162,17 @@ impl Context {
             signal,
             ids,
             shown,
+            factory: None,
             shared: None,
             #[cfg(test)]
             commit_gate: None,
         }
+    }
+
+    /// Lets `/new` and `/resume` build replacements with `factory`.
+    pub fn with_factory(mut self, factory: Option<SessionFactory>) -> Self {
+        self.factory = factory;
+        self
     }
 
     #[cfg(test)]
@@ -145,9 +182,43 @@ impl Context {
     }
 }
 
-/// A command's result: a note for the transcript, or why it changed
-/// nothing (its draft then comes back).
-pub type Outcome = Result<String, String>;
+/// What a command that succeeded leaves.
+pub enum Done {
+    /// A note for the transcript.
+    Note(String),
+    /// Nothing more, as when an information sheet closes.
+    Quiet,
+    /// A session to replace the running one with, built and not yet in
+    /// use, and the note that opens its transcript. The driver commits it,
+    /// or shuts it down when it cannot.
+    Replace {
+        replacement: Box<Replacement>,
+        note: String,
+    },
+}
+
+impl std::fmt::Debug for Done {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Note(note) => f.debug_tuple("Note").field(note).finish(),
+            Self::Quiet => f.write_str("Quiet"),
+            Self::Replace { note, .. } => f.debug_struct("Replace").field("note", note).finish(),
+        }
+    }
+}
+
+impl Done {
+    /// Shuts down a replacement that will not be used.
+    pub async fn discard(self) {
+        if let Self::Replace { replacement, .. } = self {
+            replacement.session.shutdown().await;
+        }
+    }
+}
+
+/// A command's result: what it leaves, or why it changed nothing (its
+/// draft then comes back).
+pub type Outcome = Result<Done, String>;
 
 /// What opens dialogs and takes their answers, for a command's prompts.
 #[derive(Clone)]
@@ -230,7 +301,7 @@ pub fn refuse_argument(name: &str, argument: &str) -> Option<String> {
         "login" | "logout" if !argument.is_empty() && argument != CLIPROXYAPI_ID => Some(format!(
             "/{name} knows only CLIProxyAPI in bake-rs, not {argument}; your draft is kept."
         )),
-        "refresh-models" | "settings" if !argument.is_empty() => {
+        "refresh-models" | "settings" | "session" | "new" | "resume" if !argument.is_empty() => {
             Some(format!("/{name} takes no argument; your draft is kept."))
         }
         _ => None,
@@ -249,6 +320,10 @@ pub async fn run(name: &str, argument: String, mut context: Context) -> Outcome 
         "login" => login(&mut context).await,
         "logout" => logout(&context).await,
         "refresh-models" => refresh(&context).await,
+        "session" => session_info(&mut context).await,
+        "name" => name_session(&mut context, &argument).await,
+        "new" => new_session(&context).await,
+        "resume" => resume(&mut context).await,
         _ => Err(format!("/{name} is not a command.")),
     };
     context.shown.store(0, std::sync::atomic::Ordering::SeqCst);
@@ -258,6 +333,94 @@ pub async fn run(name: &str, argument: String, mut context: Context) -> Outcome 
 
 fn model_ref(model: &Model) -> String {
     format!("{}/{}", model.provider, model.id)
+}
+
+/// A token count as the TypeScript sheet's facts write it: `200k`, `1M`.
+fn tokens(count: u64) -> String {
+    if count >= 1_000_000 && count.is_multiple_of(100_000) {
+        let tenths = count / 100_000;
+        if tenths.is_multiple_of(10) {
+            format!("{}M", tenths / 10)
+        } else {
+            format!("{}.{}M", tenths / 10, tenths % 10)
+        }
+    } else if count >= 1_000 {
+        format!("{}k", count / 1_000)
+    } else {
+        count.to_string()
+    }
+}
+
+/// The `/model` sheet's title, the TypeScript `modelSheetPrompt`'s: how
+/// many models, from which providers.
+fn model_title(models: &[Model]) -> String {
+    let mut providers: Vec<&str> = Vec::new();
+    for model in models {
+        if !providers.contains(&model.provider.as_str()) {
+            providers.push(&model.provider);
+        }
+    }
+    format!(
+        "Model · {} model{} from {}",
+        models.len(),
+        if models.len() == 1 { "" } else { "s" },
+        providers.join(", ")
+    )
+}
+
+/// The `/model` sheet's rows, as the TypeScript `modelSheetPrompt` lays
+/// them out: each provider's models under its name, in its order, each
+/// labelled with its readable name, its context window, thinking, and
+/// image facts in columns, and its exact `provider/id` route as its detail
+/// and under the list while selected, so two models with similar names
+/// stay told apart. The route is each row's value, which typing matches.
+fn model_items(models: &[Model]) -> Vec<ListItem> {
+    let mut order: Vec<&str> = Vec::new();
+    for model in models {
+        if !order.contains(&model.provider.as_str()) {
+            order.push(&model.provider);
+        }
+    }
+    order
+        .iter()
+        .flat_map(|provider| models.iter().filter(move |m| m.provider == *provider))
+        .map(|model| {
+            let route = model_ref(model);
+            let named = !model.name.trim().is_empty() && model.name != model.id;
+            ListItem {
+                value: route.clone(),
+                label: if named {
+                    model.name.clone()
+                } else {
+                    model.id.clone()
+                },
+                detail: Some(if named {
+                    route.clone()
+                } else {
+                    model.provider.clone()
+                }),
+                group: Some(model.provider.clone()),
+                facts: vec![
+                    if model.context_window > 0 {
+                        tokens(model.context_window)
+                    } else {
+                        String::new()
+                    },
+                    if model.reasoning {
+                        "think".into()
+                    } else {
+                        String::new()
+                    },
+                    if model.input.contains(&bake_ai::InputModality::Image) {
+                        "image".into()
+                    } else {
+                        String::new()
+                    },
+                ],
+                about: Some(route),
+            }
+        })
+        .collect()
 }
 
 fn saved(what: &str, save: &DefaultSave) -> String {
@@ -297,14 +460,7 @@ async fn model(context: &mut Context, argument: &str) -> Outcome {
         Some(model) => (model, false),
         None => {
             let current = context.session.model();
-            let items = models
-                .iter()
-                .map(|model| ListItem {
-                    value: model_ref(model),
-                    label: model.id.clone(),
-                    detail: Some(model.provider.clone()),
-                })
-                .collect();
+            let items = model_items(&models);
             let current = current.and_then(|current| {
                 models
                     .iter()
@@ -312,7 +468,7 @@ async fn model(context: &mut Context, argument: &str) -> Outcome {
             });
             let answer = context
                 .ask(DialogKind::List(ListDialog {
-                    title: "Model".into(),
+                    title: model_title(&models),
                     items,
                     current,
                     filterable: true,
@@ -336,7 +492,7 @@ async fn model(context: &mut Context, argument: &str) -> Outcome {
     };
     let name = model_ref(&chosen);
     let result = context.session.set_model(chosen, save).await?;
-    Ok(saved(&format!("Model: {name}"), &result))
+    Ok(Done::Note(saved(&format!("Model: {name}"), &result)))
 }
 
 async fn thinking(context: &mut Context, argument: &str) -> Outcome {
@@ -357,7 +513,7 @@ async fn thinking(context: &mut Context, argument: &str) -> Outcome {
                         .map(|level| ListItem {
                             value: level.as_str().into(),
                             label: level.as_str().into(),
-                            detail: None,
+                            ..ListItem::default()
                         })
                         .collect(),
                     current: levels.iter().position(|level| *level == current),
@@ -382,10 +538,10 @@ async fn thinking(context: &mut Context, argument: &str) -> Outcome {
     };
     let result = context.session.set_thinking_level(level, save).await?;
     let applied: ModelThinkingLevel = context.session.thinking_level();
-    Ok(saved(
+    Ok(Done::Note(saved(
         &format!("Thinking level: {}", applied.as_str()),
         &result,
-    ))
+    )))
 }
 
 fn queue_mode(mode: QueueMode) -> &'static str {
@@ -424,6 +580,7 @@ async fn settings(context: &mut Context) -> Outcome {
                     value: (*value).into(),
                     label: (*label).into(),
                     detail: Some((*now).into()),
+                    ..ListItem::default()
                 })
                 .collect(),
             current: None,
@@ -457,7 +614,7 @@ async fn settings(context: &mut Context) -> Outcome {
                 .map(|choice| ListItem {
                     value: (*choice).into(),
                     label: (*choice).into(),
-                    detail: None,
+                    ..ListItem::default()
                 })
                 .collect(),
             current: choices.iter().position(|choice| *choice == now),
@@ -482,7 +639,7 @@ async fn settings(context: &mut Context) -> Outcome {
         _ => session.set_auto_compaction_enabled(value == "on").await?,
     };
     let note = format!("{title}: {value}");
-    Ok(match result {
+    Ok(Done::Note(match result {
         DefaultSave::Failed(reason) => {
             format!("{note} for this session; it could not be saved: {reason}")
         }
@@ -490,6 +647,350 @@ async fn settings(context: &mut Context) -> Outcome {
             format!("{note} (saved; it may not survive a power loss: {reason})")
         }
         _ => note,
+    }))
+}
+
+/// `/session`, Pi's `handleSessionCommand` as a read-only sheet: the
+/// session's name, file, id, and working directory, its model and thinking
+/// level, its message counts, and its token and cost totals, read from its
+/// log. It sends nothing to a model, and closing it changes nothing.
+async fn session_info(context: &mut Context) -> Outcome {
+    let session = Arc::clone(&context.session);
+    let stats = tokio::task::spawn_blocking(move || session.session_stats())
+        .await
+        .map_err(|error| error.to_string())?;
+    let field = |label: &str, value: String| InfoLine::Field {
+        label: label.into(),
+        value,
+    };
+    let count = |value: u64| group_digits(value);
+    let mut lines = Vec::new();
+    if let Some(name) = &stats.name {
+        lines.push(field("Name", name.clone()));
+    }
+    lines.push(field(
+        "File",
+        stats.session_file.as_ref().map_or_else(
+            || "In memory (--no-session)".to_owned(),
+            |file| file.display().to_string(),
+        ),
+    ));
+    lines.push(field("ID", stats.session_id.clone()));
+    lines.push(field("Directory", context.session.cwd()));
+    lines.push(field(
+        "Model",
+        context
+            .session
+            .model()
+            .map_or_else(|| "none".to_owned(), |model| model_ref(&model)),
+    ));
+    lines.push(field(
+        "Thinking",
+        context.session.thinking_level().as_str().to_owned(),
+    ));
+    lines.push(InfoLine::Blank);
+    lines.push(InfoLine::Heading("Messages".into()));
+    lines.push(field("Total", stats.total_messages.to_string()));
+    lines.push(field("User", stats.user_messages.to_string()));
+    lines.push(field("Assistant", stats.assistant_messages.to_string()));
+    lines.push(field(
+        "Tools",
+        format!("{} calls, {} results", stats.tool_calls, stats.tool_results),
+    ));
+    lines.push(InfoLine::Blank);
+    lines.push(InfoLine::Heading("Tokens".into()));
+    let prompt = stats
+        .input
+        .saturating_add(stats.cache_read)
+        .saturating_add(stats.cache_write);
+    lines.push(field("Input", count(prompt)));
+    if prompt > 0 && (stats.cache_read > 0 || stats.cache_write > 0) {
+        lines.push(field(
+            "Cached",
+            format!(
+                "{} ({:.1}%)",
+                count(stats.cache_read),
+                stats.cache_read as f64 * 100.0 / prompt as f64
+            ),
+        ));
+    }
+    lines.push(field("Output", count(stats.output)));
+    lines.push(field("Total", count(stats.total_tokens())));
+    if stats.cost > 0.0 {
+        lines.push(InfoLine::Blank);
+        lines.push(InfoLine::Heading("Cost".into()));
+        lines.push(field("Total", format!("${:.3}", stats.cost)));
+    }
+    context
+        .ask(DialogKind::Info(InfoDialog {
+            title: "Session info".into(),
+            lines,
+        }))
+        .await;
+    Ok(Done::Quiet)
+}
+
+/// `1234567` as `1,234,567`, as Pi's `toLocaleString` writes it in English.
+fn group_digits(value: u64) -> String {
+    let digits = value.to_string();
+    let mut out = String::new();
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(digit);
+    }
+    out
+}
+
+/// `/name [name]`, Pi's `handleNameCommand`: names the session, line
+/// breaks as spaces and trimmed, and says so, and that it was normalized
+/// when it was. Without a name it asks for one in a field that starts with
+/// the current name.
+async fn name_session(context: &mut Context, argument: &str) -> Outcome {
+    let wanted = if argument.is_empty() {
+        let current = context.session.session_name().unwrap_or_default();
+        let answer = context
+            .ask(DialogKind::Field(FieldDialog {
+                title: "Session name".into(),
+                prompt: "Name this session".into(),
+                secret: false,
+                initial: current,
+                error: None,
+            }))
+            .await;
+        let DialogAnswer::Entered(text) = answer else {
+            return Err(CANCELLED.into());
+        };
+        text.expose().to_owned()
+    } else {
+        argument.to_owned()
+    };
+    if wanted.trim().is_empty() {
+        return Err("Usage: /name <name>; your draft is kept.".into());
+    }
+    let named = context.session.set_session_name(&wanted).await?;
+    let shown = named.clone().unwrap_or_else(|| wanted.trim().to_owned());
+    let mut note = format!("Session name set: {shown}");
+    if named.as_deref() != Some(wanted.as_str()) {
+        note.push_str(&format!(
+            " (normalized from {})",
+            serde_json::Value::String(wanted)
+        ));
+    }
+    Ok(Done::Note(note))
+}
+
+fn factory(context: &Context) -> Result<SessionFactory, String> {
+    context
+        .factory
+        .clone()
+        .ok_or_else(|| "This session cannot be replaced here; your draft is kept.".into())
+}
+
+/// `/new`, Pi's `handleClearCommand` and `AgentSessionRuntime.newSession`:
+/// a new session in the same directory, saved where this one is (or in
+/// memory under `--no-session`), with this session's model and thinking
+/// level. The driver commits it ([`Done::Replace`]).
+async fn new_session(context: &Context) -> Outcome {
+    let factory = factory(context)?;
+    let replacement = factory
+        .replace(&context.session, SessionTarget::New)
+        .await
+        .map_err(|error| format!("Could not start a new session: {error}; your draft is kept."))?;
+    if context.signal.aborted() {
+        replacement.session.shutdown().await;
+        return Err(CANCELLED.into());
+    }
+    Ok(Done::Replace {
+        replacement: Box::new(replacement),
+        note: "New session started".into(),
+    })
+}
+
+/// How long ago `ms` was, from `now`, as the TypeScript session picker
+/// writes ages: `now`, `5m`, `3h`, `2d`.
+fn age(ms: i64, now: i64) -> String {
+    let minutes = (now.saturating_sub(ms) / 60_000).max(0);
+    if minutes < 1 {
+        "now".into()
+    } else if minutes < 60 {
+        format!("{minutes}m ago")
+    } else if minutes < 60 * 24 {
+        format!("{}h ago", minutes / 60)
+    } else {
+        format!("{}d ago", minutes / (60 * 24))
+    }
+}
+
+/// The first block of eight hex digits of a session id, as the TypeScript
+/// picker's `shortId` tells sessions apart, or the id.
+fn short_id(id: &str) -> &str {
+    let bytes = id.as_bytes();
+    (0..bytes.len().saturating_sub(7))
+        .find(|&start| bytes[start..start + 8].iter().all(u8::is_ascii_hexdigit))
+        .and_then(|start| id.get(start..start + 8))
+        .unwrap_or(id)
+}
+
+/// The sessions `/resume` offers: this directory's, in the running
+/// session's session directory, newest first. Blocking.
+fn list_sessions(
+    cwd: &str,
+    place: &std::path::Path,
+) -> Result<Vec<bake_coding_agent::session::SessionInfo>, String> {
+    let wanted = bake_coding_agent::session::paths::resolve_path_string(cwd);
+    SessionManager::list(cwd, Some(place), None, None)
+        .map(|sessions| {
+            sessions
+                .into_iter()
+                .filter(|info| {
+                    bake_coding_agent::session::paths::resolve_path_string(&info.cwd) == wanted
+                })
+                .collect()
+        })
+        .map_err(|error| format!("Could not list sessions: {error}"))
+}
+
+/// `/resume`, Pi's `showSessionSelector` and `handleResumeSession`, laid
+/// out as the TypeScript session picker: this directory's saved sessions,
+/// newest first, each by its name or first message, with its age and short
+/// id, and its first message under the list while selected; the running
+/// session is marked current. Typing filters by name, message, or id. The
+/// answer names a session id; its file is looked up again in a fresh
+/// listing and opened only when it still holds that id, so neither a label
+/// nor a stale path decides what opens. The driver commits it
+/// ([`Done::Replace`]).
+async fn resume(context: &mut Context) -> Outcome {
+    let factory = factory(context)?;
+    let (place, persisted) = context.session.session_place();
+    if !persisted {
+        return Err(
+            "This session is not saved (--no-session), so there are no sessions to resume; your draft is kept."
+                .into(),
+        );
+    }
+    let cwd = context.session.cwd();
+    let current = context.session.session_id();
+    let listed = {
+        let (cwd, place) = (cwd.clone(), place.clone());
+        tokio::task::spawn_blocking(move || list_sessions(&cwd, &place))
+            .await
+            .map_err(|error| error.to_string())??
+    };
+    let others = listed.iter().filter(|info| info.id != current).count();
+    if others == 0 {
+        return Err("No other saved session in this directory; your draft is kept.".into());
+    }
+    let now = bake_ai::now_ms();
+    let items: Vec<ListItem> = listed
+        .iter()
+        .map(|info| {
+            let first = info
+                .first_message
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ");
+            let label = info
+                .name
+                .clone()
+                .or_else(|| (!first.is_empty()).then(|| first.clone()))
+                .unwrap_or_else(|| "Untitled session".to_owned());
+            ListItem {
+                value: info.id.clone(),
+                label,
+                detail: Some(format!(
+                    "{} · {}",
+                    age(info.modified_ms, now),
+                    short_id(&info.id)
+                )),
+                group: None,
+                facts: vec![format!(
+                    "{} msg{}",
+                    info.message_count,
+                    if info.message_count == 1 { "" } else { "s" }
+                )],
+                about: Some(if info.name.is_some() {
+                    first
+                } else {
+                    info.id.clone()
+                }),
+            }
+        })
+        .collect();
+    let current_index = listed.iter().position(|info| info.id == current);
+    let answer = context
+        .ask(DialogKind::List(ListDialog {
+            title: format!("Resume session · {} saved here", listed.len()),
+            items,
+            current: current_index,
+            filterable: true,
+            saves_default: false,
+            note: None,
+        }))
+        .await;
+    let DialogAnswer::Chose { value: id, .. } = answer else {
+        return Err(CANCELLED.into());
+    };
+    if id == current {
+        return Ok(Done::Note("Already in this session".into()));
+    }
+    let path = {
+        let (cwd, place, id) = (cwd.clone(), place.clone(), id.clone());
+        tokio::task::spawn_blocking(move || {
+            list_sessions(&cwd, &place).map(|sessions| {
+                sessions
+                    .into_iter()
+                    .filter(|info| info.id == id)
+                    .map(|info| info.path)
+                    .collect::<Vec<_>>()
+            })
+        })
+        .await
+        .map_err(|error| error.to_string())??
+    };
+    // An id is what was chosen, so it must name one file: two copies of a
+    // session share its id, and which one opens is not for the list to say.
+    let path = match <[_; 1]>::try_from(path) {
+        Ok([path]) => path,
+        Err(paths) if paths.is_empty() => {
+            return Err(format!(
+                "Session {} is no longer listed here; your draft is kept.",
+                short_id(&id)
+            ));
+        }
+        Err(paths) => {
+            return Err(format!(
+                "{} session files hold session {id}; resume one with --session <path>. Your draft is kept.",
+                paths.len()
+            ));
+        }
+    };
+    let replacement = factory
+        .replace(&context.session, SessionTarget::Open { path, id })
+        .await
+        .map_err(|error| format!("Could not resume the session: {error}; your draft is kept."))?;
+    if context.signal.aborted() {
+        replacement.session.shutdown().await;
+        return Err(CANCELLED.into());
+    }
+    // Holds the built replacement past the check above, for tests of the
+    // driver's commit boundary.
+    #[cfg(test)]
+    if let Some(gate) = &context.commit_gate {
+        let _ = gate.reached.send(());
+        match &gate.release {
+            Release::Notified(release) => release.notified().await,
+            Release::Aborted => context.signal.cancelled().await,
+        }
+    }
+    let name = replacement
+        .session
+        .session_name()
+        .unwrap_or_else(|| short_id(&replacement.session.session_id()).to_owned());
+    Ok(Done::Replace {
+        replacement: Box::new(replacement),
+        note: format!("Resumed session {name}"),
     })
 }
 
@@ -627,7 +1128,7 @@ async fn login(context: &mut Context) -> Outcome {
             }
         }
     }
-    Ok(note)
+    Ok(Done::Note(note))
 }
 
 /// A sign-in failure's text. It names no key: the setup's errors carry
@@ -682,7 +1183,7 @@ async fn logout(context: &Context) -> Outcome {
     {
         note.push_str(" · choose another model with /model, or sign in again with /login");
     }
-    Ok(note)
+    Ok(Done::Note(note))
 }
 
 /// Bake's `cliProxyModelsInUse` for this session: the current model and
@@ -740,7 +1241,7 @@ async fn refresh(context: &Context) -> Outcome {
     for warning in &refreshed.unsynced {
         note.push_str(&format!(" · {UNSYNCED}: {warning}"));
     }
-    Ok(note)
+    Ok(Done::Note(note))
 }
 
 /// What a note says of a committed write whose directory flush failed.
@@ -816,6 +1317,36 @@ mod tests {
         assert_eq!(next_dialog_id(&ids), Some(u64::MAX));
         assert_eq!(next_dialog_id(&ids), None);
         assert_eq!(next_dialog_id(&ids), None);
+    }
+
+    // Bake: the menu lists exactly the commands this module runs, so no
+    // unsupported command is offered.
+    #[test]
+    fn the_menu_lists_exactly_the_commands_that_run() {
+        let mut listed: Vec<&str> = bake_tui_view::completion::LIVE_CATALOG
+            .iter()
+            .map(|command| command.name)
+            .collect();
+        let mut run: Vec<&str> = COMMANDS.to_vec();
+        listed.sort_unstable();
+        run.sort_unstable();
+        assert_eq!(listed, run);
+    }
+
+    #[test]
+    fn helpers_format_as_the_typescript_picker() {
+        assert_eq!(tokens(200_000), "200k");
+        assert_eq!(tokens(1_000_000), "1M");
+        assert_eq!(tokens(1_500_000), "1.5M");
+        assert_eq!(group_digits(1_234_567), "1,234,567");
+        assert_eq!(group_digits(12), "12");
+        assert_eq!(short_id("01a13e27-6d7f-7128"), "01a13e27");
+        assert_eq!(short_id("custom.id"), "custom.id");
+        assert_eq!(short_id("é"), "é");
+        assert_eq!(age(0, 30_000), "now");
+        assert_eq!(age(0, 5 * 60_000), "5m ago");
+        assert_eq!(age(0, 3 * 3_600_000), "3h ago");
+        assert_eq!(age(0, 49 * 3_600_000), "2d ago");
     }
 
     #[test]

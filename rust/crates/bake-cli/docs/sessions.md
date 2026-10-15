@@ -19,6 +19,15 @@ Sessions live in `sessions/` in the Bake home, in one directory per working dire
 
 A resumed session keeps its model, thinking level, and permission unless a flag changes them.
 
+## In an interactive session
+
+- `/session` shows the session's name, file, id, and message and token counts. It changes nothing.
+- `/name <name>` records a display name, with line breaks turned into spaces; `/name` alone asks for a name, starting from the current one. A name that would be blank is refused.
+- `/new` starts a new session in a new file, keeping the current model and thinking level.
+- `/resume` lists the working directory's saved sessions, newest first, by name or first message, with the running one marked `Current`. Typing filters the list by words. Enter opens the chosen session with its own transcript, model, thinking level, and permission; Esc keeps the running session.
+
+A turn that is running refuses `/new` and `/resume`, and a failed or cancelled switch keeps the running session; the draft is kept in each case. The new session is set up before the running one is closed. `/resume` shows only sessions recorded for this working directory, does not support Pi's quoted-phrase or `re:` search, and cannot go to a session in another directory. With `--no-session`, `/new` starts another unsaved session and `/resume` is refused. `/tree` and `/fork` are not available yet.
+
 ## The format
 
 A session file is JSON Lines: a header line (`type` `session`, `version` 3, `id`, `timestamp`, `cwd`), then one entry per line, each with an `id` and a `parentId` naming the entry it follows, so the entries form a tree. Entries are appended and never rewritten, except that a file in Pi's older versions 1 and 2 is upgraded when it is opened. Lines that are damaged or cut short are skipped.

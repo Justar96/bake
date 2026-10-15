@@ -61,7 +61,15 @@ Also from v1.2.0: the session controls of src/core/agent-session.ts
 _installAgentNextTurnRefresh, the next request reading the current model),
 the model runtime's snapshot and update of src/core/model-runtime.ts, and the
 cases of those files' tests that agent_session/control_tests.rs and
-model_registry/tests.rs name.
+model_registry/tests.rs name. Also from v1.2.0: setSessionName, its
+session_info_changed event, and getSessionStats of src/core/agent-session.ts,
+with regression tests
+test/suite/regressions/5996-session-name-newlines.test.ts and
+test/suite/regressions/3686-session-name-event.test.ts adapted in
+agent_session/control_tests.rs (their extension variants are not adapted);
+and the session construction of src/core/agent-session-runtime.ts
+(newSession and switchSession building the next session) adapted in
+src/cli/mod.rs as SessionFactory.
 --------------------------------------------------------------------------------
 MIT License
 

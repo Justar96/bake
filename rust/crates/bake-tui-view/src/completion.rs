@@ -68,6 +68,10 @@ pub const LIVE_CATALOG: &[Command] = &[
     command("login", None, "Sign in to CLIProxyAPI"),
     command("logout", None, "Sign out of CLIProxyAPI"),
     command("refresh-models", None, "Refresh the CLIProxyAPI model list"),
+    command("session", None, "Show this session's details"),
+    command("name", Some("[name]"), "Name this session"),
+    command("new", None, "Start a new session"),
+    command("resume", None, "Resume a saved session from this directory"),
 ];
 
 /// Commands listed ahead of the rest, in this order, as the oracle ranks them.
@@ -164,7 +168,8 @@ mod tests {
         assert_eq!(live[0], "model");
         assert_eq!(live.len(), LIVE_CATALOG.len());
         assert!(live.contains(&"refresh-models"));
-        assert!(!live.contains(&"resume"));
+        assert!(live.contains(&"resume") && live.contains(&"new"));
+        assert!(!live.contains(&"tree") && !live.contains(&"fork"));
     }
 
     fn names(found: Option<Vec<Command>>) -> Option<Vec<&'static str>> {

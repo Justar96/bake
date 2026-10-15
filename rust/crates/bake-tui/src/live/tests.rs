@@ -121,6 +121,7 @@ fn setup(
         notes: Vec::new(),
         approvals: None,
         home: None,
+        factory: None,
         commit_gate: None,
     };
     (runtime, faux, live)
@@ -959,3 +960,4 @@ fn arguments_show_every_character_that_would_run() {
 }
 
 mod commands_live;
+mod sessions_live;

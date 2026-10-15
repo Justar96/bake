@@ -1343,7 +1343,7 @@ async function bounded(promise: Promise<void>, message: string): Promise<void> {
 /** Clears the open field with Ctrl+U and waits until it is drawn empty. */
 async function clearField(session: Preview): Promise<void> {
   session.send('\x15')
-  await session.wait('field cleared', () => session.screen.split('\n').some(line => line.trimEnd() === '  >'))
+  await session.wait('field cleared', () => session.screen.split('\n').some(line => /^ {2}(?:│ )?>\s*(?:│\s*)?$/u.test(line.trimEnd())))
 }
 
 /** Enters the fake model's address in the open address field. */
@@ -1403,7 +1403,8 @@ for (const inline of [false, true]) {
     await session.wait('thinking list', () => session.screen.includes('Thinking level') && session.screen.includes('Ctrl+S to set as default')
       && !session.screen.includes('Preparing'))
     session.send('\x1b[B')
-    await session.wait('next level selected', () => /→ {3}\w+/u.test(session.screen))
+    // The pointer moves off the current level, which keeps its mark.
+    await session.wait('next level selected', () => session.screen.split('\n').some(line => /▸ \w+/u.test(line) && !line.includes('Current')))
     session.send('\x13')
     await session.wait('thinking saved', () => /Thinking level: \w+, saved as the default/u.test(session.screen))
     const level = /Thinking level: (\w+),/u.exec(session.screen)?.[1]
@@ -1519,3 +1520,93 @@ await liveScenario('a terminal hangup while a sign-in check is held aborts the c
   assert(!existsSync(join(world.home, 'settings.json')), 'a hung-up sign-in wrote settings.json')
   assert.deepEqual(await sessionEntries(world.home), [], 'a hung-up sign-in wrote a session file')
 })
+
+// ---- Session sheets: /name, /session, /new, /resume ----
+
+/** Blank rows between the last row holding `text` and the composer's top edge. */
+function gapAboveControls(screen: string, text: string): number {
+  const lines = screen.split('\n')
+  const at = lines.findLastIndex(line => line.includes(text))
+  assert(at >= 0, `${text} is not on screen\n${screen}`)
+  const box = lines.findIndex((line, index) => index > at && /^╭─/u.test(line))
+  assert(box > at, `no composer under ${text}\n${screen}`)
+  return lines.slice(at + 1, box).filter(line => line.trim() === '').length
+}
+
+/** Waits until an open sheet holds the keyboard: its keys are shown, not its preparing line. */
+async function sheetReady(session: Preview, title: string): Promise<void> {
+  await session.wait(`${title} sheet ready`, () => session.screen.includes(title) && /Esc (?:cancel|close)/u.test(session.screen)
+    && !session.screen.includes('Preparing'))
+}
+
+for (const inline of [false, true]) {
+  await liveScenario(`${inline ? 'inline ' : ''}session sheets name, show, start, and resume sessions without mixing their logs`, async (world) => {
+    const port = world.model.port
+    await writeFile(join(world.home, 'models.json'), JSON.stringify({
+      providers: { loop: { baseUrl: `http://127.0.0.1:${port}/v1`, api: 'openai-responses', apiKey: 'test-key',
+        models: [{ id: 'loop-model', name: 'Loop', contextWindow: 1000, input: ['text', 'image'] },
+          ...Array.from({ length: 11 }, (_, n) => ({ id: `loop-extra-${n + 1}`, name: `Loop extra ${n + 1}`, contextWindow: 200_000 }))] } },
+    }))
+    const session = world.launch([], inline)
+    await session.ready()
+    session.send('ECHO alpha\r')
+    await session.wait('first answer', () => session.screen.includes('Echo: alpha.'))
+    session.send('/name Alpha work\r')
+    await session.wait('named', () => session.screen.includes('Session name set: Alpha work'))
+    await composerReady(session)
+    // Inline, the held region keeps its transcript viewport's rows (8) under
+    // the newest settled row; a closed sheet or a switch must add none.
+    const settledGap = inline ? gapAboveControls(session.screen, 'Session name set: Alpha work') : 0
+    // A tall model sheet opens framed, then closes with the transcript back against the controls.
+    session.send('/model\r')
+    await sheetReady(session, 'Model · 12 models from loop')
+    assert(session.screen.includes('▸ Loop') && session.screen.includes('Current') && session.screen.includes('> Type to filter'), session.screen)
+    assert(/╭─+╮/u.test(session.screen) && /\d+\/12/u.test(session.screen), session.screen)
+    session.send('\x1b')
+    await session.wait('model sheet cancelled', () => session.screen.includes('❯ /model') && session.screen.includes('Cancelled'))
+    await composerReady(session)
+    // Inline, the closed sheet's rows do not stay as a blank gap over the controls.
+    if (inline) assert(gapAboveControls(session.screen, 'Session name set: Alpha work') <= settledGap, `a blank gap stayed after the sheet closed\n${session.screen}`)
+    session.send('\x15')
+    await session.wait('draft cleared', () => !session.screen.includes('❯ /model'))
+    // /session is a read-only sheet; closing it sends nothing and keeps no draft.
+    const requests = world.model.requests.length
+    session.send('/session\r')
+    await sheetReady(session, 'Session info')
+    assert(session.screen.includes('Alpha work') && /Messages/u.test(session.screen), session.screen)
+    session.send('\x1b')
+    await composerReady(session)
+    await session.wait('info closed', () => !session.screen.includes('Session info') && session.screen.includes('❯ Type a draft'))
+    assert.equal(world.model.requests.length, requests, 'a sheet sent a model request')
+    session.send('/new\r')
+    await session.wait('new session', () => session.screen.includes('New session started'))
+    await composerReady(session)
+    session.send('ECHO beta\r')
+    await session.wait('second answer', () => session.screen.includes('Echo: beta.'))
+    session.send('/resume\r')
+    await sheetReady(session, 'Resume session')
+    assert(session.screen.includes('Alpha work') && session.screen.includes('Current'), session.screen)
+    await type(session, 'alpha', typed => session.screen.includes(`> ${'alpha'.slice(0, typed)}`))
+    await session.wait('one match', () => session.screen.includes('▸ Alpha work') && session.screen.includes('1/1'))
+    session.send('\r')
+    await session.wait('resumed', () => session.screen.includes('Echo: alpha.') && !session.screen.includes('Echo: beta.')
+      && !session.screen.includes('Resume session'))
+    await composerReady(session)
+    if (!inline) assert(session.screen.includes('Resumed session Alpha work'), session.screen)
+    if (inline) assert(gapAboveControls(session.screen, 'Echo: alpha.') <= settledGap, `the resumed transcript is not against the controls\n${session.screen}`)
+    const before = world.model.requests.length
+    session.send('ECHO gamma\r')
+    await session.wait('resumed answer', () => session.screen.includes('Echo: gamma.'))
+    const sent = JSON.stringify(world.model.requests[before]?.input)
+    assert(sent.includes('ECHO alpha') && !sent.includes('ECHO beta'), `the resumed request mixed sessions: ${sent}`)
+    await session.quit()
+    if (inline) session.assertShellHistory()
+    const files = await sessionEntries(world.home)
+    assert.equal(files.length, 2, 'expected one file per session')
+    const users = files.map(entries => messageTexts(entries, 'user')).sort((a, b) => a.length - b.length)
+    assert.deepEqual(users, [['ECHO beta'], ['ECHO alpha', 'ECHO gamma']])
+    const named = files.find(entries => messageTexts(entries, 'user').includes('ECHO alpha'))
+    assert(named?.some(entry => entry.type === 'session_info' && entry.name === 'Alpha work'), 'the name was not recorded')
+    assert.deepEqual(await readdir(world.project), [], 'the session wrote into the project')
+  })
+}

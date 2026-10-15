@@ -1,13 +1,18 @@
 //! Dialogs a live runtime opens over the composer: a list to choose from,
-//! for `/model`, `/thinking`, and `/settings`, and a one-line field, for
-//! the CLIProxyAPI sign-in's address and key.
+//! for `/model`, `/thinking`, `/settings`, and `/resume`; a one-line field,
+//! for the CLIProxyAPI sign-in's address and key and `/name`; and a
+//! read-only information sheet, for `/session`.
 //!
 //! The list follows Pi v1.2.0's selectors
 //! (`packages/coding-agent/src/modes/interactive/components/model-selector.ts`,
-//! `thinking-selector.ts`, `settings-selector.ts`). The current item is
-//! marked `✓` and stays marked while another is browsed. Typing filters a
-//! filterable list and moves the selection to its first row (Pi regression
-//! 7209). Enter chooses for this session. Ctrl+S chooses and sets the
+//! `thinking-selector.ts`, `settings-selector.ts`) and is drawn as the
+//! TypeScript terminal's picker (`apps/tui/packages/ui/src/picker.tsx`)
+//! ([`crate::render`]). The current item is marked `Current` and stays
+//! marked while another is browsed. Typing filters a filterable list by
+//! every word, in a row's label, detail, group, description, or value, and moves the
+//! selection to its first row (Pi regression 7209). ↑↓ (or Ctrl+P and
+//! Ctrl+N) move one row and wrap; PgUp, PgDn, Home, and End move a page or
+//! to an end. Enter chooses for this session. Ctrl+S chooses and sets the
 //! default where the list offers it (`app.models.save`/`app.thinking.save`).
 //! Esc cancels.
 //!
@@ -66,14 +71,24 @@ impl fmt::Debug for SecretText {
 }
 
 /// One row of a list dialog.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ListItem {
-    /// What an answer names.
+    /// What an answer names. Typing also matches it, so a model's exact
+    /// `provider/id` finds it whatever its label.
     pub value: String,
     /// What the row shows.
     pub label: String,
-    /// Dim text after the label, such as a model's provider.
+    /// Dim text after the label's column, such as a model's route or a
+    /// session's age and id.
     pub detail: Option<String>,
+    /// The run of rows this one belongs to, such as a model's provider. A
+    /// heading with the run's count is drawn above each run.
+    pub group: Option<String>,
+    /// Short facts in aligned columns between the label and the detail,
+    /// such as a context window; an empty fact leaves its column blank.
+    pub facts: Vec<String>,
+    /// What the row is, drawn under the list while it is selected.
+    pub about: Option<String>,
 }
 
 /// A list to choose from.
@@ -81,14 +96,33 @@ pub struct ListItem {
 pub struct ListDialog {
     pub title: String,
     pub items: Vec<ListItem>,
-    /// The item that is in effect now, marked `✓` and selected first.
+    /// The item that is in effect now, marked `Current` and selected first.
     pub current: Option<usize>,
     /// Whether typing filters the rows.
     pub filterable: bool,
     /// Whether Ctrl+S chooses and sets the default.
     pub saves_default: bool,
-    /// A dim line under the rows, such as why a list is short.
+    /// A dim line under the title, such as why a list is short.
     pub note: Option<String>,
+}
+
+/// One line of an information sheet.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum InfoLine {
+    /// A section's heading, drawn bold.
+    Heading(String),
+    /// A dim label and its value, the labels of a section in one column.
+    Field { label: String, value: String },
+    /// A blank line between sections.
+    Blank,
+}
+
+/// A read-only sheet, such as `/session`'s: it offers nothing to choose,
+/// only scrolls, and any of Enter, Esc, or `q` closes it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InfoDialog {
+    pub title: String,
+    pub lines: Vec<InfoLine>,
 }
 
 /// A one-line field.
@@ -111,6 +145,7 @@ pub struct FieldDialog {
 pub enum DialogKind {
     List(ListDialog),
     Field(FieldDialog),
+    Info(InfoDialog),
 }
 
 /// A dialog the runtime opens. A new `id` is a new dialog.
@@ -127,8 +162,16 @@ pub enum DialogAnswer {
     Chose { value: String, save_default: bool },
     /// A field's text.
     Entered(SecretText),
-    /// Esc.
+    /// Esc, or an information sheet closed.
     Cancel,
+}
+
+/// One line of a list's body as drawn: a run's heading, or the row at
+/// `row` among the filtered rows, which is item `index`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ListLine {
+    Heading { group: usize, count: usize },
+    Row { row: usize, index: usize },
 }
 
 /// An open dialog and what the person has done in it.
@@ -145,6 +188,14 @@ pub struct Dialog {
     pub answered: bool,
     /// Esc was sent; nothing more is.
     pub cancelled: bool,
+    /// The first body line drawn: a list's first line, or an information
+    /// sheet's. Rendering keeps the selection in view and records it here.
+    pub top: usize,
+    /// Body lines the last frame showed, for PgUp and PgDn.
+    pub page: usize,
+    /// Body lines in all as the last frame laid them out, which bound an
+    /// information sheet's scroll.
+    pub total: usize,
 }
 
 impl Dialog {
@@ -154,6 +205,7 @@ impl Dialog {
         let (selected, text) = match &request.kind {
             DialogKind::List(list) => (list.current.unwrap_or(0), String::new()),
             DialogKind::Field(field) => (0, field.initial.clone()),
+            DialogKind::Info(_) => (0, String::new()),
         };
         Self {
             request,
@@ -162,10 +214,15 @@ impl Dialog {
             text: SecretText(text),
             answered: false,
             cancelled: false,
+            top: 0,
+            page: 1,
+            total: 0,
         }
     }
 
     /// The list's rows that match the filter, as indexes into its items.
+    /// Every word of the filter must appear, in any case, in the row's
+    /// label, detail, group, description ([`ListItem::about`]), or value.
     pub fn rows(&self) -> Vec<usize> {
         let DialogKind::List(list) = &self.request.kind else {
             return Vec::new();
@@ -180,14 +237,39 @@ impl Dialog {
             .enumerate()
             .filter(|(_, item)| {
                 let haystack = format!(
-                    "{} {}",
-                    item.label.to_lowercase(),
-                    item.detail.as_deref().unwrap_or("").to_lowercase()
-                );
+                    "{} {} {} {} {}",
+                    item.label,
+                    item.detail.as_deref().unwrap_or(""),
+                    item.group.as_deref().unwrap_or(""),
+                    item.about.as_deref().unwrap_or(""),
+                    item.value,
+                )
+                .to_lowercase();
                 words.iter().all(|word| haystack.contains(word.as_str()))
             })
             .map(|(index, _)| index)
             .collect()
+    }
+
+    /// The list's body lines for the filtered rows: each run of rows that
+    /// share a group under that group's heading, which counts them.
+    pub fn lines(&self) -> Vec<ListLine> {
+        list_lines(self.list_items(), &self.rows())
+    }
+
+    /// The body lines of the unfiltered list, which size the sheet, so
+    /// typing a filter never changes its height.
+    pub fn all_lines(&self) -> Vec<ListLine> {
+        let items = self.list_items();
+        let all: Vec<usize> = (0..items.len()).collect();
+        list_lines(items, &all)
+    }
+
+    fn list_items(&self) -> &[ListItem] {
+        match &self.request.kind {
+            DialogKind::List(list) => &list.items,
+            _ => &[],
+        }
     }
 
     /// Applies a key. `fresh` is false for a reported repeat and for a key
@@ -211,24 +293,46 @@ impl Dialog {
             Key::Char(c) if input.mods == Mods::NONE || input.mods == Mods::SHIFT => Some(c),
             _ => None,
         };
+        let plain = input.mods == Mods::NONE;
+        let ctrl = |c: char| input.key == Key::Char(c) && input.mods == Mods::CTRL;
+        let page = self.page.max(1);
         match self.request.kind.clone() {
             DialogKind::List(list) => {
                 let rows = self.rows();
+                let count = rows.len();
+                if count > 0 {
+                    let last = count - 1;
+                    let moved = match input.key {
+                        Key::Up if plain => Some((self.selected + last) % count),
+                        Key::Down if plain => Some((self.selected + 1) % count),
+                        Key::PageUp if plain => Some(self.selected.saturating_sub(page)),
+                        Key::PageDown if plain => Some((self.selected + page).min(last)),
+                        Key::Home if plain => Some(0),
+                        Key::End if plain => Some(last),
+                        _ if ctrl('p') => Some((self.selected + last) % count),
+                        _ if ctrl('n') => Some((self.selected + 1) % count),
+                        _ => None,
+                    };
+                    if let Some(moved) = moved {
+                        self.selected = moved;
+                        return None;
+                    }
+                }
                 match input.key {
-                    Key::Up if input.mods == Mods::NONE && !rows.is_empty() => {
-                        self.selected = (self.selected + rows.len() - 1) % rows.len();
-                    }
-                    Key::Down if input.mods == Mods::NONE && !rows.is_empty() => {
-                        self.selected = (self.selected + 1) % rows.len();
-                    }
-                    Key::Enter if fresh && input.mods == Mods::NONE => {
+                    Key::Enter if fresh && plain => {
                         return self.choose(&rows, &list, false);
                     }
                     Key::Char('s') if fresh && input.mods == Mods::CTRL && list.saves_default => {
                         return self.choose(&rows, &list, true);
                     }
-                    Key::Backspace if list.filterable && input.mods == Mods::NONE => {
+                    Key::Backspace if list.filterable && plain => {
                         if self.filter.pop().is_some() {
+                            self.selected = 0;
+                        }
+                    }
+                    Key::Char('u') if list.filterable && input.mods == Mods::CTRL => {
+                        if !self.filter.is_empty() {
+                            self.filter.clear();
                             self.selected = 0;
                         }
                     }
@@ -243,11 +347,11 @@ impl Dialog {
             }
             DialogKind::Field(_) => {
                 match input.key {
-                    Key::Enter if fresh && input.mods == Mods::NONE => {
+                    Key::Enter if fresh && plain => {
                         self.answered = true;
                         return Some(DialogAnswer::Entered(std::mem::take(&mut self.text)));
                     }
-                    Key::Backspace if input.mods == Mods::NONE => {
+                    Key::Backspace if plain => {
                         self.text.0.pop();
                     }
                     Key::Char('u') if input.mods == Mods::CTRL => self.text.0.clear(),
@@ -256,6 +360,24 @@ impl Dialog {
                             self.text.0.push(c);
                         }
                     }
+                }
+                None
+            }
+            DialogKind::Info(info) => {
+                let last = self.total.max(info.lines.len()).saturating_sub(page);
+                match input.key {
+                    Key::Up if plain => self.top = self.top.saturating_sub(1),
+                    Key::Down if plain => self.top = (self.top + 1).min(last),
+                    Key::PageUp if plain => self.top = self.top.saturating_sub(page),
+                    Key::PageDown if plain => self.top = (self.top + page).min(last),
+                    Key::Home if plain => self.top = 0,
+                    Key::End if plain => self.top = last,
+                    Key::Enter | Key::Char('q') if fresh && plain => {
+                        self.answered = true;
+                        self.cancelled = true;
+                        return Some(DialogAnswer::Cancel);
+                    }
+                    _ => {}
                 }
                 None
             }
@@ -276,7 +398,7 @@ impl Dialog {
                 self.filter.extend(clean);
                 self.selected = 0;
             }
-            DialogKind::List(_) => {}
+            DialogKind::List(_) | DialogKind::Info(_) => {}
         }
     }
 
@@ -288,6 +410,28 @@ impl Dialog {
             save_default: save,
         })
     }
+}
+
+/// [`Dialog::lines`] over `rows`, indexes into `items`. A heading names
+/// its group by the index of the run's first item.
+fn list_lines(items: &[ListItem], rows: &[usize]) -> Vec<ListLine> {
+    let mut lines = Vec::with_capacity(rows.len());
+    let group = |row: usize| items.get(rows[row]).and_then(|item| item.group.as_deref());
+    for (row, &index) in rows.iter().enumerate() {
+        if let Some(name) = group(row)
+            && (row == 0 || group(row - 1) != Some(name))
+        {
+            let count = (row..rows.len())
+                .take_while(|&next| group(next) == Some(name))
+                .count();
+            lines.push(ListLine::Heading {
+                group: index,
+                count,
+            });
+        }
+        lines.push(ListLine::Row { row, index });
+    }
+    lines
 }
 
 #[cfg(test)]
@@ -312,6 +456,7 @@ mod tests {
                         value: (*id).into(),
                         label: (*id).into(),
                         detail: Some("faux".into()),
+                        ..ListItem::default()
                     })
                     .collect(),
                 current,
@@ -425,5 +570,135 @@ mod tests {
         assert_eq!(dialog.text.expose(), "sk-fake-rest");
         let shown = format!("{dialog:?}");
         assert!(!shown.contains("sk-fake"), "{shown}");
+    }
+
+    // TS picker.tsx: PgUp and PgDn move a page and stop at the ends, Home
+    // and End jump, and Ctrl+P and Ctrl+N move one row and wrap.
+    #[test]
+    fn paging_keys_move_by_the_drawn_page() {
+        let names: Vec<String> = (0..20).map(|n| format!("m{n}")).collect();
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        let mut dialog = list(&names, Some(0), true);
+        dialog.page = 5;
+        dialog.key(key(Key::PageDown), true);
+        assert_eq!(dialog.selected, 5);
+        dialog.key(key(Key::End), true);
+        assert_eq!(dialog.selected, 19);
+        dialog.key(key(Key::PageDown), true);
+        assert_eq!(dialog.selected, 19);
+        dialog.key(
+            KeyInput {
+                key: Key::Char('n'),
+                mods: Mods::CTRL,
+            },
+            true,
+        );
+        assert_eq!(dialog.selected, 0);
+        dialog.key(
+            KeyInput {
+                key: Key::Char('p'),
+                mods: Mods::CTRL,
+            },
+            true,
+        );
+        assert_eq!(dialog.selected, 19);
+        dialog.key(key(Key::Home), true);
+        assert_eq!(dialog.selected, 0);
+        dialog.key(key(Key::PageUp), true);
+        assert_eq!(dialog.selected, 0);
+    }
+
+    // TS choices.ts `filterChoices`: every word, anywhere in a row,
+    // including its description and its value, so a named session is
+    // found by its first message and a model by its exact route.
+    #[test]
+    fn a_filter_matches_descriptions_and_values() {
+        let mut dialog = Dialog::open(DialogRequest {
+            id: 1,
+            kind: DialogKind::List(ListDialog {
+                title: "Resume".into(),
+                items: vec![
+                    ListItem {
+                        value: "01a13e27-aaaa".into(),
+                        label: "Release notes".into(),
+                        about: Some("draft the changelog".into()),
+                        ..ListItem::default()
+                    },
+                    ListItem {
+                        value: "01b00000-bbbb".into(),
+                        label: "Other".into(),
+                        ..ListItem::default()
+                    },
+                ],
+                current: None,
+                filterable: true,
+                saves_default: false,
+                note: None,
+            }),
+        });
+        dialog.paste("CHANGELOG draft");
+        assert_eq!(dialog.rows(), [0]);
+        dialog.filter = "01b0".into();
+        assert_eq!(dialog.rows(), [1]);
+    }
+
+    // TS sheet.tsx: runs of rows that share a group sit under one heading
+    // that counts them, also after a filter.
+    #[test]
+    fn groups_head_their_runs_with_counts() {
+        let mut dialog = list(&["a", "b", "c"], None, true);
+        if let DialogKind::List(list) = &mut dialog.request.kind {
+            list.items[0].group = Some("one".into());
+            list.items[1].group = Some("one".into());
+            list.items[2].group = Some("two".into());
+        }
+        assert_eq!(
+            dialog.lines(),
+            [
+                ListLine::Heading { group: 0, count: 2 },
+                ListLine::Row { row: 0, index: 0 },
+                ListLine::Row { row: 1, index: 1 },
+                ListLine::Heading { group: 2, count: 1 },
+                ListLine::Row { row: 2, index: 2 },
+            ]
+        );
+        dialog.filter = "b".into();
+        assert_eq!(
+            dialog.lines(),
+            [
+                ListLine::Heading { group: 1, count: 1 },
+                ListLine::Row { row: 0, index: 1 },
+            ]
+        );
+    }
+
+    // Bake: an information sheet offers nothing to choose; it scrolls,
+    // and Enter, q, or Esc closes it once.
+    #[test]
+    fn an_info_sheet_only_scrolls_and_closes() {
+        let mut dialog = Dialog::open(DialogRequest {
+            id: 3,
+            kind: DialogKind::Info(InfoDialog {
+                title: "Session info".into(),
+                lines: (0..10)
+                    .map(|n| InfoLine::Field {
+                        label: "Row".into(),
+                        value: n.to_string(),
+                    })
+                    .collect(),
+            }),
+        });
+        dialog.page = 4;
+        assert_eq!(dialog.key(key(Key::Down), true), None);
+        assert_eq!(dialog.top, 1);
+        dialog.key(key(Key::End), true);
+        assert_eq!(dialog.top, 6);
+        assert_eq!(dialog.key(key(Key::Char('x')), true), None);
+        assert_eq!(dialog.key(key(Key::Enter), false), None);
+        assert_eq!(
+            dialog.key(key(Key::Char('q')), true),
+            Some(DialogAnswer::Cancel)
+        );
+        assert_eq!(dialog.key(key(Key::Esc), true), None);
     }
 }

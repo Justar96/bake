@@ -357,6 +357,7 @@ fn interactive(runtime: &tokio::runtime::Runtime, args: cli::Args, stderr: Share
         notes,
         approvals: Some(approvals),
         home: Some(started.home),
+        factory: Some(started.factory),
     };
     match bake_tui::run_live(screen, live) {
         Ok(exit) => exit_status(exit),

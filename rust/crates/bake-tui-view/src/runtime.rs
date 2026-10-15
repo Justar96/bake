@@ -148,6 +148,12 @@ pub enum RuntimeUpdate {
     /// the one displayed. Sent whenever the list changes; an empty list
     /// gives the keyboard back to the composer.
     Approvals(Vec<Approval>),
+    /// The session was replaced, as `/new` and `/resume` replace it: the
+    /// transcript starts over with these rows, which the new session's
+    /// notes and its replayed log make. A normal-screen terminal keeps what
+    /// it already wrote to scrollback and writes the new rows after it
+    /// ([`crate::state::State::transcript_epoch`]).
+    Replaced(Vec<Row>),
     /// Opens a dialog over the composer ([`crate::dialog`]), replacing
     /// any open one, or closes it (`None`). A waiting approval request
     /// still takes the keyboard first.

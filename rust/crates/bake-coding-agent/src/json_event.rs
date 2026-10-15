@@ -129,6 +129,13 @@ pub fn session_event_json(event: &SessionEvent<'_>) -> Value {
             out.insert("level".into(), level.as_str().into());
             Value::Object(out)
         }
+        SessionEvent::SessionInfoChanged(name) => {
+            let mut out = object("session_info_changed");
+            if let Some(name) = name {
+                out.insert("name".into(), name.clone().into());
+            }
+            Value::Object(out)
+        }
         SessionEvent::AgentEnd {
             messages,
             will_retry,
