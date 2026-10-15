@@ -72,6 +72,8 @@ pub const LIVE_CATALOG: &[Command] = &[
     command("name", Some("[name]"), "Name this session"),
     command("new", None, "Start a new session"),
     command("resume", None, "Resume a saved session from this directory"),
+    command("tree", None, "Navigate the session tree (switch branches)"),
+    command("fork", None, "Fork a new session from an earlier message"),
 ];
 
 /// Commands listed ahead of the rest, in this order, as the oracle ranks them.
@@ -169,7 +171,8 @@ mod tests {
         assert_eq!(live.len(), LIVE_CATALOG.len());
         assert!(live.contains(&"refresh-models"));
         assert!(live.contains(&"resume") && live.contains(&"new"));
-        assert!(!live.contains(&"tree") && !live.contains(&"fork"));
+        assert!(live.contains(&"tree") && live.contains(&"fork"));
+        assert!(!live.contains(&"clone") && !live.contains(&"compact"));
     }
 
     fn names(found: Option<Vec<Command>>) -> Option<Vec<&'static str>> {

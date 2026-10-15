@@ -1,6 +1,6 @@
 //! The commands a live session runs: `/model`, `/thinking`, `/settings`,
-//! `/session`, `/name`, `/new`, `/resume`, `/login`, `/logout`, and
-//! `/refresh-models`.
+//! `/session`, `/name`, `/new`, `/resume`, `/tree`, `/fork`, `/login`,
+//! `/logout`, and `/refresh-models`.
 //!
 //! `/model`, `/thinking`, and `/settings` follow Pi v1.2.0
 //! `packages/coding-agent/src/modes/interactive/interactive-mode.ts`
@@ -23,7 +23,15 @@
 //! the new session apart from the running one, and the driver swaps them
 //! only while idle and not cancelled ([`Done::Replace`]). `/resume` answers
 //! with a session id, which a fresh listing resolves to its file. No sheet
-//! sends a model request. `/tree` and `/fork` are not ported.
+//! sends a model request.
+//!
+//! `/tree` and `/fork` follow Pi v1.2.0 `interactive-mode.ts`
+//! (`showTreeSelector` without its branch-summary prompt,
+//! `showUserMessageSelector`), `agent-session.ts` (`navigateTree`,
+//! `getUserMessagesForForking`), and `agent-session-runtime.ts` (`fork`),
+//! with the same busy rule as `/new`. `/tree` moves the running session's
+//! leaf in place; `/fork` is staged like `/resume`. Both put a chosen user
+//! message back into the draft and never send it.
 //!
 //! `/login`, `/logout`, and `/refresh-models` keep Bake's CLIProxyAPI
 //! contract: `apps/tui/packages/app/src/cliproxyapi.ts`
@@ -78,12 +86,14 @@ pub const COMMANDS: &[&str] = &[
     "name",
     "new",
     "resume",
+    "tree",
+    "fork",
 ];
 
-/// The commands that replace the running session ([`Done::Replace`]).
-/// Each starts only while the session is idle, and no prompt is admitted
-/// while one runs.
-pub const TRANSITIONS: &[&str] = &["new", "resume"];
+/// The commands that replace the running session ([`Done::Replace`]) or
+/// move its leaf ([`Done::Navigated`]). Each starts only while the session
+/// is idle, and no prompt is admitted while one runs.
+pub const TRANSITIONS: &[&str] = &["new", "resume", "tree", "fork"];
 
 /// The command a prompt names, with its argument, when it names one of
 /// [`COMMANDS`].
@@ -123,9 +133,11 @@ pub struct Context {
     commit_gate: Option<CommitGate>,
 }
 
-/// Holds `/login` once its check has passed, before its commit, and `/resume`
-/// once its replacement is built and checked, before the driver commits it: the
-/// command says so on `reached` and goes on when `release` lets it.
+/// Holds `/login` once its check has passed, before its commit; `/resume`
+/// and `/fork` once their replacement is built and checked, before the
+/// driver commits it; and `/tree` once its entry is chosen, before the
+/// session moves the leaf: the command says so on `reached` and goes on
+/// when `release` lets it.
 #[cfg(test)]
 #[derive(Clone)]
 pub struct CommitGate {
@@ -194,7 +206,14 @@ pub enum Done {
     Replace {
         replacement: Box<Replacement>,
         note: String,
+        /// A message to put back into the draft, as `/fork` gives back
+        /// the message it forked before.
+        draft: Option<String>,
     },
+    /// `/tree` moved the running session's leaf: the transcript starts
+    /// over with this note and the new path's replay, and `draft`, the
+    /// chosen user message's text, goes back into the draft.
+    Navigated { note: String, draft: Option<String> },
 }
 
 impl std::fmt::Debug for Done {
@@ -203,6 +222,9 @@ impl std::fmt::Debug for Done {
             Self::Note(note) => f.debug_tuple("Note").field(note).finish(),
             Self::Quiet => f.write_str("Quiet"),
             Self::Replace { note, .. } => f.debug_struct("Replace").field("note", note).finish(),
+            Self::Navigated { note, .. } => {
+                f.debug_struct("Navigated").field("note", note).finish()
+            }
         }
     }
 }
@@ -301,7 +323,9 @@ pub fn refuse_argument(name: &str, argument: &str) -> Option<String> {
         "login" | "logout" if !argument.is_empty() && argument != CLIPROXYAPI_ID => Some(format!(
             "/{name} knows only CLIProxyAPI in bake-rs, not {argument}; your draft is kept."
         )),
-        "refresh-models" | "settings" | "session" | "new" | "resume" if !argument.is_empty() => {
+        "refresh-models" | "settings" | "session" | "new" | "resume" | "tree" | "fork"
+            if !argument.is_empty() =>
+        {
             Some(format!("/{name} takes no argument; your draft is kept."))
         }
         _ => None,
@@ -324,6 +348,8 @@ pub async fn run(name: &str, argument: String, mut context: Context) -> Outcome 
         "name" => name_session(&mut context, &argument).await,
         "new" => new_session(&context).await,
         "resume" => resume(&mut context).await,
+        "tree" => tree(&mut context).await,
+        "fork" => fork(&mut context).await,
         _ => Err(format!("/{name} is not a command.")),
     };
     context.shown.store(0, std::sync::atomic::Ordering::SeqCst);
@@ -471,6 +497,7 @@ async fn model(context: &mut Context, argument: &str) -> Outcome {
                     title: model_title(&models),
                     items,
                     current,
+                    selected: None,
                     filterable: true,
                     saves_default: true,
                     note: (!argument.is_empty())
@@ -517,6 +544,7 @@ async fn thinking(context: &mut Context, argument: &str) -> Outcome {
                         })
                         .collect(),
                     current: levels.iter().position(|level| *level == current),
+                    selected: None,
                     filterable: false,
                     saves_default: true,
                     note: (!argument.is_empty())
@@ -584,6 +612,7 @@ async fn settings(context: &mut Context) -> Outcome {
                 })
                 .collect(),
             current: None,
+            selected: None,
             filterable: false,
             saves_default: false,
             note: Some("Saved to settings.json; applies now.".into()),
@@ -618,6 +647,7 @@ async fn settings(context: &mut Context) -> Outcome {
                 })
                 .collect(),
             current: choices.iter().position(|choice| *choice == now),
+            selected: None,
             filterable: false,
             saves_default: false,
             note: None,
@@ -805,6 +835,7 @@ async fn new_session(context: &Context) -> Outcome {
     Ok(Done::Replace {
         replacement: Box::new(replacement),
         note: "New session started".into(),
+        draft: None,
     })
 }
 
@@ -924,6 +955,7 @@ async fn resume(context: &mut Context) -> Outcome {
             title: format!("Resume session · {} saved here", listed.len()),
             items,
             current: current_index,
+            selected: None,
             filterable: true,
             saves_default: false,
             note: None,
@@ -991,6 +1023,138 @@ async fn resume(context: &mut Context) -> Outcome {
     Ok(Done::Replace {
         replacement: Box::new(replacement),
         note: format!("Resumed session {name}"),
+        draft: None,
+    })
+}
+
+/// `/tree`, Pi's `showTreeSelector` without its summary prompt: the
+/// session's tree as one sheet ([`super::tree::tree_rows`]), the leaf
+/// marked current. Choosing the leaf changes nothing; choosing another
+/// entry moves the leaf there within the same file
+/// ([`AgentSession::navigate_tree`]): a user message's parent, with the
+/// message back in the draft to edit and send, or the entry itself. The
+/// branch left stays in the file unsummarized. No model request is sent.
+async fn tree(context: &mut Context) -> Outcome {
+    let session = Arc::clone(&context.session);
+    let (tree, leaf) = tokio::task::spawn_blocking(move || session.session_tree())
+        .await
+        .map_err(|error| error.to_string())?;
+    if tree.nodes.is_empty() {
+        return Err("No entries in session; your draft is kept.".into());
+    }
+    let rows = super::tree::tree_rows(&tree, leaf.as_deref());
+    if rows.items.is_empty() {
+        return Err("No messages to navigate to yet; your draft is kept.".into());
+    }
+    let shown = rows.items.len();
+    let answer = context
+        .ask(DialogKind::List(ListDialog {
+            title: format!("Session tree · {shown} entr{}", if shown == 1 { "y" } else { "ies" }),
+            items: rows.items,
+            current: rows.current,
+            selected: rows.selected,
+            filterable: true,
+            saves_default: false,
+            note: Some(
+                "Continue from an earlier point in this session; • marks the current path. A user message goes back into the draft."
+                    .into(),
+            ),
+        }))
+        .await;
+    let DialogAnswer::Chose { value: id, .. } = answer else {
+        return Err(CANCELLED.into());
+    };
+    if context.session.leaf_id().as_deref() == Some(id.as_str()) {
+        return Ok(Done::Note("Already at this point".into()));
+    }
+    // Holds the choice before the session's commit boundary, for tests.
+    #[cfg(test)]
+    if let Some(gate) = &context.commit_gate {
+        let _ = gate.reached.send(());
+        match &gate.release {
+            Release::Notified(release) => release.notified().await,
+            Release::Aborted => context.signal.cancelled().await,
+        }
+    }
+    // The session checks the signal again under its lock, right before the
+    // leaf moves, so an Esc taken before then moves nothing.
+    let navigated = context
+        .session
+        .navigate_tree(&id, Some(context.signal.clone()))
+        .await
+        .map_err(|error| {
+            if error == bake_coding_agent::agent_session::NAVIGATION_CANCELLED {
+                CANCELLED.to_owned()
+            } else {
+                format!("{error} Your draft is kept.")
+            }
+        })?;
+    if !navigated.moved {
+        return Ok(Done::Note("Already at this point".into()));
+    }
+    Ok(Done::Navigated {
+        note: "Navigated to selected point".into(),
+        draft: navigated.editor_text.filter(|text| !text.trim().is_empty()),
+    })
+}
+
+/// `/fork`, Pi's `showUserMessageSelector` and runtime `fork`: the
+/// session's user messages ([`super::tree::fork_rows`]), the latest
+/// selected. Choosing one builds a new session holding the path up to
+/// that message ([`SessionFactory::fork`]), in the same session directory
+/// (in memory under `--no-session`), with this session's file named as its
+/// parent and left as it is; the message goes back into the draft. The
+/// driver commits it ([`Done::Replace`]).
+async fn fork(context: &mut Context) -> Outcome {
+    let factory = factory(context)?;
+    let session = Arc::clone(&context.session);
+    let points = tokio::task::spawn_blocking(move || session.user_messages_for_forking())
+        .await
+        .map_err(|error| error.to_string())?;
+    if points.is_empty() {
+        return Err("No messages to fork from; your draft is kept.".into());
+    }
+    let items = super::tree::fork_rows(&points);
+    let answer = context
+        .ask(DialogKind::List(ListDialog {
+            title: "Fork from message".into(),
+            selected: items.len().checked_sub(1),
+            items,
+            current: None,
+            filterable: true,
+            saves_default: false,
+            note: Some(
+                "Copies the path up to the chosen message into a new session; the message goes back into the draft."
+                    .into(),
+            ),
+        }))
+        .await;
+    let DialogAnswer::Chose { value: id, .. } = answer else {
+        return Err(CANCELLED.into());
+    };
+    if context.signal.aborted() {
+        return Err(CANCELLED.into());
+    }
+    let (replacement, selected) = factory
+        .fork(&context.session, &id)
+        .await
+        .map_err(|error| format!("Could not fork the session: {error}; your draft is kept."))?;
+    if context.signal.aborted() {
+        replacement.session.shutdown().await;
+        return Err(CANCELLED.into());
+    }
+    #[cfg(test)]
+    if let Some(gate) = &context.commit_gate {
+        let _ = gate.reached.send(());
+        match &gate.release {
+            Release::Notified(release) => release.notified().await,
+            Release::Aborted => context.signal.cancelled().await,
+        }
+    }
+    Ok(Done::Replace {
+        replacement: Box::new(replacement),
+        note: "Forked to new session".into(),
+        draft: Some(selected).filter(|text| !text.trim().is_empty()),
     })
 }
 

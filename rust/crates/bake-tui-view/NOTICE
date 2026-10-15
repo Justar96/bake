@@ -12,7 +12,9 @@ settings-selector.ts (the current-item mark, filtering that resets the
 selection, and Ctrl+S to set the default), with the cases of
 test/model-selector.test.ts, test/thinking-selector.test.ts, and
 regression test 7209-model-selector-filter-resets-selection.test.ts that its
-tests name.
+tests name, and the first selection of
+components/user-message-selector.ts (the latest message, not marked
+current).
 --------------------------------------------------------------------------------
 MIT License
 

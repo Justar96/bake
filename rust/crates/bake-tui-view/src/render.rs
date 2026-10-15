@@ -934,6 +934,7 @@ fn render_region(
             Notice::ImagesWhileRunning => copy::IMAGES_WHILE_RUNNING,
             Notice::PreviewOnly => copy::PREVIEW_ONLY,
             Notice::Returned => copy::RETURNED,
+            Notice::Restored => copy::RESTORED,
             Notice::ApprovalKeys => copy::APPROVAL_KEYS_ONLY,
             Notice::ApprovalChooseFirst => copy::APPROVAL_CHOOSE_FIRST,
         };
@@ -2260,6 +2261,7 @@ mod tests {
                 title: "Model".into(),
                 items: vec![item("current-model"), item("browsed-model")],
                 current: Some(0),
+                selected: None,
                 filterable: true,
                 saves_default: true,
                 note: None,
@@ -2310,6 +2312,7 @@ mod tests {
             title: "Model · 30 models from alpha, beta".into(),
             items,
             current: Some(20),
+            selected: None,
             filterable: true,
             saves_default: true,
             note: None,

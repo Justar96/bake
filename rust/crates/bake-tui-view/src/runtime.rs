@@ -142,13 +142,19 @@ pub enum RuntimeUpdate {
     /// into the draft ahead of what it holds, as Pi's
     /// `restoreQueuedMessagesToEditor` does, so no submission is lost.
     Returned(Vec<String>),
+    /// A message to edit and send again, as `/tree` and `/fork` give back
+    /// the user message they move before, Pi's `editorText` and
+    /// `selectedText`. It goes into the draft ahead of what the draft
+    /// holds, so nothing typed is lost, and is never sent by itself.
+    Restored(String),
     /// The session's model, thinking level, and context use changed.
     Status(SessionStatus),
     /// Every approval request still waiting, oldest first; the first is
     /// the one displayed. Sent whenever the list changes; an empty list
     /// gives the keyboard back to the composer.
     Approvals(Vec<Approval>),
-    /// The session was replaced, as `/new` and `/resume` replace it: the
+    /// The session was replaced, as `/new`, `/resume`, and `/fork` replace
+    /// it, or its leaf moved, as `/tree` moves it: the
     /// transcript starts over with these rows, which the new session's
     /// notes and its replayed log make. A normal-screen terminal keeps what
     /// it already wrote to scrollback and writes the new rows after it

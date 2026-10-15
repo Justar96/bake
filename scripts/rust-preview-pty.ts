@@ -1106,9 +1106,9 @@ await liveScenario('live command-line prompts run first, and a setup failure exi
   await session.wait('both prompts answered', () => session.screen.includes('Echo: from args.') && session.screen.includes('Echo: later arg.')
     && /^ {2}✓ Completed/mu.test(session.screen))
   // A command bake-rs does not run is refused, and the draft is kept.
-  session.send('/tree other\r')
-  await session.wait('command refused', () => session.screen.includes('/tree is not available in bake-rs yet')
-    && session.screen.includes('❯ /tree other'))
+  session.send('/clone other\r')
+  await session.wait('command refused', () => session.screen.includes('/clone is not available in bake-rs yet')
+    && session.screen.includes('❯ /clone other'))
   await session.quit()
 
   const failed = world.launch(['--model', 'missing-model'])
@@ -1610,6 +1610,95 @@ for (const inline of [false, true]) {
     assert.deepEqual(users, [['ECHO beta'], ['ECHO alpha', 'ECHO gamma']])
     const named = files.find(entries => messageTexts(entries, 'user').includes('ECHO alpha'))
     assert(named?.some(entry => entry.type === 'session_info' && entry.name === 'Alpha work'), 'the name was not recorded')
+    assert.deepEqual(await readdir(world.project), [], 'the session wrote into the project')
+  })
+}
+
+// ---- Session tree navigation and forks: /tree, /fork ----
+
+/** Waits until `answer` is on screen and the turn that wrote it has settled: its completed status sits below it. */
+async function turnSettled(session: Preview, answer: string): Promise<void> {
+  await session.wait(`${answer} settled`, () => {
+    const lines = session.screen.split('\n')
+    const at = lines.findLastIndex(line => line.includes(answer))
+    const done = lines.findLastIndex(line => /^ {2}✓ Completed/u.test(line))
+    return at >= 0 && done > at
+  })
+}
+
+for (const inline of [false, true]) {
+  await liveScenario(`${inline ? 'inline ' : ''}tree navigation and fork branch the right logs, restore drafts, and send no hidden request`, async (world) => {
+    const port = world.model.port
+    await writeFile(join(world.home, 'models.json'), JSON.stringify({
+      providers: { loop: { baseUrl: `http://127.0.0.1:${port}/v1`, api: 'openai-responses', apiKey: 'test-key',
+        models: [{ id: 'loop-model', name: 'Loop', contextWindow: 1000 }] } },
+    }))
+    const session = world.launch([], inline)
+    await session.ready()
+    session.send('ECHO alpha\r')
+    await turnSettled(session, 'Echo: alpha.')
+    session.send('ECHO beta\r')
+    await turnSettled(session, 'Echo: beta.')
+    await composerReady(session)
+    const requests = world.model.requests.length
+    // The tree marks the current path and leaf; typing filters it.
+    session.send('/tree\r')
+    await sheetReady(session, 'Session tree')
+    assert(session.screen.includes('• user: ECHO alpha') && session.screen.includes('Current'), session.screen)
+    if (!inline) {
+      await session.resize(60, 20)
+      await sheetReady(session, 'Session tree')
+      await session.resize(80, 24)
+      await sheetReady(session, 'Session tree')
+    }
+    await type(session, 'user: echo beta', typed => session.screen.includes(`> ${'user: echo beta'.slice(0, typed)}`))
+    await session.wait('one match', () => session.screen.includes('1/1'))
+    session.send('\r')
+    // The chosen message is back in the draft, unsent, and the transcript replays the path before it.
+    await session.wait('navigated', () => session.screen.includes('❯ ECHO beta') && !session.screen.includes('Echo: beta.')
+      && session.screen.includes('Echo: alpha.') && !session.screen.includes('Session tree'))
+    await composerReady(session)
+    assert.equal(world.model.requests.length, requests, 'navigation sent a model request')
+    session.send('\x15')
+    await session.wait('draft cleared', () => !session.screen.includes('❯ ECHO beta'))
+    let before = world.model.requests.length
+    session.send('ECHO gamma\r')
+    await turnSettled(session, 'Echo: gamma.')
+    let sent = JSON.stringify(world.model.requests[before]?.input)
+    assert(sent.includes('ECHO alpha') && sent.includes('ECHO gamma') && !sent.includes('ECHO beta'), `the branched request: ${sent}`)
+    await composerReady(session)
+    // /fork lists every user message, latest selected, and starts a new session before the chosen one.
+    const forkRequests = world.model.requests.length
+    session.send('/fork\r')
+    await sheetReady(session, 'Fork from message')
+    assert(session.screen.includes('ECHO beta') && session.screen.includes('▸ ECHO gamma'), session.screen)
+    session.send('\r')
+    await session.wait('forked', () => session.screen.includes('❯ ECHO gamma') && !session.screen.includes('Echo: gamma.')
+      && session.screen.includes('Echo: alpha.') && !session.screen.includes('Fork from message'))
+    await composerReady(session)
+    if (!inline) assert(session.screen.includes('Forked to new session'), session.screen)
+    assert.equal(world.model.requests.length, forkRequests, 'the fork sent a model request')
+    session.send('\x15')
+    await session.wait('draft cleared', () => !session.screen.includes('❯ ECHO gamma'))
+    before = world.model.requests.length
+    session.send('ECHO delta\r')
+    await turnSettled(session, 'Echo: delta.')
+    sent = JSON.stringify(world.model.requests[before]?.input)
+    assert(sent.includes('ECHO alpha') && sent.includes('ECHO delta') && !sent.includes('ECHO gamma') && !sent.includes('ECHO beta'), `the forked request: ${sent}`)
+    await session.quit()
+    if (inline) session.assertShellHistory()
+    const files = await sessionEntries(world.home)
+    assert.equal(files.length, 2, 'expected the source and its fork')
+    const source = files.find(entries => messageTexts(entries, 'user').includes('ECHO beta'))
+    const fork = files.find(entries => messageTexts(entries, 'user').includes('ECHO delta'))
+    assert(source && fork, 'a session file is missing')
+    assert.deepEqual(messageTexts(source, 'user'), ['ECHO alpha', 'ECHO beta', 'ECHO gamma'])
+    assert.deepEqual(messageTexts(fork, 'user'), ['ECHO alpha', 'ECHO delta'])
+    const parentOf = (text: string) => source.find(entry => entry.type === 'message'
+      && messageTexts([entry], 'user')[0] === text)?.parentId
+    assert.equal(parentOf('ECHO beta'), parentOf('ECHO gamma'), 'beta and gamma are not siblings in the source log')
+    const header = fork[0] as { type?: string; parentSession?: string }
+    assert(header.type === 'session' && typeof header.parentSession === 'string' && header.parentSession.endsWith('.jsonl'), 'the fork does not name its source')
     assert.deepEqual(await readdir(world.project), [], 'the session wrote into the project')
   })
 }

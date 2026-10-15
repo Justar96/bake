@@ -23,13 +23,13 @@ use crate::model_registry::config::ModelConfig;
 use crate::session::NewSessionOptions;
 use crate::test_support::TempDir;
 
-struct Harness {
-    faux: Arc<FauxProvider>,
+pub(super) struct Harness {
+    pub(super) faux: Arc<FauxProvider>,
     runtime: ModelRuntime,
     apis: Arc<ApiRegistry>,
 }
 
-fn harness() -> Harness {
+pub(super) fn harness() -> Harness {
     let faux = Arc::new(FauxProvider::new(FauxProviderOptions::default()));
     let apis = Arc::new(ApiRegistry::new());
     apis.register(faux.clone());
@@ -57,11 +57,11 @@ fn harness() -> Harness {
 }
 
 impl Harness {
-    fn model(&self, id: &str) -> Model {
+    pub(super) fn model(&self, id: &str) -> Model {
         self.runtime.snapshot().model("faux", id).expect("model")
     }
 
-    async fn session(
+    pub(super) async fn session(
         &self,
         session: SessionManager,
         settings: Settings,
@@ -89,7 +89,7 @@ impl Harness {
     }
 }
 
-fn in_memory() -> SessionManager {
+pub(super) fn in_memory() -> SessionManager {
     SessionManager::in_memory(Some("/tmp"), NewSessionOptions::default(), Vec::new())
         .expect("session")
 }
@@ -292,7 +292,7 @@ async fn a_failed_session_write_changes_nothing_and_stops_prompts() {
     session.shutdown().await;
 }
 
-fn file_session(dir: &TempDir) -> SessionManager {
+pub(super) fn file_session(dir: &TempDir) -> SessionManager {
     SessionManager::create(
         &dir.path().to_string_lossy(),
         Some(&dir.join("sessions")),

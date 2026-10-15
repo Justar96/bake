@@ -35,20 +35,30 @@
 //! `message_start` queue bookkeeping, without extension-command checks or
 //! input handlers.
 //!
+//! Tree navigation ([`AgentSession::navigate_tree`]) and the store of a
+//! forked session ([`AgentSession::fork_session_manager`]) follow Pi
+//! v1.2.0's `navigateTree` and runtime `fork` (in
+//! `agent_session/navigation.rs`).
+//!
 //! Not ported (deferred): extensions and their events (including
 //! `session_before_compact`, `session_compact`, and
-//! `session_compact_failed`), branch navigation and its summaries, the
+//! `session_compact_failed`), branch summaries during navigation, the
 //! `/skill:name` slash command list and its expansion error event, prompt
 //! templates, MCP, bash `!` commands, the cache warmer, scoped
 //! models, virtual models and their failed-response routing, the
 //! `entry_appended` event, and tool-loadout changes between turns.
 
+mod navigation;
 mod recovery;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 
+pub use navigation::{
+    ForkPoint, ForkedSession, NAVIGATION_CANCELLED, NAVIGATION_WHILE_BUSY,
+    NAVIGATION_WHILE_STREAMING, TreeNavigation,
+};
 pub use recovery::CompactionReason;
 use recovery::{Activity, Core, RunState};
 
@@ -968,6 +978,9 @@ pub(crate) struct TestHooks {
     pub fail_model_entry: Option<FailHook>,
     /// What [`Self::fail_model_entry`] returned.
     pub before_continuing: Option<Box<dyn FnOnce() + Send>>,
+    /// Runs on the blocking pool after a navigation claimed the session
+    /// and before it takes the session lock to move the leaf.
+    pub before_navigation: Option<Box<dyn FnOnce() + Send>>,
 }
 
 /// Pi's bookkeeping after persisting: the last assistant message and the
@@ -1906,6 +1919,9 @@ impl AgentSession {
             if activity.manual_compaction {
                 refusal = Some("Cannot submit a prompt while compaction is in progress. Wait for compaction to finish and retry.");
                 false
+            } else if activity.navigation {
+                refusal = Some("Cannot submit a prompt while the session tree is being navigated. Wait for it to finish and retry.");
+                false
             } else if activity.run || agent_streaming {
                 // Pi queues with a `streamingBehavior`; queueing is not
                 // ported.
@@ -2157,6 +2173,10 @@ impl AgentSession {
         if let Some(reason) = self.closed_reason() {
             return Err(reason);
         }
+        // The transcript a queued prompt would join is being replaced.
+        if self.core.activity.borrow().navigation {
+            return Err(NAVIGATION_WHILE_BUSY.to_owned());
+        }
         let Some(_permit) = permit else {
             return Err("The session is shut down.".into());
         };
@@ -2279,10 +2299,10 @@ impl AgentSession {
         }
     }
 
-    /// Pi's `isCompacting`.
+    /// Pi's `isCompacting`, which also counts a tree navigation.
     pub fn is_compacting(&self) -> bool {
         let activity = *self.core.activity.borrow();
-        activity.manual_compaction || activity.auto_compaction
+        activity.manual_compaction || activity.auto_compaction || activity.navigation
     }
 
     /// Pi's `isRetrying`: waiting before a retry.
@@ -2364,6 +2384,8 @@ impl Drop for RunGuard<'_> {
 
 #[cfg(test)]
 mod control_tests;
+#[cfg(test)]
+mod navigation_tests;
 #[cfg(test)]
 mod recovery_tests;
 #[cfg(test)]

@@ -356,6 +356,8 @@ pub enum Notice {
     PreviewOnly,
     /// The runtime gave prompts back to the draft.
     Returned,
+    /// `/tree` or `/fork` put the chosen message into the draft.
+    Restored,
     /// The runtime refused a prompt, for the reason in [`State::refusal`];
     /// its draft is back.
     Refused,
@@ -1102,17 +1104,13 @@ fn runtime(state: &mut State, update: RuntimeUpdate) {
         RuntimeUpdate::Returned(texts) => {
             // Pi's `restoreQueuedMessagesToEditor`: the returned prompts,
             // then the draft, each non-blank part a paragraph.
-            let current = state.draft.text().to_owned();
-            let combined = texts
-                .iter()
-                .map(String::as_str)
-                .chain(std::iter::once(current.as_str()))
-                .filter(|text| !text.trim().is_empty())
-                .collect::<Vec<_>>()
-                .join("\n\n");
-            if combined != current {
-                state.draft.replace(&combined, combined.len());
+            if prepend_to_draft(state, &texts) {
                 state.notice = Some(Notice::Returned);
+            }
+        }
+        RuntimeUpdate::Restored(text) => {
+            if prepend_to_draft(state, std::slice::from_ref(&text)) {
+                state.notice = Some(Notice::Restored);
             }
         }
         RuntimeUpdate::Status(status) => {
@@ -1166,6 +1164,24 @@ fn runtime(state: &mut State, update: RuntimeUpdate) {
             state.phase = None;
         }
     }
+}
+
+/// Puts `texts`, then the draft, into the draft, each non-blank part a
+/// paragraph. Whether the draft changed.
+fn prepend_to_draft(state: &mut State, texts: &[String]) -> bool {
+    let current = state.draft.text().to_owned();
+    let combined = texts
+        .iter()
+        .map(String::as_str)
+        .chain(std::iter::once(current.as_str()))
+        .filter(|text| !text.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    if combined == current {
+        return false;
+    }
+    state.draft.replace(&combined, combined.len());
+    true
 }
 
 /// Whether the runtime is running a turn.
@@ -2572,6 +2588,22 @@ mod tests {
         );
         assert_eq!(state.draft.text(), "one\n\ntwo\n\ntyped");
         assert_eq!(state.notice, Some(Notice::Returned));
+    }
+
+    // `/tree` and `/fork` give the chosen message back ahead of anything
+    // typed since; an empty text changes nothing.
+    #[test]
+    fn a_restored_message_goes_ahead_of_the_draft() {
+        let mut state = live();
+        runtime(&mut state, RuntimeUpdate::Restored("chosen".into()));
+        assert_eq!(state.draft.text(), "chosen");
+        assert_eq!(state.notice, Some(Notice::Restored));
+        type_str(&mut state, " more");
+        runtime(&mut state, RuntimeUpdate::Restored("again".into()));
+        assert_eq!(state.draft.text(), "again\n\nchosen more");
+        state.notice = None;
+        runtime(&mut state, RuntimeUpdate::Restored(String::new()));
+        assert_eq!(state.notice, None);
         // Nothing returned changes nothing.
         let mut state = live();
         runtime(&mut state, RuntimeUpdate::Returned(Vec::new()));

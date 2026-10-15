@@ -1,5 +1,5 @@
 //! Dialogs a live runtime opens over the composer: a list to choose from,
-//! for `/model`, `/thinking`, `/settings`, and `/resume`; a one-line field,
+//! for `/model`, `/thinking`, `/settings`, `/resume`, `/tree`, and `/fork`; a one-line field,
 //! for the CLIProxyAPI sign-in's address and key and `/name`; and a
 //! read-only information sheet, for `/session`.
 //!
@@ -98,6 +98,9 @@ pub struct ListDialog {
     pub items: Vec<ListItem>,
     /// The item that is in effect now, marked `Current` and selected first.
     pub current: Option<usize>,
+    /// The item selected first when it is not the current one, as `/fork`
+    /// starts at the latest message.
+    pub selected: Option<usize>,
     /// Whether typing filters the rows.
     pub filterable: bool,
     /// Whether Ctrl+S chooses and sets the default.
@@ -203,7 +206,13 @@ impl Dialog {
     /// its initial text.
     pub fn open(request: DialogRequest) -> Self {
         let (selected, text) = match &request.kind {
-            DialogKind::List(list) => (list.current.unwrap_or(0), String::new()),
+            DialogKind::List(list) => (
+                list.selected
+                    .or(list.current)
+                    .unwrap_or(0)
+                    .min(list.items.len().saturating_sub(1)),
+                String::new(),
+            ),
             DialogKind::Field(field) => (0, field.initial.clone()),
             DialogKind::Info(_) => (0, String::new()),
         };
@@ -460,6 +469,7 @@ mod tests {
                     })
                     .collect(),
                 current,
+                selected: None,
                 filterable,
                 saves_default: true,
                 note: None,
@@ -496,6 +506,22 @@ mod tests {
                 save_default: false,
             })
         );
+    }
+
+    // Pi's user-message selector starts at the latest message, which is
+    // not marked current; an out-of-range start is clamped.
+    #[test]
+    fn a_first_selection_other_than_current_is_honoured_and_clamped() {
+        let request = list(&["old", "latest"], None, false).request;
+        let starting = |at: usize| {
+            let mut request = request.clone();
+            if let DialogKind::List(list) = &mut request.kind {
+                list.selected = Some(at);
+            }
+            Dialog::open(request).selected
+        };
+        assert_eq!(starting(1), 1);
+        assert_eq!(starting(9), 1);
     }
 
     // Pi 7209-model-selector-filter-resets-selection.test.ts: typing a
@@ -631,6 +657,7 @@ mod tests {
                     },
                 ],
                 current: None,
+                selected: None,
                 filterable: true,
                 saves_default: false,
                 note: None,

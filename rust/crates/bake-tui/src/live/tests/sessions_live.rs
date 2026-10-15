@@ -14,9 +14,16 @@
 //! round trip. Its "settles the active response before session replacement"
 //! is not followed: Pi aborts the running turn, while bake-rs refuses the
 //! replacement until the turn ends, as the TypeScript navigation did (see
-//! the busy case). Its `session_before_switch` cancellation and fork cases
-//! need extensions or `/fork`, which bake-rs does not have; a user's
-//! cancellation is covered by the cancelled-resume case instead.
+//! the busy case). Its `session_before_switch` cancellation needs
+//! extensions, which bake-rs does not have; a user's cancellation is
+//! covered by the cancelled-resume case instead.
+//!
+//! `/tree` and `/fork` follow Pi v1.2.0 `interactive-mode.ts`
+//! (`showTreeSelector`, `showUserMessageSelector`), `navigateTree`, and the
+//! runtime's `fork`, with Pi's `test/agent-session-branching.test.ts` cases
+//! ("should fork from middle of conversation", in-memory forking) read
+//! through the driver: the request after navigation, the files, the draft,
+//! and the restored model are checked, and no sheet sends a request.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex as StdMutex;
@@ -284,6 +291,11 @@ impl Harness {
     /// Runs the command `text` as prompt `id`, and waits for its status.
     fn command(&self, id: u64, text: &str) -> Vec<RuntimeUpdate> {
         self.submit_id(id, Submission::FollowUp(text.into()));
+        self.settled_command(id)
+    }
+
+    /// Waits for command `id` to end, and for its status when admitted.
+    fn settled_command(&self, id: u64) -> Vec<RuntimeUpdate> {
         let mut updates = self.ended(id);
         if matches!(updates.last(), Some(RuntimeUpdate::Admitted(_))) {
             updates.extend(self.until(|u| matches!(u, RuntimeUpdate::Status(_))));
@@ -438,8 +450,8 @@ fn h_requests(requests: &Requests) -> usize {
     requests.lock().expect("requests").len()
 }
 
-// TS navigation `unavailable`: a running turn refuses `/new` and `/resume`
-// with the draft kept, and the turn goes on in its own session.
+// TS navigation `unavailable`: a running turn refuses `/new`, `/resume`,
+// `/tree`, and `/fork` with the draft kept, and the turn goes on in its own session.
 #[test]
 fn a_running_turn_refuses_a_replacement_and_keeps_the_draft() {
     let world = World::new("busy");
@@ -471,7 +483,7 @@ fn a_running_turn_refuses_a_replacement_and_keeps_the_draft() {
     ]);
     h.submit_id(1, Submission::FollowUp("hold".into()));
     h.until(|u| matches!(u, RuntimeUpdate::Live(rows) if rows.iter().any(|r| matches!(r, Row::Call { .. }))));
-    for (id, text) in [(2, "/new"), (3, "/resume")] {
+    for (id, text) in [(2, "/new"), (3, "/resume"), (4, "/tree"), (5, "/fork")] {
         h.submit_id(id, Submission::FollowUp(text.into()));
         let updates = h.ended(id);
         let reason = refused(&updates).expect("refused");
@@ -861,7 +873,7 @@ fn a_driver_panic_after_new_shuts_down_the_session_in_use() {
     h.turn(3, "second");
     // Held: another process cannot take the file the session writes.
     assert!(SessionManager::open(&second, None, None).is_err());
-    h.submit_id(99, Submission::FollowUp("/tree".into()));
+    h.submit_id(99, Submission::FollowUp("/clone".into()));
     let error = h
         .port
         .take()
@@ -876,4 +888,258 @@ fn a_driver_panic_after_new_shuts_down_the_session_in_use() {
         "a task outlived the port"
     );
     assert_eq!(texts(&second, "user"), ["second"]);
+}
+
+fn restored(updates: &[RuntimeUpdate]) -> Option<String> {
+    updates.iter().find_map(|update| match update {
+        RuntimeUpdate::Restored(text) => Some(text.clone()),
+        _ => None,
+    })
+}
+
+// Pi `showTreeSelector` and `navigateTree` on a user message: the sheet
+// marks the leaf current and the path with `•`; choosing an earlier user
+// message moves the leaf to its parent in the same file, replays that
+// path, and puts the message back in the draft without sending it. The
+// next prompt carries the new path and branches in the file.
+#[test]
+fn tree_moves_the_leaf_and_the_next_prompt_branches_in_the_same_file() {
+    let world = World::new("tree");
+    let manager = persisted(&world);
+    let file = manager.session_file().expect("file").to_path_buf();
+    let (h, requests) = session_harness(&world, manager, Vec::new(), None);
+    h.turn(1, "alpha");
+    h.turn(2, "beta");
+    h.submit_id(3, Submission::FollowUp("/tree".into()));
+    let dialog = h.next_dialog();
+    let DialogKind::List(list) = &dialog.kind else {
+        panic!("{dialog:?}");
+    };
+    let current = list.current.expect("current");
+    assert_eq!(list.items[current].label, "• assistant: Echo: beta.");
+    assert!(list.filterable);
+    h.choose_answer(dialog.id, choose(&dialog, "• user: beta"));
+    let mut updates = h.ended(3);
+    updates.extend(h.until(|u| matches!(u, RuntimeUpdate::Status(_))));
+    let rows = replaced(&updates).expect("replaced");
+    assert_eq!(
+        rows.first(),
+        Some(&Row::Info("Navigated to selected point".into()))
+    );
+    assert!(
+        rows.contains(&Row::Answer("Echo: alpha.".into())),
+        "{rows:#?}"
+    );
+    assert!(!rows.contains(&Row::User("beta".into())), "{rows:#?}");
+    assert_eq!(restored(&updates).as_deref(), Some("beta"));
+    assert_eq!(h_requests(&requests), 2, "navigation sent no request");
+    h.turn(4, "gamma");
+    let (_, sent) = requests.lock().expect("requests")[2].clone();
+    assert!(sent.contains("alpha") && sent.contains("gamma"), "{sent}");
+    assert!(!sent.contains("beta"), "{sent}");
+    h.stop();
+    assert_eq!(world.files(), std::slice::from_ref(&file), "the same file");
+    assert_eq!(texts(&file, "user"), ["alpha", "beta", "gamma"]);
+    let messages = entries(&file, "message");
+    let parent_of = |text: &str| {
+        messages
+            .iter()
+            .find(|entry| entry["message"]["content"] == text)
+            .map(|entry| entry["parentId"].clone())
+    };
+    // beta and gamma are siblings under alpha's answer.
+    assert_eq!(parent_of("beta"), parent_of("gamma"));
+}
+
+// Pi: choosing the current point changes nothing; a cancelled sheet keeps
+// the leaf and gives the draft back; neither sends a request.
+#[test]
+fn tree_at_the_leaf_or_cancelled_changes_nothing() {
+    let world = World::new("tree-noop");
+    let manager = persisted(&world);
+    let file = manager.session_file().expect("file").to_path_buf();
+    let (h, requests) = session_harness(&world, manager, Vec::new(), None);
+    h.turn(1, "alpha");
+    h.submit_id(2, Submission::FollowUp("/tree".into()));
+    let dialog = h.next_dialog();
+    h.choose_answer(dialog.id, choose(&dialog, "• assistant: Echo: alpha."));
+    let updates = h.settled_command(2);
+    assert!(replaced(&updates).is_none());
+    assert!(updates.contains(&RuntimeUpdate::Commit(vec![Row::Info(
+        "Already at this point".into()
+    )])));
+    h.submit_id(3, Submission::FollowUp("/tree".into()));
+    let dialog = h.next_dialog();
+    h.choose_answer(dialog.id, DialogAnswer::Cancel);
+    assert_eq!(refused(&h.ended(3)).as_deref(), Some(commands::CANCELLED));
+    h.submit_id(4, Submission::FollowUp("/tree now".into()));
+    assert!(
+        refused(&h.ended(4))
+            .expect("refused")
+            .contains("no argument")
+    );
+    h.turn(5, "beta");
+    h.stop();
+    assert_eq!(texts(&file, "user"), ["alpha", "beta"]);
+    assert_eq!(h_requests(&requests), 2);
+}
+
+// Pi "should fork from middle of conversation" and `fork` restoring the
+// fork's recorded model: the fork is a new file in the same directory that
+// names the source as its parent and holds the path before the chosen
+// message; the source file is unchanged; the message is back in the
+// draft; later prompts land in the fork.
+#[test]
+fn fork_starts_a_new_file_and_leaves_the_source_unchanged() {
+    let world = World::new("fork");
+    let manager = persisted(&world);
+    let source = manager.session_file().expect("file").to_path_buf();
+    let (h, requests) = session_harness(&world, manager, Vec::new(), None);
+    h.turn(1, "alpha");
+    h.command(2, "/model faux/faux-2");
+    h.command(3, "/thinking high");
+    h.turn(4, "beta");
+    // A later change, on the source's path only.
+    h.command(5, "/model faux/faux-1");
+    let before = std::fs::read(&source).expect("source");
+    h.submit_id(6, Submission::FollowUp("/fork".into()));
+    let dialog = h.next_dialog();
+    let DialogKind::List(list) = &dialog.kind else {
+        panic!("{dialog:?}");
+    };
+    assert_eq!(list.items.len(), 2);
+    assert_eq!(list.selected, Some(1), "the latest message first");
+    assert_eq!(list.current, None);
+    h.choose_answer(dialog.id, choose(&dialog, "beta"));
+    let mut updates = h.ended(6);
+    updates.extend(h.until(|u| matches!(u, RuntimeUpdate::Status(_))));
+    let rows = replaced(&updates).expect("replaced");
+    assert_eq!(
+        rows.first(),
+        Some(&Row::Info("Forked to new session".into()))
+    );
+    let forked = saved_file(&rows);
+    assert_ne!(forked, source);
+    assert_eq!(forked.parent(), source.parent());
+    assert!(rows.contains(&Row::User("alpha".into())), "{rows:#?}");
+    assert!(!rows.contains(&Row::User("beta".into())), "{rows:#?}");
+    assert_eq!(restored(&updates).as_deref(), Some("beta"));
+    let status = last_status(&updates).expect("status");
+    assert_eq!(status.model.as_deref(), Some("faux/faux-2"));
+    assert_eq!(status.thinking.as_deref(), Some("high"));
+    assert_eq!(std::fs::read(&source).expect("source"), before);
+    let header = entries(&forked, "session");
+    assert_eq!(
+        header[0]["parentSession"].as_str(),
+        Some(source.to_string_lossy().as_ref())
+    );
+    let sent_before = h_requests(&requests);
+    assert_eq!(sent_before, 2, "the sheet sent no request");
+    h.turn(7, "gamma");
+    let (model, sent) = requests.lock().expect("requests")[2].clone();
+    assert_eq!(model, "faux-2");
+    assert!(sent.contains("alpha") && sent.contains("gamma"), "{sent}");
+    assert!(!sent.contains("beta"), "{sent}");
+    h.stop();
+    assert_eq!(std::fs::read(&source).expect("source"), before);
+    assert_eq!(texts(&forked, "user"), ["alpha", "gamma"]);
+    SessionManager::open(&source, None, None).expect("source free");
+    SessionManager::open(&forked, None, None).expect("fork free");
+}
+
+// Pi "should support in-memory forking in --no-session mode".
+#[test]
+fn fork_under_no_session_stays_in_memory() {
+    let world = World::new("fork-memory");
+    let manager = SessionManager::in_memory(
+        Some(&world.project()),
+        NewSessionOptions::default(),
+        Vec::new(),
+    )
+    .expect("memory");
+    let (h, _requests) = session_harness(&world, manager, Vec::new(), None);
+    h.turn(1, "alpha");
+    h.turn(2, "beta");
+    h.submit_id(3, Submission::FollowUp("/fork".into()));
+    let dialog = h.next_dialog();
+    h.choose_answer(dialog.id, choose(&dialog, "alpha"));
+    let mut updates = h.ended(3);
+    updates.extend(h.until(|u| matches!(u, RuntimeUpdate::Status(_))));
+    let rows = replaced(&updates).expect("replaced");
+    assert!(
+        rows.contains(&Row::Info("Session not saved (--no-session)".into())),
+        "{rows:#?}"
+    );
+    assert!(
+        !rows.iter().any(|row| matches!(row, Row::User(_))),
+        "{rows:#?}"
+    );
+    assert_eq!(restored(&updates).as_deref(), Some("alpha"));
+    h.stop();
+    assert!(world.files().is_empty());
+}
+
+// Bake: an Esc at the fork's commit boundary discards the built fork: the
+// running session stays and keeps writing its file, the draft comes back,
+// and the fork's file, written when it was built, is unlocked.
+#[test]
+fn an_esc_at_the_fork_commit_boundary_keeps_the_source_session() {
+    let world = World::new("fork-boundary");
+    let manager = persisted(&world);
+    let source = manager.session_file().expect("file").to_path_buf();
+    let (reached_tx, reached) = std_mpsc::channel();
+    let gate = commands::CommitGate {
+        reached: reached_tx,
+        release: commands::Release::Aborted,
+    };
+    let (h, _requests) = session_harness(&world, manager, Vec::new(), Some(gate));
+    h.turn(1, "alpha");
+    h.turn(2, "beta");
+    h.submit_id(3, Submission::FollowUp("/fork".into()));
+    let dialog = h.next_dialog();
+    h.choose_answer(dialog.id, choose(&dialog, "beta"));
+    reached.recv_timeout(PATIENCE).expect("built and held");
+    h.choose_answer(dialog.id, DialogAnswer::Cancel);
+    let updates = h.ended(3);
+    assert_eq!(refused(&updates).as_deref(), Some(commands::CANCELLED));
+    assert!(replaced(&updates).is_none());
+    assert!(restored(&updates).is_none());
+    h.turn(4, "gamma");
+    h.stop();
+    assert_eq!(texts(&source, "user"), ["alpha", "beta", "gamma"]);
+    for file in world.files() {
+        SessionManager::open(&file, None, None).expect("unlocked");
+    }
+}
+
+// Bake: an Esc after the `/tree` choice, before the session moves the
+// leaf, moves nothing: the transcript and draft come back as they were and
+// the next prompt continues from the old leaf.
+#[test]
+fn an_esc_before_the_tree_commit_moves_nothing() {
+    let world = World::new("tree-boundary");
+    let manager = persisted(&world);
+    let file = manager.session_file().expect("file").to_path_buf();
+    let (reached_tx, reached) = std_mpsc::channel();
+    let gate = commands::CommitGate {
+        reached: reached_tx,
+        release: commands::Release::Aborted,
+    };
+    let (h, requests) = session_harness(&world, manager, Vec::new(), Some(gate));
+    h.turn(1, "alpha");
+    h.turn(2, "beta");
+    h.submit_id(3, Submission::FollowUp("/tree".into()));
+    let dialog = h.next_dialog();
+    h.choose_answer(dialog.id, choose(&dialog, "• user: beta"));
+    reached.recv_timeout(PATIENCE).expect("chosen and held");
+    h.choose_answer(dialog.id, DialogAnswer::Cancel);
+    let updates = h.ended(3);
+    assert_eq!(refused(&updates).as_deref(), Some(commands::CANCELLED));
+    assert!(replaced(&updates).is_none());
+    assert!(restored(&updates).is_none());
+    h.turn(4, "gamma");
+    let (_, sent) = requests.lock().expect("requests")[2].clone();
+    assert!(sent.contains("beta") && sent.contains("gamma"), "{sent}");
+    h.stop();
+    assert_eq!(texts(&file, "user"), ["alpha", "beta", "gamma"]);
 }

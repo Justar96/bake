@@ -22,6 +22,14 @@ showSessionSelector, and handleResumeSession) with the session switch of
 src/core/agent-session-runtime.ts (newSession, switchSession). The case
 "restores model and thinking state from the destination session" of
 test/suite/agent-session-runtime.test.ts is adapted in
+src/live/tests/sessions_live.rs. The /tree and /fork commands adapt
+showTreeSelector (without its branch-summary prompt) and
+showUserMessageSelector of interactive-mode.ts, and src/live/tree.rs adapts
+src/modes/interactive/components/tree-selector.ts (TreeList's flattenTree,
+default filter, recalculateVisualStructure, findNearestVisibleIndex, row
+prefix, getEntryDisplayText, and formatToolCall) and
+components/user-message-selector.ts, with cases of test/tree-selector.test.ts
+and test/agent-session-branching.test.ts in src/live/tests/tree_rows.rs and
 src/live/tests/sessions_live.rs.
 --------------------------------------------------------------------------------
 MIT License

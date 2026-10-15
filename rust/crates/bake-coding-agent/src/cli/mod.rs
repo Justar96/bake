@@ -26,8 +26,8 @@
 //! [`start`] is the setup print mode and interactive mode share: the
 //! binary runs print mode through [`run`] and hands an interactive
 //! session to the terminal frontend (`bake-tui`), with a
-//! [`SessionFactory`] that builds the sessions `/new` and `/resume` switch
-//! to from the same arguments and the running session's settings and
+//! [`SessionFactory`] that builds the sessions `/new`, `/resume`, and
+//! `/fork` switch to from the same arguments and the running session's settings and
 //! models, without touching the running session (adapted from Pi v1.2.0
 //! `core/agent-session-runtime.ts`).
 //!
@@ -928,6 +928,13 @@ pub enum SessionTarget {
     Open { path: PathBuf, id: String },
 }
 
+/// Where [`SessionFactory::build_replacement`] takes its store from.
+enum Staged {
+    Target(SessionTarget),
+    /// A store already built, such as a fork's.
+    Store(Box<SessionManager>),
+}
+
 /// A replacement session, built and not yet in use, and what its setup
 /// warned about.
 pub struct Replacement {
@@ -935,7 +942,8 @@ pub struct Replacement {
     pub warnings: Vec<String>,
 }
 
-/// Builds the sessions `/new` and `/resume` replace the running one with,
+/// Builds the sessions `/new`, `/resume`, and `/fork` replace the running
+/// one with,
 /// as Pi's `createRuntime` does for `AgentSessionRuntime`: the same Bake
 /// home, tools, flags, sandbox provider, and approver as at startup, with
 /// the running session's live settings and model runtime, so a sign-in, a
@@ -1003,28 +1011,63 @@ impl SessionFactory {
         current: &AgentSession,
         target: SessionTarget,
     ) -> Result<Replacement, String> {
+        let resume = matches!(target, SessionTarget::Open { .. });
+        self.build_replacement(current, Staged::Target(target), resume)
+            .await
+    }
+
+    /// Builds the session `/fork` replaces `current` with, Pi's runtime
+    /// `fork` before the user message `entry_id`
+    /// ([`AgentSession::fork_session_manager`]), and returns it with the
+    /// message's text, for the editor. A fork that holds history restores
+    /// the model, thinking level, and permission its path records, as
+    /// `/resume` does; an empty fork, from a first message, starts as
+    /// `/new` does. `current` and its file are not touched; a persisted
+    /// fork's file may already be written when a later step fails.
+    pub async fn fork(
+        &self,
+        current: &AgentSession,
+        entry_id: &str,
+    ) -> Result<(Replacement, String), String> {
+        let forked = current.fork_session_manager(entry_id).await?;
+        let resume = !forked.session.build_session_context().messages.is_empty();
+        let replacement = self
+            .build_replacement(current, Staged::Store(Box::new(forked.session)), resume)
+            .await?;
+        Ok((replacement, forked.selected_text))
+    }
+
+    async fn build_replacement(
+        &self,
+        current: &AgentSession,
+        staged: Staged,
+        resume: bool,
+    ) -> Result<Replacement, String> {
         let settings = current.settings();
         let registry = current.model_runtime().clone();
         let (place, persisted) = current.session_place();
         let cwd = current.cwd();
-        let (model, thinking_level) = match &target {
-            SessionTarget::New => (current.model(), Some(current.thinking_level())),
-            SessionTarget::Open { .. } => (None, None),
+        let (model, thinking_level) = if resume {
+            (None, None)
+        } else {
+            (current.model(), Some(current.thinking_level()))
         };
-        let resume = matches!(target, SessionTarget::Open { .. });
         let factory = self.clone();
         let loaded = tokio::task::spawn_blocking(move || {
             let mut warnings = Vec::new();
-            let mut session = match target {
-                SessionTarget::New if persisted => {
+            let mut session = match staged {
+                Staged::Target(SessionTarget::New) if persisted => {
                     SessionManager::create(&cwd, Some(&place), NewSessionOptions::default())
                         .map_err(|error| error.to_string())
                 }
-                SessionTarget::New => {
+                Staged::Target(SessionTarget::New) => {
                     SessionManager::in_memory(Some(&cwd), NewSessionOptions::default(), Vec::new())
                         .map_err(|error| error.to_string())
                 }
-                SessionTarget::Open { path, id } => open_listed(&path, &id, &place, &cwd),
+                Staged::Target(SessionTarget::Open { path, id }) => {
+                    open_listed(&path, &id, &place, &cwd)
+                }
+                Staged::Store(session) => Ok(*session),
             }?;
             let resources = load_resources(
                 &mut session,

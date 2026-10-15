@@ -234,11 +234,14 @@ pub(super) struct Activity {
     pub manual_compaction: bool,
     /// Automatic compaction.
     pub auto_compaction: bool,
+    /// [`super::AgentSession::navigate_tree`], which Pi counts in
+    /// `isCompacting` through `_branchSummaryAbortController`.
+    pub navigation: bool,
 }
 
 impl Activity {
     pub fn idle(self) -> bool {
-        !self.run && !self.manual_compaction && !self.auto_compaction
+        !self.run && !self.manual_compaction && !self.auto_compaction && !self.navigation
     }
 }
 

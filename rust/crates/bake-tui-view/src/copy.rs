@@ -140,6 +140,8 @@ pub const IMAGES_WHILE_RUNNING: &str =
 pub const PREVIEW_ONLY: &str = "Sample activity and sample agents are only in `bake-rs preview`.";
 /// The runtime gave prompts back to the draft.
 pub const RETURNED: &str = "Unsent prompts are back in your draft.";
+/// `/tree` or `/fork` put the chosen message into the draft.
+pub const RESTORED: &str = "The chosen message is in your draft; edit it and press Enter to send.";
 /// The header's word for a live turn that ended with an error.
 pub const FAILED_TURN: &str = "Failed";
 /// The phase a runtime turn shows until the runtime names one.

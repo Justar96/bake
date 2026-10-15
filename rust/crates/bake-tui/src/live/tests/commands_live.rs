@@ -605,7 +605,7 @@ fn a_driver_panic_during_a_held_login_commit_still_finishes_it() {
     h.reply(key.id, entered(KEY));
     reached.recv_timeout(PATIENCE).expect("held at the commit");
     assert_eq!(auth_key(&home.0), None);
-    h.submit_id(99, Submission::FollowUp("/tree".into()));
+    h.submit_id(99, Submission::FollowUp("/clone".into()));
     let runtime = stop_after_panic(h);
     assert_eq!(auth_key(&home.0).as_deref(), Some(KEY));
     assert!(
@@ -651,7 +651,7 @@ fn a_driver_panic_during_a_held_startup_refresh_aborts_its_fetch() {
     reached
         .recv_timeout(PATIENCE)
         .expect("the startup refresh reached the proxy");
-    h.submit_id(99, Submission::FollowUp("/tree".into()));
+    h.submit_id(99, Submission::FollowUp("/clone".into()));
     let runtime = stop_after_panic(h);
     assert!(
         callback_alive.upgrade().is_none(),

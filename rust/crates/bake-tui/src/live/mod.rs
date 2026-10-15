@@ -42,6 +42,7 @@
 
 pub mod commands;
 pub mod projection;
+pub mod tree;
 
 use std::collections::VecDeque;
 use std::io;
@@ -70,7 +71,6 @@ use projection::Projector;
 /// `bake-rs` does not run yet; [`commands::COMMANDS`] are the ones it
 /// runs. A prompt that names one is refused instead of reaching the model.
 const PI_COMMANDS: &[&str] = &[
-    "tree",
     "scoped-models",
     "export",
     "import",
@@ -79,7 +79,6 @@ const PI_COMMANDS: &[&str] = &[
     "copy",
     "changelog",
     "hotkeys",
-    "fork",
     "clone",
     "trust",
     "compact",
@@ -875,7 +874,11 @@ impl Driver {
         // The command closed its dialog; a panicked one could not have.
         self.send(RuntimeUpdate::Dialog(None));
         match outcome {
-            Ok(commands::Done::Replace { replacement, note }) => {
+            Ok(commands::Done::Replace {
+                replacement,
+                note,
+                draft,
+            }) => {
                 // Prompts were refused while it ran, so the session is
                 // idle; anything else keeps it, and its draft comes back,
                 // as does an Esc that arrived after the replacement was
@@ -893,7 +896,29 @@ impl Driver {
                     if let Some(id) = command.id {
                         self.send(RuntimeUpdate::Admitted(id));
                     }
+                    if let Some(draft) = draft {
+                        self.send(RuntimeUpdate::Restored(draft));
+                    }
                 }
+            }
+            // The leaf already moved inside the session, which claimed it
+            // idle; the transcript starts over with the new path.
+            Ok(commands::Done::Navigated { note, draft }) => {
+                if let Some(id) = command.id {
+                    self.send(RuntimeUpdate::Admitted(id));
+                }
+                *self
+                    .projector
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner) = Projector::default();
+                self.send(RuntimeUpdate::Replaced(opening_rows(
+                    &[note],
+                    &self.session,
+                )));
+                if let Some(draft) = draft {
+                    self.send(RuntimeUpdate::Restored(draft));
+                }
+                self.publish_pending();
             }
             Ok(done) => {
                 if let Some(id) = command.id {

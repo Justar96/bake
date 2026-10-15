@@ -69,7 +69,20 @@ test/suite/regressions/3686-session-name-event.test.ts adapted in
 agent_session/control_tests.rs (their extension variants are not adapted);
 and the session construction of src/core/agent-session-runtime.ts
 (newSession and switchSession building the next session) adapted in
-src/cli/mod.rs as SessionFactory.
+src/cli/mod.rs as SessionFactory. Also from v1.2.0, tree navigation and
+forking: navigateTree (without branch summaries or extension events),
+getUserMessagesForForking, and the leaf rules and context refresh of
+src/core/agent-session.ts, adapted in agent_session/navigation.rs; and the
+runtime fork of src/core/agent-session-runtime.ts (its default position
+before a user message, createBranchedSession and newSession with a parent
+session) adapted in agent_session/navigation.rs, session/manager.rs
+(branched_copy), and src/cli/mod.rs (SessionFactory::fork). Cases of
+test/agent-session-tree-navigation.test.ts,
+test/agent-session-branching.test.ts,
+test/suite/regressions/tree-during-streaming.test.ts,
+test/suite/regressions/9178-tree-during-compaction.test.ts, and
+test/suite/regressions/8724-in-memory-fork-active-tool.test.ts are adapted
+in agent_session/navigation_tests.rs.
 --------------------------------------------------------------------------------
 MIT License
 
