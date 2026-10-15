@@ -1,6 +1,6 @@
 # The command line
 
-In a terminal, bake-rs opens an interactive session; with `-p`, or when standard input or output is not a terminal, it runs one headless turn, prints the result, and exits. `bake-rs --help` lists every option, and `bake-rs docs` lists these topics.
+In a terminal, bake-rs opens an interactive session; with `-p` or `--mode`, or when standard input or output is not a terminal, it runs one headless turn, prints the result, and exits. `bake-rs --help` lists every option, and `bake-rs docs` lists these topics.
 
 ## Interactive sessions
 
@@ -27,7 +27,7 @@ git diff | bake-rs -p $'\n\nReview this change'
 bake-rs --mode json -p "List the tests" > events.jsonl
 ```
 
-- `-p`, `--print` sends the prompts and prints the final answer. bake-rs also prints when `--mode` is given or standard input or output is not a terminal; otherwise it stops with an error.
+- `-p`, `--print` sends the prompts and prints the final answer. bake-rs also prints when `--mode` is given or standard input or output is not a terminal; otherwise it opens an interactive session.
 - Each message argument is a prompt, sent in order. `--` ends the options, so later arguments are messages even when they start with `-`.
 - When standard input is not a terminal, bake-rs reads it to the end before starting, up to 64 MiB, so give a run with nothing to pipe `< /dev/null`. The input is trimmed and joined to the first message with no separator, which is why the example above starts its message with a blank line.
 - `--mode text` prints the text of the final answer; `--mode json` prints the session header and then every event as one JSON line.
