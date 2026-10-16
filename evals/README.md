@@ -71,6 +71,7 @@ DeepSeek offers `low`, `high`, and `max` but no `medium`, so it runs at `high`, 
 | `EVAL_TRIALS` | trials per scenario, default 3 |
 | `EVAL_OUTPUT` | raw output directory |
 | `EVAL_GATEWAY` | a JSON file of `{ baseUrl, apiKey }`, such as pi's `~/.pi/agent/cliproxyapi.json`, that replaces the `cliproxyapi` upstream and key for every arm; the proxy swaps each arm's key for this one, so both arms reach one upstream with one account. DeepSeek routes are unaffected |
+| `EVAL_NATIVE_PERMISSION` | the preset every native arm runs under: `danger-full-access`, the default, as the Bake arms run, or `workspace-write`, the default preset, whose `bash` needs a usable sandbox backend on the host; `design.json` records it as `nativePermission` |
 | `EVAL_EXTRA_<ARM>` | a JSON array of extra overlay rows for one Bake arm, for an attribution arm such as `[{"id":"fs-observation-policy","config":{"editGuard":"version"}}]` |
 | `EVAL_SETTINGS_<ARM>` | a JSON object deep-merged into one Bake arm's `settings.yaml`, for settings no overlay row carries; it can change one route key, such as `{"llm-pi-ai":{"providers":{"$PROVIDER":{"strictTools":true}}}}`, without replacing the route, and arrays replace; `$PROVIDER` and `$MODEL` become the route under test |
 
@@ -161,7 +162,7 @@ An arm named `native` runs the native agent, `bake-rs -p --mode json`, through t
 
 `design.json` records each native arm's binary path, `bake-rs --version`, and SHA-256. A built arm also records `prebuilt: false` with the checkout's commit and whether its tracked files differed, both read right after the build. A prebuilt binary records `prebuilt: true` with no commit, since nothing ties it to one, and a record names no candidate commit for it. A record meant to name a commit builds its native arm from a checkout.
 
-Each sample runs `bake-rs -p --mode json --no-session --permission danger-full-access --model <provider>/<model> --thinking <effort> -- <prompt>` in the fixture workspace, with `BAKE_HOME` and `DSH_HOME` set to the sample's private home. The evaluator fills that home as it fills a Bake arm's:
+Each sample runs `bake-rs -p --mode json --no-session --permission danger-full-access --model <provider>/<model> --thinking <effort> -- <prompt>` in the fixture workspace, with `workspace-write` in place of `danger-full-access` when `EVAL_NATIVE_PERMISSION` asks for it, with `BAKE_HOME` and `DSH_HOME` set to the sample's private home. The evaluator fills that home as it fills a Bake arm's:
 
 - A `cliproxyapi` model gets the same `settings.yaml` route, pointed at the proxy, and a copy of `~/.bake/.credentials.yaml`. `bake-rs` imports both read-only, as it imports a 0.3 home (D25), so the native arm measures the route users get.
 - A DeepSeek model gets a `models.json` `deepseek` provider over Chat Completions at `api.deepseek.com`, whose model entry carries the shipped profile's metadata. `bake-rs` ships no Anthropic-format DeepSeek profile, so this arm reaches DeepSeek over the wire pi uses, not the Bake arm's. Its key, `DEEPSEEK_API_KEY` from the environment or `~/.bake/.credentials.yaml`, reaches the agent as `EVAL_API_KEY`.

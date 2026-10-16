@@ -152,13 +152,20 @@ export function bakeCommand(root: string, patch: string, prompt: string): string
   return ['node', join(root, 'apps/cli/lib/bin.js'), 'headless', '--patch', patch, '--json', prompt]
 }
 
+/** The permission presets a native arm can run under (`EVAL_NATIVE_PERMISSION`). */
+export const NATIVE_PERMISSIONS = ['danger-full-access', 'workspace-write'] as const
+export type NativePermission = typeof NATIVE_PERMISSIONS[number]
+
 /**
  * The `bake-rs` print-mode launch for one native sample: Pi's JSON event
- * stream, no session file, the Bake arms' `danger-full-access` preset, and the
- * route's model and effort. The prompt follows `--`, so it is never an option.
+ * stream, no session file, the permission preset (the Bake arms'
+ * `danger-full-access` unless the run asks for the default
+ * `workspace-write`), and the route's model and effort. The prompt follows
+ * `--`, so it is never an option.
  */
-export function nativeCommand(bin: string, provider: string, model: string, effort: string, prompt: string): string[] {
-  return [bin, '-p', '--mode', 'json', '--no-session', '--permission', 'danger-full-access',
+export function nativeCommand(bin: string, provider: string, model: string, effort: string, prompt: string,
+  permission: NativePermission = 'danger-full-access'): string[] {
+  return [bin, '-p', '--mode', 'json', '--no-session', '--permission', permission,
     '--model', `${provider}/${model}`, '--thinking', effort, '--', prompt]
 }
 

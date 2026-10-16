@@ -26,6 +26,12 @@ describe('native arms', () => {
         '--model', 'cliproxyapi/gpt-x', '--thinking', 'medium', '--', '-starts with a dash'])
   })
 
+  test('run under the default preset when the evaluation asks for it', () => {
+    expect(nativeCommand('/bin/bake-rs', 'cliproxyapi', 'gpt-x', 'medium', 'go', 'workspace-write'))
+      .toEqual(['/bin/bake-rs', '-p', '--mode', 'json', '--no-session', '--permission', 'workspace-write',
+        '--model', 'cliproxyapi/gpt-x', '--thinking', 'medium', '--', 'go'])
+  })
+
   test('the executable is the bake-rs binary Cargo reports, wherever its target directory is', () => {
     const artifact = (name: string, kind: string, executable: string | null) =>
       JSON.stringify({ reason: 'compiler-artifact', target: { name, kind: [kind] }, executable })
