@@ -692,6 +692,8 @@ class FakeModel {
   readonly modelLists: string[] = []
   /** Holds each model list until `release()`, as a slow proxy would. */
   holdModels = false
+  /** Streams this prompt's whole answer but holds its response.completed event. */
+  holdAnswerFor: string | undefined
   /** Settles when a held model list is aborted by its client. */
   readonly listAborted = Promise.withResolvers<void>()
   private releases: (() => void)[] = []
@@ -806,7 +808,8 @@ class FakeModel {
         },
       }), { headers: { 'content-type': 'text/event-stream' } })
     }
-    return sse(text(n, `Echo: ${prompt.replace(/^ECHO\s*/u, '')}.`))
+    const events = text(n, `Echo: ${prompt.replace(/^ECHO\s*/u, '')}.`)
+    return prompt === this.holdAnswerFor ? this.held(request, events, events.length - 1) : sse(events)
   }
 }
 
@@ -944,20 +947,33 @@ await liveScenario('a live session streams an answer and a tool call, takes a se
   await session.wait('tool call and answer', () => session.screen.includes('Read it:') && /notes\.txt/u.test(session.screen)
     && /^ {2}✓ Completed/mu.test(session.screen) && session.screen.includes('❯ Type a draft'))
   assert(/✓ Read: notes\.txt +2 lines/u.test(session.screen) && session.screen.includes('│ alpha line'), `the read card is missing\n${session.screen}`)
+  world.model.holdAnswerFor = 'ECHO second prompt'
   session.send('ECHO second prompt\r')
-  await session.wait('second answer', () => session.screen.includes('Echo: second prompt.'))
+  await session.wait('second answer text', () => session.screen.includes('Echo: second prompt.'))
+  assert.equal(world.model.holding, 1, 'the final provider event must still be held')
   assert.equal(session.screen.split('Echo: second prompt.').length - 1, 1, 'the streamed answer was drawn twice')
-  // A pasted image path stages the image, and an idle prompt sends it with the text.
-  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64')
-  const imagePath = join(world.root, 'dot.png')
-  await writeFile(imagePath, png)
-  session.send('ECHO picture ')
-  session.send(`\x1b[200~${imagePath}\x1b[201~`)
-  await session.wait('image staged', () => session.screen.includes('❯ ECHO picture [Image #1]') && session.screen.includes('Staged attachments: 1'))
-  const sentBefore = world.model.requests.length
-  session.send('\r')
-  await session.wait('image prompt answered', () => session.screen.includes('Echo: picture [Image #1].') && !session.screen.includes('Staged attachments'))
-  assert(JSON.stringify(world.model.requests[sentBefore]?.input).includes('input_image'), 'the staged image was not sent')
+  let completed = false
+  const settled = turnSettled(session, 'Echo: second prompt.').then(() => { completed = true })
+  // Observe a later PTY frame while completion is held, so text alone cannot satisfy the wait.
+  void settled.catch(() => {})
+  try {
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64')
+    const imagePath = join(world.root, 'dot.png')
+    await writeFile(imagePath, png)
+    session.send('ECHO picture ')
+    session.send(`\x1b[200~${imagePath}\x1b[201~`)
+    await session.wait('image staged', () => session.screen.includes('❯ ECHO picture [Image #1]') && session.screen.includes('Staged attachments: 1'))
+    assert(!completed, 'answer text must not be mistaken for a completed turn')
+    world.model.release()
+    await settled
+    const sentBefore = world.model.requests.length
+    session.send('\r')
+    await session.wait('image prompt answered', () => session.screen.includes('Echo: picture [Image #1].') && !session.screen.includes('Staged attachments'))
+    assert(JSON.stringify(world.model.requests[sentBefore]?.input).includes('input_image'), 'the staged image was not sent')
+  } finally {
+    world.model.release()
+    await settled.catch(() => {})
+  }
   await session.quit()
   const [entries] = await sessionEntries(world.home)
   assert(entries, 'no session file was written')
