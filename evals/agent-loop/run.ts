@@ -39,7 +39,7 @@ import {
   requestsOverFloor, routingDecisions, runawayAbort, shellEdits, skillLoads, verifiedBeforeFinal,
 } from './metrics.ts'
 import {
-  CASE_SETS, capMsFor, checkCommandFor, CONTEXT_WINDOWS, fixture, maxRequestsFor, piCompactionFor, prompts, REQUEST_FLOORS, requestCaps,
+  CASE_SETS, capMsFor, checkCommandFor, CONTEXT_WINDOWS, fixture, maxRequestsFor, piCompactionFor, piContextWindowFor, prompts, REQUEST_FLOORS, requestCaps,
   requestFloorFor, SKILL_SCENARIOS, STANDARD_CASES, usesAgentInstructions, usesSkills, validate, wallClockCaps,
 } from './scenarios.ts'
 import { DEEPSEEK_ANTHROPIC_BASE_URL, deepseekProfile } from '../../packages/llm/llm-pi-ai/tests/deepseek-profile.ts'
@@ -273,6 +273,8 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
   const built = fixture(root, scenario)
   const { workspace, file } = built
   const contextWindow = CONTEXT_WINDOWS[scenario]
+  // The window this arm's route gets: pi and bake-rs take pi's window for a forced one (piContextWindowFor).
+  const armWindow = contextWindow === undefined || !jsonMode ? contextWindow : piContextWindowFor(contextWindow)
   // The rendered system prompt of the agent's first request: the composition this sample measured.
   let systemPrompt: string | null = null
   const home = join(root, 'home'); mkdirSync(home, { mode: 0o700 })
@@ -393,18 +395,18 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
     if (nativeRoute !== undefined) {
       const files = nativeRoute.home(`${server.url.origin}/upstream`)
       if (files.settings !== undefined) {
-        if (contextWindow !== undefined) contextWindowApplied = withContextWindow(files.settings, nativeRoute.provider, contextWindow)
+        if (armWindow !== undefined) contextWindowApplied = withContextWindow(files.settings, nativeRoute.provider, armWindow)
         writeFileSync(join(home, 'settings.yaml'), YAML.stringify({ ...files.settings, permission: { defaultPreset: 'danger-full-access' } }), { mode: 0o600 })
         copyFileSync(credentialFile, join(home, '.credentials.yaml'))
       }
       if (files.models !== undefined) {
-        if (contextWindow !== undefined) {
-          for (const provider of Object.values(files.models.providers) as any[]) for (const entry of provider.models) entry.contextWindow = contextWindow
+        if (armWindow !== undefined) {
+          for (const provider of Object.values(files.models.providers) as any[]) for (const entry of provider.models) entry.contextWindow = armWindow
           contextWindowApplied = true
         }
         writeFileSync(join(home, 'models.json'), JSON.stringify(files.models), { mode: 0o600 })
       }
-      // As for pi: agent-level retry off, and a forced window gets compaction settings that mirror Bake's policy at it.
+      // As for pi: agent-level retry off, and a forced window becomes pi's window and compaction settings for it.
       writeFileSync(join(home, 'settings.json'), JSON.stringify({
         retry: { enabled: false }, ...contextWindow === undefined ? {} : { compaction: piCompactionFor(contextWindow) },
       }), { mode: 0o600 })
@@ -421,10 +423,10 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
       const agentDir = join(root, 'pi-agent'); mkdirSync(agentDir, { mode: 0o700 })
       writeFileSync(join(agentDir, 'models.json'), JSON.stringify({ providers: { eval: {
         baseUrl: `${server.url.origin}/upstream`, api: piRoute.api, apiKey: '$EVAL_API_KEY',
-        models: [contextWindow === undefined ? piRoute.model : { ...piRoute.model, contextWindow }],
+        models: [contextWindow === undefined ? piRoute.model : { ...piRoute.model, contextWindow: armWindow }],
       } } }), { mode: 0o600 })
       // Bake arms run with retries off; pi's agent-level retry would hide failed requests from the pair.
-      // A forced window also gets compaction settings that mirror Bake's policy at that window.
+      // A forced window becomes pi's window, Bake's threshold plus pi's reserve, with compaction settings for it.
       writeFileSync(join(agentDir, 'settings.json'), JSON.stringify({
         quietStartup: true, retry: { enabled: false }, ...contextWindow === undefined ? {} : { compaction: piCompactionFor(contextWindow) },
       }))
@@ -522,7 +524,7 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
       backgroundStarts: backgroundStarts(calls),
       skillLoads: usesSkills(scenario) ? skillLoads(calls) : null,
       skillNeeded: SKILL_SCENARIOS[scenario] ?? null,
-      contextWindow: contextWindowApplied ? contextWindow : null,
+      contextWindow: contextWindowApplied ? armWindow : null,
       compactions: nativeRoute !== undefined ? jsonModeCompactions(events) : piRoute === undefined ? compactions(logged) : null,
       runawayAbort: runawayAbort([
         stderr, final,
@@ -585,15 +587,16 @@ writeFileSync(join(out, 'design.json'), JSON.stringify({
   node: Bun.spawnSync(['node', '--version']).stdout.toString().trim(), models: routes.map(route => route.model), cases, trials, roster,
   routes: Object.fromEntries(routes.map(route => [route.model, { provider: route.provider, api: route.api, effort: route.effort }])),
   effort: 'medium where the model offers it; DeepSeek runs at high, its default, having no medium', maxOutputTokens: 8192, capMs: wallClockCaps().default, capMsByScenario: wallClockCaps(), maxRequests: requestCaps(), requestFloors: REQUEST_FLOORS, contextWindows: CONTEXT_WINDOWS, maxLogicalTokens,
-  // pi's compaction settings for each forced window, mirroring Bake's default threshold and retained tail; pi's defaults would compact before every request.
+  // What pi and bake-rs get for each forced window: Bake's threshold plus pi's default reserve, and Bake's retained tail.
+  piContextWindows: Object.fromEntries(Object.entries(CONTEXT_WINDOWS).map(([scenario, contextWindow]) => [scenario, piContextWindowFor(contextWindow)])),
   piCompaction: Object.fromEntries(Object.entries(CONTEXT_WINDOWS).map(([scenario, contextWindow]) => [scenario, piCompactionFor(contextWindow)])),
   retryPolicy: { mode: 'normal', maxRetries: 0 },
   gateway: override === undefined ? null : new URL(override.baseUrl).origin,
   composition: 'Built headless CLI with each revision\'s own headless system-prompt config (harness opener off, working-directory suffix) and its standard-preset persona prefix; host tools retained.'
     + (roster === 'tui' ? ' Roster tui: the standard preset\'s tool-fs, tool-fs-search, and tool-result-pruner configs and the terminal spill-policy inline cap; ask_user_question stays out, having no one to answer it headless.' : ' Roster headless: the headless bundle\'s own tool configs.')
     + ' Session title and ambient AGENTS disabled equally; instructions_file keeps agent-instructions for its own AGENTS.md.'
-    + (armNames.some(name => ARMS[name]!.kind === 'native') ? ' A native arm runs bake-rs -p --mode json with its own system prompt and Pi\'s default tools (read, bash, edit, write), no session file, the danger-full-access preset, and agent-level retry off; a cliproxyapi model comes through the 0.3 settings.yaml and .credentials.yaml it imports read-only, and a DeepSeek model through models.json over Chat Completions. It skips scenarios that need a Bake-only tool, and its stale writer acts on its event stream. Where a scenario forces a context window, it gets the same window and pi\'s compaction settings (piCompaction).' : '')
-    + (armNames.some(name => ARMS[name]!.kind === 'pi') ? ' A pi arm runs pi --mode json with its own system prompt and default tools, no session, extensions, prompt templates, or context files, no skills but a skill scenario\'s own, agent-level retry off, and pi\'s own wire for each model; it skips scenarios that need a Bake-only tool. Where a scenario forces a context window, pi gets the same window and compaction settings that mirror Bake\'s policy at it (piCompaction).' : ''),
+    + (armNames.some(name => ARMS[name]!.kind === 'native') ? ' A native arm runs bake-rs -p --mode json with its own system prompt and Pi\'s default tools (read, bash, edit, write), no session file, the danger-full-access preset, and agent-level retry off; a cliproxyapi model comes through the 0.3 settings.yaml and .credentials.yaml it imports read-only, and a DeepSeek model through models.json over Chat Completions. It skips scenarios that need a Bake-only tool, and its stale writer acts on its event stream. Where a scenario forces a context window, it gets pi\'s window for it (piContextWindows), Bake\'s threshold plus pi\'s default reserve, and pi\'s compaction settings (piCompaction).' : '')
+    + (armNames.some(name => ARMS[name]!.kind === 'pi') ? ' A pi arm runs pi --mode json with its own system prompt and default tools, no session, extensions, prompt templates, or context files, no skills but a skill scenario\'s own, agent-level retry off, and pi\'s own wire for each model; it skips scenarios that need a Bake-only tool. Where a scenario forces a context window, pi gets its window for it (piContextWindows), Bake\'s threshold plus pi\'s default reserve, and compaction settings that keep Bake\'s retained tail (piCompaction).' : ''),
   cache: 'Fresh process/home/workspace/session per sample; provider cache is observed, not assumed cold. Pair order alternates by trial and scenario.',
   endpoint: 'Agent exits; external Node test passes without test modification; injected external comment is preserved.',
   tokenAccounting: 'Provider total_tokens is authoritative. Gemini via Responses may report reasoning outside output_tokens; recorded separately and reconciled against raw SSE. Anthropic-format totals, DeepSeek\'s included, are the sum of input, cache reads/writes, and output.',

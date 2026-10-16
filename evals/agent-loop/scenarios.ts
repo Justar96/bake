@@ -57,7 +57,7 @@ export const prompts: Record<string, string> = {
   // unprompted_edit's task, with skills that do not apply to it.
   skill_distractors: roundMoneyTask + natural,
   edit_recovery: roundMoneyTask + ' truncateMoney must keep truncating.' + common,
-  long_session: `This task has three steps; finish all of them. 1. Read ${noteNames()[0]} in full with the read tool. Each of the ten notes holds one line that starts with "Checkpoint code:" and ends by naming the next note; read them one at a time in that chain until a note says it is the last. 2. Write codes.txt in this directory with the ten codes in chain order, one per line and nothing else. 3. ` + roundMoneyTask + ' Work only inside this fixture. Do not delegate, install packages, use the network, modify test.cjs, or make commits. Run node test.cjs to verify and give a brief final result.',
+  long_session: `This task has three steps; finish all of them. 1. Read ${noteNames()[0]} with the read tool. Each of the ten notes holds one line that starts with "Checkpoint code:" and ends by naming the next note; read them one at a time in that chain until a note says it is the last. 2. Write codes.txt in this directory with the ten codes in chain order, one per line and nothing else. 3. ` + roundMoneyTask + ' Work only inside this fixture. Do not delegate, install packages, use the network, modify test.cjs, or make commits. Run node test.cjs to verify and give a brief final result.',
 }
 
 /** Scenarios whose run needs more than the default 14 model requests. */
@@ -126,14 +126,29 @@ export function compactionBudget(contextWindow: number) {
   }
 }
 /**
- * pi's compaction settings for a forced context window, mirroring Bake's
- * policy: pi compacts above `contextWindow - reserveTokens` and keeps
- * `keepRecentTokens` verbatim. Its default reserve (16,384) exceeds a
- * 16,000-token window, so without these it would compact before every request.
+ * pi's default `compaction.reserveTokens`. Besides placing the threshold at
+ * `contextWindow - reserveTokens`, pi sizes its summary requests from it (0.8
+ * of it for the history, 0.5 for a split turn's prefix), and it caps each
+ * request's output at the window less the estimated context and 4,096 more
+ * tokens. A reserve near or below that margin leaves requests just under the
+ * threshold one output token, and a reasoning model's summaries no room.
+ */
+export const PI_RESERVE_TOKENS = 16_384
+/**
+ * The context window a pi-family arm (pi or bake-rs) gets in place of a
+ * forced window: Bake's threshold at that window plus pi's default reserve,
+ * so pi compacts where Bake does with the budgets it ships with.
+ */
+export function piContextWindowFor(contextWindow: number) {
+  return compactionBudget(contextWindow).thresholdTokens + PI_RESERVE_TOKENS
+}
+/**
+ * pi's compaction settings for a forced context window, used with
+ * {@link piContextWindowFor}: its default reserve, and Bake's retained tail
+ * as `keepRecentTokens`, which pi's default (20,000) would exceed.
  */
 export function piCompactionFor(contextWindow: number) {
-  const { thresholdTokens, retainTokens } = compactionBudget(contextWindow)
-  return { reserveTokens: contextWindow - thresholdTokens, keepRecentTokens: retainTokens }
+  return { reserveTokens: PI_RESERVE_TOKENS, keepRecentTokens: compactionBudget(contextWindow).retainTokens }
 }
 
 /** Whether a scenario keeps `agent-instructions` mounted, so the agent reads the fixture's AGENTS.md. */
@@ -266,24 +281,36 @@ export function noteNames(): string[] {
  *
  * - The fixed prefix (system prompt, tool schemas, and the task) is about
  *   4,500 tokens, and the route keeps an 8,192-token output cap.
- * - Each note is about 4.4 KB, so one read (call, numbered lines, and framing)
- *   is about 1,200 tokens. That is under the 2,560-token retained tail, so the
+ * - Each note is about 6 KB, so one read (call, numbered lines, and framing)
+ *   is about 1,650 tokens. That is under the 2,560-token retained tail, so the
  *   newest batch stays verbatim and the older ones form a region to summarize.
- *   The prefix, one batch, and the output cap (4,500 + 1,200 + 8,192 = 13,892)
+ *   The prefix, one batch, and the output cap (4,500 + 1,650 + 8,192 = 14,342)
  *   fit the window, and the largest request, one batch past the threshold
- *   (12,800 + 1,200 = 14,000), still leaves room for a reply.
- * - The ten batches total about 12,000 tokens, so the session reaches the
- *   threshold around the seventh note (4,500 + 7 × 1,200 = 12,900) and
+ *   (12,800 + 1,650 = 14,450), still leaves room for a reply.
+ * - The ten batches total about 16,500 tokens, so the session reaches the
+ *   threshold around the fifth note (4,500 + 5 × 1,650 = 12,750) and
  *   compacts at least once before the last.
+ * - pi and bake-rs compare the threshold with the provider's reported count,
+ *   which runs well below the estimate: a note is about 940 tokens to GPT,
+ *   Gemini, and DeepSeek and 1,340 to Claude at 4.4 KB, with a 1,700 to
+ *   2,700-token prefix. At 6 KB the ten notes take every one of those models
+ *   past 12,800 tokens with at least two notes to spare.
  */
+/** The characters of each tool result pi's `serializeConversation` keeps when it builds a summary request. */
+export const SUMMARY_TOOL_RESULT_CHARS = 2_000
 export const LONG_SESSION_BUDGET = { prefixTokens: 4_500, maxOutputTokens: 8_192, notes: 10 }
-/** One note of about 4.4 KB, under the pruner's 8,192-character threshold, with its code mid-file and the next note's path at the end. */
+/**
+ * One note of about 6 KB, under the pruner's 8,192-character threshold, with
+ * its code after five paragraphs and the next note's path at the end. The code
+ * lies in the first {@link SUMMARY_TOOL_RESULT_CHARS} characters, the part of a
+ * tool result that pi's compaction shows its summarizer.
+ */
 function note(index: number, code: string, next: string | undefined): string {
   const paragraph = (n: number) => `Section ${index}.${n}. The ledger reconciler compares each batch against the upstream journal, marks drifted rows for review, and records the operator who cleared them. Batches older than the retention window are archived with their checksums so a later audit can replay them.\n\n`
   const lines = [`# Ledger notes, part ${String(index).padStart(2, '0')}\n\n`]
-  for (let n = 1; n <= 7; n++) lines.push(paragraph(n))
+  for (let n = 1; n <= 5; n++) lines.push(paragraph(n))
   lines.push(`Checkpoint code: ${code}\n\n`)
-  for (let n = 8; n <= 16; n++) lines.push(paragraph(n))
+  for (let n = 6; n <= 22; n++) lines.push(paragraph(n))
   lines.push(next === undefined ? 'This is the last note.\n' : `Next note: ${next}\n`)
   return lines.join('')
 }

@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   checkCommandFor, checkpointCodes, compactionBudget, CONTEXT_WINDOWS, EXPLORE_ANSWER, EXTENDED_CASES, fixture, LONG_SESSION_BUDGET,
-  maxRequestsFor, noteNames, piCompactionFor, prompts, REQUEST_FLOORS, requestFloorFor, SKILL_SCENARIOS, slowCheckLine, STANDARD_CASES, usesSkills, validate,
+  maxRequestsFor, noteNames, PI_RESERVE_TOKENS, piCompactionFor, piContextWindowFor, prompts, REQUEST_FLOORS, requestFloorFor, SKILL_SCENARIOS, slowCheckLine, STANDARD_CASES, SUMMARY_TOOL_RESULT_CHARS, usesSkills, validate,
   type Fixture, type Outcome,
 } from './scenarios.ts'
 
@@ -283,6 +283,8 @@ describe('long_session', () => {
       const text = readFileSync(join(built.workspace, name), 'utf8')
       expect(text.length).toBeLessThan(8192)
       expect(text).toContain(`Checkpoint code: ${checkpointCodes()[index]}`)
+      // pi's summarizer sees only a tool result's first characters; the code must be among them.
+      expect(text.indexOf(`Checkpoint code: ${checkpointCodes()[index]}\n`) + `Checkpoint code: ${checkpointCodes()[index]}`.length).toBeLessThan(SUMMARY_TOOL_RESULT_CHARS - 300)
       expect(text.trimEnd().split('\n').at(-1)).toBe(index === names.length - 1 ? 'This is the last note.' : `Next note: ${names[index + 1]}`)
     })
     roundFix(built.workspace)
@@ -302,9 +304,9 @@ describe('long_session', () => {
     const batches = noteNames().map(name => readBatchTokens(name, readFileSync(join(built.workspace, name), 'utf8')))
     expect(batches).toHaveLength(notes)
     for (const batch of batches) {
-      // About 1,200 tokens each, as the budget's comment states.
-      expect(batch).toBeGreaterThan(1_100)
-      expect(batch).toBeLessThan(1_300)
+      // About 1,650 tokens each, as the budget's comment states.
+      expect(batch).toBeGreaterThan(1_550)
+      expect(batch).toBeLessThan(1_750)
       // The newest batch fits the retained tail, so older batches form a region compaction can summarize.
       expect(batch).toBeLessThan(retainTokens)
       // The prefix, one batch, and the output cap fit the window.
@@ -313,14 +315,27 @@ describe('long_session', () => {
       expect(thresholdTokens + batch).toBeLessThan(window)
     }
     const total = batches.reduce((sum, batch) => sum + batch, 0)
-    expect(total).toBeGreaterThan(11_000)
-    expect(total).toBeLessThan(13_000)
+    expect(total).toBeGreaterThan(15_500)
+    expect(total).toBeLessThan(17_500)
     // The session crosses the threshold with notes to spare, so compaction runs before the last read.
     expect(prefixTokens + total - batches.at(-1)! - batches.at(-2)!).toBeGreaterThan(thresholdTokens)
   })
 
-  test('gives pi compaction settings that mirror Bake at the forced window', () => {
-    expect(piCompactionFor(CONTEXT_WINDOWS.long_session!)).toEqual({ reserveTokens: 3_200, keepRecentTokens: 2_560 })
+  test('gives pi its default reserve on a window that keeps Bake\'s threshold and tail', () => {
+    const window = CONTEXT_WINDOWS.long_session!
+    const { thresholdTokens, retainTokens } = compactionBudget(window)
+    const piWindow = piContextWindowFor(window)
+    const { reserveTokens, keepRecentTokens } = piCompactionFor(window)
+    expect({ piWindow, reserveTokens, keepRecentTokens }).toEqual({ piWindow: 29_184, reserveTokens: PI_RESERVE_TOKENS, keepRecentTokens: 2_560 })
+    // pi compacts where Bake does and keeps the same tail.
+    expect(piWindow - reserveTokens).toBe(thresholdTokens)
+    expect(keepRecentTokens).toBe(retainTokens)
+    // pi caps a request's output at the window less its context and 4,096 tokens: up to the
+    // threshold, which a reply can pass by one read batch, the route's full cap remains.
+    const { maxOutputTokens } = LONG_SESSION_BUDGET
+    expect(piWindow - (thresholdTokens + 1_300) - 4_096).toBeGreaterThanOrEqual(maxOutputTokens)
+    // A split turn's prefix summary gets half the reserve, and the history summary 0.8 of it, capped by the route.
+    expect(Math.min(Math.floor(0.5 * reserveTokens), maxOutputTokens)).toBe(maxOutputTokens)
   })
 })
 

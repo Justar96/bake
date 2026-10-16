@@ -94,7 +94,7 @@ Each row supplements the detailed scope specification. The final column is a req
 
 ## Foundation qualification status
 
-Scopes 00 to 03 as of candidate `e32476594bace82b57980fe8e1d57e48e3c4c53c` (the merge of PR #215), checked on 2026-10-14. *Required* restates the acceptance row; *implemented* names what the candidate's code does; *observed* links the ledger record of what ran. The macOS runs tested git stash snapshots of the candidate plus uncommitted edits, not the candidate itself. No reviewer has accepted any of these scopes, and passing checks alone do not close one.
+Scopes 00 to 03 as of candidate `e32476594bace82b57980fe8e1d57e48e3c4c53c` (the merge of PR #215), checked on 2026-10-14. *Required* restates the acceptance row; *implemented* names what the candidate's code does; *observed* links the ledger record of what ran. The macOS runs tested git stash snapshots of the candidate plus uncommitted edits, not the candidate itself. No reviewer has accepted any of these scopes, and passing checks alone do not close one. Later records narrow the scope 01 gap below: at committed candidate `632f76e485`, the [interactive controls record](ledger/scope-15/2026-10-15-interactive-controls.json) passed the native preflight gates on Linux and Intel macOS and the Cargo tests on native Windows, all x64. This table covers scopes 00 to 03 only; evidence for scopes 04 to 15 is in their [ledger records](ledger/README.md) and the [roadmap Dev Note](README.md#dev-note).
 
 | Scope | Required | Implemented at the candidate | Observed | Missing |
 |---|---|---|---|---|

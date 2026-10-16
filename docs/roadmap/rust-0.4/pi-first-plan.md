@@ -17,12 +17,13 @@ This page re-plans roadmap scopes 02 to 17 around [D22](scope-00/support.md#deci
 
 ## Pinned Pi revision
 
-Checked through the GitHub API on 2026-10-09; re-checked on 2026-10-11 (v1.1.0), on 2026-10-13 for scope 10 ([Latest release v1.2.0](https://github.com/earendil-works/pi/releases/tag/v1.2.0), `06a466935536f8c9bcacb2d5efc0fc021be1bdff`), and on 2026-10-14 for the scope 01 to 03 qualification, when v1.2.0, published 2026-10-12 23:03 UTC, was still the latest. The session store that scopes 02 and 03 ported from v1.1.0 (`coding-agent/src/core/{session-manager,session-cwd,messages}.ts`, `coding-agent/src/utils/paths.ts`, `ai/src/utils/uuid.ts`, and `coding-agent/test/session-manager/`) is byte-identical in v1.2.0.
+Checked through the GitHub API on 2026-10-09; re-checked on 2026-10-11 (v1.1.0), on 2026-10-13 for scope 10 ([Latest release v1.2.0](https://github.com/earendil-works/pi/releases/tag/v1.2.0), `06a466935536f8c9bcacb2d5efc0fc021be1bdff`), and on 2026-10-14 for the scope 01 to 03 qualification, when v1.2.0, published 2026-10-12 23:03 UTC, was still the latest. On 2026-10-16 the latest was [v1.3.0](https://github.com/earendil-works/pi/releases/tag/v1.3.0), published 2026-10-15 19:17 UTC; its `coding-agent/src/core/compaction/` and `ai/src/api/simple-options.ts` are unchanged since v1.2.0. The session store that scopes 02 and 03 ported from v1.1.0 (`coding-agent/src/core/{session-manager,session-cwd,messages}.ts`, `coding-agent/src/utils/paths.ts`, `ai/src/utils/uuid.ts`, and `coding-agent/test/session-manager/`) is byte-identical in v1.2.0.
 
 | Reference | Revision | Use |
 |---|---|---|
 | [Release v1.1.0](https://github.com/earendil-works/pi/releases/tag/v1.1.0), published 2026-10-07 22:26 UTC | `abe508e1b89912adde45528136c3221eb69acdd7` | Initial port source (scopes 02–09) |
-| [Latest release v1.2.0](https://github.com/earendil-works/pi/releases/tag/v1.2.0), re-checked 2026-10-13 | `06a466935536f8c9bcacb2d5efc0fc021be1bdff` | Current official release (scope 10 onward) |
+| [Release v1.2.0](https://github.com/earendil-works/pi/releases/tag/v1.2.0), re-checked 2026-10-13 | `06a466935536f8c9bcacb2d5efc0fc021be1bdff` | Official release for scope 10 onward until v1.3.0 |
+| [Latest release v1.3.0](https://github.com/earendil-works/pi/releases/tag/v1.3.0), checked 2026-10-16 | `71023aec1546d6d677a65669c5665c0927ce0dd0` | Current official release; scopes re-check it as they start |
 | [`main`](https://github.com/earendil-works/pi/commit/6fb2e7815167e6b19006fc526d1a5d0f5f998787), committed 2026-10-08 15:26 UTC | `6fb2e7815167e6b19006fc526d1a5d0f5f998787` | Unreleased changes, adopted only with a named reason |
 
 Pi's packages at that main revision:
