@@ -2,9 +2,9 @@
 
 ## Summary
 
-This page proposes the native plugin API that [D6](scope-00/support.md#decision-register) requires for 0.4.0, and the inspection and management capabilities that replace the retired Cordis tooling under [D7](scope-00/support.md#decision-register). Trusted code compiled into `bake-rs` implements a Rust trait. Third-party plugins are Rust crates compiled to `wasm32-wasip2` and run as WASI 0.2 components in Wasmtime, with no ambient authority: the only effects they have are a few bounded host calls. Both kinds go through one ordered dispatcher whose model-visible effects are written to the session file in Pi's existing entry types. OS tools and MCP servers stay separate processes under [D24](scope-00/support.md#decision-register); they are not a way for a plugin to run native code. 0.4.0 has no native-process or dynamic-library plugin adapter.
+This page proposes the native plugin API that [D6](scope-00/support.md#decision-register) requires for 0.4.0, and the inspection and management capabilities that replace the retired Cordis tooling under [D7](scope-00/support.md#decision-register). Trusted code compiled into `bake-rs` implements a Rust trait. Third-party plugins are Rust crates compiled to `wasm32-wasip2` and run as WASI 0.2 components in Wasmtime inside a trusted helper owned by Bake. The guest has no ambient authority: its only effects are a few bounded host calls. Both kinds go through one ordered dispatcher whose model-visible effects are written to the session file in Pi's existing entry types. OS tools and MCP servers stay separate processes under [D24](scope-00/support.md#decision-register); they are not a way for a plugin to run native code. 0.4.0 has no native-process or dynamic-library plugin adapter.
 
-**Status: proposed design, 2026-10-17.** No Bake plugin runtime is implemented or qualified. An [isolated Linux experiment](#exploratory-linux-results) has exercised the proposed component boundary; it does not qualify the async lifecycle or supported platforms. This is a proposal under D6 and D7 for review, not an accepted decision; the names and technical exclusions are this design's own choices, which review may change. Facts in [Sources](#sources) come from the linked primary sources or local code. Apart from the measured observations in [Exploratory Linux results](#exploratory-linux-results), the rest is proposed behavior. Each protection is an obligation the [qualification gates](#implementation-choices-and-qualification-gates) must prove.
+**Status: proposed design, 2026-10-17.** No Bake plugin runtime is implemented or qualified. An [isolated Linux experiment](#exploratory-linux-results) has exercised the proposed component boundary; it does not qualify Bake's lifecycle or supported platforms. This is a proposal under D6 and D7 for review, not an accepted decision; the names and technical exclusions are this design's own choices, which review may change. Facts in [Sources](#sources) come from the linked primary sources or local code. Apart from the measured observations in [Exploratory Linux results](#exploratory-linux-results), the rest is proposed behavior. Each protection is an obligation the [qualification gates](#implementation-choices-and-qualification-gates) must prove.
 
 ## Table of Contents
 
@@ -42,8 +42,8 @@ The Bake home is resolved by `resolve_bake_home` in [`home.rs`](../../../rust/cr
 ```text
  compiled-in Rust ─┐                        ┌─► Pi session file
  (Plugin trait)    ├─► dispatcher ─► agent ─┤   (custom, custom_message,
- Wasm component  ──┘   (ordered,     loop   │    context_edit, toolResult)
- (bake:plugin WIT)      snapshot)           └─► tools ─► D24 engine ─► sandbox
+ Wasm helper     ──┘   (ordered,     loop   │    context_edit, toolResult)
+ (component/WIT)       snapshot)           └─► tools ─► D24 engine ─► sandbox
         │
         └─ host calls only: log · append-entry · state · session-info
 ```
@@ -51,11 +51,13 @@ The Bake home is resolved by `resolve_bake_home` in [`home.rs`](../../../rust/cr
 | Class | Mechanism | Trust |
 |---|---|---|
 | Built-in | A Rust trait in `bake-coding-agent`, registered at compile time | Bake's own code |
-| Third-party | The WIT package `bake:plugin@0.1.0`, whose world imports `host` and exports the `plugin` interface, on WASI 0.2, guest target `wasm32-wasip2`, one Wasmtime `Store` and one component instance per plugin (which may contain several core instances) | None ambient; only the host calls below |
+| Third-party | The WIT package `bake:plugin@0.1.0`, whose world imports `host` and exports the `plugin` interface, on WASI 0.2, guest target `wasm32-wasip2`, one trusted helper process per plugin, with one Wasmtime `Store` and component instance (which may contain several core instances) | None ambient; only the host calls below |
 | OS tools, MCP | Unchanged separate processes, scopes 04 and 12 | D24 confinement and approvals |
 | Native process or `dylib` | Not in 0.4.0 | No qualified read, network, and process sandbox exists |
 
-Guest exports are synchronous WIT functions driven by Wasmtime's host-side async calls; WASI 0.3 and async guest exports are outside this design. Both classes share the dispatcher and lifecycle code.
+Guest exports are synchronous WIT functions driven by Wasmtime's host-side async calls; WASI 0.3 and async guest exports are outside this design. Both classes share the dispatcher contract. A third-party plugin supplies a component, never a native executable. Bake starts its own helper through an internal entry point, with a scrubbed environment, an empty working directory, and owned pipes; only the helper compiles and executes the component.
+
+The helper protocol is versioned separately from WIT. A handshake checks the protocol and Bake build. Each frame's kind and size are checked before allocation, decoding rejects malformed or trailing bytes, and one request is in flight at a time. Requests and replies carry an id and generation. The parent sends bounded session and state snapshots; the helper returns bounded staged effects. No compiled native artifact crosses the pipe.
 
 ## Contribution contracts
 
@@ -92,14 +94,16 @@ The first API imports four host calls, which limits plugin tools to computation 
 
 Each guest call carries an owner (the plugin), a generation (incremented by every load or restart), and a cancellation scope (the call's token and deadline). A host call whose generation is stale, whose gate is closed, or whose token is cancelled returns an error and has no effect. Six rules prevent deadlock and late effects:
 
-- No session or registry lock is held while guest code runs: the dispatcher copies the views and `session-info` a call needs before entering the guest.
+- No session or registry lock is held while guest code runs: the dispatcher copies the views, plugin state, and `session-info` into the request. The helper serves imports from that snapshot and the call's overlay; it never waits for the parent during a guest call.
 - `append-entry` buffers into the call, and the dispatcher commits the buffer after the guest returns. A host call never waits on the session actor, which may itself be awaiting this guest.
 - `state-set` writes into the call's overlay, which `state-get` reads first. No session, registry, or state lock is held across an `.await`: the host takes the state mutex only to copy or swap in-memory values. Exclusive ownership of an instance still spans its guest call.
 - No host call enters any guest, and calls to an instance are serialized by its mutex, so an instance is never re-entered.
 - The dispatcher commits a call's entries and state overlay only if, at commit time, the generation is current, the gate is open, and the token is not cancelled. The state file write is atomic, owned, and awaited. Cancellation cannot undo an effect: an entry or state write committed before a cancellation stays, and `plugin_inspect` reports it.
-- On Esc, a timeout, or shutdown, the host drops the guest future, cancels and awaits its host futures, discards the uncommitted buffer and overlay, and fails the instance. The `Store` is dropped only after the plugin's `WorkGate` ([`owned_work.rs`](../../../rust/crates/bake-coding-agent/src/owned_work.rs)) is closed and its permits are released, so no host call runs after the plugin stops.
+- On Esc or timeout, the parent rejects new calls to that generation, kills the helper before closing its control pipe, awaits process exit and pipe drains, discards uncommitted effects, and fails the instance. Shutdown first closes the plugin's `WorkGate` ([`owned_work.rs`](../../../rust/crates/bake-coding-agent/src/owned_work.rs)); it awaits all owned work, including a helper still starting. Restart creates a new helper and generation. Dropping an async guest future inside the helper drops its awaited host future in the tested bindings; host imports must own their work and must not spawn detached tasks.
 
-Fuel and epoch deadlines bound guest instructions only. The host deadline around each call is what bounds a host call the guest awaits.
+Fuel and epoch deadlines bound guest instructions only. Every store must also configure async fuel or epoch yields so guest code cannot monopolize the executor. The parent's deadline covers the whole helper operation, including an awaited host call or compilation.
+
+A control-pipe EOF watchdog handles parent death even while the main helper thread compiles. Its exit decision and any fatal reply share one gate, so a closed pipe cannot race a different reported exit. Linux parent-death signals depend on the spawning thread's lifetime; they are only an additional safeguard with an owned thread, never the sole mechanism. Windows also requires a kill-on-close Job. Each platform must prove parent-death cleanup and rejection of late effects. These are proposed product obligations, not guarantees of the private Linux helper.
 
 ## Containment and limits
 
@@ -109,7 +113,7 @@ Fuel and epoch deadlines bound guest instructions only. The host deadline around
 - **At run time:** a WASI component may contain several core modules and instances (the adapter is one), so the limits are aggregate per `Store`. Tentatively: 32 instances, 8 memories, 16 tables, 64 MiB of linear memory summed over all memories, and 10,000 table elements summed over all tables, with rejected growth returning a trap from the custom limiter; returning `Ok(false)` would instead let the guest observe an ordinary growth failure. `StoreLimits` supplies the counts, fixed when the limiter is installed, but its memory and element caps are per memory and per table, so the sums need Bake's own `ResourceLimiter` that adds each growth request to a running total. The experiment's guest requires 3 instances, 1 memory, and 2 tables; the final values must cover every qualified SDK fixture. Each call also has fuel, an epoch deadline, and a host deadline over the whole call.
 - **After lifting:** returns are checked against the contract bounds, with JSON parsed to limited depth and size. This rejects bad values; it cannot bound the allocation that lifting already made ([return shape](#contribution-contracts)).
 - **Faults:** a trap, an exceeded limit, a missed deadline, or an invalid return fails the instance. A restart creates a fresh `Store` and component instance, since a trapped instance cannot be re-entered. It restarts at most three times a session, then stays failed until restarted by hand; a failed veto still blocks its listed tools.
-- **Compilation:** fuel does not bound compiling. It runs on one owned blocking thread at a time, behind a bounded queue, and shutdown awaits it. A deadline only discards a late result; it cannot stop the thread, so it does not make teardown bounded. Qualification must establish acceptable compilation time and memory bounds for admitted inputs; otherwise compilation and execution move together into a qualified, killable Wasm-host helper. Such a helper still accepts only components and exposes the same host-call contract; it is not a native plugin adapter and transfers no serialized native artifact back to the parent. Compiled code is cached in memory only, keyed by component hash and engine configuration. 0.4 has no persistent compiled cache and never deserializes a native artifact; a measured compile cost does not justify `unsafe` deserialization.
+- **Compilation:** fuel does not bound compiling, and a timeout cannot cancel an in-process compiler thread. Compilation and execution therefore share the helper. The parent admits one compile at a time behind a bounded queue and kills and reaps a helper that misses its deadline. A killable process still needs a qualified platform memory budget: guest limits do not bound compiler, JIT, WASI resource-table, or total process allocations. Compiled code is cached only in the helper's memory, keyed by component hash and engine configuration; killing it loses that cache. 0.4 has no persistent compiled cache and never deserializes a native artifact.
 
 ## Exploratory Linux results
 
@@ -126,7 +130,20 @@ A private experiment on 2026-10-17 built a Rust guest with `wit-bindgen` 0.63.0 
 
 The stripped experiment host added about 17 MB over its empty control binary. That is not a forecast for Bake, whose existing dependencies overlap. Measurements count Rust heap, excluding mapped linear memory, JIT code, and allocator overhead; they are exploratory observations, not performance budgets.
 
-The local harness, locks, and logs remain under `.preflight/rust-orchestration/research/plugin-spike/`; `plugin-spike-orchestrator-checks.json` records their hashes. They are private experiment artifacts, not reproducible qualification evidence in this checkout. The implementation must bring the relevant hostile fixtures into Cargo tests. Async host-call cancellation, owned teardown, hostile table growth, resource-handle limits, metered random, compiler cancellation, Windows, macOS, and arm64 remain unproven. A follow-up experiment tests a killable trusted Wasm-host helper without allowing native third-party executables.
+The local harness, locks, and logs remain under `.preflight/rust-orchestration/research/plugin-spike/`; `plugin-spike-orchestrator-checks.json` records their hashes. They are private experiment artifacts, not reproducible qualification evidence in this checkout. The implementation must bring the relevant hostile fixtures into Cargo tests. That first experiment did not cover async host-call cancellation, owned teardown, hostile table growth, or compiler cancellation. Resource-handle limits, metered random, Windows, macOS, and arm64 remain unproven. A follow-up experiment exercised async bindings and a trusted Wasm-host helper. Its 18 tests passed again in an independent orchestrator run:
+
+| Observation | Limit of the evidence |
+|---|---|
+| Dropping a guest future during a host import dropped the import's owned socket and prevented its later effect; a fresh store completed the positive control | The fixture spawned no detached work; the production ownership boundary remains to be tested |
+| A host deadline ended the suspended call; configured fuel and epoch yields let another task run during a spinning guest | Fuel alone neither ends an awaited host call nor keeps an executor responsive |
+| Two requested 6,000-element table growths under a 10,000-element aggregate budget admitted one; a 2 MiB import string was refused before the host import ran under a 1 MiB copy budget | These fixtures cover table totals and import copying, not total host allocations |
+| A roughly 2-second compile continued after an in-process 400 ms timeout; the helper was killed and reaped about 1 ms after the same deadline | The compile-start marker, CPU ticks and running state are circumstantial evidence of interruption during compilation, not a compiler stack sample or a universal timing bound |
+| Control-pipe EOF ended the helper after parent death; a Linux parent-death signal also killed a helper when only its spawning thread ended | A portable watchdog needs platform tests; a Tokio worker's lifetime cannot stand in for the parent process's lifetime |
+| Concurrent tests found and corrected fatal-exit and kill-order races; 40 subsequent concurrent suite runs passed | Stress evidence supplements the explicit protocol and ownership tests |
+
+The small guest's helper round trip took roughly 6–8 microseconds, startup about 1 ms, and load plus first call about 127 ms on that host. Its RSS high-water mark was about 22 MiB, excluding larger compilation peaks. Those observations support the helper as the proposed lifecycle boundary; they establish no production performance or memory budget.
+
+The second harness and logs are under `.preflight/rust-orchestration/research/plugin-async/`. It still lacks a total memory cap, a pre-compilation import check, bounded stderr capture, and macOS or Windows evidence. Its process runs as the user: Wasmtime's empty WASI context confines guest authority, while the helper separates memory and lifetime. Neither process groups nor Jobs provide filesystem or network confinement.
 
 ## Inspection and management
 
@@ -166,12 +183,12 @@ Separate hostile fixtures attempt ambient access (read `$BAKE_HOME` credentials,
 
 ## Implementation slices
 
-Plugins stay disabled by default, so each slice reverts alone, and the model surface is unchanged until slice 6.
+Plugins stay disabled by default. Each contribution slice includes its persistence and failure tests; any enabled path that changes model input needs a paired eval record.
 
-1. **Spike** (`rust/Cargo.toml`, `bake-coding-agent`): add Wasmtime with `component-model`, `async`, and `cranelift` and the `wasm32-wasip2` target. Measure binary size, clean build time, compile time and memory for the worst permitted component, host allocation for hostile valid returns, the guest SDK's core instance, memory, and table counts, and per-hook latency, against Pulley as the no-JIT option. Rollback: drop the dependency.
+1. **Qualification harness** (`rust/Cargo.toml`, `bake-coding-agent`): bring the relevant private experiment fixtures into Cargo tests; add Wasmtime with `component-model`, `async`, and `cranelift` and the `wasm32-wasip2` target. Measure binary size, clean build time, compile time and memory for the worst permitted component, host allocation for hostile valid returns, the guest SDK's core instance, memory, and table counts, and per-hook latency, against Pulley as the no-JIT option. Rollback: drop the dependency.
 2. **Dispatcher** (`bake-agent/src/hook.rs`, `types.rs`; `bake-coding-agent/src/agent_session.rs`): the built-in trait, ordered composition into `BeforeToolCall`, `AfterToolCall`, and `TransformContext`, and the input path, with order tests ported from Pi's runner.
 3. **Persistence** (`agent_session.rs`, `session/`): decision, `context_edit`, `custom_message`, and input entries, with the crash-reconstruction tests.
-4. **Wasm host** (`bake-coding-agent/src/plugins/`): the engine, epoch ticker, limits, empty WASI context, import check, per-instance mutex, `WorkGate`, generations, and lifecycle under `owned_work.rs`.
+4. **Wasm helper** (`bake-coding-agent/src/plugins/`, `bake-cli`): the bounded protocol, process owner and parent-death cleanup, engine, cooperative yields, limits, empty WASI context, pre-compilation import check, memory budget, `WorkGate`, generations, and lifecycle under `owned_work.rs`.
 5. **Guest SDK and consumer** (`rust/crates/bake-plugin-sdk`, guest-only, the one new crate; `rust/plugins/guard`; fixtures under `bake-coding-agent/tests/`): the consumer and hostile suites.
 6. **Management** (`tools/`, `cli/`, `bake-tui` with `bake-tui-view/src/copy.rs`): `plugin_inspect`, `plugin_manage`, `bake plugin`, and `/plugins`, with a paired eval record.
 7. **Documentation:** the `rust/README.md` rows, the roadmap Dev Note, the migration inventory, `doc-sync`, and the A19 and A20 evidence.
@@ -187,7 +204,8 @@ The plugin slice of scope 12, rows A19 and A20, qualifies only when slices 1 to 
 
 - The configured copy budget rejects hostile valid returns before excessive allocation, and retained host data stays within the per-call and per-session quotas; Wasmtime metadata, resources, and compiler allocations need separate bounds.
 - The aggregate limiter enforces the memory, instance, and table totals, sized from measured guest SDK components.
-- Compile time and memory for the worst permitted input are acceptable, or compilation is isolated.
+- Compiler deadlines kill and reap the helper, and admitted hostile inputs stay within the qualified platform memory budget. Isolation alone is not a memory limit.
+- Async yields, bounded host futures, process startup, cancellation, pipe drains, shutdown and parent death pass owned-lifecycle tests on every supported platform.
 - The quotas hold against hostile fixtures across many calls and a whole session.
 - A paired eval record exists for any model-visible tool.
 
