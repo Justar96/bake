@@ -293,11 +293,28 @@ fn validate(value: &Value) -> Result<(), Vec<String>> {
 }
 
 /// One load of `models.json`, Pi's `ModelConfig`: providers in file order,
-/// or the load error.
-#[derive(Debug, Clone, Default)]
+/// or the load error. A provider can hold a literal `apiKey` or header
+/// value, so `Debug` names each provider's members, never their values.
+#[derive(Clone, Default)]
 pub struct ModelConfig {
     providers: Vec<(String, JsonObject)>,
     error: Option<String>,
+}
+
+impl std::fmt::Debug for ModelConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ModelConfig")
+            .field(
+                "providers",
+                &self
+                    .providers
+                    .iter()
+                    .map(|(id, provider)| (id, provider.keys().collect::<Vec<_>>()))
+                    .collect::<Vec<_>>(),
+            )
+            .field("error", &self.error.is_some())
+            .finish()
+    }
 }
 
 impl ModelConfig {

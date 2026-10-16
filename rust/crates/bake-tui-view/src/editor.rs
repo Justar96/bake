@@ -249,6 +249,51 @@ impl Draft {
             .collect()
     }
 
+    /// Puts back a draft that was submitted and then refused: its text, then
+    /// whatever has been typed since, as paragraphs, in one undo step. Its
+    /// placeholders stand for what they did again, so pasted text expands
+    /// and images stay staged; with nothing typed since, its saved editing
+    /// state, including undo and caret, returns. `earlier` must be a copy of
+    /// this draft from before the submit, so placeholder numbers cannot collide.
+    pub fn restore(&mut self, earlier: &Draft) {
+        if self.text.is_empty() {
+            let pastes = self.pastes.max(earlier.pastes);
+            *self = earlier.clone();
+            self.pastes = pastes;
+            return;
+        }
+        for (token, atom) in &earlier.atoms {
+            if !self.atoms.iter().any(|(known, _)| known == token) {
+                self.atoms.push((token.clone(), atom.clone()));
+            }
+            self.unstaged.retain(|unstaged| unstaged != token);
+        }
+        self.pastes = self.pastes.max(earlier.pastes);
+        let current = self.text.clone();
+        let combined = if earlier.text.trim().is_empty() {
+            current
+        } else {
+            format!("{}\n\n{current}", earlier.text)
+        };
+        let caret = combined.len();
+        self.replace(&combined, caret);
+    }
+
+    /// The staged images whose placeholders the draft holds, by id, in the
+    /// order the placeholders appear.
+    pub fn attached(&self) -> Vec<u32> {
+        let mut found: Vec<(usize, u32)> = self
+            .atoms
+            .iter()
+            .filter_map(|(token, atom)| match atom {
+                Atom::Image(id) => self.text.find(token.as_str()).map(|at| (at, *id)),
+                Atom::Text(_) => None,
+            })
+            .collect();
+        found.sort_unstable();
+        found.into_iter().map(|(_, id)| id).collect()
+    }
+
     /// The text a submission sends: every pasted-text placeholder replaced by
     /// the text it stands for. Image placeholders stay, beside their
     /// attachments.

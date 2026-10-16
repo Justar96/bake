@@ -11,6 +11,7 @@ name = "bake-rs"
 path = "src/main.rs"
 
 [dependencies]
+bake-ai.workspace = true
 bake-coding-agent.workspace = true
 bake-sandbox.workspace = true
 bake-tui.workspace = true

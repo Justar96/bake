@@ -19,10 +19,19 @@
 //! the session's permission is settled and stored in its session file
 //! before the agent starts, `bash`, `write`, and `edit` are wrapped by the
 //! permission engine over [`CliEnvironment::sandbox_provider`], approvals
-//! fail closed (no one can answer in print mode), and the permission is
-//! stated in the system prompt's `permissions` section.
+//! go to [`CliEnvironment::approver`] (interactive mode's terminal; print
+//! mode has none, so they fail closed), and the permission is stated in the
+//! system prompt's `permissions` section.
 //!
-//! Not ported (deferred): interactive and RPC modes, `--resume`,
+//! [`start`] is the setup print mode and interactive mode share: the
+//! binary runs print mode through [`run`] and hands an interactive
+//! session to the terminal frontend (`bake-tui`), with a
+//! [`SessionFactory`] that builds the sessions `/new`, `/resume`, and
+//! `/fork` switch to from the same arguments and the running session's settings and
+//! models, without touching the running session (adapted from Pi v1.2.0
+//! `core/agent-session-runtime.ts`).
+//!
+//! Not ported (deferred): RPC mode, `--resume`,
 //! theme and extension flags, extension and MCP tools, and the
 //! missing-session-cwd prompt.
 
@@ -46,8 +55,8 @@ use crate::model_registry::resolver::{
     ScopedModel, resolve_cli_model, resolve_model_scope_from_models,
 };
 use crate::permissions::{
-    NoApprover, PermissionInputs, ToolPermissions, prepare_session_permission, sandbox_file_tools,
-    sandboxed_bash_tool,
+    Approver, NoApprover, PermissionInputs, ToolPermissions, prepare_session_permission,
+    sandbox_file_tools, sandboxed_bash_tool,
 };
 use crate::print_mode::{PrintModeOptions, PrintOutput, SharedWriter, run_print_mode, write_out};
 use crate::prompt_templates::{LoadPromptTemplatesOptions, load_prompt_templates};
@@ -56,7 +65,7 @@ use crate::session::id::assert_valid_session_id;
 use crate::session::paths::{lexical_normalize, normalize_path};
 use crate::session::time::parse_date_ms;
 use crate::session::{NewSessionOptions, SessionManager};
-use crate::settings::Settings;
+use crate::settings::{Settings, SettingsStore};
 use crate::skills::{LoadSkillsOptions, load_skills};
 use crate::system_prompt::{
     Environment, SystemPromptOptions, load_project_context_files, resolve_prompt_input,
@@ -109,6 +118,11 @@ pub struct CliEnvironment {
     /// [`bake_sandbox::default_provider`], which fails every confined call
     /// closed on a host without a backend.
     pub sandbox_provider: Arc<dyn SandboxProvider>,
+    /// Who answers approval requests (D24): interactive mode passes its
+    /// terminal's [`crate::permissions::ApprovalBroker`]; `None`, as in
+    /// print mode, means nobody can, so every escalation fails closed and
+    /// the system prompt states the `never` policy.
+    pub approver: Option<Arc<dyn Approver>>,
     /// Startup warnings found before [`run`], printed with its own.
     pub warnings: Vec<String>,
     /// Resolves with an exit code when the process should stop, such as on
@@ -136,16 +150,23 @@ pub struct ImportedStartup {
 /// [`import_default_preset`](crate::permissions::import::import_default_preset).
 /// A home without them contributes nothing; an unreadable one contributes
 /// a warning, so a `models.json` route still runs.
+///
+/// A `bake-rs` sign-in ([`crate::cliproxyapi::account`]) comes first:
+/// while `settings.json` has a `cliproxyapi` member, the 0.3 route and key
+/// are not imported. The account itself is applied to the registry later,
+/// from its own read ([`apply_account`]).
 pub fn import_startup(
     home: &std::path::Path,
     env: &dyn Fn(&str) -> Option<std::ffi::OsString>,
 ) -> ImportedStartup {
+    use crate::cliproxyapi::account::{AccountView, read_account};
     use crate::cliproxyapi::{CLIPROXYAPI_ID, import_cliproxyapi};
     let mut startup = ImportedStartup::default();
+    let owned = !matches!(read_account(home), AccountView::Absent);
     match import_cliproxyapi(home, env) {
         Ok(imported) => {
             startup.default_model = imported.default_model;
-            if let Some(route) = imported.route {
+            if let (false, Some(route)) = (owned, imported.route) {
                 let key = route.key.map(|key| key.key.expose().to_owned());
                 let mut config = route.provider.config;
                 // The config names the key's variable (`$CLIPROXYAPI_API_KEY`),
@@ -174,6 +195,15 @@ pub fn import_startup(
     startup
 }
 
+/// Applies the home's CLIProxyAPI account to `registry`, from one
+/// coherent read ([`crate::cliproxyapi::account::read_account`]); returns
+/// a warning when the account is off or its route is refused. Blocks.
+pub fn apply_account(home: &std::path::Path, registry: &mut ModelRegistry) -> Option<String> {
+    crate::cliproxyapi::account::CliProxyAccount::new(home)
+        .apply_to(registry)
+        .unwrap_or_else(Some)
+}
+
 /// A stop request: resolves with the exit code to stop with.
 pub type Interrupt = std::pin::Pin<Box<dyn std::future::Future<Output = i32> + Send>>;
 
@@ -191,6 +221,9 @@ pub enum Action {
     Version,
     /// Run print mode.
     Print(Box<Args>, Mode),
+    /// Run interactive mode: both standard streams are terminals and
+    /// neither `--print` nor `--mode` was given.
+    Interactive(Box<Args>),
     /// Stop with this exit code; the diagnostics are written.
     Exit(i32),
 }
@@ -215,7 +248,9 @@ fn warn(stderr: &SharedWriter, message: &str) {
     write_out(stderr, &format!("Warning: {message}\n"));
 }
 
-/// Pi's argument checks and `resolveAppMode`, before anything is loaded.
+/// Pi's argument checks and `resolveAppMode`, before anything is loaded:
+/// print mode when asked for or when a standard stream is not a terminal,
+/// and interactive mode otherwise.
 pub fn plan(
     args: &[String],
     stdin_is_terminal: bool,
@@ -260,12 +295,7 @@ pub fn plan(
         {
             Mode::Text
         }
-        None => {
-            return Action::Exit(error(
-                stderr,
-                "Interactive mode is not available in bake-rs yet. Use -p or --mode json.",
-            ));
-        }
+        None => return Action::Interactive(Box::new(parsed)),
     };
     Action::Print(Box::new(parsed), mode)
 }
@@ -472,7 +502,7 @@ fn create_session_manager(
             ResolvedSession::Path(path) => {
                 SessionManager::open(&path, Some(&dir), None).map_err(failed)
             }
-            // Print mode cannot prompt whether to fork; point at `--fork`.
+            // Neither mode prompts whether to fork yet; point at `--fork`.
             ResolvedSession::Global { cwd, .. } => Err(SessionStartError::Error(format!(
                 "Session found in different project: {cwd}. Use --fork {arg} to fork it into this directory."
             ))),
@@ -505,9 +535,619 @@ fn create_session_manager(
     .map_err(failed)
 }
 
+/// A session set up from the command line, ready for print or interactive
+/// mode: Pi's `main` up to the mode branch.
+pub struct Started {
+    /// The session, with its model, tools, permission, and prompt.
+    pub session: AgentSession,
+    /// The first prompt: piped standard input, `@file` text, and the first
+    /// message, as Pi's `buildInitialMessage` joins them.
+    pub initial_message: Option<String>,
+    /// Images from `@file` arguments, for the first prompt.
+    pub initial_images: Vec<bake_ai::ImageContent>,
+    /// The later messages, each its own prompt.
+    pub messages: Vec<String>,
+    /// Standard output.
+    pub stdout: SharedWriter,
+    /// Standard error.
+    pub stderr: SharedWriter,
+    /// The stop request from [`CliEnvironment::interrupt`].
+    pub interrupt: Interrupt,
+    /// The Bake home the session's settings and credentials come from.
+    pub home: PathBuf,
+    /// Builds the sessions `/new` and `/resume` replace this one with.
+    pub factory: SessionFactory,
+}
+
 /// Runs `bake-rs` print mode; returns the exit code. Must run inside a
 /// multi-threaded Tokio runtime.
 pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
+    if let Some(search_pattern) = args.list_models.clone() {
+        return run_list_models(environment, search_pattern.as_deref()).await;
+    }
+    let started = match start(environment, args).await {
+        Ok(started) => started,
+        Err(code) => return code,
+    };
+    let Started {
+        session,
+        initial_message,
+        initial_images,
+        messages,
+        stdout,
+        stderr,
+        interrupt,
+        home: _,
+        factory: _,
+    } = started;
+    let options = PrintModeOptions {
+        mode: match mode {
+            Mode::Text => PrintOutput::Text,
+            Mode::Json => PrintOutput::Json,
+        },
+        initial_message,
+        initial_images,
+        messages,
+    };
+    // Pi's print-mode signal handlers: dispose of the runtime, then exit.
+    tokio::select! {
+        code = run_print_mode(&session, options, stdout, stderr) => code,
+        code = interrupt => {
+            session.shutdown().await;
+            code
+        }
+    }
+}
+
+/// `--list-models`: loads the registry and lists its models.
+async fn run_list_models(environment: CliEnvironment, search_pattern: Option<&str>) -> i32 {
+    let CliEnvironment {
+        home,
+        docs_command,
+        stdout,
+        stderr,
+        extra_providers,
+        warnings: startup_warnings,
+        ..
+    } = environment;
+    let Some(home) = home else {
+        return error(
+            &stderr,
+            "Cannot find the Bake home: set BAKE_HOME or make the user's home directory resolvable",
+        );
+    };
+    let loaded = tokio::task::spawn_blocking(move || {
+        let settings = Settings::load(&home);
+        let mut registry = ModelRegistry::load(&home);
+        let mut warnings = startup_warnings;
+        warnings.extend(settings.warnings);
+        for (id, config, key) in extra_providers {
+            if let Err(message) = registry.add_provider_config(&id, config, key) {
+                warnings.push(message);
+            }
+        }
+        warnings.extend(apply_account(&home, &mut registry));
+        if let Some(message) = registry.error() {
+            warnings.push(format!("errors loading models.json:\n{message}"));
+        }
+        (registry, warnings)
+    })
+    .await;
+    let (registry, warnings) = match loaded {
+        Ok(loaded) => loaded,
+        Err(join) => return error(&stderr, &format!("Startup failed: {join}")),
+    };
+    for warning in &warnings {
+        warn(&stderr, warning);
+    }
+    list_models(&registry, search_pattern, &docs_command, &stdout);
+    0
+}
+
+/// Sets the session up from the command line as Pi's `main` does before
+/// it picks a mode: settings, models, the session file and its permission,
+/// context files, skills, prompt templates, tools, the system prompt, and
+/// the first prompt. Print and interactive mode share it, so both run the
+/// same session. Reports a failure on standard error and returns its exit
+/// code; nothing has touched the terminal by then. Must run inside a
+/// multi-threaded Tokio runtime.
+///
+/// Without a model, print mode stops here with Pi's no-models message.
+pub async fn start(environment: CliEnvironment, args: Args) -> Result<Started, i32> {
+    start_with(environment, args, false).await
+}
+
+/// [`start`] for interactive mode, which, as Pi's `main` does, starts
+/// without a model, or with one that has no key, so the person can sign in
+/// from the session; a prompt is then refused with Pi's message. Invalid
+/// flags and an explicit `--model` that matches nothing still fail.
+pub async fn start_interactive(environment: CliEnvironment, args: Args) -> Result<Started, i32> {
+    start_with(environment, args, true).await
+}
+
+/// What a session's setup reads besides its session file and model
+/// selection: the context files, skills, prompt templates, permission, and
+/// prompt overrides, all for the session's working directory. Pi's
+/// resource loader and `buildSessionOptions`, without extensions.
+struct Resources {
+    context_files: Vec<crate::system_prompt::ContextFile>,
+    skills: Vec<crate::skills::Skill>,
+    prompt_templates: Vec<crate::prompt_templates::PromptTemplate>,
+    permission: crate::permissions::SessionPermission,
+    custom_prompt: Option<String>,
+    append_system_prompt: Option<String>,
+}
+
+/// Settles `session`'s permission (D24), writing any change to its file
+/// before anything can run, and loads the resources for its working
+/// directory. `permission_flags` applies `--permission`, `--sandbox`, and
+/// `--approval`; a resumed session leaves them out and keeps its own.
+/// Blocking.
+#[allow(clippy::too_many_arguments)]
+fn load_resources(
+    session: &mut SessionManager,
+    settings: &Settings,
+    args: &Args,
+    home: &Path,
+    user_home: Option<PathBuf>,
+    imported_default_preset: Option<&str>,
+    permission_flags: bool,
+    warnings: &mut Vec<String>,
+) -> Result<Resources, String> {
+    let permission = prepare_session_permission(
+        session,
+        &PermissionInputs {
+            settings: settings.permission.as_ref(),
+            imported_default_preset,
+            preset: args.permission.as_deref().filter(|_| permission_flags),
+            sandbox: args.sandbox.filter(|_| permission_flags),
+            approval: args.approval.filter(|_| permission_flags),
+        },
+    )?;
+    warnings.extend(permission.warnings.iter().cloned());
+    let context_files = if args.no_context_files {
+        Vec::new()
+    } else {
+        let agents_dir = user_home.as_deref().map(user_agents_dir);
+        let (files, context_warnings) =
+            load_project_context_files(session.cwd(), agents_dir.as_deref());
+        warnings.extend(context_warnings);
+        files
+    };
+    // Pi's print mode does not report skill or prompt-template diagnostics.
+    let skills = load_skills(&LoadSkillsOptions {
+        cwd: session.cwd().to_owned(),
+        user_home,
+        skill_paths: args.skills.clone(),
+        include_defaults: !args.no_skills,
+    })
+    .skills;
+    let prompt_templates = load_prompt_templates(&LoadPromptTemplatesOptions {
+        cwd: session.cwd().to_owned(),
+        agent_dir: home.to_path_buf(),
+        prompt_paths: args.prompt_templates.clone(),
+        include_defaults: !args.no_prompt_templates,
+    })
+    .templates;
+    let custom_prompt =
+        resolve_prompt_input(args.system_prompt.as_deref(), session.cwd(), warnings);
+    let append_parts: Vec<String> = args
+        .append_system_prompt
+        .iter()
+        .filter_map(|input| resolve_prompt_input(Some(input), session.cwd(), warnings))
+        .collect();
+    let append_system_prompt = (!append_parts.is_empty()).then(|| append_parts.join("\n\n"));
+    Ok(Resources {
+        context_files,
+        skills,
+        prompt_templates,
+        permission,
+        custom_prompt,
+        append_system_prompt,
+    })
+}
+
+/// What [`build_session`] makes a session from.
+struct Build {
+    session: SessionManager,
+    apis: Arc<ApiRegistry>,
+    resources: Resources,
+    settings: Settings,
+    registry: crate::model_registry::ModelRuntime,
+    model: Option<bake_ai::Model>,
+    thinking_level: Option<bake_ai::ModelThinkingLevel>,
+    home: PathBuf,
+    docs_command: String,
+    sandbox_provider: Arc<dyn SandboxProvider>,
+    approver: Option<Arc<dyn Approver>>,
+}
+
+/// Pi's `_buildRuntime` tools, `createAgentSession` tool selection, and
+/// the system prompt, then the session itself.
+async fn build_session(args: &Args, build: Build) -> Result<AgentSession, String> {
+    let Build {
+        session,
+        apis,
+        resources,
+        settings,
+        registry,
+        model,
+        thinking_level,
+        home,
+        docs_command,
+        sandbox_provider,
+        approver,
+    } = build;
+    let Resources {
+        context_files,
+        skills,
+        prompt_templates,
+        permission,
+        custom_prompt,
+        append_system_prompt,
+    } = resources;
+    let session_cwd = session.cwd().to_owned();
+    let session_id = session.session_id().to_owned();
+    let can_ask = approver.is_some();
+    let tool_permissions = ToolPermissions::new(
+        Arc::new(permission.standing(Path::new(&session_cwd), Some(session_id.clone()))),
+        approver.unwrap_or_else(|| Arc::new(NoApprover)),
+        sandbox_provider,
+    );
+    let session_file = session
+        .session_file()
+        .map(|file| file.to_string_lossy().into_owned());
+    // The read tool asks for the session's model when it runs, and bash
+    // reads the model and thinking level for its `BAKE_*` variables when
+    // each call starts; both read what the session publishes now, so a
+    // model change reaches the next call.
+    let published = crate::agent_session::SessionSelection::default();
+    let bash_context: crate::tools::bash::BashToolContextFn = {
+        let selection = published.clone();
+        let session_cwd = PathBuf::from(&session_cwd);
+        Arc::new(move || {
+            let selected = selection.get();
+            crate::tools::bash::BashToolContext {
+                cwd: Some(session_cwd.clone()),
+                session_id: session_id.clone(),
+                session_file: session_file.clone(),
+                thinking_level: Some(selected.thinking_level.as_str().to_owned()),
+                model: selected.model.map(|model| crate::tools::bash::BashModel {
+                    provider: model.provider,
+                    id: model.id,
+                }),
+            }
+        })
+    };
+    let tools_options = ToolsOptions {
+        read: ReadToolOptions {
+            auto_resize_images: settings.image_auto_resize(),
+            resize_options: None,
+            model: Some({
+                let selection = published.clone();
+                Arc::new(move || selection.get().model)
+            }),
+        },
+        bash: Some(sandboxed_bash_tool(
+            Path::new(&session_cwd),
+            crate::tools::bash::BashToolOptions {
+                context: Some(bash_context),
+                ..Default::default()
+            },
+            &tool_permissions,
+        )?),
+    };
+    let definitions = sandbox_file_tools(
+        create_all_tool_definitions(Path::new(&session_cwd), &tools_options),
+        Path::new(&session_cwd),
+        &tool_permissions,
+    );
+    let available: Vec<String> = definitions
+        .iter()
+        .map(|definition| definition.name().to_owned())
+        .collect();
+    let selection = select_tools(
+        &ToolSelectionOptions {
+            tools: args.tools.clone(),
+            exclude_tools: args.exclude_tools.clone(),
+            no_tools: if args.no_tools {
+                Some(NoTools::All)
+            } else if args.no_builtin_tools {
+                Some(NoTools::Builtin)
+            } else {
+                None
+            },
+        },
+        settings.default_tools.as_deref(),
+        &available,
+    )?;
+    let registered: Vec<_> = definitions
+        .into_iter()
+        .filter(|definition| {
+            selection
+                .registered
+                .iter()
+                .any(|name| name == definition.name())
+        })
+        .collect();
+
+    // The session header's start, so a resumed session states the same
+    // date and patches nothing.
+    let started_ms = session
+        .header()
+        .and_then(|header| header.timestamp())
+        .and_then(parse_date_ms)
+        .unwrap_or_else(bake_ai::now_ms);
+    let mut system_prompt = SystemPromptOptions::new(session_cwd.clone());
+    system_prompt.custom_prompt = custom_prompt;
+    if let Some(append) = append_system_prompt {
+        system_prompt.append_system_prompt = append;
+    }
+    system_prompt.context_files = context_files;
+    system_prompt.skills = skills;
+    // Without an approver, escalations fail closed (D24), and the prompt
+    // states the `never` policy whatever the session's.
+    system_prompt.permissions = permission.prompt_text(Path::new(&session_cwd), can_ask);
+    system_prompt.environment = Environment::detect(Path::new(&session_cwd), started_ms);
+    let mut session = AgentSession::create(AgentSessionOptions {
+        session,
+        registry,
+        apis,
+        settings,
+        settings_store: Some(SettingsStore::new(&home)),
+        selection: Some(published),
+        model,
+        thinking_level,
+        tools: registered
+            .iter()
+            .map(|definition| Arc::new(definition.tool.clone()))
+            .collect(),
+        active_tool_names: selection.active,
+        tool_prompts: registered
+            .iter()
+            .map(|definition| definition.prompt())
+            .collect(),
+        system_prompt,
+        docs_command,
+    })
+    .await?;
+    session.set_prompt_templates(prompt_templates);
+    Ok(session)
+}
+
+/// Where a replacement session comes from: Pi's `newSession` and
+/// `switchSession`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionTarget {
+    /// A new session in the current one's session directory and working
+    /// directory, persisted when it is, in memory when it is not
+    /// (`--no-session`).
+    New,
+    /// The session file at this path, which must exist, read as a session,
+    /// and hold the session `id`.
+    Open { path: PathBuf, id: String },
+}
+
+/// Where [`SessionFactory::build_replacement`] takes its store from.
+enum Staged {
+    Target(SessionTarget),
+    /// A store already built, such as a fork's.
+    Store(Box<SessionManager>),
+}
+
+/// A replacement session, built and not yet in use, and what its setup
+/// warned about.
+pub struct Replacement {
+    pub session: AgentSession,
+    pub warnings: Vec<String>,
+}
+
+/// Builds the sessions `/new`, `/resume`, and `/fork` replace the running
+/// one with,
+/// as Pi's `createRuntime` does for `AgentSessionRuntime`: the same Bake
+/// home, tools, flags, sandbox provider, and approver as at startup, with
+/// the running session's live settings and model runtime, so a sign-in, a
+/// refreshed model list, a `--api-key`, or a changed setting carries over.
+///
+/// The command line's session choice (`--continue`, `--resume`,
+/// `--session`, `--session-id`, `--fork`), `--name`, and its prompts and
+/// files belong to the first session and are never applied again. A new
+/// session starts with the running session's model and thinking level,
+/// and with the startup permission flags; a resumed one restores the model,
+/// thinking level, and permission its file records, as `--continue` does
+/// without `--model`, `--thinking`, or permission flags.
+///
+/// The replacement is built from its own [`SessionManager`]; the running
+/// session's is never touched, so a failure leaves it, its file, and its
+/// writer lock as they were.
+#[derive(Clone)]
+pub struct SessionFactory {
+    args: Args,
+    home: PathBuf,
+    user_home: Option<PathBuf>,
+    docs_command: String,
+    sandbox_provider: Arc<dyn SandboxProvider>,
+    approver: Option<Arc<dyn Approver>>,
+    imported_default_preset: Option<String>,
+}
+
+impl std::fmt::Debug for SessionFactory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SessionFactory")
+            .field("home", &self.home)
+            .finish_non_exhaustive()
+    }
+}
+
+impl SessionFactory {
+    /// A factory for sessions set up as `args` describe, with settings and
+    /// credentials from `home`, bash confined by `sandbox_provider`, and
+    /// approvals asked of `approver` (none fails them closed). The
+    /// command line's own setup ([`start_interactive`]) also names the
+    /// user's home and the 0.3 home's imported default preset.
+    pub fn new(
+        args: Args,
+        home: PathBuf,
+        docs_command: String,
+        sandbox_provider: Arc<dyn SandboxProvider>,
+        approver: Option<Arc<dyn Approver>>,
+    ) -> Self {
+        Self {
+            args,
+            home,
+            user_home: None,
+            docs_command,
+            sandbox_provider,
+            approver,
+            imported_default_preset: None,
+        }
+    }
+
+    /// Builds the replacement for `current`, which keeps running
+    /// meanwhile; the caller shuts `current` down before it uses the
+    /// replacement, and shuts the replacement down if it does not.
+    pub async fn replace(
+        &self,
+        current: &AgentSession,
+        target: SessionTarget,
+    ) -> Result<Replacement, String> {
+        let resume = matches!(target, SessionTarget::Open { .. });
+        self.build_replacement(current, Staged::Target(target), resume)
+            .await
+    }
+
+    /// Builds the session `/fork` replaces `current` with, Pi's runtime
+    /// `fork` before the user message `entry_id`
+    /// ([`AgentSession::fork_session_manager`]), and returns it with the
+    /// message's text, for the editor. A fork that holds history restores
+    /// the model, thinking level, and permission its path records, as
+    /// `/resume` does; an empty fork, from a first message, starts as
+    /// `/new` does. `current` and its file are not touched; a persisted
+    /// fork's file may already be written when a later step fails.
+    pub async fn fork(
+        &self,
+        current: &AgentSession,
+        entry_id: &str,
+    ) -> Result<(Replacement, String), String> {
+        let forked = current.fork_session_manager(entry_id).await?;
+        let resume = !forked.session.build_session_context().messages.is_empty();
+        let replacement = self
+            .build_replacement(current, Staged::Store(Box::new(forked.session)), resume)
+            .await?;
+        Ok((replacement, forked.selected_text))
+    }
+
+    async fn build_replacement(
+        &self,
+        current: &AgentSession,
+        staged: Staged,
+        resume: bool,
+    ) -> Result<Replacement, String> {
+        let settings = current.settings();
+        let registry = current.model_runtime().clone();
+        let (place, persisted) = current.session_place();
+        let cwd = current.cwd();
+        let (model, thinking_level) = if resume {
+            (None, None)
+        } else {
+            (current.model(), Some(current.thinking_level()))
+        };
+        let factory = self.clone();
+        let loaded = tokio::task::spawn_blocking(move || {
+            let mut warnings = Vec::new();
+            let mut session = match staged {
+                Staged::Target(SessionTarget::New) if persisted => {
+                    SessionManager::create(&cwd, Some(&place), NewSessionOptions::default())
+                        .map_err(|error| error.to_string())
+                }
+                Staged::Target(SessionTarget::New) => {
+                    SessionManager::in_memory(Some(&cwd), NewSessionOptions::default(), Vec::new())
+                        .map_err(|error| error.to_string())
+                }
+                Staged::Target(SessionTarget::Open { path, id }) => {
+                    open_listed(&path, &id, &place, &cwd)
+                }
+                Staged::Store(session) => Ok(*session),
+            }?;
+            let resources = load_resources(
+                &mut session,
+                &settings,
+                &factory.args,
+                &factory.home,
+                factory.user_home.clone(),
+                factory.imported_default_preset.as_deref(),
+                !resume,
+                &mut warnings,
+            )?;
+            Ok::<_, String>((session, resources, settings, warnings))
+        })
+        .await
+        .map_err(|error| format!("Session setup failed: {error}"))??;
+        let (session, resources, settings, warnings) = loaded;
+        let session = build_session(
+            &self.args,
+            Build {
+                session,
+                apis: Arc::clone(current.apis()),
+                resources,
+                settings,
+                registry,
+                model,
+                thinking_level,
+                home: self.home.clone(),
+                docs_command: self.docs_command.clone(),
+                sandbox_provider: Arc::clone(&self.sandbox_provider),
+                approver: self.approver.clone(),
+            },
+        )
+        .await?;
+        Ok(Replacement { session, warnings })
+    }
+}
+
+/// Opens the session file `/resume` chose: one that exists, reads as a
+/// session, holds the session `id`, and started in `cwd`, the running
+/// session's working directory, which the terminal, its file mentions, and
+/// its status line also show; a session from another directory is refused
+/// rather than run with tools in a workspace the screen does not name.
+/// [`SessionManager::open`] would start a new session at a missing path,
+/// so a file removed since it was listed is refused rather than recreated.
+/// Blocking.
+fn open_listed(path: &Path, id: &str, place: &Path, cwd: &str) -> Result<SessionManager, String> {
+    let metadata = std::fs::metadata(path)
+        .map_err(|error| format!("Cannot open {}: {error}", path.display()))?;
+    if !metadata.is_file() || metadata.len() == 0 {
+        return Err(format!("{} is not a session file", path.display()));
+    }
+    let session =
+        SessionManager::open(path, Some(place), None).map_err(|error| error.to_string())?;
+    if session.session_id() != id {
+        return Err(format!(
+            "{} no longer holds session {id}; choose it again",
+            path.display()
+        ));
+    }
+    let wanted = crate::session::paths::resolve_path_string(cwd);
+    if crate::session::paths::resolve_path_string(session.cwd()) != wanted {
+        return Err(format!(
+            "Session {id} started in {}, not in {wanted}; resume it from there",
+            session.cwd()
+        ));
+    }
+    if !Path::new(session.cwd()).is_dir() {
+        return Err(format!(
+            "The session's working directory {} does not exist",
+            session.cwd()
+        ));
+    }
+    Ok(session)
+}
+
+async fn start_with(
+    environment: CliEnvironment,
+    args: Args,
+    allow_no_model: bool,
+) -> Result<Started, i32> {
     let CliEnvironment {
         cwd,
         home,
@@ -521,48 +1161,28 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
         imported_default_model,
         imported_default_preset,
         sandbox_provider,
+        approver,
         warnings: startup_warnings,
         interrupt,
     } = environment;
     let mut args = args;
     let Some(home) = home else {
-        return error(
+        return Err(error(
             &stderr,
             "Cannot find the Bake home: set BAKE_HOME or make the user's home directory resolvable",
-        );
+        ));
     };
     let cwd = cwd.to_string_lossy().into_owned();
+    let factory = SessionFactory {
+        args: args.clone(),
+        home: home.clone(),
+        user_home: user_home.clone(),
+        docs_command: docs_command.clone(),
+        sandbox_provider: Arc::clone(&sandbox_provider),
+        approver: approver.clone(),
+        imported_default_preset: imported_default_preset.clone(),
+    };
 
-    if let Some(search_pattern) = &args.list_models {
-        let loaded = {
-            let home = home.clone();
-            tokio::task::spawn_blocking(move || {
-                let settings = Settings::load(&home);
-                let mut registry = ModelRegistry::load(&home);
-                let mut warnings = startup_warnings;
-                warnings.extend(settings.warnings);
-                for (id, config, key) in extra_providers {
-                    if let Err(message) = registry.add_provider_config(&id, config, key) {
-                        warnings.push(message);
-                    }
-                }
-                if let Some(message) = registry.error() {
-                    warnings.push(format!("errors loading models.json:\n{message}"));
-                }
-                (registry, warnings)
-            })
-            .await
-        };
-        let (registry, warnings) = match loaded {
-            Ok(loaded) => loaded,
-            Err(join) => return error(&stderr, &format!("Startup failed: {join}")),
-        };
-        for warning in &warnings {
-            warn(&stderr, warning);
-        }
-        list_models(&registry, search_pattern.as_deref(), &docs_command, &stdout);
-        return 0;
-    }
     let loaded = {
         let home = home.clone();
         let cwd = cwd.clone();
@@ -586,6 +1206,7 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
                     warnings.push(message);
                 }
             }
+            warnings.extend(apply_account(&home, &mut registry));
             if let Some(message) = registry.error() {
                 warnings.push(message);
             }
@@ -602,58 +1223,17 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
                         .append_session_info(&name)
                         .map_err(|error| SessionStartError::Error(error.to_string()))?;
                 }
-                // D24: the session's permission is settled, and stored in
-                // its file, before anything can run.
-                let permission = prepare_session_permission(
+                let resources = load_resources(
                     &mut session,
-                    &PermissionInputs {
-                        settings: settings.permission.as_ref(),
-                        imported_default_preset: imported_default_preset.as_deref(),
-                        preset: args.permission.as_deref(),
-                        sandbox: args.sandbox,
-                        approval: args.approval,
-                    },
+                    &settings,
+                    &args,
+                    &home,
+                    user_home,
+                    imported_default_preset.as_deref(),
+                    true,
+                    &mut warnings,
                 )
                 .map_err(SessionStartError::Error)?;
-                warnings.extend(permission.warnings.iter().cloned());
-                let files = if args.no_context_files {
-                    Vec::new()
-                } else {
-                    let agents_dir = user_home.as_deref().map(user_agents_dir);
-                    let (files, context_warnings) =
-                        load_project_context_files(session.cwd(), agents_dir.as_deref());
-                    warnings.extend(context_warnings);
-                    files
-                };
-                // Pi's print mode does not report skill or prompt-template diagnostics.
-                let skills = load_skills(&LoadSkillsOptions {
-                    cwd: session.cwd().to_owned(),
-                    user_home,
-                    skill_paths: args.skills.clone(),
-                    include_defaults: !args.no_skills,
-                })
-                .skills;
-                let prompt_templates = load_prompt_templates(&LoadPromptTemplatesOptions {
-                    cwd: session.cwd().to_owned(),
-                    agent_dir: home.clone(),
-                    prompt_paths: args.prompt_templates.clone(),
-                    include_defaults: !args.no_prompt_templates,
-                })
-                .templates;
-                let custom_prompt = resolve_prompt_input(
-                    args.system_prompt.as_deref(),
-                    session.cwd(),
-                    &mut warnings,
-                );
-                let append_parts: Vec<String> = args
-                    .append_system_prompt
-                    .iter()
-                    .filter_map(|input| {
-                        resolve_prompt_input(Some(input), session.cwd(), &mut warnings)
-                    })
-                    .collect();
-                let append_system_prompt =
-                    (!append_parts.is_empty()).then(|| append_parts.join("\n\n"));
                 let processed_files = if args.file_args.is_empty() {
                     Ok(file_processor::ProcessedFiles::default())
                 } else {
@@ -667,16 +1247,7 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
                     )
                     .map_err(SessionStartError::Error)
                 }?;
-                Ok((
-                    session,
-                    files,
-                    skills,
-                    prompt_templates,
-                    permission,
-                    custom_prompt,
-                    append_system_prompt,
-                    processed_files,
-                ))
+                Ok((session, resources, processed_files))
             });
             (settings, registry, warnings, session)
         })
@@ -684,36 +1255,17 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
     };
     let (settings, mut registry, warnings, session) = match loaded {
         Ok(loaded) => loaded,
-        Err(join) => return error(&stderr, &format!("Startup failed: {join}")),
+        Err(join) => return Err(error(&stderr, &format!("Startup failed: {join}"))),
     };
-    let (
-        session,
-        context_files,
-        skills,
-        prompt_templates,
-        permission,
-        custom_prompt,
-        append_system_prompt,
-        processed_files,
-    ) = match session {
+    let (session, resources, processed_files) = match session {
         Ok(session) => session,
-        Err(SessionStartError::Error(message)) => return error(&stderr, &message),
+        Err(SessionStartError::Error(message)) => return Err(error(&stderr, &message)),
         Err(SessionStartError::Plain(message)) => {
             write_out(&stderr, &format!("{message}\n"));
-            return 1;
+            return Err(1);
         }
     };
     let has_existing_session = !session.build_session_context().messages.is_empty();
-    let session_cwd = session.cwd().to_owned();
-    let session_id = session.session_id().to_owned();
-    let tool_permissions = ToolPermissions::new(
-        Arc::new(permission.standing(Path::new(&session_cwd), Some(session_id.clone()))),
-        Arc::new(NoApprover),
-        sandbox_provider,
-    );
-    let session_file = session
-        .session_file()
-        .map(|file| file.to_string_lossy().into_owned());
 
     // Pi's `resolveModelScope` and `buildSessionOptions`.
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
@@ -812,149 +1364,30 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
         .iter()
         .any(|diagnostic| diagnostic.kind == DiagnosticKind::Error)
     {
-        return 1;
+        return Err(1);
     }
 
-    // Pi's `_buildRuntime` tools and `createAgentSession` tool selection.
-    // The read tool asks for the session's model when it runs.
-    let session_model: Arc<std::sync::Mutex<Option<bake_ai::Model>>> = Arc::default();
-    // Bash reads the session for its `BAKE_*` variables when each call starts.
-    let session_thinking: Arc<std::sync::Mutex<Option<String>>> = Arc::default();
-    let bash_context: crate::tools::bash::BashToolContextFn = {
-        let session_model = Arc::clone(&session_model);
-        let session_thinking = Arc::clone(&session_thinking);
-        let session_cwd = PathBuf::from(&session_cwd);
-        Arc::new(move || crate::tools::bash::BashToolContext {
-            cwd: Some(session_cwd.clone()),
-            session_id: session_id.clone(),
-            session_file: session_file.clone(),
-            model: session_model
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .as_ref()
-                .map(|model| crate::tools::bash::BashModel {
-                    provider: model.provider.clone(),
-                    id: model.id.clone(),
-                }),
-            thinking_level: session_thinking
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .clone(),
-        })
-    };
-    let tools_options = ToolsOptions {
-        read: ReadToolOptions {
-            auto_resize_images: settings.image_auto_resize(),
-            resize_options: None,
-            model: Some({
-                let session_model = Arc::clone(&session_model);
-                Arc::new(move || {
-                    session_model
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .clone()
-                })
-            }),
+    let session = match build_session(
+        &args,
+        Build {
+            session,
+            apis: Arc::new(ApiRegistry::with_builtins()),
+            resources,
+            settings,
+            registry: registry.into(),
+            model,
+            thinking_level,
+            home: home.clone(),
+            docs_command: docs_command.clone(),
+            sandbox_provider,
+            approver,
         },
-        bash: match sandboxed_bash_tool(
-            Path::new(&session_cwd),
-            crate::tools::bash::BashToolOptions {
-                context: Some(bash_context),
-                ..Default::default()
-            },
-            &tool_permissions,
-        ) {
-            Ok(definition) => Some(definition),
-            Err(message) => return error(&stderr, &message),
-        },
-    };
-    let definitions = sandbox_file_tools(
-        create_all_tool_definitions(Path::new(&session_cwd), &tools_options),
-        Path::new(&session_cwd),
-        &tool_permissions,
-    );
-    let available: Vec<String> = definitions
-        .iter()
-        .map(|definition| definition.name().to_owned())
-        .collect();
-    let selection = select_tools(
-        &ToolSelectionOptions {
-            tools: args.tools.clone(),
-            exclude_tools: args.exclude_tools.clone(),
-            no_tools: if args.no_tools {
-                Some(NoTools::All)
-            } else if args.no_builtin_tools {
-                Some(NoTools::Builtin)
-            } else {
-                None
-            },
-        },
-        settings.default_tools.as_deref(),
-        &available,
-    );
-    let selection = match selection {
-        Ok(selection) => selection,
-        Err(message) => return error(&stderr, &message),
-    };
-    let registered: Vec<_> = definitions
-        .into_iter()
-        .filter(|definition| {
-            selection
-                .registered
-                .iter()
-                .any(|name| name == definition.name())
-        })
-        .collect();
-
-    // The session header's start, so a resumed session states the same
-    // date and patches nothing.
-    let started_ms = session
-        .header()
-        .and_then(|header| header.timestamp())
-        .and_then(parse_date_ms)
-        .unwrap_or_else(bake_ai::now_ms);
-    let mut system_prompt = SystemPromptOptions::new(session_cwd.clone());
-    system_prompt.custom_prompt = custom_prompt;
-    if let Some(append) = append_system_prompt {
-        system_prompt.append_system_prompt = append;
-    }
-    system_prompt.context_files = context_files;
-    system_prompt.skills = skills;
-    // Print mode has no one to answer an approval prompt.
-    system_prompt.permissions = permission.prompt_text(Path::new(&session_cwd), false);
-    system_prompt.environment = Environment::detect(Path::new(&session_cwd), started_ms);
-    let mut session = match AgentSession::create(AgentSessionOptions {
-        session,
-        registry: Arc::new(registry),
-        apis: Arc::new(ApiRegistry::with_builtins()),
-        settings,
-        model,
-        thinking_level,
-        tools: registered
-            .iter()
-            .map(|definition| Arc::new(definition.tool.clone()))
-            .collect(),
-        active_tool_names: selection.active,
-        tool_prompts: registered
-            .iter()
-            .map(|definition| definition.prompt())
-            .collect(),
-        system_prompt,
-        docs_command: docs_command.clone(),
-    })
+    )
     .await
     {
         Ok(session) => session,
-        Err(message) => return error(&stderr, &message),
+        Err(message) => return Err(error(&stderr, &message)),
     };
-    session.set_prompt_templates(prompt_templates);
-    *session_model
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) = session.model();
-    *session_thinking
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) =
-        Some(session.thinking_level().as_str().to_owned());
 
     let piped = if stdin_is_terminal {
         Ok(None)
@@ -967,36 +1400,30 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
         Ok(piped) => piped,
         Err(message) => {
             session.shutdown().await;
-            return error(&stderr, &message);
+            return Err(error(&stderr, &message));
         }
     };
     let initial_message = build_initial_message(piped, &processed_files.text, &mut args.messages);
 
-    if session.model().is_none() {
+    if session.model().is_none() && !allow_no_model {
         session.shutdown().await;
         write_out(
             &stderr,
             &format!("{}\n", format_no_models_available_message(&docs_command)),
         );
-        return 1;
+        return Err(1);
     }
-    let options = PrintModeOptions {
-        mode: match mode {
-            Mode::Text => PrintOutput::Text,
-            Mode::Json => PrintOutput::Json,
-        },
+    Ok(Started {
+        session,
         initial_message,
         initial_images: processed_files.images,
         messages: args.messages,
-    };
-    // Pi's print-mode signal handlers: dispose of the runtime, then exit.
-    tokio::select! {
-        code = run_print_mode(&session, options, stdout, stderr) => code,
-        code = interrupt => {
-            session.shutdown().await;
-            code
-        }
-    }
+        stdout,
+        stderr,
+        interrupt,
+        home,
+        factory,
+    })
 }
 
 #[cfg(test)]
@@ -1034,11 +1461,15 @@ mod tests {
             plan(&strings(&["-p", "hi"]), true, true, &stderr),
             Action::Print(_, Mode::Text)
         ));
-        assert_eq!(
-            plan(&strings(&["hi"]), true, true, &stderr),
-            Action::Exit(1)
-        );
-        assert!(text(&errors).contains("Interactive mode is not available"));
+        assert!(matches!(
+            plan(&strings(&["hi", "--inline"]), true, true, &stderr),
+            Action::Interactive(args) if args.inline && args.messages == ["hi"]
+        ));
+        assert!(matches!(
+            plan(&strings(&[]), true, true, &stderr),
+            Action::Interactive(_)
+        ));
+        assert_eq!(text(&errors), "");
     }
 
     #[test]

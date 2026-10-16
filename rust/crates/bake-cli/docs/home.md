@@ -13,13 +13,13 @@ The Bake home is the directory that holds bake-rs's models, keys, settings, and 
 
 Instructions and skills for every project are not in the Bake home: they are in `~/.agents` in your home directory (`bake-rs docs context` and `bake-rs docs skills`).
 
-bake-rs never writes `models.json`, `auth.json`, or `settings.json`. It creates `sessions/`, the session files in it, and a `.lock` file beside each session it writes, which it leaves in place (`bake-rs docs sessions`).
+bake-rs never writes `models.json`. Interactive commands write `auth.json` (the CLIProxyAPI key) and `settings.json` (the CLIProxyAPI route, saved defaults, and `/settings` changes), each through a locked, atomic replacement that keeps other members (`bake-rs docs models`). It creates `sessions/`, the session files in it, and a `.lock` file beside each session it writes, which it leaves in place (`bake-rs docs sessions`).
 
 ## Settings from Bake 0.3
 
 A home that Bake 0.3 used also holds `settings.yaml` and `.credentials.yaml`. bake-rs reads them at startup, read-only, and never changes them:
 
-- the CLIProxyAPI route saved by the 0.3 login (`llm-pi-ai.providers.cliproxyapi`), which becomes the `cliproxyapi` provider;
+- the CLIProxyAPI route saved by the 0.3 login (`llm-pi-ai.providers.cliproxyapi`), which becomes the `cliproxyapi` provider while `settings.json` has no `cliproxyapi` member (a `/login` or `/logout` adds one);
 - that route's API key: the `CLIPROXYAPI_API_KEY` environment variable when it is set and not empty, else the key `.credentials.yaml` stores;
 - the default model (`agent-default-model`) and its reasoning effort, used only when `settings.json` names no default provider or model; the effort is the default thinking level unless `defaultThinkingLevel` sets one;
 - the default permission preset (`permission.defaultPreset`), used only when `settings.json` names none.

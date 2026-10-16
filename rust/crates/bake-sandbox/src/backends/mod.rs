@@ -1,12 +1,15 @@
 //! The local OS backends, ported from `LocalSandboxProvider` in
 //! `packages/sandbox/sandbox-local/src/index.ts`: Linux bubblewrap then
-//! Landlock, and macOS Seatbelt. Windows and every other platform have no
-//! backend in this build and refuse.
+//! Landlock, and macOS Seatbelt. The Windows restricted-token runner exists
+//! for explicit chains only: it does not confine deletion, so the Windows
+//! default chain is empty (see [`windows_acl`]). Windows and every other
+//! platform refuse by default.
 //!
 //! | Module | Contents |
 //! |---|---|
 //! | [`profiles`] | the bubblewrap, Landlock, and Seatbelt profile builders |
 //! | [`landlock`] | the Landlock helper `bake-rs` re-executes itself as |
+//! | [`windows_acl`] | the Windows restricted-token runner `bake-rs` re-executes itself as |
 //!
 //! Selection is by platform first and probes second: a chain with one
 //! candidate selects it unprobed, and its own refusal at run time is the
@@ -21,8 +24,8 @@
 //!   absolute, canonical path is the program of the probe and every wrap.
 //!   Relative and empty `PATH` entries (the current directory) and anything
 //!   under `/tmp` or the OS temporary directory are skipped. The Landlock
-//!   helper is the current executable, resolved at the same moment, and
-//!   Seatbelt is always `/usr/bin/sandbox-exec`.
+//!   helper and the Windows runner are the current executable, resolved at
+//!   the same moment, and Seatbelt is always `/usr/bin/sandbox-exec`.
 //! - **A runner a confined call could replace is refused.** Before each
 //!   wrap, the selected runner's program must not lie under any root the
 //!   call's policy grants under `workspace-write` (checked for `read-only`
@@ -46,6 +49,7 @@
 
 pub mod landlock;
 pub mod profiles;
+pub mod windows_acl;
 
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
@@ -73,6 +77,8 @@ pub enum Runner {
     Landlock,
     /// Seatbelt through `sandbox-exec` and an SBPL profile.
     Seatbelt,
+    /// The Windows restricted-token runner (`windows-acl`).
+    WindowsAcl,
 }
 
 impl Runner {
@@ -82,6 +88,7 @@ impl Runner {
             Runner::Bwrap => "bwrap",
             Runner::Landlock => "landlock",
             Runner::Seatbelt => "seatbelt",
+            Runner::WindowsAcl => "windows-acl",
         }
     }
 
@@ -91,25 +98,35 @@ impl Runner {
             Runner::Bwrap => "bubblewrap",
             Runner::Landlock => "Landlock helper",
             Runner::Seatbelt => "sandbox-exec",
+            Runner::WindowsAcl => "Windows ACL runner",
         }
     }
 
     /// The enforcement a rung claims when selected without a probe
     /// (`STATIC_ENFORCEMENT`). Landlock is listed for totality: the Linux
-    /// chain reaches it only through its probe, whose report decides.
+    /// chain reaches it only through its probe, whose report decides. The
+    /// Windows runner is partial: deletion, Everyone's grants, and hard links
+    /// escape it (see [`windows_acl`]), and no default chain holds it.
     pub fn static_enforcement(self) -> Enforcement {
-        Enforcement::Full
+        match self {
+            Runner::WindowsAcl => Enforcement::Partial,
+            _ => Enforcement::Full,
+        }
     }
 
     /// The case-insensitive stderr substrings a denied file effect produces
     /// under this runner (`DENIAL_SIGNATURES`).
     pub fn denial_signatures(self) -> Vec<String> {
-        let signature = match self {
-            Runner::Bwrap => "read-only file system",
-            Runner::Landlock => "permission denied",
-            Runner::Seatbelt => "operation not permitted",
+        let signatures: &[&str] = match self {
+            Runner::Bwrap => &["read-only file system"],
+            Runner::Landlock => &["permission denied"],
+            Runner::Seatbelt => &["operation not permitted"],
+            Runner::WindowsAcl => &windows_acl::DENIAL_SIGNATURES,
         };
-        vec![signature.to_owned()]
+        signatures
+            .iter()
+            .map(|&signature| signature.to_owned())
+            .collect()
     }
 
     /// The runner's own fatal diagnostics (`RUNNER_FAILURE_RULES`). Landlock
@@ -128,6 +145,11 @@ impl Runner {
             },
             Runner::Seatbelt => RunnerFailureRule {
                 fatal_signatures: vec!["sandbox-exec: ".to_owned()],
+                ..RunnerFailureRule::default()
+            },
+            Runner::WindowsAcl => RunnerFailureRule {
+                allowed_exit_codes: vec![windows_acl::RUNNER_FAILURE_EXIT],
+                fatal_signatures: vec![format!("{}: ", windows_acl::RUNNER_SIGNATURE)],
                 ..RunnerFailureRule::default()
             },
         };
@@ -184,6 +206,8 @@ pub struct LocalProvider {
     /// `None` when the current executable could not be resolved.
     landlock: Option<Invocation>,
     seatbelt: Invocation,
+    /// `None` when the current executable could not be resolved.
+    windows_acl: Option<Invocation>,
     probe_timeout: Duration,
     verdict: OnceCell<Verdict>,
 }
@@ -196,9 +220,10 @@ impl Default for LocalProvider {
 
 impl LocalProvider {
     /// The provider for this platform (`PLATFORM_CHAINS`): bubblewrap then
-    /// Landlock on Linux, Seatbelt on macOS, and nothing elsewhere. The
-    /// Landlock helper is the current executable, re-run with
-    /// [`landlock::HELPER_ARG`].
+    /// Landlock on Linux, Seatbelt on macOS, and nothing elsewhere, Windows
+    /// included ([`windows_acl::DEFAULT_REFUSAL`]). The Landlock helper and
+    /// the Windows runner of an explicit chain are the current executable,
+    /// re-run with [`landlock::HELPER_ARG`] or [`windows_acl::HELPER_ARG`].
     ///
     /// Building one searches `PATH` and resolves the current executable; the
     /// first confined call on a multi-candidate chain probes. Build it once
@@ -214,9 +239,12 @@ impl LocalProvider {
     /// TypeScript called `internals.chain`. An empty chain refuses every
     /// confined call. Bubblewrap is looked up on the process `PATH` now.
     pub fn with_chain(chain: Vec<Runner>) -> Self {
-        let landlock = std::env::current_exe()
-            .ok()
+        let exe = std::env::current_exe().ok();
+        let landlock = exe
+            .clone()
             .map(|exe| Invocation::new(exe, [OsString::from(landlock::HELPER_ARG)]));
+        let windows_acl =
+            exe.map(|exe| Invocation::new(exe, [OsString::from(windows_acl::HELPER_ARG)]));
         let path = std::env::var_os("PATH");
         Self {
             chain,
@@ -224,6 +252,7 @@ impl LocalProvider {
             bwrap: bwrap_on_path(path.as_deref()),
             landlock,
             seatbelt: Invocation::new(SEATBELT_EXEC, []),
+            windows_acl,
             probe_timeout: DEFAULT_PROBE_TIMEOUT,
             verdict: OnceCell::new(),
         }
@@ -264,6 +293,17 @@ impl LocalProvider {
         args: impl IntoIterator<Item = OsString>,
     ) -> Self {
         self.seatbelt = Invocation::new(program, args);
+        self
+    }
+
+    /// Runs the Windows runner as `program` with `args` before its profile;
+    /// a Bake binary needs `[windows_acl::HELPER_ARG]`.
+    pub fn with_windows_acl_runner(
+        mut self,
+        program: impl Into<OsString>,
+        args: impl IntoIterator<Item = OsString>,
+    ) -> Self {
+        self.windows_acl = Some(Invocation::new(program, args));
         self
     }
 
@@ -348,6 +388,20 @@ impl LocalProvider {
                 let (code, _) = run_probe(&self.seatbelt, &args, self.probe_timeout, false).await?;
                 (code == Some(0)).then_some(Enforcement::Full)
             }
+            Runner::WindowsAcl => {
+                // TypeScript's probe: a read-only run, which grants nothing,
+                // around `cmd /c exit 0`. Only an override chain probes it.
+                let runner = self.windows_acl.as_ref()?;
+                let temp = canonical_path(&std::env::temp_dir());
+                let mut args = windows_acl::runner_profile_args(
+                    windows_acl::RunnerMode::ReadOnly,
+                    &temp,
+                    &temp,
+                );
+                args.extend(["--", "cmd", "/c", "exit", "0"].map(OsString::from));
+                let (code, _) = run_probe(runner, &args, self.probe_timeout, false).await?;
+                (code == Some(0)).then_some(Enforcement::Partial)
+            }
         }
     }
 
@@ -384,6 +438,18 @@ impl LocalProvider {
                 };
                 (helper, profiles::landlock_profile_args(policy))
             }
+            Runner::WindowsAcl => {
+                let Some(runner) = self.windows_acl.as_ref() else {
+                    return Err(refuse(Some(
+                        "the Windows ACL runner (the current executable) could not be resolved"
+                            .to_owned(),
+                    )));
+                };
+                (
+                    runner,
+                    windows_acl_profile(policy).map_err(|detail| refuse(Some(detail)))?,
+                )
+            }
             Runner::Seatbelt => match profiles::seatbelt_profile_args(policy) {
                 Ok(profile) => (&self.seatbelt, profile),
                 Err(root) => {
@@ -418,6 +484,38 @@ impl SandboxProvider for LocalProvider {
     }
 }
 
+/// The Windows runner's profile for `policy`. Only the workspace and a
+/// private directory under the OS temporary directory become writable:
+/// [`SandboxPolicy::writable_roots`]'s temporary-directory entry is never
+/// granted (a standing ACE there would reach every later private directory
+/// and the user's other temporary files), and extra writable roots are
+/// refused, because the runner has no capability of their own to grant them
+/// and granting them the workspace's would widen every later call on that
+/// workspace.
+fn windows_acl_profile(policy: &SandboxPolicy) -> Result<Vec<OsString>, String> {
+    let mode = match policy.mode {
+        SandboxMode::ReadOnly => windows_acl::RunnerMode::ReadOnly,
+        SandboxMode::WorkspaceWrite => windows_acl::RunnerMode::WorkspaceWrite,
+        SandboxMode::DangerFullAccess => {
+            return Err("danger-full-access is not a confined mode".to_owned());
+        }
+    };
+    if mode == windows_acl::RunnerMode::WorkspaceWrite && !policy.extra_writable_roots.is_empty() {
+        return Err(
+            "the Windows ACL runner grants only the workspace and a private temporary directory; extra writable roots are not supported"
+                .to_owned(),
+        );
+    }
+    let temp_root = canonical_path(&std::env::temp_dir());
+    let workspace = crate::paths::normalize_lexically(&policy.workspace_root);
+    if mode == windows_acl::RunnerMode::WorkspaceWrite {
+        windows_acl::check_temp_root_outside_workspace(&workspace, &temp_root)?;
+    }
+    Ok(windows_acl::runner_profile_args(
+        mode, &workspace, &temp_root,
+    ))
+}
+
 /// This platform's chain, and why it is empty when it is.
 fn platform_chain() -> (Vec<Runner>, Option<String>) {
     if cfg!(target_os = "linux") {
@@ -425,13 +523,8 @@ fn platform_chain() -> (Vec<Runner>, Option<String>) {
     } else if cfg!(target_os = "macos") {
         (vec![Runner::Seatbelt], None)
     } else if cfg!(windows) {
-        (
-            Vec::new(),
-            Some(
-                "this build has no Windows sandbox backend; the restricted-token runner is not available yet"
-                    .to_owned(),
-            ),
-        )
+        // The runner leaves deletion unconfined; never select it by default.
+        (Vec::new(), Some(windows_acl::DEFAULT_REFUSAL.to_owned()))
     } else {
         (
             Vec::new(),

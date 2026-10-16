@@ -1,0 +1,64 @@
+bake-tui includes code adapted from the following project, under the license
+reproduced below. Bake's own changes are under the workspace's MIT license.
+
+================================================================================
+Pi (packages/coding-agent)
+https://github.com/earendil-works/pi
+Release v1.2.0, revision 06a466935536f8c9bcacb2d5efc0fc021be1bdff.
+Adapted in src/live/: the interactive frontend's prompt handling of
+src/modes/interactive/interactive-mode.ts (onSubmit, which prompts while idle
+and steers while streaming; onEscape and restoreQueuedMessagesToEditor, which
+return queued prompts to the editor and abort; the initial and later
+command-line messages run in order; handleEvent's mapping of agent and session
+events to the transcript; and renderSessionContext's replay of a resumed
+session), the built-in command names of src/core/slash-commands.ts, which
+bake-rs refuses until they are ported, and, in src/live/commands.rs, the
+/model, /thinking, and /settings commands of interactive-mode.ts
+(handleModelCommand, its exact match from regression 7443,
+showModelSelector, the thinking selector, and showSettingsSelector), and
+the /session, /name, /new, and /resume commands of interactive-mode.ts
+(handleSessionCommand, handleNameCommand, handleClearCommand,
+showSessionSelector, and handleResumeSession) with the session switch of
+src/core/agent-session-runtime.ts (newSession, switchSession). The case
+"restores model and thinking state from the destination session" of
+test/suite/agent-session-runtime.test.ts is adapted in
+src/live/tests/sessions_live.rs. The /tree and /fork commands adapt
+showTreeSelector (without its branch-summary prompt) and
+showUserMessageSelector of interactive-mode.ts, and src/live/tree.rs adapts
+src/modes/interactive/components/tree-selector.ts (TreeList's flattenTree,
+default filter, recalculateVisualStructure, findNearestVisibleIndex, row
+prefix, getEntryDisplayText, and formatToolCall) and
+components/user-message-selector.ts, with cases of test/tree-selector.test.ts
+and test/agent-session-branching.test.ts in src/live/tests/tree_rows.rs and
+src/live/tests/sessions_live.rs.
+/resume's search wires the session-selector search of
+src/modes/interactive/components/session-selector.ts and
+session-selector-search.ts into src/live/commands.rs (ResumeSearch).
+/compact follows v1.2.0 src/modes/interactive/interactive-mode.ts (the
+/compact parsing, handleCompactCommand, and the compaction_end rendering of
+the kept entries with the summary below them), in src/live/commands.rs,
+src/live/mod.rs, and src/live/projection.rs (replay_compacted), with the case
+of test/interactive-mode-compaction.test.ts that renders retained entries in
+src/live/tests/compact_live.rs.
+--------------------------------------------------------------------------------
+MIT License
+
+Copyright (c) 2025 Mario Zechner
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

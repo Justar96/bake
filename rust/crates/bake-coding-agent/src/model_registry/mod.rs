@@ -61,8 +61,9 @@ use crate::config_value::{
 use crate::owned_work::{WorkGate, WorkPermit};
 pub use config::{JsonObject, ModelConfig};
 
-/// Resolved request authentication, Pi's `AuthResult`.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// Resolved request authentication, Pi's `AuthResult`. `Debug` shows the
+/// header and environment names and the key's source, never a value.
+#[derive(Clone, Default, PartialEq, Eq)]
 pub struct RequestAuth {
     /// The API key.
     pub api_key: Option<String>,
@@ -74,8 +75,45 @@ pub struct RequestAuth {
     pub source: String,
 }
 
-/// One layer of Pi's `composeApiKeyAuth`.
-#[derive(Debug, Clone)]
+/// Shown in place of a secret in `Debug` output.
+struct Redacted;
+
+impl std::fmt::Debug for Redacted {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("<redacted>")
+    }
+}
+
+/// Header or variable names, each with its value redacted.
+fn names<'a>(
+    pairs: impl IntoIterator<Item = (&'a String, &'a String)>,
+) -> Vec<(&'a str, Redacted)> {
+    pairs
+        .into_iter()
+        .map(|(name, _)| (name.as_str(), Redacted))
+        .collect()
+}
+
+impl std::fmt::Debug for RequestAuth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RequestAuth")
+            .field("api_key", &self.api_key.as_ref().map(|_| Redacted))
+            .field(
+                "headers",
+                &self
+                    .headers
+                    .as_ref()
+                    .map(|headers| names(headers.iter().map(|(n, v)| (n, v)))),
+            )
+            .field("env", &self.env.as_ref().map(|env| names(env.iter())))
+            .field("source", &self.source)
+            .finish()
+    }
+}
+
+/// One layer of Pi's `composeApiKeyAuth`. `Debug` shows which values are
+/// configured, never the values.
+#[derive(Clone)]
 struct KeyAuth {
     provider: String,
     /// The layer's `apiKey` configuration value.
@@ -87,11 +125,39 @@ struct KeyAuth {
     inherited: Option<Box<KeyAuth>>,
 }
 
-/// A stored or runtime API-key credential.
-#[derive(Debug, Clone)]
+impl std::fmt::Debug for KeyAuth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KeyAuth")
+            .field("provider", &self.provider)
+            .field("raw_key", &self.raw_key.as_ref().map(|_| Redacted))
+            .field("literal_key", &self.literal_key.as_ref().map(|_| Redacted))
+            .field(
+                "raw_headers",
+                &self
+                    .raw_headers
+                    .as_ref()
+                    .map(|headers| names(headers.iter().map(|(n, v)| (n, v)))),
+            )
+            .field("auth_header", &self.auth_header)
+            .field("inherited", &self.inherited)
+            .finish()
+    }
+}
+
+/// A stored or runtime API-key credential. `Debug` shows no value.
+#[derive(Clone)]
 struct KeyCredential {
     key: Option<String>,
     env: Option<ScopedEnv>,
+}
+
+impl std::fmt::Debug for KeyCredential {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KeyCredential")
+            .field("key", &self.key.as_ref().map(|_| Redacted))
+            .field("env", &self.env.as_ref().map(|env| names(env.iter())))
+            .finish()
+    }
 }
 
 fn env_is_set(name: &str) -> bool {
@@ -240,8 +306,9 @@ fn merge_headers_ci(
     Some(merged)
 }
 
-/// A composed provider.
-#[derive(Debug, Clone)]
+/// A composed provider. `Debug` shows its id, model ids, and auth layers
+/// without any configured value.
+#[derive(Clone)]
 struct Provider {
     id: String,
     name: String,
@@ -250,6 +317,32 @@ struct Provider {
     /// overrides.
     model_headers: BTreeMap<String, Vec<(String, String)>>,
     auth: KeyAuth,
+}
+
+impl std::fmt::Debug for Provider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Provider")
+            .field("id", &self.id)
+            .field("name", &self.name)
+            .field(
+                "models",
+                &self
+                    .models
+                    .iter()
+                    .map(|model| &model.id)
+                    .collect::<Vec<_>>(),
+            )
+            .field(
+                "model_headers",
+                &self
+                    .model_headers
+                    .iter()
+                    .map(|(id, headers)| (id, names(headers.iter().map(|(n, v)| (n, v)))))
+                    .collect::<Vec<_>>(),
+            )
+            .field("auth", &self.auth)
+            .finish()
+    }
 }
 
 fn string_member(object: &JsonObject, key: &str) -> Option<String> {
@@ -671,16 +764,30 @@ fn compose(
     })
 }
 
-/// A provider added programmatically, below `models.json`.
-#[derive(Debug, Clone)]
+/// A provider added programmatically, below `models.json`. Its config can
+/// hold a literal `apiKey` or header value, so `Debug` names only its
+/// members.
+#[derive(Clone)]
 struct AddedProvider {
     id: String,
     config: JsonObject,
     api_key: Option<String>,
 }
 
-/// Pi's `ModelRuntime`, reduced to what a session needs.
-#[derive(Debug, Clone, Default)]
+impl std::fmt::Debug for AddedProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AddedProvider")
+            .field("id", &self.id)
+            .field("config", &self.config.keys().collect::<Vec<_>>())
+            .field("api_key", &self.api_key.as_ref().map(|_| Redacted))
+            .finish()
+    }
+}
+
+/// Pi's `ModelRuntime`, reduced to what a session needs. `Debug` shows
+/// provider and model ids and where auth is configured, never a key,
+/// header value, or scoped environment value.
+#[derive(Clone, Default)]
 pub struct ModelRegistry {
     config: ModelConfig,
     added: Vec<AddedProvider>,
@@ -688,6 +795,29 @@ pub struct ModelRegistry {
     providers: Vec<Provider>,
     composition_errors: Vec<(String, String)>,
     configured: BTreeSet<String>,
+    /// Keys bound to a provider's route ([`Self::bind_provider_key`]).
+    bound: BTreeMap<String, String>,
+}
+
+impl std::fmt::Debug for ModelRegistry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ModelRegistry")
+            .field("config", &self.config)
+            .field("added", &self.added)
+            .field("auth", &self.auth)
+            .field("providers", &self.providers)
+            .field(
+                "composition_errors",
+                &self
+                    .composition_errors
+                    .iter()
+                    .map(|(id, _)| id)
+                    .collect::<Vec<_>>(),
+            )
+            .field("configured", &self.configured)
+            .field("bound", &self.bound.keys().collect::<Vec<_>>())
+            .finish()
+    }
 }
 
 /// The `models.json` path under a Bake home.
@@ -757,6 +887,72 @@ impl ModelRegistry {
         self.refresh_configured();
     }
 
+    /// Removes a provider [`Self::add_provider_config`] added; whether one
+    /// was there. A `models.json` provider of the same id stays.
+    pub fn remove_provider_config(&mut self, id: &str) -> bool {
+        let before = self.added.len();
+        self.added.retain(|added| added.id != id);
+        let removed = self.added.len() != before;
+        if removed {
+            self.rebuild();
+        }
+        removed
+    }
+
+    /// `provider`'s runtime key (`--api-key`), which comes before every
+    /// other key, if set.
+    pub fn runtime_api_key(&self, provider: &str) -> Option<String> {
+        self.auth.runtime_api_key(provider).map(str::to_owned)
+    }
+
+    /// Binds `key` to `provider`'s requests, or unbinds it (`None`): a
+    /// bound key comes after the runtime key (`--api-key`) and before
+    /// `auth.json`, and is sent as written, never resolved as a
+    /// configuration value. Bake's CLIProxyAPI account binds the key it
+    /// read together with its route
+    /// ([`crate::cliproxyapi::account`]), so a later `auth.json` read never
+    /// pairs that route with another key.
+    pub fn bind_provider_key(&mut self, provider: &str, key: Option<String>) {
+        match key {
+            Some(key) => self.bound.insert(provider.to_owned(), key),
+            None => self.bound.remove(provider),
+        };
+        self.refresh_configured();
+    }
+
+    /// Whether [`Self::add_provider_config`] added a provider of this id.
+    pub fn has_added_provider(&self, id: &str) -> bool {
+        self.added.iter().any(|added| added.id == id)
+    }
+
+    /// Pi's `AuthStorage.reload` through the registry: rereads `auth.json`,
+    /// keeping the runtime keys (`--api-key`), and recomputes which
+    /// providers have auth. On an error the credentials read before stay.
+    /// Blocks.
+    pub fn reload_auth(&mut self) -> Result<(), crate::json_store::StoreError> {
+        let result = self.auth.reload();
+        self.refresh_configured();
+        result
+    }
+
+    /// The API key `provider`'s requests would send, resolved through its
+    /// auth layers as [`Self::get_auth`] resolves it, without model
+    /// headers. `Ok(None)` when the provider is unknown or has no key. May
+    /// run a command, so it blocks.
+    pub fn provider_api_key(&self, provider: &str) -> Result<Option<String>, String> {
+        let Some(entry) = self.providers.iter().find(|entry| entry.id == provider) else {
+            return Ok(None);
+        };
+        let Some(credential) = self.credential(provider) else {
+            return Ok(None);
+        };
+        Ok(entry
+            .auth
+            .resolve(credential.as_ref())
+            .map_err(|_| format!("API key auth failed for provider {provider}"))?
+            .and_then(|auth| auth.api_key))
+    }
+
     fn provider_ids(&self) -> Vec<String> {
         let mut ids: Vec<String> = self.added.iter().map(|added| added.id.clone()).collect();
         for id in self.config.provider_ids() {
@@ -800,6 +996,14 @@ impl ModelRegistry {
     }
 
     fn credential(&self, provider: &str) -> Option<Option<KeyCredential>> {
+        if !self.auth.has_runtime_api_key(provider)
+            && let Some(key) = self.bound.get(provider)
+        {
+            return Some(Some(KeyCredential {
+                key: Some(key.clone()),
+                env: None,
+            }));
+        }
         match self.auth.read(provider) {
             None => Some(None),
             Some(Credential::ApiKey { key, env }) => Some(Some(KeyCredential { key, env })),
@@ -951,7 +1155,105 @@ impl ModelRegistry {
         apis: Arc<ApiRegistry>,
         gate: Option<WorkGate>,
     ) -> StreamFn {
-        let registry = Arc::clone(self);
+        ModelRuntime::from(Arc::clone(self)).stream_fn_owned(apis, gate)
+    }
+}
+
+/// The registry a running session reads, which a login, logout, or catalog
+/// refresh replaces while the session runs: Pi's `ModelRuntime`, whose
+/// `refresh` and auth changes are seen by the next request.
+///
+/// Readers take an immutable [`ModelRegistry`] snapshot. Each request the
+/// stream function makes takes one when it starts and keeps it, so a
+/// request already running finishes with the auth it began with, and a
+/// later request sees a committed change. [`Self::update`] serializes
+/// writers: it clones the current registry, changes the clone, and swaps it
+/// in, so concurrent updates lose none and readers never see a partial
+/// change. No lock is held while a reader uses its snapshot or across an
+/// `await`; a change that blocks (rereading `auth.json`, say) runs on the
+/// caller's thread, which on an async runtime must be a blocking one.
+/// Runtime keys (`--api-key`) live in the registry's [`AuthStorage`] and
+/// survive every update that does not remove them.
+#[derive(Clone, Default)]
+pub struct ModelRuntime {
+    current: Arc<std::sync::RwLock<Arc<ModelRegistry>>>,
+    writer: Arc<std::sync::Mutex<()>>,
+}
+
+impl std::fmt::Debug for ModelRuntime {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("ModelRuntime")
+            .field(&self.snapshot())
+            .finish()
+    }
+}
+
+impl From<ModelRegistry> for ModelRuntime {
+    fn from(registry: ModelRegistry) -> Self {
+        Self::new(registry)
+    }
+}
+
+impl From<Arc<ModelRegistry>> for ModelRuntime {
+    fn from(registry: Arc<ModelRegistry>) -> Self {
+        Self {
+            current: Arc::new(std::sync::RwLock::new(registry)),
+            writer: Arc::default(),
+        }
+    }
+}
+
+impl ModelRuntime {
+    /// A runtime starting from `registry`.
+    pub fn new(registry: ModelRegistry) -> Self {
+        Arc::new(registry).into()
+    }
+
+    /// The registry as last committed.
+    pub fn snapshot(&self) -> Arc<ModelRegistry> {
+        Arc::clone(
+            &self
+                .current
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        )
+    }
+
+    /// Applies `change` to a copy of the current registry and publishes the
+    /// copy only when `change` returns `Ok`, one writer at a time. An `Err`,
+    /// or a panic, publishes nothing, however much of the copy `change`
+    /// had already changed, so readers never see a half-applied change.
+    pub fn try_update<R, E>(
+        &self,
+        change: impl FnOnce(&mut ModelRegistry) -> Result<R, E>,
+    ) -> Result<R, E> {
+        let _writer = self
+            .writer
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut next = (*self.snapshot()).clone();
+        let result = change(&mut next)?;
+        *self
+            .current
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Arc::new(next);
+        Ok(result)
+    }
+
+    /// [`Self::try_update`] for a change that cannot fail: it is always
+    /// published. A change that can fail part-way belongs in
+    /// [`Self::try_update`].
+    pub fn update<R>(&self, change: impl FnOnce(&mut ModelRegistry) -> R) -> R {
+        match self.try_update(|registry| Ok::<R, std::convert::Infallible>(change(registry))) {
+            Ok(result) => result,
+            Err(never) => match never {},
+        }
+    }
+
+    /// [`ModelRegistry::stream_fn_owned`] over this runtime: each request
+    /// authenticates through the snapshot current when it starts.
+    pub fn stream_fn_owned(&self, apis: Arc<ApiRegistry>, gate: Option<WorkGate>) -> StreamFn {
+        let runtime = self.clone();
         Arc::new(move |model, context, options| {
             let permit = match &gate {
                 None => None,
@@ -964,11 +1266,31 @@ impl ModelRegistry {
                     }
                 },
             };
+            // The model's definition (endpoint, protocol, headers) comes
+            // from the same snapshot as its auth, so a route replaced
+            // under a running session never pairs one proxy's key with
+            // another's endpoint.
+            let registry = runtime.snapshot();
+            let model = match registry.model(&model.provider, &model.id) {
+                Some(current) => current,
+                None if registry.has_provider(&model.provider) => {
+                    let (sender, stream) = assistant_message_channel();
+                    sender.finish(setup_error(
+                        model,
+                        &format!(
+                            "Model {}/{} is no longer available",
+                            model.provider, model.id
+                        ),
+                    ));
+                    return Ok(stream);
+                }
+                None => model.clone(),
+            };
             Ok(lazy_stream(
                 LazyRequest {
-                    registry: Arc::clone(&registry),
+                    registry,
                     apis: Arc::clone(&apis),
-                    model: model.clone(),
+                    model,
                     context: context.clone(),
                     options,
                 },

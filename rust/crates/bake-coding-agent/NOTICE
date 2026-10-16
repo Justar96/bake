@@ -42,8 +42,62 @@ under test/ that the Rust tests name. From release v1.2.0, revision
 src/utils/frontmatter.ts, the .agents skill discovery of
 src/core/package-manager.ts, and the skill-command expansion of
 src/core/agent-session.ts), the linked-worktree fix of
-src/core/resource-loader.ts, and Pi's skill fixtures under
-test/fixtures/skills and test/fixtures/skills-collision.
+src/core/resource-loader.ts, Pi's skill fixtures under
+test/fixtures/skills and test/fixtures/skills-collision, and the settings and
+credential writes: the locked file backends and global-scope setters of
+src/core/settings-manager.ts and src/core/auth-storage.ts, the runtime-key
+overlay of src/core/runtime-credentials.ts, and the cases of
+test/auth-storage.test.ts, test/runtime-credentials.test.ts,
+test/settings-manager.test.ts, and test/settings-manager-bug.test.ts that the
+Rust tests name; the steering and follow-up queue of src/core/agent-session.ts
+(steer, followUp, _queueUserInput, _queueSteer, _queueFollowUp, clearQueue,
+_emitQueueUpdate, and the queue bookkeeping on message_start), its
+queue_update event, and its pre-prompt model and API-key check.
+The queue-mode and pre-message_start bookkeeping cases of
+test/suite/agent-session-queue.test.ts are adapted in agent_session/tests.rs;
+extension-command, input-handler, and custom-message cases remain deferred.
+Also from v1.2.0: the session controls of src/core/agent-session.ts
+(setModel, setThinkingLevel, setSteeringMode, setFollowUpMode, and
+_installAgentNextTurnRefresh, the next request reading the current model),
+the model runtime's snapshot and update of src/core/model-runtime.ts, and the
+cases of those files' tests that agent_session/control_tests.rs and
+model_registry/tests.rs name. Also from v1.2.0: setSessionName, its
+session_info_changed event, and getSessionStats of src/core/agent-session.ts,
+with regression tests
+test/suite/regressions/5996-session-name-newlines.test.ts and
+test/suite/regressions/3686-session-name-event.test.ts adapted in
+agent_session/control_tests.rs (their extension variants are not adapted);
+and the session construction of src/core/agent-session-runtime.ts
+(newSession and switchSession building the next session) adapted in
+src/cli/mod.rs as SessionFactory. Also from v1.2.0, tree navigation and
+forking: navigateTree (without branch summaries or extension events),
+getUserMessagesForForking, and the leaf rules and context refresh of
+src/core/agent-session.ts, adapted in agent_session/navigation.rs; and the
+runtime fork of src/core/agent-session-runtime.ts (its default position
+before a user message, createBranchedSession and newSession with a parent
+session) adapted in agent_session/navigation.rs, session/manager.rs
+(branched_copy), and src/cli/mod.rs (SessionFactory::fork). Cases of
+test/agent-session-tree-navigation.test.ts,
+test/agent-session-branching.test.ts,
+test/suite/regressions/tree-during-streaming.test.ts,
+test/suite/regressions/9178-tree-during-compaction.test.ts, and
+test/suite/regressions/8724-in-memory-fork-active-tool.test.ts are adapted
+in agent_session/navigation_tests.rs.
+Also from v1.2.0, session search: src/modes/interactive/components/
+session-selector-search.ts (parseSearchQuery, matchSession,
+filterAndSortSessions, hasSessionName, without the threaded sort), adapted in
+src/session/search.rs, with the cases of
+test/session-selector-search.test.ts in src/session/search_tests.rs; and the
+fuzzy matching of packages/tui/src/fuzzy.ts (fuzzyMatch, fuzzyFilter) in
+src/cli/list_models.rs, with the cases of packages/tui/test/fuzzy.test.ts.
+Also from v1.2.0, interactive compaction: src/core/agent-session.ts (compact,
+abortCompaction, and the prompt's refusal during compaction), adapted as
+AgentSession::compact_when_idle in src/agent_session.rs and
+src/agent_session/recovery.rs, with cases of
+test/agent-session-compaction.test.ts,
+test/suite/regressions/7150-rpc-prompt-during-compaction.test.ts, and
+test/suite/regressions/9340-9777-auto-compaction-cancellation.test.ts in
+src/agent_session/idle_compaction_tests.rs.
 --------------------------------------------------------------------------------
 MIT License
 

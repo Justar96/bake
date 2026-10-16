@@ -4,7 +4,7 @@
 
 This page re-plans roadmap scopes 02 to 17 around [D22](scope-00/support.md#decision-register) and [D32](scope-00/support.md#decision-register): the Rust implementation is ported primarily from Pi's latest official source, Bake's TypeScript runtime is ported selectively, and 0.4 is a new binary with no migration from a TypeScript install. For each scope it names the Pi owners to port, the Bake behavior that must survive, and the exit evidence that replaces 0.3 parity.
 
-**Status: plan, 2026-10-09; D32 applied 2026-10-10.** This page defines the scope; the [roadmap](README.md#linear-development-sequence) records implementation progress. The [scope specifications](README.md#scope-specifications) for scopes 02 to 04 follow this page; those for scopes 05 to 17 still hold the 0.3-parity text. Where they conflict with this page, this page governs, and each scope's first PR replaces its specification text.
+**Status: plan, 2026-10-09; D32 applied 2026-10-10.** This page defines the scope; the [roadmap](README.md#linear-development-sequence) records implementation progress. The [scope specifications](README.md#scope-specifications) for scopes 02 to 05 follow this page; those for scopes 06 to 17 still hold the 0.3-parity text. Where they conflict with this page, this page governs, and each scope's first PR replaces its specification text.
 
 ## Table of Contents
 
@@ -17,7 +17,7 @@ This page re-plans roadmap scopes 02 to 17 around [D22](scope-00/support.md#deci
 
 ## Pinned Pi revision
 
-Checked through the GitHub API on 2026-10-09; re-checked on 2026-10-11 (v1.1.0) and on 2026-10-13 for scope 10 ([Latest release v1.2.0](https://github.com/earendil-works/pi/releases/tag/v1.2.0), `06a466935536f8c9bcacb2d5efc0fc021be1bdff`).
+Checked through the GitHub API on 2026-10-09; re-checked on 2026-10-11 (v1.1.0), on 2026-10-13 for scope 10 ([Latest release v1.2.0](https://github.com/earendil-works/pi/releases/tag/v1.2.0), `06a466935536f8c9bcacb2d5efc0fc021be1bdff`), and on 2026-10-14 for the scope 01 to 03 qualification, when v1.2.0, published 2026-10-12 23:03 UTC, was still the latest. The session store that scopes 02 and 03 ported from v1.1.0 (`coding-agent/src/core/{session-manager,session-cwd,messages}.ts`, `coding-agent/src/utils/paths.ts`, `ai/src/utils/uuid.ts`, and `coding-agent/test/session-manager/`) is byte-identical in v1.2.0.
 
 | Reference | Revision | Use |
 |---|---|---|

@@ -87,7 +87,8 @@ fn percent_decode(text: &str) -> Option<String> {
     String::from_utf8(bytes).ok()
 }
 
-/// A staged image, as the attachments panel lists it.
+/// A staged image, as the attachments panel lists it, with the bytes a
+/// live session sends.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Image {
     pub name: String,
@@ -95,6 +96,29 @@ pub struct Image {
     pub bytes: u64,
     /// Width and height in pixels, where the header says.
     pub size: Option<(u32, u32)>,
+    /// The image file's bytes.
+    pub data: ImageData,
+}
+
+/// An image's bytes, shared and cheap to clone. Debug output shows only
+/// their length.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct ImageData(pub std::sync::Arc<[u8]>);
+
+impl ImageData {
+    pub fn new(bytes: Vec<u8>) -> Self {
+        Self(bytes.into())
+    }
+
+    pub fn bytes(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for ImageData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ImageData({} bytes)", self.0.len())
+    }
 }
 
 impl Image {
@@ -199,6 +223,7 @@ mod tests {
             media_type: "image/png",
             bytes: 2048,
             size: Some((640, 480)),
+            data: ImageData::default(),
         };
         assert_eq!(
             image.summary(),

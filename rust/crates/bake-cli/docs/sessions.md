@@ -19,6 +19,35 @@ Sessions live in `sessions/` in the Bake home, in one directory per working dire
 
 A resumed session keeps its model, thinking level, and permission unless a flag changes them.
 
+## In an interactive session
+
+- `/session` shows the session's name, file, id, and message and token counts. It changes nothing.
+- `/name <name>` records a display name, with line breaks turned into spaces; `/name` alone asks for a name, starting from the current one. A name that would be blank is refused.
+- `/new` starts a new session in a new file, keeping the current model and thinking level.
+- `/resume` lists the working directory's saved sessions, newest first, by name or first message, with the running one marked `Current`. Typing searches them (see [Searching sessions](#searching-sessions)). Enter opens the chosen session with its own transcript, model, thinking level, and permission; Esc keeps the running session.
+- `/tree` shows the session's entries as a tree, the branch you are on first and marked with `•`, the current point marked `Current`. Settings entries and replies that only call tools are hidden; typing filters the rows. Enter on an earlier entry continues from there in the same file: on a user message, the session goes back to just before it and puts its text in your draft to edit and send; on any other entry, the session continues after it. Nothing is sent, and the navigation itself writes nothing: the next entry written, such as your next prompt, starts a new branch there, and the branch you left stays in the file. The model, thinking level, and permission stay as they are.
+- `/fork` lists the session's user messages, the latest selected. Enter starts a new session in a new file, in the same session directory, holding the conversation up to just before the chosen message, and puts that message in your draft. The new file names the running session's file as its parent, and the running session's file is left unchanged. A fork that holds earlier messages uses the model, thinking level, and permission they were recorded with.
+
+A turn that is running refuses `/new`, `/resume`, `/tree`, `/fork`, and `/compact`, and a failed or cancelled command keeps the running session where it was; the draft is kept in each case. The new session is set up before the running one is closed. `/resume` shows only sessions recorded for this working directory, has no threaded order, path display, rename, or delete, and cannot go to a session in another directory. With `--no-session`, `/new` and `/fork` start unsaved sessions and `/resume` is refused. A fork cancelled after it was set up may leave its new file behind. `/tree` does not offer Pi's branch summaries, labels, filter modes, or folding, and there is no `/clone`.
+
+### Compacting
+
+`/compact` summarizes the conversation before the most recent messages, so later prompts send the summary instead of the older history. Text after it, as in `/compact keep the API decisions`, is passed to the summary request as extra instructions. While the summary is written, the bar shows `compacting` and Esc cancels it; prompts and commands you send meanwhile are refused and stay in your draft. When it finishes, the transcript starts over with the messages it kept and `Compacted from N tokens` below them, and the session file gains one compaction entry; earlier entries stay in the file. It works whether or not automatic compaction (`compaction.enabled`) is on, and `compaction.keepRecentTokens` sets how much recent history is kept.
+
+`/compact` runs only while the session is idle: a running turn, waiting prompts, or another compaction refuse it with the draft kept. Pi instead stops a running turn first; in bake-rs, Esc stops the turn, then `/compact` compacts. A session that is too small, or that ends with a compaction already, is refused, as is a session with no model. A cancel, or a summary request that fails, writes nothing, puts `/compact` back in your draft, and leaves the conversation as it was. An Esc that arrives after the compaction was saved is reported with the result. If the compaction cannot be written to the session file, the session stops, as it does after any failed write: nothing more is written, and later prompts are refused. The summary prompts and the compaction entry follow Pi's.
+
+### Searching sessions
+
+`/resume` searches each session's id, name, working directory, and the text of every message you or the model wrote in it, including on branches you left. Tool output and thinking are not searched.
+
+| Type | Matches |
+|---|---|
+| `word other` | Sessions holding every word's letters in order, ignoring case |
+| `"a phrase"` | Sessions holding those words together, whatever whitespace separates them |
+| `re:pattern` | Sessions matching the regular expression, ignoring case |
+
+Ctrl+S switches between newest first and best match first, and Ctrl+N shows only named sessions; the line under the title shows both. Regular expressions do not support look-around or backreferences, and a pattern may be at most 8 KiB. A pattern that cannot be used lists nothing, the line under the title says why, and Enter opens nothing. Searching, switching the order or filter, and Esc never change a session file or send a request.
+
 ## The format
 
 A session file is JSON Lines: a header line (`type` `session`, `version` 3, `id`, `timestamp`, `cwd`), then one entry per line, each with an `id` and a `parentId` naming the entry it follows, so the entries form a tree. Entries are appended and never rewritten, except that a file in Pi's older versions 1 and 2 is upgraded when it is opened. Lines that are damaged or cut short are skipped.

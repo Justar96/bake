@@ -2,13 +2,16 @@
 
 ## Summary
 
-Each [roadmap scope](README.md#linear-development-sequence) closes only when an independent observer can reproduce its behavior, failure handling, and cleanup from identified commits and artifacts. This document defines that evidence and the comparison rules. Future test requirements below are planned work; [planning-session evidence](#planning-session-evidence) and the [qualification ledger](ledger/README.md) distinguish observed checks from missing evidence.
+Each [roadmap scope](README.md#linear-development-sequence) closes only when an independent observer can reproduce its behavior, failure handling, and cleanup from identified commits and artifacts. This document defines that evidence and the comparison rules. Future test requirements below are planned work; the [foundation qualification status](#foundation-qualification-status), [planning-session evidence](#planning-session-evidence), and the [qualification ledger](ledger/README.md) distinguish observed checks from missing evidence.
+
+**Status: reconciled with [D22](scope-00/support.md#decision-register), [D24](scope-00/support.md#decision-register), [D25](scope-00/support.md#decision-register), [D32](scope-00/support.md#decision-register), [D33](scope-00/support.md#decision-register), and [D34](scope-00/support.md#decision-register) on 2026-10-14.** The reference for ported behavior is Pi's official source at a recorded revision, and for the three retained Bake contracts it is their TypeScript source. 0.4 has no TypeScript runtime arm, Session-log compatibility, or 0.3 parity bar. Where a row below for scopes 04 to 17 still names 0.3 behavior, the [Pi-first scope plan](pi-first-plan.md#scope-plan) governs until that scope's first PR rewrites it.
 
 ## Table of Contents
 
 - [Evidence required for every scope](#evidence-required-for-every-scope)
-- [Comparison architecture](#comparison-architecture)
+- [Reference sources and comparison](#reference-sources-and-comparison)
 - [Acceptance matrix](#acceptance-matrix)
+- [Foundation qualification status](#foundation-qualification-status)
 - [Platform requirements](#platform-requirements)
 - [Evals and model-facing fidelity](#evals-and-model-facing-fidelity)
 - [Performance and soak](#performance-and-soak)
@@ -33,28 +36,36 @@ Every scope must supply:
 
 “Complete” requires all required results passing or a separately approved change to the support contract. A skipped required platform, unavailable credential, unknown consumer, or unimplemented comparator is missing evidence. A rerun that passes after a load-related failure remains reported as a warning until explained.
 
-## Comparison architecture
+## Reference sources and comparison
 
-Use two independently built executables and a third test driver. Both arms receive identical fixtures in separate private homes/workspaces, the same deterministic external responses, and the same operation sequence. Observe what each arm sends and changes; never run them as competing writers to one workspace except in an intentional locking test.
+Expected results come from a source independent of the Rust code under test. The same Rust implementation must not generate both its input and its expected result.
 
-The driver must compare more than the final assistant reply:
+| Behavior | Reference | How it reaches a Rust test |
+|---|---|---|
+| Ported from Pi ([D22](scope-00/support.md#decision-register)) | Pi's official release at the revision the PR records | Pi's tests, ported with the code, and golden files that Pi's own code writes or reads (for example `rust/crates/bake-coding-agent/tests/fixtures/pi-session/generate.mjs`) |
+| Retained Bake contracts ([D32](scope-00/support.md#decision-register): the CLIProxyAPI route, the sandbox, approvals, and permission presets of [D24](scope-00/support.md#decision-register), and the `~/.bake` home read as [D25](scope-00/support.md#decision-register) describes) | The cited TypeScript source and its tests | Rust fixture tests derived from that source; the TypeScript arm stays in TypeScript tests and never changes product source |
+| Bake's own additions (writer exclusion, durable writes, the system prompt of [D33](scope-00/support.md#decision-register), and the terminal) | The owning design document | An independent test specification, real OS effects, and the paired eval records the [eval policy](../../../evals/README.md) requires |
+
+No TypeScript runtime runs as a comparison arm for Rust behavior, and no Bake Session log is read, written, or compared ([D32](scope-00/support.md#decision-register)). The synthetic TypeScript/Rust harness, conformance tables, and cross-runtime checks were deleted; their [ledger](ledger/README.md) records stay as history.
+
+A test compares more than a final assistant reply:
 
 | Observation | Comparison rule |
 |---|---|
 | System prompts, context strings, tool names/descriptions/results/errors | Exact bytes after narrowly defined fixture substitutions |
 | Model request structure | Exact values and ordered arrays, omitted/null distinction, tool order, request count; compare provider-neutral and encoded provider forms separately |
 | Provider wire body | Preserve prompt/schema order where cache or protocol behavior depends on it; parse JSON only where object-key order is demonstrably irrelevant |
-| Durable events | Exact type/data/order/references; IDs normalized by one stable bijection across the entire run |
-| Historical generation | Original bytes unchanged; decoded logical data and admission/refusal match; no requirement for new compressed bytes to match another compressor |
+| Session entries | Exact entry type, data, order, and `id`/`parentId` links; generated ids normalized by one stable bijection across the entire run |
+| Session file bytes | Lines a writer leaves match the bytes Pi writes for the same entries; a file Pi wrote reads as Pi reads it |
 | Files and commands | File bytes, permissions where applicable, protected-fixture hashes, real check exit, timeout and signal recorded separately |
 | Terminal | Emulator cells, cursor position, terminal modes, scrollback markers, input submission and exits; identical ANSI instruction sequences are unnecessary |
 | Cleanup | All owned processes/tasks/connections terminate, locks release, no callback mutates state after close |
 
 Normalize generated UUIDs, fixture-root paths, captured clock values, and allocated loopback ports only through an allowlist. Keep identity relationships, event ordering, timeout decisions, and model-visible text intact. Do not sort arrays, drop unknown fields, erase errors, normalize all whitespace, or ignore “extra” model calls to make a comparison pass. Compare durations as measurements, not by rewriting them to fixed values.
 
-Generate or extract neutral fixtures using the real TypeScript runtime. Expected filesystem outcomes and scenario predicates come from an independent test specification. The same new Rust implementation must not generate both its own input and expected result. Retain the current original test alongside an extracted fixture until its behavior has equivalent coverage.
+Expected filesystem outcomes and scenario predicates come from an independent test specification. Keep a ported Pi test beside any golden file derived from it until the golden file covers the same behavior.
 
-For model-visible scopes before the complete native loop exists, scope 01's eval-arm adapter must exercise the changed component in a representative composed arm. If that is not yet possible, keep the implementation experimental and the scope open; do not declare evals unnecessary because the final binary is unfinished.
+A model-visible change is measured through the native `bake-rs` eval arm ([eval policy](../../../evals/README.md#native-bake-rs-arm)). Do not declare evals unnecessary because a feature has no live consumer yet; keep it experimental and the scope open until a composed arm exercises it.
 
 ## Acceptance matrix
 
@@ -62,24 +73,37 @@ Each row supplements the detailed scope specification. The final column is a req
 
 | Scope | Required observable evidence | Required failure/control |
 |---|---|---|
-| 00 | Every shipped behavior and existing test has a disposition; reproducible baseline artifacts and results | Remove a supported profile/tool from the inventory and make the inventory check fail |
-| 01 | Clean native builds and native eval fixture reports | A fake arm that tampers with evaluator-owned tests, claims success without an edit, or exits with failure is rejected |
+| 00 | Every shipped behavior and existing test has a disposition (keep, replace with Pi's, or retire by decision under [D22](scope-00/support.md#decision-register)); reproducible baseline artifacts and results | Remove a supported profile/tool from the inventory and make the inventory check fail |
+| 01 | Clean locked native builds on Linux, macOS, and Windows and native eval fixture reports | A fake arm that tampers with evaluator-owned tests, claims success without an edit, or exits with failure is rejected |
 | 02 | Pi's session entry tree, branching, and context rebuilt from a session file ([D32](scope-00/support.md#decision-register)) | Pi's session-manager tests, ported, including a malformed or truncated entry |
-| 03 | Pi's session files under the Bake home, resume, and writer exclusion | A writer killed mid-append resumes; a second Rust writer is excluded |
+| 03 | Pi's session files under the Bake home, resume, writer exclusion, and durable appends and rewrites | A writer killed mid-append resumes; a second Rust writer is excluded and takes over after the holder exits or is killed; the [crash-recovery matrix](durable-execution.md#crash-recovery-matrix) rows for session writes |
 | 04 | Real filesystem confinement and no surviving owned descendants on each OS | Escape attempt, missing backend, ignored termination, and timeout with exit 0 |
 | 05 | Layer precedence, retained native profiles, scope visibility, credential storage and disposal | Failed registration/reload; excluded custom Cordis profiles and presets, nonempty legacy built-in layers, user `!!js`, and npm profile installs refuse before execution or file changes; secret prompt cancellation and attempted secret leakage |
-| 06 | Equivalent stream assembly, finish/failure mapping and usage | Split chunk, malformed stream, abrupt EOF, consumer exception, cancellation at every stream phase |
+| 06 | Pi's stream assembly, finish/failure mapping and usage | Split chunk, malformed stream, abrupt EOF, consumer exception, cancellation at every stream phase |
 | 07 | Approved provider/auth matrix, sanitized request fixtures and live route smokes | Expired credentials, failed refresh, malformed tool arguments, idle timeout, invalid route override |
 | 08 | Exact tool schemas/results and independently checked coding effects | Stale edit, denied call, out-of-order completion, exclusive barrier, late progress |
-| 09 | Native edit/check/resume, event trace parity and paired eval | Cancel before admission and during tools; crash after effect but before result commit |
+| 09 | Native edit/check/resume, every request reconstructable from the session file, and paired eval | Cancel before admission and during tools; crash after effect but before result commit |
 | 10 | Exact composed context, image admission, reconstructable compaction and long-session task | Missing attachment, failed summary, orphaned tool pair, canceled checkpoint, byte-limit edge |
 | 11 | Durable child/job/goal/schedule results and shutdown | Parent/child race, duplicate wakeup, clock jump, router failure, restart at settlement |
 | 12 | MCP/hooks/web/VM, the native plugin API with a named consumer, and native extensions through real runtime | Disconnect, invalid schema, private-address redirect, infinite loop, memory limit, denied nested tool, plugin API version mismatch |
 | 13 | Built CLI flags/exits, public transport behavior and actual Desktop launch | Invalid envelope, dropped client, withdrawn approval, busy session, incompatible Electron entry |
 | 14 | Inline/fullscreen terminal cells, Unicode input, modes and restoration | Resize mid-stream, panic, hangup, malformed escape/input, constrained dimensions |
 | 15 | Complete PTY workflow map and all retained preset model surfaces | Cancel navigation/login/question; retain draft; deny approval; external-editor failure |
-| 16 | Signed fresh install, old-to-new update, no-Node native launch and data rollback | Bad signature/hash, candidate launch failure, disk-full, interrupted switch, locked Windows file |
-| 17 | Complete ledger, final artifacts/platforms, paired evals, performance and migration rehearsal | Revert default and resume with retained 0.3; reject release with missing required evidence |
+| 16 | Signed fresh install, update between 0.4 releases, no-Node native launch and rollback; a 0.4 install leaves a 0.3 install and its data working | Bad signature/hash, candidate launch failure, disk-full, interrupted switch, locked Windows file |
+| 17 | Complete ledger, final artifacts/platforms, paired evals, performance, and retained-contract evidence | Revert the default; a 0.3 install beside 0.4 still resumes its own sessions; reject release with missing required evidence |
+
+## Foundation qualification status
+
+Scopes 00 to 03 as of candidate `e32476594bace82b57980fe8e1d57e48e3c4c53c` (the merge of PR #215), checked on 2026-10-14. *Required* restates the acceptance row; *implemented* names what the candidate's code does; *observed* links the ledger record of what ran. The macOS runs tested git stash snapshots of the candidate plus uncommitted edits, not the candidate itself. No reviewer has accepted any of these scopes, and passing checks alone do not close one.
+
+| Scope | Required | Implemented at the candidate | Observed | Missing |
+|---|---|---|---|---|
+| 00 | Every shipped behavior dispositioned; reproducible baseline; owner decisions answered | Inventory and its check (`bun run verify-rust-migration-inventory`), the 2026-10-07 TypeScript baseline | [Scope 00 README](scope-00/README.md#what-is-implemented-and-what-is-missing); no new record | Owner decisions D7, D8 beyond CLIProxyAPI, D9, D10 timing, D11, D12, D13's window, and D14; frozen performance budgets; minimum host versions |
+| 01 | Clean locked native builds, lints, and tests on three OSes; eval fixture arm with tamper controls | `rust/` workspace on Rust 1.99.0, `bun run check:rust`, the native fixture adapter, and the keyless `bake-rs` arm | [Native checks at e32476594b](ledger/scope-01/2026-10-14-foundation-native-checks.json): local native preflight failed twice on a port-reuse race in a CLIProxyAPI test, and a stepwise rerun passed; CI passed on Linux and Windows. macOS on Intel x86_64: [first run](ledger/scope-01/2026-10-14-macos-native-r1.json) failed on the first fix, and the [second run](ledger/scope-01/2026-10-14-macos-native-r2.json) passed all three native gates with the final refused-connection test | A committed candidate that carries the fix, with a clean native gate on Linux, macOS, and Windows; arm64 hosts; Windows PTY; two macOS PTY cases that need Linux `/proc` |
+| 02 | Pi's entry tree, branching, context rebuild; Pi's tests; malformed and truncated entries | `bake-coding-agent::session` ported from Pi v1.1.0, whose session sources and tests are unchanged in v1.2.0 | [Pi session model](ledger/scope-02/2026-10-14-pi-session-model.json) | The durable-execution unfinished-work projection; property cases over truncated files; macOS on a committed candidate |
+| 03 | Pi's session files under the Bake home; resume; writer exclusion on three OSes; a writer killed mid-append resumes | Pi's file operations and listing, a `.lock` sidecar with `File::try_lock`, synced appends that start on a new line, and synced rename rewrites | [Pi session storage](ledger/scope-03/2026-10-14-pi-session-storage.json) | A process killed during an append (tests write the torn bytes instead); the crash-recovery matrix; group append. On macOS the session tests ran only on an [uncommitted snapshot](ledger/scope-01/2026-10-14-macos-native-r2.json) |
+
+The scope 02 and 03 records before 2026-10-10 qualify the deleted Bake-format code ([D32](scope-00/support.md#decision-register)) and say nothing about the Pi port.
 
 ## Platform requirements
 
@@ -87,9 +111,9 @@ The existing [release target list](../../../packages/boot/updater/src/manifest.t
 
 | Target | Required native evidence |
 |---|---|
-| Linux x64 and arm64 | Install/start/update/rollback; flock interoperability; process trees; PTY; enforcing sandbox, with bubblewrap and Landlock backend coverage on capable hosts |
-| macOS x64 and arm64 | Install/start/update/rollback; flock; Seatbelt effects; PTY/raw modes and signals |
-| Windows x64 | Install/start/update/rollback with held files; LockFileEx; restricted-token/ACL effects; job descendants; PowerShell; ConPTY and console restoration |
+| Linux x64 and arm64 | Install/start/update/rollback; session writer exclusion between processes; process trees; PTY; enforcing sandbox, with bubblewrap and Landlock backend coverage on capable hosts |
+| macOS x64 and arm64 | Install/start/update/rollback; session writer exclusion between processes; Seatbelt effects; PTY/raw modes and signals |
+| Windows x64 | Install/start/update/rollback with held files; session writer exclusion between processes, with session files left readable; restricted-token/ACL effects; job descendants; PowerShell; ConPTY and console restoration |
 
 Scope 00 records minimum OS/kernel/libc/deployment versions from the release artifacts and supported hosts. Do not infer musl distribution support from the presence of a musl-built helper. Match the intended Rust linking strategy to those minimums and test archive execution there.
 
@@ -99,11 +123,11 @@ Run required backend tests on a capable host. An unavailable kernel feature can 
 
 Follow the existing [eval policy](../../../evals/README.md). For a model-visible PR, build a clean base and candidate, run the standard task suite against the standard and extended model sets with three trials, interleave arms, and commit the sanitized record under `evals/agent-loop/versions/unreleased/<YYYY-MM-DD>-<topic>/`. Use the model roster owned by that README rather than duplicating a second roster here. Preserve old records; a wrong record is superseded.
 
-The PR-base comparison checks each incremental change. A second comparison against the frozen 0.3 oracle checks cumulative native drift at scopes 09 and 17. The two comparisons answer different questions. Keep the same route, effort, credentials, task fixtures, composition, and provider settings across each pair. Add extended long-session, delegation, background, or attachment cases for their owning scopes; they supplement the standard suite.
+The PR-base comparison checks each incremental change. A comparison against the frozen 0.3 agent may inform scopes 09 and 17, as the [native arm record](../../../evals/agent-loop/versions/unreleased/2026-10-13-native-arm/REPORT.md) does, but under [D32](scope-00/support.md#decision-register) it sets no parity bar. Keep the same route, effort, credentials, task fixtures, composition, and provider settings across each pair. Add extended long-session, delegation, background, or attachment cases for their owning scopes; they supplement the standard suite.
 
 The existing evaluator flags token increases with the 95% interval above zero, request increases over 10% with that interval above zero, at least two additional failed samples for a model, or increased tool errors. Fix a flag or record its measured cause and acceptance in the eval note and PR. Deterministic changes to prompts/schemas/results still require review even when noisy live counts show no statistically clear change.
 
-[Model-surface snapshots](../../testing.md#pin-the-model-surface) pin provider-neutral requests. Add per-protocol wire fixtures because a matching neutral request can still encode differently. Credential-dependent smokes remain separate from keyless replay and paired task evaluation; none substitutes for the others.
+The Rust first-request fixtures (`rust/crates/bake-cli/tests/fixtures/first-request/`) pin the full first request of each preset; the TypeScript [model-surface snapshots](../../testing.md#pin-the-model-surface) pin only the frozen 0.3 agent. Add per-protocol wire fixtures because a matching neutral request can still encode differently. Credential-dependent smokes remain separate from keyless replay and paired task evaluation; none substitutes for the others.
 
 ## Performance and soak
 
@@ -123,11 +147,11 @@ Use barriers and explicit lifecycle signals for races. Register cleanup immediat
 
 Use property tests for pure admission/reduction, bounded fuzzing for JSONL/SSE/terminal/protocol parsers, and deterministic fault injection for persistence/publication/process ownership. Choose iteration/time budgets in the owning PR and record them. A test failure is investigated before adding retries, widening timeouts, weakening assertions, or serializing a whole suite.
 
-Scope 01's opt-in [native workspace](../../../rust/README.md) provides locked builds, Rust formatting/lints, unit tests, and preview PTY checks. The synthetic TypeScript/Rust comparison harness that scope 01 first built was deleted under [D32](scope-00/support.md#decision-register); the [ledger](ledger/README.md) keeps its records. [Keyless eval-launch checks](../../../evals/README.md#launcher-contract-checks) pin the existing Bake and pi configuration before a native arm is added. The [native eval fixture adapter](../../../evals/README.md#native-fixture-adapter) accepts a compiled fake arm's correct edit and rejects tampered tests, false success claims, and unsuccessful processes. The [qualification ledger](ledger/README.md) records partial evidence and failed attempts. A live native model arm remains open. Exact Cargo/test-wrapper commands belong to the workspace README and its CI. Keep current Bun/Node checks until the consumers they protect are retired through scope 17.
+Scope 01's opt-in [native workspace](../../../rust/README.md) provides locked builds, Rust formatting/lints, unit tests, and preview PTY checks. The synthetic TypeScript/Rust comparison harness that scope 01 first built was deleted under [D32](scope-00/support.md#decision-register); the [ledger](ledger/README.md) keeps its records. [Keyless eval-launch checks](../../../evals/README.md#launcher-contract-checks) pin the Bake and pi launch configuration. The [native eval fixture adapter](../../../evals/README.md#native-fixture-adapter) accepts a compiled fake arm's correct edit and rejects tampered tests, false success claims, and unsuccessful processes. The [native `bake-rs` arm](../../../evals/README.md#native-bake-rs-arm) runs `bake-rs -p` against a keyless fake server in `bun run test:rust:eval` and against live models in paired records. The [qualification ledger](ledger/README.md) records partial evidence and failed attempts. Exact Cargo/test-wrapper commands belong to the workspace README and its CI. Keep current Bun/Node checks until the consumers they protect are retired through scope 17.
 
 ## Planning-session evidence
 
-These runs validate selected TypeScript oracles and the documentation work, not Rust compatibility. Host: Linux x86_64, Bun 1.4.2, Node v26.10.0. Source baseline: `ae5eb51ab61f2266b0fc2ff52f2f14b9f3a9a917`. The repository's CI uses Node 24, so this local run does not replace CI or the release matrix.
+These 2026-10-07 runs validate selected TypeScript oracles and the documentation work, not Rust behavior; since [D32](scope-00/support.md#decision-register) those oracles are no longer comparison arms. Host: Linux x86_64, Bun 1.4.2, Node v26.10.0. Source baseline: `ae5eb51ab61f2266b0fc2ff52f2f14b9f3a9a917`. The repository's CI uses Node 24, so this local run does not replace CI or the release matrix.
 
 | Executed command | Observed result |
 |---|---|

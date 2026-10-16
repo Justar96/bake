@@ -23,7 +23,14 @@ use ratatui::{Terminal, TerminalOptions, Viewport};
 #[derive(Default)]
 pub(crate) struct Inline {
     published: usize,
+    /// The transcript's [`State::transcript_epoch`] `published` counts in.
+    /// A replaced transcript is written after what scrollback already
+    /// holds, from its first row; nothing already written is erased.
+    epoch: u64,
     held: u16,
+    /// Whether the last frame held a dialog or an approval request, whose
+    /// closing shrinks the held region ([`Inline::reanchor`]).
+    panel: bool,
     initialized: bool,
 }
 
@@ -66,12 +73,11 @@ impl Inline {
                 Clear(ClearType::FromCursorDown)
             )?;
         }
-        let held = inline_height(state, width, height).max(old).min(height);
-        let settled = state.settled_rows();
-        let committing = self.published < settled;
-        // Cleared UI cells are blank. During publishing, transcript output
-        // is never owned by restoration as a transient held region.
-        crate::terminal::HELD_ROWS.store(if committing { 0 } else { old }, Ordering::SeqCst);
+        let replaced = self.epoch != state.transcript_epoch;
+        if replaced {
+            self.epoch = state.transcript_epoch;
+            self.published = 0;
+        }
         let look = Look {
             tones: state.tones,
             classic: state.frame == FrameStyle::Classic,
@@ -80,6 +86,35 @@ impl Inline {
         // The scrollbar's reserved column matches the existing transcript
         // component; presenting against the whole sequence keeps separators.
         let columns = usize::from(width.saturating_sub(u16::from(width > 20)));
+        let wanted = inline_height(state, width, height).min(height);
+        let panel = state.dialog.is_some() || state.approval().is_some();
+        let closed = std::mem::replace(&mut self.panel, panel) && !panel;
+        let mut old = old;
+        if closed && wanted < old {
+            if replaced {
+                // The rows on screen belong to the session just replaced,
+                // which the state no longer holds: they scroll into
+                // scrollback whole, and the new session's rows are
+                // published against the controls.
+                crate::terminal::HELD_ROWS.store(0, Ordering::SeqCst);
+                execute!(
+                    terminal.backend_mut(),
+                    MoveTo(0, height - 1),
+                    Print("\r\n".repeat(usize::from(height))),
+                    MoveTo(0, height - wanted),
+                    SavePosition
+                )?;
+            } else {
+                self.reanchor(terminal, state, width, height - wanted, columns, look)?;
+            }
+            old = wanted;
+        }
+        let held = wanted.max(old);
+        let settled = state.settled_rows();
+        let committing = self.published < settled;
+        // Cleared UI cells are blank. During publishing, transcript output
+        // is never owned by restoration as a transient held region.
+        crate::terminal::HELD_ROWS.store(if committing { 0 } else { old }, Ordering::SeqCst);
         publish(
             &mut self.published,
             &crate::terminal::HELD_ROWS,
@@ -114,6 +149,60 @@ impl Inline {
         crate::terminal::HELD_ROWS.store(held, Ordering::SeqCst);
         terminal.draw(|frame| render_inline(state, frame, self.published, height))?;
         Ok(held)
+    }
+}
+
+impl Inline {
+    /// The TypeScript `useRepaint` for a closing sheet: the held region
+    /// grew for a dialog or an approval, which scrolled the transcript
+    /// above it up; the terminal cannot pull those rows back down, so
+    /// shrinking the region alone would leave its freed rows as a blank gap
+    /// over the controls. Instead the visible rows above the new region,
+    /// `top` of them, are written again with the published transcript's
+    /// last lines, blank above a short one, so the newest row sits against
+    /// the controls. Only the visible screen is rewritten: rows already in
+    /// scrollback, including the shell's, stay as they are. The boundary
+    /// is saved at the new region's top.
+    fn reanchor(
+        &self,
+        terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+        state: &State,
+        width: u16,
+        top: u16,
+        columns: usize,
+        look: Look,
+    ) -> io::Result<()> {
+        // Transcript cells only, while they are written.
+        crate::terminal::HELD_ROWS.store(0, Ordering::SeqCst);
+        let room = usize::from(top);
+        let published = self.published.min(state.transcript.rows.len());
+        let mut tail: Vec<Line<'static>> = Vec::new();
+        for index in (0..published).rev() {
+            if tail.len() >= room {
+                break;
+            }
+            let mut lines = transcript::present(&state.transcript.rows, index, columns, look);
+            lines.extend(tail);
+            tail = lines;
+        }
+        let skip = tail.len().saturating_sub(room);
+        let tail = &tail[skip..];
+        let blank = room - tail.len();
+        let out = terminal.backend_mut();
+        execute!(out, MoveTo(0, 0))?;
+        for _ in 0..blank {
+            queue!(
+                out,
+                SetAttribute(Attribute::Reset),
+                ResetColor,
+                Clear(ClearType::CurrentLine),
+                Print("\r\n")
+            )?;
+        }
+        for line in tail {
+            write_line(out, line, width)?;
+        }
+        execute!(out, MoveTo(0, top), SavePosition)
     }
 }
 

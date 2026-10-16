@@ -1,6 +1,6 @@
 # Models and providers
 
-bake-rs has no built-in model catalog: every model comes from `models.json` in the Bake home or from the CLIProxyAPI route Bake 0.3 saved. API keys come from `models.json`, `auth.json`, or that route. bake-rs reads these files and never writes them.
+bake-rs has no built-in model catalog: every model comes from `models.json` in the Bake home or from the CLIProxyAPI account. API keys come from `models.json`, `auth.json`, or that account. bake-rs never writes `models.json`; only the interactive commands write `auth.json` and `settings.json` (`/login`, `/logout`, `/refresh-models`, and saving a default).
 
 ## Choosing a model
 
@@ -45,7 +45,7 @@ Without `--model`, a resumed session keeps the model it last used while that mod
 { "my-gateway": { "type": "api_key", "key": "!pass show gateway" } }
 ```
 
-A request's key is the first of: the provider's key in `auth.json`, its `apiKey` in `models.json`, then the imported CLIProxyAPI key. A credential may carry `env`, values that its key and headers read before the process environment.
+A request's key is the first of: `--api-key`, the provider's key in `auth.json`, its `apiKey` in `models.json`, then the imported CLIProxyAPI key. The CLIProxyAPI account's key is the exception: it is used only with its own route (see below). A credential may carry `env`, values that its key and headers read before the process environment.
 
 ## Keys and header values
 
@@ -56,6 +56,16 @@ A request's key is the first of: the provider's key in `auth.json`, its `apiKey`
 - `$$` for a literal `$`, and `$!` for a literal `!`.
 - Anything else, used as written.
 
-## The CLIProxyAPI route
+## The CLIProxyAPI account
 
-When the Bake home holds a CLIProxyAPI route that Bake 0.3's login saved, bake-rs adds it as the `cliproxyapi` provider with the models saved with it. Its key is `CLIPROXYAPI_API_KEY` when that environment variable is set and not empty, else the key in `.credentials.yaml`. bake-rs cannot log in or refresh the saved model list; `bake-rs docs home` lists what else it imports.
+In an interactive session, `/login` signs in to a CLIProxyAPI proxy. It asks for the proxy's address (its root, `/v1`, or `/backend-api` URL; empty means `http://127.0.0.1:8317`) and API key, reads the proxy's model list with that key, and saves the account as the `cliproxyapi` provider with the models listed. Esc cancels until the list has been read; nothing is saved then.
+
+- The key goes to `auth.json`, as the `cliproxyapi` record. The route (address and models) goes to the `cliproxyapi` member of `settings.json`. Both carry the same `account` value, a random tag each sign-in draws.
+- bake-rs uses the route only with the key whose tag matches. When they do not match, for example after another program replaced the key or after a crash between the two writes, the account is off: a startup note says so, there is no `cliproxyapi` provider, and `/login` recovers. The account's key is never sent to another route.
+- `/refresh-models` reads the model list again and saves it, keeping the current model and the default model. Each interactive session also refreshes the list once at start, quietly, unless a saved list may not survive a power loss, which it reports.
+- `/logout` sets the route to `null` and removes the key. A signed-out home no longer imports the route Bake 0.3 saved.
+- `--api-key` still comes first for requests and for `/refresh-models`.
+
+## The route Bake 0.3 saved
+
+While `settings.json` has no `cliproxyapi` member, a CLIProxyAPI route that Bake 0.3's login saved becomes the `cliproxyapi` provider with the models saved with it. Its key is `CLIPROXYAPI_API_KEY` when that environment variable is set and not empty, else the key in `.credentials.yaml`. Signing in replaces it; the 0.3 files are never changed. `bake-rs docs home` lists what else bake-rs imports.

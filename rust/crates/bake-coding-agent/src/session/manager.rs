@@ -1248,6 +1248,48 @@ impl SessionManager {
         Ok(Some(new_file))
     }
 
+    /// A new session forked from this one, Pi's runtime `fork` over
+    /// `createBranchedSession` and `newSession`, built without changing
+    /// this manager, its file, or its writer lock: a copy holding the path
+    /// from the root to `leaf_id` ([`Self::create_branched_session`]), or,
+    /// for `None`, an empty session. A persisted fork names this session's
+    /// file as its parent, goes in the same session directory, and holds
+    /// only its own file's writer lock; an in-memory one writes nothing.
+    pub fn branched_copy(&self, leaf_id: Option<&str>) -> Result<Self, SessionError> {
+        let mut copy = Self {
+            session_id: self.session_id.clone(),
+            session_file: self.session_file.clone(),
+            session_dir: self.session_dir.clone(),
+            cwd: self.cwd.clone(),
+            persist: self.persist,
+            flushed: self.flushed,
+            file_entries: self.file_entries.clone(),
+            by_id: self.by_id.clone(),
+            labels_by_id: self.labels_by_id.clone(),
+            label_timestamps_by_id: self.label_timestamps_by_id.clone(),
+            leaf_id: self.leaf_id.clone(),
+            writer: None,
+            writer_closed: false,
+        };
+        match leaf_id {
+            Some(leaf_id) => {
+                copy.create_branched_session(leaf_id)?;
+            }
+            None => {
+                let parent = self
+                    .persist
+                    .then_some(self.session_file.as_ref())
+                    .flatten()
+                    .map(|file| file.to_string_lossy().into_owned());
+                copy.new_session(NewSessionOptions {
+                    id: None,
+                    parent_session: parent,
+                })?;
+            }
+        }
+        Ok(copy)
+    }
+
     /// Create a persisted session. Without `session_dir`, it lives in the
     /// Bake home's directory for `cwd`, which is created. The file is
     /// written once the session holds a user or assistant message.

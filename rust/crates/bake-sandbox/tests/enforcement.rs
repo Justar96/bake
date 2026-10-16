@@ -16,6 +16,7 @@
 //!
 //! A backend that is not usable here is skipped with a printed note, except
 //! under `CI=true`, which requires Landlock on Linux and Seatbelt on macOS.
+//! The Windows scenarios ([`windows`]) are never skipped.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -29,10 +30,24 @@ use bake_sandbox::{
     classify_runner_failure, default_provider, matches_signature,
 };
 
+#[cfg(windows)]
+#[path = "enforcement/windows.rs"]
+mod windows;
+
 fn main() -> ExitCode {
     let args: Vec<OsString> = std::env::args_os().skip(1).collect();
     if args.first().is_some_and(|arg| arg == HELPER_ARG) {
         helper_main(args.into_iter().skip(1));
+    }
+    if args
+        .first()
+        .is_some_and(|arg| arg == bake_sandbox::backends::windows_acl::HELPER_ARG)
+    {
+        bake_sandbox::backends::windows_acl::helper_main(args.into_iter().skip(1));
+    }
+    #[cfg(windows)]
+    if args.first().is_some_and(|arg| arg == windows::PROBE_ARG) {
+        windows::probe_main(args.into_iter().skip(1).collect());
     }
     harness::run(tests(), args)
 }
@@ -123,6 +138,8 @@ fn tests() -> Vec<harness::Test> {
             landlock_helper_inside_the_workspace_is_refused,
         ));
     }
+    #[cfg(windows)]
+    tests.extend(windows::tests());
     tests.push(harness::Test::new(
         "chain::no_usable_backend_refuses".into(),
         no_usable_backend_refuses,
@@ -154,7 +171,8 @@ fn required(runner: Runner) -> bool {
         && match runner {
             Runner::Landlock => cfg!(target_os = "linux"),
             Runner::Seatbelt => cfg!(target_os = "macos"),
-            Runner::Bwrap => false,
+            // The Windows scenarios never skip.
+            Runner::Bwrap | Runner::WindowsAcl => false,
         }
 }
 
@@ -186,6 +204,7 @@ fn pinned(runner: Runner) -> LocalProvider {
         Runner::Seatbelt => {
             LocalProvider::with_chain(vec![Runner::Seatbelt, Runner::Bwrap]).with_bwrap(ABSENT, [])
         }
+        Runner::WindowsAcl => LocalProvider::with_chain(vec![Runner::WindowsAcl]),
     }
 }
 
@@ -422,6 +441,7 @@ fn selects_and_reports_its_dialect(backend: &Backend) {
             assert_eq!(command.enforcement, Enforcement::Full);
             assert_eq!(command.denial_signatures, ["operation not permitted"]);
         }
+        Runner::WindowsAcl => unreachable!("the Windows runner has its own scenarios"),
     }
 }
 
@@ -596,6 +616,7 @@ fn runner_failures_are_classified(backend: &Backend) {
         Runner::Bwrap => "bwrap: ",
         Runner::Landlock => "landlock-run: ",
         Runner::Seatbelt => "sandbox-exec: ",
+        Runner::WindowsAcl => unreachable!("the Windows runner has its own scenarios"),
     };
     let line = run.runner_failure();
     assert!(
@@ -1106,35 +1127,31 @@ fn default_provider_confines_or_refuses() {
     let provider: Arc<dyn SandboxProvider> = default_provider();
     let workspace = Scratch::outside("default");
     let policy = SandboxPolicy::new(SandboxMode::ReadOnly, &workspace.0);
-    let argv: Vec<OsString> = ["sh", "-c", "echo hi > denied.txt"]
-        .iter()
-        .map(OsString::from)
-        .collect();
+    let script: &[&str] = if cfg!(windows) {
+        &["cmd", "/c", "echo hi > denied.txt"]
+    } else {
+        &["sh", "-c", "echo hi > denied.txt"]
+    };
+    let argv: Vec<OsString> = script.iter().map(OsString::from).collect();
     match runtime().block_on(provider.confine(&argv, &policy)) {
+        // Windows has no default backend: its runner leaves deletion
+        // unconfined.
+        Ok(_) if cfg!(windows) => panic!("the Windows default provider must refuse"),
         Ok(_) => {
-            let run = run_argv(
-                provider.as_ref(),
-                &["sh", "-c", "echo hi > denied.txt"],
-                &policy,
-                &workspace.0,
-            );
+            let run = run_argv(provider.as_ref(), script, &policy, &workspace.0);
             assert_ne!(run.code, Some(0));
             assert!(run.denied(), "{}", run.stderr);
             assert!(!workspace.join("denied.txt").exists());
         }
+        #[cfg(windows)]
+        Err(error) => assert_eq!(
+            error.detail.as_deref(),
+            Some(bake_sandbox::backends::windows_acl::DEFAULT_REFUSAL),
+            "{error}"
+        ),
+        #[cfg(not(windows))]
         Err(error) => {
-            assert!(
-                cfg!(windows) || !in_ci(),
-                "CI requires a backend here: {error}"
-            );
-            #[cfg(windows)]
-            assert!(
-                error
-                    .detail
-                    .as_deref()
-                    .is_some_and(|detail| detail.contains("Windows")),
-                "{error}"
-            );
+            assert!(!in_ci(), "CI requires a backend here: {error}");
             eprintln!("note: the default provider refused here: {error}");
         }
     }

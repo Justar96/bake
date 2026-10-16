@@ -78,7 +78,7 @@ Delete the install directory and its `bake` link: `~/.local/share/bake` and `~/.
 - [Terminal application](apps/tui/packages/app/README.md): commands, keys, and session navigation.
 - [TUI design](apps/tui/DESIGN.md), including its [known limits](apps/tui/DESIGN.md#10-limits).
 - [Development guide](docs/development.md): building from source, test loops, and repository layout.
-- [Rust TUI preview](rust/README.md): run `bun run dev:rust` from a checkout to try the native composer and sample-agent views. Model connections and tools are not available in this preview.
+- [Rust agent](rust/README.md): run `bun run dev:rust` from a checkout to try the interactive Rust agent, `bake-rs`, with the models in your Bake home, or `bun run dev:rust:preview` for the sample views with no model connection. It is a development build, not the shipped `bake`.
 - [0.4 Rust migration roadmap](docs/roadmap/rust-0.4/README.md): proposed development scopes, 0.3.x maintenance policy, and required test evidence.
 - [Contributing](CONTRIBUTING.md) and the [changelog](CHANGELOG.md).
 

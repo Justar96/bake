@@ -476,14 +476,67 @@ enum SetupStep {
 #[allow(clippy::too_many_arguments)]
 pub async fn configure_cli_proxy_api<P, F, Fut>(
     saved_base_url: Option<&str>,
-    mut prompt: F,
+    prompt: F,
     signal: Option<&AbortSignal>,
-    mut checking: impl FnMut(&str),
+    checking: impl FnMut(&str),
     read_credential: impl FnOnce() -> Result<Option<String>, String>,
     mut set_credential: impl FnMut(&str) -> Result<(), String>,
     unset_credential: impl FnOnce() -> Result<(), String>,
     mutate_settings: impl FnOnce(Value) -> Result<(), String>,
 ) -> Result<usize, ConfigureCliProxyError<P>>
+where
+    F: FnMut(LoginPrompt) -> Fut,
+    Fut: Future<Output = Result<String, P>>,
+{
+    let CheckedLogin {
+        endpoints,
+        key: valid_key,
+        models,
+    } = check_cli_proxy_login(saved_base_url, prompt, signal, checking).await?;
+    let previous_key = read_credential().map_err(ConfigureCliProxyError::CredentialRead)?;
+    set_credential(valid_key.expose()).map_err(ConfigureCliProxyError::CredentialWrite)?;
+    let route = CliProxyRoute::from_login(&endpoints, &models).to_settings_json();
+    if let Err(settings_error) = mutate_settings(route) {
+        let rollback = match &previous_key {
+            Some(prev) => set_credential(prev),
+            None => unset_credential(),
+        };
+        if let Err(rollback_error) = rollback {
+            return Err(ConfigureCliProxyError::RollbackFailed {
+                settings_error,
+                rollback_error,
+            });
+        }
+        return Err(ConfigureCliProxyError::SettingsWrite(settings_error));
+    }
+
+    Ok(models.len())
+}
+
+/// A proxy address and key that [`check_cli_proxy_login`] checked against
+/// the proxy's model list, with the models it listed. `Debug` redacts the
+/// key.
+#[derive(Debug, Clone)]
+pub struct CheckedLogin {
+    /// The proxy's addresses.
+    pub endpoints: super::CliProxyEndpoints,
+    /// The key the proxy accepted.
+    pub key: ApiKey,
+    /// The models it listed.
+    pub models: Vec<CliProxyModel>,
+}
+
+/// The asking and checking half of `configureCliProxyApi`: prompts for the
+/// address and key, re-asking with the TypeScript's messages until the
+/// proxy's model list accepts them, and writes nothing. The caller commits
+/// the result, as [`configure_cli_proxy_api`] does through its callbacks
+/// and `cliproxyapi::account` does through the Bake home's files.
+pub async fn check_cli_proxy_login<P, F, Fut>(
+    saved_base_url: Option<&str>,
+    mut prompt: F,
+    signal: Option<&AbortSignal>,
+    mut checking: impl FnMut(&str),
+) -> Result<CheckedLogin, ConfigureCliProxyError<P>>
 where
     F: FnMut(LoginPrompt) -> Fut,
     Fut: Future<Output = Result<String, P>>,
@@ -624,25 +677,11 @@ where
     if signal.is_some_and(AbortSignal::aborted) {
         return Err(ConfigureCliProxyError::Aborted);
     }
-
-    let previous_key = read_credential().map_err(ConfigureCliProxyError::CredentialRead)?;
-    set_credential(valid_key.expose()).map_err(ConfigureCliProxyError::CredentialWrite)?;
-    let route = CliProxyRoute::from_login(&endpoints, &models).to_settings_json();
-    if let Err(settings_error) = mutate_settings(route) {
-        let rollback = match &previous_key {
-            Some(prev) => set_credential(prev),
-            None => unset_credential(),
-        };
-        if let Err(rollback_error) = rollback {
-            return Err(ConfigureCliProxyError::RollbackFailed {
-                settings_error,
-                rollback_error,
-            });
-        }
-        return Err(ConfigureCliProxyError::SettingsWrite(settings_error));
-    }
-
-    Ok(models.len())
+    Ok(CheckedLogin {
+        endpoints,
+        key: valid_key,
+        models,
+    })
 }
 
 #[cfg(test)]

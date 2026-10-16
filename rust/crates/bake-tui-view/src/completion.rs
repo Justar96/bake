@@ -2,8 +2,9 @@
 //! caret, and the drafts a choice makes.
 //!
 //! Ports the slash half of the TypeScript `completion.ts`. The preview has no
-//! command service, so the catalog is a fixed sample of the runtime's own
+//! command service, so its catalog is a fixed sample of the runtime's own
 //! commands, with their names, hints, and descriptions; none of them runs.
+//! A live session lists [`LIVE_CATALOG`], the commands it runs.
 
 /// One command in the sample catalog.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -59,6 +60,27 @@ pub const CATALOG: &[Command] = &[
     ),
 ];
 
+/// The commands a live `bake-rs` session runs.
+pub const LIVE_CATALOG: &[Command] = &[
+    command("model", Some("[search]"), "Choose the model"),
+    command("thinking", Some("[level]"), "Choose the thinking level"),
+    command("settings", None, "Change session settings"),
+    command("login", None, "Sign in to CLIProxyAPI"),
+    command("logout", None, "Sign out of CLIProxyAPI"),
+    command("refresh-models", None, "Refresh the CLIProxyAPI model list"),
+    command("session", None, "Show this session's details"),
+    command("name", Some("[name]"), "Name this session"),
+    command("new", None, "Start a new session"),
+    command("resume", None, "Resume a saved session from this directory"),
+    command("tree", None, "Navigate the session tree (switch branches)"),
+    command("fork", None, "Fork a new session from an earlier message"),
+    command(
+        "compact",
+        Some("[instructions]"),
+        "Manually compact the session context",
+    ),
+];
+
 /// Commands listed ahead of the rest, in this order, as the oracle ranks them.
 const FREQUENT: &[&str] = &["model", "resume", "new", "clear"];
 
@@ -77,7 +99,7 @@ fn rank(command: &Command) -> usize {
 /// caret is exactly one: `/` and letters, digits, `_`, or `-`. Matching is
 /// by prefix, case-insensitively; the frequent commands come first and the
 /// rest keep the catalog's order. `None` outside the slash menu.
-pub fn matches(draft: &str, caret: usize) -> Option<Vec<Command>> {
+pub fn matches(draft: &str, caret: usize, catalog: &[Command]) -> Option<Vec<Command>> {
     let token = draft[..caret].strip_prefix('/')?;
     if !token
         .chars()
@@ -86,7 +108,7 @@ pub fn matches(draft: &str, caret: usize) -> Option<Vec<Command>> {
         return None;
     }
     let prefix = token.to_ascii_lowercase();
-    let mut found: Vec<Command> = CATALOG
+    let mut found: Vec<Command> = catalog
         .iter()
         .filter(|command| command.name.starts_with(&prefix))
         .copied()
@@ -121,11 +143,11 @@ pub fn complete(draft: &str, command: &Command) -> (String, usize) {
 
 /// The command whose arguments are being typed once the menu has closed: the
 /// one named before the first space or tab, when it has a hint.
-pub fn usage(draft: &str) -> Option<Command> {
+pub fn usage(draft: &str, catalog: &[Command]) -> Option<Command> {
     let rest = draft.strip_prefix('/')?;
     let end = rest.find([' ', '\t'])?;
     let name = &rest[..end];
-    CATALOG
+    catalog
         .iter()
         .find(|command| command.name == name && command.hint.is_some())
         .copied()
@@ -135,23 +157,55 @@ pub fn usage(draft: &str) -> Option<Command> {
 mod tests {
     use super::*;
 
+    fn matches_preview(draft: &str, caret: usize) -> Option<Vec<Command>> {
+        matches(draft, caret, CATALOG)
+    }
+
+    fn usage_preview(draft: &str) -> Option<Command> {
+        usage(draft, CATALOG)
+    }
+
+    #[test]
+    fn a_live_session_lists_the_commands_it_runs() {
+        let live: Vec<&str> = matches("/", 1, LIVE_CATALOG)
+            .unwrap()
+            .iter()
+            .map(|c| c.name)
+            .collect();
+        assert_eq!(live[0], "model");
+        assert_eq!(live.len(), LIVE_CATALOG.len());
+        assert!(live.contains(&"refresh-models"));
+        assert!(live.contains(&"resume") && live.contains(&"new"));
+        assert!(live.contains(&"tree") && live.contains(&"fork"));
+        assert!(live.contains(&"compact") && !live.contains(&"clone"));
+        // `/compact`'s instructions are optional, so Enter on it submits.
+        let compact = LIVE_CATALOG.iter().find(|c| c.name == "compact").unwrap();
+        assert!(!requires_input(compact));
+    }
+
     fn names(found: Option<Vec<Command>>) -> Option<Vec<&'static str>> {
         found.map(|found| found.iter().map(|c| c.name).collect())
     }
 
     #[test]
     fn a_leading_slash_token_lists_its_prefix_matches_frequent_first() {
-        let all = names(matches("/", 1)).unwrap();
+        let all = names(matches_preview("/", 1)).unwrap();
         assert_eq!(&all[..4], ["model", "resume", "new", "clear"]);
         assert_eq!(all.len(), CATALOG.len());
-        assert_eq!(names(matches("/lo", 3)), Some(vec!["login", "logout"]));
-        assert_eq!(names(matches("/LO", 3)), Some(vec!["login", "logout"]));
-        assert_eq!(names(matches("/zz", 3)), Some(vec![]));
+        assert_eq!(
+            names(matches_preview("/lo", 3)),
+            Some(vec!["login", "logout"])
+        );
+        assert_eq!(
+            names(matches_preview("/LO", 3)),
+            Some(vec!["login", "logout"])
+        );
+        assert_eq!(names(matches_preview("/zz", 3)), Some(vec![]));
         // Only the draft up to the caret counts, and only as one token.
-        assert_eq!(names(matches("/model x", 6)), Some(vec!["model"]));
-        assert_eq!(matches("/model x", 8), None);
-        assert_eq!(matches("ask /model", 10), None);
-        assert_eq!(matches("", 0), None);
+        assert_eq!(names(matches_preview("/model x", 6)), Some(vec!["model"]));
+        assert_eq!(matches_preview("/model x", 8), None);
+        assert_eq!(matches_preview("ask /model", 10), None);
+        assert_eq!(matches_preview("", 0), None);
     }
 
     #[test]
@@ -168,11 +222,11 @@ mod tests {
 
     #[test]
     fn a_typed_command_with_a_hint_shows_its_usage() {
-        assert_eq!(usage("/goal ").map(|c| c.name), Some("goal"));
-        assert_eq!(usage("/goal ship").map(|c| c.name), Some("goal"));
+        assert_eq!(usage_preview("/goal ").map(|c| c.name), Some("goal"));
+        assert_eq!(usage_preview("/goal ship").map(|c| c.name), Some("goal"));
         // Without a separator the menu is still open; `new` takes nothing.
-        assert_eq!(usage("/goal"), None);
-        assert_eq!(usage("/new "), None);
-        assert_eq!(usage("/nope "), None);
+        assert_eq!(usage_preview("/goal"), None);
+        assert_eq!(usage_preview("/new "), None);
+        assert_eq!(usage_preview("/nope "), None);
     }
 }

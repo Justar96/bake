@@ -1,0 +1,830 @@
+{
+  "schema": "bake/rust-migration/qualification-attempt",
+  "version": 1,
+  "id": "2026-10-15-session-search",
+  "scope": "15",
+  "status": "partial",
+  "recordedOn": "2026-10-15",
+  "summary": "The /resume sheet searches saved user and assistant text with fuzzy terms, quoted phrases and bounded regular expressions. Named-only and recent/relevance controls preserve same-directory isolation and stable session selection. Full release qualification remains open.",
+  "supersedes": [],
+  "provenance": {
+    "base": "5239df0a1a709327f29c4055bb7e85ddba3b2685",
+    "candidate": "3a65c3ebd8d06ef68d4b8213cafc1a5a16c83b22",
+    "oracle": "06a466935536f8c9bcacb2d5efc0fc021be1bdff"
+  },
+  "support": [
+    {
+      "id": "d22",
+      "reference": "docs/roadmap/rust-0.4/scope-00/support.md"
+    },
+    {
+      "id": "d24",
+      "reference": "docs/roadmap/rust-0.4/scope-00/support.md"
+    },
+    {
+      "id": "d25",
+      "reference": "docs/roadmap/rust-0.4/scope-00/support.md"
+    },
+    {
+      "id": "d32",
+      "reference": "docs/roadmap/rust-0.4/scope-00/support.md"
+    }
+  ],
+  "fixtures": {
+    "files": [
+      {
+        "path": "rust/crates/bake-coding-agent/src/cli/list_models.rs",
+        "role": "fixture-definition-source",
+        "sha256": "9cf4ffd29378356a6bda103447f21e0c3b3d7d5e908020350614de4c9399f2be"
+      },
+      {
+        "path": "rust/crates/bake-coding-agent/src/session/search_tests.rs",
+        "role": "fixture-definition-source",
+        "sha256": "38ff8eff7eeefd0921d4b74a0b42cda293a21d993c680157442d7f9cf0d28099"
+      },
+      {
+        "path": "rust/crates/bake-coding-agent/tests/session/search.rs",
+        "role": "fixture-definition-source",
+        "sha256": "3acbdbe7bfc62fe164bc0188777c8e757a87846624a772b28bc9b4943a45a570"
+      },
+      {
+        "path": "rust/crates/bake-tui-view/src/dialog.rs",
+        "role": "fixture-definition-source",
+        "sha256": "c238c70a6678ae33a53fdf985ffa79e84f02b3500916fe5b3442ad0b8c1fb8ae"
+      },
+      {
+        "path": "rust/crates/bake-tui-view/src/render.rs",
+        "role": "fixture-definition-source",
+        "sha256": "ab725685d69b665a0a03ea8e2d203610c5183256185a060c4c1e288f0a63eb2a"
+      },
+      {
+        "path": "rust/crates/bake-tui/src/live/tests/sessions_live.rs",
+        "role": "fixture-definition-source",
+        "sha256": "f43de12a2b5de6dc69310b0fb9c9433149df569d04fec7e0c796528b99b7e67f"
+      },
+      {
+        "path": "scripts/rust-preview-pty.ts",
+        "role": "fixture-definition-source",
+        "sha256": "22680965fcbc2bea3c93e25eef2f3908c3a984f1e674b088fff1f4900557c54b"
+      }
+    ],
+    "digest": "311553ec155b4ddea200389d91577d88433f8a2332c87c7d811aefc0ef702034"
+  },
+  "artifacts": [
+    {
+      "id": "release-binary",
+      "description": "Local Linux release binary used for the independent terminal probe; not published.",
+      "sha256": "feca74eeab4e2e66ed8430f4af8bae3d3680fde2205940b10776e114a1123443",
+      "command": "search-smoke"
+    },
+    {
+      "id": "baseline-binary",
+      "description": "Previous Linux release binary, copied before implementation, rejected by the phrase-search probe.",
+      "sha256": "d209873460212dbb784298f62c1d3610334550bbc0a7895bd799e1f20335d506",
+      "command": "baseline-search-negative"
+    }
+  ],
+  "commands": [
+    {
+      "id": "linux-rust",
+      "argv": [
+        "bun",
+        "run",
+        "check:rust"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "Linux WSL2 x86_64"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3-canary.1+bc7a813b1"
+      },
+      "testedCommit": "3a65c3ebd8d06ef68d4b8213cafc1a5a16c83b22",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 1535,
+        "failed": 0,
+        "skipped": 3,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/session-search/evidence/linux-rust.log",
+        "sha256": "60680842f0dba856558af366c6e9eadacfc3d0bf31c90f615dfe87ba1d210443"
+      }
+    },
+    {
+      "id": "linux-pty",
+      "argv": [
+        "bun",
+        "run",
+        "test:rust:pty"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "Linux WSL2 x86_64"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3-canary.1+bc7a813b1"
+      },
+      "testedCommit": "3a65c3ebd8d06ef68d4b8213cafc1a5a16c83b22",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 48,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/session-search/evidence/linux-pty.log",
+        "sha256": "6a34ee6ca1b104de9523d66c6af426ec2d27ae00066f381e76b46bbee6a88faf"
+      }
+    },
+    {
+      "id": "mac-native",
+      "argv": [
+        "bun",
+        "run",
+        "preflight:mac"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "darwin",
+        "arch": "x64",
+        "runner": "SSH macpro; Intel x86_64; macOS 26.7.1"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.2"
+      },
+      "testedCommit": "3a65c3ebd8d06ef68d4b8213cafc1a5a16c83b22",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/session-search/evidence/mac-native.log",
+        "sha256": "f9d8c2eb7b8dca98688d543b36851ab049bd2a7ae1296dde27694c6945440f14"
+      }
+    },
+    {
+      "id": "mac-rust",
+      "argv": [
+        "bun",
+        "run",
+        "check:rust"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "darwin",
+        "arch": "x64",
+        "runner": "SSH macpro; Intel x86_64; macOS 26.7.1"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.2"
+      },
+      "testedCommit": "3a65c3ebd8d06ef68d4b8213cafc1a5a16c83b22",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 1509,
+        "failed": 0,
+        "skipped": 3,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/session-search/evidence/mac-rust.log",
+        "sha256": "5f8ce19f1113628d55a83e5f92231307966f41cad0cbf600dfc7266f0cc34f8f"
+      }
+    },
+    {
+      "id": "mac-eval",
+      "argv": [
+        "bun",
+        "run",
+        "test:rust:eval"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "darwin",
+        "arch": "x64",
+        "runner": "SSH macpro; Intel x86_64; macOS 26.7.1"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.2"
+      },
+      "testedCommit": "3a65c3ebd8d06ef68d4b8213cafc1a5a16c83b22",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/session-search/evidence/mac-eval.log",
+        "sha256": "2c858a7bb1f7872baccf445466703b2cf50ff17908989567f4894a6054f99166"
+      }
+    },
+    {
+      "id": "mac-pty",
+      "argv": [
+        "bun",
+        "run",
+        "test:rust:pty"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "darwin",
+        "arch": "x64",
+        "runner": "SSH macpro; Intel x86_64; macOS 26.7.1"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.2"
+      },
+      "testedCommit": "3a65c3ebd8d06ef68d4b8213cafc1a5a16c83b22",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 46,
+        "failed": 0,
+        "skipped": 2,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/session-search/evidence/mac-pty.log",
+        "sha256": "a12d4fa50ae8dee9e534cbf7aa418d185c83834c09000cd387d77dc8d3c3016e"
+      }
+    },
+    {
+      "id": "windows-native",
+      "argv": [
+        "powershell.exe",
+        "cargo clippy/test/build --locked --workspace"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "win32",
+        "arch": "x64",
+        "runner": "Native Windows; all tracked Rust files copied and hash-verified; isolated TEMP"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)"
+      },
+      "testedCommit": "3a65c3ebd8d06ef68d4b8213cafc1a5a16c83b22",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 1433,
+        "failed": 0,
+        "skipped": 3,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/session-search/evidence/windows-native.log",
+        "sha256": "afb18115d1eba11f5969b38ae4f77c60b881f47ea51e677e20d8741b39f94c99"
+      }
+    },
+    {
+      "id": "static",
+      "argv": [
+        "bun",
+        "run",
+        "preflight",
+        "--fast"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "Linux WSL2 x86_64"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3-canary.1+bc7a813b1"
+      },
+      "testedCommit": "3a65c3ebd8d06ef68d4b8213cafc1a5a16c83b22",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 26,
+        "failed": 0,
+        "skipped": 8,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/session-search/evidence/static.log",
+        "sha256": "e823b7a1bc875e1bbcb3b28edd182aee8b3dd1f75a8eb91fdf1f82cb6b1c4a74"
+      }
+    },
+    {
+      "id": "node-pty",
+      "argv": [
+        "bun",
+        "run",
+        "test:e2e"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "Linux WSL2 x86_64"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3-canary.1+bc7a813b1"
+      },
+      "testedCommit": "5239df0a1a709327f29c4055bb7e85ddba3b2685",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 42,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/session-search/evidence/node-pty.log",
+        "sha256": "23fb3ddc972888497d584b9fe72d7ede469ce2c0300647df8fbf3257fb41e7c3"
+      }
+    },
+    {
+      "id": "search-smoke",
+      "argv": [
+        "bun",
+        ".preflight/rust-orchestrator/session-search/search-smoke.ts",
+        "--binary",
+        "rust/target/release/bake-rs"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "Linux WSL2 x86_64"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3-canary.1+bc7a813b1"
+      },
+      "testedCommit": "3a65c3ebd8d06ef68d4b8213cafc1a5a16c83b22",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/session-search/evidence/search-smoke-v2.log",
+        "sha256": "2be7cc62d054bb7c03968b5cedbe5695affafbc300e93f532f96ebc439a4d2d5"
+      }
+    },
+    {
+      "id": "baseline-search-negative",
+      "argv": [
+        "bun",
+        ".preflight/rust-orchestrator/session-search/search-smoke.ts",
+        "--binary",
+        ".preflight/rust-orchestrator/session-search/baseline-bake-rs"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "Linux WSL2 x86_64"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3-canary.1+bc7a813b1"
+      },
+      "testedCommit": "5239df0a1a709327f29c4055bb7e85ddba3b2685",
+      "expectedExit": 1,
+      "actualExit": 1,
+      "counts": {
+        "passed": 0,
+        "failed": 1,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/session-search/evidence/baseline-search-negative.log",
+        "sha256": "15d8a46dca6428228047479f2c03ecccd8143f712c9ebe385c9e6409304064da"
+      }
+    },
+    {
+      "id": "cli-docs-tests",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "bake-cli"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "Linux WSL2 x86_64"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3-canary.1+bc7a813b1"
+      },
+      "testedCommit": "3a65c3ebd8d06ef68d4b8213cafc1a5a16c83b22",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 42,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/session-search/evidence/cli-docs-tests.log",
+        "sha256": "f1ba0ddc5226eba801e550f1350379df430f4a2a74a16d3b444069b8a33cd1bd"
+      }
+    },
+    {
+      "id": "search-pty-after-lint",
+      "argv": [
+        "bun",
+        "run",
+        "test:rust:pty",
+        "--filter",
+        "resume search"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "Linux WSL2 x86_64"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3-canary.1+bc7a813b1"
+      },
+      "testedCommit": "3a65c3ebd8d06ef68d4b8213cafc1a5a16c83b22",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 2,
+        "failed": 0,
+        "skipped": 46,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/session-search/evidence/linux-search-pty-after-lint.log",
+        "sha256": "30e53209be53ea58a337be0c30009352f2dcce411502bdae81a271f2279cd19a"
+      }
+    },
+    {
+      "id": "release-build",
+      "argv": [
+        "cargo",
+        "build",
+        "--locked",
+        "--release",
+        "-p",
+        "bake-cli"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "Linux WSL2 x86_64"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3-canary.1+bc7a813b1"
+      },
+      "testedCommit": "3a65c3ebd8d06ef68d4b8213cafc1a5a16c83b22",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/session-search/evidence/release-build.log",
+        "sha256": "682d70e9fb8a727241b627e58e34684f6faf82f28e1e3c9d1845c59c8cdeeabd"
+      }
+    },
+    {
+      "id": "rustdoc",
+      "argv": [
+        "env",
+        "RUSTDOCFLAGS=-Drustdoc::broken_intra_doc_links",
+        "bash",
+        "-lc",
+        "cd rust && cargo doc --locked --workspace --no-deps"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "Linux WSL2 x86_64"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3-canary.1+bc7a813b1"
+      },
+      "testedCommit": "3a65c3ebd8d06ef68d4b8213cafc1a5a16c83b22",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 3
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/session-search/evidence/rustdoc.log",
+        "sha256": "e39e5259bf4ad05c4a90df839d529d2a2a295b13a85cb158515608e54fc96f50"
+      }
+    },
+    {
+      "id": "linux-rust-first-attempt",
+      "argv": [
+        "bun",
+        "run",
+        "check:rust"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "Linux WSL2 x86_64"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3-canary.1+bc7a813b1"
+      },
+      "testedCommit": {
+        "missing": "Uncommitted intermediate fixture assertions, before Clippy correction."
+      },
+      "expectedExit": 0,
+      "actualExit": 101,
+      "counts": {
+        "passed": 0,
+        "failed": 1,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/session-search/evidence/linux-rust-first-attempt.log",
+        "sha256": "82d2609b29cc734e0bd518a2ff4ade7c8344d69813e3c428c896e1f13e226c8a"
+      }
+    },
+    {
+      "id": "lint-first-attempt",
+      "argv": [
+        "bun",
+        "run",
+        "lint"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "Linux WSL2 x86_64"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3-canary.1+bc7a813b1"
+      },
+      "testedCommit": {
+        "missing": "Uncommitted intermediate PTY fixture before its long line was split."
+      },
+      "expectedExit": 0,
+      "actualExit": 1,
+      "counts": {
+        "passed": 0,
+        "failed": 1,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/session-search/evidence/lint-first-attempt.log",
+        "sha256": "84ced430e57d5de56a2c6d7782a6355446f09ae24f44a5181b53ad3ca8e15e76"
+      }
+    },
+    {
+      "id": "search-smoke-first-attempt",
+      "argv": [
+        "bun",
+        ".preflight/rust-orchestrator/session-search/search-smoke.ts",
+        "--binary",
+        "rust/target/release/bake-rs"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "Linux WSL2 x86_64"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3-canary.1+bc7a813b1"
+      },
+      "testedCommit": "3a65c3ebd8d06ef68d4b8213cafc1a5a16c83b22",
+      "expectedExit": 0,
+      "actualExit": 1,
+      "counts": {
+        "passed": 0,
+        "failed": 1,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/session-search/evidence/search-smoke.log",
+        "sha256": "3b4cab54c81e849dff8e29fe4c6a1b65d19a69d9e5cabc11dfebef6d2bf6df20"
+      }
+    }
+  ],
+  "results": [
+    {
+      "id": "session-search",
+      "behavior": "Pi search matches ID, name, directory and all saved user/assistant text. Quoted phrases normalize whitespace; recent order is stable and relevance ties use modified time.",
+      "owner": "scopes 03 and 15",
+      "report": "docs/roadmap/rust-0.4/ledger/scope-15/2026-10-15-session-search.json",
+      "commands": [
+        "linux-rust",
+        "mac-rust",
+        "windows-native",
+        "linux-pty",
+        "search-smoke"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "picker-controls",
+      "behavior": "Named-only and sort controls apply to the resume sheet; invalid regex has no selectable stale row. Fullscreen and inline filtering, narrow resize and cancel preserve the draft and select the intended session by ID.",
+      "owner": "scopes 03 and 15",
+      "report": "docs/roadmap/rust-0.4/ledger/scope-15/2026-10-15-session-search.json",
+      "commands": [
+        "linux-rust",
+        "linux-pty",
+        "mac-pty",
+        "search-smoke"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "side-effects",
+      "behavior": "The independent probe observes no network requests, unchanged session files, same-directory isolation and the chosen session ID after resume.",
+      "owner": "scopes 03 and 15",
+      "report": "docs/roadmap/rust-0.4/ledger/scope-15/2026-10-15-session-search.json",
+      "commands": [
+        "search-smoke"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "platform-checks",
+      "behavior": "Linux and Intel macOS terminal scenarios, Windows Cargo checks, static gates and Node terminal scenarios pass. Windows Cargo does not exercise ConPTY.",
+      "owner": "scopes 03 and 15",
+      "report": "docs/roadmap/rust-0.4/ledger/scope-15/2026-10-15-session-search.json",
+      "commands": [
+        "linux-rust",
+        "linux-pty",
+        "mac-native",
+        "windows-native",
+        "static",
+        "node-pty"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "negative-control",
+      "behavior": "The prior binary cannot find a quoted phrase present only in a later assistant message; the independent terminal assertion rejects it.",
+      "owner": "scopes 03 and 15",
+      "report": "docs/roadmap/rust-0.4/ledger/scope-15/2026-10-15-session-search.json",
+      "commands": [
+        "baseline-search-negative",
+        "search-smoke"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "mac-eval-smoke",
+      "behavior": "Intel macOS native eval smoke passes, including eight native-arm samples and 22 fixture requests; this is not a paired live model eval.",
+      "owner": "scopes 03 and 15",
+      "report": "docs/roadmap/rust-0.4/ledger/scope-15/2026-10-15-session-search.json",
+      "commands": [
+        "mac-eval"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "corrected-development-checks",
+      "behavior": "The first full Rust check failed Clippy on five cloned fixture IDs; the first lint failed a long PTY line. Both were corrected; full Rust and lint passed, and the two affected PTY scenarios passed after the line split.",
+      "owner": "scopes 03 and 15",
+      "report": "docs/roadmap/rust-0.4/ledger/scope-15/2026-10-15-session-search.json",
+      "commands": [
+        "linux-rust-first-attempt",
+        "lint-first-attempt",
+        "linux-rust",
+        "static",
+        "search-pty-after-lint"
+      ],
+      "outcome": "fail"
+    },
+    {
+      "id": "corrected-probe-fixture",
+      "behavior": "The first independent probe compared files to incomplete seed logs; startup added the missing permission and thinking entries before the sheet opened. The corrected seed records those values explicitly and retains the byte-for-byte no-write assertion through search, cancellation and resume. The corrected probe passes in both modes.",
+      "owner": "scopes 03 and 15",
+      "report": "docs/roadmap/rust-0.4/ledger/scope-15/2026-10-15-session-search.json",
+      "commands": [
+        "search-smoke-first-attempt",
+        "search-smoke"
+      ],
+      "outcome": "fail"
+    },
+    {
+      "id": "documentation-checks",
+      "behavior": "Embedded CLI help tests and the release build include the final documentation edits. Rustdoc has no broken links; three pre-existing private-link warnings remain. Cargo totals in this record include the standalone sandbox harness as well as libtest summaries; prior records counted libtest summaries only.",
+      "owner": "scopes 03 and 15",
+      "report": "docs/roadmap/rust-0.4/ledger/scope-15/2026-10-15-session-search.json",
+      "commands": [
+        "cli-docs-tests",
+        "release-build",
+        "rustdoc"
+      ],
+      "outcome": "pass"
+    }
+  ],
+  "negativeControls": [
+    {
+      "id": "missing-content-search",
+      "defect": "The previous resume picker searches visible row text only and treats quotes literally.",
+      "assertion": "A quoted phrase in later assistant messages must reveal the two matching session rows.",
+      "observed": "rejected",
+      "commands": [
+        "baseline-search-negative",
+        "search-smoke"
+      ]
+    }
+  ],
+  "missingEvidence": [
+    {
+      "what": "Remaining kept workflows",
+      "reason": "The remaining workflow mapping, including decisions on /clone, /compact and branch summaries, remains open. Threaded session display and cross-directory switching are not part of this slice.",
+      "owner": "scope 15"
+    },
+    {
+      "what": "Complete platform qualification",
+      "reason": "Native Windows Cargo tests do not exercise ConPTY. macpro is Intel; Apple Silicon remains untested here.",
+      "owner": "scopes 14, 15 and 17"
+    }
+  ],
+  "evalRecords": {
+    "notApplicable": "Picker-only matching and ordering; the diff does not change model requests, prompts, tools, context assembly or turn execution. Session switching uses its existing implementation. Independent terminal tests assert filtering and selection send no model request."
+  },
+  "performanceRecords": {
+    "notApplicable": "No comparative performance claim."
+  },
+  "rollback": {
+    "notApplicable": "Opt-in development binary; no installation, migration, release or launcher change."
+  },
+  "review": {
+    "reviewer": "Codex independent review of Pi Opus 5.5 medium implementation",
+    "state": "commented",
+    "reference": "docs/roadmap/rust-0.4/README.md"
+  }
+}

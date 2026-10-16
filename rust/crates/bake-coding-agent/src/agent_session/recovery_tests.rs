@@ -73,7 +73,9 @@ fn settings(value: Value) -> Settings {
 fn options(h: &Harness, session: SessionManager, settings: Settings) -> AgentSessionOptions {
     AgentSessionOptions {
         session,
-        registry: Arc::clone(&h.registry),
+        registry: Arc::clone(&h.registry).into(),
+        settings_store: None,
+        selection: None,
         apis: Arc::clone(&h.apis),
         settings,
         model: h.registry.model("faux", "faux-1"),
@@ -1365,3 +1367,6 @@ async fn disabled_retry_and_compaction_leave_errors_alone() {
     assert!(retry_log(&events).is_empty());
     session.shutdown().await;
 }
+
+#[path = "idle_compaction_tests.rs"]
+mod idle_compaction;

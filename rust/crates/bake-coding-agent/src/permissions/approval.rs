@@ -92,7 +92,8 @@ pub fn approval_policy_sentence(policy: ApprovalPolicy) -> &'static str {
 }
 
 /// One permission question (`ApprovalRequest` without the agent, which the
-/// session-scoped approver already knows).
+/// session-scoped approver already knows), with the call's arguments,
+/// which Bake's Rust agent adds so a person can see what would run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApprovalRequest {
     /// The tool the question is about.
@@ -101,6 +102,8 @@ pub struct ApprovalRequest {
     pub call_id: String,
     /// Why the asker asks, such as `escalate sandbox to …: <justification>`.
     pub reason: String,
+    /// The call's validated arguments.
+    pub arguments: serde_json::Value,
 }
 
 /// The answer to one [`ApprovalRequest`].
@@ -140,8 +143,9 @@ impl Approver for NoApprover {
 /// The approval service in front of an answerer (`ApprovalService.decide`):
 /// an already-aborted request is `cancelled` without asking; under the
 /// session's `never` policy every request is `rejected` without asking;
-/// otherwise the answerer decides, raced against `cancel`, and an answerer
-/// that panics fails the question closed as `unavailable`. The policy is
+/// otherwise the answerer decides, raced against `cancel`, which wins any
+/// tie, and an answerer that panics fails the question closed as
+/// `unavailable`. The policy is
 /// read from the session's standing permissions when each request starts.
 pub struct PolicyApprover {
     standing: Arc<StandingPermissions>,
@@ -174,18 +178,32 @@ impl Approver for PolicyApprover {
             if policy == ApprovalPolicy::Never {
                 return EscalationOutcome::Rejected;
             }
-            let answer = CatchUnwind(answerer.request(request, cancel.clone()));
+            let answer_cancel = cancel.clone();
+            // Construct the answerer's future inside the protected poll too:
+            // a synchronous request failure must fail closed like a poll failure.
+            let answer = CatchUnwind(Box::pin(async move {
+                answerer.request(request, answer_cancel).await
+            }));
             let withdrawn = async {
                 match &cancel {
                     Some(signal) => signal.cancelled().await,
                     None => std::future::pending().await,
                 }
             };
-            tokio::select! {
-                // A late answer after the abort is dropped with its future.
-                () = withdrawn => EscalationOutcome::Cancelled,
+            let answer = tokio::select! {
+                // Cancellation first: when the abort and an answer are both
+                // ready, nothing is granted, and a late answer is dropped
+                // with its future.
+                biased;
+                () = withdrawn => return EscalationOutcome::Cancelled,
                 answer = answer => answer.unwrap_or(EscalationOutcome::Unavailable),
+            };
+            // An answerer that saw the abort and answered anyway is
+            // overruled.
+            if cancel.as_ref().is_some_and(AbortSignal::aborted) {
+                return EscalationOutcome::Cancelled;
             }
+            answer
         })
     }
 }

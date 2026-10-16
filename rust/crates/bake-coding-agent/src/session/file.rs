@@ -22,7 +22,7 @@
 //!
 //! Deviation: Pi's `loadEntriesFromFile` appends that newline too; here only
 //! a holder of the file's writer lock modifies the file
-//! ([`crate::session::durable`]), so [`load_entries_from_file`] and a fork's
+//! (`session::durable`), so [`load_entries_from_file`] and a fork's
 //! source are read without the repair. A reader cannot know whether a writer
 //! is mid-append, and taking the lock to find out would, on filesystems that
 //! emulate `flock` with process-wide locks, release a writer's lock in the

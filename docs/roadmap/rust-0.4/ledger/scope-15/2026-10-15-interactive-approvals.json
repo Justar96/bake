@@ -1,0 +1,819 @@
+{
+  "schema": "bake/rust-migration/qualification-attempt",
+  "version": 1,
+  "id": "2026-10-15-interactive-approvals",
+  "scope": "15",
+  "status": "partial",
+  "recordedOn": "2026-10-15",
+  "summary": "Interactive D24 approvals are wired to the existing Rust terminal frontend. Linux, native Windows and Intel macOS checks passed, as did real Opus allow/reject smokes. The stale-answer regression rejects an intentionally broken broker. The separate paired headless eval records provider and whitespace-guard failures; it does not measure the interactive approval workflow. The core runtime and live eval use cfcafb2ef9; UI-only follow-up 0cdf7c30fb corrects composer hints and passes focused checks on all three hosts. Scope 15 and broader release qualification remain open.",
+  "supersedes": [],
+  "provenance": {
+    "base": "44ff68c676fecdb27fad3e05dc60f42c710d4d74",
+    "candidate": "0cdf7c30fbcd9c19a1cf35a97308d860b73a3103",
+    "oracle": {
+      "notApplicable": "Pi latest official release was rechecked: v1.2.0, 06a466935536f8c9bcacb2d5efc0fc021be1bdff. Pi has no equivalent Bake approval policy. D24 selectively adapts apps/tui/packages/app/src/interactions.ts and tests/interactions.spec.ts, apps/tui/packages/ui/src/interaction.tsx, and packages/interaction/user-approval source/tests; Rust adds the reader barrier, display tokens, argument detail and two-step confirmation. No TypeScript comparison arm applies."
+    }
+  },
+  "support": [
+    {
+      "id": "d22",
+      "reference": "docs/roadmap/rust-0.4/scope-00/support.md"
+    },
+    {
+      "id": "d24",
+      "reference": "docs/roadmap/rust-0.4/scope-00/support.md"
+    },
+    {
+      "id": "d32",
+      "reference": "docs/roadmap/rust-0.4/scope-00/support.md"
+    }
+  ],
+  "fixtures": {
+    "files": [
+      {
+        "path": "rust/crates/bake-coding-agent/src/permissions/broker_tests.rs",
+        "role": "fixture-definition-source",
+        "sha256": "947c1f74786ace71645899c37a606c3d2cf9d7ffa6ac09fd69e21fe2302d47d2"
+      },
+      {
+        "path": "rust/crates/bake-coding-agent/src/permissions/tests.rs",
+        "role": "fixture-definition-source",
+        "sha256": "2ca57955e55a22c9b7c347a09f7f69570f7bc1067b3e6f91af31d34d5d11278a"
+      },
+      {
+        "path": "rust/crates/bake-tui-view/src/render.rs",
+        "role": "fixture-definition-source",
+        "sha256": "52d249f11c7cac64b0d869b7203a2d4f4f959531c450d565e684d778335fe6d0"
+      },
+      {
+        "path": "rust/crates/bake-tui-view/src/state.rs",
+        "role": "fixture-definition-source",
+        "sha256": "8abfe25852fa75581a3d487c0f1aa6f1c2f8fecc3ec567f5a5c81292c7fdd3f8"
+      },
+      {
+        "path": "rust/crates/bake-tui/src/input.rs",
+        "role": "fixture-definition-source",
+        "sha256": "85dd2c4589fb0a7d0e383bf3ffbb77d473c60b13e7ae899b0aa1d6df91d4c61c"
+      },
+      {
+        "path": "rust/crates/bake-tui/src/live/tests.rs",
+        "role": "fixture-definition-source",
+        "sha256": "1e1f7ab31284446136c07390745c7ded5e58c3275d1c496abed2ac9bafac918e"
+      },
+      {
+        "path": "rust/crates/bake-tui/src/terminal.rs",
+        "role": "fixture-definition-source",
+        "sha256": "52885165afe9550339b41174b6fa9668179d29f16d7f968b42be49c73091995d"
+      },
+      {
+        "path": "scripts/rust-preview-pty.ts",
+        "role": "fixture-definition-source",
+        "sha256": "c87bc62c1d9ebdb8679c90f3668ddf63ae0b68422126ce92df5743b67cf6c6c7"
+      }
+    ],
+    "digest": "77e8e834b1225d0e6925d57bdf87eadc8d9a8e317fcdf4ba82496fb7c76caa09"
+  },
+  "artifacts": [
+    {
+      "id": "live-linux-binary",
+      "description": "Local debug bake-rs used by the real-model approval smoke; not a release artifact. Its digest remained unchanged after the negative-control test-cache collision.",
+      "sha256": "8dbe846b0f8fe83e818ab929ab40509db11720dacd10abe34660d9a45581572e",
+      "command": "live-opus"
+    }
+  ],
+  "commands": [
+    {
+      "id": "linux-native",
+      "argv": [
+        "bun",
+        "run",
+        "preflight",
+        "--only",
+        "native"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "Linux WSL2 x86_64"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3"
+      },
+      "testedCommit": "cfcafb2ef901cc008de7f13261699e7d2439c8cf",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/approvals/evidence/linux-native-final.log",
+        "sha256": "64473c3f9d7f0c87478da9db6c91a66000c2592b49d5ab22ba7f5e4cda66443a"
+      }
+    },
+    {
+      "id": "linux-rust",
+      "argv": [
+        "bun",
+        "run",
+        "check:rust"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "Linux WSL2 x86_64"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3"
+      },
+      "testedCommit": "cfcafb2ef901cc008de7f13261699e7d2439c8cf",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 1361,
+        "failed": 0,
+        "skipped": 2,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/approvals/evidence/linux-rust-final.log",
+        "sha256": "b1bd27d2030e0030d0b1199c6fd00f37560801473323c4b5779d1d4647d3570f"
+      }
+    },
+    {
+      "id": "linux-pty",
+      "argv": [
+        "bun",
+        "run",
+        "test:rust:pty"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "Linux WSL2 x86_64"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3"
+      },
+      "testedCommit": "cfcafb2ef901cc008de7f13261699e7d2439c8cf",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 38,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/approvals/evidence/linux-rust-pty-final.log",
+        "sha256": "d37729e884ddcd10406ad526dfcce393b44d9627a221959a09127d41a41fd19d"
+      }
+    },
+    {
+      "id": "mac-native",
+      "argv": [
+        "bun",
+        "run",
+        "preflight:mac"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "darwin",
+        "arch": "x64",
+        "runner": "SSH macpro; Intel x86_64; macOS 26.7.1"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3"
+      },
+      "testedCommit": "cfcafb2ef901cc008de7f13261699e7d2439c8cf",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/approvals/evidence/mac-final.log",
+        "sha256": "258a3befc7d4e0d23fc72abd8170002e9aea6c6b73e75b0de5d64a0355b5afa8"
+      }
+    },
+    {
+      "id": "mac-rust",
+      "argv": [
+        "bun",
+        "run",
+        "check:rust"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "darwin",
+        "arch": "x64",
+        "runner": "SSH macpro; Intel x86_64; macOS 26.7.1"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3"
+      },
+      "testedCommit": "cfcafb2ef901cc008de7f13261699e7d2439c8cf",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 1356,
+        "failed": 0,
+        "skipped": 2,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/approvals/evidence/mac-rust.log",
+        "sha256": "bf92857cd472049ffdb9783d1e2fe9754b1ab11480db4eb73a47623edaa958c9"
+      }
+    },
+    {
+      "id": "mac-pty",
+      "argv": [
+        "bun",
+        "run",
+        "test:rust:pty"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "darwin",
+        "arch": "x64",
+        "runner": "SSH macpro; Intel x86_64; macOS 26.7.1"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3"
+      },
+      "testedCommit": "cfcafb2ef901cc008de7f13261699e7d2439c8cf",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 36,
+        "failed": 0,
+        "skipped": 2,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/approvals/evidence/mac-rust-pty.log",
+        "sha256": "739fa0f5b4f28db208f8551daa8193d04d20d2328401e9e444d00ff3f3dfb7aa"
+      }
+    },
+    {
+      "id": "windows-native",
+      "argv": [
+        "powershell.exe",
+        "-Command",
+        "cargo clippy --locked --workspace --all-targets -- -D warnings; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; cargo test --locked --workspace; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; cargo build --locked --workspace"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "win32",
+        "arch": "x64",
+        "runner": "Native Windows; NTFS source copy verified against all 329 tracked Rust files; isolated TEMP"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)"
+      },
+      "testedCommit": "cfcafb2ef901cc008de7f13261699e7d2439c8cf",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 1272,
+        "failed": 0,
+        "skipped": 2,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/approvals/evidence/windows-final.log",
+        "sha256": "b13629deb66372900dd4c5a970d2918933ce99224892b7c5aeab00b0cbc1921d"
+      }
+    },
+    {
+      "id": "static",
+      "argv": [
+        "bun",
+        "run",
+        "preflight",
+        "--fast"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "Linux WSL2 x86_64"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3"
+      },
+      "testedCommit": "cfcafb2ef901cc008de7f13261699e7d2439c8cf",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 26,
+        "failed": 0,
+        "skipped": 8,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/approvals/evidence/static-final.log",
+        "sha256": "537a28942deb447d5491e64394e5a36318afe83c62a091028686f7e122f72a3c"
+      }
+    },
+    {
+      "id": "built-profile-pty",
+      "argv": [
+        "bun",
+        "run",
+        "test:e2e"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "Linux WSL2 x86_64"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3"
+      },
+      "testedCommit": {
+        "missing": "Ran while the Rust implementation was uncommitted. TypeScript product and built-profile PTY sources were unchanged from base 44ff68c676fecdb27fad3e05dc60f42c710d4d74."
+      },
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 42,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/approvals/evidence/built-profile-pty.log",
+        "sha256": "22fbc18f15eb6be184ef27a077760229ba345cb48a9593649d9cb0bf9bf4fa1d"
+      }
+    },
+    {
+      "id": "live-opus",
+      "argv": [
+        "bun",
+        ".preflight/rust-orchestrator/approvals/live-smoke.ts"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "Linux WSL2 x86_64"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3"
+      },
+      "testedCommit": "cfcafb2ef901cc008de7f13261699e7d2439c8cf",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/approvals/evidence/live-opus.log",
+        "sha256": "eb21037667b4f56b47bf4b4a81d3394fc524bafcf298ce5fa1f280288956b9ec"
+      }
+    },
+    {
+      "id": "negative-stale-answer",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "bake-coding-agent",
+        "--lib",
+        "requests_queue_in_order_and_a_stale_answer_settles_nothing"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "Linux WSL2 x86_64"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3"
+      },
+      "testedCommit": {
+        "missing": "Isolated candidate checkout with the broker generation comparison disabled. Exact mutation: .preflight/rust-orchestrator/approvals/evidence/negative-stale-answer.patch. No mutation reached the candidate checkout."
+      },
+      "expectedExit": 101,
+      "actualExit": 101,
+      "counts": {
+        "passed": 0,
+        "failed": 1,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/approvals/evidence/negative-stale-answer.log",
+        "sha256": "71094dccfa68097def6a08c882d9901fda8403290e2d992b4ec9920093b4da1a"
+      }
+    },
+    {
+      "id": "positive-cache-collision",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "bake-coding-agent",
+        "--lib",
+        "requests_queue_in_order_and_a_stale_answer_settles_nothing"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "Linux WSL2 x86_64"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3"
+      },
+      "testedCommit": {
+        "missing": "The first restored check reused the mutated test executable from the shared debug target directory; Cargo did not rebuild it. Candidate source and the debug/release product binaries were unchanged. The following command forced recompilation from candidate source."
+      },
+      "expectedExit": 0,
+      "actualExit": 101,
+      "counts": {
+        "passed": 0,
+        "failed": 1,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/approvals/evidence/positive-stale-answer.log",
+        "sha256": "b3eab11f03c4d0a6a7bc61115b366c65a37c079e6291f54951615f7ceca39b2c"
+      }
+    },
+    {
+      "id": "positive-stale-answer",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "bake-coding-agent",
+        "--lib",
+        "requests_queue_in_order_and_a_stale_answer_settles_nothing"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "Linux WSL2 x86_64"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3"
+      },
+      "testedCommit": "cfcafb2ef901cc008de7f13261699e7d2439c8cf",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/approvals/evidence/positive-stale-answer-rebuilt.log",
+        "sha256": "3791f4de33322e7a69e3661091559ddb8d5a25660fce480c642618a2c5ba4717"
+      }
+    },
+    {
+      "id": "initial-worker-pty",
+      "argv": [
+        "bun",
+        "scripts/rust-preview-pty.ts",
+        "--filter",
+        "approval"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "Linux WSL2 x86_64"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3"
+      },
+      "testedCommit": {
+        "missing": "Uncommitted initial implementation before review fixes. The original output and later hangup diagnostics remain under .preflight/rust-orchestrator/approvals/evidence/."
+      },
+      "expectedExit": 0,
+      "actualExit": {
+        "missing": "The worker piped output through grep/tail, masking the PTY process exit. The retained output proves a draft/image readiness timeout; the final fixture uses the actual caret/image state and explicit provider readiness."
+      },
+      "counts": {
+        "passed": 1,
+        "failed": 1,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/approvals/evidence/worker-pty-5.log",
+        "sha256": "3112c1488ae51cfbf5291db75a686eb751142b2034f517cc11f1194609bb2f04"
+      }
+    },
+    {
+      "id": "ui-hints-linux",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "bake-tui-view",
+        "render::tests"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "Linux WSL2 x86_64"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3"
+      },
+      "testedCommit": {
+        "missing": "Uncommitted UI hint follow-up whose two source files match 0cdf7c30fbcd9c19a1cf35a97308d860b73a3103. The same command chain passed Clippy and rebuilt bake-cli."
+      },
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 45,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/approvals/evidence/ui-hints-linux.log",
+        "sha256": "0fc26efb6b03774fcb7cbea8695832b265d1e69f95c175a44a0f0ed57e700ba0"
+      }
+    },
+    {
+      "id": "ui-hints-pty",
+      "argv": [
+        "bun",
+        "scripts/rust-preview-pty.ts",
+        "--filter",
+        "approval"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "Linux WSL2 x86_64"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3"
+      },
+      "testedCommit": "0cdf7c30fbcd9c19a1cf35a97308d860b73a3103",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 8,
+        "failed": 0,
+        "skipped": 30,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/approvals/evidence/ui-hints-pty.log",
+        "sha256": "4abaec46c78b96fd676a1c49a8f185ef8d92bc70d037b77751270229d62d89e3"
+      }
+    },
+    {
+      "id": "ui-hints-mac",
+      "argv": [
+        "bun",
+        "run",
+        "preflight:mac",
+        "cd rust && cargo test --locked -p bake-tui-view"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "darwin",
+        "arch": "x64",
+        "runner": "SSH macpro; Intel x86_64; macOS 26.7.1"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3"
+      },
+      "testedCommit": "0cdf7c30fbcd9c19a1cf35a97308d860b73a3103",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 243,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/approvals/evidence/ui-hints-mac.log",
+        "sha256": "a84a3509b9436b6a7301708486969f59842b9fae85d7983edab44c14dd38b632"
+      }
+    },
+    {
+      "id": "ui-hints-windows",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "bake-tui-view"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "win32",
+        "arch": "x64",
+        "runner": "Native Windows; NTFS source copy verified against all 329 tracked Rust files; isolated TEMP"
+      },
+      "tools": {
+        "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)"
+      },
+      "testedCommit": "0cdf7c30fbcd9c19a1cf35a97308d860b73a3103",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 243,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/approvals/evidence/ui-hints-windows.log",
+        "sha256": "c941363bd90f37603346a64073f5d853584ad13996f593b9c6f00c4e3173669a"
+      }
+    }
+  ],
+  "results": [
+    {
+      "id": "approval-ownership",
+      "behavior": "The displayed exact request alone can receive a one-call grant. Duplicate call IDs, stale answers, cancellation, dropped futures, disconnects, and answerer panics fail closed.",
+      "owner": "scope 15 / D24",
+      "report": "docs/roadmap/rust-0.4/ledger/scope-15/2026-10-15-interactive-approvals.json",
+      "commands": [
+        "linux-rust",
+        "mac-rust",
+        "windows-native",
+        "positive-stale-answer"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "terminal-input",
+      "behavior": "Buffered input, paste, bursts, explicit key repeats, stale readiness after resize, and Enter alone cannot grant. Drafts and images survive. Quitting, signals, and hangup restore the terminal without a pending write.",
+      "owner": "scope 15 / D24",
+      "report": "docs/roadmap/rust-0.4/ledger/scope-15/2026-10-15-interactive-approvals.json",
+      "commands": [
+        "linux-pty",
+        "mac-pty",
+        "linux-rust",
+        "mac-rust"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "live-approval",
+      "behavior": "Real CLIProxyAPI Opus 5.5 medium: fullscreen allow-once creates the requested temporary file; inline rejection leaves its target absent. Both restore the terminal; inline preserves shell history.",
+      "owner": "scope 15 / D24",
+      "report": "docs/roadmap/rust-0.4/ledger/scope-15/2026-10-15-interactive-approvals.json",
+      "commands": [
+        "live-opus"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "platform-gates",
+      "behavior": "Linux and Intel macOS each pass three native gates; native Windows lint/tests/build and 26 static gates pass. Counts distinguish gates, Cargo tests, PTY scenarios and live screen-mode cases.",
+      "owner": "scope 15 / D24",
+      "report": "docs/roadmap/rust-0.4/ledger/scope-15/2026-10-15-interactive-approvals.json",
+      "commands": [
+        "linux-native",
+        "mac-native",
+        "windows-native",
+        "static",
+        "built-profile-pty"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "approval-composer-hints",
+      "behavior": "UI-only follow-up replaces the inactive composer steering hint with Approval pending and Esc cancels request. Rendering tests pass on Linux, Intel Mac and native Windows; all eight approval PTYs pass.",
+      "owner": "scope 15 / D24",
+      "report": "docs/roadmap/rust-0.4/ledger/scope-15/2026-10-15-interactive-approvals.json",
+      "commands": [
+        "ui-hints-linux",
+        "ui-hints-mac",
+        "ui-hints-windows",
+        "ui-hints-pty"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "retained-initial-failures",
+      "behavior": "An initial PTY draft/image readiness failure and a shared Cargo debug-target collision are retained. Final PTYs pass; forced recompilation restores the positive stale-answer test.",
+      "owner": "scope 15 / D24",
+      "report": "docs/roadmap/rust-0.4/ledger/scope-15/2026-10-15-interactive-approvals.json",
+      "commands": [
+        "initial-worker-pty",
+        "positive-cache-collision"
+      ],
+      "outcome": "fail",
+      "reason": "These are superseded test-development observations, not failures in the final candidate. The worker also diagnosed a Ratatui cursor-restoration panic on terminal loss; final hangup PTYs cover its fix."
+    }
+  ],
+  "negativeControls": [
+    {
+      "id": "wrong-request-grant",
+      "defect": "Disable the broker generation comparison so an answer naming a queued request grants the displayed one.",
+      "assertion": "requests_queue_in_order_and_a_stale_answer_settles_nothing rejects answering the later request; the mutated test fails at that assertion with exit 101. The unmodified candidate passes after rebuilding its test executable.",
+      "observed": "rejected",
+      "commands": [
+        "negative-stale-answer",
+        "positive-stale-answer"
+      ]
+    }
+  ],
+  "missingEvidence": [
+    {
+      "what": "Remaining interactive controls",
+      "reason": "Model/thinking/settings controls, CLIProxyAPI login/refresh/logout, slash/session commands and complete kept-workflow mapping remain. Approval audit persistence and Auto review remain outside this slice.",
+      "owner": "scopes 04, 05 and 15"
+    },
+    {
+      "what": "Complete terminal platform matrix",
+      "reason": "Windows Cargo checks do not exercise ConPTY; macpro is Intel, not Apple Silicon. macOS skips two Linux-only process-stop barriers.",
+      "owner": "scopes 14, 15 and 17"
+    },
+    {
+      "what": "Windows confined process execution",
+      "reason": "The existing deletion/move confinement gap is unchanged; the default Windows backend remains fail-closed.",
+      "owner": "scope 04"
+    },
+    {
+      "what": "Interactive paired eval",
+      "reason": "The standard paired runner drives headless mode. Actual interactive model-visible ask/allow/reject behavior is covered by compiled PTYs and the live Opus smoke; headless metrics do not measure approval UX or model behavior while waiting for a person. Provider failures also limit the paired measurement; see its report.",
+      "owner": "scope 15 / eval qualification"
+    }
+  ],
+  "evalRecords": [
+    "evals/agent-loop/versions/unreleased/2026-10-15-interactive-approvals/REPORT.md"
+  ],
+  "performanceRecords": {
+    "notApplicable": "No comparative performance claim."
+  },
+  "rollback": {
+    "notApplicable": "Opt-in development binary; no install, migration, release or default-launcher change."
+  },
+  "review": {
+    "reviewer": "Codex review of the requested Pi Opus 5.5 medium worker; final fixes for synchronous answerer panic and explicitly reported key repeats",
+    "state": "commented",
+    "reference": "docs/roadmap/rust-0.4/README.md"
+  }
+}

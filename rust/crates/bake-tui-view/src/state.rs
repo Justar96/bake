@@ -7,14 +7,15 @@ use std::time::Duration;
 use crate::activity::{self, Tones};
 use crate::completion::{self, Command};
 use crate::composer::ComposerWindow;
+use crate::dialog::{Dialog, DialogAnswer};
 use crate::editor::Draft;
 use crate::frame::FrameStyle;
-use crate::keys::{self, Action, KeyInput, Scope};
+use crate::keys::{self, Action, Key, KeyInput, Mods, Scope};
 use crate::live;
 use crate::mention::{self, Candidate, Choice};
 use crate::mode::Mode;
 use crate::paste::{self, Image};
-use crate::runtime::{Pending, RuntimeUpdate, Submission};
+use crate::runtime::{Approval, ApprovalAnswer, Pending, Prompt, RuntimeUpdate, Submission};
 use crate::selection::{self, Granularity, Point, Range};
 use crate::status::StatusInput;
 use crate::transcript::{self, Transcript};
@@ -23,7 +24,25 @@ use crate::wheel::{self, WheelSteps};
 /// Everything the frontend applies, in arrival order.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Msg {
+    /// A key, read after every frame drawn so far.
     Key(KeyInput),
+    /// An explicitly reported held-key repeat. The composer accepts it;
+    /// an approval requires fresh presses for every decision.
+    KeyRepeat(KeyInput),
+    /// A key the terminal owner's input thread read; `burst` when it came
+    /// in one sweep with other keys, as a paste without bracketed paste or
+    /// text typed faster than it was read does. A key in a burst never
+    /// answers an approval request.
+    KeyRead {
+        key: KeyInput,
+        burst: bool,
+    },
+    /// The input thread has read, and sent ahead of this, every key that
+    /// was waiting once the displayed approval request came on screen for
+    /// the showing `token` names ([`State::approval_drawn`]). Keys after
+    /// this one may answer the request while that showing lasts; none
+    /// before it can.
+    ApprovalArmed(u64),
     /// A bracketed paste, inserted as text without submitting.
     Paste(String),
     /// The terminal's new size. Rendering reads the size from the frame, so
@@ -243,9 +262,9 @@ pub enum Effect {
     Copy(String),
     /// Read an image, then report with [`Msg::ImageRead`].
     ReadImage(ImageSource),
-    /// Send a prompt to the runtime. The draft is cleared; the prompt
-    /// appears once the runtime commits it.
-    Submit(Submission),
+    /// Send a prompt, with any staged images, to the runtime. The draft is
+    /// cleared; the prompt appears once the runtime commits it.
+    Submit(Prompt),
     /// Stop the running turn; the runtime reports when it has ended.
     Cancel,
     /// Send every waiting prompt now; the runtime reports the turn it starts.
@@ -253,6 +272,18 @@ pub enum Effect {
     /// List the paths that match this `@` query, then report with
     /// [`Msg::FilesFound`]. A newer request supersedes it.
     FindFiles(String),
+    /// Answer the approval request `generation` names. The runtime settles
+    /// it only while it is the displayed request.
+    Answer {
+        generation: u64,
+        answer: ApprovalAnswer,
+    },
+    /// Answer the dialog `id` names ([`crate::dialog`]). The runtime takes
+    /// it only while that dialog is open.
+    Dialog {
+        id: u64,
+        answer: DialogAnswer,
+    },
 }
 
 /// A fixed example row for the agent list; it describes no running work.
@@ -317,6 +348,25 @@ pub enum Notice {
     PendingSent,
     /// Alt+↑ with nothing waiting.
     NoPending,
+    /// Enter with staged images while a live turn runs: a steer takes text
+    /// alone, so the draft waits for the turn to end.
+    ImagesWhileRunning,
+    /// A preview-only key, the sample activity or the sample agent list,
+    /// in a live session.
+    PreviewOnly,
+    /// The runtime gave prompts back to the draft.
+    Returned,
+    /// `/tree` or `/fork` put the chosen message into the draft.
+    Restored,
+    /// The runtime refused a prompt, for the reason in [`State::refusal`];
+    /// its draft is back.
+    Refused,
+    /// While an approval waits, a key or paste that does not answer it: a
+    /// key other than the panel's, or one typed before the request was on
+    /// screen or in a burst of text.
+    ApprovalKeys,
+    /// While an approval waits, Enter before `y` chose to allow it.
+    ApprovalChooseFirst,
 }
 
 /// Where a pasted image is read from: the clipboard, or a file whose path
@@ -359,6 +409,8 @@ pub enum Outcome {
     Completed,
     /// Esc stopped it.
     Interrupted,
+    /// A live turn ended with an error, which the transcript shows.
+    Failed,
 }
 
 /// The header's line about the last sample turn, held until the next starts.
@@ -415,6 +467,10 @@ pub struct State {
     pub transcript_area: Option<Area>,
     /// Settled rows excluded from the inline live region while following.
     pub(crate) transcript_published: usize,
+    /// How many times the runtime replaced the transcript
+    /// ([`RuntimeUpdate::Replaced`]). A normal-screen writer that counts
+    /// published rows starts its count over when this changes.
+    pub transcript_epoch: u64,
     /// The transcript selection.
     pub selecting: Selecting,
     /// The terminal's columns at the last resize; a change drops the
@@ -438,6 +494,66 @@ pub struct State {
     /// While a first Ctrl+C is armed, when it lapses; a second before then
     /// quits. The prompt to press again shows until then.
     pub quit_until: Option<Duration>,
+    /// Whether a live agent session answers the composer instead of the
+    /// preview's fixture: the transcript starts with the session's rows,
+    /// staged images are sent, slash prompts reach the runtime, and the
+    /// sample activity and agent list are refused.
+    pub live: bool,
+    /// Prompts sent to a live runtime that it has not admitted yet, each
+    /// with the draft and staged images it came from.
+    unadmitted: Vec<Unadmitted>,
+    /// Prompts submitted so far; the next takes the next id.
+    submitted: u64,
+    /// Why the runtime last refused a prompt, for [`Notice::Refused`].
+    pub refusal: Option<String>,
+    /// Approval requests the runtime waits on, oldest first, as it last
+    /// reported. While any waits, the first takes the keyboard: the draft,
+    /// its caret, and its staged images stay as they were.
+    pub approvals: Vec<Approval>,
+    /// The dialog the runtime opened over the composer, if any.
+    pub dialog: Option<Dialog>,
+    /// A dialog opened, replaced, or closed since the last frame, so the
+    /// keyboard changes hands at the next one ([`Self::approval_drawn`]).
+    handoff_due: bool,
+    /// The token of a keyboard handoff not armed yet. Until it is
+    /// ([`Msg::ApprovalArmed`]), keys and pastes go to neither the dialog
+    /// nor the draft, so input typed for what had the keyboard before
+    /// never reaches what has it now.
+    handoff: Option<u64>,
+    /// The dialog the last frame drew whole, set by rendering.
+    pub(crate) dialog_on_screen: Option<u64>,
+    /// The dialog whose current showing holds, or is being handed, the
+    /// keyboard. Cleared when a frame hides it, an approval covers it, or
+    /// the terminal is resized, so it is handed over afresh.
+    dialog_showing: Option<u64>,
+    /// The displayed request's current showing: its generation and the
+    /// token the showing was published under, from the first frame that
+    /// drew it whole until one does not, a resize, or another request.
+    approval_showing: Option<(u64, u64)>,
+    /// Showings so far; the next takes the next token, so no token repeats.
+    approval_showings: u64,
+    /// The showing the input thread has armed ([`Msg::ApprovalArmed`]).
+    approval_armed: Option<u64>,
+    /// The showing in which `y` chose to allow; Enter confirms.
+    approval_chosen: Option<u64>,
+    /// The request the last rendered frame drew whole: its title, at
+    /// least one row of its detail, and its keys.
+    pub(crate) approval_on_screen: Option<u64>,
+    /// The request this view has already answered, so a second key for it
+    /// sends nothing before the runtime's next list arrives.
+    approval_answered: Option<u64>,
+    /// The first row of the displayed request's detail in view, and how
+    /// many rows the last frame showed, for paging.
+    pub(crate) approval_scroll: usize,
+    pub(crate) approval_page: usize,
+}
+
+/// A submitted prompt's draft, kept until the runtime admits the prompt.
+#[derive(Debug)]
+struct Unadmitted {
+    id: u64,
+    draft: Draft,
+    attachments: Vec<(u32, Image)>,
 }
 
 impl Default for State {
@@ -481,6 +597,7 @@ impl State {
             draft_spot: None,
             transcript_area: None,
             transcript_published: 0,
+            transcript_epoch: 0,
             selecting: Selecting::default(),
             columns: 0,
             copied: None,
@@ -490,6 +607,34 @@ impl State {
             files: Files::default(),
             dragging: false,
             quit_until: None,
+            live: false,
+            unadmitted: Vec::new(),
+            submitted: 0,
+            refusal: None,
+            approvals: Vec::new(),
+            dialog: None,
+            handoff_due: false,
+            handoff: None,
+            dialog_on_screen: None,
+            dialog_showing: None,
+            approval_showing: None,
+            approval_showings: 0,
+            approval_armed: None,
+            approval_chosen: None,
+            approval_on_screen: None,
+            approval_answered: None,
+            approval_scroll: 0,
+            approval_page: 0,
+        }
+    }
+
+    /// The state of a live session whose transcript starts with `rows`:
+    /// what a resumed session replays, or what startup reported.
+    pub fn live(frame: FrameStyle, tones: Tones, rows: Vec<transcript::Row>) -> Self {
+        Self {
+            transcript: Transcript::new(rows),
+            live: true,
+            ..Self::new(frame, tones)
         }
     }
 
@@ -527,10 +672,21 @@ impl State {
     /// The slash menu, while the draft up to the caret is a leading slash
     /// token and Esc has not closed it there.
     pub fn menu(&self) -> Option<Menu> {
+        // A live session lists the commands it runs; the preview, its
+        // sample catalog.
         let (draft, caret) = self.menu_here()?;
-        let entries = completion::matches(draft, caret)?;
+        let entries = completion::matches(draft, caret, self.catalog())?;
         let selected = self.remembered(entries.iter().map(|c| c.name));
         Some(Menu { entries, selected })
+    }
+
+    /// The commands the slash menu lists.
+    pub fn catalog(&self) -> &'static [Command] {
+        if self.live {
+            completion::LIVE_CATALOG
+        } else {
+            completion::CATALOG
+        }
     }
 
     /// The `@` token the file menu completes, with where it ends, while the
@@ -538,7 +694,7 @@ impl State {
     /// the menu there.
     fn file_token(&self) -> Option<(mention::AtToken, usize)> {
         let (draft, caret) = self.menu_here()?;
-        if completion::matches(draft, caret).is_some() {
+        if completion::matches(draft, caret, self.catalog()).is_some() {
             return None;
         }
         let token = mention::active_at_token(draft, caret)?;
@@ -567,6 +723,138 @@ impl State {
             loading,
             error,
         })
+    }
+
+    /// Records whether the frame just drawn showed the displayed approval
+    /// request whole. The first such frame starts a showing and returns
+    /// its token, for the terminal owner to have the input thread arm
+    /// ([`Msg::ApprovalArmed`]); later frames of the same showing return
+    /// `None`. A frame that does not show it whole ends the showing: the
+    /// request is disarmed and its choice dropped, and the next showing
+    /// needs a new arming, and starts without the last one's key notice.
+    /// Call once after each frame.
+    ///
+    /// With no approval waiting, a frame drawn after a dialog opened,
+    /// changed, or closed starts a keyboard handoff the same way: its token
+    /// is returned for arming, and until then keys and pastes are dropped
+    /// ([`Self::handing_off`]).
+    pub fn approval_drawn(&mut self) -> Option<u64> {
+        let on_screen = self.approval_on_screen.take();
+        let dialog_on_screen = self.dialog_on_screen.take();
+        let front = self.approval().map(|a| a.generation);
+        if front.is_none() {
+            self.end_showing();
+            return self.dialog_drawn(dialog_on_screen);
+        }
+        // The request covers any dialog, which is handed over afresh once
+        // it shows again.
+        if self.dialog.is_some() {
+            self.dialog_showing = None;
+            self.handoff = None;
+        }
+        if on_screen != front {
+            self.end_showing();
+            return None;
+        }
+        let generation = front?;
+        if self
+            .approval_showing
+            .is_some_and(|(shown, _)| shown == generation)
+        {
+            return None;
+        }
+        self.approval_showings += 1;
+        self.approval_showing = Some((generation, self.approval_showings));
+        // What the last showing's keys said no longer applies.
+        if matches!(
+            self.notice,
+            Some(Notice::ApprovalKeys | Notice::ApprovalChooseFirst)
+        ) {
+            self.notice = None;
+        }
+        Some(self.approval_showings)
+    }
+
+    /// [`Self::approval_drawn`] with no approval waiting: a dialog drawn
+    /// whole that does not hold the keyboard yet, or the composer after a
+    /// dialog closed, starts a handoff. A dialog the frame did not draw
+    /// whole loses the keyboard.
+    fn dialog_drawn(&mut self, on_screen: Option<u64>) -> Option<u64> {
+        match self.dialog.as_ref().map(|dialog| dialog.request.id) {
+            Some(id) => {
+                if on_screen != Some(id) {
+                    self.dialog_showing = None;
+                    self.handoff = None;
+                    return None;
+                }
+                if self.dialog_showing == Some(id) && !self.handoff_due {
+                    return None;
+                }
+                self.dialog_showing = Some(id);
+            }
+            None => {
+                if !self.handoff_due {
+                    return None;
+                }
+                self.dialog_showing = None;
+            }
+        }
+        self.handoff_due = false;
+        self.approval_showings += 1;
+        self.handoff = Some(self.approval_showings);
+        self.handoff
+    }
+
+    /// Whether the composer is waiting for the keyboard after a dialog
+    /// closed.
+    pub fn handing_off(&self) -> bool {
+        self.dialog.is_none() && (self.handoff_due || self.handoff.is_some())
+    }
+
+    /// Whether the open dialog holds the keyboard: drawn whole, handed
+    /// over, and armed, with no approval waiting.
+    pub fn dialog_ready(&self) -> bool {
+        self.approvals.is_empty()
+            && !self.handoff_due
+            && self.handoff.is_none()
+            && self
+                .dialog
+                .as_ref()
+                .is_some_and(|dialog| self.dialog_showing == Some(dialog.request.id))
+    }
+
+    /// Ends the displayed request's showing: disarmed, with no choice.
+    fn end_showing(&mut self) {
+        self.approval_showing = None;
+        self.approval_armed = None;
+        self.approval_chosen = None;
+    }
+
+    /// The token of the displayed request's current showing.
+    fn showing(&self) -> Option<u64> {
+        let front = self.approval()?.generation;
+        self.approval_showing
+            .filter(|(shown, _)| *shown == front)
+            .map(|(_, token)| token)
+    }
+
+    /// Whether keys can answer the displayed request: its current showing
+    /// is armed ([`Msg::ApprovalArmed`]).
+    pub fn approval_armed(&self) -> bool {
+        self.showing()
+            .is_some_and(|token| self.approval_armed == Some(token))
+    }
+
+    /// Whether `y` has chosen to allow the displayed request in its current
+    /// showing, so Enter confirms it.
+    pub fn approval_chosen(&self) -> bool {
+        self.showing()
+            .is_some_and(|token| self.approval_chosen == Some(token))
+    }
+
+    /// The displayed approval request, if any waits.
+    pub fn approval(&self) -> Option<&Approval> {
+        self.approvals.first()
     }
 
     /// Whether a second Ctrl+C would quit now.
@@ -653,7 +941,53 @@ fn discover(state: &mut State) -> Option<Effect> {
 
 fn apply(state: &mut State, msg: Msg) -> Vec<Effect> {
     match msg {
-        Msg::Key(input) => return key(state, input),
+        Msg::Key(input) if !state.approvals.is_empty() => return approval_key(state, input, false),
+        Msg::KeyRead { key, burst } if !state.approvals.is_empty() => {
+            return approval_key(state, key, burst);
+        }
+        Msg::KeyRepeat(_) if !state.approvals.is_empty() => {}
+        // Typed for what had the keyboard before the handoff: dropped, but
+        // Ctrl+C keeps its quit gesture.
+        Msg::Key(input) | Msg::KeyRepeat(input) | Msg::KeyRead { key: input, .. }
+            if state.handing_off() =>
+        {
+            let bound = keys::action(Scope::Composer, input);
+            if let Some(effects) = quit_key(state, bound) {
+                return effects;
+            }
+        }
+        Msg::Paste(_) if state.approvals.is_empty() && state.handing_off() => {}
+        Msg::Key(input) if state.dialog.is_some() => return dialog_key(state, input, true),
+        Msg::KeyRepeat(input) if state.dialog.is_some() => {
+            return dialog_key(state, input, false);
+        }
+        Msg::KeyRead { key, burst } if state.dialog.is_some() => {
+            return dialog_key(state, key, !burst);
+        }
+        Msg::Key(input) | Msg::KeyRepeat(input) | Msg::KeyRead { key: input, .. } => {
+            return key(state, input);
+        }
+        Msg::ApprovalArmed(token) => {
+            if state.showing() == Some(token) {
+                state.approval_armed = Some(token);
+            }
+            if state.handoff == Some(token) {
+                state.handoff = None;
+            }
+        }
+        // A paste is taken and dropped while an approval waits: pasted text
+        // that happens to read `y` is not a decision.
+        Msg::Paste(_) if !state.approvals.is_empty() => {
+            state.approval_chosen = None;
+            state.notice = Some(Notice::ApprovalKeys);
+        }
+        Msg::Paste(text) if state.dialog.is_some() => {
+            if state.dialog_ready()
+                && let Some(dialog) = state.dialog.as_mut()
+            {
+                dialog.paste(&text);
+            }
+        }
         Msg::Paste(text) => match state.focus {
             // A terminal pastes nothing for a clipboard that holds only an
             // image, and a dropped file arrives as its path; either is read
@@ -674,6 +1008,15 @@ fn apply(state: &mut State, msg: Msg) -> Vec<Effect> {
             Focus::Inspect(_) => state.notice = Some(Notice::ReadOnly),
         },
         Msg::Resize { cols, .. } => {
+            // What was on screen no longer is: the request must be drawn
+            // whole and armed again before a key answers it.
+            if !state.approvals.is_empty() {
+                state.end_showing();
+            }
+            if state.dialog.is_some() {
+                state.dialog_showing = None;
+                state.handoff = None;
+            }
             // The first resize only learns the width.
             if state.columns != 0 && cols != state.columns {
                 state.selecting.clear();
@@ -691,6 +1034,11 @@ fn apply(state: &mut State, msg: Msg) -> Vec<Effect> {
                 state.copied = None;
             }
         }
+        // While an approval waits, the wheel still scrolls the transcript,
+        // but no press moves the caret or starts a selection.
+        Msg::Mouse(mouse)
+            if !state.approvals.is_empty()
+                && !matches!(mouse.kind, MouseKind::WheelUp | MouseKind::WheelDown) => {}
         Msg::Mouse(mouse) => return pointer(state, mouse),
         Msg::Copied(ok) => state.copied = Some((ok, state.now + COPIED)),
         Msg::ImageRead { source, image } => staged(state, source, image),
@@ -724,6 +1072,87 @@ fn runtime(state: &mut State, update: RuntimeUpdate) {
         RuntimeUpdate::Pending(pending) => state.pending = pending,
         RuntimeUpdate::Live(rows) => state.transcript.set_live(rows),
         RuntimeUpdate::Commit(rows) => state.transcript.commit(rows),
+        RuntimeUpdate::Replaced(rows) => {
+            // What the old session's view held goes with it: its rows, the
+            // selection over them, its turn, and its pending prompts. The
+            // draft, its staged images, and any dialog stay.
+            state.transcript = Transcript::new(rows);
+            state.transcript_epoch = state.transcript_epoch.wrapping_add(1);
+            state.transcript_published = 0;
+            state.selecting.clear();
+            state.dragging = false;
+            state.track = None;
+            state.latest = None;
+            state.transcript_area = None;
+            state.live_call = None;
+            state.activity = None;
+            state.phase = None;
+            state.summary = None;
+            state.pending.clear();
+        }
+        RuntimeUpdate::Admitted(id) => state.unadmitted.retain(|kept| kept.id != id),
+        RuntimeUpdate::Refused { id, reason } => {
+            if let Some(index) = state.unadmitted.iter().position(|kept| kept.id == id) {
+                let kept = state.unadmitted.remove(index);
+                state.draft.restore(&kept.draft);
+                state.attachments.extend(kept.attachments);
+                state.attachments.sort_by_key(|(id, _)| *id);
+            }
+            state.refusal = Some(reason);
+            state.notice = Some(Notice::Refused);
+        }
+        RuntimeUpdate::Returned(texts) => {
+            // Pi's `restoreQueuedMessagesToEditor`: the returned prompts,
+            // then the draft, each non-blank part a paragraph.
+            if prepend_to_draft(state, &texts) {
+                state.notice = Some(Notice::Returned);
+            }
+        }
+        RuntimeUpdate::Restored(text) => {
+            if prepend_to_draft(state, std::slice::from_ref(&text)) {
+                state.notice = Some(Notice::Restored);
+            }
+        }
+        RuntimeUpdate::Status(status) => {
+            state.status.model = status.model;
+            state.status.thinking = status.thinking;
+            state.status.context = status.context;
+        }
+        RuntimeUpdate::Approvals(approvals) => {
+            let front = approvals.first().map(|a| a.generation);
+            // A newly displayed request starts unarmed, unchosen, and at
+            // the top of its detail.
+            if state.approval().map(|a| a.generation) != front {
+                state.end_showing();
+                state.approval_scroll = 0;
+            }
+            if state
+                .approval_answered
+                .is_some_and(|answered| !approvals.iter().any(|a| a.generation == answered))
+            {
+                state.approval_answered = None;
+            }
+            if front.is_some() {
+                state.selecting.clear();
+                state.dragging = false;
+            } else if matches!(
+                state.notice,
+                Some(Notice::ApprovalKeys | Notice::ApprovalChooseFirst)
+            ) {
+                state.notice = None;
+            }
+            state.approvals = approvals;
+        }
+        RuntimeUpdate::Dialog(request) => {
+            state.handoff_due = true;
+            state.handoff = None;
+            state.dialog_showing = None;
+            state.dialog = request.map(Dialog::open);
+            if state.dialog.is_some() {
+                state.selecting.clear();
+                state.dragging = false;
+            }
+        }
         RuntimeUpdate::TurnEnded(outcome) => {
             if let Some(turn) = state.activity.filter(|a| a.runtime) {
                 state.summary = Some(TurnSummary {
@@ -735,6 +1164,24 @@ fn runtime(state: &mut State, update: RuntimeUpdate) {
             state.phase = None;
         }
     }
+}
+
+/// Puts `texts`, then the draft, into the draft, each non-blank part a
+/// paragraph. Whether the draft changed.
+fn prepend_to_draft(state: &mut State, texts: &[String]) -> bool {
+    let current = state.draft.text().to_owned();
+    let combined = texts
+        .iter()
+        .map(String::as_str)
+        .chain(std::iter::once(current.as_str()))
+        .filter(|text| !text.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    if combined == current {
+        return false;
+    }
+    state.draft.replace(&combined, combined.len());
+    true
 }
 
 /// Whether the runtime is running a turn.
@@ -751,12 +1198,15 @@ fn submit(state: &mut State) -> Vec<Effect> {
     if text.trim().is_empty() {
         return Vec::new();
     }
-    let refused = if text.starts_with('/') {
+    let running = turn_running(state);
+    let refused = if text.starts_with('/') && !state.live {
         Some(Notice::NoCommands)
     } else if state.activity.is_some_and(|a| !a.runtime) {
         Some(Notice::SampleOnly)
-    } else if !state.attachments.is_empty() {
+    } else if !state.attachments.is_empty() && !state.live {
         Some(Notice::NoImages)
+    } else if !state.attachments.is_empty() && running {
+        Some(Notice::ImagesWhileRunning)
     } else {
         None
     };
@@ -765,13 +1215,32 @@ fn submit(state: &mut State) -> Vec<Effect> {
         return Vec::new();
     }
     state.notice = None;
+    state.submitted += 1;
+    let id = state.submitted;
+    // A live runtime may refuse the prompt; until it admits it, the draft
+    // and its images are kept to put back.
+    if state.live {
+        state.unadmitted.push(Unadmitted {
+            id,
+            draft: state.draft.clone(),
+            attachments: state.attachments.clone(),
+        });
+    }
+    // The images go in the order their placeholders appear in the draft.
+    let placed = state.draft.attached();
+    let mut images: Vec<_> = std::mem::take(&mut state.attachments);
+    images.sort_by_key(|(id, _)| placed.iter().position(|p| p == id).unwrap_or(usize::MAX));
     state.draft.replace("", 0);
-    let submission = if turn_running(state) {
+    let submission = if running {
         Submission::Steer(text)
     } else {
         Submission::FollowUp(text)
     };
-    vec![Effect::Submit(submission)]
+    vec![Effect::Submit(Prompt {
+        id,
+        submission,
+        images: images.into_iter().map(|(_, image)| image).collect(),
+    })]
 }
 
 /// Applies a mouse report. The wheel scrolls what the arrows would: the
@@ -1071,19 +1540,116 @@ fn edge_scroll(state: &mut State) {
     }
 }
 
-fn key(state: &mut State, input: KeyInput) -> Vec<Effect> {
-    let bound = keys::action(state.focus.scope(), input);
-    // A first Ctrl+C arms the quit and a second within the window quits, so
-    // a stray press never ends the session. Any other key disarms it and
-    // then does what it does.
-    if bound == Some(Action::Quit) {
-        if state.quitting() {
-            return vec![Effect::Quit];
-        }
-        state.quit_until = Some(state.now + QUIT_WINDOW);
+/// A first Ctrl+C arms the quit and a second within the window quits, so a
+/// stray press never ends the session. Returns `None` for any other key,
+/// which disarms it.
+/// A key while a dialog is open and no approval waits: Ctrl+C keeps its
+/// quit gesture, and every other key goes to the dialog, never to the
+/// draft. `fresh` as [`Dialog::key`] takes it.
+fn dialog_key(state: &mut State, input: KeyInput, fresh: bool) -> Vec<Effect> {
+    let bound = keys::action(Scope::Composer, input);
+    if let Some(effects) = quit_key(state, bound) {
+        return effects;
+    }
+    // Until the dialog holds the keyboard, only Esc reaches it, to cancel.
+    let cancel = input.key == Key::Esc && input.mods == Mods::NONE;
+    if !state.dialog_ready() && !cancel {
         return Vec::new();
     }
+    let Some(dialog) = state.dialog.as_mut() else {
+        return Vec::new();
+    };
+    let id = dialog.request.id;
+    dialog
+        .key(input, fresh)
+        .map(|answer| vec![Effect::Dialog { id, answer }])
+        .unwrap_or_default()
+}
+
+fn quit_key(state: &mut State, bound: Option<Action>) -> Option<Vec<Effect>> {
+    if bound == Some(Action::Quit) {
+        if state.quitting() {
+            return Some(vec![Effect::Quit]);
+        }
+        state.quit_until = Some(state.now + QUIT_WINDOW);
+        return Some(Vec::new());
+    }
     state.quit_until = None;
+    None
+}
+
+/// A key while an approval request waits; `burst` when it was read in one
+/// sweep with other keys.
+///
+/// As the TypeScript `ApprovalView`, `n` rejects the call, and Esc
+/// withdraws the request, as the TypeScript controller's cancel does. To
+/// allow, `y` chooses and Enter confirms: a terminal that repeats a held
+/// key as fresh presses can then repeat `y` into no grant, and Enter alone
+/// never allows. Only keys read alone after the input thread armed the
+/// request ([`Msg::ApprovalArmed`]) choose, confirm, or reject, so a key
+/// typed before the prompt appeared, still waiting, or one inside a burst
+/// of typed or pasted text decides nothing; it says how to answer instead.
+/// The arrow and page keys scroll the request's detail. Nothing touches
+/// the draft, its caret, or its staged images, and Ctrl+C keeps its quit
+/// gesture.
+fn approval_key(state: &mut State, input: KeyInput, burst: bool) -> Vec<Effect> {
+    let bound = keys::action(state.focus.scope(), input);
+    if let Some(effects) = quit_key(state, bound) {
+        return effects;
+    }
+    let Some(generation) = state.approval().map(|a| a.generation) else {
+        return Vec::new();
+    };
+    if state.approval_answered == Some(generation) {
+        return Vec::new();
+    }
+    let page = state.approval_page.max(1);
+    let scroll = match input.key {
+        Key::Up => Some(-1),
+        Key::Down => Some(1),
+        Key::PageUp => Some(-(page as isize)),
+        Key::PageDown => Some(page as isize),
+        _ => None,
+    };
+    if let Some(delta) = scroll.filter(|_| input.mods == Mods::NONE) {
+        // Render clamps the far end to the detail's length.
+        state.approval_scroll = state.approval_scroll.saturating_add_signed(delta);
+        return Vec::new();
+    }
+    let plain = input.mods == Mods::NONE || input.mods == Mods::SHIFT;
+    let showing = state.showing();
+    let ready = plain && !burst && showing.is_some() && state.approval_armed == showing;
+    let chosen = showing.is_some() && state.approval_chosen == showing;
+    let answer = match input.key {
+        Key::Esc if input.mods == Mods::NONE => ApprovalAnswer::Cancel,
+        Key::Char('n' | 'N') if ready => ApprovalAnswer::Reject,
+        Key::Enter if ready && chosen && input.mods == Mods::NONE => ApprovalAnswer::AllowOnce,
+        Key::Char('y' | 'Y') if ready => {
+            state.approval_chosen = showing;
+            state.notice = None;
+            return Vec::new();
+        }
+        Key::Enter if ready && input.mods == Mods::NONE => {
+            state.notice = Some(Notice::ApprovalChooseFirst);
+            return Vec::new();
+        }
+        _ => {
+            state.approval_chosen = None;
+            state.notice = Some(Notice::ApprovalKeys);
+            return Vec::new();
+        }
+    };
+    state.notice = None;
+    state.approval_chosen = None;
+    state.approval_answered = Some(generation);
+    vec![Effect::Answer { generation, answer }]
+}
+
+fn key(state: &mut State, input: KeyInput) -> Vec<Effect> {
+    let bound = keys::action(state.focus.scope(), input);
+    if let Some(effects) = quit_key(state, bound) {
+        return effects;
+    }
     match state.focus {
         Focus::Composer if bound == Some(Action::PasteImage) => {
             return vec![Effect::ReadImage(ImageSource::Clipboard)];
@@ -1146,6 +1712,10 @@ fn menu_key(state: &mut State, bound: Option<Action>) -> bool {
             let name = text.trim_end();
             if state.draft.text() != name {
                 state.draft.replace(name, name.len());
+            }
+            // A live session runs it: the composer submits the name.
+            if state.live {
+                return false;
             }
             state.notice = Some(Notice::NoCommands);
             true
@@ -1248,6 +1818,10 @@ fn composer_key(state: &mut State, bound: Option<Action>, input: KeyInput) -> Ve
     let running = turn_running(state);
     let draft = &mut state.draft;
     let complete = match bound {
+        Some(Action::ToggleAgentList) if state.live => {
+            state.notice = Some(Notice::PreviewOnly);
+            return Vec::new();
+        }
         Some(Action::ToggleAgentList) => {
             state.focus = Focus::AgentList;
             state.notice = None;
@@ -1268,6 +1842,10 @@ fn composer_key(state: &mut State, bound: Option<Action>, input: KeyInput) -> Ve
             return Vec::new();
         }
         // The sample stands in for a turn, so it waits while a real one runs.
+        Some(Action::ToggleSampleActivity) if state.live => {
+            state.notice = Some(Notice::PreviewOnly);
+            return Vec::new();
+        }
         Some(Action::ToggleSampleActivity) => {
             if !running {
                 toggle_activity(state);
@@ -1499,7 +2077,7 @@ fn end_turn(state: &mut State, outcome: Outcome) {
     };
     let how = match outcome {
         Outcome::Completed => live::Settle::Completed,
-        Outcome::Interrupted => live::Settle::Interrupted,
+        Outcome::Interrupted | Outcome::Failed => live::Settle::Interrupted,
     };
     if let Some(row) = state.transcript.rows.get_mut(index) {
         *row = live::settle(elapsed, how);
@@ -1545,6 +2123,17 @@ mod tests {
     use crate::runtime::{RuntimeUpdate, Submission};
     use crate::transcript::{CallState, Row};
 
+    /// The submissions among `effects`.
+    fn submitted(effects: Vec<Effect>) -> Vec<Submission> {
+        effects
+            .into_iter()
+            .filter_map(|effect| match effect {
+                Effect::Submit(prompt) => Some(prompt.submission),
+                _ => None,
+            })
+            .collect()
+    }
+
     fn press(state: &mut State, key: Key) -> Vec<Effect> {
         update(state, Msg::Key(KeyInput::plain(key)))
     }
@@ -1570,8 +2159,8 @@ mod tests {
         type_str(&mut state, "hello");
         press(&mut state, Key::Left);
         assert_eq!(
-            press(&mut state, Key::Enter),
-            [Effect::Submit(Submission::FollowUp("hello".into()))]
+            submitted(press(&mut state, Key::Enter)),
+            [Submission::FollowUp("hello".into())]
         );
         assert_eq!((state.draft.text(), state.notice), ("", None));
         // The prompt shows only once the runtime commits it.
@@ -1579,6 +2168,465 @@ mod tests {
         // Undo brings a sent draft back, as the oracle's does.
         chord(&mut state, Key::Char('-'), Mods::CTRL);
         assert_eq!(state.draft.text(), "hello");
+    }
+
+    fn live() -> State {
+        State::live(FrameStyle::default(), Tones::default(), Vec::new())
+    }
+
+    fn live_image(state: &mut State, name: &str) {
+        let image = Image {
+            name: name.into(),
+            media_type: "image/png",
+            bytes: 3,
+            size: None,
+            data: crate::paste::ImageData::new(name.as_bytes().to_vec()),
+        };
+        update(
+            state,
+            Msg::ImageRead {
+                source: ImageSource::Clipboard,
+                image: Some(image),
+            },
+        );
+    }
+
+    #[test]
+    fn a_live_session_opens_on_its_own_rows_without_the_samples() {
+        let state = State::live(
+            FrameStyle::default(),
+            Tones::default(),
+            vec![Row::Info("Session s".into())],
+        );
+        assert!(state.live);
+        assert_eq!(state.transcript.rows, [Row::Info("Session s".into())]);
+    }
+
+    #[test]
+    fn a_live_prompt_sends_its_images_in_placeholder_order() {
+        let mut state = live();
+        type_str(&mut state, "a ");
+        live_image(&mut state, "first.png");
+        type_str(&mut state, " b ");
+        live_image(&mut state, "second.png");
+        let effects = press(&mut state, Key::Enter);
+        let [Effect::Submit(prompt)] = &effects[..] else {
+            panic!("{effects:?}");
+        };
+        assert_eq!(
+            prompt.submission,
+            Submission::FollowUp("a [Image #1] b [Image #2]".into())
+        );
+        let names: Vec<_> = prompt.images.iter().map(|i| i.name.as_str()).collect();
+        assert_eq!(names, ["first.png", "second.png"]);
+        assert!(state.attachments.is_empty());
+        assert_eq!(state.draft.text(), "");
+    }
+
+    #[test]
+    fn a_live_turn_refuses_images_and_keeps_the_draft_and_steers_text() {
+        let mut state = live();
+        runtime(&mut state, RuntimeUpdate::TurnStarted { seed: "s".into() });
+        type_str(&mut state, "look ");
+        live_image(&mut state, "shot.png");
+        assert_eq!(press(&mut state, Key::Enter), []);
+        assert_eq!(state.notice, Some(Notice::ImagesWhileRunning));
+        assert_eq!(state.draft.text(), "look [Image #1]");
+        assert_eq!(state.attachments.len(), 1);
+        // Without the image, Enter steers.
+        press(&mut state, Key::Backspace);
+        assert!(state.attachments.is_empty());
+        assert_eq!(
+            submitted(press(&mut state, Key::Enter)),
+            [Submission::Steer("look ".into())]
+        );
+    }
+
+    #[test]
+    fn live_slash_prompts_reach_the_runtime_and_preview_keys_are_refused() {
+        let mut state = live();
+        type_str(&mut state, "/skill:review now");
+        assert_eq!(state.menu(), None);
+        assert_eq!(
+            submitted(press(&mut state, Key::Enter)),
+            [Submission::FollowUp("/skill:review now".into())]
+        );
+        assert_eq!(chord(&mut state, Key::Char('t'), Mods::CTRL), []);
+        assert_eq!(
+            (state.activity, state.notice),
+            (None, Some(Notice::PreviewOnly))
+        );
+        assert_eq!(chord(&mut state, Key::Char('g'), Mods::CTRL), []);
+        assert_eq!(state.focus, Focus::Composer);
+    }
+
+    /// Draws nothing, but takes the keyboard handoff a frame would start,
+    /// and arms it, as the terminal owner's input thread does.
+    fn hand_off(state: &mut State) {
+        state.dialog_on_screen = state.dialog.as_ref().map(|dialog| dialog.request.id);
+        let token = state.approval_drawn().expect("a handoff");
+        update(state, Msg::ApprovalArmed(token));
+    }
+
+    fn secret_field(id: u64) -> RuntimeUpdate {
+        RuntimeUpdate::Dialog(Some(crate::dialog::DialogRequest {
+            id,
+            kind: crate::dialog::DialogKind::Field(crate::dialog::FieldDialog {
+                title: "Sign in to CLIProxyAPI".into(),
+                prompt: "API key".into(),
+                secret: true,
+                initial: String::new(),
+                error: None,
+            }),
+        }))
+    }
+
+    // Bake: a secret typed or pasted into a dialog field never reaches the
+    // draft, its undo, the prompt history, or the transcript, and leaves
+    // only in the dialog's answer; the draft is untouched throughout.
+    #[test]
+    fn a_secret_field_keeps_its_text_out_of_the_draft_and_history() {
+        let mut state = live();
+        type_str(&mut state, "draft");
+        let undo = state.draft.undo_len();
+        let rows = state.transcript.rows.clone();
+        runtime(&mut state, secret_field(7));
+        hand_off(&mut state);
+        type_str(&mut state, "sk-fake-typed");
+        update(&mut state, Msg::Paste("-pasted\nrest".into()));
+        // A paste's line break did not answer the field.
+        assert!(!state.dialog.as_ref().unwrap().answered);
+        let effects = press(&mut state, Key::Enter);
+        let [Effect::Dialog { id: 7, answer }] = &effects[..] else {
+            panic!("{effects:?}");
+        };
+        assert_eq!(
+            answer,
+            &DialogAnswer::Entered("sk-fake-typed-pastedrest".to_owned().into())
+        );
+        let shown = format!("{effects:?} {state:?}");
+        assert!(!shown.contains("sk-fake"), "{shown}");
+        assert_eq!(state.draft.text(), "draft");
+        assert_eq!(state.draft.undo_len(), undo);
+        assert_eq!(state.transcript.rows, rows);
+        // The runtime closes it; keys reach the composer again.
+        runtime(&mut state, RuntimeUpdate::Dialog(None));
+        hand_off(&mut state);
+        type_str(&mut state, "!");
+        assert_eq!(state.draft.text(), "draft!");
+    }
+
+    // Pi `AgentSessionRuntime` replacement and its interactive mode's
+    // `renderInitialMessages`: the transcript starts over with the new
+    // session's rows, its epoch moves so a normal-screen writer publishes
+    // them from the first, and the draft and its images stay.
+    #[test]
+    fn a_replaced_session_starts_the_transcript_over_and_keeps_the_draft() {
+        let mut state = live();
+        runtime(
+            &mut state,
+            RuntimeUpdate::Commit(vec![Row::User("old".into())]),
+        );
+        runtime(
+            &mut state,
+            RuntimeUpdate::Pending(vec![crate::runtime::Pending {
+                text: "queued".into(),
+                target: crate::runtime::Target::NextTurn,
+            }]),
+        );
+        type_str(&mut state, "draft");
+        let epoch = state.transcript_epoch;
+        runtime(
+            &mut state,
+            RuntimeUpdate::Replaced(vec![
+                Row::Info("Resumed session x".into()),
+                Row::User("new".into()),
+            ]),
+        );
+        assert_eq!(state.transcript_epoch, epoch + 1);
+        assert_eq!(
+            state.transcript.rows,
+            [
+                Row::Info("Resumed session x".into()),
+                Row::User("new".into())
+            ]
+        );
+        assert_eq!(state.settled_rows(), 2);
+        assert!(state.pending.is_empty());
+        assert_eq!(state.draft.text(), "draft");
+    }
+
+    // Bake: a repeated or burst Enter never answers, an answered field
+    // takes nothing more until the runtime's next dialog, and keys typed
+    // across that transition do not spill into the draft.
+    #[test]
+    fn enter_bursts_and_repeats_do_not_carry_across_dialogs() {
+        let mut state = live();
+        runtime(&mut state, secret_field(1));
+        // Keys queued before the handoff is armed go nowhere.
+        type_str(&mut state, "early");
+        assert_eq!(press(&mut state, Key::Enter), []);
+        hand_off(&mut state);
+        assert_eq!(state.dialog.as_ref().unwrap().text.chars(), 0);
+        update(
+            &mut state,
+            Msg::KeyRead {
+                key: KeyInput::plain(Key::Char('a')),
+                burst: true,
+            },
+        );
+        assert_eq!(
+            update(
+                &mut state,
+                Msg::KeyRead {
+                    key: KeyInput::plain(Key::Enter),
+                    burst: true,
+                },
+            ),
+            []
+        );
+        assert_eq!(
+            update(&mut state, Msg::KeyRepeat(KeyInput::plain(Key::Enter))),
+            []
+        );
+        assert_eq!(press(&mut state, Key::Enter).len(), 1);
+        // Waiting: a held Enter and typing go nowhere.
+        assert_eq!(
+            update(&mut state, Msg::KeyRepeat(KeyInput::plain(Key::Enter))),
+            []
+        );
+        type_str(&mut state, "late");
+        assert_eq!(state.draft.text(), "");
+        runtime(&mut state, secret_field(2));
+        type_str(&mut state, "typeahead");
+        assert_eq!(press(&mut state, Key::Enter), []);
+        hand_off(&mut state);
+        assert_eq!(
+            update(&mut state, Msg::KeyRepeat(KeyInput::plain(Key::Enter))),
+            []
+        );
+        assert_eq!(state.dialog.as_ref().unwrap().text.chars(), 0);
+        // Esc cancels the new one, once, even before it holds the keyboard.
+        runtime(&mut state, secret_field(2));
+        assert!(!state.dialog_ready());
+        assert_eq!(
+            press(&mut state, Key::Esc),
+            [Effect::Dialog {
+                id: 2,
+                answer: DialogAnswer::Cancel,
+            }]
+        );
+        assert_eq!(press(&mut state, Key::Esc), []);
+        // Closed: typeahead before the handoff does not reach the draft.
+        runtime(&mut state, RuntimeUpdate::Dialog(None));
+        type_str(&mut state, "spill");
+        hand_off(&mut state);
+        assert_eq!(state.draft.text(), "");
+        type_str(&mut state, "ok");
+        assert_eq!(state.draft.text(), "ok");
+    }
+
+    // Bake: an approval request takes the keyboard first; the dialog keeps
+    // what was typed and takes keys again once the request is settled.
+    #[test]
+    fn an_approval_takes_precedence_over_a_dialog() {
+        let mut state = live();
+        runtime(&mut state, secret_field(3));
+        hand_off(&mut state);
+        type_str(&mut state, "ab");
+        runtime(
+            &mut state,
+            RuntimeUpdate::Approvals(vec![Approval {
+                generation: 9,
+                tool: "bash".into(),
+                call_id: "c".into(),
+                reason: "r".into(),
+                arguments: String::new(),
+            }]),
+        );
+        assert_eq!(
+            press(&mut state, Key::Esc),
+            [Effect::Answer {
+                generation: 9,
+                answer: ApprovalAnswer::Cancel,
+            }]
+        );
+        assert_eq!(state.dialog.as_ref().unwrap().text.chars(), 2);
+        // The approval covered the dialog: once it clears, keys queued
+        // before the dialog is handed back go nowhere.
+        state.approval_on_screen = Some(9);
+        assert!(state.approval_drawn().is_some());
+        runtime(&mut state, RuntimeUpdate::Approvals(Vec::new()));
+        type_str(&mut state, "queued");
+        assert_eq!(state.dialog.as_ref().unwrap().text.expose(), "ab");
+        hand_off(&mut state);
+        type_str(&mut state, "c");
+        assert_eq!(state.dialog.as_ref().unwrap().text.expose(), "abc");
+        // A resize keeps its text but takes the keyboard back until the
+        // next frame shows it whole and is armed.
+        update(&mut state, Msg::Resize { cols: 40, rows: 10 });
+        assert_eq!(state.dialog.as_ref().unwrap().text.chars(), 3);
+        type_str(&mut state, "x");
+        assert_eq!(state.dialog.as_ref().unwrap().text.chars(), 3);
+        // A frame that does not show it whole hands nothing over.
+        state.dialog_on_screen = None;
+        assert_eq!(state.approval_drawn(), None);
+        hand_off(&mut state);
+        type_str(&mut state, "d");
+        assert_eq!(state.dialog.as_ref().unwrap().text.expose(), "abcd");
+    }
+
+    // Bake: a live session's slash menu lists the commands it runs, and
+    // Enter on one submits its name.
+    #[test]
+    fn a_live_slash_menu_submits_the_chosen_command() {
+        let mut state = live();
+        type_str(&mut state, "/thi");
+        let menu = state.menu().expect("menu");
+        assert_eq!(menu.entries[0].name, "thinking");
+        assert_eq!(
+            submitted(press(&mut state, Key::Enter)),
+            [Submission::FollowUp("/thinking".into())]
+        );
+    }
+
+    #[test]
+    fn a_refused_prompt_restores_its_editing_history() {
+        let mut state = live();
+        type_str(&mut state, "first");
+        state.draft.paste(" second");
+        let undo_len = state.draft.undo_len();
+        let [Effect::Submit(sent)] = &press(&mut state, Key::Enter)[..] else {
+            panic!("no submission");
+        };
+        runtime(
+            &mut state,
+            RuntimeUpdate::Refused {
+                id: sent.id,
+                reason: "no key".into(),
+            },
+        );
+        assert_eq!(state.draft.undo_len(), undo_len);
+        chord(&mut state, Key::Char('-'), Mods::CTRL);
+        assert_eq!(state.draft.text(), "first");
+        chord(&mut state, Key::Char('-'), Mods::CTRL);
+        assert_eq!(state.draft.text(), "");
+    }
+
+    #[test]
+    fn a_refused_prompt_puts_its_draft_images_and_caret_back() {
+        let mut state = live();
+        type_str(&mut state, "see ");
+        live_image(&mut state, "shot.png");
+        press(&mut state, Key::Left);
+        let caret = state.draft.caret();
+        let [Effect::Submit(sent)] = &press(&mut state, Key::Enter)[..] else {
+            panic!("no submission");
+        };
+        let sent = sent.clone();
+        assert_eq!((state.draft.text(), state.attachments.len()), ("", 0));
+        // Refused with nothing typed since: the draft returns as it was.
+        runtime(
+            &mut state,
+            RuntimeUpdate::Refused {
+                id: sent.id,
+                reason: "no key".into(),
+            },
+        );
+        assert_eq!(state.draft.text(), "see [Image #1]");
+        assert_eq!(state.draft.caret(), caret);
+        assert_eq!(state.attachments.len(), 1);
+        assert_eq!(
+            (state.notice, state.refusal.as_deref()),
+            (Some(Notice::Refused), Some("no key"))
+        );
+        // Sent again, it carries the same image bytes.
+        let [Effect::Submit(again)] = &press(&mut state, Key::Enter)[..] else {
+            panic!("no submission");
+        };
+        assert_eq!(again.images, sent.images);
+        assert_eq!(again.images[0].data.bytes(), b"shot.png");
+        // Typing while it waits survives a refusal, after the prompt.
+        type_str(&mut state, "more");
+        runtime(
+            &mut state,
+            RuntimeUpdate::Refused {
+                id: again.id,
+                reason: "still no key".into(),
+            },
+        );
+        assert_eq!(state.draft.text(), "see [Image #1]\n\nmore");
+        assert_eq!(state.attachments.len(), 1);
+        // An admitted prompt's draft is forgotten: a late refusal changes nothing.
+        state.draft.replace("", 0);
+        unstage(&mut state);
+        let effects = press(&mut state, Key::Enter);
+        assert_eq!(effects, []);
+        type_str(&mut state, "ok");
+        let [Effect::Submit(admitted)] = &press(&mut state, Key::Enter)[..] else {
+            panic!("no submission");
+        };
+        let id = admitted.id;
+        runtime(&mut state, RuntimeUpdate::Admitted(id));
+        runtime(
+            &mut state,
+            RuntimeUpdate::Refused {
+                id,
+                reason: "late".into(),
+            },
+        );
+        assert_eq!(state.draft.text(), "");
+    }
+
+    #[test]
+    fn returned_prompts_go_back_ahead_of_the_draft() {
+        let mut state = live();
+        type_str(&mut state, "typed");
+        runtime(
+            &mut state,
+            RuntimeUpdate::Returned(vec!["one".into(), "two".into()]),
+        );
+        assert_eq!(state.draft.text(), "one\n\ntwo\n\ntyped");
+        assert_eq!(state.notice, Some(Notice::Returned));
+    }
+
+    // `/tree` and `/fork` give the chosen message back ahead of anything
+    // typed since; an empty text changes nothing.
+    #[test]
+    fn a_restored_message_goes_ahead_of_the_draft() {
+        let mut state = live();
+        runtime(&mut state, RuntimeUpdate::Restored("chosen".into()));
+        assert_eq!(state.draft.text(), "chosen");
+        assert_eq!(state.notice, Some(Notice::Restored));
+        type_str(&mut state, " more");
+        runtime(&mut state, RuntimeUpdate::Restored("again".into()));
+        assert_eq!(state.draft.text(), "again\n\nchosen more");
+        state.notice = None;
+        runtime(&mut state, RuntimeUpdate::Restored(String::new()));
+        assert_eq!(state.notice, None);
+        // Nothing returned changes nothing.
+        let mut state = live();
+        runtime(&mut state, RuntimeUpdate::Returned(Vec::new()));
+        assert_eq!((state.draft.text(), state.notice), ("", None));
+    }
+
+    #[test]
+    fn the_runtime_sets_the_status_and_a_failed_turn_says_so() {
+        let mut state = live();
+        runtime(
+            &mut state,
+            RuntimeUpdate::Status(crate::runtime::SessionStatus {
+                model: Some("p/m".into()),
+                thinking: Some("high".into()),
+                context: None,
+            }),
+        );
+        assert_eq!(state.status.model.as_deref(), Some("p/m"));
+        assert_eq!(state.status.thinking.as_deref(), Some("high"));
+        runtime(&mut state, RuntimeUpdate::TurnStarted { seed: "s".into() });
+        runtime(&mut state, RuntimeUpdate::TurnEnded(Outcome::Failed));
+        assert_eq!(state.summary.map(|s| s.outcome), Some(Outcome::Failed));
+        assert_eq!(state.activity, None);
     }
 
     #[test]
@@ -1626,6 +2674,7 @@ mod tests {
             media_type: "image/png",
             bytes: 1,
             size: None,
+            data: crate::paste::ImageData::default(),
         };
         update(
             &mut state,
@@ -1694,8 +2743,8 @@ mod tests {
         // While it runs, Enter steers, Esc asks to stop, and Ctrl+T waits.
         type_str(&mut state, "also");
         assert_eq!(
-            press(&mut state, Key::Enter),
-            [Effect::Submit(Submission::Steer("also".into()))]
+            submitted(press(&mut state, Key::Enter)),
+            [Submission::Steer("also".into())]
         );
         chord(&mut state, Key::Char('t'), Mods::CTRL);
         assert!(state.activity.unwrap().runtime);
@@ -1897,6 +2946,7 @@ mod tests {
             media_type: "image/png",
             bytes: 10,
             size: Some((2, 1)),
+            data: crate::paste::ImageData::default(),
         }
     }
 
@@ -2004,7 +3054,7 @@ mod tests {
         assert_eq!((state.draft.text(), state.draft.caret()), ("/logout ", 8));
         assert!(state.menu().is_none());
         assert_eq!(
-            completion::usage(state.draft.text()).map(|c| c.name),
+            completion::usage(state.draft.text(), state.catalog()).map(|c| c.name),
             Some("logout")
         );
         // One undo takes the completion back; at the same draft and caret
@@ -2051,8 +3101,8 @@ mod tests {
         press(&mut state, Key::Tab);
         assert_eq!(state.draft.text(), "a\t");
         assert_eq!(
-            press(&mut state, Key::Enter),
-            [Effect::Submit(Submission::FollowUp("a\t".into()))]
+            submitted(press(&mut state, Key::Enter)),
+            [Submission::FollowUp("a\t".into())]
         );
     }
 
@@ -2166,8 +3216,8 @@ mod tests {
         );
         // Enter sends the draft as typed, menu or not.
         assert_eq!(
-            press(&mut state, Key::Enter),
-            [Effect::Submit(Submission::FollowUp("@src/m".into()))]
+            submitted(press(&mut state, Key::Enter)),
+            [Submission::FollowUp("@src/m".into())]
         );
     }
 
@@ -2357,5 +3407,232 @@ mod tests {
         assert_eq!(state.draft.text(), "/x");
         assert_eq!(state.notice, Some(Notice::NoCommands));
         assert_eq!(state.now, Duration::from_secs(9));
+    }
+
+    // ---- Approvals ----
+    //
+    // The keys follow the TypeScript `ApprovalView`
+    // (`apps/tui/packages/ui/src/interaction.tsx`): `n` rejects, a paste
+    // is dropped, Ctrl and Alt chords decide nothing; `y` then Enter
+    // allows, and only once the input thread has armed the request.
+
+    fn waiting(generation: u64) -> crate::runtime::Approval {
+        crate::runtime::Approval {
+            generation,
+            tool: "bash".into(),
+            call_id: format!("call-{generation}"),
+            reason: "escalate sandbox to danger-full-access: needs the network".into(),
+            arguments: "command: curl -fsS https://example.com".into(),
+        }
+    }
+
+    /// A live state with `text` typed, the caret one left of its end, and
+    /// request `generation` displayed, drawn, and armed.
+    fn asking(text: &str, generation: u64) -> State {
+        let mut state = State::live(FrameStyle::default(), Tones::None, Vec::new());
+        type_str(&mut state, text);
+        press(&mut state, Key::Left);
+        runtime(
+            &mut state,
+            RuntimeUpdate::Approvals(vec![waiting(generation)]),
+        );
+        state.approval_on_screen = Some(generation);
+        let token = state.approval_drawn().expect("a new showing");
+        assert_eq!(update(&mut state, Msg::ApprovalArmed(token)), []);
+        state
+    }
+
+    fn answer(generation: u64, answer: ApprovalAnswer) -> Vec<Effect> {
+        vec![Effect::Answer { generation, answer }]
+    }
+
+    fn read(state: &mut State, key: Key, burst: bool) -> Vec<Effect> {
+        let key = KeyInput::plain(key);
+        update(state, Msg::KeyRead { key, burst })
+    }
+
+    #[test]
+    fn y_then_enter_allows_and_nothing_else_touches_the_draft() {
+        let mut state = asking("draft", 5);
+        state.attachments.push((1, shot("a.png")));
+        // Enter alone never allows.
+        assert_eq!(press(&mut state, Key::Enter), []);
+        assert_eq!(state.notice, Some(Notice::ApprovalChooseFirst));
+        for key in [
+            Key::Char('x'),
+            Key::Backspace,
+            Key::Tab,
+            Key::Left,
+            Key::Home,
+        ] {
+            assert_eq!(press(&mut state, key), [], "{key:?}");
+        }
+        assert_eq!(state.notice, Some(Notice::ApprovalKeys));
+        assert_eq!(chord(&mut state, Key::Char('y'), Mods::CTRL), []);
+        assert_eq!(chord(&mut state, Key::Char('y'), Mods::ALT), []);
+        assert_eq!(update(&mut state, Msg::Paste("y\n".into())), []);
+        assert_eq!(
+            update(&mut state, Msg::Paste(String::new())),
+            [],
+            "no image read"
+        );
+        let click = Mouse {
+            kind: MouseKind::Down,
+            column: 4,
+            row: 20,
+            alt: false,
+            at: Duration::ZERO,
+        };
+        assert_eq!(update(&mut state, Msg::Mouse(click)), []);
+        // `y` chooses; another key withdraws the choice; `y` again, then
+        // Enter, allows. A held `y` repeats only the choice.
+        assert_eq!(chord(&mut state, Key::Char('Y'), Mods::SHIFT), []);
+        assert!(state.approval_chosen());
+        assert_eq!(press(&mut state, Key::Char('z')), []);
+        assert!(!state.approval_chosen());
+        for _ in 0..3 {
+            assert_eq!(press(&mut state, Key::Char('y')), []);
+        }
+        assert_eq!(state.notice, None);
+        assert_eq!(
+            press(&mut state, Key::Enter),
+            answer(5, ApprovalAnswer::AllowOnce)
+        );
+        assert_eq!((state.draft.text(), state.draft.caret()), ("draft", 4));
+        assert_eq!(state.attachments.len(), 1);
+        // Answered: nothing more is sent for it.
+        assert_eq!(press(&mut state, Key::Char('n')), []);
+        assert_eq!(press(&mut state, Key::Esc), []);
+        // The runtime settles it; the composer has its draft back.
+        runtime(&mut state, RuntimeUpdate::Approvals(Vec::new()));
+        press(&mut state, Key::Char('!'));
+        assert_eq!(state.draft.text(), "draf!t");
+    }
+
+    #[test]
+    fn reported_key_repeats_edit_the_composer_but_never_answer_an_approval() {
+        let mut state = asking("draft", 5);
+        let repeat = |key| Msg::KeyRepeat(KeyInput::plain(key));
+        assert_eq!(update(&mut state, repeat(Key::Char('y'))), []);
+        assert!(!state.approval_chosen());
+        press(&mut state, Key::Char('y'));
+        assert!(state.approval_chosen());
+        for key in [Key::Enter, Key::Char('n'), Key::Esc] {
+            assert_eq!(update(&mut state, repeat(key)), []);
+        }
+        assert_eq!(
+            press(&mut state, Key::Enter),
+            answer(5, ApprovalAnswer::AllowOnce)
+        );
+        runtime(&mut state, RuntimeUpdate::Approvals(Vec::new()));
+        let before = state.draft.text().len();
+        update(&mut state, repeat(Key::Char('x')));
+        assert_eq!(state.draft.text().len(), before + 1);
+    }
+
+    #[test]
+    fn keys_before_the_arming_or_in_a_burst_answer_nothing() {
+        let mut state = State::live(FrameStyle::default(), Tones::None, Vec::new());
+        runtime(&mut state, RuntimeUpdate::Approvals(vec![waiting(9)]));
+        // Neither drawn nor armed.
+        assert_eq!(read(&mut state, Key::Char('n'), false), []);
+        // Drawn, so the input thread is arming it, but not armed yet: a key
+        // read before the arming was waiting when the prompt appeared.
+        state.approval_on_screen = Some(9);
+        assert_eq!(state.approval_drawn(), Some(1));
+        state.approval_on_screen = Some(9);
+        assert_eq!(state.approval_drawn(), None, "the same showing");
+        assert_eq!(read(&mut state, Key::Char('n'), false), []);
+        // An arming for another showing arms nothing.
+        update(&mut state, Msg::ApprovalArmed(2));
+        assert_eq!(read(&mut state, Key::Char('n'), false), []);
+        update(&mut state, Msg::ApprovalArmed(1));
+        assert_eq!(read(&mut state, Key::Char('n'), true), [], "a burst");
+        assert_eq!(read(&mut state, Key::Char('y'), true), []);
+        assert!(!state.approval_chosen());
+        assert_eq!(state.notice, Some(Notice::ApprovalKeys));
+        assert_eq!(read(&mut state, Key::Char('y'), false), []);
+        assert_eq!(read(&mut state, Key::Enter, true), [], "Enter in a burst");
+        assert!(!state.approval_chosen(), "a burst withdraws the choice");
+        assert_eq!(read(&mut state, Key::Char('y'), false), []);
+        assert_eq!(update(&mut state, Msg::Paste("x".into())), []);
+        assert!(!state.approval_chosen(), "a paste withdraws the choice");
+        assert_eq!(
+            read(&mut state, Key::Char('n'), false),
+            answer(9, ApprovalAnswer::Reject)
+        );
+        // The next request is unarmed and unchosen until its own showing is
+        // armed, so the last answer's keys cannot reach it.
+        runtime(&mut state, RuntimeUpdate::Approvals(vec![waiting(10)]));
+        assert!(!state.approval_chosen());
+        update(&mut state, Msg::ApprovalArmed(1));
+        assert_eq!(read(&mut state, Key::Enter, false), []);
+        assert_eq!(read(&mut state, Key::Char('n'), false), []);
+        // Esc withdraws it even before it is armed.
+        assert_eq!(
+            press(&mut state, Key::Esc),
+            answer(10, ApprovalAnswer::Cancel)
+        );
+    }
+
+    #[test]
+    fn a_resize_or_a_frame_that_hides_the_request_disarms_it() {
+        let mut state = asking("", 4);
+        press(&mut state, Key::Char('y'));
+        assert!(state.approval_chosen());
+        // A frame that cannot show it whole ends the showing and its choice.
+        state.approval_on_screen = None;
+        assert_eq!(state.approval_drawn(), None);
+        assert!(!state.approval_chosen());
+        assert_eq!(press(&mut state, Key::Enter), []);
+        // Shown again: a new showing, armed afresh; the old arming is stale.
+        state.approval_on_screen = Some(4);
+        assert_eq!(state.approval_drawn(), Some(2));
+        update(&mut state, Msg::ApprovalArmed(1));
+        assert_eq!(press(&mut state, Key::Char('y')), []);
+        assert_eq!(press(&mut state, Key::Enter), []);
+        update(&mut state, Msg::ApprovalArmed(2));
+        press(&mut state, Key::Char('y'));
+        // A resize ends the showing at once, before any frame.
+        update(&mut state, Msg::Resize { cols: 80, rows: 24 });
+        assert!(!state.approval_chosen());
+        assert_eq!(press(&mut state, Key::Enter), []);
+        update(&mut state, Msg::ApprovalArmed(2));
+        assert_eq!(press(&mut state, Key::Char('y')), []);
+        assert_eq!(press(&mut state, Key::Enter), []);
+        state.approval_on_screen = Some(4);
+        assert_eq!(state.approval_drawn(), Some(3));
+        update(&mut state, Msg::ApprovalArmed(3));
+        press(&mut state, Key::Char('y'));
+        assert_eq!(
+            press(&mut state, Key::Enter),
+            answer(4, ApprovalAnswer::AllowOnce)
+        );
+    }
+
+    #[test]
+    fn the_arrow_and_page_keys_scroll_the_detail_and_keep_the_choice() {
+        let mut state = asking("", 3);
+        state.approval_page = 4;
+        press(&mut state, Key::Char('y'));
+        press(&mut state, Key::PageDown);
+        press(&mut state, Key::Down);
+        assert_eq!(state.approval_scroll, 5);
+        press(&mut state, Key::Up);
+        press(&mut state, Key::PageUp);
+        press(&mut state, Key::PageUp);
+        assert_eq!(state.approval_scroll, 0);
+        assert!(state.approval_chosen());
+    }
+
+    #[test]
+    fn ctrl_c_keeps_its_quit_gesture_while_an_approval_waits() {
+        let mut state = asking("", 1);
+        assert_eq!(chord(&mut state, Key::Char('c'), Mods::CTRL), []);
+        assert!(state.quitting());
+        assert_eq!(
+            chord(&mut state, Key::Char('c'), Mods::CTRL),
+            [Effect::Quit]
+        );
     }
 }

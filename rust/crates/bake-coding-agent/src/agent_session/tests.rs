@@ -58,7 +58,9 @@ fn harness() -> Harness {
 fn options(harness: &Harness, session: SessionManager, cwd: &str) -> AgentSessionOptions {
     AgentSessionOptions {
         session,
-        registry: Arc::clone(&harness.registry),
+        registry: Arc::clone(&harness.registry).into(),
+        settings_store: None,
+        selection: None,
         apis: Arc::clone(&harness.apis),
         settings: Settings::default(),
         model: harness.registry.model("faux", "faux-1"),
@@ -104,8 +106,8 @@ fn new_file_session(dir: &TempDir) -> SessionManager {
     .expect("session")
 }
 
-// Bake: shutdown releases the session file for good. A later change stays
-// in memory, takes no lock, and writes nothing.
+// Bake: shutdown releases the session file for good. A later model change
+// is refused: it takes no lock, writes nothing, and leaves the model.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn shutdown_closes_the_session_file() {
     let dir = TempDir::new("shutdown-closes");
@@ -121,11 +123,17 @@ async fn shutdown_closes_the_session_file() {
     session.shutdown().await;
     let written = std::fs::read(&file).expect("read");
     let model = session.model().expect("model");
-    let error = session.set_model(model).await.expect_err("closed");
-    assert!(
-        error.starts_with("Session file is closed for writing"),
-        "{error}"
-    );
+    let error = session
+        .set_model(model.clone(), false)
+        .await
+        .expect_err("closed");
+    assert_eq!(error, "The session is shut down.");
+    let error = session
+        .set_thinking_level(ModelThinkingLevel::Low, false)
+        .await
+        .expect_err("closed");
+    assert_eq!(error, "The session is shut down.");
+    assert_eq!(session.model(), Some(model));
     assert_eq!(std::fs::read(&file).expect("read"), written);
     // Another writer takes the file at once.
     drop(SessionManager::open(&file, None, None).expect("open"));
@@ -283,6 +291,194 @@ async fn refuses_a_prompt_while_streaming() {
     session.shutdown().await;
 }
 
+// Pi v1.2.0 `steer`, `clearQueue`, and the `message_start` queue
+// bookkeeping: a steer queued while a response streams is delivered at the
+// next step, persisted, and leaves the queue; `clear_queue` hands back what
+// was not delivered and empties the agent's queue too.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn steering_is_delivered_at_the_next_step_and_clear_queue_returns_the_rest() {
+    let dir = TempDir::new("steer-queue");
+    let cwd = dir.path().to_string_lossy().into_owned();
+    let h = harness();
+    let release = Arc::new(Notify::new());
+    let gate = Arc::clone(&release);
+    h.faux.set_responses(vec![
+        FauxResponseStep::Factory(Arc::new(move |_, _, _, _| {
+            let gate = Arc::clone(&gate);
+            Box::pin(async move {
+                gate.notified().await;
+                Ok(faux_assistant_message("first"))
+            })
+        })),
+        faux_assistant_message("after steer").into(),
+    ]);
+    let session = Arc::new(
+        AgentSession::create(options(&h, new_file_session(&dir), &cwd))
+            .await
+            .expect("session"),
+    );
+    let updates = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let seen = Arc::clone(&updates);
+    let subscription = session.subscribe(move |event| {
+        if let SessionEvent::QueueUpdate {
+            steering,
+            follow_up,
+        } = event
+        {
+            seen.lock()
+                .unwrap()
+                .push((steering.to_vec(), follow_up.to_vec()));
+        }
+    });
+    let run = {
+        let session = Arc::clone(&session);
+        tokio::spawn(async move { session.prompt("start", Vec::new()).await })
+    };
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    // Steered once the first request is held, so it waits for the next step.
+    while h.faux.call_count() < 1 {
+        assert!(tokio::time::Instant::now() < deadline, "never requested");
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    session.steer("steer me", Vec::new()).await.expect("steer");
+    assert_eq!(session.queued_messages().steering, ["steer me"]);
+    release.notify_one();
+    assert_eq!(run.await.expect("joined"), Ok(()));
+    assert!(session.queued_messages().is_empty());
+    let users: Vec<String> = session
+        .messages()
+        .iter()
+        .filter_map(|message| message.as_user())
+        .map(|user| bake_ai::utils::text::user_content_text(&user.content, ""))
+        .collect();
+    assert_eq!(users, ["start", "steer me"]);
+    assert_eq!(
+        bake_ai::utils::text::assistant_text(
+            session
+                .messages()
+                .last()
+                .and_then(|m| m.as_assistant())
+                .expect("assistant")
+        ),
+        "after steer"
+    );
+    // The steer reached the session file.
+    let file = std::fs::read_to_string(session.session_file().expect("file")).expect("read");
+    assert!(file.contains("steer me"), "{file}");
+
+    // Queued while idle, then cleared: nothing reaches the agent.
+    session
+        .follow_up("later", Vec::new())
+        .await
+        .expect("follow up");
+    assert!(session.agent().has_queued_messages());
+    let cleared = session.clear_queue();
+    assert_eq!(cleared.follow_up, ["later"]);
+    assert!(!session.agent().has_queued_messages());
+    subscription.unsubscribe();
+    assert_eq!(
+        *updates.lock().unwrap(),
+        [
+            (vec!["steer me".to_owned()], Vec::new()),
+            (Vec::new(), Vec::new()),
+            (Vec::new(), vec!["later".to_owned()]),
+            (Vec::new(), Vec::new()),
+        ]
+    );
+    session.shutdown().await;
+}
+
+// Bake: queue updates reach listeners with no lock held, so a listener may
+// read and clear the queue; after shutdown nothing more is queued.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn queue_listeners_may_use_the_queue_and_shutdown_refuses_more() {
+    let h = harness();
+    let manager = SessionManager::in_memory(Some("/tmp"), NewSessionOptions::default(), Vec::new())
+        .expect("session");
+    let session = Arc::new(
+        AgentSession::create(options(&h, manager, "/tmp"))
+            .await
+            .expect("session"),
+    );
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let subscription = {
+        let weak = Arc::downgrade(&session);
+        let seen = Arc::clone(&seen);
+        session.subscribe(move |event| {
+            if let SessionEvent::QueueUpdate { steering, .. } = event {
+                seen.lock().unwrap().push(steering.to_vec());
+                let Some(session) = weak.upgrade() else {
+                    return;
+                };
+                // Reentrant: reading, then clearing, from inside the update.
+                if !session.queued_messages().steering.is_empty() {
+                    session.clear_queue();
+                }
+            }
+        })
+    };
+    let steer = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        session.steer("one", Vec::new()),
+    )
+    .await
+    .expect("no deadlock");
+    assert_eq!(steer, Ok(()));
+    assert!(session.queued_messages().is_empty());
+    assert!(!session.agent().has_queued_messages());
+    // The clear announced after the update it ran in.
+    assert_eq!(*seen.lock().unwrap(), [vec!["one".to_owned()], Vec::new()]);
+    subscription.unsubscribe();
+    session.shutdown().await;
+    assert_eq!(
+        session.steer("late", Vec::new()).await,
+        Err("The session is shut down.".into())
+    );
+    assert_eq!(
+        session.follow_up("late", Vec::new()).await,
+        Err("The session is shut down.".into())
+    );
+    assert!(!session.agent().has_queued_messages());
+}
+
+// A listener that clears the queue during an update does not make a later
+// listener see the cleared queue before the update it was cleared in.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn every_listener_sees_queue_updates_in_order() {
+    let h = harness();
+    let manager = SessionManager::in_memory(Some("/tmp"), NewSessionOptions::default(), Vec::new())
+        .expect("session");
+    let session = Arc::new(
+        AgentSession::create(options(&h, manager, "/tmp"))
+            .await
+            .expect("session"),
+    );
+    let clearer = {
+        let weak = Arc::downgrade(&session);
+        session.subscribe(move |event| {
+            if let SessionEvent::QueueUpdate { steering, .. } = event
+                && let (false, Some(session)) = (steering.is_empty(), weak.upgrade())
+            {
+                session.clear_queue();
+            }
+        })
+    };
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let watcher = {
+        let seen = Arc::clone(&seen);
+        session.subscribe(move |event| {
+            if let SessionEvent::QueueUpdate { steering, .. } = event {
+                seen.lock().unwrap().push(steering.to_vec());
+            }
+        })
+    };
+    assert_eq!(session.steer("one", Vec::new()).await, Ok(()));
+    assert_eq!(*seen.lock().unwrap(), [vec!["one".to_owned()], Vec::new()]);
+    clearer.unsubscribe();
+    watcher.unsubscribe();
+    session.shutdown().await;
+}
+
 // Pi: "should persist message_end events in order with slow extension
 // handlers", with a slow session listener in place of the extension.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -407,7 +603,7 @@ async fn new_sessions_record_the_model_and_clamped_thinking_level() {
     .expect("session");
     assert_eq!(session.thinking_level(), ModelThinkingLevel::Low);
     session
-        .set_thinking_level(ModelThinkingLevel::High)
+        .set_thinking_level(ModelThinkingLevel::High, false)
         .await
         .expect("set");
     assert_eq!(
@@ -420,7 +616,7 @@ async fn new_sessions_record_the_model_and_clamped_thinking_level() {
     );
     // Setting the same level records nothing.
     session
-        .set_thinking_level(ModelThinkingLevel::High)
+        .set_thinking_level(ModelThinkingLevel::High, false)
         .await
         .expect("set");
     assert_eq!(entry_kinds(&session).len(), 3);
@@ -438,7 +634,7 @@ async fn prompts_need_a_model_with_auth() {
         .expect("session");
     let h = harness();
     let session = AgentSession::create(AgentSessionOptions {
-        registry: Arc::clone(&empty),
+        registry: Arc::clone(&empty).into(),
         model: None,
         ..options(&h, manager, "/tmp")
     })
@@ -460,7 +656,7 @@ async fn prompts_need_a_model_with_auth() {
     let manager = SessionManager::in_memory(Some("/tmp"), NewSessionOptions::default(), Vec::new())
         .expect("session");
     let session = AgentSession::create(AgentSessionOptions {
-        registry: empty,
+        registry: empty.into(),
         ..options(&h, manager, "/tmp")
     })
     .await
@@ -475,7 +671,7 @@ async fn prompts_need_a_model_with_auth() {
     );
     assert_eq!(
         session
-            .set_model(h.registry.model("faux", "faux-1").expect("model"))
+            .set_model(h.registry.model("faux", "faux-1").expect("model"), false)
             .await,
         Err("No API key for faux/faux-1".into())
     );
@@ -674,6 +870,19 @@ async fn a_failed_write_aborts_the_run() {
     written.sort();
     assert_eq!(written.len(), 2, "{written:?}");
     assert_eq!(format!("{}.lock", written[0]), written[1]);
+    // Bake: the file now misses a message, so later prompts and steers are
+    // refused instead of writing after the gap.
+    for refused in [
+        session.prompt("again", Vec::new()).await,
+        session.steer("again", Vec::new()).await,
+    ] {
+        let error = refused.expect_err("refused after a failed write");
+        assert!(
+            error.starts_with("The session file could not be written"),
+            "{error}"
+        );
+    }
+    assert_eq!(h.faux.call_count(), 1);
     session.shutdown().await;
 }
 
@@ -704,7 +913,7 @@ async fn shutdown_ends_a_request_waiting_for_auth() {
     let session = Arc::new(
         AgentSession::create(AgentSessionOptions {
             model: registry.model("slow", "slow-1"),
-            registry,
+            registry: registry.into(),
             ..options(&h, manager, "/tmp")
         })
         .await
@@ -817,4 +1026,150 @@ fn the_tool_argument_whitespace_setting_reaches_each_request() {
             .unwrap_or_else(std::sync::PoisonError::into_inner),
         [None, Some(64), Some(7)]
     );
+}
+
+// Pi v1.2.0 test/suite/agent-session-queue.test.ts: multiple steering and
+// follow-up messages in one-at-a-time/all mode, and queue removal before
+// message_start. A held tool makes queue admission deterministic.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pi_queue_modes_and_pending_message_start() {
+    use bake_agent::{AgentEvent, AgentTool, QueueMode};
+    use bake_ai::utils::text::{assistant_text, user_content_text};
+
+    for mode in [QueueMode::OneAtATime, QueueMode::All] {
+        for steer in [true, false] {
+            let dir = TempDir::new("pi-queue-modes");
+            let cwd = dir.path().to_string_lossy().into_owned();
+            let h = harness();
+            let started = Arc::new(Notify::new());
+            let release = Arc::new(Notify::new());
+            let tool = {
+                let started = Arc::clone(&started);
+                let release = Arc::clone(&release);
+                Arc::new(AgentTool::new(
+                    "wait",
+                    "Wait",
+                    "Wait for release",
+                    json!({"type": "object", "properties": {}}),
+                    move |_, _, signal, _| {
+                        let started = Arc::clone(&started);
+                        let release = Arc::clone(&release);
+                        Box::pin(async move {
+                            started.notify_one();
+                            if let Some(signal) = signal {
+                                tokio::select! {
+                                    () = release.notified() => {},
+                                    () = signal.cancelled() => return Err("cancelled".into()),
+                                }
+                            } else {
+                                release.notified().await;
+                            }
+                            Ok(AgentToolResult::text("released"))
+                        })
+                    },
+                ))
+            };
+            let mut responses = vec![
+                faux_assistant_blocks(
+                    vec![faux_tool_call("wait", json!({}), Some("wait-1"))],
+                    StopReason::ToolUse,
+                )
+                .into(),
+            ];
+            let mut expected = vec!["user:start", "assistant:"];
+            if !steer {
+                responses.push(faux_assistant_message("original complete").into());
+                expected.push("assistant:original complete");
+            }
+            if mode == QueueMode::All {
+                responses.push(faux_assistant_message("batch").into());
+                expected.extend(["user:one", "user:two", "assistant:batch"]);
+            } else {
+                responses.extend([
+                    faux_assistant_message("handled one").into(),
+                    faux_assistant_message("handled two").into(),
+                ]);
+                expected.extend([
+                    "user:one",
+                    "assistant:handled one",
+                    "user:two",
+                    "assistant:handled two",
+                ]);
+            }
+            h.faux.set_responses(responses);
+            let mut opts = options(&h, new_file_session(&dir), &cwd);
+            opts.settings.steering_mode = mode;
+            opts.settings.follow_up_mode = mode;
+            opts.tools = vec![tool];
+            opts.active_tool_names = vec!["wait".into()];
+            let session = Arc::new(AgentSession::create(opts).await.expect("session"));
+            let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let subscription = {
+                let weak = Arc::downgrade(&session);
+                let seen = Arc::clone(&seen);
+                session.subscribe(move |event| {
+                    if let SessionEvent::Agent(AgentEvent::MessageStart { message }) = event
+                        && let Some(user) = message.as_user()
+                        && ["one", "two"].contains(&user_content_text(&user.content, "").as_str())
+                        && let Some(session) = weak.upgrade()
+                    {
+                        seen.lock().unwrap().push(session.queued_messages());
+                    }
+                })
+            };
+            let run = async {
+                let (result, ()) = tokio::join!(session.prompt("start", Vec::new()), async {
+                    started.notified().await;
+                    for text in ["one", "two"] {
+                        if steer {
+                            session.steer(text, Vec::new()).await.expect("steer");
+                        } else {
+                            session
+                                .follow_up(text, Vec::new())
+                                .await
+                                .expect("follow up");
+                        }
+                    }
+                    release.notify_one();
+                });
+                result
+            };
+            let result = tokio::time::timeout(std::time::Duration::from_secs(10), run).await;
+            session.shutdown().await;
+            result.expect("queue run settled").expect("prompt");
+            subscription.unsubscribe();
+            let actual: Vec<String> = session
+                .messages()
+                .iter()
+                .filter_map(|message| {
+                    if let Some(user) = message.as_user() {
+                        Some(format!("user:{}", user_content_text(&user.content, "")))
+                    } else {
+                        message
+                            .as_assistant()
+                            .map(|assistant| format!("assistant:{}", assistant_text(assistant)))
+                    }
+                })
+                .collect();
+            assert_eq!(actual, expected, "mode={mode:?}, steer={steer}");
+            let remaining: Vec<Vec<String>> = seen
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|queued| {
+                    if steer {
+                        queued.steering.clone()
+                    } else {
+                        queued.follow_up.clone()
+                    }
+                })
+                .collect();
+            assert_eq!(
+                remaining,
+                [vec!["two".to_owned()], vec![]],
+                "mode={mode:?}, steer={steer}"
+            );
+            assert!(session.queued_messages().is_empty());
+        }
+    }
 }

@@ -13,11 +13,28 @@
 //! `$BAKE_HOME/settings.json` only. Bake 0.3's `settings.yaml` beside it is
 //! a different file, which this module does not read (D25).
 //!
+//! [`SettingsStore`] writes the file, porting the global-scope saves of
+//! `SettingsManager` (Pi v1.2.0, `06a466935536f8c9bcacb2d5efc0fc021be1bdff`)
+//! for the settings above that Pi has setters for, through the locked
+//! atomic backend of [`crate::json_store`].
+//!
 //! # Deviations from Pi
 //!
 //! - **No project settings.** Project files need Pi's project trust, which
 //!   is not ported.
-//! - **No writes.** Nothing saves settings.
+//! - **Writes are patches.** Pi's manager records which fields a session
+//!   changed and, when saving, copies those fields from its in-memory copy
+//!   over the file read under the lock. [`SettingsStore`] keeps no copy: each
+//!   setter changes its own members of the file read under the lock and
+//!   returns the settings now stored. A model's thinking level changes only
+//!   that model's entry of `modelThinkingLevels`, where Pi rewrites the whole
+//!   map from memory. Writes are synchronous and return their error instead
+//!   of Pi's write queue and `drainErrors`.
+//! - **Writes refuse a broken file.** Pi skips saving when the file failed
+//!   to load; a setter returns [`StoreError::Refused`] and leaves the file's
+//!   bytes as they are. Pi's legacy-key migrations (`queueMode` and others)
+//!   apply when reading but are not written back, so a save leaves members it
+//!   does not set as they were.
 //! - **Typed reads.** A member of the wrong type, or a thinking level Pi
 //!   does not define, is ignored where Pi would pass it on. The compaction
 //!   token settings are the exception: they are checked when read and an
@@ -34,6 +51,7 @@ use serde_json::{Map, Value};
 
 use crate::auth_storage::{read_text_file, strip_bom};
 use crate::compaction::CompactionSettings;
+use crate::json_store::{JsonFileStore, StoreError, remove_member, set_member};
 use crate::model_registry::resolver::parse_thinking_level;
 use crate::session::json::{js_number_to_string, js_truthy};
 use crate::session::paths::normalize_path;
@@ -83,8 +101,88 @@ pub struct Settings {
     /// tool call's arguments may end with (`config.ts`, a positive integer);
     /// `None` uses [`bake_ai::DEFAULT_MAX_TOOL_ARGUMENT_WHITESPACE`].
     pub max_tool_argument_whitespace: Option<usize>,
+    /// `cliproxyapi`: Bake's own member, the CLIProxyAPI route a Rust
+    /// login wrote, or `null` after a logout (see [`CliProxySetting`]).
+    pub cliproxyapi: CliProxySetting,
     /// Load errors, as Pi's settings diagnostics word them.
     pub warnings: Vec<String>,
+}
+
+/// The `cliproxyapi` member of `settings.json`, which `bake-rs` owns: a
+/// login writes the route there, a logout writes `null`, and a refresh
+/// replaces its `models`. Any present value, `null` included, takes the
+/// route's place in the read-only 0.3 import (D25), so a signed-out route
+/// is not imported again.
+#[derive(Clone, Default, PartialEq)]
+pub enum CliProxySetting {
+    /// No member: the 0.3 import applies.
+    #[default]
+    Absent,
+    /// `null`: signed out; no route.
+    SignedOut,
+    /// An object: the route as `CliProxyRoute::to_settings_json` writes it.
+    /// It is checked when it is used.
+    Route(Value),
+    /// Any other value: no route, with a warning.
+    Invalid,
+}
+
+impl std::fmt::Debug for CliProxySetting {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Absent => f.write_str("Absent"),
+            Self::SignedOut => f.write_str("SignedOut"),
+            Self::Route(route) => f.debug_tuple("Route").field(&RouteShape(route)).finish(),
+            Self::Invalid => f.write_str("Invalid"),
+        }
+    }
+}
+
+/// A saved route's shape for `Debug`: its member names and how many
+/// models it lists. Values stay out, since a route may hold header
+/// values.
+pub(crate) struct RouteShape<'a>(pub &'a Value);
+
+impl std::fmt::Debug for RouteShape<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let members: Vec<&str> = self
+            .0
+            .as_object()
+            .map(|object| object.keys().map(String::as_str).collect())
+            .unwrap_or_default();
+        let models = self.0.get("models").and_then(Value::as_array).map(Vec::len);
+        f.debug_struct("Route")
+            .field("members", &members)
+            .field("models", &models)
+            .finish()
+    }
+}
+
+impl CliProxySetting {
+    fn from_value(value: Option<&Value>) -> Self {
+        match value {
+            None => Self::Absent,
+            Some(Value::Null) => Self::SignedOut,
+            Some(route @ Value::Object(_)) => Self::Route(route.clone()),
+            Some(_) => Self::Invalid,
+        }
+    }
+}
+
+/// The `settings.json` member [`CliProxySetting`] reads.
+pub const CLIPROXYAPI_MEMBER: &str = "cliproxyapi";
+
+/// Pi's `setCompactionEnabled` on a settings value: `compaction.enabled`,
+/// keeping the section's other members.
+pub fn set_compaction_enabled_in(settings: &mut Settings, enabled: bool) {
+    let mut compaction = settings
+        .compaction
+        .as_ref()
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    compaction.insert("enabled".into(), Value::Bool(enabled));
+    settings.compaction = Some(Value::Object(compaction));
 }
 
 impl Default for Settings {
@@ -106,6 +204,7 @@ impl Default for Settings {
             retry: RetrySettings::default(),
             permission: None,
             max_tool_argument_whitespace: None,
+            cliproxyapi: CliProxySetting::Absent,
             warnings: Vec::new(),
         }
     }
@@ -293,6 +392,7 @@ impl Settings {
                 .and_then(Value::as_u64)
                 .filter(|max| *max >= 1)
                 .and_then(|max| usize::try_from(max).ok()),
+            cliproxyapi: CliProxySetting::from_value(object.get(CLIPROXYAPI_MEMBER)),
             warnings: Vec::new(),
         }
     }
@@ -400,11 +500,14 @@ impl Settings {
     /// The settings of a Bake home: `<home>/settings.json`, or defaults
     /// when it does not exist.
     pub fn load(home: &Path) -> Self {
-        let path = home.join("settings.json");
-        match read_text_file(&path, MAX_SETTINGS_FILE_BYTES) {
+        Self::load_file(&settings_path(home))
+    }
+
+    fn load_file(path: &Path) -> Self {
+        match read_text_file(path, MAX_SETTINGS_FILE_BYTES) {
             Ok(None) => Self::default(),
-            Ok(Some(text)) => Self::parse(&text, &path),
-            Err(error) => Self::failed(&path, &error.to_string()),
+            Ok(Some(text)) => Self::parse(&text, path),
+            Err(error) => Self::failed(path, &error.to_string()),
         }
     }
 
@@ -420,6 +523,204 @@ impl Settings {
             .iter()
             .find(|(known, _)| *known == key)
             .map(|(_, level)| *level)
+    }
+}
+
+/// The `settings.json` path under a Bake home.
+pub fn settings_path(home: &Path) -> PathBuf {
+    home.join("settings.json")
+}
+
+/// Pi's string for a queue mode.
+fn queue_mode_name(mode: QueueMode) -> &'static str {
+    match mode {
+        QueueMode::All => "all",
+        QueueMode::OneAtATime => "one-at-a-time",
+    }
+}
+
+/// Saves settings to `settings.json`, Pi's `SettingsManager` setters for the
+/// global scope (see the module's deviations).
+///
+/// Each setter reads the file under the lock, changes only the members it
+/// names, keeps every other member (including ones Bake does not read), and
+/// returns the settings as now stored. A setter that changes nothing does not
+/// write. The file is created owner-only when missing; a file that cannot be
+/// read as a JSON object is left untouched and the setter fails. A setter
+/// error for which [`StoreError::is_committed`] holds means the change was
+/// written but may not survive a power loss; [`SettingsStore::load`] reads
+/// it back. Setters block, and never touch Bake 0.3's `settings.yaml` (D25).
+#[derive(Debug, Clone)]
+pub struct SettingsStore {
+    file: JsonFileStore,
+}
+
+impl SettingsStore {
+    /// The store of a Bake home's `settings.json`.
+    pub fn new(home: &Path) -> Self {
+        Self {
+            file: JsonFileStore::new(settings_path(home), MAX_SETTINGS_FILE_BYTES),
+        }
+    }
+
+    /// The file it writes.
+    pub fn path(&self) -> &Path {
+        self.file.path()
+    }
+
+    /// The store with a failure injected into each update.
+    #[cfg(test)]
+    pub(crate) fn with_fault(mut self, fault: crate::json_store::Fault) -> Self {
+        self.file = self.file.with_fault(fault);
+        self
+    }
+
+    /// Pi's `reload`: the settings now in the file, read as
+    /// [`Settings::load`] reads them.
+    pub fn load(&self) -> Settings {
+        Settings::load_file(self.file.path())
+    }
+
+    fn update(
+        &self,
+        change: impl FnOnce(&mut Map<String, Value>) -> bool,
+    ) -> Result<Settings, StoreError> {
+        let updated = self.file.update(change)?;
+        match updated.unsynced {
+            Some(error) => Err(error),
+            None => Ok(Settings::from_object(&updated.object)),
+        }
+    }
+
+    /// Pi's `setDefaultProvider`.
+    pub fn set_default_provider(&self, provider: &str) -> Result<Settings, StoreError> {
+        self.update(|object| set_member(object, "defaultProvider", provider.into()))
+    }
+
+    /// Pi's `setDefaultModel`.
+    pub fn set_default_model(&self, model: &str) -> Result<Settings, StoreError> {
+        self.update(|object| set_member(object, "defaultModel", model.into()))
+    }
+
+    /// Pi's `setDefaultModelAndProvider`: both in one write.
+    pub fn set_default_model_and_provider(
+        &self,
+        provider: &str,
+        model: &str,
+    ) -> Result<Settings, StoreError> {
+        self.update(|object| {
+            let provider = set_member(object, "defaultProvider", provider.into());
+            set_member(object, "defaultModel", model.into()) | provider
+        })
+    }
+
+    /// Pi's `setDefaultThinkingLevel`.
+    pub fn set_default_thinking_level(
+        &self,
+        level: ModelThinkingLevel,
+    ) -> Result<Settings, StoreError> {
+        self.update(|object| set_member(object, "defaultThinkingLevel", level.as_str().into()))
+    }
+
+    /// Pi's `setModelThinkingLevel`: the level for `provider/id`, keeping the
+    /// other models' entries. A `modelThinkingLevels` that is not an object
+    /// is replaced.
+    pub fn set_model_thinking_level(
+        &self,
+        provider: &str,
+        id: &str,
+        level: ModelThinkingLevel,
+    ) -> Result<Settings, StoreError> {
+        let key = format!("{provider}/{id}");
+        self.update(|object| {
+            let levels = object
+                .entry("modelThinkingLevels")
+                .or_insert_with(|| Value::Object(Map::new()));
+            if !levels.is_object() {
+                *levels = Value::Object(Map::new());
+            }
+            match levels.as_object_mut() {
+                Some(levels) => set_member(levels, &key, level.as_str().into()),
+                None => false,
+            }
+        })
+    }
+
+    /// Pi's `removeModelThinkingLevel`: drops `provider/id`, and the map
+    /// when that leaves it empty.
+    pub fn remove_model_thinking_level(
+        &self,
+        provider: &str,
+        id: &str,
+    ) -> Result<Settings, StoreError> {
+        let key = format!("{provider}/{id}");
+        self.update(|object| {
+            let Some(levels) = object
+                .get_mut("modelThinkingLevels")
+                .and_then(Value::as_object_mut)
+            else {
+                return false;
+            };
+            let removed = remove_member(levels, &key);
+            if levels.is_empty() {
+                remove_member(object, "modelThinkingLevels");
+            }
+            removed
+        })
+    }
+
+    /// Pi's `setSteeringMode`.
+    pub fn set_steering_mode(&self, mode: QueueMode) -> Result<Settings, StoreError> {
+        self.update(|object| set_member(object, "steeringMode", queue_mode_name(mode).into()))
+    }
+
+    /// Pi's `setFollowUpMode`.
+    pub fn set_follow_up_mode(&self, mode: QueueMode) -> Result<Settings, StoreError> {
+        self.update(|object| set_member(object, "followUpMode", queue_mode_name(mode).into()))
+    }
+
+    /// Pi's `setCompactionEnabled`: `compaction.enabled`, keeping the
+    /// section's other members. A `compaction` that is not an object is
+    /// replaced.
+    pub fn set_compaction_enabled(&self, enabled: bool) -> Result<Settings, StoreError> {
+        self.update(|object| {
+            let section = object
+                .entry("compaction")
+                .or_insert_with(|| Value::Object(Map::new()));
+            if !section.is_object() {
+                *section = Value::Object(Map::new());
+            }
+            match section.as_object_mut() {
+                Some(section) => set_member(section, "enabled", Value::Bool(enabled)),
+                None => false,
+            }
+        })
+    }
+
+    /// Changes the `cliproxyapi` member ([`CliProxySetting`]) under the
+    /// file's lock: `change` sees the member as stored now (`None` when
+    /// absent) and returns `None` to leave the file as it is, `Some(None)`
+    /// to remove the member, or `Some(Some(value))` to set it. Returns the
+    /// settings now stored and whether the member changed. After
+    /// [`StoreError::is_committed`] the change is in the file. Bake's own
+    /// member; Pi has no setter for it.
+    pub fn update_cliproxyapi(
+        &self,
+        change: impl FnOnce(Option<&Value>) -> Option<Option<Value>>,
+    ) -> Result<(Settings, bool), StoreError> {
+        let mut written = false;
+        let settings = self.update(|object| {
+            written = match change(object.get(CLIPROXYAPI_MEMBER)) {
+                None => false,
+                Some(None) => remove_member(object, CLIPROXYAPI_MEMBER),
+                Some(Some(next)) => set_member(object, CLIPROXYAPI_MEMBER, next),
+            };
+            written
+        });
+        match settings {
+            Ok(settings) => Ok((settings, written)),
+            Err(error) => Err(error),
+        }
     }
 }
 
@@ -724,6 +1025,172 @@ mod tests {
                 }
             );
             assert_eq!(manager.branch_summary_reserve_tokens, 100);
+        }
+    }
+
+    // Ports of Pi v1.2.0 `test/settings-manager.test.ts` ("preserves
+    // externally added settings", "reload") and
+    // `test/settings-manager-bug.test.ts` for the setters Bake has. Not
+    // ported: project settings and trust, and the settings Bake does not
+    // read (theme, packages, and the TUI settings).
+    mod store {
+        use super::*;
+        use crate::test_support::TempDir;
+        use serde_json::json;
+
+        fn read(path: &Path) -> Value {
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
+        }
+
+        // A directory flush that fails after the replacement: the setter
+        // reports a committed error and the new value reads back.
+        #[test]
+        fn an_unsynced_write_is_reported_and_reads_back() {
+            use crate::json_store::{Fault, JsonFileStore};
+            let dir = TempDir::new("settings-unsynced");
+            let store = SettingsStore {
+                file: JsonFileStore::new(settings_path(dir.path()), MAX_SETTINGS_FILE_BYTES)
+                    .with_fault(Fault::DirectorySync),
+            };
+            let error = store.set_default_provider("cliproxyapi").unwrap_err();
+            assert!(error.is_committed(), "{error:?}");
+            assert_eq!(
+                store.load().default_provider.as_deref(),
+                Some("cliproxyapi")
+            );
+            assert_eq!(
+                read(store.path()),
+                json!({ "defaultProvider": "cliproxyapi" })
+            );
+        }
+
+        // Pi: "should preserve enabledModels when changing thinking level"
+        // and "should preserve file changes to packages array when changing
+        // unrelated setting".
+        #[test]
+        fn a_setter_keeps_external_and_unknown_settings() {
+            let dir = TempDir::new("settings-store");
+            let store = SettingsStore::new(dir.path());
+            assert_eq!(store.path(), dir.join("settings.json"));
+            std::fs::write(
+                store.path(),
+                r#"{"theme":"dark","defaultModel":"claude-sonnet"}"#,
+            )
+            .unwrap();
+            // Another process edits the file after this one started.
+            std::fs::write(
+                store.path(),
+                r#"{"theme":"dark","defaultModel":"claude-sonnet","enabledModels":["claude-opus-4-5","gpt-5.2-codex"],"packages":["npm:pi-mcp-adapter"],"queueMode":"all"}"#,
+            )
+            .unwrap();
+            let settings = store
+                .set_default_thinking_level(ModelThinkingLevel::High)
+                .unwrap();
+            assert_eq!(
+                settings.default_thinking_level,
+                Some(ModelThinkingLevel::High)
+            );
+            assert_eq!(settings.steering_mode, QueueMode::All);
+            assert_eq!(
+                read(store.path()),
+                json!({
+                    "theme": "dark", "defaultModel": "claude-sonnet",
+                    "enabledModels": ["claude-opus-4-5", "gpt-5.2-codex"],
+                    "packages": ["npm:pi-mcp-adapter"], "queueMode": "all",
+                    "defaultThinkingLevel": "high",
+                })
+            );
+        }
+
+        // Pi: "should let in-memory changes override file changes for same
+        // key", and persistence across a restart.
+        #[test]
+        fn setters_persist_and_the_last_write_of_a_key_wins() {
+            let dir = TempDir::new("settings-persist");
+            let store = SettingsStore::new(dir.path());
+            store
+                .set_default_model_and_provider("cliproxyapi", "gpt-5")
+                .unwrap();
+            std::fs::write(
+                store.path(),
+                r#"{"defaultProvider":"external","defaultModel":"external-model","x":1}"#,
+            )
+            .unwrap();
+            store.set_default_provider("cliproxyapi").unwrap();
+            store.set_steering_mode(QueueMode::All).unwrap();
+            store.set_follow_up_mode(QueueMode::All).unwrap();
+            store
+                .set_model_thinking_level("p", "m", ModelThinkingLevel::Low)
+                .unwrap();
+            let settings = store.set_default_model("gpt-5").unwrap();
+            let loaded = Settings::load(dir.path());
+            assert_eq!(settings, loaded);
+            assert_eq!(loaded.default_provider.as_deref(), Some("cliproxyapi"));
+            assert_eq!(loaded.default_model.as_deref(), Some("gpt-5"));
+            assert_eq!(loaded.steering_mode, QueueMode::All);
+            assert_eq!(loaded.follow_up_mode, QueueMode::All);
+            assert_eq!(
+                loaded.model_thinking_level("p", "m"),
+                Some(ModelThinkingLevel::Low)
+            );
+            assert_eq!(read(store.path())["x"], 1);
+            assert_eq!(store.load(), loaded);
+        }
+
+        // Pi's `removeModelThinkingLevel`, keyed per model here.
+        #[test]
+        fn model_thinking_levels_change_one_entry() {
+            let dir = TempDir::new("settings-levels");
+            let store = SettingsStore::new(dir.path());
+            std::fs::write(store.path(), r#"{"modelThinkingLevels":"broken"}"#).unwrap();
+            store
+                .set_model_thinking_level("a", "x/y", ModelThinkingLevel::Max)
+                .unwrap();
+            std::fs::write(
+                store.path(),
+                r#"{"modelThinkingLevels":{"a/x/y":"max","other/m":"low"}}"#,
+            )
+            .unwrap();
+            let settings = store.remove_model_thinking_level("a", "x/y").unwrap();
+            assert_eq!(settings.model_thinking_level("a", "x/y"), None);
+            assert_eq!(
+                read(store.path()),
+                json!({ "modelThinkingLevels": { "other/m": "low" } })
+            );
+            store.remove_model_thinking_level("other", "m").unwrap();
+            assert_eq!(read(store.path()), json!({}));
+        }
+
+        // Pi: "should keep previous settings and report the file path when
+        // the file is invalid", with the write refused and the bytes kept.
+        #[test]
+        fn a_broken_file_is_not_overwritten() {
+            let dir = TempDir::new("settings-broken");
+            let store = SettingsStore::new(dir.path());
+            for broken in ["{\"theme\":", "[]", "null"] {
+                std::fs::write(store.path(), broken).unwrap();
+                let error = store.set_default_model("m").unwrap_err();
+                assert!(matches!(error, StoreError::Refused { .. }), "{error:?}");
+                assert_eq!(std::fs::read_to_string(store.path()).unwrap(), broken);
+                assert_eq!(store.load().warnings.len(), 1);
+            }
+        }
+
+        #[test]
+        fn an_unchanged_value_does_not_create_the_file() {
+            let dir = TempDir::new("settings-noop");
+            let store = SettingsStore::new(dir.path());
+            store.remove_model_thinking_level("p", "m").unwrap();
+            assert!(!store.path().exists());
+            store.set_default_model("m").unwrap();
+            let modified = std::fs::metadata(store.path()).unwrap().modified().unwrap();
+            let text = std::fs::read_to_string(store.path()).unwrap();
+            store.set_default_model("m").unwrap();
+            assert_eq!(std::fs::read_to_string(store.path()).unwrap(), text);
+            assert_eq!(
+                std::fs::metadata(store.path()).unwrap().modified().unwrap(),
+                modified
+            );
         }
     }
 }

@@ -1,0 +1,376 @@
+{
+  "schema": "bake/rust-migration/qualification-attempt",
+  "version": 1,
+  "id": "2026-10-14-macos-native-r2",
+  "scope": "01",
+  "status": "partial",
+  "recordedOn": "2026-10-14",
+  "summary": "macOS native preflight on Darwin x86_64 passed all three native gates for snapshot 49b7d80811a03d4b3f54bd8191fc182469b33f81 (tree 555152ed6d000628dcddfce613569a78f08a563e). This is a git stash snapshot that bun run preflight:mac made of e32476594bace82b57980fe8e1d57e48e3c4c53c plus the working tree's tracked edits; it is not a branch commit, and it is not e32476594bace82b57980fe8e1d57e48e3c4c53c itself. The snapshot includes the final refused-connection test design: the OS refusal is injected into the real error mapping, because macOS times out a connection to a bound, never-listening port. The same rust/, scripts/, and evals/ files passed the Linux native preflight and a 40-run loop of the library tests. It qualifies only that snapshot on that Intel Mac; arm64, scope acceptance, and a committed candidate are missing.",
+  "supersedes": [
+    "2026-10-14-macos-native-r1"
+  ],
+  "provenance": {
+    "base": "e32476594bace82b57980fe8e1d57e48e3c4c53c",
+    "candidate": "49b7d80811a03d4b3f54bd8191fc182469b33f81",
+    "oracle": {
+      "notApplicable": "D32: no TypeScript runtime arm."
+    }
+  },
+  "support": [
+    {
+      "id": "d34-rust-first-develop",
+      "reference": "docs/roadmap/rust-0.4/scope-00/support.md"
+    }
+  ],
+  "fixtures": {
+    "files": [
+      {
+        "path": "evals/agent-loop/native-arm-smoke.ts",
+        "role": "fixture-definition-source",
+        "sha256": "00d320f2ca2e431f4107d735f74f70dd2f77b4d941a6d55721f0e1cfc3c10bc2"
+      },
+      {
+        "path": "evals/agent-loop/native-fixture.ts",
+        "role": "fixture-definition-source",
+        "sha256": "4b84968c7909dc7aa51f92a92779915758a13ff0e38e3c5aa083adba13379970"
+      },
+      {
+        "path": "evals/agent-loop/native-smoke.ts",
+        "role": "fixture-definition-source",
+        "sha256": "47217921444353ff3103c93fbfccd8c506f057fd40987bacba4a9c252f3ab18d"
+      },
+      {
+        "path": "rust/Cargo.lock",
+        "role": "fixture-definition-source",
+        "sha256": "b1582e955fd9fdb15908bf9894ddf88481d34f8e126d813782b89c489cb3ad77"
+      },
+      {
+        "path": "rust/crates/bake-coding-agent/src/cliproxyapi/fetch.rs",
+        "role": "fixture-definition-source",
+        "sha256": "8e6980173ee2a6672835d80d17e6736283783871e303599e04d8bdd17bc31827"
+      },
+      {
+        "path": "rust/crates/bake-coding-agent/src/cliproxyapi/fetch/tests.rs",
+        "role": "fixture-definition-source",
+        "sha256": "79a1299ede1dc1e083b1f74bfc1d1b31354087508424b26a1ccfe04bd40591f4"
+      },
+      {
+        "path": "rust/rust-toolchain.toml",
+        "role": "fixture-definition-source",
+        "sha256": "2ad6f15416572b4836585087f1d4abc53b8fa2dbd616f8dacfaa587ed6714228"
+      },
+      {
+        "path": "scripts/mac-preflight.sh",
+        "role": "fixture-definition-source",
+        "sha256": "3230cbf5a6e0c1ce4586e0fa44cbab22ffee997b93861433718e52f1f5ddbdee"
+      },
+      {
+        "path": "scripts/preflight.ts",
+        "role": "fixture-definition-source",
+        "sha256": "48cb1c8be49a6fc77b9593effd655d7dd0300db457f561dd2f8b2fdd61dd4af3"
+      },
+      {
+        "path": "scripts/rust-preview-pty.ts",
+        "role": "fixture-definition-source",
+        "sha256": "405a539df768cdc8bb3e7dfcf66a101b840a253895f6977a41b15caeeae20102"
+      }
+    ],
+    "digest": "771f32b06867330ffd9769da5095bea17fd2530db3b5c6130cc4e4f99acf4fbe"
+  },
+  "artifacts": {
+    "missing": "The Mac run keeps no binary hash; mac-r2-rust-eval.log reports the fake arm digest only inside the smoke output."
+  },
+  "commands": [
+    {
+      "id": "mac-native-r2",
+      "argv": [
+        "bun",
+        "run",
+        "preflight",
+        "--only",
+        "native"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "darwin",
+        "arch": "x64",
+        "runner": "macpro over SSH (bun run preflight:mac); Darwin x86_64, Intel Xeon W-3275M, macOS 26.7.1 (25G241)"
+      },
+      "tools": {
+        "bun": "1.4.2",
+        "node": "v26.9.0",
+        "rustc": "1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "1.99.0 (5f94df478 2026-08-27)",
+        "git": "2.55.0"
+      },
+      "testedCommit": "49b7d80811a03d4b3f54bd8191fc182469b33f81",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/evidence/mac-r2-last.log",
+        "sha256": "9430150031d796db8178acf660e20640245f294a06c810bc8186d7b421235b0f"
+      }
+    },
+    {
+      "id": "linux-native-final",
+      "argv": [
+        "bun",
+        "run",
+        "preflight",
+        "--only",
+        "native"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local WSL2; kernel 6.18.40.1-microsoft-standard-WSL2; 32 threads"
+      },
+      "tools": {
+        "rustc": "1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3 (package.json pins bun@1.4.2)",
+        "node": "v26.10.0",
+        "git": "2.43.0"
+      },
+      "testedCommit": {
+        "missing": "Working tree of e32476594bace82b57980fe8e1d57e48e3c4c53c whose rust/, scripts/, and evals/ files equal tree 555152ed6d000628dcddfce613569a78f08a563e (git diff --stat empty for those paths); documentation differed. Not a committed checkout."
+      },
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/evidence/linux-native-final.json",
+        "sha256": "e0fe4b2a34c8f95d69d74c4c405bb35a4655adce64e24e67212bfe3af95586e1"
+      }
+    },
+    {
+      "id": "lib-loop-final",
+      "argv": [
+        ".preflight/rust-orchestrator/evidence/lib-loop.sh",
+        "40"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local WSL2; kernel 6.18.40.1-microsoft-standard-WSL2; 32 threads"
+      },
+      "tools": {
+        "rustc": "1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3 (package.json pins bun@1.4.2)",
+        "node": "v26.10.0",
+        "git": "2.43.0"
+      },
+      "testedCommit": {
+        "missing": "Same working tree as linux-native-final; not a committed checkout."
+      },
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 40,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/evidence/lib-loop-final.json",
+        "sha256": "90945c20ee1dddb3e1e05f0cb35876bd916a91b268bd9edffc2809788d1b9c93"
+      }
+    },
+    {
+      "id": "control-refused-code",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "bake-coding-agent",
+        "--lib",
+        "cliproxyapi::fetch::tests::a_refused"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local WSL2; kernel 6.18.40.1-microsoft-standard-WSL2; 32 threads"
+      },
+      "tools": {
+        "rustc": "1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3 (package.json pins bun@1.4.2)",
+        "node": "v26.10.0",
+        "git": "2.43.0"
+      },
+      "testedCommit": {
+        "missing": "Working tree above with one deliberate edit to fetch.rs (.preflight/rust-orchestrator/evidence/nc-e-refused-code.diff), then restored and hash-checked."
+      },
+      "expectedExit": 101,
+      "actualExit": 101,
+      "counts": {
+        "passed": 0,
+        "failed": 1,
+        "skipped": 387,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/evidence/nc-e-refused-code.json",
+        "sha256": "88d957394286a1b430ebe5f364ec5d9dbc0f8f768beeb5615440688a88fd2a64"
+      }
+    },
+    {
+      "id": "control-quote-client-line",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "bake-coding-agent",
+        "--lib",
+        "cliproxyapi::fetch::tests::a_refused"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local WSL2; kernel 6.18.40.1-microsoft-standard-WSL2; 32 threads"
+      },
+      "tools": {
+        "rustc": "1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3 (package.json pins bun@1.4.2)",
+        "node": "v26.10.0",
+        "git": "2.43.0"
+      },
+      "testedCommit": {
+        "missing": "Working tree above with one deliberate edit to fetch.rs (.preflight/rust-orchestrator/evidence/nc-f-quote-client-line.diff), then restored and hash-checked."
+      },
+      "expectedExit": 101,
+      "actualExit": 101,
+      "counts": {
+        "passed": 0,
+        "failed": 1,
+        "skipped": 387,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/evidence/nc-f-quote-client-line.json",
+        "sha256": "b3492d4fd95f7fc6e2ec5917489a56202ce43182ad5ba1c4247ea1fe667e656d"
+      }
+    }
+  ],
+  "results": [
+    {
+      "id": "mac-rust",
+      "behavior": "On the Mac, check:rust passed in 186.4 s: cargo fmt, clippy -D warnings, cargo test --workspace (1259 passed, 0 failed, 1 ignored across 28 targets; the ignored test is the live CLIProxyAPI home test), and build. Within it the session target passed 174 tests including all 12 writer_exclusion tests (killed and exited holder processes taken over), bake-cli's a_held_session_is_refused passed, and both cliproxyapi::fetch::tests::a_refused_connection_asks_for_the_url_again and says_which_field_to_ask_again_and_words_each_failure passed. Counts in the command describe gates.",
+      "owner": "rust/",
+      "report": ".preflight/rust-orchestrator/evidence/mac-r2-rust.log",
+      "commands": [
+        "mac-native-r2"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "mac-pty-eval",
+      "behavior": "rust-pty passed with 20 preview PTY cases and 2 skipped (the two coalesced-resize barrier cases need Linux /proc process state). rust-eval passed 14 lines: the 4 native fixture cases (tamper-tests, claim-only, and edit-exit1 rejected) and the native bake-rs arm smoke on darwin x64 (8 samples, 22 requests, evaluator ~/.agents isolation, stray context-file refusal).",
+      "owner": "evals/agent-loop/native-smoke.ts",
+      "report": ".preflight/rust-orchestrator/evidence/mac-r2-rust-eval.log",
+      "commands": [
+        "mac-native-r2"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "refusal-design",
+      "behavior": "The refused-connection case no longer acquires a port: no loopback port can be held refusing on every OS (a freed port can be taken by any process on the host, and macOS times out a never-listening bound socket). fetch.rs now reads any error chain in transport_detail and builds the unreachable error in unreachable_error, both private and behavior-preserving; the test passes an io::ErrorKind::ConnectionRefused inside an error chain shaped like reqwest's and asserts the exact field, \"Could not reach 127.0.0.1:4141 (ECONNREFUSED)\", the message, and that the key is never quoted. Redirect, timeout, 401, 403, 404, other status, and non-JSON cases still run against a real loopback server. On Linux the native preflight passed (1285 Cargo tests, 1 ignored) and 40 of 40 library test runs passed. The earlier 16 of 40 and 0 of 40 loops in 2026-10-14-foundation-native-checks describe the candidate and the first fix, not this design.",
+      "owner": "rust/crates/bake-coding-agent/src/cliproxyapi/fetch.rs",
+      "report": ".preflight/rust-orchestrator/evidence/lib-loop-final.json",
+      "commands": [
+        "linux-native-final",
+        "lib-loop-final"
+      ],
+      "outcome": "pass"
+    }
+  ],
+  "negativeControls": [
+    {
+      "id": "refused-maps-to-reset",
+      "defect": "transport_detail mapped ConnectionRefused to ECONNRESET.",
+      "assertion": "a_refused_connection_asks_for_the_url_again failed: left \"(ECONNRESET)\", right \"(ECONNREFUSED)\" (exit 101).",
+      "observed": "rejected",
+      "commands": [
+        "control-refused-code"
+      ]
+    },
+    {
+      "id": "detail-quotes-client-line",
+      "defect": "transport_detail appended the client error's own line, which names the URL and, in the test chain, the key.",
+      "assertion": "a_refused_connection_asks_for_the_url_again failed on the exact text, which showed the leaked key (exit 101).",
+      "observed": "rejected",
+      "commands": [
+        "control-quote-client-line"
+      ]
+    }
+  ],
+  "missingEvidence": [
+    {
+      "what": "A committed candidate",
+      "reason": "49b7d80811a03d4b3f54bd8191fc182469b33f81 is a stash snapshot; the fix and records are uncommitted. The checks must be repeated on the commit that lands.",
+      "owner": "unassigned"
+    },
+    {
+      "what": "Real OS refusal through reqwest",
+      "reason": "The refusal is injected below the error mapping; reqwest still produces the io::Error chain on a real refusal, which this record does not observe on any OS.",
+      "owner": "rust/crates/bake-coding-agent/src/cliproxyapi/fetch.rs"
+    },
+    {
+      "what": "macOS arm64 and Linux arm64",
+      "reason": "The Mac is Intel x86_64; no arm64 host ran.",
+      "owner": "unassigned"
+    },
+    {
+      "what": "Windows run of this snapshot",
+      "reason": "Windows CI ran only the PR #215 tree; the new test has not run on Windows.",
+      "owner": ".github/workflows/ci.yml"
+    },
+    {
+      "what": "Two macOS PTY cases",
+      "reason": "The coalesced-resize barrier cases need Linux /proc and skip on macOS.",
+      "owner": "scripts/rust-preview-pty.ts"
+    },
+    {
+      "what": "Session crash and recovery on macOS",
+      "reason": "Only the writer-lock and written-torn-tail tests ran; no process was killed mid-append and the crash-recovery matrix is not implemented.",
+      "owner": "docs/roadmap/rust-0.4/durable-execution.md"
+    }
+  ],
+  "evalRecords": {
+    "notApplicable": "No model-visible change."
+  },
+  "performanceRecords": {
+    "notApplicable": "No performance qualification attempted; gate durations are not a baseline."
+  },
+  "rollback": {
+    "observed": "The runner checked out the detached snapshot in a new Mac directory (bake-ci-foundation-20261014-r2), leaving the first run's directory unchanged; git status there was empty after the run. Each local control edit was restored and fetch.rs hash-checked against its original.",
+    "commands": [
+      "mac-native-r2",
+      "control-refused-code",
+      "control-quote-client-line"
+    ]
+  },
+  "review": {
+    "missing": "No reviewer has accepted this scope. Green checks and this record do not establish scope acceptance."
+  }
+}

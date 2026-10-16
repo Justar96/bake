@@ -13,6 +13,7 @@
 //! | [`entry`] | `core/session-manager.ts` (entry and header types) |
 //! | [`file`](mod@file) | `core/session-manager.ts` (parsing, loading, migration, discovery) |
 //! | [`list`] | `core/session-manager.ts` (`buildSessionInfo`, `list`, `listAll`) |
+//! | [`search`] | `modes/interactive/components/session-selector-search.ts` (v1.2.0) |
 //! | [`messages`] | `core/messages.ts` |
 //! | [`cwd`] | `core/session-cwd.ts` |
 //! | [`paths`] | `utils/paths.ts` (`normalizePath`, `resolvePath`) |
@@ -104,6 +105,7 @@ pub mod list;
 pub mod manager;
 pub mod messages;
 pub mod paths;
+pub mod search;
 pub mod time;
 
 use std::fmt;

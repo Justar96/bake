@@ -10,6 +10,7 @@ pub mod activity;
 pub mod completion;
 pub mod composer;
 mod copy;
+pub mod dialog;
 pub mod diff;
 pub mod editor;
 pub mod frame;

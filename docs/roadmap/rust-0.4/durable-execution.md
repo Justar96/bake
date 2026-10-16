@@ -2,15 +2,16 @@
 
 ## Summary
 
-Shape the native runtime so that every unit of agent work (a model request, a tool call, a compaction, a child agent, a background job) is an owned, typed task whose start, progress, and outcome are recoverable from the Session log. This page takes the task-and-scheduler model of Pi Durable as a design reference and applies it inside Bake's retained contracts: Session format 3 ([D4](scope-00/support.md#decision-register)), one serialized owner per agent, and reconstructable model requests. It adds internal structure and crash-recovery proofs to scopes 03 and 05–13. Changes the model or a released reader could observe are listed separately as post-0.4.0 candidates, each needing its own decision and paired eval.
+Shape the native runtime so that every unit of agent work (a model request, a tool call, a compaction, a child agent, a background job) is an owned, typed task whose start, progress, and outcome are recoverable from the session file. This page takes the task-and-scheduler model of Pi Durable as a design reference and applies it inside Bake's retained contracts: Pi's session format ([D32](scope-00/support.md#decision-register)), one serialized owner per agent, and model requests reconstructable from the session file. It adds internal structure and crash-recovery proofs to scopes 02 to 13. Changes the model or Pi's session reader could observe are listed separately as post-0.4.0 candidates, each needing its own decision and paired eval.
 
-**Status: proposed direction, 2026-10-08.** Nothing here is implemented or qualified, and it changes no support decision. [D22](scope-00/support.md#decision-register) made Pi the primary port source while keeping Session format 3 and the model-visible surface; [D32](scope-00/support.md#decision-register) has since replaced Bake's Session format with Pi's session format, so read "Session log" below as that file. Pi Durable's storage, API, and entry kinds are not adopted by this page.
+**Status: proposed direction, 2026-10-08; reconciled with [D22](scope-00/support.md#decision-register), [D32](scope-00/support.md#decision-register), and [D33](scope-00/support.md#decision-register) on 2026-10-14.** The rules below are requirements for the native runtime, and none is qualified. [Current implementation](#current-implementation) says which already hold in `bake-rs` and which test, if any, shows it; [Crash-recovery matrix](#crash-recovery-matrix) marks each kill point's evidence. This page changes no support decision. Bake Session format 3 and its events (`tool/call`, `assistant/attempt`, `compaction/start`, and the rest) are not written or read by 0.4; where this page names them, it describes 0.3. Pi Durable's storage, API, and entry kinds are not adopted.
 
 ## Table of Contents
 
 - [Sources](#sources)
-- [What Bake already records](#what-bake-already-records)
+- [What 0.3 recorded and what Pi's session records](#what-03-recorded-and-what-pis-session-records)
 - [Design rules for 0.4.0](#design-rules-for-040)
+- [Current implementation](#current-implementation)
 - [Post-0.4.0 candidates](#post-040-candidates)
 - [Non-goals](#non-goals)
 - [Scope additions](#scope-additions)
@@ -27,39 +28,40 @@ Shape the native runtime so that every unit of agent work (a model request, a to
 
 The comparison's central point applies directly to Bake. A session-based harness persists the conversation, but the work in flight lives in process memory: after a crash the harness can show what happened, yet it cannot tell which work was unfinished or whether repeating it is safe. Pi Durable persists execution state too, so a new process can find unfinished work and continue it. Pi Durable is experimental, its source was read but not run, and its API may change; record a fresh revision before adopting any specific behavior.
 
-## What Bake already records
+## What 0.3 recorded and what Pi's session records
 
-Bake 0.3 is closer to durable execution than a typical session harness. The Rust port must keep these properties and should build on them rather than add a second record of the same facts.
+Bake 0.3 was closer to durable execution than a typical session harness. Under [D32](scope-00/support.md#decision-register) its Session events are not carried forward, but the properties they gave are obligations the native runtime keeps inside Pi's format. Pi's session file holds one JSON line per entry, linked by `id` and `parentId`: `message` entries (user, assistant with its `toolCall` blocks, and `toolResult` messages), `compaction` and `branch_summary` entries, model and thinking-level changes, labels, session info, context edits, and `custom` entries that never reach the model.
 
-| Durable execution concern | Bake 0.3 behavior | Gap the native design should close |
-|---|---|---|
-| Tool intent before effect | `tool/call` is logged before dispatch; [crash repair](../../../packages/core/session/src/repair.ts) closes an unmatched call with `TOOL_NOT_STARTED` or `TOOL_OUTCOME_UNKNOWN` and tells the model not to retry side effects blindly | Tools carry no declared replay class, so the runtime cannot reason about safety itself; the decision always goes to the model |
-| Interrupted turns | Synthetic closers end the open step and turn with `interrupted` | Recovery runs on load; an interrupted run does not continue unless the user resubmits |
-| Partial model output | `assistant/attempt` records stream records of an attempt | Scope 06 must state how much of a cut-off stream reaches the log and when |
-| Compaction | `compaction/start`, `compaction/summary`, `compaction/summary-error`, and `compaction/end` are logged | The summary is produced on the agent's critical path |
-| Child agents | `subagent/catalog`, `subagent/descriptor`, and routing decisions are logged; `subagent/start` and `subagent/end` are in-process events, and `subagent/not-resumable` is a control notice | Scope 11 must inventory which child state survives a restart |
-| Background jobs | [`jobs-local`](../../../packages/jobs/README.md) runs and stores jobs in this process | Jobs do not survive the process |
-| UI state | The terminal renders authoritative projections ([analysis](analysis.md#execution-and-ownership)) | None in kind; the native transport should make the projection the only thing a client attaches to |
+| Concern | Bake 0.3 | Pi's session in `bake-rs` | Gap the native design closes |
+|---|---|---|---|
+| Tool intent before effect | `tool/call` logged before dispatch; [crash repair](../../../packages/core/session/src/repair.ts) closed an unmatched call with `TOOL_NOT_STARTED` or `TOOL_OUTCOME_UNKNOWN` | In a persisted session, the assistant `message` holding the `toolCall` blocks is appended and synced before its tools run; if that append fails, the agent is aborted and tool preparation, which checks the abort first, runs no tool. No entry records that a call started. When the next request is built, Pi's `transformMessages` answers a call with no `toolResult` with a synthetic error result, `No result provided`, in the request only; the file is not changed. An assistant message that ended in an error or abort is dropped from the request with its calls | No started/not-started distinction and no replay class, so neither the runtime nor the model can tell whether an effect happened |
+| Interrupted turns | Synthetic closers ended the open step and turn | The file ends at the last synced entry; the next request is rebuilt from the path to the leaf | An interrupted run does not continue unless the user resubmits |
+| Partial model output | `assistant/attempt` recorded an attempt's stream | An assistant message is appended only at its end, including one that ended in an error or abort; a failed attempt Pi retries stays in the file and is omitted from context by a context edit | A crash mid-stream loses the partial output; scope 06 defines what reaches the file |
+| Compaction | `compaction/start` to `compaction/end` logged | A `compaction` entry is appended once its summary exists | The summary runs on the agent's critical path |
+| Child agents | `subagent/catalog` and descriptors logged | Not implemented | Scope 11 decides which child state survives a restart |
+| Background jobs | [`jobs-local`](../../../packages/jobs/README.md) ran them in-process | Not implemented | Jobs do not survive the process |
+| Decisions | Approvals and hook decisions were logged before their effects | The session's permission settings are `bake.permission` custom entries; print mode has no answerer, so escalations are refused and nothing is asked | Interactive approvals and their logged decisions are not implemented |
+| UI state | The terminal rendered authoritative projections ([analysis](analysis.md#execution-and-ownership)) | The terminal preview has no agent connection | The native transport should make the projection the only thing a client attaches to |
 
 ## Design rules for 0.4.0
 
-These rules change internal structure, not the model surface or the Session format. Each is testable through the matrix below.
+These rules change internal structure, not the model surface or the session format. Each is testable through the matrix below.
 
 ### 1. Work is an owned task with a recoverable status
 
 Model the runtime's work as typed tasks with explicit states: *pending* (admitted but not started), *running*, *waiting* (on named child tasks, with an all-settled or fail-fast policy), *completing* (outcome decided, owned work still draining), and *terminal* (completed, failed, or aborted). In Rust these are values held by the agent's single owner task, not free-floating futures; each running task has one `JoinHandle` and one cancellation token derived from its owner.
 
-The durable footprint of a task is the Session events Bake already writes. A task's recovered status must be derivable from the log alone: a tool call the open step requested without a `tool/result` is a pending tool task, started if its `tool/call` is recorded; an open `compaction/start` is an unfinished compaction; and so on. Scope 02 defines this derivation as a pure projection beside request reconstruction; the projection, not process memory, answers "what was unfinished".
+The durable footprint of a task is the session entries the runtime already writes. A task's recovered status must be derivable from the file alone: a `toolCall` on the path to the leaf without a matching `toolResult` is an unfinished tool task, and so on. Scope 02 defines this derivation as a pure projection beside the context rebuild; the projection, not process memory, answers "what was unfinished".
 
 ### 2. Record intent before effect, and classify replay
 
-Keep the existing order: commit the call before any effect, commit the result before the next step uses it. Give every native tool an internal replay class:
+Keep the order: persist the assistant message that requests a call before any effect, and persist the result before the next request uses it. Give every native tool an internal replay class:
 
 | Class | Meaning | 0.4.0 recovery |
 |---|---|---|
-| `safe` | Rerunning has no external effect beyond the first run (read, glob, search, fetch) | Same as 0.3: report `TOOL_OUTCOME_UNKNOWN` to the model |
-| `idempotent` | Rerunning with the same key has the same effect (a write of identical bytes, a child lookup by owner) | Same as 0.3 |
-| `report` | Effects may have happened and repeating could duplicate them (shell, edits with relative changes, external deploys) | Same as 0.3 |
+| `safe` | Rerunning has no external effect beyond the first run (read, glob, search, fetch) | Pi's synthetic error result in the next request; no automatic rerun |
+| `idempotent` | Rerunning with the same key has the same effect (a write of identical bytes, a child lookup by owner) | Pi's synthetic error result; no automatic rerun |
+| `report` | Effects may have happened and repeating could duplicate them (shell, edits with relative changes, external deploys) | Pi's synthetic error result; no automatic rerun |
 
 In 0.4.0 the class is internal metadata with tests, not a behavior change: automatic rerun alters what the model sees and is a [post-0.4.0 candidate](#post-040-candidates). The native plugin API ([D6](scope-00/support.md#decision-register)) requires every contributed tool to declare a class and defaults to `report`. MCP tools default to `report`, matching the [Pi reference](pi-reference.md#native-mcp-direction) rule against retrying calls whose outcome is uncertain.
 
@@ -67,15 +69,15 @@ In 0.4.0 the class is internal metadata with tests, not a behavior change: autom
 
 Agents, turns, model requests, tool calls, processes, child agents, jobs, and timers form one tree. Aborting a node aborts what it owns bottom-up, and a node becomes terminal only after its owned work has finished, so each owner undoes or reports its own effects before its parent proceeds. This is the [defensive patterns](../../defensive-patterns.md) obligation made structural.
 
-Mark the boundary between foreground and background work explicitly. Foreground work belongs to the current turn: the agent is idle only once it is done, and Esc cancels it. Background work (a job, a scheduled follow-up, a detached child) belongs to the agent but not the turn: the turn can end while it runs, an ordinary cancel leaves it alone, and only disposing the agent or cancelling that node stops it. Each existing Bake behavior (Esc during a child call, `/jobs` kill, goal continuation) is mapped onto this tree in scope 11, and the mapping must reproduce 0.3's observable outcome.
+Mark the boundary between foreground and background work explicitly. Foreground work belongs to the current turn: the agent is idle only once it is done, and Esc cancels it. Background work (a job, a scheduled follow-up, a detached child) belongs to the agent but not the turn: the turn can end while it runs, an ordinary cancel leaves it alone, and only disposing the agent or cancelling that node stops it. Scope 11 maps each Bake surface it ports (Esc during a child call, job kill, goal continuation) onto this tree and states each observable outcome.
 
-### 4. Commit related events as a recoverable group
+### 4. Commit related entries as a recoverable group
 
-Format 3 appends events one row at a time, so a crash can leave any prefix. The native writer exposes a group append for events that belong together (a tool result and the context it adds, an inbox claim and its user message, a goal change and the event that caused it), flushes the group in order, and keeps the owner from publishing a view until the group is written. Recovery must handle every prefix of every group, as `interruptedTurnClosers` already does for turns. Scope 03 enumerates the groups and tests a crash after each row. True all-or-nothing commits would need a format change and stay out of 0.4.0 ([D4](scope-00/support.md#decision-register)).
+Pi's format appends entries one line at a time, so a crash can leave any prefix of a group that belongs together (a tool result and the context it adds, an inbox claim and its user message, a goal change and the entry that caused it). The native writer exposes a group append that writes a group in order, and the owner publishes no view until the group is written. Loading must handle every prefix of every group. Scope 03 enumerates the groups and tests a crash after each line. True all-or-nothing commits would need a format change and stay out of 0.4.0.
 
 ### 5. Compaction is a task, not a phase of the loop
 
-Implement compaction as a task owned by the agent, with its own cancellation, retries, usage accounting, and recovered status, instead of a step the loop calls inline. In 0.4.0 the loop still waits for it where 0.3 waits, so prompts and placement are unchanged. The structure lets a later release start a summary in the background and place it at a turn boundary without redesigning the loop.
+Implement compaction as a task owned by the agent, with its own cancellation, retries, usage accounting, and recovered status, instead of a step the loop calls inline. In 0.4.0 the loop still waits for it where Pi waits, so prompts and placement are unchanged. The structure lets a later release start a summary in the background and place it at a turn boundary without redesigning the loop.
 
 ### 6. Clients attach to the owner's view
 
@@ -83,7 +85,20 @@ The agent owner publishes one view: transcript projection, live stream, running 
 
 ### 7. Decisions are recorded once
 
-Any human or hook decision that gates an effect, such as an approval, a question answer, or a hook's block or rewrite, is committed before the effect it gates. Recovery reads the recorded decision instead of asking again or re-evaluating a hook that may answer differently. Scope 08 inventories which 0.3 decisions are already logged; an unlogged decision that is re-asked after a crash is accepted 0.3 behavior, but the native design must not lose a decision that 0.3 records.
+Any human or hook decision that gates an effect, such as an approval, a question answer, or a hook's block or rewrite, is committed before the effect it gates. Recovery reads the recorded decision instead of asking again or re-evaluating a hook that may answer differently. Scopes 04, 08, and 12 choose how each decision is recorded in the session file before its effect; the session's permission settings already use `bake.permission` custom entries, which the model does not see.
+
+## Current implementation
+
+At candidate `e32476594bace82b57980fe8e1d57e48e3c4c53c`. "Tested" names the test that shows the behavior; "not tested" means the code path exists without a test of the property.
+
+| Rule or property | State in `bake-rs` | Evidence |
+|---|---|---|
+| One writer per session file | Implemented: an exclusive `File::try_lock` on a `.jsonl.lock` sidecar; a second writer fails with `SessionError::Locked` and takes over after the holder releases, exits, or is killed | Tested: `tests/session/writer_exclusion.rs` in `bake-coding-agent`, on Linux and Windows CI and locally on Linux |
+| Durable appends and rewrites | Implemented: each append is synced and starts on a new line after a torn tail; rewrites go through a synced temporary file renamed over the session | Tested with written torn bytes (`a_torn_tail_resumes_and_appends`, `golden::torn_tail_repairs_the_same`); no process is killed during an append |
+| Intent before effect (rule 2) | In a persisted session, assistant messages are appended at `message_end`, and the agent awaits that listener before it prepares the message's tools; a failed append aborts the agent, and tool preparation checks the abort before running a tool. A `--no-session` run writes nothing | Not tested, by a crash or by a failed append |
+| Unfinished-work projection (rule 1) | Not implemented. Pi's `transformMessages` closes orphaned calls in each request it builds, leaving the file unchanged; this is request repair, not the projection the rule requires | `bake-ai` `transform_messages` unit tests |
+| Replay classes, group append, compaction as a task, attached views, logged decisions (rules 2 to 7) | Not implemented | None |
+| Ownership tree (rule 3) | Partial: the bash tool and exec own and await their process trees; `AgentSession::shutdown` removes listeners and closes the writer | Tested for bash and exec process trees; no tree spans agents, jobs, or children |
 
 ## Post-0.4.0 candidates
 
@@ -91,20 +106,20 @@ Each of these changes what the model sees, what a released reader must understan
 
 | Candidate | Benefit | Constraint |
 |---|---|---|
-| Continue an interrupted run on resume | A crash or sleep no longer ends the user's request | Must not rerun `report` tools; the resumed request must be reconstructable from the log |
-| Automatically rerun `safe` tools after a crash | Fewer wasted model round trips after recovery | Changes the model surface; eval against the 0.3 repair message |
+| Continue an interrupted run on resume | A crash or sleep no longer ends the user's request | Must not rerun `report` tools; the resumed request must be reconstructable from the session file |
+| Automatically rerun `safe` tools after a crash | Fewer wasted model round trips after recovery | Changes the model surface; eval against Pi's synthetic `No result provided` result |
 | Background compaction placed at a turn boundary | Long sessions stop pausing for summaries | New placement and staleness rules; prompt-cache and request reconstruction proofs; long-session eval |
-| Idempotent submissions keyed by a client request id | Headless and Desktop retries after a crash cannot double-submit | Desktop protocol version 1 is fixed ([D9](scope-00/support.md#decision-register)); needs a coordinated protocol change |
+| Idempotent submissions keyed by a client request id | Headless and Desktop retries after a crash cannot double-submit | The Desktop launch and protocol are open under [D9](scope-00/support.md#decision-register); needs a coordinated protocol change |
 | Durable background jobs and schedules | Background work survives restarts | Process and sandbox ownership after restart; scope 04 proofs for adopting or killing orphans |
-| Typed agent documents (plans, todos, goals) with fork rules | Application state stays consistent with the transcript through forks | Session format change; migration and rollback per [session format status](../../session-format-status.md) |
+| Typed agent documents (plans, todos, goals) with fork rules | Application state stays consistent with the transcript through forks | New entry kinds that Pi's reader must still open; a decision on extending Pi's format |
 | Hook memos and plugin-defined task types | Native plugins get crash-safe decisions and long-running work | Part of the D6 plugin API design; needs a named consumer |
 
 ## Non-goals
 
 - No SQLite, Pi Durable JSONL, or other new storage backend. Pi's session files, with the writer exclusion scope 03 adds, remain the only storage.
 - No general scheduler that bypasses the agent owner. Concurrency stays bounded work that returns results to the owner, and only the owner commits.
-- No multi-writer or multi-process execution of one Session; the writer lease still excludes a second process.
-- No change to tool names, schemas, results, or recovery messages in 0.4.0.
+- No multi-writer or multi-process execution of one session; the writer lock excludes a second writer.
+- No change in this direction to tool names, schemas, results, or recovery messages, which follow Pi ([D33](scope-00/support.md#decision-register)).
 
 ## Scope additions
 
@@ -112,32 +127,34 @@ These additions extend the scope specifications in the [roadmap](README.md#scope
 
 | Scope | Addition | Proof |
 |---|---|---|
-| 02 | Pure *unfinished-work* projection: tool calls pending without a result, open compactions, open children (the parent's `subagent/catalog` entries), pending inbox | Matches 0.3 repair on every historical fixture; property cases over truncated logs at every row |
-| 03 | Group append and crash-after-every-row recovery | Kill the writer after each row of each group; every resulting log loads, repairs deterministically, and reconstructs a provider-valid request |
+| 02 | Pure *unfinished-work* projection over the path to the leaf: `toolCall` blocks without a `toolResult`, and later open children and pending inbox | Property cases over files truncated at every line; the projection and Pi's `transformMessages` agree on which calls are unfinished |
+| 03 | Group append and crash-after-every-line recovery | Kill the writer after each line of each group; every resulting file loads as Pi loads it and rebuilds a provider-valid request |
 | 05 | Ownership tree and the foreground/background boundary as the lifecycle primitive | Cancel and dispose at each node; no owned task, process, or timer outlives its owner |
-| 06 | Defined persistence point for partial streams | A crash mid-stream yields the same `assistant/attempt` content in both runtimes |
-| 08 | Replay class on every tool, approvals committed before effects | Schema-level test that every registered tool declares a class; crash during each tool class yields the 0.3 recovery result |
-| 09 | Agent owner holds task states; recovery reads the projection, not memory | Crash at each admission, dispatch, and commit boundary; recovered state equals the 0.3 oracle's |
-| 10 | Compaction as an owned task with unchanged placement | Cancel and crash during summary; the log recovers and the next request matches 0.3 |
+| 06 | Defined persistence point for partial streams | A crash mid-stream leaves the file Pi would leave and a provider-valid next request |
+| 08 | Replay class on every tool, approvals committed before effects | Schema-level test that every registered tool declares a class; a crash during each tool class yields Pi's synthetic result and no rerun |
+| 09 | Agent owner holds task states; recovery reads the projection, not memory | Crash at each admission, dispatch, and commit boundary; the recovered state equals the projection of the file |
+| 10 | Compaction as an owned task with unchanged placement | Cancel and crash during summary; the file loads with no half-applied replacement and the next request is provider-valid |
 | 11 | Map Esc, job kill, child cancel, and goal continuation onto the ownership tree | Abort order is bottom-up; no completion notice is admitted twice after restart |
 | 12 | Plugin API tools and MCP tools declare or default a replay class | A plugin tool without a class is registered as `report` |
 | 13 | Clients attach to view plus deltas with bounded queues | A stalled client cannot block the owner; reconnect renders the current view |
 
 ## Crash-recovery matrix
 
-Add these cases to [verification](verification.md) as each scope begins. Every case kills the process (not a graceful shutdown) at the named point, restarts against the same home, and asserts on the log, the files, the process table, and the next reconstructed request.
+Add these cases to [verification](verification.md#acceptance-matrix) as each scope begins. Every case kills the process (not a graceful shutdown) at the named point, restarts against the same home, and asserts on the session file, the files, the process table, and the next rebuilt request. The *evidence* column records what exists at candidate `e32476594b`; a passing writer-lock or torn-tail test does not prove the other rows.
 
-| Kill point | Expected outcome |
-|---|---|
-| After the `assistant/message` with a tool-call block, before its `tool/call` | `TOOL_NOT_STARTED` closer; no effect on disk |
-| After `tool/call`, before the tool's first effect | `TOOL_OUTCOME_UNKNOWN` closer; no effect on disk |
-| During a `report` tool (shell writing a file) | `TOOL_OUTCOME_UNKNOWN`; no automatic rerun; no surviving child process after restart |
-| During a `safe` tool | Same as 0.3 in 0.4.0 |
-| Mid model stream | The recorded attempt is preserved; the next request is provider-valid |
-| During compaction summary | The log loads; no half-applied replacement; the next request matches the oracle |
-| Between rows of an event group | Deterministic repair; projection matches the oracle |
-| While a child agent runs | Parent and child logs both load; no duplicate completion notice; the child's processes are gone |
-| While a background job runs | 0.3 outcome for jobs (lost with the process), reported to the agent, with no orphan process |
+| Kill point | Expected outcome | Evidence |
+|---|---|---|
+| During an append of any entry | The torn last line is skipped as Pi's loader skips it; the next append starts on a new line | Written torn bytes only; no process killed mid-append |
+| While another process holds the writer lock | The next writer takes over once the holder dies | Tested: `a_killed_holder_process_is_taken_over` |
+| During a rewrite (migration, branched session) | The old or the new file is complete, never a mix | Rename path tested without a kill |
+| After the assistant message with a `toolCall`, before the tool's first effect | The next request carries Pi's synthetic error result; no effect on disk | Not tested |
+| During a `report` tool (shell writing a file) | Pi's synthetic error result; no automatic rerun; no surviving child process after restart | Not tested |
+| During a `safe` tool | Same as `report` in 0.4.0 | Not tested |
+| Mid model stream | The file ends at the last finished entry; the next request is provider-valid | Not tested |
+| During compaction summary | The file loads; no half-applied replacement; the next request is provider-valid | Not tested |
+| Between lines of an entry group | Deterministic loading; the projection matches the file | Not tested; groups not implemented |
+| While a child agent runs | Parent and child files both load; no duplicate completion notice; the child's processes are gone | Not implemented |
+| While a background job runs | The job is lost with the process and reported to the agent, with no orphan process | Not implemented |
 
 ## Dev Note
 

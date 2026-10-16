@@ -1,6 +1,7 @@
-//! Bake's native terminal preview: the terminal owner, input decoding, the
-//! event loop that drives the pure view in `bake-tui-view`, and the runtime
-//! port with its scripted fixture.
+//! Bake's native terminal interface: the terminal owner, input decoding,
+//! the event loop that drives the pure view in `bake-tui-view`, and the
+//! runtime ports: the preview's scripted fixture and a live agent session
+//! ([`live`]).
 
 mod clipboard;
 mod files;
@@ -8,7 +9,11 @@ mod fixture;
 mod git;
 mod inline;
 mod input;
+pub mod live;
 mod port;
 mod terminal;
 
-pub use terminal::{PreviewExit, ScreenMode, TerminalSession, run_preview, run_preview_mode};
+pub use live::LiveSession;
+pub use terminal::{
+    PreviewExit, ScreenMode, TerminalSession, run_live, run_preview, run_preview_mode,
+};

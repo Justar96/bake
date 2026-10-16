@@ -12,6 +12,7 @@
 //! |---|---|
 //! | [`presets`] | `packages/interaction/permission-presets/src/{index,types}.ts` |
 //! | [`approval`] | `packages/interaction/user-approval/src/{index,types}.ts` |
+//! | [`broker`] | the approval half of `apps/tui/packages/app/src/interactions.ts` (`Interactions`) |
 //! | [`state`] | the `permission/preset`, `sandbox/mode`, and `approval/policy` events and their folds (`permission-presets/src/index.ts`, `packages/sandbox/sandbox-policy/src/session-mode.ts`, `user-approval/src/index.ts`) |
 //! | [`engine`] | `packages/sandbox/sandbox-policy/src/index.ts` (`resolve`), `packages/sandbox/sandbox/src/escalation.ts` (`approveEscalation`), the escalation steps of `packages/shell/tool-bash/src/index.ts` and `packages/fs/tool-fs/src/sandbox.ts` |
 //! | [`context`] | `renderPolicyContext` in `sandbox-policy/src/index.ts`, the `approval:policy` contribution in `user-approval/src/index.ts` |
@@ -34,9 +35,9 @@
 //!
 //! # Not ported
 //!
-//! The `approval/asked` and `approval/decided` audit events (no interactive
-//! answerer exists yet, and the headless run's requests resolve without
-//! one); the live `/permission` command and its "approval policy changed"
+//! The `approval/asked` and `approval/decided` audit events: no entry
+//! records a request or its answer in the session file, and the outcome
+//! reaches the model only as the tool's result; the live `/permission` command and its "approval policy changed"
 //! notice; the Auto review integration (`registerAuto`); background bash
 //! jobs and their `runnerFailed` notice; the Cordis projection, catalog,
 //! and invariant companions.
@@ -44,6 +45,7 @@
 pub mod approval;
 pub mod bash;
 pub mod beneath;
+pub mod broker;
 pub mod context;
 pub mod engine;
 pub mod fs;
@@ -61,6 +63,7 @@ pub use approval::{
     ASK_SENTENCE, ApprovalPolicy, ApprovalRequest, Approver, NEVER_SENTENCE, NeverApprover,
     NoApprover, PolicyApprover,
 };
+pub use broker::{ApprovalAnswer, ApprovalBroker, ApprovalListener, ApprovalPrompt};
 pub use engine::{
     BlankJustification, EscalationLayer, LayerDecision, PermissionEngine, PolicyLayer,
     StandingModeLayer, StandingPermissions, ToolCall,

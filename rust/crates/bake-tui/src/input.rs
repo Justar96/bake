@@ -13,6 +13,7 @@ use crossterm::event::{
 /// Decodes `event`, read at `at` on the loop's clock.
 pub fn decode(event: Event, at: Duration) -> Option<Msg> {
     match event {
+        Event::Key(key) if key.kind == KeyEventKind::Repeat => Some(Msg::KeyRepeat(key_input(key))),
         Event::Key(key) if key.kind != KeyEventKind::Release => Some(Msg::Key(key_input(key))),
         Event::Paste(text) => Some(Msg::Paste(text)),
         Event::Resize(cols, rows) => Some(Msg::Resize { cols, rows }),
@@ -102,7 +103,11 @@ mod tests {
                     KeyModifiers::CONTROL | KeyModifiers::SUPER,
                     kind
                 )),
-                Some(Msg::Key(KeyInput::new(Key::Char('j'), Mods::CTRL)))
+                Some(if kind == KeyEventKind::Repeat {
+                    Msg::KeyRepeat(KeyInput::new(Key::Char('j'), Mods::CTRL))
+                } else {
+                    Msg::Key(KeyInput::new(Key::Char('j'), Mods::CTRL))
+                })
             );
         }
         assert_eq!(

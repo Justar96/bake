@@ -1,0 +1,775 @@
+{
+  "schema": "bake/rust-migration/qualification-attempt",
+  "version": 1,
+  "id": "2026-10-14-foundation-native-checks",
+  "scope": "01",
+  "status": "failed",
+  "recordedOn": "2026-10-14",
+  "summary": "Native workspace checks at e32476594b, the merge of PR #215 on develop. The required native preflight failed both local attempts on a test-isolation race in cliproxyapi::fetch::tests::says_which_field_to_ask_again_and_words_each_failure, which frees a port before connecting to it so a concurrent test can take it (16 of 40 runs of the library test binary failed). A stepwise rerun of every native check passed, and CI on the candidate's tree passed on Linux and Windows. The test fix is uncommitted in the follow-up branch, so this candidate fails the gate; macOS was not run.",
+  "supersedes": [],
+  "provenance": {
+    "base": "4fe12d6e70e7752b93a9ac26dd40d20383c38e24",
+    "candidate": "e32476594bace82b57980fe8e1d57e48e3c4c53c",
+    "oracle": {
+      "notApplicable": "D32: no TypeScript runtime arm; scope 01 checks the native workspace and the eval adapter against evaluator-owned predicates."
+    }
+  },
+  "support": [
+    {
+      "id": "d34-rust-first-develop",
+      "reference": "docs/roadmap/rust-0.4/scope-00/support.md"
+    }
+  ],
+  "fixtures": {
+    "files": [
+      {
+        "path": "evals/agent-loop/native-arm-smoke.ts",
+        "role": "fixture-definition-source",
+        "sha256": "00d320f2ca2e431f4107d735f74f70dd2f77b4d941a6d55721f0e1cfc3c10bc2"
+      },
+      {
+        "path": "evals/agent-loop/native-fixture.ts",
+        "role": "fixture-definition-source",
+        "sha256": "4b84968c7909dc7aa51f92a92779915758a13ff0e38e3c5aa083adba13379970"
+      },
+      {
+        "path": "evals/agent-loop/native-smoke.ts",
+        "role": "fixture-definition-source",
+        "sha256": "47217921444353ff3103c93fbfccd8c506f057fd40987bacba4a9c252f3ab18d"
+      },
+      {
+        "path": "evals/agent-loop/scenarios.ts",
+        "role": "fixture-definition-source",
+        "sha256": "62efbcaacaadc4121f3620bdb59674b2a421d5dc120d781efa26cb5126bc58d7"
+      },
+      {
+        "path": "rust/Cargo.lock",
+        "role": "fixture-definition-source",
+        "sha256": "b1582e955fd9fdb15908bf9894ddf88481d34f8e126d813782b89c489cb3ad77"
+      },
+      {
+        "path": "rust/crates/bake-conformance/src/bin/bake-eval-fake-arm.rs",
+        "role": "fixture-definition-source",
+        "sha256": "d0c5ce17b9fcd509256992c8ca776c3ced1dbf7e7ccd72a62a0fbe8c770ff860"
+      },
+      {
+        "path": "rust/rust-toolchain.toml",
+        "role": "fixture-definition-source",
+        "sha256": "2ad6f15416572b4836585087f1d4abc53b8fa2dbd616f8dacfaa587ed6714228"
+      },
+      {
+        "path": "scripts/preflight.ts",
+        "role": "fixture-definition-source",
+        "sha256": "48cb1c8be49a6fc77b9593effd655d7dd0300db457f561dd2f8b2fdd61dd4af3"
+      },
+      {
+        "path": "scripts/rust-preview-pty.ts",
+        "role": "fixture-definition-source",
+        "sha256": "405a539df768cdc8bb3e7dfcf66a101b840a253895f6977a41b15caeeae20102"
+      }
+    ],
+    "digest": "0bd42475ef5bba5fba667ac1d4706692edc95f2f7c3116b0014a34d252d14a60"
+  },
+  "artifacts": [
+    {
+      "id": "bake-rs-linux-debug",
+      "description": "rust/target/debug/bake-rs built by cargo-build in the clean candidate worktree; rust-eval and rust-pty launched this binary.",
+      "sha256": "7062e6a6bb278df5a605ad7e367fbc4211f87451bf1e8644aaa5a3db6c59055b",
+      "command": "cargo-build"
+    },
+    {
+      "id": "fake-arm-linux-debug",
+      "description": "The compiled bake-eval-fake-arm that native-smoke reports as binarySha256.",
+      "sha256": "cbd787b9a3895aaa8041da688caf553ca97fbfa49a5fedc80f59b827a597696b",
+      "command": "rust-eval"
+    },
+    {
+      "id": "ci-rust-log-linux",
+      "description": "The rust-log-ubuntu-latest artifact (rust.log zipped) of the CI run; 1284 Cargo tests passed and 1 ignored across 28 test targets.",
+      "sha256": "200ea7aa817e167396e565548a4cce71f01a2448bfe425398920b797deda112b",
+      "command": "ci-native-linux"
+    },
+    {
+      "id": "ci-rust-log-windows",
+      "description": "The rust-log-windows-latest artifact (rust.log zipped) of the CI run; 1169 Cargo tests passed and 1 ignored across 28 test targets.",
+      "sha256": "560f6f16a6d8896be9dc4173df406e5f100a323856536e34e7ede39e4151f10e",
+      "command": "ci-native-windows"
+    },
+    {
+      "id": "ci-binaries",
+      "description": "Native binaries CI built.",
+      "sha256": {
+        "missing": "The CI jobs upload only rust.log; binary hashes are not recorded."
+      },
+      "command": "ci-native-linux"
+    }
+  ],
+  "commands": [
+    {
+      "id": "local-preflight-native-1",
+      "argv": [
+        "bun",
+        "run",
+        "preflight",
+        "--only",
+        "native"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local WSL2; kernel 6.18.40.1-microsoft-standard-WSL2; 32 threads"
+      },
+      "tools": {
+        "rustc": "1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3 (package.json pins bun@1.4.2)",
+        "node": "v26.10.0",
+        "git": "2.43.0"
+      },
+      "testedCommit": "e32476594bace82b57980fe8e1d57e48e3c4c53c",
+      "expectedExit": 0,
+      "actualExit": 1,
+      "counts": {
+        "passed": 0,
+        "failed": 1,
+        "skipped": 2,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/evidence/preflight-native.json",
+        "sha256": "d8bf16ce8296e010ec9437ddf886e9cc0047c0ee6ea5314ea59eef376b685bb9"
+      }
+    },
+    {
+      "id": "local-preflight-native-2",
+      "argv": [
+        "bun",
+        "run",
+        "preflight",
+        "--only",
+        "native"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local WSL2; kernel 6.18.40.1-microsoft-standard-WSL2; 32 threads"
+      },
+      "tools": {
+        "rustc": "1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3 (package.json pins bun@1.4.2)",
+        "node": "v26.10.0",
+        "git": "2.43.0"
+      },
+      "testedCommit": "e32476594bace82b57980fe8e1d57e48e3c4c53c",
+      "expectedExit": 0,
+      "actualExit": 1,
+      "counts": {
+        "passed": 0,
+        "failed": 1,
+        "skipped": 2,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/evidence/preflight-native-2.json",
+        "sha256": "3055defdaab2cf829a6586fcbb6e74d3232000cd6fe6cef2dccc0472e5fef8e0"
+      }
+    },
+    {
+      "id": "cargo-fmt",
+      "argv": [
+        "cargo",
+        "fmt",
+        "--all",
+        "--",
+        "--check"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local WSL2; kernel 6.18.40.1-microsoft-standard-WSL2; 32 threads"
+      },
+      "tools": {
+        "rustc": "1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3 (package.json pins bun@1.4.2)",
+        "node": "v26.10.0",
+        "git": "2.43.0"
+      },
+      "testedCommit": "e32476594bace82b57980fe8e1d57e48e3c4c53c",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/evidence/cand-cargo-fmt.json",
+        "sha256": "b64246ad1d4329672d91ba4de7a7ccd1b6adb61132b6b137bf506181818c3a1a"
+      }
+    },
+    {
+      "id": "cargo-clippy",
+      "argv": [
+        "cargo",
+        "clippy",
+        "--workspace",
+        "--all-targets",
+        "--locked",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local WSL2; kernel 6.18.40.1-microsoft-standard-WSL2; 32 threads"
+      },
+      "tools": {
+        "rustc": "1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3 (package.json pins bun@1.4.2)",
+        "node": "v26.10.0",
+        "git": "2.43.0"
+      },
+      "testedCommit": "e32476594bace82b57980fe8e1d57e48e3c4c53c",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/evidence/cand-cargo-clippy.json",
+        "sha256": "80f6b3066fe5d50e3566ff7eb15adcd7cca1a34f662efaa55bcc1f4fcbe1f024"
+      }
+    },
+    {
+      "id": "cargo-test",
+      "argv": [
+        "cargo",
+        "test",
+        "--workspace",
+        "--locked",
+        "--no-fail-fast"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local WSL2; kernel 6.18.40.1-microsoft-standard-WSL2; 32 threads"
+      },
+      "tools": {
+        "rustc": "1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3 (package.json pins bun@1.4.2)",
+        "node": "v26.10.0",
+        "git": "2.43.0"
+      },
+      "testedCommit": "e32476594bace82b57980fe8e1d57e48e3c4c53c",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 1284,
+        "failed": 0,
+        "skipped": 1,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/evidence/cand-cargo-test.json",
+        "sha256": "209cb4ee7c7a5253f1f43e0bcce9023216119a503ec76372ab11aa5cbc47e0c8"
+      }
+    },
+    {
+      "id": "cargo-build",
+      "argv": [
+        "cargo",
+        "build",
+        "--workspace",
+        "--locked"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local WSL2; kernel 6.18.40.1-microsoft-standard-WSL2; 32 threads"
+      },
+      "tools": {
+        "rustc": "1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3 (package.json pins bun@1.4.2)",
+        "node": "v26.10.0",
+        "git": "2.43.0"
+      },
+      "testedCommit": "e32476594bace82b57980fe8e1d57e48e3c4c53c",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/evidence/cand-cargo-build.json",
+        "sha256": "038a830763bb0e884548a8754c644fb3fbec9654d17c8b65a0050e3b00ef4a85"
+      }
+    },
+    {
+      "id": "rust-pty",
+      "argv": [
+        "bun",
+        "run",
+        "test:rust:pty"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local WSL2; kernel 6.18.40.1-microsoft-standard-WSL2; 32 threads"
+      },
+      "tools": {
+        "rustc": "1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3 (package.json pins bun@1.4.2)",
+        "node": "v26.10.0",
+        "git": "2.43.0"
+      },
+      "testedCommit": "e32476594bace82b57980fe8e1d57e48e3c4c53c",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 22,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/evidence/cand-rust-pty.json",
+        "sha256": "a9390df961a8fbb6ff326c906ad2164ca71ce8afd52b577d0308fbad16ba9486"
+      }
+    },
+    {
+      "id": "rust-eval",
+      "argv": [
+        "bun",
+        "run",
+        "test:rust:eval"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local WSL2; kernel 6.18.40.1-microsoft-standard-WSL2; 32 threads"
+      },
+      "tools": {
+        "rustc": "1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3 (package.json pins bun@1.4.2)",
+        "node": "v26.10.0",
+        "git": "2.43.0"
+      },
+      "testedCommit": "e32476594bace82b57980fe8e1d57e48e3c4c53c",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 14,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/evidence/cand-rust-eval.json",
+        "sha256": "7f7791555d0f1e14203e155bfd2c2d008dcfbc15f9fb83295a3b5a26029c29b4"
+      }
+    },
+    {
+      "id": "lib-loop-candidate",
+      "argv": [
+        ".preflight/rust-orchestrator/evidence/lib-loop.sh",
+        "40"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local WSL2; kernel 6.18.40.1-microsoft-standard-WSL2; 32 threads"
+      },
+      "tools": {
+        "rustc": "1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3 (package.json pins bun@1.4.2)",
+        "node": "v26.10.0",
+        "git": "2.43.0"
+      },
+      "testedCommit": "e32476594bace82b57980fe8e1d57e48e3c4c53c",
+      "expectedExit": 0,
+      "actualExit": 1,
+      "counts": {
+        "passed": 24,
+        "failed": 16,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/evidence/lib-loop-candidate.json",
+        "sha256": "9648d166f8e20a755a356a3261b242abe4579446c97694e95b9f97faff7007d1"
+      }
+    },
+    {
+      "id": "lib-loop-fixed",
+      "argv": [
+        ".preflight/rust-orchestrator/evidence/lib-loop.sh",
+        "40"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local WSL2; kernel 6.18.40.1-microsoft-standard-WSL2; 32 threads"
+      },
+      "tools": {
+        "rustc": "1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.3 (package.json pins bun@1.4.2)",
+        "node": "v26.10.0",
+        "git": "2.43.0"
+      },
+      "testedCommit": {
+        "missing": "Working tree of e32476594bace82b57980fe8e1d57e48e3c4c53c with the uncommitted test fix in rust/crates/bake-coding-agent/src/cliproxyapi/fetch/tests.rs (diff .preflight/rust-orchestrator/evidence/flake-fix.diff, sha256 a5d12b825bb3323d812dedd28fc70ce063cacff3ac830bca575bde739544b7af) and documentation edits; not a committed checkout."
+      },
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 40,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/evidence/lib-loop-fixed.json",
+        "sha256": "0e35b075e7c21997b7ac5bb92eefe4b09c9705c4469d79910a332eb60d4f7d8e"
+      }
+    },
+    {
+      "id": "control-evaluator",
+      "argv": [
+        "bun",
+        "evals/agent-loop/native-smoke.ts"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local WSL2; kernel 6.18.40.1-microsoft-standard-WSL2; 32 threads"
+      },
+      "tools": {
+        "bun": "1.4.3 (package.json pins bun@1.4.2)",
+        "node": "v26.10.0",
+        "git": "2.43.0"
+      },
+      "testedCommit": {
+        "missing": "Clean worktree of e32476594bace82b57980fe8e1d57e48e3c4c53c with one deliberate uncommitted edit to evals/agent-loop/native-fixture.ts (.preflight/rust-orchestrator/evidence/nc-d.diff); not a committed checkout."
+      },
+      "expectedExit": 1,
+      "actualExit": 1,
+      "counts": {
+        "passed": 1,
+        "failed": 1,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestrator/evidence/nc-d-evaluator-ignores-verdict.json",
+        "sha256": "5828b578db84e657f06de9003c2b0d64d45c7c8c76ce3764fcf8ebc5bc86b9b5"
+      }
+    },
+    {
+      "id": "ci-native-linux",
+      "argv": [
+        "bun",
+        "run",
+        "preflight",
+        "--only",
+        "native"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "ubuntu-latest; image ubuntu-24.04 20261004.327.1"
+      },
+      "tools": {
+        "bun": "1.4.2 (bun-version-file package.json)",
+        "node": "v24.21.0",
+        "rust-toolchain": "1.99.0-x86_64-unknown-linux-gnu"
+      },
+      "testedCommit": "6f894e6d72ee98ffad497ac5db3a5847772dfc65",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": "https://github.com/Justar96/bake/actions/runs/38521717043/job/115712769763",
+        "sha256": "1c88a73746ef54e855056cf51f4ac01193d940f2720f66a1646d07c37a8e9b9c"
+      }
+    },
+    {
+      "id": "ci-native-windows",
+      "argv": [
+        "bun",
+        "run",
+        "preflight",
+        "--only",
+        "native"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "win32",
+        "arch": "x64",
+        "runner": "windows-latest; image windows-2025-vs2026 20260925.250.1"
+      },
+      "tools": {
+        "bun": "1.4.2 (bun-version-file package.json)",
+        "node": "v24.21.0",
+        "rust-toolchain": "1.99.0-x86_64-pc-windows-msvc"
+      },
+      "testedCommit": "6f894e6d72ee98ffad497ac5db3a5847772dfc65",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 2,
+        "failed": 0,
+        "skipped": 1,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": "https://github.com/Justar96/bake/actions/runs/38521717043/job/115712769809",
+        "sha256": "933d9aac46f16cc393600ec33d977322879243179cf618b314d70fe219ea98bd"
+      }
+    },
+    {
+      "id": "ci-checks-linux",
+      "argv": [
+        "bun",
+        "run",
+        "preflight",
+        "--full",
+        "--skip",
+        "runtime,native"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "ubuntu-latest; image ubuntu-24.04 20261004.327.1"
+      },
+      "tools": {
+        "bun": "1.4.2 (bun-version-file package.json)",
+        "node": "v24.21.0"
+      },
+      "testedCommit": "6f894e6d72ee98ffad497ac5db3a5847772dfc65",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 27,
+        "failed": 0,
+        "skipped": 7,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": "https://github.com/Justar96/bake/actions/runs/38521717043/job/115712769672",
+        "sha256": "e5026d13b0232b5d3715fb301fa3f65367ae30b7be54ff0e3ea13a439385a4fc"
+      }
+    },
+    {
+      "id": "ci-runtime-linux",
+      "argv": [
+        "bun",
+        "run",
+        "preflight",
+        "--full",
+        "--only",
+        "build,runtime"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "ubuntu-latest; image ubuntu-24.04 20261004.327.1"
+      },
+      "tools": {
+        "bun": "1.4.2 (bun-version-file package.json)",
+        "node": "v24.21.0"
+      },
+      "testedCommit": "6f894e6d72ee98ffad497ac5db3a5847772dfc65",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": "https://github.com/Justar96/bake/actions/runs/38521717043/job/115712769776",
+        "sha256": "f4199508f116a789612c7f43361ba27c03bad99f28f0b60ca34a799c3de7faba"
+      }
+    }
+  ],
+  "results": [
+    {
+      "id": "local-native-gate",
+      "behavior": "bun run preflight --only native on the clean candidate worktree failed twice (39.4 s, then 6.7 s with warm caches): the rust gate's cargo test stopped at the bake-coding-agent library tests, where says_which_field_to_ask_again_and_words_each_failure received ECONNRESET instead of ECONNREFUSED; rust-pty and rust-eval were skipped by preflight because rust failed. Counts describe gates.",
+      "owner": "rust/crates/bake-coding-agent/src/cliproxyapi/fetch/tests.rs",
+      "report": ".preflight/rust-orchestrator/evidence/preflight-native.json",
+      "commands": [
+        "local-preflight-native-1",
+        "local-preflight-native-2"
+      ],
+      "outcome": "fail"
+    },
+    {
+      "id": "flake-cause",
+      "behavior": "The test binds 127.0.0.1:0, drops the listener, then connects, expecting a refusal; another test in the same binary can bind the freed port first. 40 runs of the candidate's library test binary failed 16 times, always that test; alone or with only cliproxyapi tests it passed 40 and 30 of 30 times. With the uncommitted fix, which holds a bound, never-listening tokio TcpSocket until the check ends, 40 of 40 runs passed, and 4 concurrent processes of 10 runs each also passed (an ad hoc run, not separately recorded). Counts describe binary runs.",
+      "owner": "rust/crates/bake-coding-agent/src/cliproxyapi/fetch/tests.rs",
+      "report": ".preflight/rust-orchestrator/evidence/lib-loop-candidate.json",
+      "commands": [
+        "lib-loop-candidate",
+        "lib-loop-fixed"
+      ],
+      "outcome": "fail",
+      "reason": "The candidate still carries the race; the fix is not yet a commit."
+    },
+    {
+      "id": "stepwise-native",
+      "behavior": "Run one at a time on the same clean worktree: cargo fmt, clippy with -D warnings, and build passed; cargo test --workspace --no-fail-fast passed 1284 tests across 28 targets with 1 ignored (the live CLIProxyAPI home test, which reads the real ~/.bake and needs the network), on a run where the racing test passed. This rerun pass does not clear the gate failure above. Counts describe Cargo tests or commands.",
+      "owner": "rust/",
+      "report": ".preflight/rust-orchestrator/evidence/cand-cargo-test.json",
+      "commands": [
+        "cargo-fmt",
+        "cargo-clippy",
+        "cargo-test",
+        "cargo-build"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "pty-and-eval",
+      "behavior": "test:rust:pty passed 22 preview PTY cases (input, resize, signals, hangup, and terminal restoration, inline and fullscreen). test:rust:eval passed the 4 native fixture cases (edit accepted; tamper-tests, claim-only, and edit-exit1 rejected) and the native bake-rs arm smoke: 8 samples, 22 requests against the keyless fake server, plus the evaluator ~/.agents isolation check and stray context-file refusal, 14 pass lines in all. Counts describe pass lines.",
+      "owner": "evals/agent-loop/native-smoke.ts",
+      "report": ".preflight/rust-orchestrator/evidence/cand-rust-eval.json",
+      "commands": [
+        "rust-pty",
+        "rust-eval"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "ci-native",
+      "behavior": "CI run 38521717043 for PR #215 tested synthetic merge 6f894e6d72ee98ffad497ac5db3a5847772dfc65, whose tree 49c6999d9689a51952de2e18cb77e3a54df7505b equals the candidate's. Native preflight passed rust, rust-pty, and rust-eval on Linux; on Windows rust and rust-eval passed and rust-pty was skipped (native ConPTY scenarios are not implemented). The uploaded rust.log shows 1284 Cargo tests on Linux and 1169 on Windows, each with 1 ignored. Counts describe gates.",
+      "owner": ".github/workflows/ci.yml",
+      "report": "https://github.com/Justar96/bake/actions/runs/38521717043",
+      "commands": [
+        "ci-native-linux",
+        "ci-native-windows"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "ci-app-and-runtime",
+      "behavior": "The same run passed the app checks (27 gates; skipped: whitespace with no merge base, actionlint not on PATH, and five gates by flag) and the Linux build, runtime, and integration gates. Counts describe gates.",
+      "owner": "scripts/preflight.ts",
+      "report": "https://github.com/Justar96/bake/actions/runs/38521717043",
+      "commands": [
+        "ci-checks-linux",
+        "ci-runtime-linux"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "macos",
+      "behavior": "Native preflight on macOS through bun run preflight:mac.",
+      "owner": "unassigned",
+      "report": {
+        "missing": "No macOS command ran."
+      },
+      "commands": [],
+      "outcome": "missing",
+      "reason": "ssh macpro failed with 'Host key verification failed.'; ~/.ssh/config has no macpro entry and BAKE_MAC_HOST is unset. No GitHub Actions job runs on macOS."
+    }
+  ],
+  "negativeControls": [
+    {
+      "id": "evaluator-ignores-verdict",
+      "defect": "In the clean candidate worktree, changed native-fixture.ts so a run's success no longer requires verdict.validated (one line, .preflight/rust-orchestrator/evidence/nc-d.diff), then restored it with git checkout and checked its hash and an empty git status.",
+      "assertion": "native-smoke.ts rejects the evaluator: the correct edit still passed, then the tamper-tests case failed with \"unexpected fixture or process verdict\" (success true with testsUnchanged false) and the script exited 1.",
+      "observed": "rejected",
+      "commands": [
+        "control-evaluator"
+      ]
+    }
+  ],
+  "missingEvidence": [
+    {
+      "what": "A clean native gate on a committed candidate",
+      "reason": "Both local preflight attempts failed on the port race; the fix must land in a commit and be rechecked.",
+      "owner": "rust/crates/bake-coding-agent"
+    },
+    {
+      "what": "macOS native checks",
+      "reason": "The Mac was unreachable from this host (unknown host key, no ssh alias); no CI job runs on macOS.",
+      "owner": "unassigned"
+    },
+    {
+      "what": "Windows PTY",
+      "reason": "rust-pty skips on Windows: native ConPTY scenarios are not implemented (scope 14).",
+      "owner": "scripts/preflight.ts"
+    },
+    {
+      "what": "Linux arm64 and macOS arm64 hosts",
+      "reason": "No native check ran on an arm64 host.",
+      "owner": "unassigned"
+    },
+    {
+      "what": "Other order-dependent tests",
+      "reason": "Only the failing test was diagnosed; no randomized-order or repeated run covered the other Cargo targets.",
+      "owner": "rust/"
+    }
+  ],
+  "evalRecords": {
+    "notApplicable": "No model-visible change: the only code change is a test fixture, and it is not part of this candidate."
+  },
+  "performanceRecords": {
+    "notApplicable": "No performance qualification attempted; command durations are not a baseline."
+  },
+  "rollback": {
+    "observed": "Every local command ran in a separate clean worktree at the candidate; the wrapper observed an empty git status before and after each clean command. The control edit was restored with git checkout and its hash verified. The lib-loop-fixed run used the follow-up working tree. Surviving descendants were not measured.",
+    "commands": [
+      "cargo-fmt",
+      "cargo-clippy",
+      "cargo-test",
+      "cargo-build",
+      "rust-pty",
+      "rust-eval",
+      "local-preflight-native-1",
+      "local-preflight-native-2",
+      "control-evaluator"
+    ]
+  },
+  "review": {
+    "missing": "No reviewer has accepted this scope. Green checks, code review, and this record do not establish scope acceptance."
+  }
+}

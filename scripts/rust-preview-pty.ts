@@ -1,7 +1,10 @@
 #!/usr/bin/env bun
-/** Drive the built Rust preview in a real PTY and check its return to the shell. */
+/**
+ * Drive the built Rust preview, and live `bake-rs` sessions against a fake
+ * streaming model, in a real PTY and check their return to the shell.
+ */
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
@@ -13,6 +16,10 @@ import { Unicode11Addon } from '@xterm/addon-unicode11'
 const root = resolve(import.meta.dir, '..')
 const { values } = parseArgs({ options: { binary: { type: 'string' }, filter: { type: 'string' } } })
 const binary = resolve(values.binary ?? join(root, 'rust/target/debug/bake-rs'))
+
+/** A live session's command line and the isolated environment it runs in. */
+interface Live { readonly args: readonly string[]; readonly env: Readonly<Record<string, string>> }
+
 class Preview {
   private readonly terminal = new xterm.Terminal({ cols: 80, rows: 24, allowProposedApi: true })
   private readonly pty: Bun.Terminal
@@ -28,21 +35,21 @@ class Preview {
   /** Everything the preview wrote, its last MiB, for sequences the screen does not show. */
   raw = ''
 
-  constructor(cwd: string, readonly inline = false) {
+  constructor(cwd: string, readonly inline = false, readonly live?: Live) {
     // Emoji cases use Unicode 11 widths, matching modern terminal cell allocation.
     this.terminal.loadAddon(new Unicode11Addon())
     this.terminal.unicode.activeVersion = '11'
     const decoder = new TextDecoder()
     // The shell waits for our handshake before exec, preserving its PID. This
     // lets us read cooked modes before the native process can enable raw mode.
-    const shell = inline
-      ? 'read -r ready; i=0; while [ "$i" -lt 40 ]; do printf "SHELL_HISTORY_%02d\\n" "$i"; i=$((i + 1)); done; exec "$1" preview --inline'
-      : 'read -r ready; exec "$1" preview'
-    this.process = Bun.spawn(['sh', '-c', shell, 'rust-preview-pty', binary], {
+    const history = 'i=0; while [ "$i" -lt 40 ]; do printf "SHELL_HISTORY_%02d\\n" "$i"; i=$((i + 1)); done; '
+    const shell = `read -r ready; ${inline ? history : ''}exec "$@"`
+    const args = live?.args ?? (inline ? ['preview', '--inline'] : ['preview'])
+    this.process = Bun.spawn(['sh', '-c', shell, 'rust-preview-pty', binary, ...args], {
       cwd,
       // SSH_TTY sends a copy to the terminal as OSC 52, which the driver
       // reads, instead of to this machine's clipboard.
-      env: { PATH: process.env.PATH, TERM: 'xterm-256color', LANG: 'C.UTF-8', SSH_TTY: '/dev/pts/bake-pty' },
+      env: { PATH: process.env.PATH, TERM: 'xterm-256color', LANG: 'C.UTF-8', SSH_TTY: '/dev/pts/bake-pty', ...live?.env },
       terminal: {
         cols: 80, rows: 24,
         data: (_terminal, bytes) => {
@@ -135,8 +142,8 @@ class Preview {
 
   async ready(): Promise<void> {
     await this.wait('Rust preview ready', () => this.terminal.buffer.active.type === (this.inline ? 'normal' : 'alternate')
-      // The sample session's newest lines and the composer show on the first frame.
-      && this.screen.includes('rejects it before splitting.') && this.screen.includes('❯ Type a draft')
+      // The sample session's newest lines show on the first frame, and so does the composer.
+      && (this.live !== undefined || this.screen.includes('rejects it before splitting.')) && this.screen.includes('❯ ')
       && this.raw.includes('\x1b[?2004h') && this.raw.includes('\x1b[?1000h\x1b[?1002h\x1b[?1006h'))
     assert.notDeepEqual(this.modes(), this.initialModes, 'preview did not acquire raw mode')
   }
@@ -173,7 +180,7 @@ class Preview {
   }
 
   async quit(signal?: 'SIGINT' | 'SIGTERM' | 'SIGHUP'): Promise<void> {
-    if (signal === 'SIGTERM') {
+    if (signal === 'SIGTERM' && this.live === undefined) {
       this.send('\x07')
       await this.wait('agent list with hidden cursor', () => this.screen.includes('Fixed examples · nothing is running')
         && this.raw.lastIndexOf('\x1b[?25l') > this.raw.lastIndexOf('\x1b[?25h'))
@@ -203,6 +210,20 @@ class Preview {
     assert(this.raw.lastIndexOf('\x1b[?25h') > this.raw.lastIndexOf('\x1b[?25l'), 'cursor was not restored')
     assert.throws(() => process.kill(this.process.pid, 0), 'application remains alive after exit')
   }
+
+  /** Waits for the process to exit by itself and returns its status, for a run that never takes the terminal. */
+  async exit(): Promise<number> {
+    const code = await Promise.race([this.exited, delay(30_000).then(() => 'timed out')])
+    assert.equal(typeof code, 'number', 'the process did not exit')
+    await this.wait('PTY drained', () => this.streamStatus !== undefined, false)
+    await this.parsed
+    return code as number
+  }
+
+  /** The preview's process id: the shell that `exec`s the binary. */
+  get pid(): number { return this.process.pid }
+
+  get unchangedModes(): boolean { return JSON.stringify(this.modes()) === JSON.stringify(this.initialModes) }
 
   /** Close the terminal under the preview, as an emulator window closing does, and expect the quiet hangup exit. */
   async hangUp(): Promise<void> {
@@ -646,3 +667,1241 @@ if (process.platform === 'linux') {
     preview.assertNoChromeResidue(true)
   }, [], true)
 } else console.log('SKIP Rust PTY: inline coalesced resize barrier needs Linux /proc process state')
+
+/**
+ * A fake OpenAI Responses model on a loopback port. It answers by the last
+ * user prompt: `ECHO <words>` streams `Echo: <words>.`; `READ <path>` calls
+ * `read`, then answers with the file's first line; `SLEEP` calls bash
+ * `sleep 30`; `HOLD` streams `Holding` and finishes only on `release()` or
+ * when the request is aborted; `STEER <words>` answers `Steered: <words>.`;
+ * `WRITE <files…>` calls `write` once per file, in order, each asking to
+ * escalate to workspace-write and all with the one call id `call_write`,
+ * then answers with the last result's first line; `HOLDWRITE <file>` is
+ * `WRITE` whose call is held until `release()`.
+ */
+/** CLIProxyAPI scenario text; the key is fake. */
+const UNCONFIGURED = 'No model is ready yet. Run /login'
+const FIELD_KEYS = 'Enter continue · Esc cancel'
+const PROXY_KEY = 'sk-fake-pty-0123456789'
+
+class FakeModel {
+  readonly requests: { input: unknown[] }[] = []
+  /** The Authorization header of each request, model lists included, in order. */
+  readonly authorizations: string[] = []
+  /** The model lists served, as a CLIProxyAPI lists them. */
+  readonly modelLists: string[] = []
+  /** Holds each model list until `release()`, as a slow proxy would. */
+  holdModels = false
+  /** Settles when a held model list is aborted by its client. */
+  readonly listAborted = Promise.withResolvers<void>()
+  private releases: (() => void)[] = []
+  aborted = 0
+  private readonly server: ReturnType<typeof Bun.serve>
+
+  constructor() {
+    this.server = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: request => this.answer(request) })
+  }
+
+  get port(): number { return this.server.port ?? 0 }
+
+  /** Lets every held response finish. */
+  release(): void {
+    for (const done of this.releases.splice(0)) done()
+  }
+
+  get holding(): number { return this.releases.length }
+
+  async stop(): Promise<void> { await this.server.stop(true) }
+
+  /** A held response: its first events stream at once, the rest on `release()`; an abort ends it. */
+  private held(request: Request, events: string[], head: number): Response {
+    const encoder = new TextEncoder()
+    let release: () => void = () => {}
+    const released = new Promise<void>((done) => { release = done })
+    this.releases.push(release)
+    request.signal.addEventListener('abort', () => { this.aborted++; release() })
+    return new Response(new ReadableStream({
+      start: async (controller) => {
+        controller.enqueue(encoder.encode(events.slice(0, head).join('')))
+        await released
+        if (request.signal.aborted) {
+          controller.close()
+          return
+        }
+        controller.enqueue(encoder.encode(events.slice(head).join('')))
+        controller.close()
+      },
+    }), { headers: { 'content-type': 'text/event-stream' } })
+  }
+
+  private async answer(request: Request): Promise<Response> {
+    this.authorizations.push(request.headers.get('authorization') ?? '')
+    if (request.method === 'GET' && new URL(request.url).pathname === '/v1/models') {
+      this.modelLists.push(request.url)
+      const list = JSON.stringify({ data: [
+        { id: 'gpt-loop', owned_by: 'openai' },
+        { id: 'gpt-two', owned_by: 'openai', supported_reasoning_levels: [{ effort: 'low' }, { effort: 'high' }] },
+      ] })
+      if (!this.holdModels) return new Response(list, { headers: { 'content-type': 'application/json' } })
+      let release: () => void = () => {}
+      const released = new Promise<void>((done) => { release = done })
+      this.releases.push(release)
+      request.signal.addEventListener('abort', () => { this.listAborted.resolve(); release() })
+      await released
+      return new Response(list, { headers: { 'content-type': 'application/json' } })
+    }
+    const body = await request.json() as { input: { role?: string; type?: string; content?: { text?: string }[]; output?: string }[] }
+    this.requests.push(body)
+    const input = body.input
+    const last = input.at(-1)
+    const prompt = [...input].reverse().find(item => item.role === 'user')?.content?.map(part => part.text ?? '').join('') ?? ''
+    const toolOutput = last?.type === 'function_call_output' ? String(last.output ?? '') : undefined
+    const n = this.requests.length
+    // A compaction's summary requests: the history (with `/compact`'s instructions) and a split turn's prefix.
+    if (prompt.startsWith('<conversation>') || prompt.startsWith('# Conversation\n')) {
+      if (prompt.includes('FAIL-SUMMARY')) {
+        return new Response(JSON.stringify({ error: { message: 'summary refused by the fake model', type: 'invalid_request_error' } }),
+          { status: 400, headers: { 'content-type': 'application/json' } })
+      }
+      const events = text(n, 'Summary: the greek letters so far.')
+      return prompt.includes('HOLD-SUMMARY') ? this.held(request, events, 1) : sse(events)
+    }
+    const write = /^(HOLD)?WRITE (.+)$/u.exec(prompt)
+    if (write !== null) {
+      const targets = write[2]
+      assert(targets !== undefined)
+      const files = targets.trim().split(/\s+/u)
+      const since = input.length - 1 - [...input].reverse().findIndex(item => item.role === 'user')
+      const done = input.slice(since).filter(item => item.type === 'function_call_output').length
+      const file = files[done]
+      if (file === undefined) return sse(text(n, `Wrote: ${(toolOutput ?? '').split('\n')[0]}`))
+      const events = call(n, 'write', { path: file, content: `${file} body`, sandbox_permissions: 'workspace-write', justification: `create ${file}` }, 'call_write')
+      return write[1] === undefined ? sse(events) : this.held(request, events, 1)
+    }
+    if (toolOutput !== undefined) {
+      if (prompt.startsWith('READ ')) return sse(text(n, `Read it: ${toolOutput.split('\n')[0]}`))
+      return sse(text(n, 'Slept.'))
+    }
+    if (prompt.startsWith('READ ')) return sse(call(n, 'read', { path: prompt.slice(5).trim() }))
+    if (prompt.startsWith('SLEEP')) return sse(call(n, 'bash', { command: 'sleep 30' }))
+    if (prompt.startsWith('STEER ')) return sse(text(n, `Steered: ${prompt.slice(6).trim()}.`))
+    if (prompt.startsWith('HOLD')) {
+      const events = text(n, 'Holding until released.')
+      const encoder = new TextEncoder()
+      let release: () => void = () => {}
+      const released = new Promise<void>((done) => { release = done })
+      this.releases.push(release)
+      request.signal.addEventListener('abort', () => { this.aborted++; release() })
+      return new Response(new ReadableStream({
+        start: async (controller) => {
+          // The first delta streams at once; the rest waits for the release.
+          controller.enqueue(encoder.encode(events.slice(0, 5).join('')))
+          await released
+          if (request.signal.aborted) {
+            controller.close()
+            return
+          }
+          controller.enqueue(encoder.encode(events.slice(5).join('')))
+          controller.close()
+        },
+      }), { headers: { 'content-type': 'text/event-stream' } })
+    }
+    return sse(text(n, `Echo: ${prompt.replace(/^ECHO\s*/u, '')}.`))
+  }
+}
+
+function event(sequence: number, value: Record<string, unknown>): string {
+  return `event: ${String(value.type)}\ndata: ${JSON.stringify({ ...value, sequence_number: sequence })}\n\n`
+}
+
+const usage = {
+  input_tokens: 40,
+  input_tokens_details: { cached_tokens: 0 },
+  output_tokens: 8,
+  output_tokens_details: { reasoning_tokens: 0 },
+  total_tokens: 48,
+}
+
+/** A text response in SSE events: its first five open the message and stream `Holding`'s first word. */
+function text(n: number, answer: string): string[] {
+  const id = `msg_${n}`
+  const [head, ...rest] = answer.split(' ')
+  const tail = rest.length > 0 ? ` ${rest.join(' ')}` : ''
+  const item = { id, type: 'message', status: 'completed', role: 'assistant', content: [{ type: 'output_text', annotations: [], text: answer }] }
+  return [
+    { type: 'response.created', response: { id: `resp_${n}`, object: 'response', created_at: 1_760_000_000, status: 'in_progress', model: 'loop-model', output: [] } },
+    { type: 'response.output_item.added', output_index: 0, item: { id, type: 'message', status: 'in_progress', role: 'assistant', content: [] } },
+    { type: 'response.content_part.added', item_id: id, output_index: 0, content_index: 0, part: { type: 'output_text', annotations: [], text: '' } },
+    { type: 'response.output_text.delta', item_id: id, output_index: 0, content_index: 0, delta: head },
+    { type: 'response.in_progress', response: { id: `resp_${n}`, object: 'response', created_at: 1_760_000_000, status: 'in_progress', model: 'loop-model', output: [] } },
+    { type: 'response.output_text.delta', item_id: id, output_index: 0, content_index: 0, delta: tail },
+    { type: 'response.output_text.done', item_id: id, output_index: 0, content_index: 0, text: answer },
+    { type: 'response.content_part.done', item_id: id, output_index: 0, content_index: 0, part: { type: 'output_text', annotations: [], text: answer } },
+    { type: 'response.output_item.done', output_index: 0, item },
+    { type: 'response.completed', response: { id: `resp_${n}`, object: 'response', created_at: 1_760_000_000, status: 'completed', model: 'loop-model', output: [item], usage } },
+  ].map((value, sequence) => event(sequence, value))
+}
+
+/** A response holding one tool call, with its call id `call_<n>` unless one is given. */
+function call(n: number, name: string, args: Record<string, unknown>, callId = `call_${n}`): string[] {
+  const id = `fc_${n}`
+  const item = { id, type: 'function_call', status: 'completed', call_id: callId, name, arguments: JSON.stringify(args) }
+  return [
+    { type: 'response.created', response: { id: `resp_${n}`, object: 'response', created_at: 1_760_000_000, status: 'in_progress', model: 'loop-model', output: [] } },
+    { type: 'response.output_item.added', output_index: 0, item: { ...item, status: 'in_progress', arguments: '' } },
+    { type: 'response.function_call_arguments.done', item_id: id, output_index: 0, arguments: item.arguments },
+    { type: 'response.output_item.done', output_index: 0, item },
+    { type: 'response.completed', response: { id: `resp_${n}`, object: 'response', created_at: 1_760_000_000, status: 'completed', model: 'loop-model', output: [item], usage } },
+  ].map((value, sequence) => event(sequence, value))
+}
+
+function sse(events: string[]): Response {
+  return new Response(events.join(''), { headers: { 'content-type': 'text/event-stream' } })
+}
+
+/** An isolated Bake home, user home, and project for live sessions, all removed afterwards. */
+interface LiveWorld {
+  readonly root: string
+  readonly home: string
+  readonly project: string
+  readonly model: FakeModel
+  launch(args?: readonly string[], inline?: boolean): Preview
+}
+
+/** The session files the home holds, each as its parsed entries. */
+async function sessionEntries(home: string): Promise<Record<string, unknown>[][]> {
+  const found: Record<string, unknown>[][] = []
+  const walk = async (dir: string): Promise<void> => {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name)
+      if (entry.isDirectory()) await walk(path)
+      else if (entry.name.endsWith('.jsonl')) found.push(readFileSync(path, 'utf8').trim().split('\n').map(line => JSON.parse(line) as Record<string, unknown>))
+    }
+  }
+  await walk(join(home, 'sessions')).catch(() => {})
+  return found
+}
+
+function messageTexts(entries: Record<string, unknown>[], role: string): string[] {
+  return entries.flatMap((entry) => {
+    const message = entry.message as { role?: string; content?: string | { type: string; text?: string }[] } | undefined
+    if (entry.type !== 'message' || message?.role !== role) return []
+    const content = message.content
+    return [typeof content === 'string' ? content : (content ?? []).map(part => part.text ?? '').join('')]
+  })
+}
+
+/** Run one live scenario against a fresh fake model and isolated homes. */
+async function liveScenario(name: string, run: (world: LiveWorld) => Promise<void>): Promise<void> {
+  if (values.filter !== undefined && !name.includes(values.filter)) {
+    console.log(`SKIP Rust PTY: ${name} (filter ${values.filter})`)
+    return
+  }
+  const root = await mkdtemp(join(tmpdir(), 'bake-rust-live-'))
+  const home = join(root, 'home')
+  const project = join(root, 'project')
+  const user = join(root, 'user')
+  for (const dir of [home, project, user]) await mkdir(dir, { recursive: true })
+  const model = new FakeModel()
+  await writeFile(join(home, 'models.json'), JSON.stringify({
+    providers: { loop: { baseUrl: `http://127.0.0.1:${model.port}/v1`, api: 'openai-responses', apiKey: 'test-key', models: [{ id: 'loop-model', name: 'Loop', contextWindow: 1000, input: ['text', 'image'] }] } },
+  }))
+  const launched: Preview[] = []
+  const world: LiveWorld = {
+    root, home, project, model,
+    launch: (args = [], inline = false) => {
+      const preview = new Preview(project, inline, { args: inline ? ['--inline', ...args] : args, env: { BAKE_HOME: home, HOME: user, USERPROFILE: user } })
+      launched.push(preview)
+      return preview
+    },
+  }
+  try {
+    await run(world)
+    console.log(`PASS Rust PTY: ${name}`)
+  } catch (error) {
+    const last = launched.at(-1)
+    if (last !== undefined) {
+      await mkdir(join(root, '..', basename(root)), { recursive: true })
+      await mkdir(join(join(import.meta.dir, '..'), '.preflight'), { recursive: true })
+      const transcript = join(import.meta.dir, '..', '.preflight', `${basename(root)}.ansi`)
+      await last.saveFailure(transcript)
+      console.error(`Rust PTY transcript: ${transcript}`)
+    }
+    throw error
+  } finally {
+    for (const preview of launched) await preview.close()
+    await model.stop()
+    await rm(root, { recursive: true, force: true })
+  }
+}
+
+await liveScenario('a live session streams an answer and a tool call, takes a second prompt, and resumes', async (world) => {
+  await writeFile(join(world.project, 'notes.txt'), 'alpha line\nbeta line\n')
+  const session = world.launch()
+  await session.ready()
+  await session.wait('model in the status line', () => session.screen.includes('loop-model'))
+  session.send('READ notes.txt\r')
+  await session.wait('tool call and answer', () => session.screen.includes('Read it:') && /notes\.txt/u.test(session.screen)
+    && /^ {2}✓ Completed/mu.test(session.screen) && session.screen.includes('❯ Type a draft'))
+  assert(/✓ Read: notes\.txt +2 lines/u.test(session.screen) && session.screen.includes('│ alpha line'), `the read card is missing\n${session.screen}`)
+  session.send('ECHO second prompt\r')
+  await session.wait('second answer', () => session.screen.includes('Echo: second prompt.'))
+  assert.equal(session.screen.split('Echo: second prompt.').length - 1, 1, 'the streamed answer was drawn twice')
+  // A pasted image path stages the image, and an idle prompt sends it with the text.
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64')
+  const imagePath = join(world.root, 'dot.png')
+  await writeFile(imagePath, png)
+  session.send('ECHO picture ')
+  session.send(`\x1b[200~${imagePath}\x1b[201~`)
+  await session.wait('image staged', () => session.screen.includes('❯ ECHO picture [Image #1]') && session.screen.includes('Staged attachments: 1'))
+  const sentBefore = world.model.requests.length
+  session.send('\r')
+  await session.wait('image prompt answered', () => session.screen.includes('Echo: picture [Image #1].') && !session.screen.includes('Staged attachments'))
+  assert(JSON.stringify(world.model.requests[sentBefore]?.input).includes('input_image'), 'the staged image was not sent')
+  await session.quit()
+  const [entries] = await sessionEntries(world.home)
+  assert(entries, 'no session file was written')
+  assert.deepEqual(messageTexts(entries, 'user'), ['READ notes.txt', 'ECHO second prompt', 'ECHO picture [Image #1]'])
+  assert(messageTexts(entries, 'toolResult').some(text => text.includes('alpha line')), 'the tool result was not persisted')
+  assert(messageTexts(entries, 'assistant').includes('Echo: second prompt.'))
+
+  // Resumed, the transcript replays from the session file and the next request carries the history.
+  const resumed = world.launch(['--continue'])
+  await resumed.ready()
+  await resumed.wait('replayed transcript', () => resumed.screen.includes('Echo: second prompt.') && resumed.screen.includes('> ECHO second prompt'))
+  const before = world.model.requests.length
+  resumed.send('ECHO third\r')
+  await resumed.wait('resumed answer', () => resumed.screen.includes('Echo: third.'))
+  const sent = JSON.stringify(world.model.requests[before]?.input)
+  assert(sent.includes('READ notes.txt') && sent.includes('Echo: second prompt.'), 'the resumed request lost its history')
+  await resumed.quit()
+  const files = await sessionEntries(world.home)
+  assert.equal(files.length, 1, '--continue started a new session file')
+  assert.deepEqual(messageTexts(files[0] ?? [], 'user'), ['READ notes.txt', 'ECHO second prompt', 'ECHO picture [Image #1]', 'ECHO third'])
+  assert.deepEqual(await readdir(world.project), ['notes.txt'], 'the session wrote into the project')
+})
+
+await liveScenario('inline live session steers a held turn, cancels another, and returns the unsent steer', async (world) => {
+  const session = world.launch([], true)
+  await session.ready()
+  session.assertShellHistory()
+  session.send('HOLD first\r')
+  await session.wait('held stream', () => session.screen.includes('Holding') && session.screen.includes('Esc interrupts'))
+  session.send('STEER left\r')
+  await session.wait('steer waits for the next step', () => session.screen.includes('Next step: STEER left'))
+  world.model.release()
+  await session.wait('steer answered', () => session.history.includes('Steered: left.') && /^ {2}✓ Completed/mu.test(session.screen))
+  assert(!session.screen.includes('Pending input'), 'the delivered steer stayed pending')
+  session.send('HOLD second\r')
+  await session.wait('second held stream', () => world.model.holding === 1 && session.screen.includes('Esc interrupts'))
+  session.send('STEER keep me\r')
+  await session.wait('second steer pending', () => session.screen.includes('Next step: STEER keep me'))
+  session.send('\x1b')
+  await session.wait('turn interrupted and steer returned', () => /^ {2}■ Interrupted/mu.test(session.screen)
+    && session.screen.includes('❯ STEER keep me') && session.screen.includes('Unsent prompts are back in your draft'))
+  assert.equal(world.model.aborted, 1, 'the held request was not aborted')
+  // The returned draft is not sent again by itself.
+  const requests = world.model.requests.length
+  await delay(300)
+  assert.equal(world.model.requests.length, requests, 'the cancelled steer reached the model')
+  assert.equal(session.history.split('\n').filter(line => line.trimEnd() === '> HOLD first').length, 1, 'a committed prompt was lost or duplicated')
+  session.assertShellHistory()
+  await session.quit()
+  session.assertShellHistory()
+  session.assertNoChromeResidue(true)
+  const [entries] = await sessionEntries(world.home)
+  assert.deepEqual(messageTexts(entries ?? [], 'user'), ['HOLD first', 'STEER left', 'HOLD second'])
+})
+
+/** A process `ps` listed. */
+type Listed = { parent: number; command: string }
+
+/**
+ * Each live process (not a zombie) as pid → parent pid and command
+ * line. A listing that failed, or that misses this process, is an error, so
+ * no check reads it as "nothing left".
+ */
+function processTable(): Map<number, Listed> {
+  const listed = Bun.spawnSync(['ps', '-A', '-o', 'pid=,ppid=,stat=,args='])
+  assert.equal(listed.exitCode, 0, `ps failed: ${listed.stderr.toString()}`)
+  const listing = listed.stdout.toString()
+  const table = new Map<number, Listed>()
+  for (const line of listing.split('\n')) {
+    const [, pid, parent, state, command] = /^\s*(\d+)\s+(\d+)\s+(\S+)\s*(.*)$/u.exec(line) ?? []
+    if (pid === undefined || parent === undefined || state === undefined || state.startsWith('Z')) continue
+    table.set(Number(pid), { parent: Number(parent), command: (command ?? '').trimEnd() })
+  }
+  assert(table.has(process.pid), 'ps listed no usable rows')
+  return table
+}
+
+/** The live descendants of `root`, with their command lines. */
+function descendants(root: number): Map<number, string> {
+  const table = processTable()
+  const found = new Map<number, string>()
+  const queue = [root]
+  for (let parent = queue.shift(); parent !== undefined; parent = queue.shift()) {
+    for (const [pid, entry] of table) {
+      if (entry.parent !== parent) continue
+      queue.push(pid)
+      found.set(pid, entry.command)
+    }
+  }
+  return found
+}
+
+/** Which of `owned` (pid → command line) are still live: the same pid with the same command line. */
+function survivors(owned: Map<number, string>): number[] {
+  const table = processTable()
+  return [...owned].filter(([pid, command]) => table.get(pid)?.command === command).map(([pid]) => pid)
+}
+
+await liveScenario('a live bash call cancelled by Esc fails its card and leaves no process', async (world) => {
+  const session = world.launch()
+  await session.ready()
+  session.send('SLEEP\r')
+  // The call's own process tree (its sandbox runner, shell, and `sleep 30`),
+  // found under this session's process; other processes on the host with
+  // the same command line are not this test's.
+  let owned = new Map<number, string>()
+  await session.wait('bash running', () => {
+    if (!session.screen.includes('running bash') || !session.screen.includes('sleep 30')) return false
+    owned = descendants(session.pid)
+    return [...owned.values()].includes('sleep 30')
+  })
+  try {
+    session.send('\x1b')
+    await session.wait('bash interrupted', () => /^ {2}■ Interrupted/mu.test(session.screen))
+    const left = survivors(owned)
+    assert.deepEqual(left, [], `the cancelled bash call left its process: ${left.join(', ')}`)
+    await session.quit()
+  } finally {
+    for (const pid of survivors(owned)) {
+      try {
+        process.kill(pid, 'SIGKILL')
+      } catch (error) {
+        // It exited after the listing, or with a parent killed before it.
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
+      }
+    }
+  }
+})
+
+for (const [signal, inline] of [['SIGTERM', false], ['SIGHUP', true], ['SIGINT', false]] as const) {
+  await liveScenario(`${inline ? 'inline ' : ''}live ${signal} mid-turn shuts the session down and restores the terminal`, async (world) => {
+    const session = world.launch([], inline)
+    await session.ready()
+    session.send('HOLD signal\r')
+    await session.wait('held stream', () => session.screen.includes('Holding'))
+    await session.quit(signal)
+    if (inline) session.assertShellHistory()
+    assert.equal(world.model.aborted, 1, 'shutdown did not abort the request')
+    const [entries] = await sessionEntries(world.home)
+    assert.deepEqual(messageTexts(entries ?? [], 'user'), ['HOLD signal'])
+  })
+}
+
+await liveScenario('a live terminal hangup mid-turn exits quietly', async (world) => {
+  const session = world.launch()
+  await session.ready()
+  session.send('HOLD hangup\r')
+  await session.wait('held stream', () => session.screen.includes('Holding'))
+  await session.hangUp()
+})
+
+await liveScenario('live command-line prompts run first, and a setup failure exits before the terminal changes', async (world) => {
+  const session = world.launch(['ECHO from args', 'ECHO later arg'])
+  await session.ready()
+  await session.wait('both prompts answered', () => session.screen.includes('Echo: from args.') && session.screen.includes('Echo: later arg.')
+    && /^ {2}✓ Completed/mu.test(session.screen))
+  // A command bake-rs does not run is refused, and the draft is kept.
+  session.send('/clone other\r')
+  await session.wait('command refused', () => session.screen.includes('/clone is not available in bake-rs yet')
+    && session.screen.includes('❯ /clone other'))
+  await session.quit()
+
+  const failed = world.launch(['--model', 'missing-model'])
+  assert.equal(await failed.exit(), 1)
+  assert(failed.raw.includes('missing-model'), `the error was not reported\n${failed.raw}`)
+  assert(!failed.raw.includes('\x1b[?2004h') && !failed.raw.includes('\x1b[?1049h'), 'setup failure changed the terminal')
+  assert(failed.unchangedModes, 'setup failure left terminal modes changed')
+
+  // A model without a key opens the terminal, so /login can set one up; a
+  // prompt is refused with its draft kept, and no session file is written.
+  await writeFile(join(world.home, 'models.json'), JSON.stringify({
+    providers: { loop: { baseUrl: `http://127.0.0.1:${world.model.port}/v1`, api: 'openai-responses', models: [{ id: 'loop-model' }] } },
+  }))
+  const before = (await sessionEntries(world.home)).length
+  const keyless = world.launch(['--model', 'loop/loop-model'])
+  await keyless.ready()
+  await keyless.wait('unconfigured note', () => keyless.screen.includes(UNCONFIGURED))
+  keyless.send('ECHO nope\r')
+  await keyless.wait('prompt refused', () => keyless.screen.includes('No API key found') && keyless.screen.includes('❯ ECHO nope'))
+  await keyless.quit()
+  assert.equal((await sessionEntries(world.home)).length, before, 'a refused prompt wrote a session file')
+})
+
+/** Every tool result the home's sessions hold, as text. */
+async function toolResults(home: string): Promise<string[]> {
+  return (await sessionEntries(home)).flatMap(entries => messageTexts(entries, 'toolResult'))
+}
+
+const ALLOWED_PROMPT = 'Approval prompts: enabled.'
+const REFUSED_PROMPT = 'Approval prompts: disabled.'
+
+const CHOOSE_FIRST = 'Press Y first, then Enter'
+const KEYS_ONLY = 'To answer, press Y then Enter'
+const CONFIRM = 'Allow this call once?'
+
+const PREPARING = 'Preparing approval…'
+const KEYS = 'Y then Enter allows once · N rejects · Esc cancels'
+
+/**
+ * Waits until a freshly shown prompt takes keys. The input thread arms it
+ * only after reading every key that was waiting once it was drawn; until
+ * then the panel offers only Esc, and its keys row appears once armed.
+ */
+async function armed(session: Preview): Promise<void> {
+  await session.wait('prompt armed', () => session.screen.includes(KEYS) && !session.screen.includes(PREPARING))
+}
+
+await liveScenario('an approval allows one write once, and typeahead, paste, a burst, and Enter alone do not', async (world) => {
+  const session = world.launch(['--sandbox', 'read-only'])
+  await session.ready()
+  // Typed ahead with the prompt: read long before the request exists.
+  session.send('WRITE ahead.txt\ry')
+  await session.wait('first approval', () => session.screen.includes('Approval required: write  call_write')
+    && session.screen.includes('escalate sandbox to workspace-write: create ahead.txt')
+    && session.screen.includes('path: ahead.txt') && session.screen.includes('content: ahead.txt body')
+    && (session.screen.includes(PREPARING) || session.screen.includes(KEYS)))
+  assert(JSON.stringify(world.model.requests[0]).includes(ALLOWED_PROMPT), 'the interactive prompt does not offer approvals')
+  await armed(session)
+  // Enter alone does not allow: it says to press Y first.
+  session.send('\r')
+  await session.wait('Enter refused', () => session.screen.includes(CHOOSE_FIRST))
+  // A pasted `y` decides nothing and says how to answer.
+  session.send('\x1b[200~y\x1b[201~')
+  await session.wait('paste refused', () => session.screen.includes(KEYS_ONLY))
+  session.send('\r')
+  await session.wait('Enter refused', () => session.screen.includes(CHOOSE_FIRST))
+  // Text typed in one burst, as an unbracketed paste arrives, decides nothing.
+  session.send('yes')
+  await session.wait('burst refused', () => session.screen.includes(KEYS_ONLY))
+  session.send('n')
+  await session.wait('rejected write answered', () => session.screen.includes('Wrote:') && /^ {2}✓ Completed/mu.test(session.screen))
+  assert(!existsSync(join(world.project, 'ahead.txt')), 'typeahead, a paste, a burst, or Enter approved the write')
+  assert(session.screen.includes('❯ y'), `the typed-ahead key left the draft\n${session.screen}`)
+  session.send('\x7f')
+
+  // Two writes with one call id: the first answer allows only the first.
+  session.send('WRITE one.txt two.txt\r')
+  await session.wait('first of two', () => session.screen.includes('create one.txt') && session.screen.includes('Approval required: write'))
+  await armed(session)
+  session.send('y')
+  await session.wait('allow chosen', () => session.screen.includes(CONFIRM))
+  session.send('\r')
+  await session.wait('second of two', () => session.screen.includes('create two.txt') && session.screen.includes('Approval required: write'))
+  assert.equal(readFileSync(join(world.project, 'one.txt'), 'utf8'), 'one.txt body')
+  assert(!existsSync(join(world.project, 'two.txt')), 'the first answer approved the second request')
+  // The second prompt needs its own arming and choice: Enter alone, again, does not allow it.
+  assert(!session.screen.includes(CONFIRM), 'the first choice carried over')
+  await armed(session)
+  session.send('\r')
+  await session.wait('Enter refused again', () => session.screen.includes(CHOOSE_FIRST))
+  assert(!existsSync(join(world.project, 'two.txt')), 'Enter allowed the second request')
+  session.send('y')
+  await session.wait('allow chosen again', () => session.screen.includes(CONFIRM))
+  session.send('n')
+  await session.wait('turn after two', () => /^ {2}✓ Completed/mu.test(session.screen) && !session.screen.includes('Approval required'))
+  assert(!existsSync(join(world.project, 'two.txt')), 'a rejected write ran')
+  await session.quit()
+  const results = await toolResults(world.home)
+  assert.equal(results.filter(text => text.includes('the user rejected escalating this operation to "workspace-write"')).length, 2, results.join('\n'))
+  assert.deepEqual((await readdir(world.project)).sort(), ['one.txt'])
+})
+
+await liveScenario('an approval keeps the draft, its caret, and a pasted image, and Esc cancels it', async (world) => {
+  const session = world.launch(['--sandbox', 'read-only'])
+  await session.ready()
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64')
+  const imagePath = join(world.root, 'dot.png')
+  await writeFile(imagePath, png)
+  session.send('HOLDWRITE held.txt\r')
+  await session.wait('held write call', () => world.model.holding === 1)
+  session.send('keep ')
+  session.send(`\x1b[200~${imagePath}\x1b[201~`)
+  // The image is read off the loop and lands at the caret once read.
+  await session.wait('image staged', () => session.screen.includes('❯ keep [Image #1]'))
+  session.send('ZZ\x1b[D')
+  await session.wait('draft with image', () => session.screen.includes('❯ keep [Image #1]ZZ') && session.screen.includes('Staged attachments: 1'))
+  world.model.release()
+  await session.wait('approval over the draft', () => session.screen.includes('create held.txt') && session.screen.includes('Approval required'))
+  assert(session.screen.includes('keep [Image #1]ZZ') && session.screen.includes('Staged attachments: 1'), `the draft was not kept\n${session.screen}`)
+  await armed(session)
+  // Typing through the prompt is a burst, which answers nothing.
+  session.send('xyz\x7f')
+  await session.wait('typing refused', () => session.screen.includes(KEYS_ONLY))
+  session.send('\x1b')
+  await session.wait('cancelled', () => !session.screen.includes('Approval required') && /^ {2}✓ Completed/mu.test(session.screen))
+  assert(!existsSync(join(world.project, 'held.txt')), 'a cancelled write ran')
+  // The caret is where it was: typing lands before the last character.
+  session.send('!')
+  await session.wait('caret kept', () => session.screen.includes('❯ keep [Image #1]Z!Z'))
+  await session.quit()
+  const results = await toolResults(world.home)
+  assert(results.some(text => text.includes('approval for escalating to "workspace-write" was cancelled')), results.join('\n'))
+})
+
+await liveScenario('a resize disarms a chosen approval until it is shown and armed again', async (world) => {
+  const session = world.launch(['--sandbox', 'read-only'])
+  await session.ready()
+  session.send('WRITE resized.txt\r')
+  await session.wait('approval', () => session.screen.includes('create resized.txt') && session.screen.includes('Approval required: write'))
+  await armed(session)
+  session.send('y')
+  await session.wait('allow chosen', () => session.screen.includes(CONFIRM))
+  // Too short to show the request whole: the choice is gone, and Enter does nothing.
+  await session.resize(80, 3)
+  session.send('\r')
+  await session.resize(80, 24)
+  await session.wait('shown again', () => session.screen.includes('create resized.txt'))
+  assert(!session.screen.includes(CONFIRM), 'the choice survived the resize')
+  assert(!existsSync(join(world.project, 'resized.txt')), 'Enter after the resize allowed the write')
+  await armed(session)
+  session.send('y')
+  await session.wait('allow chosen again', () => session.screen.includes(CONFIRM))
+  session.send('\r')
+  await session.wait('allowed', () => /Wrote: Successfully wrote/u.test(session.screen))
+  assert.equal(readFileSync(join(world.project, 'resized.txt'), 'utf8'), 'resized.txt body')
+  await session.quit()
+})
+
+await liveScenario('inline approvals under the never policy show no prompt, and an approved write runs', async (world) => {
+  const never = world.launch(['--sandbox', 'read-only', '--approval', 'never'], true)
+  await never.ready()
+  never.send('WRITE never.txt\r')
+  await never.wait('refused write answered', () => never.screen.includes('Wrote:') && /^ {2}✓ Completed/mu.test(never.screen))
+  assert(!never.raw.includes('Approval required'), 'the never policy showed a prompt')
+  assert(JSON.stringify(world.model.requests[0]).includes(REFUSED_PROMPT), 'the never policy offered approvals')
+  assert(!existsSync(join(world.project, 'never.txt')))
+  await never.quit()
+  never.assertShellHistory()
+
+  const ask = world.launch(['--sandbox', 'read-only'], true)
+  await ask.ready()
+  ask.send('WRITE inline.txt\r')
+  await ask.wait('inline approval', () => ask.screen.includes('Approval required: write  call_write'))
+  await armed(ask)
+  ask.send('y')
+  await ask.wait('allow chosen', () => ask.screen.includes(CONFIRM))
+  ask.send('\r')
+  await ask.wait('approved write answered', () => /Wrote: Successfully wrote/u.test(ask.screen) && /^ {2}✓ Completed/mu.test(ask.screen))
+  assert.equal(readFileSync(join(world.project, 'inline.txt'), 'utf8'), 'inline.txt body')
+  await ask.quit()
+  ask.assertShellHistory()
+  ask.assertNoChromeResidue(true)
+})
+
+for (const [how, inline] of [['Ctrl+C', false], ['SIGTERM', true], ['hangup', false], ['inline hangup', true]] as const) {
+  await liveScenario(`${how} with an approval waiting restores the terminal and the write never runs`, async (world) => {
+    const session = world.launch(['--sandbox', 'read-only'], inline)
+    await session.ready()
+    session.send('WRITE pending.txt\r')
+    await session.wait('approval waiting', () => session.screen.includes('Approval required: write'))
+    const requests = world.model.requests.length
+    if (how.endsWith('hangup')) await session.hangUp()
+    else await session.quit(how === 'SIGTERM' ? 'SIGTERM' : undefined)
+    if (inline && how === 'SIGTERM') session.assertShellHistory()
+    assert(!existsSync(join(world.project, 'pending.txt')), 'the write ran after exit')
+    assert.equal(world.model.requests.length, requests, 'the withdrawn call went on to another model request')
+    assert.deepEqual(await readdir(world.project), [], 'the session wrote into the project')
+  })
+}
+
+// ---- CLIProxyAPI sign-in, model and thinking controls, refresh, sign-out ----
+//
+// The fake model also answers `GET /v1/models` as a CLIProxyAPI lists its
+// models, so the account's route sends prompts back to it. Keys are fake.
+
+
+/** Waits until the open field takes keys: drawn whole and armed. */
+async function fieldReady(session: Preview, prompt: string): Promise<void> {
+  await session.wait(`${prompt} field ready`, () => session.screen.includes(`${prompt} (`) && session.screen.includes(FIELD_KEYS)
+    && !session.screen.includes('Preparing'))
+}
+
+/** Waits until the composer takes keys again after a dialog closed. */
+async function composerReady(session: Preview): Promise<void> {
+  await session.wait('composer ready', () => !session.screen.includes('Preparing') && !session.screen.includes(FIELD_KEYS))
+}
+
+/** Types `text` one key per write, each after the last was drawn, as a person types. */
+async function type(session: Preview, text: string, shown: (typed: number) => boolean): Promise<void> {
+  for (let typed = 1; typed <= text.length; typed++) {
+    session.send(text[typed - 1] ?? '')
+    await session.wait(`typed ${typed}`, () => shown(typed))
+  }
+}
+
+/** Awaits `promise`, failing with `message` after 10 seconds. */
+async function bounded(promise: Promise<void>, message: string): Promise<void> {
+  const timeout = Symbol('timeout')
+  assert.notEqual(await Promise.race([promise, delay(10_000).then(() => timeout)]), timeout, message)
+}
+
+/** Clears the open field with Ctrl+U and waits until it is drawn empty. */
+async function clearField(session: Preview): Promise<void> {
+  session.send('\x15')
+  await session.wait('field cleared', () => session.screen.split('\n').some(line => /^ {2}(?:│ )?>\s*(?:│\s*)?$/u.test(line.trimEnd())))
+}
+
+/** Enters the fake model's address in the open address field. */
+async function enterUrl(session: Preview, world: LiveWorld): Promise<void> {
+  await fieldReady(session, 'Base URL')
+  await clearField(session)
+  const url = `http://127.0.0.1:${world.model.port}`
+  await type(session, url, typed => session.screen.includes(`> ${url.slice(0, typed)}`))
+  session.send('\r')
+  await session.wait('address answered', () => session.screen.includes('Working…') || session.screen.includes('API key ('))
+}
+
+/** Signs in through the dialogs with the fake model as the proxy. */
+async function signIn(session: Preview, world: LiveWorld): Promise<void> {
+  session.send('/login\r')
+  await fieldReady(session, 'Base URL')
+  await clearField(session)
+  const url = `http://127.0.0.1:${world.model.port}`
+  await type(session, url, typed => session.screen.includes(`> ${url.slice(0, typed)}`))
+  session.send('\r')
+  await fieldReady(session, 'API key')
+  await type(session, PROXY_KEY, typed => session.screen.includes(`> ${'•'.repeat(typed)}`))
+  session.send('\r')
+}
+
+function readJson(path: string): Record<string, unknown> {
+  return JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>
+}
+
+for (const inline of [false, true]) {
+  await liveScenario(`${inline ? 'inline ' : ''}a keyless home signs in, prompts, changes model and thinking, refreshes, resumes, and signs out`, async (world) => {
+    await rm(join(world.home, 'models.json'))
+    const session = world.launch([], inline)
+    await session.ready()
+    await session.wait('unconfigured note', () => session.screen.includes(UNCONFIGURED))
+    session.send('ECHO early\r')
+    await session.wait('prompt refused', () => session.screen.includes('❯ ECHO early') && /No model/u.test(session.screen))
+    session.send('\x15')
+    await session.wait('draft cleared', () => !session.screen.includes('ECHO early'))
+    await signIn(session, world)
+    await session.wait('signed in', () => session.screen.includes('Signed in to CLIProxyAPI') && session.screen.includes('now using cliproxyapi/gpt-loop'))
+    await composerReady(session)
+    assert(!session.raw.includes(PROXY_KEY) && !session.history.includes(PROXY_KEY), 'the key reached the terminal')
+    assert.equal(world.model.authorizations.at(-1), `Bearer ${PROXY_KEY}`)
+    const auth = readJson(join(world.home, 'auth.json')) as { cliproxyapi?: { key?: string } }
+    assert.equal(auth.cliproxyapi?.key, PROXY_KEY)
+    assert(!readFileSync(join(world.home, 'settings.json'), 'utf8').includes(PROXY_KEY), 'the key reached settings.json')
+
+    session.send('ECHO signed in\r')
+    await session.wait('answer through the route', () => session.screen.includes('Echo: signed in.'))
+    assert.equal(world.model.authorizations.at(-1), `Bearer ${PROXY_KEY}`)
+
+    session.send('/model gpt-two\r')
+    await session.wait('model changed', () => session.screen.includes('Model: cliproxyapi/gpt-two'))
+    await composerReady(session)
+    session.send('/thinking\r')
+    await session.wait('thinking list', () => session.screen.includes('Thinking level') && session.screen.includes('Ctrl+S to set as default')
+      && !session.screen.includes('Preparing'))
+    session.send('\x1b[B')
+    // The pointer moves off the current level, which keeps its mark.
+    await session.wait('next level selected', () => session.screen.split('\n').some(line => /▸ \w+/u.test(line) && !line.includes('Current')))
+    session.send('\x13')
+    await session.wait('thinking saved', () => /Thinking level: \w+, saved as the default/u.test(session.screen))
+    const level = /Thinking level: (\w+),/u.exec(session.screen)?.[1]
+    assert(level, 'no thinking level shown')
+    await composerReady(session)
+    session.send('/refresh-models\r')
+    await session.wait('refreshed', () => /CLIProxyAPI model list/u.test(session.screen))
+    await composerReady(session)
+    session.send('ECHO with two\r')
+    await session.wait('answer with gpt-two', () => session.screen.includes('Echo: with two.'))
+    await session.quit()
+    if (inline) session.assertShellHistory()
+    assert(!session.raw.includes(PROXY_KEY), 'the key reached the terminal')
+    const [entries] = await sessionEntries(world.home)
+    assert(entries, 'no session file was written')
+    assert(!JSON.stringify(entries).includes(PROXY_KEY), 'the key reached the session file')
+    const changes = entries.filter(entry => entry.type === 'model_change').map(entry => `${String(entry.provider)}/${String(entry.modelId)}`)
+    assert.deepEqual(changes.slice(-2), ['cliproxyapi/gpt-loop', 'cliproxyapi/gpt-two'])
+    assert(entries.some(entry => entry.type === 'thinking_level_change' && entry.thinkingLevel === level), 'the thinking change was not recorded')
+
+    // Resumed: the session's model and level come back, and the route still works.
+    const resumed = world.launch(['--continue'], inline)
+    await resumed.ready()
+    await resumed.wait('resumed status', () => resumed.screen.includes('gpt-two') && resumed.screen.includes(level))
+    resumed.send('/logout\r')
+    await resumed.wait('signed out', () => resumed.screen.includes('Signed out of CLIProxyAPI'))
+    await composerReady(resumed)
+    resumed.send('ECHO after\r')
+    await resumed.wait('prompt refused after sign-out', () => resumed.screen.includes('❯ ECHO after') && resumed.screen.includes('No API key found'))
+    await resumed.quit()
+    const signedOut = readJson(join(world.home, 'auth.json'))
+    assert.equal(signedOut.cliproxyapi, undefined, 'the key stayed in auth.json')
+    assert.equal(readJson(join(world.home, 'settings.json')).cliproxyapi, null)
+    assert.deepEqual(await readdir(world.project), [], 'the session wrote into the project')
+  })
+}
+
+await liveScenario('a sign-in cancelled at each step, during its check, or by a signal writes nothing and keeps the draft', async (world) => {
+  await rm(join(world.home, 'models.json'))
+  const session = world.launch([], true)
+  await session.ready()
+  // Esc at the address.
+  session.send('/login\r')
+  await fieldReady(session, 'Base URL')
+  session.send('\x1b')
+  await session.wait('cancelled at the address', () => session.screen.includes('❯ /login') && session.screen.includes('Cancelled'))
+  await composerReady(session)
+  session.send('\x15')
+  await session.wait('draft cleared', () => !session.screen.includes('❯ /login'))
+  // The address with typeahead behind its Enter: the queued keys reach
+  // neither the key field nor the draft.
+  session.send('/login\r')
+  await fieldReady(session, 'Base URL')
+  await clearField(session)
+  const url = `http://127.0.0.1:${world.model.port}`
+  await type(session, url, typed => session.screen.includes(`> ${url.slice(0, typed)}`))
+  // Enter must arrive alone to answer: one in a burst with typing never does.
+  session.send('\r')
+  await session.wait('address answered', () => session.screen.includes('Working…') || session.screen.includes('API key ('))
+  session.send('typed-ahead')
+  await fieldReady(session, 'API key')
+  assert(!/> •/u.test(session.screen), `typeahead reached the key field\n${session.screen}`)
+  // Esc at the key.
+  session.send('\x1b')
+  await session.wait('cancelled at the key', () => session.screen.includes('❯ /login') && session.screen.includes('Cancelled'))
+  await composerReady(session)
+  assert(!session.screen.includes('typed-ahead'), 'typeahead reached the draft')
+  session.send('\x15')
+  // Esc while the proxy check is held: it is aborted.
+  world.model.holdModels = true
+  session.send('/login\r')
+  await enterUrl(session, world)
+  await fieldReady(session, 'API key')
+  await type(session, PROXY_KEY, typed => session.screen.includes(`> ${'•'.repeat(typed)}`))
+  session.send('\r')
+  await session.wait('check held', () => world.model.holding === 1 && session.screen.includes('Working…'))
+  session.send('spill')
+  session.send('\x1b')
+  await session.wait('cancelled during the check', () => session.screen.includes('❯ /login') && session.screen.includes('Cancelled'))
+  await bounded(world.model.listAborted.promise, 'the held check was not aborted')
+  await composerReady(session)
+  assert(!session.screen.includes('spill'), 'keys typed while waiting reached the draft')
+  // A signal during secret input restores the terminal and saves nothing.
+  world.model.holdModels = false
+  session.send('\x15')
+  session.send('/login\r')
+  await enterUrl(session, world)
+  await fieldReady(session, 'API key')
+  await type(session, PROXY_KEY.slice(0, 6), typed => session.screen.includes(`> ${'•'.repeat(typed)}`))
+  await session.quit('SIGTERM')
+  session.assertShellHistory()
+  assert(!session.raw.includes(PROXY_KEY.slice(0, 6)) && !session.history.includes(PROXY_KEY.slice(0, 6)), 'the key reached the terminal')
+  assert(!existsSync(join(world.home, 'auth.json')), 'a cancelled sign-in wrote auth.json')
+  assert(!existsSync(join(world.home, 'settings.json')), 'a cancelled sign-in wrote settings.json')
+  assert.deepEqual(await sessionEntries(world.home), [], 'a cancelled sign-in wrote a session file')
+})
+
+await liveScenario('a terminal hangup while a sign-in check is held aborts the check, restores the terminal, and saves nothing', async (world) => {
+  await rm(join(world.home, 'models.json'))
+  world.model.holdModels = true
+  const session = world.launch([], true)
+  await session.ready()
+  session.send('/login\r')
+  await enterUrl(session, world)
+  await fieldReady(session, 'API key')
+  await type(session, PROXY_KEY, typed => session.screen.includes(`> ${'•'.repeat(typed)}`))
+  session.send('\r')
+  await session.wait('check held', () => world.model.holding === 1 && session.screen.includes('Working…'))
+  await session.hangUp()
+  await bounded(world.model.listAborted.promise, 'the held check was not aborted')
+  assert(!session.raw.includes(PROXY_KEY), 'the key reached the terminal')
+  assert(!existsSync(join(world.home, 'auth.json')), 'a hung-up sign-in wrote auth.json')
+  assert(!existsSync(join(world.home, 'settings.json')), 'a hung-up sign-in wrote settings.json')
+  assert.deepEqual(await sessionEntries(world.home), [], 'a hung-up sign-in wrote a session file')
+})
+
+// ---- Session sheets: /name, /session, /new, /resume ----
+
+/** Blank rows between the last row holding `text` and the composer's top edge. */
+function gapAboveControls(screen: string, text: string): number {
+  const lines = screen.split('\n')
+  const at = lines.findLastIndex(line => line.includes(text))
+  assert(at >= 0, `${text} is not on screen\n${screen}`)
+  const box = lines.findIndex((line, index) => index > at && /^╭─/u.test(line))
+  assert(box > at, `no composer under ${text}\n${screen}`)
+  return lines.slice(at + 1, box).filter(line => line.trim() === '').length
+}
+
+/** Waits until an open sheet holds the keyboard: its keys are shown, not its preparing line. */
+async function sheetReady(session: Preview, title: string): Promise<void> {
+  await session.wait(`${title} sheet ready`, () => session.screen.includes(title) && /Esc (?:cancel|close)/u.test(session.screen)
+    && !session.screen.includes('Preparing'))
+}
+
+for (const inline of [false, true]) {
+  await liveScenario(`${inline ? 'inline ' : ''}session sheets name, show, start, and resume sessions without mixing their logs`, async (world) => {
+    const port = world.model.port
+    await writeFile(join(world.home, 'models.json'), JSON.stringify({
+      providers: { loop: { baseUrl: `http://127.0.0.1:${port}/v1`, api: 'openai-responses', apiKey: 'test-key',
+        models: [{ id: 'loop-model', name: 'Loop', contextWindow: 1000, input: ['text', 'image'] },
+          ...Array.from({ length: 11 }, (_, n) => ({ id: `loop-extra-${n + 1}`, name: `Loop extra ${n + 1}`, contextWindow: 200_000 }))] } },
+    }))
+    const session = world.launch([], inline)
+    await session.ready()
+    session.send('ECHO alpha\r')
+    await session.wait('first answer completed', () => session.screen.includes('Echo: alpha.')
+      && /^ {2}✓ Completed/mu.test(session.screen))
+    session.send('/name Alpha work\r')
+    await session.wait('named', () => session.screen.includes('Session name set: Alpha work'))
+    await composerReady(session)
+    // Inline, the held region keeps its transcript viewport's rows (8) under
+    // the newest settled row; a closed sheet or a switch must add none.
+    const settledGap = inline ? gapAboveControls(session.screen, 'Session name set: Alpha work') : 0
+    // A tall model sheet opens framed, then closes with the transcript back against the controls.
+    session.send('/model\r')
+    await sheetReady(session, 'Model · 12 models from loop')
+    assert(session.screen.includes('▸ Loop') && session.screen.includes('Current') && session.screen.includes('> Type to filter'), session.screen)
+    assert(/╭─+╮/u.test(session.screen) && /\d+\/12/u.test(session.screen), session.screen)
+    session.send('\x1b')
+    await session.wait('model sheet cancelled', () => session.screen.includes('❯ /model') && session.screen.includes('Cancelled'))
+    await composerReady(session)
+    // Inline, the closed sheet's rows do not stay as a blank gap over the controls.
+    if (inline) assert(gapAboveControls(session.screen, 'Session name set: Alpha work') <= settledGap, `a blank gap stayed after the sheet closed\n${session.screen}`)
+    session.send('\x15')
+    await session.wait('draft cleared', () => !session.screen.includes('❯ /model'))
+    // /session is a read-only sheet; closing it sends nothing and keeps no draft.
+    const requests = world.model.requests.length
+    session.send('/session\r')
+    await sheetReady(session, 'Session info')
+    assert(session.screen.includes('Alpha work') && /Messages/u.test(session.screen), session.screen)
+    session.send('\x1b')
+    await composerReady(session)
+    await session.wait('info closed', () => !session.screen.includes('Session info') && session.screen.includes('❯ Type a draft'))
+    assert.equal(world.model.requests.length, requests, 'a sheet sent a model request')
+    session.send('/new\r')
+    await session.wait('new session', () => session.screen.includes('New session started'))
+    await composerReady(session)
+    session.send('ECHO beta\r')
+    await session.wait('second answer completed', () => session.screen.includes('Echo: beta.')
+      && /^ {2}✓ Completed/mu.test(session.screen))
+    session.send('/resume\r')
+    await sheetReady(session, 'Resume session')
+    assert(session.screen.includes('Alpha work') && session.screen.includes('Current'), session.screen)
+    await type(session, 'alpha', typed => session.screen.includes(`> ${'alpha'.slice(0, typed)}`))
+    await session.wait('one match', () => session.screen.includes('▸ Alpha work') && session.screen.includes('1/1'))
+    session.send('\r')
+    await session.wait('resumed', () => session.screen.includes('Echo: alpha.') && !session.screen.includes('Echo: beta.')
+      && !session.screen.includes('Resume session'))
+    await composerReady(session)
+    if (!inline) assert(session.screen.includes('Resumed session Alpha work'), session.screen)
+    if (inline) assert(gapAboveControls(session.screen, 'Echo: alpha.') <= settledGap, `the resumed transcript is not against the controls\n${session.screen}`)
+    const before = world.model.requests.length
+    session.send('ECHO gamma\r')
+    await session.wait('resumed answer completed', () => session.screen.includes('Echo: gamma.')
+      && /^ {2}✓ Completed/mu.test(session.screen))
+    const sent = JSON.stringify(world.model.requests[before]?.input)
+    assert(sent.includes('ECHO alpha') && !sent.includes('ECHO beta'), `the resumed request mixed sessions: ${sent}`)
+    await session.quit()
+    if (inline) session.assertShellHistory()
+    const files = await sessionEntries(world.home)
+    assert.equal(files.length, 2, 'expected one file per session')
+    const users = files.map(entries => messageTexts(entries, 'user')).sort((a, b) => a.length - b.length)
+    assert.deepEqual(users, [['ECHO beta'], ['ECHO alpha', 'ECHO gamma']])
+    const named = files.find(entries => messageTexts(entries, 'user').includes('ECHO alpha'))
+    assert(named?.some(entry => entry.type === 'session_info' && entry.name === 'Alpha work'), 'the name was not recorded')
+    assert.deepEqual(await readdir(world.project), [], 'the session wrote into the project')
+  })
+}
+
+// ---- Session search in /resume ----
+
+/** Every session file under the home, by path, as its text; the sessions directory must exist. */
+async function sessionBytes(home: string): Promise<Map<string, string>> {
+  const found = new Map<string, string>()
+  const walk = async (dir: string): Promise<void> => {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name)
+      if (entry.isDirectory()) await walk(path)
+      else if (entry.name.endsWith('.jsonl')) found.set(path, readFileSync(path, 'utf8'))
+    }
+  }
+  await walk(join(home, 'sessions'))
+  return found
+}
+
+/** Writes a Pi session file beside `beside`: a first ask, then a later answer holding `later`. */
+async function seedSession(beside: string, id: string, cwd: string, later: string): Promise<string> {
+  const path = join(dirname(beside), `2026-01-01T00-00-00-000Z_${id}.jsonl`)
+  const cost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+  const usage = { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost }
+  const lines = [
+    { type: 'session', version: 3, id, timestamp: '2026-01-01T00:00:00.000Z', cwd },
+    { type: 'message', id: 'a1', parentId: null, timestamp: '2026-01-01T00:00:01.000Z', message: { role: 'user', content: 'first ask', timestamp: 1_767_225_601_000 } },
+    { type: 'message', id: 'a2', parentId: 'a1', timestamp: '2026-01-01T00:00:02.000Z', message: { role: 'assistant', content: [{ type: 'text', text: 'short reply' }], api: 'openai-responses', provider: 'loop', model: 'loop-model', stopReason: 'stop', timestamp: 1_767_225_602_000, usage } },
+    { type: 'message', id: 'a3', parentId: 'a2', timestamp: '2026-01-01T00:00:03.000Z', message: { role: 'user', content: 'and then?', timestamp: 1_767_225_603_000 } },
+    { type: 'message', id: 'a4', parentId: 'a3', timestamp: '2026-01-01T00:00:04.000Z', message: { role: 'assistant', content: [{ type: 'text', text: later }], api: 'openai-responses', provider: 'loop', model: 'loop-model', stopReason: 'stop', timestamp: 1_767_225_604_000, usage } },
+  ]
+  await writeFile(path, lines.map(line => `${JSON.stringify(line)}\n`).join(''))
+  return path
+}
+
+for (const inline of [false, true]) {
+  await liveScenario(`${inline ? 'inline ' : ''}resume search finds later answers, refuses a bad pattern, filters named sessions, and opens the chosen id`, async (world) => {
+    const session = world.launch([], inline)
+    await session.ready()
+    session.send('ECHO alpha\r')
+    await turnSettled(session, 'Echo: alpha.')
+    session.send('/name Alpha work\r')
+    await session.wait('named', () => session.screen.includes('Session name set: Alpha work'))
+    await composerReady(session)
+    const [own] = [...(await sessionBytes(world.home)).keys()]
+    assert(own, 'no session file was written')
+    const header = JSON.parse(readFileSync(own, 'utf8').split('\n')[0] ?? '{}') as { cwd?: string }
+    assert(typeof header.cwd === 'string', 'the session header has no cwd')
+    const target = await seedSession(own, '01dddddd-0000-7000-8000-000000000001', header.cwd, 'Zebra\n\n   crossing notes')
+    await seedSession(own, '01ffffff-0000-7000-8000-000000000002', join(world.root, 'elsewhere'), 'zebra crossing notes elsewhere')
+    const before = await sessionBytes(world.home)
+    const requests = world.model.requests.length
+
+    session.send('/resume\r')
+    await sheetReady(session, 'Resume session')
+    assert(session.screen.includes('^S sort: Recent · ^N named: off') && session.screen.includes('> Search · re:<regex> · "phrase"'), session.screen)
+    assert(session.screen.includes('Alpha work') && session.screen.includes('Current') && session.screen.includes('first ask'), session.screen)
+    assert(!session.screen.includes('elsewhere'), `another directory's session is listed\n${session.screen}`)
+    // A phrase only a later answer holds, its whitespace collapsed, finds that session.
+    const phrase = '"zebra crossing"'
+    await type(session, phrase, typed => session.screen.includes(`> ${phrase.slice(0, typed)}`))
+    await session.wait('phrase match', () => session.screen.includes('▸ first ask') && session.screen.includes('1/1') && !session.screen.includes('Current'))
+    // A bad pattern lists nothing, says why, and Enter chooses nothing.
+    session.send('\x15')
+    await session.wait('search cleared', () => session.screen.includes('> Search · re:<regex>'))
+    await type(session, 're:(', typed => session.screen.includes(`> ${'re:('.slice(0, typed)}`))
+    await session.wait('invalid pattern', () => session.screen.includes('Invalid regex:') && session.screen.includes('No matching sessions'))
+    session.send('\r')
+    session.send('\x15')
+    await session.wait('pattern cleared', () => session.screen.includes('^S sort: Recent') && session.screen.includes('first ask') && session.screen.includes('Alpha work'))
+    assert(session.screen.includes('Resume session') && !session.screen.includes('Resumed session'), `Enter on no rows answered\n${session.screen}`)
+    // Ctrl+N keeps named sessions only; Ctrl+S switches the order.
+    session.send('\x0e')
+    await session.wait('named only', () => session.screen.includes('^N named: on') && session.screen.includes('Current') && session.screen.includes('1/1') && !session.screen.includes('first ask'))
+    session.send('\x13')
+    await session.wait('relevance', () => session.screen.includes('^S sort: Relevance'))
+    session.send('\x0e')
+    await session.wait('all names', () => session.screen.includes('^N named: off') && session.screen.includes('first ask'))
+    if (!inline) {
+      await session.resize(42, 20)
+      // Narrow, the keys take their short form; the search state stays whole.
+      await session.wait('narrow sheet', () => session.screen.includes('Resume session') && session.screen.includes('↑↓ · Enter · Esc')
+        && session.screen.includes('^S sort: Relevance · ^N named: off') && session.screen.includes('> Search · re:<regex> · "phrase"')
+        && !session.screen.includes('Preparing'))
+      await session.resize(80, 24)
+      await sheetReady(session, 'Resume session')
+    }
+    session.send('\x1b')
+    await session.wait('resume cancelled', () => session.screen.includes('Cancelled') && !session.screen.includes('Resume session'))
+    await composerReady(session)
+    assert.deepEqual(await sessionBytes(world.home), before, 'searching or cancelling wrote a session file')
+    assert.equal(world.model.requests.length, requests, 'the sheet sent a model request')
+
+    // The chosen search result opens by its id.
+    session.send('\x15')
+    session.send('/resume\r')
+    await sheetReady(session, 'Resume session')
+    await type(session, 're:crossing\\s+NOTES', typed => session.screen.includes(`> ${'re:crossing\\s+NOTES'.slice(0, typed)}`))
+    await session.wait('regex match', () => session.screen.includes('▸ first ask') && session.screen.includes('1/1'))
+    session.send('\r')
+    await session.wait('resumed', () => session.screen.includes('crossing notes') && session.screen.includes('first ask')
+      && !session.screen.includes('Echo: alpha.') && !session.screen.includes('Resume session'))
+    await composerReady(session)
+    assert.equal(world.model.requests.length, requests, 'resuming sent a model request')
+    await session.quit()
+    if (inline) session.assertShellHistory()
+    const after = await sessionBytes(world.home)
+    for (const [path, bytes] of before) {
+      if (path !== target) assert.equal(after.get(path), bytes, `${basename(path)} changed`)
+    }
+    assert((after.get(target) ?? '').startsWith(before.get(target) ?? '\0'), 'the resumed session lost entries')
+    assert.deepEqual(await readdir(world.project), [], 'the session wrote into the project')
+  })
+}
+
+// ---- Session tree navigation and forks: /tree, /fork ----
+
+/** Waits until `answer` is on screen and the turn that wrote it has settled: its completed status sits below it. */
+async function turnSettled(session: Preview, answer: string): Promise<void> {
+  await session.wait(`${answer} settled`, () => {
+    const lines = session.screen.split('\n')
+    const at = lines.findLastIndex(line => line.includes(answer))
+    const done = lines.findLastIndex(line => /^ {2}✓ Completed/u.test(line))
+    return at >= 0 && done > at
+  })
+}
+
+for (const inline of [false, true]) {
+  await liveScenario(`${inline ? 'inline ' : ''}tree navigation and fork branch the right logs, restore drafts, and send no hidden request`, async (world) => {
+    const port = world.model.port
+    await writeFile(join(world.home, 'models.json'), JSON.stringify({
+      providers: { loop: { baseUrl: `http://127.0.0.1:${port}/v1`, api: 'openai-responses', apiKey: 'test-key',
+        models: [{ id: 'loop-model', name: 'Loop', contextWindow: 1000 }] } },
+    }))
+    const session = world.launch([], inline)
+    await session.ready()
+    session.send('ECHO alpha\r')
+    await turnSettled(session, 'Echo: alpha.')
+    session.send('ECHO beta\r')
+    await turnSettled(session, 'Echo: beta.')
+    await composerReady(session)
+    const requests = world.model.requests.length
+    // The tree marks the current path and leaf; typing filters it.
+    session.send('/tree\r')
+    await sheetReady(session, 'Session tree')
+    assert(session.screen.includes('• user: ECHO alpha') && session.screen.includes('Current'), session.screen)
+    if (!inline) {
+      await session.resize(60, 20)
+      await sheetReady(session, 'Session tree')
+      await session.resize(80, 24)
+      await sheetReady(session, 'Session tree')
+    }
+    await type(session, 'user: echo beta', typed => session.screen.includes(`> ${'user: echo beta'.slice(0, typed)}`))
+    await session.wait('one match', () => session.screen.includes('1/1'))
+    session.send('\r')
+    // The chosen message is back in the draft, unsent, and the transcript replays the path before it.
+    await session.wait('navigated', () => session.screen.includes('❯ ECHO beta') && !session.screen.includes('Echo: beta.')
+      && session.screen.includes('Echo: alpha.') && !session.screen.includes('Session tree'))
+    await composerReady(session)
+    assert.equal(world.model.requests.length, requests, 'navigation sent a model request')
+    session.send('\x15')
+    await session.wait('draft cleared', () => !session.screen.includes('❯ ECHO beta'))
+    let before = world.model.requests.length
+    session.send('ECHO gamma\r')
+    await turnSettled(session, 'Echo: gamma.')
+    let sent = JSON.stringify(world.model.requests[before]?.input)
+    assert(sent.includes('ECHO alpha') && sent.includes('ECHO gamma') && !sent.includes('ECHO beta'), `the branched request: ${sent}`)
+    await composerReady(session)
+    // /fork lists every user message, latest selected, and starts a new session before the chosen one.
+    const forkRequests = world.model.requests.length
+    session.send('/fork\r')
+    await sheetReady(session, 'Fork from message')
+    assert(session.screen.includes('ECHO beta') && session.screen.includes('▸ ECHO gamma'), session.screen)
+    session.send('\r')
+    await session.wait('forked', () => session.screen.includes('❯ ECHO gamma') && !session.screen.includes('Echo: gamma.')
+      && session.screen.includes('Echo: alpha.') && !session.screen.includes('Fork from message'))
+    await composerReady(session)
+    if (!inline) assert(session.screen.includes('Forked to new session'), session.screen)
+    assert.equal(world.model.requests.length, forkRequests, 'the fork sent a model request')
+    session.send('\x15')
+    await session.wait('draft cleared', () => !session.screen.includes('❯ ECHO gamma'))
+    before = world.model.requests.length
+    session.send('ECHO delta\r')
+    await turnSettled(session, 'Echo: delta.')
+    sent = JSON.stringify(world.model.requests[before]?.input)
+    assert(sent.includes('ECHO alpha') && sent.includes('ECHO delta') && !sent.includes('ECHO gamma') && !sent.includes('ECHO beta'), `the forked request: ${sent}`)
+    await session.quit()
+    if (inline) session.assertShellHistory()
+    const files = await sessionEntries(world.home)
+    assert.equal(files.length, 2, 'expected the source and its fork')
+    const source = files.find(entries => messageTexts(entries, 'user').includes('ECHO beta'))
+    const fork = files.find(entries => messageTexts(entries, 'user').includes('ECHO delta'))
+    assert(source && fork, 'a session file is missing')
+    assert.deepEqual(messageTexts(source, 'user'), ['ECHO alpha', 'ECHO beta', 'ECHO gamma'])
+    assert.deepEqual(messageTexts(fork, 'user'), ['ECHO alpha', 'ECHO delta'])
+    const parentOf = (text: string) => source.find(entry => entry.type === 'message'
+      && messageTexts([entry], 'user')[0] === text)?.parentId
+    assert.equal(parentOf('ECHO beta'), parentOf('ECHO gamma'), 'beta and gamma are not siblings in the source log')
+    const header = fork[0] as { type?: string; parentSession?: string }
+    assert(header.type === 'session' && typeof header.parentSession === 'string' && header.parentSession.endsWith('.jsonl'), 'the fork does not name its source')
+    assert.deepEqual(await readdir(world.project), [], 'the session wrote into the project')
+  })
+}
+
+// ---- Manual compaction: /compact [instructions] ----
+
+for (const inline of [false, true]) {
+  await liveScenario(`${inline ? 'inline ' : ''}compact cancels on Esc, keeps drafts on failure, rebuilds the transcript, continues from the summary, and quits mid-summary`, async (world) => {
+    // Automatic compaction is off and one token is kept, so only /compact compacts and a short session has history to summarize.
+    await writeFile(join(world.home, 'settings.json'), JSON.stringify({ compaction: { enabled: false, keepRecentTokens: 1 }, retry: { enabled: false } }))
+    const session = world.launch([], inline)
+    await session.ready()
+    for (const word of ['alpha', 'beta', 'gamma']) {
+      session.send(`ECHO ${word}\r`)
+      await turnSettled(session, `Echo: ${word}.`)
+    }
+    await composerReady(session)
+    const compactions = async (): Promise<number> => (await sessionEntries(world.home)).flat().filter(entry => entry.type === 'compaction').length
+
+    // Esc cancels a held summary; a prompt typed meanwhile is refused and both drafts come back.
+    let requests = world.model.requests.length
+    session.send('/compact HOLD-SUMMARY\r')
+    await session.wait('compaction running', () => world.model.holding === 1 && session.screen.includes('compacting') && session.screen.includes('Esc'))
+    await type(session, 'kept draft', typed => session.screen.includes(`❯ ${'kept draft'.slice(0, typed)}`))
+    session.send('\r')
+    await session.wait('prompt refused while compacting', () => session.screen.includes('being compacted') && session.screen.includes('❯ kept draft'))
+    session.send('\x1b')
+    await session.wait('compaction cancelled', () => /■ Interrupted/u.test(session.screen) && session.screen.includes('/compact HOLD-SUMMARY')
+      && session.screen.includes('kept draft') && session.screen.includes('Cancelled; your draft is back.'))
+    assert.equal(world.model.aborted, 1, 'the summary request was not aborted')
+    assert.equal(world.model.requests.length, requests + 1, 'a cancelled compaction sent more than its summary request')
+    assert.equal(await compactions(), 0, 'a cancelled compaction was written')
+    // Clear the two-paragraph draft one key at a time: each line, then the blank lines between them.
+    // /compact opens no dialog, so no keyboard handoff drops the next keys: they reach the draft at once.
+    await composerReady(session)
+    session.send('\x15')
+    await session.wait('second paragraph cleared', () => !session.screen.includes('kept draft'))
+    session.send('\x7f\x7f')
+    await session.wait('paragraphs joined', () => session.screen.includes('❯ /compact HOLD-SUMMARY'))
+    session.send('\x15')
+    await session.wait('draft cleared', () => !session.screen.includes('❯ /compact'))
+
+    // A failed summary keeps the draft and the session.
+    session.send('/compact FAIL-SUMMARY\r')
+    await session.wait('compaction failed', () => session.screen.includes('Compaction failed') && session.screen.includes('❯ /compact FAIL-SUMMARY'))
+    assert.equal(await compactions(), 0, 'a failed compaction was written')
+    session.send('\x15')
+    await session.wait('draft cleared', () => !session.screen.includes('❯ /compact'))
+
+    // Success: the instructions reach the summary request and the transcript starts over with the kept history.
+    requests = world.model.requests.length
+    session.send('/compact keep the greek letters\r')
+    await session.wait('compacted', () => /Compacted from [\d,]+ tokens/u.test(session.screen) && !session.screen.includes('compacting'))
+    await composerReady(session)
+    const summaries = world.model.requests.slice(requests).map(request => JSON.stringify(request.input))
+    assert.equal(summaries.length, 2, 'expected the history and turn-prefix summary requests')
+    assert(summaries[0]?.includes('Additional focus: keep the greek letters'), `the instructions are missing: ${summaries[0]}`)
+    const lines = session.screen.split('\n')
+    assert(lines.findIndex(line => line.includes('Echo: gamma.')) < lines.findIndex(line => /Compacted from/u.test(line)), 'the note is not below the kept history')
+    if (!inline) assert(!session.screen.includes('Echo: alpha.'), `the summarized history is still shown\n${session.screen}`)
+    assert.equal(await compactions(), 1)
+
+    // The next prompt is sent with the summary instead of the summarized history.
+    requests = world.model.requests.length
+    session.send('ECHO delta\r')
+    await turnSettled(session, 'Echo: delta.')
+    const sent = JSON.stringify(world.model.requests[requests]?.input)
+    assert(sent.includes('Summary: the greek letters so far.') && !sent.includes('ECHO alpha') && sent.includes('ECHO delta'), `the continued request: ${sent}`)
+    await composerReady(session)
+
+    // Quitting while a summary is held aborts it, writes nothing, and restores the terminal.
+    const aborted = world.model.aborted
+    session.send('/compact HOLD-SUMMARY\r')
+    await session.wait('second compaction running', () => world.model.holding >= 1 && session.screen.includes('compacting'))
+    await session.quit()
+    if (inline) session.assertShellHistory()
+    assert.equal(world.model.aborted, aborted + 1, 'quitting did not abort the summary request')
+    const [entries, ...others] = await sessionEntries(world.home)
+    assert(entries && others.length === 0, 'expected one session file')
+    assert.equal(entries.filter(entry => entry.type === 'compaction').length, 1, 'quitting mid-summary wrote a compaction')
+    assert.deepEqual(messageTexts(entries, 'user'), ['ECHO alpha', 'ECHO beta', 'ECHO gamma', 'ECHO delta'], 'slash text reached the log')
+    assert(!world.model.requests.some(request => JSON.stringify(request.input).includes('/compact')), 'slash text reached the model')
+    assert.deepEqual(await readdir(world.project), [], 'the session wrote into the project')
+  })
+}

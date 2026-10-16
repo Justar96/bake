@@ -129,6 +129,13 @@ pub fn session_event_json(event: &SessionEvent<'_>) -> Value {
             out.insert("level".into(), level.as_str().into());
             Value::Object(out)
         }
+        SessionEvent::SessionInfoChanged(name) => {
+            let mut out = object("session_info_changed");
+            if let Some(name) = name {
+                out.insert("name".into(), name.clone().into());
+            }
+            Value::Object(out)
+        }
         SessionEvent::AgentEnd {
             messages,
             will_retry,
@@ -210,6 +217,15 @@ pub fn session_event_json(event: &SessionEvent<'_>) -> Value {
         }
         SessionEvent::SummarizationRetryFinished => {
             Value::Object(object("summarization_retry_finished"))
+        }
+        SessionEvent::QueueUpdate {
+            steering,
+            follow_up,
+        } => {
+            let mut out = object("queue_update");
+            out.insert("steering".into(), (*steering).into());
+            out.insert("followUp".into(), (*follow_up).into());
+            Value::Object(out)
         }
     }
 }

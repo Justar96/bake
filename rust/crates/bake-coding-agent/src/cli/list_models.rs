@@ -25,14 +25,17 @@ fn is_word_boundary_char(ch: char) -> bool {
     is_whitespace(ch) || matches!(ch, '-' | '_' | '.' | '/' | ':')
 }
 
-fn match_query(query: &[char], text: &[char]) -> FuzzyMatch {
+/// Pi's inner `matchQuery` over a lowercased `text`. Indexes count `char`s
+/// where Pi counts UTF-16 code units, so only text with characters beyond
+/// the Basic Multilingual Plane scores differently.
+fn match_query(query: &[char], text: &str) -> FuzzyMatch {
     if query.is_empty() {
         return FuzzyMatch {
             matches: true,
             score: 0.0,
         };
     }
-    if query.len() > text.len() {
+    if query.len() > text.chars().count() {
         return FuzzyMatch {
             matches: false,
             score: 0.0,
@@ -43,17 +46,24 @@ fn match_query(query: &[char], text: &[char]) -> FuzzyMatch {
     let mut score = 0.0f64;
     let mut last_match_index: Option<usize> = None;
     let mut consecutive_matches = 0usize;
+    // Scanning resumes after the last match, as Pi's `indexOf(…, last + 1)`.
+    let mut chars = text.chars().enumerate();
+    let mut previous: Option<char> = None;
 
     while query_index < query.len() {
-        let start = last_match_index.map_or(0, |last| last + 1);
-        let Some(offset) = text[start..]
-            .iter()
-            .position(|&ch| ch == query[query_index])
-        else {
+        let wanted = query[query_index];
+        let mut found = None;
+        for (i, ch) in chars.by_ref() {
+            let before = previous.replace(ch);
+            if ch == wanted {
+                found = Some((i, before));
+                break;
+            }
+        }
+        let Some((i, before)) = found else {
             break;
         };
-        let i = start + offset;
-        let is_word_boundary = i == 0 || is_word_boundary_char(text[i - 1]);
+        let is_word_boundary = before.is_none_or(is_word_boundary_char);
 
         // Pi's `lastMatchIndex === i - 1` with `lastMatchIndex` starting at
         // -1: a first match at index 0 also counts as consecutive.
@@ -85,7 +95,7 @@ fn match_query(query: &[char], text: &[char]) -> FuzzyMatch {
         };
     }
 
-    if query == text {
+    if text.chars().eq(query.iter().copied()) {
         score -= 100.0;
     }
 
@@ -134,21 +144,24 @@ fn swapped_alphanumeric_query(query_lower: &str) -> Option<String> {
 /// (case-insensitive), with a fallback for swapped `letters+digits` /
 /// `digits+letters` queries. Lower score is a better match.
 pub fn fuzzy_match(query: &str, text: &str) -> FuzzyMatch {
-    let query_lower = query.to_lowercase();
-    let text_lower = text.to_lowercase();
-    let query_chars: Vec<char> = query_lower.chars().collect();
-    let text_chars: Vec<char> = text_lower.chars().collect();
+    fuzzy_match_lowercase(&query.to_lowercase(), &text.to_lowercase())
+}
 
-    let primary = match_query(&query_chars, &text_chars);
+/// [`fuzzy_match`] of a query and a text both already lowercased, so a
+/// caller that matches one text many times lowercases it once.
+pub(crate) fn fuzzy_match_lowercase(query_lower: &str, text_lower: &str) -> FuzzyMatch {
+    let query_chars: Vec<char> = query_lower.chars().collect();
+
+    let primary = match_query(&query_chars, text_lower);
     if primary.matches {
         return primary;
     }
 
-    let Some(swapped) = swapped_alphanumeric_query(&query_lower) else {
+    let Some(swapped) = swapped_alphanumeric_query(query_lower) else {
         return primary;
     };
     let swapped_chars: Vec<char> = swapped.chars().collect();
-    let swapped_match = match_query(&swapped_chars, &text_chars);
+    let swapped_match = match_query(&swapped_chars, text_lower);
     if !swapped_match.matches {
         return primary;
     }
@@ -531,6 +544,43 @@ mod tests {
                 .to_owned()),
             ["claude groq", "anthropic codex"]
         );
+    }
+
+    // Bake: the streaming `matchQuery` over a lowercased `&str` keeps the
+    // scores of the earlier `&[char]` one, which these values were taken
+    // from: Unicode lowercasing, characters outside the Basic Multilingual
+    // Plane counted as one, and word boundaries.
+    #[test]
+    fn match_query_keeps_its_scores_for_unicode_text() {
+        let cases: [(&str, &str, Option<f64>); 13] = [
+            ("über", "ÉCOLE ÜBER straße", Some(-37.0)),
+            ("ÉC", "école", Some(-24.9)),
+            ("ss", "straße", None),
+            ("İ", "İstanbul", Some(-24.9)),
+            ("ab", "a😀b", Some(-12.8)),
+            ("😀b", "x 😀-b", Some(-17.4)),
+            ("codex52", "gpt-5.2-codex", None),
+            ("", "anything", Some(0.0)),
+            ("zz", "abc", None),
+            ("abc", "abc", Some(-139.7)),
+            ("fb", "foo-bar", Some(-18.6)),
+            ("foo", "f_o_o_bar", Some(-30.4)),
+            ("longquery", "short", None),
+        ];
+        for (query, text, score) in cases {
+            let query: Vec<char> = query.to_lowercase().chars().collect();
+            let found = match_query(&query, &text.to_lowercase());
+            assert_eq!(found.matches, score.is_some(), "{query:?} in {text:?}");
+            if let Some(score) = score {
+                assert!(
+                    (found.score - score).abs() < 1e-9,
+                    "{query:?} in {text:?}: {}",
+                    found.score
+                );
+            }
+        }
+        // The prelowered entry point keeps the swapped-digits fallback.
+        assert!(fuzzy_match_lowercase("codex52", "gpt-5.2-codex").matches);
     }
 
     // Ported from Pi `packages/tui/test/fuzzy.test.ts` (`describe("fuzzyMatch")`).

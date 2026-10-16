@@ -12,6 +12,7 @@ pub const HEADER_LIST_HINT: &str = "↑↓ select · Enter inspect · Esc back";
 pub const PLACEHOLDER: &[&str] = &["Type a draft", "Alt+Enter newline", "Ctrl+- undo"];
 /// While a turn runs, Enter steers instead of sending.
 pub const PLACEHOLDER_RUNNING: &[&str] = &["Enter steers the next step · Alt+↑ sends now"];
+pub const PLACEHOLDER_APPROVAL: &[&str] = &["Approval pending"];
 /// While history is compacted, Enter queues a prompt to run afterwards.
 pub const PLACEHOLDER_COMPACTING: &[&str] = &["Compacting… Enter queues · Esc cancels"];
 /// An inspection whose parent draft is empty.
@@ -20,6 +21,47 @@ pub const PLACEHOLDER_INSPECTING: &[&str] = &["Read-only · Esc returns to paren
 pub const PLACEHOLDER_SEP: &str = " · ";
 pub const HINT_SEND: &str = "Enter sends";
 pub const HINT_INTERRUPT: &str = "Esc interrupts";
+pub const HINT_APPROVAL: &str = "Esc cancels request";
+pub const PLACEHOLDER_DIALOG: &[&str] = &["Answer the dialog above"];
+pub const HINT_DIALOG: &str = "Esc cancels";
+pub const PLACEHOLDER_PREPARING: &[&str] = &["Preparing…"];
+pub const HINT_PREPARING: &str = "Preparing…";
+/// The keys of a list dialog, with and without its save key, and their
+/// short forms for a narrow sheet.
+pub const DIALOG_LIST_KEYS: &str = "↑↓ choose · Enter select · Esc cancel";
+pub const DIALOG_LIST_SAVE_KEYS: &str =
+    "↑↓ choose · Enter select · Ctrl+S to set as default · Esc cancel";
+pub const DIALOG_LIST_KEYS_SHORT: &str = "↑↓ · Enter · Esc";
+pub const DIALOG_LIST_SAVE_KEYS_SHORT: &str = "↑↓ · Enter · ^S save · Esc";
+/// The keys a sheet too narrow for the others still names.
+pub const DIALOG_KEYS_TINY: &str = "↵ · Esc";
+/// What an empty filter row says.
+pub const DIALOG_FILTER: &str = "Type to filter";
+pub const DIALOG_NO_MATCH: &str = "No matching choices";
+/// What `/resume`'s empty search row says; its keys and state, `{order}`
+/// one of the order names and `{named}` `on` or `off`; and what it lists
+/// when nothing matches.
+pub const SESSION_SEARCH_FILTER: &str = "Search · re:<regex> · \"phrase\"";
+pub const SESSION_SEARCH_STATE: &str = "^S sort: {order} · ^N named: {named}";
+pub const SESSION_SEARCH_RECENT: &str = "Recent";
+pub const SESSION_SEARCH_RELEVANCE: &str = "Relevance";
+pub const SESSION_SEARCH_NO_MATCH: &str = "No matching sessions";
+pub const SESSION_SEARCH_NO_NAMED: &str = "No named sessions · ^N shows all";
+/// Why a `re:` query matches nothing: none given, or `{reason}` the
+/// pattern was refused.
+pub const SESSION_SEARCH_EMPTY_REGEX: &str = "Empty regex: type a pattern after re:";
+pub const SESSION_SEARCH_INVALID_REGEX: &str = "Invalid regex: {reason}";
+/// The status of the item in effect now.
+pub const DIALOG_CURRENT: &str = "Current";
+/// After the count of rows a scrolled list hides above or below.
+pub const DIALOG_MORE: &str = "more";
+pub const DIALOG_FIELD_KEYS: &str = "Enter continue · Esc cancel";
+pub const DIALOG_FIELD_KEYS_SHORT: &str = "Enter · Esc";
+/// The keys of an information sheet, when it scrolls and when it fits.
+pub const DIALOG_INFO_SCROLL_KEYS: &str = "↑↓ scroll · Enter or Esc close";
+pub const DIALOG_INFO_KEYS: &str = "Enter or Esc close";
+pub const DIALOG_WAITING: &str = "Working… · Esc cancels";
+pub const DIALOG_PREPARING: &str = "Preparing… · Esc cancels";
 pub const DRAFT_KEPT: &str = "draft kept · Esc returns";
 /// Phases a sample turn steps through, one every [`PHASE_SECONDS`].
 pub const SAMPLE_PHASES: &[&str] = &["thinking", "writing", "running bash", "running subagent +2"];
@@ -104,6 +146,17 @@ pub const SAMPLE_ONLY: &str =
     "The sample activity takes no prompt. Esc stops it; your draft is kept.";
 /// Enter with staged images: the fixture runtime takes text alone.
 pub const NO_IMAGES: &str = "Images are not sent in this preview. Your draft is kept.";
+/// Enter with staged images while a live turn runs.
+pub const IMAGES_WHILE_RUNNING: &str =
+    "Wait for the turn to end before sending images. Your draft is kept.";
+/// Ctrl+T or Ctrl+G in a live session: they open the preview's samples.
+pub const PREVIEW_ONLY: &str = "Sample activity and sample agents are only in `bake-rs preview`.";
+/// The runtime gave prompts back to the draft.
+pub const RETURNED: &str = "Unsent prompts are back in your draft.";
+/// `/tree` or `/fork` put the chosen message into the draft.
+pub const RESTORED: &str = "The chosen message is in your draft; edit it and press Enter to send.";
+/// The header's word for a live turn that ended with an error.
+pub const FAILED_TURN: &str = "Failed";
 /// The phase a runtime turn shows until the runtime names one.
 pub const FIRST_PHASE: &str = "thinking";
 pub const READ_ONLY: &str =
@@ -135,3 +188,20 @@ pub const CONTEXT: &str = "ctx";
 /// The header's word for a sample turn that ran to its end, and for one Esc stopped.
 pub const COMPLETED: &str = "Completed";
 pub const INTERRUPTED: &str = "Interrupted";
+/// The approval panel's words: its title, before the tool's name; the
+/// heading over the call's arguments; its keys, as the TypeScript copy's
+/// `approval` and `approve`, with `y` choosing and Enter confirming, and
+/// the cancel key; the line once `y` has chosen; the scroll keys; and the
+/// line shown until the request is armed and keys can answer it.
+pub const APPROVAL_TITLE: &str = "Approval required";
+pub const APPROVAL_ARGUMENTS: &str = "Arguments:";
+pub const APPROVAL_KEYS: &str = "Y then Enter allows once · N rejects · Esc cancels";
+pub const APPROVAL_CONFIRM: &str = "Allow this call once?";
+pub const APPROVAL_CONFIRM_KEYS: &str = "Enter allows · N rejects · Esc cancels";
+pub const APPROVAL_SCROLL: &str = "↑↓ PgUp/PgDn";
+pub const APPROVAL_PREPARING: &str = "Preparing approval… · Esc cancels";
+/// Why a key or paste did not answer the waiting approval.
+pub const APPROVAL_KEYS_ONLY: &str =
+    "To answer, press Y then Enter, or N, each on its own once the request shows; Esc cancels";
+/// Why Enter did not allow the waiting approval.
+pub const APPROVAL_CHOOSE_FIRST: &str = "Press Y first, then Enter, to allow this call once";

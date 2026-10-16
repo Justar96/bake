@@ -1,7 +1,7 @@
 //! Draws [`State`] into a Ratatui frame. Rows from the top: body, gap, notice,
-//! the bar (activity and status), the composer box (top edge, draft rows,
-//! bottom edge), and the sample-agents row, in the heights
-//! [`crate::layout::plan`] grants them.
+//! the approval panel while a request waits, the bar (activity and status),
+//! the composer box (top edge, draft rows, bottom edge), and the
+//! sample-agents row, in the heights [`crate::layout::plan`] grants them.
 
 use ratatui_core::buffer::Buffer;
 use ratatui_core::layout::{Position, Rect};
@@ -15,6 +15,7 @@ use crate::activity::{self, Hue, Tones};
 use crate::completion;
 use crate::composer::{self, Edge};
 use crate::copy;
+use crate::dialog::{Dialog, DialogKind, InfoLine, ListLine, SearchOrder};
 use crate::editor::{self, display};
 use crate::frame::FrameStyle;
 use crate::layout::{self, Needs};
@@ -55,23 +56,842 @@ pub fn render_inline(app: &mut State, frame: &mut Frame, published: usize, termi
     render_region(app, frame, Some(published), terminal_height);
 }
 
-fn needs(app: &State, width: u16) -> Needs {
+fn needs(app: &State, width: u16, height: u16) -> Needs {
     let geometry = composer::geometry(width);
     let draft = editor::layout(app.draft.text(), app.draft.caret(), geometry.wrap_width);
     Needs {
         draft_rows: u16::try_from(draft.rows.len()).unwrap_or(u16::MAX),
-        standing: true,
+        // The sample agents' row belongs to the preview.
+        standing: !app.live,
         notice: u16::from(app.notice.is_some() || app.quitting()),
         pending: panel_rows(app.pending.len()),
         panel: panel_rows(app.attachments.len()),
         menu: menu_rows(app),
+        approval: approval_rows(app, inner_width(width)).max(dialog_rows(
+            app,
+            inner_width(width),
+            height,
+        )),
     }
+}
+
+/// Widest a sheet grows, the TypeScript `SHEET_WIDTH`: past this, rows
+/// are harder to scan than to scroll.
+pub const SHEET_WIDTH: u16 = 80;
+
+/// The fewest columns a framed sheet takes; a narrower one is drawn
+/// without its frame, as the TypeScript sheet is below its minimum.
+const SHEET_FRAME_COLUMNS: u16 = 12;
+
+/// Columns between a sheet's columns.
+const SHEET_GAP: usize = 2;
+
+/// Body rows a sheet asks for at most at `height`: half the terminal, at
+/// least 3 and at most 14, as the TypeScript picker takes up to half the
+/// screen for a list worth scanning.
+fn sheet_body_cap(height: u16) -> usize {
+    usize::from(height / 2).clamp(3, 14)
+}
+
+/// The rows a dialog draws around its body, frame excluded: a list's
+/// title, note, filter, selected row's detail, and keys; a field's title,
+/// prompt, field, error, and keys; an information sheet's title and keys.
+fn sheet_chrome(dialog: &Dialog) -> usize {
+    match &dialog.request.kind {
+        DialogKind::List(list) => {
+            2 + usize::from(list.note.is_some())
+                + usize::from(list.search.is_some())
+                + usize::from(list.filterable)
+                + usize::from(list.items.iter().any(|item| item.about.is_some()))
+        }
+        DialogKind::Field(field) => 4 + usize::from(field.error.is_some()),
+        DialogKind::Info(_) => 2,
+    }
+}
+
+/// The body lines a dialog has: a list's unfiltered lines, so typing a
+/// filter never changes the sheet's height, or an information sheet's
+/// rows wrapped to a framed sheet's width at `width` columns.
+fn sheet_body(dialog: &Dialog, width: u16) -> usize {
+    match &dialog.request.kind {
+        DialogKind::List(_) => dialog.all_lines().len().max(1),
+        DialogKind::Field(_) => 0,
+        DialogKind::Info(info) => {
+            let inner = usize::from(width.min(SHEET_WIDTH)).saturating_sub(4);
+            info_rows(info, inner).len().max(1)
+        }
+    }
+}
+
+/// The rows the open dialog wants at `width` columns and `height` rows
+/// while no approval waits, its frame included: its chrome and as many
+/// body lines as fit [`sheet_body_cap`].
+fn dialog_rows(app: &State, width: u16, height: u16) -> u16 {
+    let Some(dialog) = app.dialog.as_ref().filter(|_| app.approval().is_none()) else {
+        return 0;
+    };
+    let rows = sheet_chrome(dialog) + sheet_body(dialog, width).min(sheet_body_cap(height)) + 2;
+    u16::try_from(rows).unwrap_or(u16::MAX)
+}
+
+/// The fewest cells a sheet's rows need to show a selection, a field, or
+/// a value legibly; a narrower sheet is not handed the keyboard.
+const SHEET_MIN_INNER: usize = 10;
+
+/// An information sheet's rows at `width` cells, as the TypeScript sheet
+/// wraps its lines: each value wrapped under its own column, its wrapped
+/// rows hanging past the label, so a long path or id is shown whole.
+fn info_rows(info: &crate::dialog::InfoDialog, width: usize) -> Vec<Line<'static>> {
+    let clean = |text: &str| editor::sanitize(text).replace(['\n', '\t'], " ");
+    let width = width.max(1);
+    let label_w = info
+        .lines
+        .iter()
+        .filter_map(|l| match l {
+            InfoLine::Field { label, .. } => Some(clean(label).width()),
+            _ => None,
+        })
+        .max()
+        .unwrap_or(0)
+        .min(width / 3);
+    let gap = SHEET_GAP.min(width.saturating_sub(label_w));
+    let room = width.saturating_sub(label_w + gap).max(1);
+    let mut rows = Vec::new();
+    for info_line in &info.lines {
+        match info_line {
+            InfoLine::Heading(text) => rows.push(Line::styled(
+                fit(&clean(text), width),
+                Style::new().add_modifier(Modifier::BOLD),
+            )),
+            InfoLine::Field { label, value } => {
+                let value = clean(value);
+                let wrapped = transcript::wrap(&value, room);
+                for (index, part) in wrapped.into_iter().enumerate() {
+                    let label = if index == 0 {
+                        clean(label)
+                    } else {
+                        String::new()
+                    };
+                    rows.push(Line::from(vec![
+                        Span::styled(pad(&label, label_w), dim()),
+                        Span::raw(" ".repeat(gap)),
+                        Span::raw(part),
+                    ]));
+                }
+            }
+            InfoLine::Blank => rows.push(Line::raw("")),
+        }
+    }
+    rows
+}
+
+/// `text` cut to `width` cells from its middle, keeping its start and its
+/// end, so two routes or ids that share a long prefix stay told apart.
+fn fit_middle(text: &str, width: usize) -> String {
+    if text.width() <= width {
+        return text.to_owned();
+    }
+    if width < 5 {
+        return fit(text, width);
+    }
+    let head = (width - 1) / 3;
+    let tail = width - 1 - head;
+    let start = fit(text, head + 1);
+    let start = start.trim_end_matches('…');
+    let end = fit_start(text, tail + 1);
+    format!("{start}…{}", end.trim_start_matches('…'))
+}
+
+/// `text` cut to `width` cells, then padded to them.
+fn pad(text: &str, width: usize) -> String {
+    let cut = fit(text, width);
+    let fill = width.saturating_sub(cut.width());
+    format!("{cut}{}", " ".repeat(fill))
+}
+
+/// `text` right-aligned in `width` cells.
+fn pad_start(text: &str, width: usize) -> String {
+    let cut = fit(text, width);
+    format!("{}{cut}", " ".repeat(width.saturating_sub(cut.width())))
+}
+
+/// The first body line shown and how many: every line when they fit;
+/// otherwise a window that keeps `follow` in view, moving only when it
+/// would leave, with a row above and below to say what is hidden when
+/// there are three rows or more.
+fn sheet_window(
+    total: usize,
+    rows: usize,
+    follow: Option<usize>,
+    top: usize,
+) -> (usize, usize, bool) {
+    if total <= rows {
+        return (0, total, false);
+    }
+    let edges = rows >= 3;
+    let count = if edges { rows - 2 } else { rows };
+    if count == 0 {
+        return (0, 0, false);
+    }
+    let mut top = top.min(total - count);
+    if let Some(follow) = follow {
+        if follow < top {
+            top = follow;
+        } else if follow >= top + count {
+            top = follow + 1 - count;
+        }
+    }
+    (top, count, edges)
+}
+
+/// A dialog's key row: `keys`, or `short` where they do not fit, or only
+/// Enter and Esc ([`copy::DIALOG_KEYS_TINY`]), with the selection's
+/// position at the right edge; where even that does not fit, the position
+/// goes before Esc does, so a narrow sheet still says how to cancel.
+fn sheet_footer(keys: &str, short: &str, position: Option<String>, width: usize) -> Line<'static> {
+    let candidates = [keys, short, copy::DIALOG_KEYS_TINY];
+    if let Some(position) = position {
+        for keys in candidates {
+            if keys.width() + SHEET_GAP + position.width() <= width {
+                let fill = width - keys.width() - position.width();
+                return Line::styled(format!("{keys}{}{position}", " ".repeat(fill)), dim());
+            }
+        }
+    }
+    let keys = candidates
+        .into_iter()
+        .find(|keys| keys.width() <= width)
+        .unwrap_or(copy::DIALOG_KEYS_TINY);
+    Line::styled(fit(keys, width), dim())
+}
+
+/// The status column's style: the TypeScript picker's `done` tone.
+fn current_style(tones: crate::activity::Tones) -> Style {
+    match tones {
+        crate::activity::Tones::TrueColor => Style::new().fg(Color::Rgb(0x22, 0xc5, 0x5e)),
+        crate::activity::Tones::Ansi => Style::new().fg(Color::Green),
+        crate::activity::Tones::None => Style::new(),
+    }
+}
+
+/// How a list's rows lay out their columns, sized over every item so the
+/// columns stay put while the list scrolls or narrows.
+struct SheetColumns {
+    label: usize,
+    facts: Vec<usize>,
+    status: usize,
+    /// Whether anything follows the label, so it has a fixed column.
+    fixed: bool,
+    /// Whether rows show their detail.
+    detail: bool,
+}
+
+/// The TypeScript picker's columns at `width` cells after the pointer:
+/// the label takes at most 55% of the room the facts and status leave,
+/// and facts give way from the right before a label is cut shorter than
+/// 20 cells (or its own width).
+fn sheet_columns(
+    list: &crate::dialog::ListDialog,
+    width: usize,
+    clean: &dyn Fn(&str) -> String,
+) -> SheetColumns {
+    let status = if list.current.is_some() {
+        copy::DIALOG_CURRENT.width()
+    } else {
+        0
+    };
+    let widest = list
+        .items
+        .iter()
+        .map(|item| clean(&item.label).width())
+        .max()
+        .unwrap_or(1)
+        .max(1);
+    let columns = list
+        .items
+        .iter()
+        .map(|item| item.facts.len())
+        .max()
+        .unwrap_or(0);
+    let mut facts: Vec<usize> = (0..columns)
+        .map(|column| {
+            list.items
+                .iter()
+                .map(|item| item.facts.get(column).map_or(0, |fact| clean(fact).width()))
+                .max()
+                .unwrap_or(0)
+        })
+        .collect();
+    let room = |facts: &[usize]| {
+        width
+            .saturating_sub(if status > 0 { status + SHEET_GAP } else { 0 })
+            .saturating_sub(
+                facts
+                    .iter()
+                    .map(|w| if *w > 0 { w + SHEET_GAP } else { 0 })
+                    .sum::<usize>(),
+            )
+    };
+    while !facts.is_empty() && room(&facts) * 55 / 100 < widest.min(20) {
+        facts.pop();
+    }
+    let room = room(&facts);
+    // The detail column gives way next, before the label is cut shorter
+    // than 24 cells (or its own width); the selected row's description,
+    // under the list, still says what it is.
+    let detail =
+        list.items.iter().any(|item| item.detail.is_some()) && room * 55 / 100 >= widest.min(24);
+    let fixed = detail || status > 0 || facts.iter().any(|w| *w > 0);
+    let label = if !fixed {
+        room.max(1)
+    } else if detail {
+        (room * 55 / 100).min(widest).max(1)
+    } else {
+        widest
+            .min(
+                room.saturating_sub(if status > 0 || facts.iter().any(|w| *w > 0) {
+                    SHEET_GAP
+                } else {
+                    0
+                }),
+            )
+            .max(1)
+    };
+    SheetColumns {
+        label,
+        facts,
+        status,
+        fixed,
+        detail,
+    }
+}
+
+/// The open dialog ([`crate::dialog`]), in the approval panel's place,
+/// drawn as the TypeScript sheet and picker draw theirs
+/// (`apps/tui/packages/ui/src/sheet.tsx`, `picker.tsx`): at most
+/// [`SHEET_WIDTH`] columns, in a dim frame where it fits; its title bold;
+/// a list's note, filter row (`>` and what is typed, or what typing does),
+/// rows under their groups' headings with the selection's `▸`, aligned
+/// label, fact, and `Current` columns, and a dim detail, the selected
+/// row's description, and keys with the selection's position. A long list
+/// scrolls only when the selection would leave it, and its edges say how
+/// many rows they hide. A secret field is drawn as one `•` per character
+/// typed, at every width.
+///
+/// Records the dialog as on screen only when its title, every row around
+/// its body, its keys, and (for a list or an information sheet) at least
+/// one body line fit, so the keyboard is handed to it only once the
+/// selection and its keys are shown.
+fn render_dialog(app: &mut State, area: Rect, buf: &mut Buffer) {
+    app.dialog_on_screen = None;
+    if area.is_empty() || app.approval().is_some() {
+        return;
+    }
+    let tones = app.tones;
+    let glyphs = app.frame.glyphs();
+    let ready = app.dialog_ready();
+    let Some(dialog) = app.dialog.as_mut() else {
+        return;
+    };
+    let clean = |text: &str| editor::sanitize(text).replace(['\n', '\t'], " ");
+    let width = area.width.min(SHEET_WIDTH);
+    let chrome = sheet_chrome(dialog);
+    let least = chrome + usize::from(!matches!(dialog.request.kind, DialogKind::Field(_)));
+    let framed = width >= SHEET_FRAME_COLUMNS && usize::from(area.height) >= least + 2;
+    let inner = if framed {
+        let frame = dim();
+        let horizontal = glyphs.horizontal.repeat(usize::from(width - 2));
+        line(
+            buf,
+            Rect::new(area.x, area.y, width, 1),
+            Line::styled(
+                format!("{}{horizontal}{}", glyphs.top_left, glyphs.top_right),
+                frame,
+            ),
+        );
+        line(
+            buf,
+            Rect::new(area.x, area.bottom() - 1, width, 1),
+            Line::styled(
+                format!("{}{horizontal}{}", glyphs.bottom_left, glyphs.bottom_right),
+                frame,
+            ),
+        );
+        for y in area.y + 1..area.bottom() - 1 {
+            line(
+                buf,
+                Rect::new(area.x, y, 1, 1),
+                Line::styled(glyphs.vertical, frame),
+            );
+            line(
+                buf,
+                Rect::new(area.x + width - 1, y, 1, 1),
+                Line::styled(glyphs.vertical, frame),
+            );
+        }
+        Rect::new(area.x + 2, area.y + 1, width - 4, area.height - 2)
+    } else {
+        Rect::new(area.x, area.y, width, area.height)
+    };
+    let w = usize::from(inner.width);
+    let body_rows = usize::from(inner.height).saturating_sub(chrome);
+    let whole = usize::from(inner.height) >= least && usize::from(inner.width) >= SHEET_MIN_INNER;
+    let title_style = tone_style(Tone::Waiting, tones).add_modifier(Modifier::BOLD);
+    let mut head: Vec<Line> = Vec::new();
+    let mut body: Vec<Line> = Vec::new();
+    let mut tail: Vec<Line> = Vec::new();
+    let (keys, short, position) = match dialog.request.kind.clone() {
+        DialogKind::List(list) => {
+            head.push(Line::styled(fit(&clean(&list.title), w), title_style));
+            if let Some(note) = &list.note {
+                head.push(Line::styled(fit(&clean(note), w), dim()));
+            }
+            // A session search's state, or why its query matches nothing.
+            let search = dialog.search.clone().filter(|_| list.search.is_some());
+            if let Some(view) = &search {
+                head.push(match &view.error {
+                    Some(error) => Line::styled(
+                        fit(&clean(&error.message()), w),
+                        Style::new().fg(Color::Yellow),
+                    ),
+                    None => Line::styled(
+                        fit(
+                            &copy::SESSION_SEARCH_STATE
+                                .replace(
+                                    "{order}",
+                                    match view.order {
+                                        SearchOrder::Recent => copy::SESSION_SEARCH_RECENT,
+                                        SearchOrder::Relevance => copy::SESSION_SEARCH_RELEVANCE,
+                                    },
+                                )
+                                .replace("{named}", if view.named_only { "on" } else { "off" }),
+                            w,
+                        ),
+                        dim(),
+                    ),
+                });
+            }
+            if list.filterable {
+                let prompt = Span::styled("> ", accent().add_modifier(Modifier::BOLD));
+                let placeholder = if search.is_some() {
+                    copy::SESSION_SEARCH_FILTER
+                } else {
+                    copy::DIALOG_FILTER
+                };
+                head.push(if dialog.filter().is_empty() {
+                    Line::from(vec![
+                        prompt,
+                        Span::styled(fit(placeholder, w.saturating_sub(2)), dim()),
+                    ])
+                } else {
+                    Line::from(vec![
+                        prompt,
+                        Span::raw(fit_start(&clean(dialog.filter()), w.saturating_sub(2))),
+                    ])
+                });
+            }
+            let rows = dialog.rows();
+            if dialog.selected >= rows.len() {
+                dialog.selected = rows.len().saturating_sub(1);
+            }
+            let lines = dialog.lines();
+            let follow = lines
+                .iter()
+                .position(|l| matches!(l, ListLine::Row { row, .. } if *row == dialog.selected));
+            let (mut top, count, edges) = sheet_window(lines.len(), body_rows, follow, dialog.top);
+            // The first row of a run brings its heading into view.
+            if let Some(follow) = follow
+                && follow == top
+                && top > 0
+                && count >= 2
+                && matches!(lines[top - 1], ListLine::Heading { .. })
+            {
+                top -= 1;
+            }
+            dialog.top = top;
+            dialog.page = count.max(1);
+            let pointer_w = 2;
+            let columns = sheet_columns(&list, w.saturating_sub(pointer_w), &clean);
+            let hidden = |range: &[ListLine]| {
+                range
+                    .iter()
+                    .filter(|l| matches!(l, ListLine::Row { .. }))
+                    .count()
+            };
+            let heading = |group: usize, count: usize| -> Line<'static> {
+                let name = clean(list.items[group].group.as_deref().unwrap_or(""));
+                let name = fit(&name, w);
+                let rest = format!(" {count} ");
+                let rule = w.saturating_sub(name.width() + rest.width());
+                Line::from(vec![
+                    Span::styled(name, Style::new().add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        fit(
+                            &format!("{rest}{}", "─".repeat(rule)),
+                            w.saturating_sub(w.min(rest.width())),
+                        ),
+                        dim(),
+                    ),
+                ])
+            };
+            if rows.is_empty() {
+                let empty = match &search {
+                    Some(view) if view.named_only && dialog.filter().trim().is_empty() => {
+                        copy::SESSION_SEARCH_NO_NAMED
+                    }
+                    Some(_) => copy::SESSION_SEARCH_NO_MATCH,
+                    None => copy::DIALOG_NO_MATCH,
+                };
+                body.push(Line::styled(fit(&format!("  {empty}"), w), dim()));
+            }
+            if edges {
+                let above = hidden(&lines[..top]);
+                let more = if above > 0 {
+                    format!("↑ {above} {}", copy::DIALOG_MORE)
+                } else {
+                    String::new()
+                };
+                // Scrolled into a run, the edge names the run it cut.
+                let carried = match lines.get(top) {
+                    Some(ListLine::Row { index, .. }) if above > 0 => {
+                        list.items[*index].group.clone()
+                    }
+                    _ => None,
+                };
+                body.push(match carried {
+                    Some(group) => Line::from(vec![
+                        Span::styled(
+                            fit(&clean(&group), w),
+                            Style::new().add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(format!("  {more}"), dim()),
+                    ]),
+                    None => Line::styled(fit(&format!("  {more}"), w), dim()),
+                });
+            }
+            for list_line in lines.iter().skip(top).take(count) {
+                match *list_line {
+                    ListLine::Heading { group, count } => body.push(heading(group, count)),
+                    ListLine::Row { row, index } => {
+                        let item = &list.items[index];
+                        let active = row == dialog.selected;
+                        let mut spans = vec![Span::styled(
+                            if active { "▸ " } else { "  " },
+                            accent().add_modifier(Modifier::BOLD),
+                        )];
+                        let label_style = if active {
+                            accent().add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::new()
+                        };
+                        let label = clean(&item.label);
+                        if columns.fixed {
+                            spans.push(Span::styled(pad(&label, columns.label), label_style));
+                            spans.push(Span::raw(" ".repeat(SHEET_GAP)));
+                        } else {
+                            spans.push(Span::styled(fit(&label, columns.label), label_style));
+                        }
+                        let fact_style = if active { Style::new() } else { dim() };
+                        for (column, fact_w) in columns.facts.iter().enumerate() {
+                            if *fact_w == 0 {
+                                continue;
+                            }
+                            let fact = item.facts.get(column).map(|f| clean(f)).unwrap_or_default();
+                            spans.push(Span::styled(pad_start(&fact, *fact_w), fact_style));
+                            spans.push(Span::raw(" ".repeat(SHEET_GAP)));
+                        }
+                        if columns.status > 0 {
+                            let status = if list.current == Some(index) {
+                                copy::DIALOG_CURRENT
+                            } else {
+                                ""
+                            };
+                            spans.push(Span::styled(
+                                pad(status, columns.status),
+                                current_style(tones),
+                            ));
+                            spans.push(Span::raw(" ".repeat(SHEET_GAP)));
+                        }
+                        if let Some(detail) = item.detail.as_ref().filter(|_| columns.detail) {
+                            let used: usize = spans.iter().map(|span| span.content.width()).sum();
+                            let room = w.saturating_sub(used);
+                            if room > 1 {
+                                spans.push(Span::styled(
+                                    fit_middle(&clean(detail), room),
+                                    fact_style,
+                                ));
+                            }
+                        }
+                        body.push(Line::from(spans));
+                    }
+                }
+            }
+            if edges {
+                let below = hidden(lines.get(top + count..).unwrap_or(&[]));
+                body.push(Line::styled(
+                    fit(
+                        &if below > 0 {
+                            format!("  ↓ {below} {}", copy::DIALOG_MORE)
+                        } else {
+                            String::new()
+                        },
+                        w,
+                    ),
+                    dim(),
+                ));
+            }
+            if list.items.iter().any(|item| item.about.is_some()) {
+                let about = rows
+                    .get(dialog.selected)
+                    .and_then(|&index| list.items[index].about.as_deref())
+                    .map(clean)
+                    .unwrap_or_default();
+                tail.push(Line::styled(
+                    format!("  {}", fit_middle(&about, w.saturating_sub(2))),
+                    dim(),
+                ));
+            }
+            let position =
+                (!rows.is_empty()).then(|| format!("{}/{}", dialog.selected + 1, rows.len()));
+            if list.saves_default {
+                (
+                    copy::DIALOG_LIST_SAVE_KEYS,
+                    copy::DIALOG_LIST_SAVE_KEYS_SHORT,
+                    position,
+                )
+            } else {
+                (
+                    copy::DIALOG_LIST_KEYS,
+                    copy::DIALOG_LIST_KEYS_SHORT,
+                    position,
+                )
+            }
+        }
+        DialogKind::Field(field) => {
+            head.push(Line::styled(fit(&clean(&field.title), w), title_style));
+            head.push(Line::raw(fit(&clean(&field.prompt), w)));
+            let shown = if field.secret {
+                "•".repeat(dialog.text.chars())
+            } else {
+                clean(dialog.text.expose())
+            };
+            // The end of a long entry stays in view, where typing goes.
+            let room = w.saturating_sub(2).max(1);
+            let tail_text: String = {
+                let chars: Vec<char> = shown.chars().collect();
+                let skip = chars.len().saturating_sub(room);
+                chars[skip..].iter().collect()
+            };
+            head.push(Line::from(vec![
+                Span::styled("> ", accent().add_modifier(Modifier::BOLD)),
+                Span::raw(fit_start(&tail_text, room)),
+            ]));
+            if let Some(error) = &field.error {
+                head.push(Line::styled(
+                    fit(&clean(error), w),
+                    Style::new().fg(Color::Yellow),
+                ));
+            }
+            (copy::DIALOG_FIELD_KEYS, copy::DIALOG_FIELD_KEYS_SHORT, None)
+        }
+        DialogKind::Info(info) => {
+            head.push(Line::styled(fit(&clean(&info.title), w), title_style));
+            let rendered = info_rows(&info, w);
+            let total = rendered.len();
+            let page = body_rows.max(1);
+            dialog.top = dialog.top.min(total.saturating_sub(page));
+            dialog.page = page;
+            dialog.total = total;
+            body.extend(rendered.into_iter().skip(dialog.top).take(body_rows));
+            if total > body_rows {
+                let shown = format!(
+                    "{}-{}/{total}",
+                    dialog.top + 1,
+                    (dialog.top + body_rows).min(total)
+                );
+                (
+                    copy::DIALOG_INFO_SCROLL_KEYS,
+                    copy::DIALOG_INFO_KEYS,
+                    Some(shown),
+                )
+            } else {
+                (copy::DIALOG_INFO_KEYS, copy::DIALOG_INFO_KEYS, None)
+            }
+        }
+    };
+    let footer = if dialog.answered {
+        sheet_footer(copy::DIALOG_WAITING, copy::DIALOG_WAITING, None, w)
+    } else if !ready {
+        sheet_footer(copy::DIALOG_PREPARING, copy::DIALOG_PREPARING, None, w)
+    } else {
+        sheet_footer(keys, short, position, w)
+    };
+    let id = dialog.request.id;
+    // Top to bottom; short of rows, the body gives way first, and the
+    // keys keep the last row.
+    let room = usize::from(inner.height).saturating_sub(1);
+    let rows_drawn = head
+        .into_iter()
+        .chain(body.into_iter().take(body_rows))
+        .chain(tail)
+        .take(room);
+    for (y, row) in (inner.y..).zip(rows_drawn) {
+        line(buf, Rect::new(inner.x, y, inner.width, 1), row);
+    }
+    if inner.height > 0 {
+        line(
+            buf,
+            Rect::new(inner.x, inner.bottom() - 1, inner.width, 1),
+            footer,
+        );
+    }
+    if whole {
+        app.dialog_on_screen = Some(id);
+    }
+}
+
+/// The columns rows outside the box get at `width`, inside its insets.
+fn inner_width(width: u16) -> u16 {
+    if composer::geometry(width).boxed {
+        width.saturating_sub(2 * INSET)
+    } else {
+        width
+    }
+}
+
+/// Detail rows the approval panel asks for; a longer detail scrolls.
+const APPROVAL_DETAIL_ROWS: usize = 12;
+
+/// The rows the approval panel wants: its title, its detail up to
+/// [`APPROVAL_DETAIL_ROWS`], and its keys.
+fn approval_rows(app: &State, width: u16) -> u16 {
+    if app.approval().is_none() {
+        return 0;
+    }
+    let detail = approval_detail(app, width)
+        .len()
+        .clamp(1, APPROVAL_DETAIL_ROWS);
+    u16::try_from(detail + 2).unwrap_or(u16::MAX)
+}
+
+/// The displayed request's detail as rows of at most `width` cells: the
+/// reason, then the call's arguments under a heading, each in full. The
+/// text is sanitized, so model-written text cannot reach the terminal as
+/// an escape sequence; tabs become spaces.
+fn approval_detail(app: &State, width: u16) -> Vec<String> {
+    let Some(approval) = app.approval() else {
+        return Vec::new();
+    };
+    let width = usize::from(width.max(1));
+    let wrap = |text: &str| -> Vec<String> {
+        editor::sanitize(text)
+            .replace('\t', "  ")
+            .split('\n')
+            .flat_map(|part| transcript::wrap(part, width))
+            .collect()
+    };
+    let mut rows = wrap(&approval.reason);
+    if !approval.arguments.trim().is_empty() {
+        rows.push(copy::APPROVAL_ARGUMENTS.to_owned());
+        rows.extend(wrap(&approval.arguments));
+    }
+    rows
+}
+
+/// The approval panel for the displayed request, as the TypeScript
+/// `ApprovalView` orders it: what is asked (the tool and its exact call
+/// id, with the queue's length when others wait), its detail, scrolled to
+/// [`State::approval_scroll`] with a row that says where while it does not
+/// all fit, then the keys. Records which request it showed whole: its
+/// title, at least one detail row, and its keys.
+fn render_approval(app: &mut State, area: Rect, buf: &mut Buffer) {
+    app.approval_on_screen = None;
+    let Some(approval) = app.approval().cloned() else {
+        return;
+    };
+    if area.is_empty() {
+        return;
+    }
+    let clean = |text: &str| editor::sanitize(text).replace(['\n', '\t'], " ");
+    let waiting = tone_style(Tone::Waiting, app.tones).add_modifier(Modifier::BOLD);
+    let mut head = vec![
+        Span::styled(
+            format!("{}: {}", copy::APPROVAL_TITLE, clean(&approval.tool)),
+            waiting,
+        ),
+        Span::styled(format!("  {}", clean(&approval.call_id)), dim()),
+    ];
+    if app.approvals.len() > 1 {
+        head.push(Span::styled(format!("  1/{}", app.approvals.len()), dim()));
+    }
+    line(
+        buf,
+        Rect::new(area.x, area.y, area.width, 1),
+        Line::from(head),
+    );
+    if area.height < 3 {
+        return;
+    }
+    let detail = approval_detail(app, area.width);
+    let rows = usize::from(area.height - 2);
+    // A detail longer than its rows gives its last row to where the view
+    // is and the keys that move it, cut to fit, so even a narrow terminal
+    // shows that more is there.
+    let more = detail.len() > rows && rows >= 2;
+    let page = rows - usize::from(more);
+    let last = detail.len().saturating_sub(page);
+    app.approval_scroll = app.approval_scroll.min(last);
+    app.approval_page = page;
+    let first = app.approval_scroll;
+    for (i, row) in detail.iter().skip(first).take(page).enumerate() {
+        let style = if row == copy::APPROVAL_ARGUMENTS {
+            dim()
+        } else {
+            Style::new()
+        };
+        line(
+            buf,
+            Rect::new(area.x, area.y + 1 + i as u16, area.width, 1),
+            Line::styled(row.clone(), style),
+        );
+    }
+    if more {
+        let position = format!(
+            "{}-{}/{} · {}",
+            first + 1,
+            (first + page).min(detail.len()),
+            detail.len(),
+            copy::APPROVAL_SCROLL
+        );
+        line(
+            buf,
+            Rect::new(area.x, area.y + 1 + page as u16, area.width, 1),
+            Line::styled(fit(&position, usize::from(area.width)), dim()),
+        );
+    }
+    let keys = if app.approval_chosen() {
+        Line::from(vec![
+            Span::styled(copy::APPROVAL_CONFIRM, waiting),
+            Span::styled(format!(" · {}", copy::APPROVAL_CONFIRM_KEYS), dim()),
+        ])
+    } else if app.approval_armed() {
+        Line::styled(copy::APPROVAL_KEYS, dim())
+    } else {
+        // Not armed yet: keys cannot answer, so none are offered but Esc.
+        Line::styled(copy::APPROVAL_PREPARING, dim())
+    };
+    line(
+        buf,
+        Rect::new(area.x, area.bottom() - 1, area.width, 1),
+        keys,
+    );
+    app.approval_on_screen = Some(approval.generation);
 }
 
 /// Natural controls plus a bounded transcript, with the same composer window
 /// policy as the fullscreen preview. Short terminals retain its collapse order.
 pub fn inline_height(app: &State, width: u16, terminal_height: u16) -> u16 {
-    let rows = layout::plan(terminal_height, needs(app, width));
+    let rows = layout::plan(terminal_height, needs(app, width, terminal_height));
     // Keep navigation's measured viewport stable when live output settles;
     // the held controls still grow with the draft and its panels.
     let body = rows.body.min(INLINE_BODY_ROWS);
@@ -90,7 +910,7 @@ fn render_region(
     }
     let geometry = composer::geometry(area.width);
     let draft = editor::layout(app.draft.text(), app.draft.caret(), geometry.wrap_width);
-    let mut rows = layout::plan(terminal_height, needs(app, area.width));
+    let mut rows = layout::plan(terminal_height, needs(app, area.width, terminal_height));
     if published.is_some() {
         rows.body = area.height.saturating_sub(rows.total() - rows.body);
     }
@@ -108,6 +928,7 @@ fn render_region(
     let panel = next(rows.panel);
     let notice = next(rows.notice);
     let menu_area = next(rows.menu);
+    let approval_area = next(rows.approval);
     let bar = next(rows.bar);
     let rule = next(rows.top_edge);
     let band = next(rows.composer);
@@ -135,7 +956,8 @@ fn render_region(
             Line::styled(copy::QUIT, tone_style(Tone::Waiting, app.tones)),
         );
     } else if let Some(kind) = app.notice {
-        let text = match kind {
+        let text: &str = match kind {
+            Notice::Refused => app.refusal.as_deref().unwrap_or(copy::RETURNED),
             Notice::SampleOnly => copy::SAMPLE_ONLY,
             Notice::NoImages => copy::NO_IMAGES,
             Notice::ReadOnly => copy::READ_ONLY,
@@ -144,6 +966,12 @@ fn render_region(
             Notice::NoCommands => copy::NO_COMMANDS,
             Notice::PendingSent => copy::PENDING_SENT,
             Notice::NoPending => copy::NO_PENDING,
+            Notice::ImagesWhileRunning => copy::IMAGES_WHILE_RUNNING,
+            Notice::PreviewOnly => copy::PREVIEW_ONLY,
+            Notice::Returned => copy::RETURNED,
+            Notice::Restored => copy::RESTORED,
+            Notice::ApprovalKeys => copy::APPROVAL_KEYS_ONLY,
+            Notice::ApprovalChooseFirst => copy::APPROVAL_CHOOSE_FIRST,
         };
         line(
             buf,
@@ -154,6 +982,8 @@ fn render_region(
     render_pending(app, inset(pending), buf);
     render_attachments(app, inset(panel), buf);
     render_menu(app, inset(menu_area), buf);
+    render_approval(app, inset(approval_area), buf);
+    render_dialog(app, inset(approval_area), buf);
     let columns = area.width;
     render_bar(app, inset(bar), buf);
     render_agents_row(columns, inset(agents), buf);
@@ -182,13 +1012,29 @@ fn render_region(
     // The sample-agent list holds focus outside the composer, so the
     // composer names no key while it is open.
     let listing = app.focus == Focus::AgentList;
-    let mode = mode::view(app.mode(), !app.draft.is_empty(), area.width);
+    let approving = app.approval().is_some();
+    let asking = approving || app.dialog.is_some();
+    let mut mode = mode::view(app.mode(), !app.draft.is_empty(), area.width);
+    if approving {
+        mode.placeholder = copy::PLACEHOLDER_APPROVAL;
+        mode.hint = (area.width >= mode::HINT_MIN_COLUMNS).then_some(copy::HINT_APPROVAL);
+    } else if asking {
+        mode.placeholder = copy::PLACEHOLDER_DIALOG;
+        mode.hint = (area.width >= mode::HINT_MIN_COLUMNS).then_some(copy::HINT_DIALOG);
+    } else if app.handing_off() {
+        // A dialog closed: the composer takes keys once this frame is
+        // armed, and says so until then.
+        mode.placeholder = copy::PLACEHOLDER_PREPARING;
+        mode.hint = (area.width >= mode::HINT_MIN_COLUMNS).then_some(copy::HINT_PREPARING);
+    }
     let below_label = if below > 0 {
         Some(format!("+{below} {}", copy::BELOW))
     } else {
         // While the menu offers commands, its key takes the hint's place.
-        let completing = app.menu().is_some_and(|menu| !menu.entries.is_empty())
-            || app.file_menu().is_some_and(|menu| !menu.entries.is_empty());
+        let completing = !asking
+            && !app.handing_off()
+            && (app.menu().is_some_and(|menu| !menu.entries.is_empty())
+                || app.file_menu().is_some_and(|menu| !menu.entries.is_empty()));
         mode.hint
             .filter(|_| !listing)
             .map(|hint| {
@@ -210,8 +1056,10 @@ fn render_region(
         below_label.as_deref(),
     );
 
-    let editing = app.focus == Focus::Composer;
-    let quiet = mode.dim || listing;
+    // A waiting approval takes the keyboard: the draft stays, dimmed and
+    // without a caret, until the request is settled.
+    let editing = app.focus == Focus::Composer && !asking && !app.handing_off();
+    let quiet = mode.dim || listing || asking || app.handing_off();
     let text_style = if quiet { dim() } else { Style::new() };
     let prompt_style = if quiet { dim() } else { accent() };
     let limit = geometry.wrap_width.saturating_sub(1).max(1);
@@ -379,6 +1227,7 @@ fn bar_left(app: &State) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
                 let (head, color) = match summary.outcome {
                     Outcome::Completed => (format!("✓ {}", copy::COMPLETED), Color::Green),
                     Outcome::Interrupted => (format!("■ {}", copy::INTERRUPTED), Color::Yellow),
+                    Outcome::Failed => (format!("✗ {}", copy::FAILED_TURN), Color::Red),
                 };
                 let details = format!("  {}", activity::format_elapsed(summary.elapsed));
                 (
@@ -441,7 +1290,7 @@ fn menu_rows(app: &State) -> u16 {
     } else if let Some(menu) = app.file_menu() {
         (listed_rows(menu.entries.len()) + file_status(&menu).len()).max(1)
     } else if app.focus == Focus::Composer {
-        usize::from(completion::usage(app.draft.text()).is_some())
+        usize::from(completion::usage(app.draft.text(), app.catalog()).is_some())
     } else {
         0
     };
@@ -585,7 +1434,7 @@ fn render_menu(app: &State, area: Rect, buf: &mut Buffer) {
         return;
     }
     let Some(menu) = app.menu() else {
-        if let Some(command) = completion::usage(app.draft.text()) {
+        if let Some(command) = completion::usage(app.draft.text(), app.catalog()) {
             let text = format!(
                 "/{} {}  {}",
                 command.name,
@@ -1276,8 +2125,30 @@ mod tests {
         (rows, terminal.get_cursor_position().unwrap())
     }
 
-    fn key(app: &mut State, key: Key) {
-        update(app, Msg::Key(KeyInput::plain(key)));
+    fn key(app: &mut State, key: Key) -> Vec<Effect> {
+        update(app, Msg::Key(KeyInput::plain(key)))
+    }
+
+    /// Draws `app` as the inline writer does, in the held region's rows at
+    /// the bottom of a `height`-row terminal.
+    fn draw_inline(app: &mut State, width: u16, height: u16) -> (Vec<String>, Position) {
+        let held = inline_height(app, width, height).min(height);
+        let mut terminal = Terminal::new(TestBackend::new(width, held)).unwrap();
+        terminal.draw(|f| render_inline(app, f, 0, height)).unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let rows = (0..held)
+            .map(|y| {
+                let mut row = String::new();
+                let mut x = 0;
+                while x < width {
+                    let symbol = buffer[(x, y)].symbol();
+                    row.push_str(symbol);
+                    x += editor::cell_width(symbol).max(1) as u16;
+                }
+                row
+            })
+            .collect();
+        (rows, terminal.get_cursor_position().unwrap())
     }
 
     fn row_index(rows: &[String], needle: &str) -> usize {
@@ -1295,6 +2166,519 @@ mod tests {
             app.draft.type_text(&format!("line{i}"));
         }
         app
+    }
+
+    // Bake: a secret field is drawn masked at every width and frame style,
+    // and the draft stays in the dimmed composer.
+    #[test]
+    fn a_secret_field_is_masked_at_every_width() {
+        use crate::dialog::{DialogKind, DialogRequest, FieldDialog};
+        use crate::runtime::RuntimeUpdate;
+        for style in [FrameStyle::default(), FrameStyle::Classic] {
+            for (w, h) in [(12, 8), (20, 10), (40, 12), (80, 24), (200, 40)] {
+                let mut app = State::live(style, Tones::None, Vec::new());
+                app.draft.type_text("kept");
+                update(
+                    &mut app,
+                    Msg::Runtime(RuntimeUpdate::Dialog(Some(DialogRequest {
+                        id: 1,
+                        kind: DialogKind::Field(FieldDialog {
+                            title: "Sign in".into(),
+                            prompt: "API key".into(),
+                            secret: true,
+                            initial: String::new(),
+                            error: None,
+                        }),
+                    }))),
+                );
+                let _ = draw(&mut app, w, h);
+                if let Some(token) = app.approval_drawn() {
+                    update(&mut app, Msg::ApprovalArmed(token));
+                }
+                update(&mut app, Msg::Paste("sk-fake-secret-value".into()));
+                let (rows, _) = draw(&mut app, w, h);
+                let screen = rows.join("\n");
+                for part in ["sk-fake", "secret", "value"] {
+                    assert!(!screen.contains(part), "{w}x{h}: {screen}");
+                }
+                // Where the field fits whole it holds the paste, masked.
+                if app.dialog_ready() {
+                    assert!(screen.contains("••••"), "{w}x{h}: {screen}");
+                }
+            }
+        }
+    }
+
+    // Bake: a terminal too short for the whole dialog does not hand it the
+    // keyboard; once it is tall enough, the next frame does.
+    #[test]
+    fn a_dialog_cut_short_is_not_handed_the_keyboard() {
+        use crate::dialog::{DialogKind, DialogRequest, FieldDialog};
+        use crate::runtime::RuntimeUpdate;
+        let mut app = State::live(FrameStyle::default(), Tones::None, Vec::new());
+        update(
+            &mut app,
+            Msg::Runtime(RuntimeUpdate::Dialog(Some(DialogRequest {
+                id: 1,
+                kind: DialogKind::Field(FieldDialog {
+                    title: "Sign in".into(),
+                    prompt: "API key".into(),
+                    secret: true,
+                    initial: String::new(),
+                    error: Some("Try again".into()),
+                }),
+            }))),
+        );
+        let _ = draw(&mut app, 80, 5);
+        assert_eq!(app.approval_drawn(), None);
+        let (rows, _) = draw(&mut app, 80, 24);
+        assert!(rows.iter().any(|r| r.contains("Preparing")), "{rows:#?}");
+        let token = app.approval_drawn().expect("a handoff");
+        update(&mut app, Msg::ApprovalArmed(token));
+        assert!(app.dialog_ready());
+    }
+
+    // Bake: after a dialog closes, the composer says it is preparing until
+    // the handoff is armed, then shows its usual prompt and takes keys.
+    #[test]
+    fn the_composer_says_it_is_preparing_until_it_has_the_keyboard() {
+        use crate::runtime::RuntimeUpdate;
+        let mut app = State::live(FrameStyle::default(), Tones::None, Vec::new());
+        update(&mut app, Msg::Runtime(RuntimeUpdate::Dialog(None)));
+        let (rows, _) = draw(&mut app, 80, 24);
+        assert!(rows.iter().any(|r| r.contains("Preparing")), "{rows:#?}");
+        key(&mut app, Key::Char('x'));
+        assert_eq!(app.draft.text(), "");
+        let token = app.approval_drawn().expect("a handoff");
+        update(&mut app, Msg::ApprovalArmed(token));
+        let (rows, _) = draw(&mut app, 80, 24);
+        assert!(!rows.iter().any(|r| r.contains("Preparing")), "{rows:#?}");
+        key(&mut app, Key::Char('x'));
+        assert_eq!(app.draft.text(), "x");
+    }
+
+    fn open_list(app: &mut State, list: crate::dialog::ListDialog) {
+        use crate::dialog::{DialogKind, DialogRequest};
+        use crate::runtime::RuntimeUpdate;
+        update(
+            app,
+            Msg::Runtime(RuntimeUpdate::Dialog(Some(DialogRequest {
+                id: 1,
+                kind: DialogKind::List(list),
+            }))),
+        );
+    }
+
+    fn arm(app: &mut State, w: u16, h: u16) {
+        let _ = draw(app, w, h);
+        if let Some(token) = app.approval_drawn() {
+            update(app, Msg::ApprovalArmed(token));
+        }
+    }
+
+    // Pi model-selector.test.ts "keeps the current model marked while
+    // browsing", drawn as the TypeScript picker draws a row: the pointer,
+    // the label's column, and the `Current` status, which stays on the
+    // current model as the selection moves.
+    #[test]
+    fn a_list_dialog_marks_the_current_item_while_browsing() {
+        use crate::dialog::{ListDialog, ListItem};
+        let mut app = State::live(FrameStyle::default(), Tones::None, Vec::new());
+        let item = |id: &str| ListItem {
+            value: id.into(),
+            label: id.into(),
+            detail: Some("faux".into()),
+            ..ListItem::default()
+        };
+        open_list(
+            &mut app,
+            ListDialog {
+                title: "Model".into(),
+                items: vec![item("current-model"), item("browsed-model")],
+                current: Some(0),
+                selected: None,
+                filterable: true,
+                saves_default: true,
+                note: None,
+                search: None,
+            },
+        );
+        let (rows, _) = draw(&mut app, 80, 24);
+        assert!(rows.iter().any(|r| r.contains("Preparing")));
+        let token = app.approval_drawn().expect("a handoff");
+        update(&mut app, Msg::ApprovalArmed(token));
+        let (rows, _) = draw(&mut app, 80, 24);
+        let current = &rows[row_index(&rows, "current-model")];
+        assert!(
+            current.contains("▸ current-model  Current  faux"),
+            "{rows:#?}"
+        );
+        assert!(
+            rows.iter()
+                .any(|r| r.contains("Ctrl+S to set as default") && r.contains("1/2"))
+        );
+        assert!(rows.iter().any(|r| r.contains("> Type to filter")));
+        // The sheet is framed and dim-bounded at SHEET_WIDTH or less.
+        assert!(rows.iter().any(|r| r.contains('╭') && r.contains('╮')));
+        key(&mut app, Key::Down);
+        let (rows, _) = draw(&mut app, 80, 24);
+        assert!(rows[row_index(&rows, "current-model")].contains("  current-model  Current  faux"));
+        assert!(rows[row_index(&rows, "browsed-model")].contains("▸ browsed-model           faux"));
+        assert!(rows.iter().any(|r| r.contains("2/2")));
+    }
+
+    /// A session search for render tests: `bad` is an invalid pattern,
+    /// and otherwise a row is listed when its label holds the query.
+    struct LabelSearch(Vec<(&'static str, bool)>);
+
+    impl crate::dialog::SessionFilter for LabelSearch {
+        fn search(
+            &self,
+            query: &str,
+            _: crate::dialog::SearchOrder,
+            named_only: bool,
+        ) -> crate::dialog::SearchResult {
+            if query == "bad" {
+                return crate::dialog::SearchResult {
+                    rows: Vec::new(),
+                    error: Some(crate::dialog::SearchError::InvalidRegex(
+                        "look-around, including look-ahead and look-behind, is not supported"
+                            .into(),
+                    )),
+                };
+            }
+            crate::dialog::SearchResult {
+                rows: (0..self.0.len())
+                    .filter(|&i| (!named_only || self.0[i].1) && self.0[i].0.contains(query))
+                    .collect(),
+                error: None,
+            }
+        }
+    }
+
+    // Pi session-selector.ts's header and hints, drawn in the shared sheet:
+    // the order and named state with their keys, the search syntax in the
+    // empty search row, the current mark apart from the selection, and an
+    // invalid pattern's reason, all legible in a 42-column terminal.
+    #[test]
+    fn the_session_sheet_shows_its_search_state_at_42_columns() {
+        use crate::dialog::{ListDialog, ListItem, SessionSearch};
+        let labels = vec![("Release prep", true), ("Fix flaky test", false)];
+        for width in [42u16, 80] {
+            let mut app = State::live(FrameStyle::default(), Tones::None, Vec::new());
+            open_list(
+                &mut app,
+                ListDialog {
+                    title: "Resume session · 2 saved here".into(),
+                    items: labels
+                        .iter()
+                        .map(|(label, _)| ListItem {
+                            value: (*label).into(),
+                            label: (*label).into(),
+                            detail: Some("2h ago · 01a13e27".into()),
+                            ..ListItem::default()
+                        })
+                        .collect(),
+                    current: Some(0),
+                    selected: None,
+                    filterable: true,
+                    saves_default: false,
+                    note: None,
+                    search: Some(SessionSearch::new(LabelSearch(labels.clone()))),
+                },
+            );
+            arm(&mut app, width, 24);
+            let (rows, _) = draw(&mut app, width, 24);
+            assert!(
+                rows.iter()
+                    .any(|r| r.contains("^S sort: Recent · ^N named: off")),
+                "{rows:#?}"
+            );
+            assert!(
+                rows.iter()
+                    .any(|r| r.contains("> Search · re:<regex> · \"phrase\"")),
+                "{rows:#?}"
+            );
+            assert!(
+                rows.iter().any(|r| r.contains("▸ Release prep")),
+                "{rows:#?}"
+            );
+            key(&mut app, Key::Down);
+            let (rows, _) = draw(&mut app, width, 24);
+            assert!(rows[row_index(&rows, "Release prep")].contains("Current"));
+            assert!(
+                rows.iter().any(|r| r.contains("▸ Fix flaky test")),
+                "{rows:#?}"
+            );
+            update(
+                &mut app,
+                Msg::Key(KeyInput {
+                    key: Key::Char('s'),
+                    mods: Mods::CTRL,
+                }),
+            );
+            update(
+                &mut app,
+                Msg::Key(KeyInput {
+                    key: Key::Char('n'),
+                    mods: Mods::CTRL,
+                }),
+            );
+            let (rows, _) = draw(&mut app, width, 24);
+            assert!(
+                rows.iter()
+                    .any(|r| r.contains("^S sort: Relevance · ^N named: on")),
+                "{rows:#?}"
+            );
+            assert!(
+                !rows.iter().any(|r| r.contains("Fix flaky test")),
+                "{rows:#?}"
+            );
+            for c in "bad".chars() {
+                key(&mut app, Key::Char(c));
+            }
+            let (rows, _) = draw(&mut app, width, 24);
+            assert!(
+                rows.iter()
+                    .any(|r| r.contains("Invalid regex: look-around")),
+                "{rows:#?}"
+            );
+            assert!(
+                rows.iter().any(|r| r.contains("No matching sessions")),
+                "{rows:#?}"
+            );
+            assert!(rows.iter().all(|r| r.chars().count() == usize::from(width)));
+        }
+    }
+
+    /// Thirty models of two providers, readable names sharing prefixes.
+    fn models() -> crate::dialog::ListDialog {
+        use crate::dialog::{ListDialog, ListItem};
+        let items = (1..=30)
+            .map(|n| {
+                let provider = if n <= 15 { "alpha" } else { "beta" };
+                let id = format!("claude-sonnet-4-5-2025{n:04}");
+                ListItem {
+                    value: format!("{provider}/{id}"),
+                    label: format!("Claude Sonnet 4.5 ({n})"),
+                    detail: Some(format!("{provider}/{id}")),
+                    group: Some(provider.into()),
+                    facts: vec!["200k".into(), "think".into()],
+                    about: Some(format!("{provider}/{id}")),
+                }
+            })
+            .collect();
+        ListDialog {
+            title: "Model · 30 models from alpha, beta".into(),
+            items,
+            current: Some(20),
+            selected: None,
+            filterable: true,
+            saves_default: true,
+            note: None,
+            search: None,
+        }
+    }
+
+    // TS sheet.tsx `pageStart` and picker.tsx: a list longer than its rows
+    // scrolls only to keep the selection in view, each edge says how many
+    // rows it hides, groups keep their headings, and the selected row and
+    // its full route stay on screen at every size that hands it the keys.
+    #[test]
+    fn a_long_list_follows_its_selection_at_every_size() {
+        for inline in [false, true] {
+            for (w, h) in [
+                (80, 24),
+                (42, 24),
+                (42, 14),
+                (120, 40),
+                (24, 12),
+                (22, 14),
+                (16, 10),
+            ] {
+                let mut app = State::live(FrameStyle::default(), Tones::None, Vec::new());
+                open_list(&mut app, models());
+                arm(&mut app, w, h);
+                let mut seen = Vec::new();
+                for step in 0..32 {
+                    let (rows, _) = if inline {
+                        draw_inline(&mut app, w, h)
+                    } else {
+                        draw(&mut app, w, h)
+                    };
+                    let screen = rows.join("\n");
+                    if app.dialog_ready() {
+                        let selected = app.dialog.as_ref().expect("dialog").selected;
+                        let n = selected + 1;
+                        // The selected row is drawn, pointed at.
+                        assert!(
+                            rows.iter().any(|r| r.contains('▸')),
+                            "{w}x{h} step {step}: {screen}"
+                        );
+                        if w >= 42 {
+                            let route = format!("claude-sonnet-4-5-2025{n:04}");
+                            assert!(
+                                screen.contains(&route),
+                                "{w}x{h} step {step} {route}: {screen}"
+                            );
+                            assert!(
+                                screen.contains(&format!("{}/30", selected + 1)),
+                                "{w}x{h}: {screen}"
+                            );
+                        }
+                        for row in &rows {
+                            assert!(row.width() <= usize::from(w), "{w}x{h}: {row}");
+                        }
+                        // However narrow, the armed sheet says how to cancel.
+                        assert!(
+                            rows.iter()
+                                .any(|r| r.contains('│') && r.contains("Esc") && !r.contains('❯')),
+                            "{w}x{h}: {screen}"
+                        );
+                        seen.push(selected);
+                    }
+                    key(&mut app, Key::Down);
+                }
+                if w >= 24 {
+                    assert!(!seen.is_empty(), "{w}x{h} never ready");
+                }
+            }
+        }
+    }
+
+    // TS picker.tsx: the edges count hidden rows; a filter keeps the
+    // sheet's height and matches a model's exact route.
+    #[test]
+    fn a_filtered_list_keeps_its_height_and_matches_routes() {
+        let mut app = State::live(FrameStyle::default(), Tones::None, Vec::new());
+        open_list(&mut app, models());
+        arm(&mut app, 80, 30);
+        let (rows, _) = draw(&mut app, 80, 30);
+        let height = rows.iter().filter(|r| r.contains('│')).count();
+        assert!(rows.iter().any(|r| r.contains("more")), "{rows:#?}");
+        for c in "beta/claude-sonnet-4-5-20250021".chars() {
+            key(&mut app, Key::Char(c));
+        }
+        let (rows, _) = draw(&mut app, 80, 30);
+        assert_eq!(rows.iter().filter(|r| r.contains('│')).count(), height);
+        assert!(
+            rows.iter().any(|r| r.contains("▸ Claude Sonnet 4.5 (21)")),
+            "{rows:#?}"
+        );
+        assert!(rows.iter().any(|r| r.contains("1/1")));
+        for c in "zz".chars() {
+            key(&mut app, Key::Char(c));
+        }
+        let (rows, _) = draw(&mut app, 80, 30);
+        assert!(
+            rows.iter().any(|r| r.contains("No matching choices")),
+            "{rows:#?}"
+        );
+    }
+
+    // Bake: a sheet too narrow to show its selection is never handed the
+    // keyboard, so Enter cannot choose what was not seen; Esc still cancels.
+    #[test]
+    fn an_unusably_narrow_sheet_is_not_handed_the_keyboard() {
+        let mut app = State::live(FrameStyle::default(), Tones::None, Vec::new());
+        open_list(&mut app, models());
+        arm(&mut app, 8, 30);
+        assert!(!app.dialog_ready());
+        assert!(key(&mut app, Key::Enter).is_empty());
+        let effects = key(&mut app, Key::Esc);
+        assert!(matches!(
+            &effects[..],
+            [Effect::Dialog {
+                answer: crate::dialog::DialogAnswer::Cancel,
+                ..
+            }]
+        ));
+    }
+
+    // TS sheet.tsx `sheetRows`: an information sheet wraps a long value
+    // under its own column, so a long session path and a Unicode name are
+    // shown whole, scrolling where they do not fit.
+    #[test]
+    fn an_info_sheet_wraps_long_values_and_scrolls() {
+        use crate::dialog::{DialogKind, DialogRequest, InfoDialog, InfoLine};
+        use crate::runtime::RuntimeUpdate;
+        let path = format!(
+            "/tmp/{}/2026-10-15T06-02-13-759Z_01a13e27-6d7f-7128-952d-5840b7da8c4b.jsonl",
+            "很长的目录".repeat(4)
+        );
+        let mut lines = vec![
+            InfoLine::Field {
+                label: "Name".into(),
+                value: "日本語のセッション 🚀".into(),
+            },
+            InfoLine::Field {
+                label: "File".into(),
+                value: path.clone(),
+            },
+        ];
+        for n in 0..20 {
+            lines.push(InfoLine::Field {
+                label: format!("Row {n}"),
+                value: n.to_string(),
+            });
+        }
+        for (w, h) in [(80, 24), (42, 16), (30, 12)] {
+            let mut app = State::live(FrameStyle::default(), Tones::None, Vec::new());
+            update(
+                &mut app,
+                Msg::Runtime(RuntimeUpdate::Dialog(Some(DialogRequest {
+                    id: 4,
+                    kind: DialogKind::Info(InfoDialog {
+                        title: "Session info".into(),
+                        lines: lines.clone(),
+                    }),
+                }))),
+            );
+            arm(&mut app, w, h);
+            assert!(app.dialog_ready(), "{w}x{h}");
+            // Each body row by its place in the whole sheet, as it scrolls.
+            let mut seen = std::collections::BTreeMap::new();
+            for _ in 0..40 {
+                let (rows, _) = draw(&mut app, w, h);
+                for row in &rows {
+                    assert!(row.width() <= usize::from(w), "{w}x{h}: {row}");
+                }
+                let inside: Vec<String> = rows
+                    .iter()
+                    .filter(|row| row.matches('│').count() == 2)
+                    .map(|row| row.split('│').nth(1).unwrap_or("").trim().to_owned())
+                    .collect();
+                let top = app.dialog.as_ref().expect("dialog").top;
+                // Inside the frame: the title, the body, then the keys.
+                for (i, row) in inside
+                    .iter()
+                    .skip(1)
+                    .take(inside.len().saturating_sub(2))
+                    .enumerate()
+                {
+                    seen.insert(top + i, row.clone());
+                }
+                key(&mut app, Key::Down);
+            }
+            let text: String = seen.values().cloned().collect();
+            let joined: String = text.split_whitespace().collect();
+            let wanted: String = path.split_whitespace().collect();
+            assert!(
+                joined.contains(&wanted),
+                "{w}x{h}: the whole path was never shown"
+            );
+            assert!(joined.contains("日本語のセッション🚀"), "{w}x{h}");
+            assert!(joined.contains("Row19"), "{w}x{h}");
+            // Enter closes it, as Esc does.
+            let effects = key(&mut app, Key::Enter);
+            assert!(matches!(
+                &effects[..],
+                [Effect::Dialog {
+                    answer: crate::dialog::DialogAnswer::Cancel,
+                    ..
+                }]
+            ));
+        }
     }
 
     #[test]
@@ -2272,6 +3656,7 @@ mod tests {
                 media_type: "image/png",
                 bytes: 10,
                 size: Some((2, 1)),
+                data: crate::paste::ImageData::default(),
             };
             update(
                 &mut app,
@@ -2444,6 +3829,7 @@ mod tests {
                 media_type: "image/png",
                 bytes: 1,
                 size: None,
+                data: crate::paste::ImageData::default(),
             },
         ));
         let (rows, _) = draw(&mut app, 60, 24);
@@ -2470,7 +3856,8 @@ mod tests {
                     let mut app = State::default();
                     app.draft.paste(&vec!["x"; draft_rows].join("\n"));
                     let height = inline_height(&app, width, physical_height);
-                    let expected = layout::plan(physical_height, needs(&app, width)).composer;
+                    let expected =
+                        layout::plan(physical_height, needs(&app, width, physical_height)).composer;
                     let published = app.settled_rows();
                     let mut terminal = Terminal::with_options(
                         TestBackend::new(width, physical_height),
@@ -2567,5 +3954,101 @@ mod tests {
         let bar = row_index(&rows, "no model");
         assert!(rows[bar - 1].contains("Commands are not available"));
         assert!(rows[bar - 2].contains("lines below · Ctrl+End"));
+    }
+
+    // ---- Approvals ----
+
+    fn asking(reason: &str, arguments: &str) -> State {
+        let mut app = State::live(FrameStyle::default(), Tones::None, Vec::new());
+        update(&mut app, Msg::Key(KeyInput::plain(Key::Char('d'))));
+        update(
+            &mut app,
+            Msg::Runtime(crate::runtime::RuntimeUpdate::Approvals(vec![
+                crate::runtime::Approval {
+                    generation: 4,
+                    tool: "bash\x1b[31m".into(),
+                    call_id: "call\x07-4".into(),
+                    reason: reason.into(),
+                    arguments: arguments.into(),
+                },
+            ])),
+        );
+        app
+    }
+
+    #[test]
+    fn the_approval_panel_shows_the_call_its_reason_and_arguments_without_escapes() {
+        let mut app = asking(
+            "escalate sandbox to danger-full-access: \x1b]52;c;aGk=\x07fetch",
+            "command: curl -fsS https://example.com",
+        );
+        let (rows, _) = draw(&mut app, 80, 24);
+        let screen = rows.join("\n");
+        assert!(
+            !screen.contains('\x1b') && !screen.contains('\x07'),
+            "{screen}"
+        );
+        assert!(
+            screen.contains("Approval required: bash[31m  call-4"),
+            "{screen}"
+        );
+        assert!(screen.contains("escalate sandbox to danger-full-access: ]52;c;aGk=fetch"));
+        assert!(screen.contains("Arguments:"));
+        assert!(screen.contains("command: curl -fsS https://example.com"));
+        // Not armed yet: no key but Esc is offered.
+        assert!(screen.contains(copy::APPROVAL_PREPARING), "{screen}");
+        assert!(!screen.contains(copy::APPROVAL_KEYS), "{screen}");
+        // The draft stays, dimmed, below the panel.
+        assert!(screen.contains("❯ d"), "{screen}");
+        assert_eq!(app.approval_drawn(), Some(1), "a new showing");
+        // The preparing frame counts as shown; once armed, the keys show.
+        update(&mut app, Msg::ApprovalArmed(1));
+        let (rows, _) = draw(&mut app, 80, 24);
+        assert!(rows.join("\n").contains(copy::APPROVAL_KEYS));
+        assert_eq!(app.approval_drawn(), None, "still the same showing");
+        app.draft = crate::editor::Draft::default();
+        update(
+            &mut app,
+            Msg::Runtime(crate::runtime::RuntimeUpdate::TurnStarted {
+                seed: "approval".into(),
+            }),
+        );
+        let (rows, _) = draw(&mut app, 80, 24);
+        let screen = rows.join("\n");
+        assert!(screen.contains("Approval pending"));
+        assert!(screen.contains(copy::HINT_APPROVAL));
+        assert!(!screen.contains("Enter steers") && !screen.contains(copy::HINT_INTERRUPT));
+    }
+
+    #[test]
+    fn a_long_detail_scrolls_on_a_narrow_terminal_and_a_short_one_does_not_arm() {
+        let content: Vec<String> = (1..=40).map(|n| format!("  line {n}")).collect();
+        let arguments = format!("path: notes.txt\ncontent:\n{}", content.join("\n"));
+        let mut app = asking(&"needs it ".repeat(20), &arguments);
+        let (rows, _) = draw(&mut app, 40, 30);
+        let screen = rows.join("\n");
+        // Eleven detail rows, then where they are in the whole.
+        assert!(screen.contains("1-11/"), "{screen}");
+        assert_eq!(app.approval_drawn(), Some(1));
+        // Paging reaches the last line, and no further.
+        for _ in 0..20 {
+            update(&mut app, Msg::Key(KeyInput::plain(Key::PageDown)));
+        }
+        let (rows, _) = draw(&mut app, 40, 30);
+        let screen = rows.join("\n");
+        assert!(screen.contains("line 40"), "{screen}");
+        let total = approval_detail(&app, 36).len();
+        assert_eq!(app.approval_scroll, total - 11);
+        assert_eq!(app.approval_drawn(), None, "still the same showing");
+        // Title and keys alone, without a detail row, are not shown whole.
+        let mut short = asking("why", "command: x");
+        let (rows, _) = draw(&mut short, 80, 2);
+        assert!(rows.join("\n").contains("Approval required"));
+        assert_eq!(short.approval_drawn(), None);
+        // Four rows: the draft's first row, then title, one detail row, keys.
+        let (_, _) = draw(&mut short, 80, 3);
+        assert_eq!(short.approval_drawn(), None);
+        let (_, _) = draw(&mut short, 80, 4);
+        assert_eq!(short.approval_drawn(), Some(1));
     }
 }
