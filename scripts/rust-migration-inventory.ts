@@ -37,7 +37,7 @@ const DISPOSITIONS = {
   'port-contract': 'The native implementation must reproduce this observable contract.',
   'reuse-oracle': 'Kept as a TypeScript or frozen oracle that native work is compared against.',
   'replace-tooling': 'TypeScript-workspace tooling that native work replaces or extends instead of porting.',
-  'explicit-exclusion': 'Deliberately not ported; the reason states what remains read-only.',
+  'explicit-exclusion': 'Deliberately not ported to 0.4.0, whether retired or deferred by decision; the reason states what remains read-only or frozen.',
 } as const
 /** How native work treats an inventoried item. */
 export type Disposition = keyof typeof DISPOSITIONS
@@ -64,7 +64,16 @@ export interface Rule {
   readonly pending?: string
 }
 
-const PENDING_EXTENSIONS = 'Custom JavaScript/Cordis profiles and their migration are excluded by D5; decide migration of shipped capabilities, native replacements, or retirement for Cordis tooling under D7.'
+/**
+ * D7 retires the Cordis/JavaScript-specific tooling. Only the TypeScript
+ * implementation is excluded: the Rust-native inspection and management
+ * capabilities that replace it are a scope-12 requirement, not an excluded item.
+ */
+const RETIRED_BY_D7 = 'Retired by D7: 0.4 ships no port, wrapper, or compatibility layer of this Cordis/JavaScript-specific implementation, and the frozen TypeScript package and its tests stay until the TypeScript agent is removed (D34). Its useful inspection and management roles move to Rust-native capabilities that scope 12 designs with the D6 plugin API; those are required, not excluded.'
+const retiredByD7 = (what: string): Rule => ({ scopes: ['12'], disposition: 'explicit-exclusion', reason: `${what} ${RETIRED_BY_D7}` })
+
+/** D9 defers Bake Desktop integration beyond 0.4.0 while the frozen TypeScript bundle stays. */
+const DEFERRED_BY_D9 = 'Deferred beyond 0.4.0 by D9: no native Desktop entry, protocol, or Electron launch adapter, and no Desktop consumer test gates 0.4.0; the frozen TypeScript bundle and its tests stay.'
 const PENDING_TRANSPORT = 'Trace retained api/client/host/typert consumers before porting or removing them.'
 
 const transportConsumers: Rule = { scopes: ['13'], disposition: 'port-contract', reason: 'Gateway, connection, host, and type-runtime transports; preserve required wire behavior for retained consumers only.', pending: PENDING_TRANSPORT }
@@ -80,7 +89,7 @@ const PACKAGE_GROUPS: Readonly<Record<string, Rule>> = {
   'packages/context': { scopes: ['10'], disposition: 'port-contract', reason: 'Instruction discovery and file/session references assembled into model context.' },
   'packages/core': { scopes: ['02', '05', '06', '07', '08', '09'], disposition: 'port-contract', reason: 'Agent, session, tool, and prompt core contracts every later scope builds on.' },
   'packages/credentials': { scopes: ['05', '07'], disposition: 'port-contract', reason: 'Credential precedence, managed secret storage, and provider authorization.' },
-  'packages/extensions': { scopes: ['12'], disposition: 'port-contract', reason: 'Cordis host runner and inspection tools that execute JavaScript plugin operations.', pending: PENDING_EXTENSIONS },
+  'packages/extensions': retiredByD7('Cordis host runner and Cordis inspection tools that execute JavaScript plugin operations.'),
   'packages/feedback': { scopes: ['13', '17'], disposition: 'port-contract', reason: 'Local feedback and explicit-feedback export rules.' },
   'packages/fs': { scopes: ['04', '08'], disposition: 'port-contract', reason: 'Filesystem access, observation guards, and the read/write/edit/search tools.' },
   'packages/goal': { scopes: ['11'], disposition: 'port-contract', reason: 'Durable goals and automatic round continuation.' },
@@ -90,7 +99,7 @@ const PACKAGE_GROUPS: Readonly<Record<string, Rule>> = {
   'packages/identity': { scopes: ['13'], disposition: 'port-contract', reason: 'Anonymous identity consumed by telemetry opt-outs and feedback.' },
   'packages/interaction': { scopes: ['08', '15'], disposition: 'port-contract', reason: 'Permission presets, approvals, user questions, and commands.' },
   'packages/jobs': { scopes: ['11'], disposition: 'port-contract', reason: 'Background jobs, their completion notices, and job tools.' },
-  'packages/llm': { scopes: ['06', '07'], disposition: 'port-contract', reason: 'Provider-neutral streaming, retry, token metering, and pi-ai provider routes.' },
+  'packages/llm': { scopes: ['06', '07'], disposition: 'port-contract', reason: 'Provider-neutral streaming, retry, and token metering, and the CLIProxyAPI route over the three wire protocols it selects per model: openai-responses, openai-completions, and anthropic-messages (D8). Direct provider routes, catalog API families beyond those three, and direct API-key and OAuth logins are deferred beyond 0.4.0.' },
   'packages/mcp': { scopes: ['12'], disposition: 'port-contract', reason: 'MCP client, server-qualified dynamic tools, and resources.' },
   'packages/preset': { scopes: ['05', '10'], disposition: 'port-contract', reason: 'Agent preset discovery, personas, and preset-scoped composition.' },
   'packages/ptc-runtime': { scopes: ['12'], disposition: 'port-contract', reason: 'run_code keeps JavaScript semantics through a confined embedded engine.' },
@@ -121,9 +130,9 @@ const PACKAGE_GROUPS: Readonly<Record<string, Rule>> = {
 /** Narrower scopes or dispositions for individual packages, keyed by directory. */
 const PACKAGE_OVERRIDES: Readonly<Record<string, Partial<Rule>>> = {
   'packages/boot/updater': { scopes: ['16'], reason: 'Signed manifest and update/rollback; old updaters expect a Node entry point.' },
-  'packages/boot/plugin-manager': { scopes: ['12'], reason: 'npm/Cordis plugin installation for profiles.', pending: PENDING_EXTENSIONS },
+  'packages/boot/plugin-manager': retiredByD7('npm/Cordis plugin installation and toggling for profiles.'),
   'packages/boot/cmdline': { scopes: ['13'] },
-  'packages/bundle/desktop': { scopes: ['13'], reason: 'Bake Desktop profile bundle launched with `dsh --profile desktop` over stdio or an Electron port.', pending: 'Desktop launch: native child spawning or a tested Electron port-to-stdio adapter.' },
+  'packages/bundle/desktop': { scopes: ['13'], disposition: 'explicit-exclusion', reason: `Bake Desktop profile bundle launched with \`dsh --profile desktop\` over stdio or an Electron port. ${DEFERRED_BY_D9}` },
   'packages/core/agent-loop': { scopes: ['09'] },
   'packages/core/session': { scopes: ['02', '03'] },
   'packages/core/system-prompt': { scopes: ['10'] },
@@ -206,14 +215,14 @@ const PTY_SCENARIOS: Readonly<Record<string, readonly [reason: PtyReason, scopes
 const PROFILES: Readonly<Record<string, Rule>> = {
   tui: { scopes: ['13', '14', '15'], disposition: 'port-contract', reason: 'Default terminal profile: base runtime plus the TUI bundle.' },
   headless: { scopes: ['09', '13'], disposition: 'port-contract', reason: 'One-task command-line profile with JSON stream output.' },
-  desktop: { scopes: ['13'], disposition: 'port-contract', reason: 'Bake Desktop profile driven over stdio or an Electron parent port.', pending: 'Desktop launch: native child spawning or a tested Electron port-to-stdio adapter.' },
+  desktop: { scopes: ['13'], disposition: 'explicit-exclusion', reason: `Bake Desktop profile driven over stdio or an Electron parent port. ${DEFERRED_BY_D9}` },
 }
 
 const PRESETS: Readonly<Record<string, Rule>> = {
   standard: { scopes: ['05', '10'], disposition: 'port-contract', reason: 'Default coding preset with editing, shell, search, skills, goals, and subagents.' },
   minimal: { scopes: ['05', '10'], disposition: 'port-contract', reason: 'Single persistent-shell preset.' },
   ptc: { scopes: ['10', '12'], disposition: 'port-contract', reason: 'Tools exposed through run_code; depends on the embedded JavaScript engine.' },
-  cordis: { scopes: ['05', '12'], disposition: 'port-contract', reason: 'Creation preset with Cordis inspection and persistent plugin management.', pending: PENDING_EXTENSIONS },
+  cordis: { ...retiredByD7('Creation preset with Cordis inspection and persistent plugin management.'), scopes: ['05', '12'] },
 }
 
 /** Tool packages in `docs/tool-catalog.md`, by package name. */
@@ -234,8 +243,8 @@ const TOOL_PACKAGES: Readonly<Record<string, Rule>> = {
   'bake-tool-skill': { scopes: ['10'], disposition: 'port-contract', reason: 'skill invocation adding model context.' },
   'bake-tool-web': { scopes: ['12'], disposition: 'port-contract', reason: 'web_search and web_fetch with destination and payload limits.' },
   'bake-mcp-resources': { scopes: ['12'], disposition: 'port-contract', reason: 'MCP resource listing and reading tools.' },
-  'bake-tool-cordis': { scopes: ['12'], disposition: 'port-contract', reason: 'Cordis inspection over a generated JavaScript API catalog that cannot be presented as a Rust API unchanged.', pending: PENDING_EXTENSIONS },
-  'bake-plugin-manager': { scopes: ['12'], disposition: 'port-contract', reason: 'plugin_manager installs and toggles JavaScript profile plugins.', pending: PENDING_EXTENSIONS },
+  'bake-tool-cordis': retiredByD7('cordis_inspect_list and cordis_inspect_query over a generated JavaScript API catalog that 0.4 never presents to the model.'),
+  'bake-plugin-manager': retiredByD7('plugin_manager installs and toggles JavaScript profile plugins.'),
 }
 
 /** Model-surface snapshot directories and the test that owns each. */

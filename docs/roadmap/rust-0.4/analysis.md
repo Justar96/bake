@@ -91,9 +91,11 @@ MCP similarly delegates to an SDK and registers server-qualified tools with scop
 
 The [plugin manager](../../../packages/boot/plugin-manager/README.md), [Cordis host runner](../../../packages/extensions/cordis-host-runner/README.md), and [Cordis tool](../../../packages/extensions/tool-cordis/README.md) expose JavaScript package and runtime operations. Arbitrary plugins can depend on Cordis services and lifecycle behavior that cannot be transparently represented by a small JSON-RPC adapter.
 
-The product owner decided on 2026-10-07 that 0.4 ships Rust only ([D5](scope-00/support.md#decision-register)): no Node/TypeScript compatibility runtime ships. The owner has also excluded custom JavaScript/Cordis profiles and their migration from 0.4.0. The old whole-profile runtime stays runnable in development as the comparison oracle. The owner also decided that 0.4.0 requires a native plugin API ([D6](scope-00/support.md#decision-register)); MCP servers and hook processes alone do not satisfy it. Its form is not chosen; design it around a named consumer. Before release, the shipped Cordis preset, tools, and plugin manager each need a designed migration of the shipped capability, a native replacement, or an explicit retirement decision under D7; custom-profile conversion is excluded by D5. Never feed an obsolete Cordis API catalog to the model while executing an unrelated native interface.
+The product owner decided on 2026-10-07 that 0.4 ships Rust only ([D5](scope-00/support.md#decision-register)): no Node/TypeScript compatibility runtime ships. The owner has also excluded custom JavaScript/Cordis profiles and their migration from 0.4.0. The old whole-profile runtime stays runnable in development as the comparison oracle. The owner also decided that 0.4.0 requires a native plugin API ([D6](scope-00/support.md#decision-register)); MCP servers and hook processes alone do not satisfy it. Its form is not chosen; design it around a named consumer. On 2026-10-17 the owner retired the shipped Cordis preset, tools, host runner, and plugin manager and required Rust-native inspection and management capabilities, designed with the plugin API, in their place ([D7](scope-00/support.md#decision-register)); custom-profile conversion is excluded by D5. Never feed an obsolete Cordis API catalog to the model while executing an unrelated native interface.
 
-### Bake Desktop is a retained consumer
+### Bake Desktop is deferred beyond 0.4.0
+
+On 2026-10-17 the owner deferred Desktop integration beyond 0.4.0 ([D9](scope-00/support.md#decision-register)); the frozen TypeScript `desktop` bundle and its tests stay. The findings below describe 0.3 and apply to any later Desktop work.
 
 The [Desktop transport](../../../packages/bundle/desktop/src/transport.ts) supports both newline-delimited stdio and Electron's `process.parentPort`. Its [protocol declaration](../../../packages/bundle/desktop/src/protocol.ts) is shared with a separate repository. A native executable cannot be substituted for a JavaScript Electron utility-process entry without coordinating the launch path or providing a tested adapter.
 
@@ -129,9 +131,9 @@ This map assigns every direct shared package group to a migration owner. It iden
 | `fs`, `shell`, `interaction`, `spill`, `guard` | Port tools, permissions, questions, errors, progress and bounds | 04, 08, 15 |
 | `preset`, `context`, `skill`, `attachment`, `compaction` | Preserve composition and model-facing context | 05, 10 |
 | `subagent`, `goal`, `jobs`, `schedule` | Port durable orchestration and restart behavior | 11 |
-| `mcp`, `web`, `hooks`, `ptc-runtime`, `extensions` | Native integrations and plugin API; custom Cordis profiles excluded by D5; shipped Cordis tooling awaits D7 | 12 |
+| `mcp`, `web`, `hooks`, `ptc-runtime`, `extensions` | Native integrations and plugin API; custom Cordis profiles excluded by D5; shipped Cordis tooling retired and replaced by native inspection and management capabilities (D7) | 12 |
 | `api`, `client`, `host`, `typert` | Trace retained consumers; preserve required wire/API behavior; replace TS-specific generation where justified | 13 |
-| `bundle`, CLI | Native profiles and supported launch contracts, including Desktop | 09, 13 |
+| `bundle`, CLI | Native profiles and supported launch contracts; Desktop deferred beyond 0.4.0 (D9) | 09, 13 |
 | `runtime-diagnostics`, `feedback`, Session telemetry | Preserve opt-outs, local feedback, bounded shutdown, identity/redaction; replace V8-specific measurements with native measurements | 13, 17 |
 | TUI app/UI/harness | Port product behavior; adapt recorded fixtures and preview tools where still useful | 14–15 |
 | `test-support`, scripts, evals | Retain language-independent oracles; add native drivers and reviewed generators | 00–01, all scopes |
@@ -155,11 +157,11 @@ Scope 00 must settle these points in a concrete support matrix. Recommended defa
 
 | Decision | Recommended default | Evidence needed before acceptance |
 |---|---|---|
-| Native completion | Native standard, minimal, and code-mode agent paths plus terminal/headless/Desktop; explicit disposition for the shipped Cordis preset; custom JavaScript/Cordis profiles excluded | Per-profile command/tool/config/provider inventory |
+| Native completion | Native standard, minimal, and code-mode agent paths plus terminal and headless (Desktop deferred by D9); the shipped Cordis preset retired by D7; custom JavaScript/Cordis profiles excluded | Per-profile command/tool/config/provider inventory |
 | Session version | Superseded by [D32](scope-00/support.md#decision-register): 0.4 writes Pi's session format and reads no Bake Session log | Pi's session tests, ported; resume after a killed writer |
-| Extension strategy | Built-ins in Rust; ship Rust only; custom JavaScript/Cordis profiles and their migration excluded (D5); keep TypeScript as the development oracle; require a native plugin API in 0.4.0 (D6), designed around a named consumer | Real native plugin lifecycle and unsupported-profile refusal fixtures; separate D7 disposition for shipped Cordis tooling |
-| Desktop integration | Coordinate native child spawning or test an Electron port-to-stdio adapter | Separate Desktop consumer test on supported hosts |
-| Provider breadth | Inventory catalog routes as well as three generic wire overrides; preserve claimed login flows | Fixture and live-smoke matrix with no implicit unsupported routes |
+| Extension strategy | Built-ins in Rust; ship Rust only; custom JavaScript/Cordis profiles and their migration excluded (D5); keep TypeScript as the development oracle; require a native plugin API in 0.4.0 (D6), designed around a named consumer | Real native plugin lifecycle and unsupported-profile refusal fixtures; the native inspection and management capabilities that D7 requires in place of the retired Cordis tooling |
+| Desktop integration | Deferred beyond 0.4.0 by [D9](scope-00/support.md#decision-register) | None for 0.4.0; a later release needs a Desktop consumer test on supported hosts |
+| Provider breadth | Settled by [D8](scope-00/support.md#decision-register): CLIProxyAPI over the three generic wire protocols; direct providers deferred | CLIProxyAPI fixtures, per-protocol wire fixtures, and a live smoke, with no implicit unsupported routes |
 | 0.3 maintenance | Bug fixes only; define post-0.4 maintenance PRs and separate update channel before cutover | Branch-policy and signed-channel release rehearsal |
 | Performance | Compare identical workloads/process trees on fixed hosts; freeze budgets before native results | Repeatable TypeScript measurements with confidence/noise characterization |
 

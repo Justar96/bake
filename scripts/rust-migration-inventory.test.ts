@@ -305,3 +305,74 @@ describe('check rejects missing or malformed source inputs', () => {
     expect(checkInventory(duplicated, committed(files), TABLES)).toEqual(['rust-migration-inventory: discovery listed scripts/tool.test.ts twice'])
   })
 })
+
+describe('the real classification follows the scope-00 support decisions', () => {
+  const c = CLASSIFICATION
+  const d7 = {
+    'package group packages/extensions': c.packageGroups['packages/extensions'],
+    'package packages/boot/plugin-manager': c.packageOverrides['packages/boot/plugin-manager'],
+    'preset cordis': c.presets.cordis,
+    'tool bake-tool-cordis': c.toolPackages['bake-tool-cordis'],
+    'tool bake-plugin-manager': c.toolPackages['bake-plugin-manager'],
+  }
+  const d9 = {
+    'package packages/bundle/desktop': c.packageOverrides['packages/bundle/desktop'],
+    'profile desktop': c.profiles.desktop,
+  }
+
+  test('D7 retires the Cordis-specific implementations without excluding their native replacement', () => {
+    for (const [subject, rule] of Object.entries(d7)) {
+      expect([subject, rule?.disposition]).toEqual([subject, 'explicit-exclusion'])
+      expect([subject, rule?.pending]).toEqual([subject, undefined])
+      expect(rule?.reason).toContain('Retired by D7')
+      expect(rule?.scopes).toContain('12')
+      // The Rust-native inspection and management capabilities stay a scope-12 requirement.
+      expect(rule?.reason).toContain('Rust-native capabilities that scope 12 designs with the D6 plugin API; those are required, not excluded')
+    }
+  })
+
+  test('D9 defers Desktop integration while its frozen TypeScript bundle stays', () => {
+    for (const [subject, rule] of Object.entries(d9)) {
+      expect([subject, rule?.disposition]).toEqual([subject, 'explicit-exclusion'])
+      expect([subject, rule?.pending]).toEqual([subject, undefined])
+      expect(rule?.reason).toContain('Deferred beyond 0.4.0 by D9')
+      expect(rule?.reason).toContain('the frozen TypeScript bundle and its tests stay')
+    }
+  })
+
+  test('D8 keeps the CLIProxyAPI protocols and defers direct-provider breadth', () => {
+    const llm = c.packageGroups['packages/llm']
+    expect(llm?.disposition).toBe('port-contract')
+    for (const protocol of ['openai-responses', 'openai-completions', 'anthropic-messages']) expect(llm?.reason).toContain(protocol)
+    expect(llm?.reason).toContain('CLIProxyAPI')
+    expect(llm?.reason).toContain('Direct provider routes, catalog API families beyond those three, and direct API-key and OAuth logins are deferred beyond 0.4.0')
+  })
+
+  test('no rule still waits on the decided D7 or Desktop launch questions', () => {
+    const rules: Partial<Rule>[] = [
+      ...Object.values(c.packageGroups), ...Object.values(c.packageOverrides), ...c.testAreas, ...Object.values(c.snapshotSurfaces),
+      ...Object.values(c.profiles), ...Object.values(c.presets), ...Object.values(c.toolPackages),
+    ]
+    const stale = rules.map(rule => rule.pending).filter(pending => pending !== undefined && /\bD7\b|Desktop launch/u.test(pending))
+    expect(stale).toEqual([])
+  })
+
+  test('tests owned by a retired or deferred package are excluded, not kept as native oracles', () => {
+    const files = fixtureFiles()
+    files.set('packages/extensions/tool-cordis/package.json', JSON.stringify({ name: 'bake-tool-cordis' }))
+    files.set('packages/extensions/tool-cordis/tests/inspect.spec.ts', '')
+    files.set('packages/bundle/desktop/package.json', JSON.stringify({ name: 'bake-desktop' }))
+    files.set('packages/bundle/desktop/tests/transport.spec.ts', '')
+    const tables: Classification = {
+      ...TABLES,
+      packageGroups: { ...TABLES.packageGroups, 'packages/extensions': c.packageGroups['packages/extensions'] as Rule, 'packages/bundle': port('13', 'bundles') },
+      packageOverrides: { ...TABLES.packageOverrides, 'packages/bundle/desktop': c.packageOverrides['packages/bundle/desktop'] as Partial<Rule> },
+    }
+    const inventory = buildInventory(sources(files), tables)
+    const tests = new Map(inventory.tests.map(item => [item.path, item.disposition]))
+    expect(tests.get('packages/extensions/tool-cordis/tests/inspect.spec.ts')).toBe('explicit-exclusion')
+    expect(tests.get('packages/bundle/desktop/tests/transport.spec.ts')).toBe('explicit-exclusion')
+    expect(tests.get('packages/core/agent/tests/agent.spec.ts')).toBe('reuse-oracle')
+    expect(inventory.rules['packages/bundle/desktop']?.pending).toBeUndefined()
+  })
+})

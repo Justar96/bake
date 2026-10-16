@@ -81,7 +81,7 @@ Implement compaction as a task owned by the agent, with its own cancellation, re
 
 ### 6. Clients attach to the owner's view
 
-The agent owner publishes one view: transcript projection, live stream, running tasks and their output, inbox, usage, and context pressure. The TUI, headless output, and Desktop each take the current view, then deltas; a client that joins late or reconnects starts from the current view and receives no replay of missed deltas. A slow client's queue is bounded and collapses to the newest full view. This makes the existing "render projections, keep no competing copy" rule a transport property, and gives scope 15's child inspection the same mechanism as the main agent.
+The agent owner publishes one view: transcript projection, live stream, running tasks and their output, inbox, usage, and context pressure. The TUI, headless output, and any retained transport client each take the current view, then deltas; a client that joins late or reconnects starts from the current view and receives no replay of missed deltas. A slow client's queue is bounded and collapses to the newest full view. This makes the existing "render projections, keep no competing copy" rule a transport property, and gives scope 15's child inspection the same mechanism as the main agent.
 
 ### 7. Decisions are recorded once
 
@@ -109,7 +109,7 @@ Each of these changes what the model sees, what a released reader must understan
 | Continue an interrupted run on resume | A crash or sleep no longer ends the user's request | Must not rerun `report` tools; the resumed request must be reconstructable from the session file |
 | Automatically rerun `safe` tools after a crash | Fewer wasted model round trips after recovery | Changes the model surface; eval against Pi's synthetic `No result provided` result |
 | Background compaction placed at a turn boundary | Long sessions stop pausing for summaries | New placement and staleness rules; prompt-cache and request reconstruction proofs; long-session eval |
-| Idempotent submissions keyed by a client request id | Headless and Desktop retries after a crash cannot double-submit | The Desktop launch and protocol are open under [D9](scope-00/support.md#decision-register); needs a coordinated protocol change |
+| Idempotent submissions keyed by a client request id | Headless and retained transport clients' retries after a crash cannot double-submit | Desktop is deferred beyond 0.4.0 ([D9](scope-00/support.md#decision-register)); a Desktop client needs a coordinated protocol change in a later release |
 | Durable background jobs and schedules | Background work survives restarts | Process and sandbox ownership after restart; scope 04 proofs for adopting or killing orphans |
 | Typed agent documents (plans, todos, goals) with fork rules | Application state stays consistent with the transcript through forks | New entry kinds that Pi's reader must still open; a decision on extending Pi's format |
 | Hook memos and plugin-defined task types | Native plugins get crash-safe decisions and long-running work | Part of the D6 plugin API design; needs a named consumer |
