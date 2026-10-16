@@ -34,8 +34,22 @@ use crate::compaction::{
 use crate::owned_work::WorkGate;
 use crate::session::time::js_date_ms;
 use crate::session::{
-    AgentMessage, SessionEntry, SessionManager, SessionProjection, get_latest_compaction_entry,
+    AgentMessage, GroupEntry, SessionEntry, SessionError, SessionManager, SessionProjection,
+    get_latest_compaction_entry,
 };
+
+/// A recovery omission whose write failed, with the projection of the
+/// known synced prefix when part of it was written.
+struct Omission {
+    error: SessionError,
+    projection: Option<Box<SessionProjection>>,
+}
+
+impl std::fmt::Display for Omission {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.error.fmt(formatter)
+    }
+}
 
 /// What started a compaction, Pi's `reason`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -583,7 +597,18 @@ impl Core {
     /// and its tool results from model context; the raw history keeps them.
     /// Each target is its entry and whether the transcript holds it; one in
     /// the transcript without an entry cannot be omitted.
-    async fn omit_recovery_attempt(
+    ///
+    /// The edits are one group ([`SessionManager::append_group`]), the
+    /// attempt's last, written through the session's write boundary ([`super::write_session`]), and
+    /// the transcript is refreshed from the session projection once the
+    /// group is written, as Pi refreshes it after its edits. When the write
+    /// fails, the gap is recorded so nothing more is written, the edits
+    /// known to be synced are refreshed into the transcript, and the
+    /// failure is returned, which ends the run before another provider
+    /// request: no retry wait, no compaction. An immediate reopen may read
+    /// one edit more, an unsynced line or a torn one whose whole JSON was
+    /// written ([`crate::session::GroupWriteError`]).
+    pub(super) async fn omit_recovery_attempt(
         &self,
         targets: Vec<(Option<String>, bool)>,
     ) -> Result<(), String> {
@@ -596,17 +621,58 @@ impl Core {
                     .to_owned(),
             );
         }
-        let projection = self
-            .with_session(move |session| {
-                for target in targets.iter().filter_map(|(id, _)| id.as_ref()) {
-                    session.append_context_edit(target, None)?;
+        // Pi writes the attempt's edit first. Here its tool results' edits
+        // come first: a crash after any line then leaves no tool result in
+        // context whose call is omitted, which a provider would refuse,
+        // while a call whose result is omitted gets Pi's synthetic result
+        // in the request. The written group projects as Pi's order does.
+        let mut targets = targets;
+        targets.rotate_left(1);
+        let edits: Vec<GroupEntry> = targets
+            .into_iter()
+            .filter_map(|(id, _)| id)
+            .map(|id| GroupEntry::context_edit(id, None))
+            .collect();
+        let Some(permit) = self.work.enter() else {
+            return Err("The session is shut down".to_owned());
+        };
+        #[cfg(test)]
+        self.session_io.send_modify(|count| *count += 1);
+        let session = Arc::clone(&self.session);
+        let gap = Arc::clone(&self.gap);
+        let written = tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            super::write_session(&session, &gap, |session| {
+                match session.append_group(edits) {
+                    Ok(_) => Ok(session.build_session_projection()),
+                    Err(error) => {
+                        let projection = matches!(
+                            &error,
+                            SessionError::GroupWrite(failure) if !failure.written.is_empty()
+                        )
+                        .then(|| Box::new(session.build_session_projection()));
+                        Err(Omission { error, projection })
+                    }
                 }
-                Ok::<_, crate::session::SessionError>(session.build_session_projection())
             })
-            .await?
-            .map_err(|error| error.to_string())?;
-        self.refresh_context(&projection);
-        Ok(())
+        })
+        .await
+        .map_err(|error| format!("Session I/O task failed: {error}"))?;
+        match written {
+            Ok(projection) => {
+                self.refresh_context(&projection);
+                Ok(())
+            }
+            Err(super::WriteRefused::AfterGap(error)) => Err(format!(
+                "The session file could not be written ({error}), so nothing more is written to it"
+            )),
+            Err(super::WriteRefused::Failed(failed)) => {
+                if let Some(projection) = &failed.projection {
+                    self.refresh_context(projection);
+                }
+                Err(failed.error.to_string())
+            }
+        }
     }
 
     /// Pi's `_summarizationRetryCallbacks` for compaction.
@@ -694,7 +760,7 @@ impl Core {
                     hook();
                 }
             }
-            let written = super::write_session(&core.session, &core.gap, |session| {
+            let written = super::write_session::<_, String>(&core.session, &core.gap, |session| {
                 // The commit boundary: a cancel seen here writes nothing.
                 if cancelled() {
                     return Ok(None);
