@@ -302,9 +302,9 @@ describe('long_session', () => {
     const batches = noteNames().map(name => readBatchTokens(name, readFileSync(join(built.workspace, name), 'utf8')))
     expect(batches).toHaveLength(notes)
     for (const batch of batches) {
-      // About 1,200 tokens each, as the budget's comment states.
-      expect(batch).toBeGreaterThan(1_100)
-      expect(batch).toBeLessThan(1_300)
+      // About 1,650 tokens each, as the budget's comment states.
+      expect(batch).toBeGreaterThan(1_550)
+      expect(batch).toBeLessThan(1_750)
       // The newest batch fits the retained tail, so older batches form a region compaction can summarize.
       expect(batch).toBeLessThan(retainTokens)
       // The prefix, one batch, and the output cap fit the window.
@@ -313,8 +313,8 @@ describe('long_session', () => {
       expect(thresholdTokens + batch).toBeLessThan(window)
     }
     const total = batches.reduce((sum, batch) => sum + batch, 0)
-    expect(total).toBeGreaterThan(11_000)
-    expect(total).toBeLessThan(13_000)
+    expect(total).toBeGreaterThan(15_500)
+    expect(total).toBeLessThan(17_500)
     // The session crosses the threshold with notes to spare, so compaction runs before the last read.
     expect(prefixTokens + total - batches.at(-1)! - batches.at(-2)!).toBeGreaterThan(thresholdTokens)
   })

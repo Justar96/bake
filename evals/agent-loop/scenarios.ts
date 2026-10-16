@@ -281,24 +281,29 @@ export function noteNames(): string[] {
  *
  * - The fixed prefix (system prompt, tool schemas, and the task) is about
  *   4,500 tokens, and the route keeps an 8,192-token output cap.
- * - Each note is about 4.4 KB, so one read (call, numbered lines, and framing)
- *   is about 1,200 tokens. That is under the 2,560-token retained tail, so the
+ * - Each note is about 6 KB, so one read (call, numbered lines, and framing)
+ *   is about 1,650 tokens. That is under the 2,560-token retained tail, so the
  *   newest batch stays verbatim and the older ones form a region to summarize.
- *   The prefix, one batch, and the output cap (4,500 + 1,200 + 8,192 = 13,892)
+ *   The prefix, one batch, and the output cap (4,500 + 1,650 + 8,192 = 14,342)
  *   fit the window, and the largest request, one batch past the threshold
- *   (12,800 + 1,200 = 14,000), still leaves room for a reply.
- * - The ten batches total about 12,000 tokens, so the session reaches the
- *   threshold around the seventh note (4,500 + 7 × 1,200 = 12,900) and
+ *   (12,800 + 1,650 = 14,450), still leaves room for a reply.
+ * - The ten batches total about 16,500 tokens, so the session reaches the
+ *   threshold around the fifth note (4,500 + 5 × 1,650 = 12,750) and
  *   compacts at least once before the last.
+ * - pi and bake-rs compare the threshold with the provider's reported count,
+ *   which runs well below the estimate: a note is about 940 tokens to GPT,
+ *   Gemini, and DeepSeek and 1,340 to Claude at 4.4 KB, with a 1,700 to
+ *   2,700-token prefix. At 6 KB the ten notes take every one of those models
+ *   past 12,800 tokens with at least two notes to spare.
  */
 export const LONG_SESSION_BUDGET = { prefixTokens: 4_500, maxOutputTokens: 8_192, notes: 10 }
-/** One note of about 4.4 KB, under the pruner's 8,192-character threshold, with its code mid-file and the next note's path at the end. */
+/** One note of about 6 KB, under the pruner's 8,192-character threshold, with its code mid-file and the next note's path at the end. */
 function note(index: number, code: string, next: string | undefined): string {
   const paragraph = (n: number) => `Section ${index}.${n}. The ledger reconciler compares each batch against the upstream journal, marks drifted rows for review, and records the operator who cleared them. Batches older than the retention window are archived with their checksums so a later audit can replay them.\n\n`
   const lines = [`# Ledger notes, part ${String(index).padStart(2, '0')}\n\n`]
-  for (let n = 1; n <= 7; n++) lines.push(paragraph(n))
+  for (let n = 1; n <= 11; n++) lines.push(paragraph(n))
   lines.push(`Checkpoint code: ${code}\n\n`)
-  for (let n = 8; n <= 16; n++) lines.push(paragraph(n))
+  for (let n = 12; n <= 22; n++) lines.push(paragraph(n))
   lines.push(next === undefined ? 'This is the last note.\n' : `Next note: ${next}\n`)
   return lines.join('')
 }
