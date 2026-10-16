@@ -1094,8 +1094,9 @@ fn sent_tool_output(request: &Request) -> String {
 
 /// D24 through `bake-rs -p --permission workspace-write`: the model's
 /// `write` outside the project is refused before any effect, and the tool
-/// result sent back is the denial marker and the escalation hint
-/// (`packages/fs/tool-fs/src/sandbox.ts` `mapError`). The target lives under
+/// result sent back is the denial marker (`packages/fs/tool-fs/src/sandbox.ts`
+/// `mapError`), without the escalation hint, since `-p` has no one to
+/// approve one. The target lives under
 /// Cargo's per-target temporary directory, outside the project and outside
 /// the temporary directories `workspace-write` also allows.
 /// Removes a test's directory on drop, so a failed assertion leaves nothing.
@@ -1142,23 +1143,17 @@ fn print_mode_refuses_a_write_outside_the_project() {
     assert_eq!(requests.len(), 2);
     assert_eq!(
         sent_tool_output(&requests[1]),
-        "[sandbox: file access denied under workspace-write mode]\n[sandbox: escalation available — retry this exact operation once with sandbox_permissions (the narrowest wider mode that suffices) + justification; the approval prompt asks the user]"
+        "[sandbox: file access denied under workspace-write mode]"
     );
-    // The file tools advertise the escalation parameters.
-    let write = requests[0].body["tools"]
-        .as_array()
-        .expect("tools")
-        .iter()
-        .find(|tool| tool["name"] == "write")
-        .expect("write is declared");
-    assert_eq!(
-        write["parameters"]["properties"]["sandbox_permissions"],
-        json!({
-            "type": "string",
-            "enum": ["workspace-write", "danger-full-access"],
-            "description": "One retry after a sandbox denial; asks the user.",
-        })
-    );
+    // With no one to approve an escalation, no tool offers one.
+    for tool in requests[0].body["tools"].as_array().expect("tools") {
+        let properties = &tool["parameters"]["properties"];
+        assert!(
+            properties.get("sandbox_permissions").is_none()
+                && properties.get("justification").is_none(),
+            "{tool}"
+        );
+    }
     // The permission is stated in the system prompt.
     let system = &transcript(&requests[0])[0];
     let root = serde_json::to_string(
@@ -1169,7 +1164,7 @@ fn print_mode_refuses_a_write_outside_the_project() {
     .expect("root");
     assert!(
         system.contains(&format!(
-            "\n<permissions>\nFile sandbox: workspace-write. Sandboxed tools can modify files under {root}, and possibly in some temporary directories.\n\nApproval prompts: disabled. Actions that need approval are rejected automatically, so do not request sandbox escalation with `sandbox_permissions`.\n</permissions>\n\n<environment>\n"
+            "\n<permissions>\nFile sandbox: workspace-write. Sandboxed tools can modify files under {root}, and possibly in some temporary directories.\n\nApproval prompts: disabled. Actions that need approval are rejected automatically.\n</permissions>\n\n<environment>\n"
         )),
         "{system}"
     );
@@ -1182,7 +1177,7 @@ fn print_mode_refuses_a_write_outside_the_project() {
 /// D24 through `bake-rs -p` on a real backend: under `workspace-write`, a
 /// bash write outside the project and the temporary directories is denied by
 /// the kernel, nothing is created, and the result carries the denial marker
-/// and the escalation hint.
+/// without the escalation hint.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn workspace_write_confines_bash() {
@@ -1213,7 +1208,8 @@ fn workspace_write_confines_bash() {
         sent.contains("[sandbox: file access denied under workspace-write mode]"),
         "{sent}"
     );
-    assert!(sent.contains("[sandbox: escalation available"), "{sent}");
+    // `-p` has no one to approve an escalation, so the denial offers none.
+    assert!(!sent.contains("[sandbox: escalation available"), "{sent}");
     let _ = std::fs::remove_dir_all(&outside);
 }
 

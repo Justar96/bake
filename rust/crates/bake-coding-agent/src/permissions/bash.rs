@@ -32,8 +32,8 @@ use bake_agent::BoxFuture;
 use bake_ai::AbortSignal;
 use bake_sandbox::escalation::{escalation_hint_marker, sandbox_denial_marker};
 use bake_sandbox::{
-    ConfinedCommand, SandboxPolicy, SandboxProvider, SandboxUnavailable, classify_runner_failure,
-    matches_signature,
+    ConfinedCommand, SandboxMode, SandboxPolicy, SandboxProvider, SandboxUnavailable,
+    classify_runner_failure, matches_signature,
 };
 use serde_json::Value;
 
@@ -48,8 +48,11 @@ use crate::tools::bash::{
 use crate::tools::definition::ToolDefinition;
 
 /// The sandbox paragraph `bashDescription` appends when a confining
-/// executor is composed.
-pub const BASH_SANDBOX_DESCRIPTION: &str = " A file sandbox may block commands; trying is safe. `[sandbox: file access denied under <mode> mode]` is a policy denial: do not work around it. If a wider mode would help, retry the same command once this turn with the narrowest `sandbox_permissions` and a `justification`; that asks the user, so do not ask in chat. Request wider access up front only after this session was denied the same access. A rejection is final for that command.";
+/// executor is composed: its denial sentences, then, when a wider mode is
+/// reachable, [`BASH_SANDBOX_ESCALATION_DESCRIPTION`].
+pub const BASH_SANDBOX_DESCRIPTION: &str = " A file sandbox may block commands; trying is safe. `[sandbox: file access denied under <mode> mode]` is a policy denial: do not work around it.";
+/// The escalation sentences of `bashDescription`'s sandbox paragraph.
+pub const BASH_SANDBOX_ESCALATION_DESCRIPTION: &str = " If a wider mode would help, retry the same command once this turn with the narrowest `sandbox_permissions` and a `justification`; that asks the user, so do not ask in chat. Request wider access up front only after this session was denied the same access. A rejection is final for that command.";
 /// `tool-bash`'s `sandbox_permissions` description.
 pub const BASH_SANDBOX_PERMISSIONS_DESCRIPTION: &str = "For retrying a denied command.";
 /// `tool-bash`'s `justification` description.
@@ -59,15 +62,26 @@ pub const BASH_JUSTIFICATION_DESCRIPTION: &str = "One sentence for the user.";
 /// this much from its start and this much from its end.
 pub const STDERR_CLASSIFY_BYTES: usize = 64 * 1024;
 
-/// Pi's description with the sandbox paragraph.
-pub fn sandboxed_bash_tool_description() -> String {
-    format!("{}{BASH_SANDBOX_DESCRIPTION}", bash_tool_description())
+/// Pi's description with the sandbox paragraph, whose escalation sentences
+/// appear only when `targets` is not empty.
+pub fn sandboxed_bash_tool_description(targets: &[SandboxMode]) -> String {
+    let escalation = if targets.is_empty() {
+        ""
+    } else {
+        BASH_SANDBOX_ESCALATION_DESCRIPTION
+    };
+    format!(
+        "{}{BASH_SANDBOX_DESCRIPTION}{escalation}",
+        bash_tool_description()
+    )
 }
 
-/// Pi's parameters with `sandbox_permissions` and `justification`.
-pub fn sandboxed_bash_tool_parameters() -> Value {
+/// Pi's parameters with `sandbox_permissions` (enum `targets`) and
+/// `justification`; Pi's alone when `targets` is empty.
+pub fn sandboxed_bash_tool_parameters(targets: &[SandboxMode]) -> Value {
     with_escalation_parameters(
         bash_tool_parameters(),
+        targets,
         BASH_SANDBOX_PERMISSIONS_DESCRIPTION,
         BASH_JUSTIFICATION_DESCRIPTION,
     )
@@ -127,6 +141,7 @@ pub struct SandboxedBashOperations {
     local: LocalShellOperations,
     provider: Arc<dyn SandboxProvider>,
     policy: SandboxPolicy,
+    escalation_hint: bool,
 }
 
 impl std::fmt::Debug for SandboxedBashOperations {
@@ -134,12 +149,15 @@ impl std::fmt::Debug for SandboxedBashOperations {
         f.debug_struct("SandboxedBashOperations")
             .field("provider", &self.provider.name())
             .field("policy", &self.policy)
+            .field("escalation_hint", &self.escalation_hint)
             .finish_non_exhaustive()
     }
 }
 
 impl SandboxedBashOperations {
-    /// Runs `local`'s shell through `provider` under `policy`.
+    /// Runs `local`'s shell through `provider` under `policy`. A denial
+    /// carries the escalation hint unless [`Self::with_escalation_hint`]
+    /// turns it off.
     pub fn new(
         local: LocalShellOperations,
         provider: Arc<dyn SandboxProvider>,
@@ -149,7 +167,15 @@ impl SandboxedBashOperations {
             local,
             provider,
             policy,
+            escalation_hint: true,
         }
+    }
+
+    /// Whether a denial carries the escalation hint: only when a wider mode
+    /// than the policy's is reachable.
+    pub fn with_escalation_hint(mut self, escalation_hint: bool) -> Self {
+        self.escalation_hint = escalation_hint;
+        self
     }
 
     async fn run(
@@ -248,8 +274,10 @@ impl SandboxedBashOperations {
                 notice.push('\n');
             }
             notice.push_str(&sandbox_denial_marker(mode));
-            notice.push('\n');
-            notice.push_str(&escalation_hint_marker("command"));
+            if self.escalation_hint {
+                notice.push('\n');
+                notice.push_str(&escalation_hint_marker("command"));
+            }
             on_data(notice.as_bytes());
         }
         Ok(exit)
@@ -295,8 +323,8 @@ pub fn create_sandboxed_bash_tool_definition(
     let mut tool = create_bash_tool(cwd, options.clone());
     let cwd = cwd.to_path_buf();
     let permissions = permissions.clone();
-    tool.description = sandboxed_bash_tool_description();
-    tool.parameters = sandboxed_bash_tool_parameters();
+    tool.description = sandboxed_bash_tool_description(permissions.escalation_targets);
+    tool.parameters = sandboxed_bash_tool_parameters(permissions.escalation_targets);
     tool.execute = Arc::new(
         move |id: String, args: Value, signal: Option<AbortSignal>, on_update| {
             let cwd = cwd.clone();
@@ -313,7 +341,9 @@ pub fn create_sandboxed_bash_tool_definition(
                 let policy = permissions.engine.resolve(&call, signal.as_ref()).await?;
                 let local = create_local_bash_operations(options.shell_path.clone())
                     .with_bin_dir(options.bin_dir.clone());
-                let operations = SandboxedBashOperations::new(local, permissions.provider, policy);
+                let hint = permissions.offers_escalation_beyond(policy.mode);
+                let operations = SandboxedBashOperations::new(local, permissions.provider, policy)
+                    .with_escalation_hint(hint);
                 let tool = create_bash_tool(
                     cwd,
                     BashToolOptions {
