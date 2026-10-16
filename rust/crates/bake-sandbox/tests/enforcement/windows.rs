@@ -8,7 +8,8 @@
 //! or process operation and reports it, so every check observes a real
 //! effect (or its absence) on disk or in the process table, without a
 //! shell's own wording. Each scenario owns its directories under Cargo's
-//! per-target temporary directory; the runner's own private temp
+//! per-target temporary directory, whose workspace and outside roots grant
+//! this user full access ([`user_scratch`]); the runner's own private temp
 //! directories live under the OS temporary directory or, for direct runner
 //! runs, under a directory the scenario owns. Negative controls run the same
 //! probe unconfined and see it succeed.
@@ -298,7 +299,34 @@ fn assert_denied(run: &Run, what: &str) {
 }
 
 fn workspace_and_outside() -> (Scratch, Scratch) {
-    (Scratch::outside("acl-ws"), Scratch::outside("acl-out"))
+    (user_scratch("acl-ws"), user_scratch("acl-out"))
+}
+
+/// A scratch root whose DACL grants this user full access, inherited by
+/// everything under it: the runner requires a user-owned workspace, and the
+/// deletion measurements in `windows_acl` assume such roots. The runner's
+/// `LUA_TOKEN` makes Administrators deny-only, so where directories grant
+/// access only through that group, as on GitHub's Windows runners, which
+/// run as the built-in Administrator, the normal access check would deny
+/// every effect and the denial scenarios would pass without reaching the
+/// restricting SIDs.
+fn user_scratch(label: &str) -> Scratch {
+    let scratch = Scratch::outside(label);
+    let user = win32::user_sid().expect("this process's user SID");
+    let output = std::process::Command::new("icacls")
+        .arg(&scratch.0)
+        .args(["/grant", &format!("*{user}:(OI)(CI)F"), "/q"])
+        .stdin(Stdio::null())
+        .output()
+        .expect("icacls");
+    assert!(
+        output.status.success(),
+        "icacls /grant on {}: {}\n{}",
+        scratch.0.display(),
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+    scratch
 }
 
 fn ww(workspace: &Scratch) -> SandboxPolicy {
@@ -1052,7 +1080,7 @@ fn hard_links_are_the_documented_partial_boundary() {
     // A link that exists when the first grant propagates aliases the file
     // object: the ACE lands on its one security descriptor, so the outside
     // path becomes writable. This is the boundary `Partial` reports.
-    let fresh = Scratch::outside("acl-ws-hl");
+    let fresh = user_scratch("acl-ws-hl");
     std::fs::hard_link(&target, fresh.join("alias.txt")).expect("hard link");
     let policy = SandboxPolicy::new(SandboxMode::WorkspaceWrite, &fresh.0);
     let run = confined(&policy, &fresh.0, &["write", &text(&target), "changed"]);
@@ -1508,17 +1536,32 @@ mod win32 {
         Ok(buffer)
     }
 
-    /// This process's user SID, whether its token is restricted, and its
-    /// restricting SIDs.
-    pub fn token_report() -> std::io::Result<String> {
+    fn process_token() -> std::io::Result<OwnedHandle> {
         let mut raw = null_mut();
         // SAFETY: the pseudo-handle needs no closing.
         check(unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut raw) })?;
         // SAFETY: a fresh handle owned here.
-        let token = unsafe { OwnedHandle::from_raw_handle(raw) };
-        let user = information(&token, TokenUser)?;
+        Ok(unsafe { OwnedHandle::from_raw_handle(raw) })
+    }
+
+    fn token_user(token: &OwnedHandle) -> std::io::Result<String> {
+        let user = information(token, TokenUser)?;
         // SAFETY: the buffer holds a TOKEN_USER.
-        let user = sid_text(unsafe { (*user.as_ptr().cast::<TOKEN_USER>()).User.Sid });
+        Ok(sid_text(unsafe {
+            (*user.as_ptr().cast::<TOKEN_USER>()).User.Sid
+        }))
+    }
+
+    /// This process's user SID.
+    pub fn user_sid() -> std::io::Result<String> {
+        token_user(&process_token()?)
+    }
+
+    /// This process's user SID, whether its token is restricted, and its
+    /// restricting SIDs.
+    pub fn token_report() -> std::io::Result<String> {
+        let token = process_token()?;
+        let user = token_user(&token)?;
         // SAFETY: a live token handle.
         let restricted = unsafe { IsTokenRestricted(token.as_raw_handle()) } != 0;
         let groups = information(&token, TokenRestrictedSids)?;
