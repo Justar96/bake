@@ -603,15 +603,64 @@ fn the_policy_sentences_are_the_typescript_ones() {
         "File sandbox: workspace-write. Sandboxed tools can modify files under \"C:\\\\work \\\"q\\\"\", and possibly in some temporary directories."
     );
     // user-approval.spec: "contributes the complete current ask or never
-    // policy as cache-safe context".
+    // policy as cache-safe context". The never sentence drops TypeScript's
+    // clause about `sandbox_permissions`, which no tool advertises then.
     assert_eq!(
         permissions_section_text(&SandboxPolicy::new(DFA, root), NEVER),
-        "File sandbox: danger-full-access. File changes are not restricted.\n\nApproval prompts: disabled. Actions that need approval are rejected automatically, so do not request sandbox escalation with `sandbox_permissions`."
+        "File sandbox: danger-full-access. File changes are not restricted.\n\nApproval prompts: disabled. Actions that need approval are rejected automatically."
     );
     assert_eq!(
         approval::approval_policy_sentence(ASK),
         "Approval prompts: enabled. Actions that need approval request it before running, and fail if no one can answer."
     );
+}
+
+// Bake's own: the tools offer only the modes an approval could grant,
+// strictly wider than the standing mode, and none under `never`.
+#[test]
+fn only_reachable_escalations_are_offered() {
+    assert_eq!(reachable_escalation_targets(RO, ASK), &[WW, DFA]);
+    assert_eq!(reachable_escalation_targets(WW, ASK), &[DFA]);
+    assert_eq!(
+        reachable_escalation_targets(DFA, ASK),
+        &[] as &[SandboxMode]
+    );
+    for mode in [RO, WW, DFA] {
+        assert_eq!(
+            reachable_escalation_targets(mode, NEVER),
+            &[] as &[SandboxMode]
+        );
+    }
+    let provider: Arc<dyn bake_sandbox::SandboxProvider> =
+        Arc::new(bake_sandbox::UnavailableProvider::new(None));
+    let tools = |mode, approval| {
+        ToolPermissions::new(
+            standing(mode, approval),
+            Arc::new(NoApprover),
+            Arc::clone(&provider),
+        )
+    };
+    let read_only = tools(RO, ASK);
+    assert_eq!(read_only.escalation_targets, &[WW, DFA]);
+    // A grant to workspace-write can still be retried wider; full access cannot.
+    assert!(read_only.offers_escalation_beyond(RO));
+    assert!(read_only.offers_escalation_beyond(WW));
+    assert!(!read_only.offers_escalation_beyond(DFA));
+    assert!(!tools(WW, NEVER).offers_escalation_beyond(WW));
+    let headless = tools(WW, ASK).without_escalation();
+    assert_eq!(headless.escalation_targets, &[] as &[SandboxMode]);
+    assert!(!headless.offers_escalation_beyond(WW));
+    // The prompt states `never` exactly when the tools offer nothing for
+    // want of an answerer.
+    let permission = SessionPermission {
+        table: PresetTable::default(),
+        sandbox: WW,
+        approval: ASK,
+        preset: "workspace-write".into(),
+        warnings: Vec::new(),
+    };
+    assert_eq!(permission.stated_approval(true), ASK);
+    assert_eq!(permission.stated_approval(false), NEVER);
 }
 
 // user-approval.spec: "rejects a policy outside the closed vocabulary".

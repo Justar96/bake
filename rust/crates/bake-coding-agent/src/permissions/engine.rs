@@ -121,7 +121,10 @@ impl StandingPermissions {
         }
     }
 
-    /// Replaces the knobs; later calls resolve under them.
+    /// Replaces the knobs; later calls resolve under them. The tools'
+    /// escalation offer was fixed when they were built
+    /// ([`super::ToolPermissions::new`]), so a switch that changes which
+    /// modes are reachable must rebuild them.
     pub fn set(&self, sandbox: SandboxMode, approval: ApprovalPolicy, preset: impl Into<String>) {
         *self.state.write().unwrap_or_else(PoisonError::into_inner) = Standing {
             sandbox,
