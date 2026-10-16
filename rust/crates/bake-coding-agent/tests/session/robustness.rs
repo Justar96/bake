@@ -3,10 +3,12 @@
 
 use std::fs;
 
-use bake_coding_agent::session::{FileEntry, NewSessionOptions, SessionError, SessionManager};
+use bake_coding_agent::session::{
+    FileEntry, NewSessionOptions, SessionError, SessionManager, unanswered_tool_calls,
+};
 use serde_json::json;
 
-use crate::support::{TempDir, assistant_msg, object, roles, text_of, user_msg};
+use crate::support::{TempDir, assistant_msg, message, object, roles, text_of, usage, user_msg};
 
 fn sample_session(dir: &TempDir) -> std::path::PathBuf {
     let mut session =
@@ -38,22 +40,44 @@ fn sample_session(dir: &TempDir) -> std::path::PathBuf {
         .branch_with_summary(Some(&first), "left", None, None, None)
         .expect("summary");
     session.append_message(user_msg("after")).expect("append");
+    session
+        .append_message(message(json!({
+            "role": "assistant",
+            "content": [
+                {"type": "toolCall", "id": "c1", "name": "read", "arguments": {"path": "a"}},
+                {"type": "toolCall", "id": "c2", "name": "bash", "arguments": {"command": "ls"}},
+            ],
+            "api": "anthropic-messages", "provider": "anthropic", "model": "test",
+            "usage": usage(), "stopReason": "toolUse", "timestamp": 1,
+        })))
+        .expect("append");
+    session
+        .append_message(message(json!({
+            "role": "toolResult", "toolCallId": "c1", "toolName": "read",
+            "content": [{"type": "text", "text": "a"}], "isError": false, "timestamp": 1,
+        })))
+        .expect("append");
     session.session_file().expect("file").to_path_buf()
 }
 
 /// Every prefix of a session file, as a writer killed mid-line leaves one,
 /// opens to a context no longer than the whole file's, and the torn tail is
-/// set apart by a newline so the next append starts its own line.
+/// set apart by a newline so the next append starts its own line. The
+/// resumed user message leaves the unanswered tool calls as they were: it
+/// closes the calls the request would have closed at its end.
 #[test]
 fn every_truncation_opens_and_repairs() {
     let dir = TempDir::new("robust-truncate");
     let source = sample_session(&dir);
     let bytes = fs::read(&source).expect("read");
-    let full = SessionManager::open(&source, Some(dir.path()), None)
-        .expect("open")
-        .build_session_context()
-        .messages
-        .len();
+    let whole = SessionManager::open(&source, Some(dir.path()), None).expect("open");
+    let full = whole.build_session_context().messages.len();
+    let tail: Vec<String> = unanswered_tool_calls(&whole.build_session_projection())
+        .into_iter()
+        .map(|call| call.tool_call_id)
+        .collect();
+    assert_eq!(tail, ["c2"]);
+    drop(whole);
     let header_end = bytes
         .iter()
         .position(|byte| *byte == b'\n')
@@ -69,9 +93,15 @@ fn every_truncation_opens_and_repairs() {
                 if cut > header_end {
                     let written = fs::read(&file).expect("read");
                     assert_eq!(written.last(), Some(&b'\n'), "cut at {cut}");
+                    let unanswered = unanswered_tool_calls(&session.build_session_projection());
                     session.append_message(user_msg("resumed")).expect("append");
                     drop(session);
                     let reopened = SessionManager::open(&file, Some(&work), None).expect("reopen");
+                    assert_eq!(
+                        unanswered_tool_calls(&reopened.build_session_projection()),
+                        unanswered,
+                        "cut at {cut}"
+                    );
                     let messages = reopened.build_session_context().messages;
                     if let Some(last) = messages.last() {
                         assert_eq!(text_of(last), "resumed", "cut at {cut}");
