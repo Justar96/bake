@@ -296,14 +296,21 @@ export function noteNames(): string[] {
  *   2,700-token prefix. At 6 KB the ten notes take every one of those models
  *   past 12,800 tokens with at least two notes to spare.
  */
+/** The characters of each tool result pi's `serializeConversation` keeps when it builds a summary request. */
+export const SUMMARY_TOOL_RESULT_CHARS = 2_000
 export const LONG_SESSION_BUDGET = { prefixTokens: 4_500, maxOutputTokens: 8_192, notes: 10 }
-/** One note of about 6 KB, under the pruner's 8,192-character threshold, with its code mid-file and the next note's path at the end. */
+/**
+ * One note of about 6 KB, under the pruner's 8,192-character threshold, with
+ * its code after five paragraphs and the next note's path at the end. The code
+ * lies in the first {@link SUMMARY_TOOL_RESULT_CHARS} characters, the part of a
+ * tool result that pi's compaction shows its summarizer.
+ */
 function note(index: number, code: string, next: string | undefined): string {
   const paragraph = (n: number) => `Section ${index}.${n}. The ledger reconciler compares each batch against the upstream journal, marks drifted rows for review, and records the operator who cleared them. Batches older than the retention window are archived with their checksums so a later audit can replay them.\n\n`
   const lines = [`# Ledger notes, part ${String(index).padStart(2, '0')}\n\n`]
-  for (let n = 1; n <= 11; n++) lines.push(paragraph(n))
+  for (let n = 1; n <= 5; n++) lines.push(paragraph(n))
   lines.push(`Checkpoint code: ${code}\n\n`)
-  for (let n = 12; n <= 22; n++) lines.push(paragraph(n))
+  for (let n = 6; n <= 22; n++) lines.push(paragraph(n))
   lines.push(next === undefined ? 'This is the last note.\n' : `Next note: ${next}\n`)
   return lines.join('')
 }

@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   checkCommandFor, checkpointCodes, compactionBudget, CONTEXT_WINDOWS, EXPLORE_ANSWER, EXTENDED_CASES, fixture, LONG_SESSION_BUDGET,
-  maxRequestsFor, noteNames, PI_RESERVE_TOKENS, piCompactionFor, piContextWindowFor, prompts, REQUEST_FLOORS, requestFloorFor, SKILL_SCENARIOS, slowCheckLine, STANDARD_CASES, usesSkills, validate,
+  maxRequestsFor, noteNames, PI_RESERVE_TOKENS, piCompactionFor, piContextWindowFor, prompts, REQUEST_FLOORS, requestFloorFor, SKILL_SCENARIOS, slowCheckLine, STANDARD_CASES, SUMMARY_TOOL_RESULT_CHARS, usesSkills, validate,
   type Fixture, type Outcome,
 } from './scenarios.ts'
 
@@ -283,6 +283,8 @@ describe('long_session', () => {
       const text = readFileSync(join(built.workspace, name), 'utf8')
       expect(text.length).toBeLessThan(8192)
       expect(text).toContain(`Checkpoint code: ${checkpointCodes()[index]}`)
+      // pi's summarizer sees only a tool result's first characters; the code must be among them.
+      expect(text.indexOf(`Checkpoint code: ${checkpointCodes()[index]}\n`) + `Checkpoint code: ${checkpointCodes()[index]}`.length).toBeLessThan(SUMMARY_TOOL_RESULT_CHARS - 300)
       expect(text.trimEnd().split('\n').at(-1)).toBe(index === names.length - 1 ? 'This is the last note.' : `Next note: ${names[index + 1]}`)
     })
     roundFix(built.workspace)
