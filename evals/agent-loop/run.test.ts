@@ -340,14 +340,14 @@ function expectedPiModels(scenario: string): Json {
     baseUrl: '<PROXY>/upstream', api: 'openai-responses', apiKey: '$EVAL_API_KEY',
     models: [{
       id: 'fixture-model', name: 'Fixture Model', reasoning: true, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      contextWindow: scenario === 'long_session' ? 16_000 : 64_000, maxTokens: 8192,
+      contextWindow: scenario === 'long_session' ? 29_184 : 64_000, maxTokens: 8192,
       thinkingLevelMap: { off: null, minimal: null, low: 'minimal', medium: null, high: 'deep', xhigh: null, max: null },
     }],
   } } }
 }
 const expectedPiSettings = (scenario: string): Json => ({
   quietStartup: true, retry: { enabled: false },
-  ...scenario === 'long_session' ? { compaction: { reserveTokens: 3200, keepRecentTokens: 2560 } } : {},
+  ...scenario === 'long_session' ? { compaction: { reserveTokens: 16_384, keepRecentTokens: 2560 } } : {},
 })
 
 /** Every capture of one roster run, normalized and keyed by `<arm>.<scenario>`. */
@@ -385,7 +385,7 @@ function contract(roster: 'headless' | 'tui', setup: { models: string; effort: s
         expect(sample).toMatchObject({
           model: 'fixture-model', provider: pi ? 'eval' : 'cliproxyapi', agent: pi ? 'pi' : 'bake', api: 'openai-responses', effort: setup.effort, trial: 0,
           code: 0, signal: null, abortCause: null, success: false, requests: 0, usageComplete: false, systemPrompt: null, composition: null,
-          injectedStale: false, roster: pi ? null : roster, contextWindow: sample.scenario === 'long_session' ? 16_000 : null,
+          injectedStale: false, roster: pi ? null : roster, contextWindow: sample.scenario === 'long_session' ? (pi ? 29_184 : 16_000) : null,
         })
       }
       expect(launches.size).toBe(setup.order.length)
@@ -441,7 +441,8 @@ function contract(roster: 'headless' | 'tui', setup: { models: string; effort: s
       expect(design).toMatchObject({
         roster, models: ['fixture-model'], cases: setup.cases, trials: 1, gateway: null,
         routes: { 'fixture-model': { provider: 'cliproxyapi', api: 'openai-responses', effort: setup.effort } },
-        contextWindows: { long_session: 16_000 }, piCompaction: { long_session: { reserveTokens: 3200, keepRecentTokens: 2560 } },
+        contextWindows: { long_session: 16_000 }, piContextWindows: { long_session: 29_184 },
+        piCompaction: { long_session: { reserveTokens: 16_384, keepRecentTokens: 2560 } },
       })
       expect(design.revisions.pi).toEqual({ root: join(run.realRoot, 'pi'), agent: 'pi', version: '0.0.0-contract', commit: null, dirty: false })
     })

@@ -126,14 +126,29 @@ export function compactionBudget(contextWindow: number) {
   }
 }
 /**
- * pi's compaction settings for a forced context window, mirroring Bake's
- * policy: pi compacts above `contextWindow - reserveTokens` and keeps
- * `keepRecentTokens` verbatim. Its default reserve (16,384) exceeds a
- * 16,000-token window, so without these it would compact before every request.
+ * pi's default `compaction.reserveTokens`. Besides placing the threshold at
+ * `contextWindow - reserveTokens`, pi sizes its summary requests from it (0.8
+ * of it for the history, 0.5 for a split turn's prefix), and it caps each
+ * request's output at the window less the estimated context and 4,096 more
+ * tokens. A reserve near or below that margin leaves requests just under the
+ * threshold one output token, and a reasoning model's summaries no room.
+ */
+export const PI_RESERVE_TOKENS = 16_384
+/**
+ * The context window a pi-family arm (pi or bake-rs) gets in place of a
+ * forced window: Bake's threshold at that window plus pi's default reserve,
+ * so pi compacts where Bake does with the budgets it ships with.
+ */
+export function piContextWindowFor(contextWindow: number) {
+  return compactionBudget(contextWindow).thresholdTokens + PI_RESERVE_TOKENS
+}
+/**
+ * pi's compaction settings for a forced context window, used with
+ * {@link piContextWindowFor}: its default reserve, and Bake's retained tail
+ * as `keepRecentTokens`, which pi's default (20,000) would exceed.
  */
 export function piCompactionFor(contextWindow: number) {
-  const { thresholdTokens, retainTokens } = compactionBudget(contextWindow)
-  return { reserveTokens: contextWindow - thresholdTokens, keepRecentTokens: retainTokens }
+  return { reserveTokens: PI_RESERVE_TOKENS, keepRecentTokens: compactionBudget(contextWindow).retainTokens }
 }
 
 /** Whether a scenario keeps `agent-instructions` mounted, so the agent reads the fixture's AGENTS.md. */

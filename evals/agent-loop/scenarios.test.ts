@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   checkCommandFor, checkpointCodes, compactionBudget, CONTEXT_WINDOWS, EXPLORE_ANSWER, EXTENDED_CASES, fixture, LONG_SESSION_BUDGET,
-  maxRequestsFor, noteNames, piCompactionFor, prompts, REQUEST_FLOORS, requestFloorFor, SKILL_SCENARIOS, slowCheckLine, STANDARD_CASES, usesSkills, validate,
+  maxRequestsFor, noteNames, PI_RESERVE_TOKENS, piCompactionFor, piContextWindowFor, prompts, REQUEST_FLOORS, requestFloorFor, SKILL_SCENARIOS, slowCheckLine, STANDARD_CASES, usesSkills, validate,
   type Fixture, type Outcome,
 } from './scenarios.ts'
 
@@ -319,8 +319,21 @@ describe('long_session', () => {
     expect(prefixTokens + total - batches.at(-1)! - batches.at(-2)!).toBeGreaterThan(thresholdTokens)
   })
 
-  test('gives pi compaction settings that mirror Bake at the forced window', () => {
-    expect(piCompactionFor(CONTEXT_WINDOWS.long_session!)).toEqual({ reserveTokens: 3_200, keepRecentTokens: 2_560 })
+  test('gives pi its default reserve on a window that keeps Bake\'s threshold and tail', () => {
+    const window = CONTEXT_WINDOWS.long_session!
+    const { thresholdTokens, retainTokens } = compactionBudget(window)
+    const piWindow = piContextWindowFor(window)
+    const { reserveTokens, keepRecentTokens } = piCompactionFor(window)
+    expect({ piWindow, reserveTokens, keepRecentTokens }).toEqual({ piWindow: 29_184, reserveTokens: PI_RESERVE_TOKENS, keepRecentTokens: 2_560 })
+    // pi compacts where Bake does and keeps the same tail.
+    expect(piWindow - reserveTokens).toBe(thresholdTokens)
+    expect(keepRecentTokens).toBe(retainTokens)
+    // pi caps a request's output at the window less its context and 4,096 tokens: up to the
+    // threshold, which a reply can pass by one read batch, the route's full cap remains.
+    const { maxOutputTokens } = LONG_SESSION_BUDGET
+    expect(piWindow - (thresholdTokens + 1_300) - 4_096).toBeGreaterThanOrEqual(maxOutputTokens)
+    // A split turn's prefix summary gets half the reserve, and the history summary 0.8 of it, capped by the route.
+    expect(Math.min(Math.floor(0.5 * reserveTokens), maxOutputTokens)).toBe(maxOutputTokens)
   })
 })
 
