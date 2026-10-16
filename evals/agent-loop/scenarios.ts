@@ -57,7 +57,7 @@ export const prompts: Record<string, string> = {
   // unprompted_edit's task, with skills that do not apply to it.
   skill_distractors: roundMoneyTask + natural,
   edit_recovery: roundMoneyTask + ' truncateMoney must keep truncating.' + common,
-  long_session: `This task has three steps; finish all of them. 1. Read ${noteNames()[0]} in full with the read tool. Each of the ten notes holds one line that starts with "Checkpoint code:" and ends by naming the next note; read them one at a time in that chain until a note says it is the last. 2. Write codes.txt in this directory with the ten codes in chain order, one per line and nothing else. 3. ` + roundMoneyTask + ' Work only inside this fixture. Do not delegate, install packages, use the network, modify test.cjs, or make commits. Run node test.cjs to verify and give a brief final result.',
+  long_session: `This task has three steps; finish all of them. 1. Read ${noteNames()[0]} with the read tool. Each of the ten notes holds one line that starts with "Checkpoint code:" and ends by naming the next note; read them one at a time in that chain until a note says it is the last. 2. Write codes.txt in this directory with the ten codes in chain order, one per line and nothing else. 3. ` + roundMoneyTask + ' Work only inside this fixture. Do not delegate, install packages, use the network, modify test.cjs, or make commits. Run node test.cjs to verify and give a brief final result.',
 }
 
 /** Scenarios whose run needs more than the default 14 model requests. */
