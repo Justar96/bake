@@ -12,14 +12,17 @@ initialization, tool listing and calling, cancellation, and close behavior of
 src/client.ts, the transport contract of src/transports/transport.ts, and the
 newline-delimited framing and the process lifecycle of
 src/transports/stdio.ts (process-tree ownership, the stdin-close, SIGTERM, and
-SIGKILL shutdown sequence, and the bounded standard error tail), with cases of
-test/client.test.ts and test/stdio.test.ts and the behavior of
-test/fixtures/stdio-server.mjs and stubborn-server.mjs.
-Not ported: the OAuth client (src/oauth/, adapted by Pi from the MIT-licensed
-Model Context Protocol TypeScript SDK, whose notice Pi keeps under
-packages/mcp/LICENSES/), the Streamable HTTP transport, cross-spawn's
-Windows command resolution, the process-exit hook, resources, progress, and
-roots.
+SIGKILL shutdown sequence, and the bounded standard error tail), and the
+Streamable HTTP transport of src/transports/streamable-http.ts (its SSE
+decoder, POST, GET stream, session, protocol-version, resumption,
+reconnection, and close behavior, without the auth provider), with cases of
+test/client.test.ts, test/stdio.test.ts, and test/streamable-http.test.ts and
+the behavior of test/fixtures/stdio-server.mjs and stubborn-server.mjs.
+Not ported: the OAuth client and the auth provider (src/oauth/,
+src/auth-provider.ts; Pi adapted src/oauth/ from the MIT-licensed Model
+Context Protocol TypeScript SDK, whose notice Pi keeps under
+packages/mcp/LICENSES/), cross-spawn's Windows command resolution, the
+process-exit hook, resources, progress, and roots.
 --------------------------------------------------------------------------------
 MIT License
 
