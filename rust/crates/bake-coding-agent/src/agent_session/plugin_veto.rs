@@ -61,6 +61,16 @@ pub(super) fn plugin_veto_hook(
             if !persist_decision(&core, &persist_error, &decision, signal).await? {
                 return Ok(Some(aborted()));
             }
+            if let Some(error) = &decision.unrecorded {
+                // The call stays blocked and the plugin failed for this
+                // session, but later sessions may not know: stop the run
+                // and report it, as a failed decision write does.
+                return Err(stop(
+                    &core,
+                    &persist_error,
+                    format!("{error}, so the run stopped"),
+                ));
+            }
             Ok(Some(BeforeToolCallResult {
                 block: true,
                 reason: Some(decision.denial_text()),
@@ -143,6 +153,14 @@ async fn persist_decision(
             error
         }
     };
+    stop(core, persist_error, error.clone());
+    Err(format!(
+        "The plugin decision could not be written to the session file ({error}), so the session stopped and takes no more prompts."
+    ))
+}
+
+/// Aborts the run and records `error` as its result; returns `error`.
+fn stop(core: &Core, persist_error: &Mutex<Option<String>>, error: String) -> String {
     core.abort_requested.store(true, Ordering::SeqCst);
     if let Some(agent) = core.agent() {
         agent.abort();
@@ -151,7 +169,5 @@ async fn persist_decision(
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .get_or_insert_with(|| error.clone());
-    Err(format!(
-        "The plugin decision could not be written to the session file ({error}), so the session stopped and takes no more prompts."
-    ))
+    error
 }

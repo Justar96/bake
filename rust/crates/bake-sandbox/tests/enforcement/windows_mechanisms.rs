@@ -61,6 +61,14 @@ use super::{
 pub fn probe(ops: &[&str]) -> std::io::Result<i32> {
     match ops {
         // The integrity level and AppContainer flag of this process's token.
+        // TEMP, TMP, and LOCALAPPDATA as this process sees them, one per
+        // line: Windows reroutes all three for a profile.
+        ["env-pair"] => {
+            for name in ["TEMP", "TMP", "LOCALAPPDATA"] {
+                println!("{}", std::env::var(name).unwrap_or_default());
+            }
+            Ok(0)
+        }
         ["identity"] => identity().map(|line| {
             println!("{line}");
             0
@@ -81,6 +89,19 @@ pub fn probe(ops: &[&str]) -> std::io::Result<i32> {
                 println!("grandchild {}", child.id());
                 0
             }),
+        // The same parked descendant, then this process parks too, after a
+        // handshake naming both: a confined tree for a runner to lose.
+        ["orphan-and-park"] => {
+            use std::io::Write;
+            let child = std::process::Command::new(std::env::current_exe()?)
+                .args([PROBE_ARG, "park"])
+                .spawn()?;
+            println!("grandchild {} child {}", child.id(), std::process::id());
+            std::io::stdout().flush()?;
+            loop {
+                std::thread::park();
+            }
+        }
         // A descendant that asks to leave the Job. Should Windows allow it,
         // the descendant is killed and reaped before this reports, so no
         // process outlives the run either way.
@@ -156,12 +177,12 @@ pub fn tests() -> Vec<harness::Test> {
 
 /// `FILE_GENERIC_READ | FILE_GENERIC_EXECUTE` (0x1200A9), `icacls`'s `RX`:
 /// what the AppContainer's package SID needs to read and run its binary.
-const READ_EXECUTE: u32 = 0x0012_00A9;
+pub(super) const READ_EXECUTE: u32 = 0x0012_00A9;
 
 /// The package SID's grant on its own workspace: [`READ_EXECUTE`] plus the
 /// runner's write grant (0x1301FF), still without `WRITE_DAC` and
 /// `WRITE_OWNER`.
-const CONTAINER_WORKSPACE: u32 = READ_EXECUTE | GRANT_MASK;
+pub(super) const CONTAINER_WORKSPACE: u32 = READ_EXECUTE | GRANT_MASK;
 
 // The runner's write grant, `GENERIC_WRITE`'s file rights, `DELETE`,
 // `FILE_DELETE_CHILD`, and `SYNCHRONIZE` (`icacls` `WD,AD,WEA,WA,D,DC,S`),
@@ -202,10 +223,10 @@ enum Launch<'a> {
 
 /// One run's result, with the live members of its Job when its direct
 /// process exited (empty for the runner, which owns its own Job).
-struct Outcome {
-    code: Option<i32>,
-    stdout: String,
-    stderr: String,
+pub(super) struct Outcome {
+    pub(super) code: Option<i32>,
+    pub(super) stdout: String,
+    pub(super) stderr: String,
     left_in_job: Vec<u32>,
 }
 
@@ -496,7 +517,7 @@ impl Roots {
 
 /// Seeds `name` under `root` with a DACL that grants this user everything
 /// but `DELETE`, so only the parent's `FILE_DELETE_CHILD` can delete it.
-fn seed_without_delete(root: &Scratch, name: &str, user: &str) -> PathBuf {
+pub(super) fn seed_without_delete(root: &Scratch, name: &str, user: &str) -> PathBuf {
     use windows_sys::Win32::Security::Authorization::{
         ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
     };
@@ -898,7 +919,7 @@ fn read_output(dir: &Path, name: &str) -> Option<String> {
 /// [`TestJob::finish`] must report the Job reaped, and only then are the
 /// files read. A launch that overruns [`BOUND`] or leaves no output files
 /// panics with whatever evidence there is.
-fn launch(
+pub(super) fn launch(
     token: Option<&OwnedHandle>,
     container: Option<*mut c_void>,
     exe: &Path,
@@ -1135,14 +1156,14 @@ impl Drop for Attributes {
 
 /// An AppContainer profile with a name no other run uses. Dropped, it is
 /// deleted, its registry and folder state with it, and its SID freed.
-struct Profile {
+pub(super) struct Profile {
     name: Vec<u16>,
-    sid: *mut c_void,
-    sid_text: String,
+    pub(super) sid: *mut c_void,
+    pub(super) sid_text: String,
 }
 
 impl Profile {
-    fn create() -> Self {
+    pub(super) fn create() -> Self {
         use std::sync::atomic::{AtomicUsize, Ordering};
         use windows_sys::Win32::Security::Isolation::CreateAppContainerProfile;
         static NEXT: AtomicUsize = AtomicUsize::new(0);
@@ -1213,7 +1234,7 @@ impl Drop for Profile {
 // ---------------------------------------------------------------------------
 // The low-integrity candidate token.
 
-mod token {
+pub(super) mod token {
     use std::ffi::{OsStr, c_void};
     use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
     use std::ptr::{null, null_mut};
@@ -1240,10 +1261,10 @@ mod token {
     const FILE_ALL_ACCESS: u32 = 0x001F_01FF;
 
     /// A SID from its string form, freed on drop.
-    pub(super) struct Sid(Local);
+    pub(in super::super) struct Sid(Local);
 
     impl Sid {
-        pub(super) fn parse(text: &str) -> std::io::Result<Self> {
+        pub(in super::super) fn parse(text: &str) -> std::io::Result<Self> {
             use windows_sys::Win32::Security::Authorization::ConvertStringSidToSidW;
             let units = wide(OsStr::new(text));
             let mut sid = null_mut();
@@ -1255,7 +1276,7 @@ mod token {
             Ok(Self(Local(sid)))
         }
 
-        pub(super) fn as_ptr(&self) -> *mut c_void {
+        pub(in super::super) fn as_ptr(&self) -> *mut c_void {
             self.0.0
         }
     }
@@ -1390,7 +1411,7 @@ mod token {
 // ---------------------------------------------------------------------------
 // Fixture ACLs through Win32, with binary SIDs.
 
-mod acl {
+pub(super) mod acl {
     use std::ffi::c_void;
     use std::path::Path;
     use std::ptr::{null, null_mut};
@@ -1410,7 +1431,7 @@ mod acl {
     /// `ACCESS_ALLOWED_ACE_TYPE`.
     pub const ACCESS_ALLOWED: u8 = 0x0;
     /// `ACCESS_DENIED_ACE_TYPE`, laid out as an allow ACE.
-    const ACCESS_DENIED: u8 = 0x1;
+    pub const ACCESS_DENIED: u8 = 0x1;
     /// `SYSTEM_MANDATORY_LABEL_ACE_TYPE`, laid out as an allow ACE.
     pub const MANDATORY_LABEL: u8 = 0x11;
     /// `OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE`, and nothing else: not

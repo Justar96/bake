@@ -1,0 +1,15 @@
+[package]
+name = "bake-plugin-guard"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "The guard plugin: Pi's protected-paths example as a Bake plugin component"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+bake-plugin-sdk = { path = "../../crates/bake-plugin-sdk" }
+serde_json = { workspace = true, features = ["std"] }

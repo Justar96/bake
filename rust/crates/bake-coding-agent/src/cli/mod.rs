@@ -77,6 +77,8 @@ use crate::permissions::{
     Approver, NoApprover, PermissionInputs, ToolPermissions, prepare_session_permission,
     sandbox_file_tools, sandboxed_bash_tool,
 };
+use crate::plugins::installed::PluginHome;
+use crate::plugins::wasm::WasmSetup;
 use crate::print_mode::{PrintModeOptions, PrintOutput, SharedWriter, run_print_mode, write_out};
 use crate::prompt_templates::{LoadPromptTemplatesOptions, load_prompt_templates};
 use crate::session::file::default_session_dir_path;
@@ -142,6 +144,11 @@ pub struct CliEnvironment {
     /// print mode, means nobody can, so every escalation fails closed and
     /// the system prompt states the `never` policy.
     pub approver: Option<Arc<dyn Approver>>,
+    /// How sessions run the Wasm plugins the Bake home enables
+    /// ([`crate::plugins::installed`]): the binary passes itself as the
+    /// helper and one compile queue for the process. Without a helper
+    /// command, each enabled plugin blocks the tools it lists.
+    pub plugins: WasmSetup,
     /// Startup warnings found before [`run`], printed with its own.
     pub warnings: Vec<String>,
     /// Resolves with an exit code when the process should stop, such as on
@@ -711,12 +718,17 @@ struct Resources {
     permission: crate::permissions::SessionPermission,
     custom_prompt: Option<String>,
     append_system_prompt: Option<String>,
+    plugins: crate::plugins::PluginRegistry,
 }
 
 /// Settles `session`'s permission (D24), writing any change to its file
 /// before anything can run, and loads the resources for its working
 /// directory. `permission_flags` applies `--permission`, `--sandbox`, and
 /// `--approval`; a resumed session leaves them out and keeps its own.
+/// The Wasm plugins the home enables are loaded under `plugins`; an
+/// invalid or untrusted `plugins.json`, or a plugins directory inside the
+/// session's working directory or a git repository, fails the setup
+/// before any tool can run.
 /// Blocking.
 #[allow(clippy::too_many_arguments)]
 fn load_resources(
@@ -726,9 +738,14 @@ fn load_resources(
     home: &Path,
     user_home: Option<PathBuf>,
     imported_default_preset: Option<&str>,
+    plugins: &WasmSetup,
     permission_flags: bool,
     warnings: &mut Vec<String>,
 ) -> Result<Resources, String> {
+    let loaded = PluginHome::new(home)
+        .load(plugins, Some(Path::new(session.cwd())))
+        .map_err(|error| error.to_string())?;
+    warnings.extend(loaded.warnings);
     let permission = prepare_session_permission(
         session,
         &PermissionInputs {
@@ -790,6 +807,7 @@ fn load_resources(
         permission,
         custom_prompt,
         append_system_prompt,
+        plugins: loaded.registry,
     })
 }
 
@@ -912,6 +930,7 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
         permission,
         custom_prompt,
         append_system_prompt,
+        plugins,
     } = resources;
     let session_cwd = session.cwd().to_owned();
     let session_id = session.session_id().to_owned();
@@ -1044,7 +1063,7 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
             .collect(),
         system_prompt,
         docs_command,
-        plugins: crate::plugins::PluginRegistry::default(),
+        plugins,
         work: Some(work),
     })
     .await?;
@@ -1167,6 +1186,7 @@ pub struct SessionFactory {
     sandbox_provider: Arc<dyn SandboxProvider>,
     approver: Option<Arc<dyn Approver>>,
     imported_default_preset: Option<String>,
+    plugins: WasmSetup,
 }
 
 impl std::fmt::Debug for SessionFactory {
@@ -1198,7 +1218,16 @@ impl SessionFactory {
             sandbox_provider,
             approver,
             imported_default_preset: None,
+            plugins: WasmSetup::default(),
         }
+    }
+
+    /// Runs the home's enabled Wasm plugins under `plugins`; without this,
+    /// the factory has no helper command, so each enabled plugin blocks the
+    /// tools it lists.
+    pub fn with_plugins(mut self, plugins: WasmSetup) -> Self {
+        self.plugins = plugins;
+        self
     }
 
     /// Builds the replacement for `current`, which keeps running
@@ -1274,6 +1303,7 @@ impl SessionFactory {
                 &factory.home,
                 factory.user_home.clone(),
                 factory.imported_default_preset.as_deref(),
+                &factory.plugins,
                 !resume,
                 &mut warnings,
             )?;
@@ -1364,6 +1394,7 @@ async fn start_with(
         imported_default_preset,
         sandbox_provider,
         approver,
+        plugins,
         warnings: startup_warnings,
         mut interrupt,
     } = environment;
@@ -1383,6 +1414,7 @@ async fn start_with(
         sandbox_provider: Arc::clone(&sandbox_provider),
         approver: approver.clone(),
         imported_default_preset: imported_default_preset.clone(),
+        plugins: plugins.clone(),
     };
 
     let loaded = {
@@ -1432,6 +1464,7 @@ async fn start_with(
                     &home,
                     user_home,
                     imported_default_preset.as_deref(),
+                    &plugins,
                     true,
                     &mut warnings,
                 )
@@ -2002,6 +2035,7 @@ mod tests {
             approver: None,
             warnings: Vec::new(),
             interrupt: no_interrupt(),
+            plugins: WasmSetup::default(),
         };
         (environment, buffer)
     }

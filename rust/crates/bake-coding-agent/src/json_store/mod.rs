@@ -58,7 +58,9 @@
 //!   - macOS: its ACL, copied by `fcopyfile(3)` with `COPYFILE_ACL`.
 //!   - Windows: its DACL is copied onto the temporary file. This adapts
 //!     Bake's `writeFileAtomic` in `packages/fs/fs-local/src/fsio.ts` and
-//!     `src/win32.ts`.
+//!     `src/win32.ts`. The DACL is read by path when the replacement is
+//!     prepared, not from the handle the update read, so it is whatever
+//!     object holds the name then.
 //!
 //!   A replacement does not keep other extended attributes, an SELinux
 //!   label, BSD file flags, or hard links (a hard-linked file is split from
@@ -69,6 +71,10 @@
 //!   for reading and writing, is larger than the store's limit, is not UTF-8,
 //!   is not JSON, or is not a JSON object. The update itself is refused when
 //!   its result would exceed the limit.
+//! - **Checked contents.** A crate-internal checked update lets the caller
+//!   refuse the file through the handle its bytes were read from, under the
+//!   lock and after the read, so the contents a change starts from are the
+//!   ones that check passed on, not those of an earlier read by path.
 //!
 //! # Limitations
 //!
@@ -195,6 +201,34 @@ pub(crate) struct JsonFileStore {
     lock_timeout: Duration,
     #[cfg(test)]
     fault: Option<Fault>,
+    #[cfg(test)]
+    hook: Option<Hook>,
+}
+
+/// Where in an update a test runs [`Hook::run`].
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Stage {
+    /// Under the lock, before the file is inspected or opened.
+    BeforeOpen,
+    /// Under the lock, after the bytes are read and before the check.
+    AfterRead,
+}
+
+/// Code a test runs at one [`Stage`] of an update, under its lock: a
+/// deterministic point for a concurrent change.
+#[cfg(test)]
+#[derive(Clone)]
+pub(crate) struct Hook {
+    stage: Stage,
+    run: std::sync::Arc<dyn Fn() + Send + Sync>,
+}
+
+#[cfg(test)]
+impl fmt::Debug for Hook {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Hook").field("stage", &self.stage).finish()
+    }
 }
 
 /// A failure a test injects into an update.
@@ -330,6 +364,8 @@ impl JsonFileStore {
             lock_timeout: DEFAULT_LOCK_TIMEOUT,
             #[cfg(test)]
             fault: None,
+            #[cfg(test)]
+            hook: None,
         }
     }
 
@@ -348,6 +384,26 @@ impl JsonFileStore {
     pub(crate) fn with_fault(mut self, fault: Fault) -> Self {
         self.fault = Some(fault);
         self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_hook(
+        mut self,
+        stage: Stage,
+        run: impl Fn() + Send + Sync + 'static,
+    ) -> Self {
+        self.hook = Some(Hook {
+            stage,
+            run: std::sync::Arc::new(run),
+        });
+        self
+    }
+
+    #[cfg(test)]
+    fn run_hook(&self, stage: Stage) {
+        if let Some(hook) = self.hook.as_ref().filter(|hook| hook.stage == stage) {
+            (hook.run)();
+        }
     }
 
     #[cfg(test)]
@@ -421,8 +477,14 @@ impl JsonFileStore {
         }
     }
 
-    /// Reads the file for an update: `None` when it does not exist.
-    fn read_current(&self) -> Result<Option<Current>, StoreError> {
+    /// Reads the file for an update: `None` when it does not exist. `check`
+    /// runs on the handle after its bytes are read, before they are parsed.
+    fn read_current(
+        &self,
+        check: impl FnOnce(&File) -> Result<(), String>,
+    ) -> Result<Option<Current>, StoreError> {
+        #[cfg(test)]
+        self.run_hook(Stage::BeforeOpen);
         let metadata = match fs::symlink_metadata(&self.path) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -455,6 +517,9 @@ impl JsonFileStore {
         if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > self.limit {
             return Err(too_large());
         }
+        #[cfg(test)]
+        self.run_hook(Stage::AfterRead);
+        check(&file).map_err(|reason| self.refused(reason))?;
         let text = String::from_utf8(bytes).map_err(|_| self.refused("it is not UTF-8"))?;
         let object = parse_object(&text).map_err(|reason| self.refused(reason))?;
         Ok(Some(Current {
@@ -610,9 +675,25 @@ impl JsonFileStore {
         &self,
         change: impl FnOnce(&mut Map<String, Value>) -> bool,
     ) -> Result<Updated, StoreError> {
+        self.update_checked(|_| Ok(()), change)
+    }
+
+    /// [`Self::update`], first refusing an existing file when `check`
+    /// returns an error for the handle its bytes were read from. `check`
+    /// runs under the lock, after the read and before `change`, so the
+    /// object `change` receives was read from the object `check` passed;
+    /// a refusal is [`StoreError::Refused`] with its reason, and nothing is
+    /// written. It is not called when the file does not exist. What `check`
+    /// observes about that object holds when it runs; a writer with access
+    /// to the object can still change it afterwards.
+    pub(crate) fn update_checked(
+        &self,
+        check: impl FnOnce(&File) -> Result<(), String>,
+        change: impl FnOnce(&mut Map<String, Value>) -> bool,
+    ) -> Result<Updated, StoreError> {
         let _lock = self.lock()?;
         self.remove_orphans();
-        let (mut object, original) = match self.read_current()? {
+        let (mut object, original) = match self.read_current(check)? {
             Some(Current { object, original }) => (object, Some(original)),
             None => (Map::new(), None),
         };

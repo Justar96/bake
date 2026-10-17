@@ -10,6 +10,7 @@
 accepted = [
     "MIT",
     "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
     "ISC",
     "BSD-3-Clause",
     "Unicode-3.0",
@@ -105,6 +106,35 @@ checksum = "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
 license = "MIT OR Apache-2.0"
 
 [[windows-sys.clarify.files]]
+path = "license-mit"
+license = "MIT"
+checksum = "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+
+# libm 0.2.16 (through Wasmtime's Cranelift): `MIT`; LICENSE.txt holds the MIT
+# text, the contributors' Apache-2.0 grant, and the copyright notices of libm
+# and the musl and Sun-derived code, which cargo-about does not identify.
+[libm.clarify]
+license = "MIT"
+
+[[libm.clarify.files]]
+path = "LICENSE.txt"
+license = "MIT"
+checksum = "3823dda7cf046602f4b4e77ec8e227863dc4736037cc85bb33d9f19febe16bb7"
+
+# windows-targets 0.52.6 and windows_x86_64_msvc 0.52.6: `MIT OR Apache-2.0`;
+# the same indented `license-mit` as windows-sys 0.61.2.
+[windows-targets.clarify]
+license = "MIT OR Apache-2.0"
+
+[[windows-targets.clarify.files]]
+path = "license-mit"
+license = "MIT"
+checksum = "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+
+[windows_x86_64_msvc.clarify]
+license = "MIT OR Apache-2.0"
+
+[[windows_x86_64_msvc.clarify.files]]
 path = "license-mit"
 license = "MIT"
 checksum = "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"

@@ -53,6 +53,11 @@ pub const TOPICS: &[Topic] = &[
         text: include_str!("../docs/context.md"),
     },
     Topic {
+        name: "plugins",
+        summary: "Wasm plugins that veto tool calls: install, enable, disable",
+        text: include_str!("../docs/plugins.md"),
+    },
+    Topic {
         name: "skills",
         summary: "Agent Skills, where they are found, and /skill:<name>",
         text: include_str!("../docs/skills.md"),

@@ -69,6 +69,10 @@ interface FixtureOptions {
   readonly about?: (about: { crates: unknown[]; licenses: unknown[] }) => void
   /** Edits `cargo metadata`'s packages. */
   readonly metadata?: (packages: Record<string, unknown>[]) => void
+  readonly lock?: string
+  readonly upstream?: string
+  /** Files under `rust/licenses/`, by path. */
+  readonly vendored?: Readonly<Record<string, string>>
 }
 
 function fixture(list: readonly Crate[], options: FixtureOptions = {}): Fixture {
@@ -79,7 +83,8 @@ function fixture(list: readonly Crate[], options: FixtureOptions = {}): Fixture 
     writeFileSync(path, text)
   }
   const config = options.config ?? CONFIG
-  write(join(root, 'rust/Cargo.lock'), '# locked\n')
+  write(join(root, 'rust/Cargo.lock'), options.lock ?? '# locked\n')
+  for (const [path, text] of Object.entries(options.vendored ?? {})) write(join(root, 'rust/licenses', path), text)
   write(join(root, 'rust/about.toml'), config)
   write(join(root, 'rust/rust-toolchain.toml'), '[toolchain]\nchannel = "1.99.0"\n')
   const workspace = ['bake-cli', 'bake-agent'].map(name => ({ name, dir: join(root, 'rust/crates', name) }))
@@ -137,6 +142,7 @@ function fixture(list: readonly Crate[], options: FixtureOptions = {}): Fixture 
     trees,
     hostTree,
     about: JSON.stringify(about),
+    upstream: options.upstream ?? null,
   }
   return { root, inputs, dir }
 }
@@ -269,6 +275,70 @@ describe('generation refuses', () => {
   test('a crate that only a path or git source provides', () => {
     const { inputs } = fixture([crates.memchr], { metadata: (packages) => { (packages.at(-1) as Record<string, unknown>).source = 'git+https://example.com/memchr#abc' } })
     expect(failure(() => buildBundle(inputs))).toContain('memchr@2.8.3 comes from git+https://example.com/memchr#abc; only crates.io sources are supported')
+  })
+})
+
+describe('upstream texts', () => {
+  const COMMIT = 'f96eabaa11a06086e4fb779ed1c1688481067ab9'
+  const UPSTREAM = `${APACHE}\n--- LLVM Exceptions to the Apache 2.0 License ----\n`
+  const CHECKSUM = '0ec2ba2d4f3d'.padEnd(64, '0')
+  const hash = (text: string): string => new Bun.CryptoHasher('sha256').update(text).digest('hex')
+  const vcs = (sha1: string, path: string): string => JSON.stringify({ git: { sha1 }, path_in_vcs: path })
+  // A published package with no license file, as cranelift-bitset 0.136.3 is; cargo-about reports only its generic text.
+  const bitset: Crate = {
+    name: 'cranelift-bitset',
+    version: '0.136.3',
+    license: 'Apache-2.0 WITH LLVM-exception',
+    files: { '.cargo_vcs_info.json': vcs(COMMIT, 'cranelift/bitset'), 'Cargo.toml': '' },
+    chosen: [{ id: 'Apache-2.0', file: null }],
+  }
+  const lock = (checksum = CHECKSUM): string => `version = 4\n\n[[package]]\nname = "cranelift-bitset"\nversion = "0.136.3"\nsource = "registry+https://github.com/rust-lang/crates.io-index"\nchecksum = "${checksum}"\n`
+  const entry = (fields: { sha256?: string; license?: string; crate?: string; pathInVcs?: string } = {}): string => [
+    '[[text]]',
+    'file = "upstream/wasmtime-v49.0.3/LICENSE"',
+    `sha256 = "${fields.sha256 ?? hash(UPSTREAM)}"`,
+    `license = "${fields.license ?? 'Apache-2.0 WITH LLVM-exception'}"`,
+    'repository = "https://github.com/bytecodealliance/wasmtime"',
+    `commit = "${COMMIT}"`,
+    'path = "LICENSE"',
+    `url = "https://raw.githubusercontent.com/bytecodealliance/wasmtime/${COMMIT}/LICENSE"`,
+    `crates = [{ crate = "${fields.crate ?? 'cranelift-bitset@0.136.3'}", checksum = "${CHECKSUM}", path-in-vcs = "${fields.pathInVcs ?? 'cranelift/bitset'}" }]`,
+    '',
+  ].join('\n')
+  const options = (overrides: Partial<FixtureOptions> = {}): FixtureOptions => ({ lock: lock(), upstream: entry(), vendored: { 'upstream/wasmtime-v49.0.3/LICENSE': UPSTREAM }, ...overrides })
+
+  test('fill a crate whose published package omits the file, naming the commit it came from', () => {
+    const { files } = buildBundle(fixture([bitset], options()).inputs)
+    const text = bundle(files, 'linux-x64')
+    expect(text).toContain('--- LLVM Exceptions to the Apache 2.0 License ----')
+    expect(text).toContain(`Source: https://github.com/bytecodealliance/wasmtime at ${COMMIT}, LICENSE (the published crates omit it)`)
+    expect(text).not.toContain('<copyright holders>')
+    type Texts = { texts: { license: string; upstream?: { commit: string; file: string } }[] }
+    const record = JSON.parse(files[INVENTORY_FILE] as string) as Texts & { inputs: Record<string, { path: string; sha256: string }> }
+    expect(record.inputs.upstream).toEqual({ path: 'rust/licenses/upstream.toml', sha256: hash(entry()) })
+    expect(record.inputs['rust/licenses/upstream/wasmtime-v49.0.3/LICENSE']).toEqual({ path: 'rust/licenses/upstream/wasmtime-v49.0.3/LICENSE', sha256: hash(UPSTREAM) })
+    expect(record.texts[0]).toMatchObject({ license: 'Apache-2.0 WITH LLVM-exception', upstream: { commit: COMMIT, file: 'rust/licenses/upstream/wasmtime-v49.0.3/LICENSE' } })
+  })
+
+  test('are refused unless the vendored file, lock checksum, publishing commit, and declared license all match', () => {
+    expect(failure(() => buildBundle(fixture([bitset], options({ vendored: { 'upstream/wasmtime-v49.0.3/LICENSE': `${UPSTREAM}edited\n` } })).inputs))).toContain('not the reviewed')
+    expect(failure(() => buildBundle(fixture([bitset], options({ lock: lock('f'.repeat(64)) })).inputs))).toContain(`but Cargo.lock has ${'f'.repeat(64)}`)
+    const otherCommit = { ...bitset, files: { ...bitset.files, '.cargo_vcs_info.json': vcs('0'.repeat(40), 'cranelift/bitset') } }
+    expect(failure(() => buildBundle(fixture([otherCommit], options()).inputs))).toContain(`was published from ${'0'.repeat(40)}`)
+    expect(failure(() => buildBundle(fixture([bitset], options({ upstream: entry({ pathInVcs: 'cranelift/entity' }) })).inputs))).toContain('not f96eabaa11a06086e4fb779ed1c1688481067ab9 at "cranelift/entity"')
+    expect(failure(() => buildBundle(fixture([bitset], options({ upstream: entry({ license: 'Apache-2.0' }) })).inputs))).toContain('but it declares "Apache-2.0 WITH LLVM-exception"')
+    expect(failure(() => buildBundle(fixture([bitset], options({ upstream: `${entry()}extra = 1\n` })).inputs))).toContain('needs file, sha256')
+  })
+
+  test('are refused once no compiled crate needs them', () => {
+    expect(failure(() => buildBundle(fixture([crates.memchr], options()).inputs))).toContain('upstream.toml supplies cranelift-bitset@0.136.3, which no release platform compiles')
+    const shipsLicense = { ...bitset, files: { ...bitset.files, LICENSE: UPSTREAM }, chosen: [{ id: 'Apache-2.0', file: 'LICENSE' }] }
+    expect(failure(() => buildBundle(fixture([shipsLicense], options()).inputs))).toContain('whose own package now holds its license text')
+  })
+
+  test('cover only the crates they name', () => {
+    const entity = { ...bitset, name: 'cranelift-entity', files: { ...bitset.files, '.cargo_vcs_info.json': vcs(COMMIT, 'cranelift/entity') } }
+    expect(failure(() => buildBundle(fixture([bitset, entity], options()).inputs))).toContain('cranelift-entity@0.136.3: no Apache-2.0 license text was found')
   })
 })
 

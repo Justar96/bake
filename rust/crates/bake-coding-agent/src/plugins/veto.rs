@@ -3,7 +3,9 @@
 //! in order, the first `block` returned) and `AgentSession._beforeToolCall`
 //! (`src/core/agent-session.ts`: a failing handler blocks the call), with
 //! Bake's ordering, deadline, sticky failure, and non-sticky cancellation
-//! (see the module above).
+//! (see the module above), and the configured Wasm plugins of
+//! [`super::installed`]: their failures recorded in the Bake home, and their
+//! helpers shut down by a keeper task the session's work gate owns.
 
 use std::any::Any;
 use std::future::Future;
@@ -17,9 +19,12 @@ use bake_agent::BoxFuture;
 use bake_ai::AbortSignal;
 use serde_json::{Value, json};
 
+use super::wasm::session::{HelperInfo, WasmAnswer, WasmVeto};
 use super::{
-    MAX_REASON_BYTES, PluginId, PluginRegistry, Registered, ToolCallVeto, ToolCallView, truncate,
+    Contribution, MAX_REASON_BYTES, PluginId, PluginRegistry, Registered, ToolCallVeto,
+    ToolCallView, truncate,
 };
+use crate::owned_work::{Refused, WorkGate};
 
 /// Pi's default text for a block without a reason
 /// (`agent-loop.ts` `prepareToolCall`).
@@ -36,16 +41,59 @@ pub(crate) enum FailureKind {
     Timeout,
     /// It returned a reason over [`MAX_REASON_BYTES`].
     InvalidReturn,
+    /// A Wasm guest trapped or hit a limit.
+    Trap,
+    /// A Wasm plugin's helper died or broke the protocol during a call.
+    Helper,
+    /// A Wasm plugin's helper refused the component, missed its compile
+    /// deadline, or died while loading it.
+    Start,
+    /// A Wasm plugin could not be started for a reason outside the plugin:
+    /// the compile queue, the spawn, or the helper's memory-limit setup.
+    Unavailable,
+    /// A configured plugin's package could not be loaded from the store.
+    Unloadable,
 }
 
 impl FailureKind {
-    fn as_str(self) -> &'static str {
+    /// Every kind, for parsing a recorded one.
+    const ALL: [Self; 9] = [
+        Self::Error,
+        Self::Panic,
+        Self::Timeout,
+        Self::InvalidReturn,
+        Self::Trap,
+        Self::Helper,
+        Self::Start,
+        Self::Unavailable,
+        Self::Unloadable,
+    ];
+
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Error => "error",
             Self::Panic => "panic",
             Self::Timeout => "timeout",
             Self::InvalidReturn => "invalid-return",
+            Self::Trap => "trap",
+            Self::Helper => "helper",
+            Self::Start => "start",
+            Self::Unavailable => "unavailable",
+            Self::Unloadable => "unloadable",
         }
+    }
+
+    pub(crate) fn parse(text: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| kind.as_str() == text)
+    }
+
+    /// Whether a configured plugin's failure of this kind is recorded in
+    /// the Bake home, so every later session blocks its tools until the
+    /// plugin is disabled. The kinds that are not recorded come from the
+    /// host or the store, not the plugin, and are found again (or not) by
+    /// the next session.
+    pub(crate) fn persists(self) -> bool {
+        !matches!(self, Self::Unavailable | Self::Unloadable)
     }
 }
 
@@ -57,7 +105,7 @@ pub(crate) struct Failure {
 }
 
 impl Failure {
-    fn new(kind: FailureKind, message: &str) -> Self {
+    pub(crate) fn new(kind: FailureKind, message: &str) -> Self {
         Self {
             kind,
             message: truncate(message, MAX_REASON_BYTES).to_owned(),
@@ -72,6 +120,10 @@ pub(crate) enum Outcome {
     Blocked { reason: String },
     /// The plugin failed on this call, or (`earlier`) on an earlier one.
     Failed { failure: Failure, earlier: bool },
+    /// A Wasm plugin could not be asked about this call (its arguments are
+    /// over the host's limits); the call is blocked, the plugin is not
+    /// failed.
+    Unchecked { message: String },
 }
 
 /// What the plugins decided about one call.
@@ -110,10 +162,16 @@ enum Answer {
 pub(crate) struct VetoDecision {
     pub plugin: PluginId,
     pub version: String,
+    /// A configured Wasm plugin's package hash.
+    pub sha256: Option<String>,
     pub tool_call_id: String,
     pub tool_name: String,
     pub outcome: Outcome,
     pub terminate: bool,
+    /// The failure this call recorded could not be written to the Bake
+    /// home; the hook stops the run with this reason after writing the
+    /// decision.
+    pub unrecorded: Option<String>,
 }
 
 impl VetoDecision {
@@ -128,6 +186,10 @@ impl VetoDecision {
                 if *earlier { "failed earlier" } else { "failed" },
                 failure.message
             ),
+            Outcome::Unchecked { message } => format!(
+                "Plugin \"{}\" cannot check this call, blocking execution: {message}",
+                self.plugin
+            ),
         }
     }
 
@@ -141,10 +203,14 @@ impl VetoDecision {
             "decision": match self.outcome {
                 Outcome::Blocked { .. } => "block",
                 Outcome::Failed { .. } => "failed",
+                Outcome::Unchecked { .. } => "unchecked",
             },
             "reason": self.denial_text(),
             "terminate": self.terminate,
         });
+        if let Some(sha256) = &self.sha256 {
+            data["sha256"] = json!(sha256);
+        }
         if let Outcome::Failed { failure, earlier } = &self.outcome {
             data["failure"] = json!({
                 "kind": failure.kind.as_str(),
@@ -184,6 +250,10 @@ pub(crate) struct VetoDispatcher {
     /// Sorted by configured order, then id; fixed for the session.
     slots: Arc<[Slot]>,
     call_timeout: Duration,
+    /// The session's gate, once [`Self::attach`]ed: Wasm asks and failure
+    /// records run under its permits, and its keeper shuts the helpers
+    /// down. Unattached, a Wasm plugin is never asked.
+    work: std::sync::OnceLock<WorkGate>,
 }
 
 impl std::fmt::Debug for VetoDispatcher {
@@ -209,13 +279,63 @@ impl VetoDispatcher {
         Some(Self {
             slots: plugins
                 .into_iter()
-                .map(|registered| Slot {
-                    registered,
-                    failure: Mutex::new(None),
+                .map(|registered| {
+                    // A configured plugin that failed before, or cannot be
+                    // loaded, blocks from the first call.
+                    let failure = match &registered.plugin {
+                        Contribution::Blocked(failure) => Some(failure.clone()),
+                        _ => None,
+                    };
+                    Slot {
+                        registered,
+                        failure: Mutex::new(failure),
+                    }
                 })
                 .collect(),
             call_timeout,
+            work: std::sync::OnceLock::new(),
         })
+    }
+
+    /// The Wasm adapters, in dispatch order.
+    fn wasm(&self) -> Vec<Arc<WasmVeto>> {
+        self.slots
+            .iter()
+            .filter_map(|slot| match &slot.registered.plugin {
+                Contribution::Wasm(veto) => Some(Arc::clone(veto)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Binds the dispatcher to the session's gate. With Wasm plugins, it
+    /// spawns their keeper: an owned task that waits for the gate to close
+    /// and then shuts every helper down, so the gate's drain, and the
+    /// session's shutdown, wait for each helper to be reaped. Call once,
+    /// before the first dispatch.
+    pub fn attach(&self, work: &WorkGate) -> Result<(), Refused> {
+        if self.work.set(work.clone()).is_err() {
+            return Ok(());
+        }
+        let wasm = self.wasm();
+        if wasm.is_empty() {
+            return Ok(());
+        }
+        let keeper = work.spawn(move |scope| async move {
+            scope.signal().cancelled().await;
+            for veto in wasm {
+                veto.shutdown().await;
+            }
+        })?;
+        // The gate owns and awaits the keeper; its output is nothing.
+        drop(keeper);
+        Ok(())
+    }
+
+    /// The helpers the session's Wasm plugins have started and not yet
+    /// seen stop, in dispatch order.
+    pub fn helpers(&self) -> Vec<HelperInfo> {
+        self.wasm().iter().flat_map(|veto| veto.helpers()).collect()
     }
 
     /// Asks the plugins that list `call`'s tool, in order, and returns the
@@ -238,10 +358,12 @@ impl VetoDispatcher {
                 Dispatch::Blocked(VetoDecision {
                     plugin: slot.registered.manifest.id().clone(),
                     version: slot.registered.manifest.version().to_owned(),
+                    sha256: slot.registered.sha256.clone(),
                     tool_call_id: call.tool_call_id.to_owned(),
                     tool_name: call.tool_name.to_owned(),
                     outcome,
                     terminate,
+                    unrecorded: None,
                 })
             };
             let earlier = |failure| {
@@ -258,6 +380,13 @@ impl VetoDispatcher {
             }
             if let Some(failure) = slot.failure() {
                 return earlier(failure);
+            }
+            if let Contribution::Wasm(veto) = &slot.registered.plugin {
+                match self.ask_wasm(slot, veto, call, signal).await {
+                    Some(Dispatch::Continue) => continue,
+                    Some(blocked @ Dispatch::Blocked(_)) => return blocked,
+                    Some(Dispatch::Cancelled) | None => return Dispatch::Cancelled,
+                }
             }
             match self.ask(slot, call, signal).await {
                 Answer::Cancelled => return Dispatch::Cancelled,
@@ -303,6 +432,86 @@ impl VetoDispatcher {
         Dispatch::Continue
     }
 
+    /// Asks one Wasm plugin, under a permit of the session's gate held
+    /// until its failure, if any, is recorded: `None` when the gate is
+    /// closing or was never attached, which the caller treats as a
+    /// cancellation. The host bounds every phase itself (queue, start,
+    /// compile, call, and teardown), so no outer deadline drops the ask;
+    /// a cancelled start or call is torn down in place. Cancellation wins a
+    /// tie with an answer, as for trusted plugins.
+    async fn ask_wasm(
+        &self,
+        slot: &Slot,
+        veto: &WasmVeto,
+        call: ToolCallView<'_>,
+        signal: Option<&AbortSignal>,
+    ) -> Option<Dispatch> {
+        let permit = self.work.get()?.enter()?;
+        let decide = |outcome, terminate, unrecorded| {
+            Dispatch::Blocked(VetoDecision {
+                plugin: slot.registered.manifest.id().clone(),
+                version: slot.registered.manifest.version().to_owned(),
+                sha256: slot.registered.sha256.clone(),
+                tool_call_id: call.tool_call_id.to_owned(),
+                tool_name: call.tool_name.to_owned(),
+                outcome,
+                terminate,
+                unrecorded,
+            })
+        };
+        let answer = veto.ask(call, signal).await;
+        if signal.is_some_and(AbortSignal::aborted) {
+            return Some(Dispatch::Cancelled);
+        }
+        Some(match answer {
+            WasmAnswer::Cancelled => Dispatch::Cancelled,
+            WasmAnswer::Unchecked(message) => decide(Outcome::Unchecked { message }, false, None),
+            WasmAnswer::Veto(ToolCallVeto::Continue) => match slot.failure() {
+                Some(failure) => decide(
+                    Outcome::Failed {
+                        failure,
+                        earlier: true,
+                    },
+                    false,
+                    None,
+                ),
+                None => Dispatch::Continue,
+            },
+            // The host refuses a reason over the limit as a broken reply.
+            WasmAnswer::Veto(ToolCallVeto::Block { reason, terminate }) => {
+                decide(Outcome::Blocked { reason }, terminate, None)
+            }
+            WasmAnswer::Failed(failure) => {
+                slot.fail(failure.clone());
+                let unrecorded = match &slot.registered.record {
+                    Some(record) if failure.kind.persists() => {
+                        let record = record.clone();
+                        let recorded = failure.clone();
+                        // A blocking job of the gate: it finishes even if this
+                        // call is dropped meanwhile.
+                        match permit.spawn_blocking(move || record.record(&recorded)) {
+                            Ok(job) => match job.await {
+                                Ok(Ok(())) => None,
+                                Ok(Err(error)) => Some(error),
+                                Err(error) => Some(format!("the record task failed: {error}")),
+                            },
+                            Err(refused) => Some(refused.to_string()),
+                        }
+                    }
+                    _ => None,
+                };
+                decide(
+                    Outcome::Failed {
+                        failure,
+                        earlier: false,
+                    },
+                    false,
+                    unrecorded,
+                )
+            }
+        })
+    }
+
     /// Runs one plugin under the deadline and the call's cancellation,
     /// turning a panic into a failure. Dropping the plugin's future is how
     /// a timeout or cancellation stops it; cancellation wins a tie.
@@ -312,7 +521,14 @@ impl VetoDispatcher {
         call: ToolCallView<'_>,
         signal: Option<&AbortSignal>,
     ) -> Answer {
-        let plugin = &slot.registered.plugin;
+        let Contribution::Trusted(plugin) = &slot.registered.plugin else {
+            // Blocked slots are failed from the start, and Wasm slots are
+            // asked by `ask_wasm`.
+            return Answer::Failed(Failure::new(
+                FailureKind::Error,
+                "the plugin cannot be asked",
+            ));
+        };
         let future = match catch_unwind(AssertUnwindSafe(|| plugin.on_tool_call(call))) {
             Ok(future) => future,
             Err(payload) => {

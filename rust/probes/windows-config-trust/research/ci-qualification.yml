@@ -1,0 +1,52 @@
+# PROPOSAL ONLY: not part of the product workflow. Review before use.
+# A minimal, separate workflow_dispatch job that builds the standalone probe
+# on a GitHub-hosted (ephemeral) Windows runner and records native evidence.
+# It changes ACLs only on objects the probe creates under $env:RUNNER_TEMP,
+# and deletes exactly those objects. It creates no users and changes no
+# host or profile ACLs. The probe must be copied into the checkout (for
+# example under .preflight/) by the reviewer who dispatches it; it is not
+# committed product code.
+name: windows-config-trust-probe
+on: workflow_dispatch
+jobs:
+  probe:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        shell: pwsh
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal
+          rustup target add x86_64-pc-windows-msvc --toolchain 1.99.0
+      - name: Build
+        shell: pwsh
+        working-directory: .preflight/windows-config-trust/probe
+        run: cargo +1.99.0 build --release --locked --target x86_64-pc-windows-msvc
+      - name: Evidence
+        shell: pwsh
+        working-directory: .preflight/windows-config-trust/probe
+        run: |
+          $probe = "target/x86_64-pc-windows-msvc/release/bake-windows-config-trust-probe.exe"
+          $out = "$env:RUNNER_TEMP/probe-evidence"
+          New-Item -ItemType Directory -Force $out | Out-Null
+          [System.Environment]::OSVersion | Out-File "$out/os.txt"
+          cmd /c ver >> "$out/os.txt"
+          whoami /all > "$out/whoami.txt"
+          $dump = @("C:\", "C:\Users", $env:USERPROFILE, $env:RUNNER_TEMP, $env:GITHUB_WORKSPACE)
+          if (Test-Path "D:\") { $dump += "D:\" }
+          & $probe dump @dump > "$out/dump.jsonl"
+          & $probe walk (Join-Path $env:USERPROFILE ".bake") "mcp.json" > "$out/walk-default-home.jsonl"
+          & $probe walk $env:RUNNER_TEMP > "$out/walk-runner-temp.jsonl"
+          & $probe mechanisms $env:RUNNER_TEMP > "$out/mechanisms.jsonl"
+          $left = Get-ChildItem $env:RUNNER_TEMP -Filter "bake-trust-probe-*" -Directory -ErrorAction SilentlyContinue
+          if ($left) { "LEFTOVER: $($left.FullName)" | Tee-Object "$out/leftover.txt"; exit 1 }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-config-trust-probe
+          path: ${{ runner.temp }}/probe-evidence
+# Not covered here (needs separate review because it mutates the host):
+# a standard-user run (create an ephemeral local user on the runner and
+# start the probe with CreateProcessWithLogonW), and a subst drive (per-user
+# DOS device mapping).

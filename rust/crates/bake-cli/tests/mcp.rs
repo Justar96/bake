@@ -106,6 +106,11 @@ fn main() {
             "a_setup_failure_after_servers_start_leaves_no_process",
             a_setup_failure_after_servers_start_leaves_no_process,
         ),
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        (
+            "an_enabled_plugin_vetoes_an_mcp_call_and_both_owners_end",
+            an_enabled_plugin_vetoes_an_mcp_call_and_both_owners_end,
+        ),
         #[cfg(unix)]
         (
             "tool_restrictions_cover_mcp_tools",
@@ -731,6 +736,163 @@ const FIXTURE_TOOLS: [&str; 9] = [
     "mcp__fx__exit",
     "mcp__fx__write",
 ];
+
+/// The pids of `root`'s descendants, from `ps`, whose arguments include
+/// `marker`.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn descendants_running(root: u32, marker: &str) -> Vec<u32> {
+    let out = Command::new("ps")
+        .args(["-A", "-o", "pid=", "-o", "ppid=", "-o", "args="])
+        .output()
+        .expect("ps runs");
+    let table: Vec<(u32, u32, String)> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            let pid = fields.next()?.parse().ok()?;
+            let ppid = fields.next()?.parse().ok()?;
+            Some((pid, ppid, fields.collect::<Vec<_>>().join(" ")))
+        })
+        .collect();
+    let mut tree = vec![root];
+    let mut index = 0;
+    while let Some(&parent) = tree.get(index) {
+        tree.extend(
+            table
+                .iter()
+                .filter(|(_, ppid, _)| *ppid == parent)
+                .map(|(pid, _, _)| *pid),
+        );
+        index += 1;
+    }
+    table
+        .iter()
+        .filter(|(pid, _, args)| tree[1..].contains(pid) && args.contains(marker))
+        .map(|(pid, _, _)| *pid)
+        .collect()
+}
+
+// Bake's installed-plugin veto over an MCP tool, through the shipped
+// binary: a home enables a plugin whose manifest lists the fixture
+// server's `mcp__fx__write`, and the hostile component blocks a call
+// carrying a `block` reason. That call never reaches the server and its
+// file is not written; the decision precedes the denial in the session
+// file; the same tool without a reason runs. The plugin's helper and the
+// server are observed while `bake-rs` waits on the model, and both are
+// gone at once when it exits, so its shutdown awaited both owners. Only
+// Linux and macOS check who can change plugin files, so only they enable
+// one.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn an_enabled_plugin_vetoes_an_mcp_call_and_both_owners_end(case: &Arc<Case>) {
+    let package = case.root.join("package");
+    std::fs::create_dir_all(&package).expect("package directory");
+    std::fs::write(
+        package.join("plugin.json"),
+        r#"{"api":"0.1.0","id":"mcp-guard","version":"0.1.0","vetoTools":["mcp__fx__write"]}"#,
+    )
+    .expect("plugin.json");
+    std::fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/fixtures/hostile/hostile.wasm"),
+        package.join("plugin.wasm"),
+    )
+    .expect("plugin.wasm");
+    let manage = |args: &[&str]| {
+        case.spawn(args, false, &[]);
+        let run = case.wait();
+        assert_eq!(run.status.code(), Some(0), "{args:?}: {}", run.stderr);
+        run.stdout
+    };
+    let installed = manage(&["plugin", "install", &package.to_string_lossy()]);
+    let hash = installed
+        .lines()
+        .find_map(|line| line.strip_prefix("installed mcp-guard 0.1.0 as sha256:"))
+        .unwrap_or_else(|| panic!("{installed}"))
+        .to_owned();
+    manage(&["plugin", "enable", &hash]);
+
+    let (vetoed, allowed) = (
+        case.project().join("vetoed.txt"),
+        case.project().join("allowed.txt"),
+    );
+    let observed: Arc<Mutex<Vec<u32>>> = Arc::default();
+    let (hook_case, observed_hook) = (Arc::clone(case), Arc::clone(&observed));
+    let model = ModelServer::with_hook(
+        vec![
+            Reply::calls(&[
+                (
+                    "mcp__fx__write",
+                    json!({"path": vetoed.to_string_lossy(), "block": "No MCP writes here"}),
+                ),
+                ("mcp__fx__write", json!({"path": allowed.to_string_lossy()})),
+            ]),
+            Reply::text(),
+        ],
+        Box::new(move |index, _| {
+            if index != 1 {
+                return;
+            }
+            // `bake-rs` waits for this reply: the vetoing helper and the
+            // server it asked about both still run.
+            let mut pids = hook_case.observe_server("fx");
+            let bake = probe::Process::observe(hook_case.child_pid())
+                .unwrap_or_else(|error| panic!("{error}"));
+            let helpers = descendants_running(bake.pid, "__bake-wasm-plugin-host");
+            assert_eq!(helpers.len(), 1, "one plugin helper: {helpers:?}");
+            let helper = probe::Process::observe_descendant(&bake, helpers[0])
+                .unwrap_or_else(|error| panic!("{error}"));
+            assert!(!helper.exited(), "the helper had already exited");
+            pids.push(helper.pid);
+            lock(&hook_case.processes).push((false, helper));
+            *lock(&observed_hook) = pids;
+        }),
+    );
+    case.write_models(model.port);
+    case.write_config(
+        &case.home(),
+        &json!({ "mcpServers": { "fx": case.server("fx", "", json!({})) } }),
+    );
+    let run = case.run(&["--sandbox", "danger-full-access"]);
+    let pids = lock(&observed).clone();
+    // At once: the binary's shutdown returned only once they were gone.
+    assert!(
+        case.all_exited(&pids),
+        "the server or the plugin helper outlived bake-rs"
+    );
+    assert_eq!(pids.len(), 2, "the server and the helper: {pids:?}");
+    model.assert_hook_passed();
+    assert_eq!(run.status.code(), Some(0), "{}", run.stderr);
+    assert_eq!(run.stdout, format!("{ANSWER}\n"));
+    let requests = model.requests();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(tool_outputs(&requests[1]), ["No MCP writes here", "wrote"]);
+    assert!(!vetoed.exists(), "the vetoed call wrote its file");
+    assert!(allowed.exists(), "the allowed call did not write");
+    let calls: Vec<String> = case
+        .events("fx")
+        .into_iter()
+        .filter(|event| event.starts_with("call "))
+        .collect();
+    assert_eq!(
+        calls.len(),
+        1,
+        "only the allowed call reached the server: {calls:?}"
+    );
+    let lines = session_lines(case);
+    let decision = lines
+        .iter()
+        .position(|line| line["customType"] == "bake.plugin.decision")
+        .expect("a logged decision");
+    let denial = lines
+        .iter()
+        .position(|line| {
+            line["message"]["role"] == "toolResult"
+                && line["message"]["content"][0]["text"] == "No MCP writes here"
+        })
+        .expect("a logged denial");
+    assert!(decision < denial, "the decision follows its denial");
+    assert_eq!(lines[decision]["data"]["sha256"], hash.as_str());
+    assert_eq!(lines[denial]["message"]["toolName"], "mcp__fx__write");
+}
 
 // Pi v1.3.0 `test/suite/agent-session-mcp.test.ts`, "declares directly
 // exposed MCP tools to the model", through the shipped binary: the first

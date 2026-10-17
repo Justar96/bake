@@ -118,10 +118,10 @@
 //! reachable through an explicit [`LocalProvider::with_chain`](super::LocalProvider::with_chain)
 //! for its qualification tests; that chain reports
 //! [`Enforcement::Partial`](crate::Enforcement::Partial), and deletion is
-//! one more effect it leaves unconfined. Selecting a Windows backend by
-//! default needs a different confinement design (for example a low
-//! integrity level or an AppContainer), which is a roadmap decision.
-//! Whether a low level's no-write-up policy denies `DELETE` and the
+//! one more effect it leaves unconfined. On 2026-10-17 the owner selected
+//! AppContainer with explicit read and network grants as the replacement
+//! (D24); its unqualified runner is [`super::windows_appcontainer`], which
+//! reuses this runner's DACL, Job, and process helpers. Whether a low level's no-write-up policy denies `DELETE` and the
 //! parent's `FILE_DELETE_CHILD` is not settled: Microsoft defines that
 //! policy over the generic-write mapping, which omits both. The mechanism
 //! probe in `tests/enforcement/windows_mechanisms.rs` measures both
@@ -254,7 +254,7 @@ pub fn temp_write_sid(temp_dir: &str) -> String {
     format!("S-1-4-{first}-{second}-1")
 }
 
-fn sha256(parts: &[&[u8]]) -> [u8; 32] {
+pub(super) fn sha256(parts: &[&[u8]]) -> [u8; 32] {
     let mut context = ring::digest::Context::new(&ring::digest::SHA256);
     for part in parts {
         context.update(part);
@@ -418,7 +418,7 @@ fn parse(args: Vec<OsString>) -> Result<Cli, String> {
 
 /// Checks that `path` is an existing, canonical directory reached through
 /// no link, as the provider resolved it.
-fn check_directory(label: &str, path: &Path) -> Result<(), String> {
+pub(super) fn check_directory(label: &str, path: &Path) -> Result<(), String> {
     let meta = std::fs::symlink_metadata(path).map_err(|error| {
         format!(
             "{label} is not an existing directory: {} ({error})",
@@ -496,7 +496,7 @@ pub fn allow_aces_naming(path: &Path, sid: &str) -> Result<usize, String> {
 }
 
 #[cfg(windows)]
-mod sys;
+pub(in crate::backends) mod sys;
 
 #[cfg(test)]
 mod tests;
