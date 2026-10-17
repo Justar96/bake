@@ -14,6 +14,7 @@ pub(super) type SharedExecutions = Arc<Mutex<Executions>>;
 pub(super) struct Execution {
     id: u64,
     pub control: RunControl,
+    pub journal: Option<Arc<run_journal::Journal>>,
     finished: tokio::sync::watch::Receiver<Option<RunOutcome>>,
 }
 
@@ -21,7 +22,11 @@ pub(super) type Completion = tokio::sync::watch::Sender<Option<RunOutcome>>;
 
 impl Executions {
     /// Called while the session's activity claim is locked.
-    pub fn claim(&mut self, control: RunControl) -> Result<(Arc<Execution>, Completion), String> {
+    pub fn claim(
+        &mut self,
+        control: RunControl,
+        journal: Option<Arc<run_journal::Journal>>,
+    ) -> Result<(Arc<Execution>, Completion), String> {
         if self.current.is_some() {
             return Err("The previous session execution has not finished.".into());
         }
@@ -34,6 +39,7 @@ impl Executions {
         let execution = Arc::new(Execution {
             id,
             control,
+            journal,
             finished,
         });
         self.current = Some(Arc::clone(&execution));
@@ -98,9 +104,11 @@ impl PromptExecution {
         execution: Arc<Execution>,
         completion: Completion,
         scope: TaskScope,
-        text: String,
-        images: Vec<ImageContent>,
+        input: Option<(String, Vec<ImageContent>)>,
     ) {
+        if let Some(journal) = &execution.journal {
+            journal.bind(scope.permit());
+        }
         let guard = RunGuard {
             core: Arc::clone(&self.core),
             agent: Arc::clone(&self.agent),
@@ -113,7 +121,20 @@ impl PromptExecution {
         };
         let control = &execution.control;
         let result = {
-            let prompt = self.prompt_inner(&text, images, control);
+            let prompt = async {
+                if let Some(journal) = &execution.journal {
+                    self.core
+                        .cancel_background_compaction("recoverable run admission")
+                        .await;
+                    if let Some(outcome) = journal.begin().await? {
+                        return Ok(outcome);
+                    }
+                }
+                match input {
+                    Some((text, images)) => self.prompt_inner(&text, images, control).await,
+                    None => self.continue_inner(control).await,
+                }
+            };
             tokio::pin!(prompt);
             tokio::select! {
                 result = &mut prompt => result,
@@ -131,6 +152,11 @@ impl PromptExecution {
         if self.core.aborted() {
             self.core.finish_cancelled_retry();
         }
+        if execution.journal.is_some() {
+            self.core
+                .cancel_background_compaction("recoverable run settlement")
+                .await;
+        }
         drain_execution(&self.core, &self.agent, control).await;
         let persisted = self
             .persist_error
@@ -138,11 +164,18 @@ impl PromptExecution {
             .unwrap_or_else(PoisonError::into_inner)
             .take();
         let gap = lock_gap(&self.core.gap).clone();
-        let outcome = if let Some(error) = persisted.or(gap) {
+        let mut outcome = if let Some(error) = persisted.or(gap) {
             control.fail(error)
         } else {
             control.settle(result.unwrap_or_else(|message| RunOutcome::Failed { message }))
         };
+        if let Some(journal) = &execution.journal {
+            outcome = match journal.finish(outcome, control.clone()).await {
+                Ok(outcome) => outcome,
+                Err(error) => control.fail(error),
+            };
+            journal.release();
+        }
         guard.finish(outcome);
     }
 
@@ -324,8 +357,12 @@ impl Drop for RunGuard {
             // This share was admitted with the driver, so shutdown also
             // awaits its cleanup if the task unwinds after the gate closes.
             let _permit = permit;
+            if execution.journal.is_some() {
+                core.cancel_background_compaction("recoverable execution lost")
+                    .await;
+            }
             drain_execution(&core, &agent, &execution.control).await;
-            let outcome = if let Some(error) = lock_gap(&core.gap).clone() {
+            let mut outcome = if let Some(error) = lock_gap(&core.gap).clone() {
                 execution.control.fail(error)
             } else {
                 execution.control.stopped().unwrap_or_else(|| {
@@ -334,12 +371,51 @@ impl Drop for RunGuard {
                         .fail("The session prompt task ended before settlement.".into())
                 })
             };
+            if let Some(journal) = &execution.journal {
+                outcome = match journal.finish(outcome, execution.control.clone()).await {
+                    Ok(outcome) => outcome,
+                    Err(error) => execution.control.fail(error),
+                };
+                journal.release();
+            }
             publish_completion(&core, &executions, &execution, &completion, outcome);
         }));
     }
 }
 
 impl PromptExecution {
+    async fn continue_inner(&self, control: &RunControl) -> Result<RunOutcome, String> {
+        if let Some(outcome) = control.stopped() {
+            return Ok(outcome);
+        }
+        if let Some(reason) = self.closed_reason() {
+            return Err(reason);
+        }
+        let model = self
+            .model()
+            .ok_or_else(|| format_no_model_selected_message(&self.docs_command))?;
+        let registry = self.registry.snapshot();
+        if !registry.has_configured_auth(&model.provider)
+            && registry.check_auth(&model.provider).is_none()
+        {
+            return Err(format_no_api_key_found_message(
+                &model.provider,
+                &self.docs_command,
+            ));
+        }
+        if let Some(mcp) = self.mcp.get() {
+            mcp.wait_for_startup(|| self.core.aborted() || self.closed_reason().is_some())
+                .await;
+        }
+        // A recovery notice already refreshed the durable context. The active
+        // tool set is selected afresh; a changed prompt patch is persisted by
+        // the agent as part of this execution before its first request.
+        let messages = self
+            .prepare_prompt_and_tools()?
+            .map(|update| vec![update.into()]);
+        self.run_agent_input(messages, control).await
+    }
+
     /// The system message patching the sections the transcript replays,
     /// Pi's `_preparePromptAndToolLoadout`; it also activates the tools.
     fn prepare_prompt_and_tools(&self) -> Result<Option<SystemMessage>, String> {
@@ -458,6 +534,14 @@ impl PromptExecution {
         messages: Vec<LiveMessage>,
         control: &RunControl,
     ) -> Result<RunOutcome, String> {
+        self.run_agent_input(Some(messages), control).await
+    }
+
+    async fn run_agent_input(
+        &self,
+        messages: Option<Vec<LiveMessage>>,
+        control: &RunControl,
+    ) -> Result<RunOutcome, String> {
         let core = &self.core;
         {
             let mut state = core.state();
@@ -467,11 +551,16 @@ impl PromptExecution {
         }
         let mut result = if core.aborted() {
             Ok(control.stopped().unwrap_or(RunOutcome::Cancelled))
-        } else {
+        } else if let Some(messages) = messages {
             self.agent
                 .prompt_with_control(PromptInput::Messages(messages), control.clone())
                 .await
                 .map_err(|error: AgentError| error.to_string())
+        } else {
+            self.agent
+                .continue_with_control(control.clone())
+                .await
+                .map_err(|error| error.to_string())
         };
         while result.is_ok() && !core.aborted() {
             if matches!(result, Ok(RunOutcome::Cancelled)) {

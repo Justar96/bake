@@ -214,9 +214,23 @@ impl RunControl {
 
     /// An interval whose model debits must pass `observer` before dispatch.
     pub fn with_admission_observer(limits: RunLimits, observer: Option<AdmissionObserver>) -> Self {
+        Self::restore(limits, 0, observer)
+    }
+
+    /// Restores an interval's original limits and already-spent debits.
+    /// The caller must validate its durable journal and deadline continuity;
+    /// this constructor never refunds calls, even when they exceed the limit.
+    pub fn restore(
+        limits: RunLimits,
+        model_calls: u64,
+        observer: Option<AdmissionObserver>,
+    ) -> Self {
         Self(Arc::new(Inner {
             limits,
-            state: Mutex::new(State::default()),
+            state: Mutex::new(State {
+                calls: model_calls,
+                ..State::default()
+            }),
             admission: Mutex::new(None),
             observer,
             abort: AbortController::new(),
@@ -396,6 +410,34 @@ impl RunControl {
             RunOutcome::FinishedTurn => outcome,
             _ => self.stop(outcome, false),
         }
+    }
+
+    /// Closes a dedicated interval once all its producers have settled.
+    /// Cancellation and expiry before this boundary win; later cancellation
+    /// cannot replace completion. Required writes may still fail through
+    /// [`Self::fail`]. Shared multi-prompt owners should use [`Self::settle`].
+    pub fn finish_interval(&self, outcome: RunOutcome) -> RunOutcome {
+        let mut state = self.0.state.lock().unwrap_or_else(PoisonError::into_inner);
+        if state.stopped.is_none() {
+            let outcome = if self
+                .0
+                .limits
+                .deadline
+                .is_some_and(|deadline| Instant::now() >= deadline)
+            {
+                RunOutcome::BudgetExhausted {
+                    limit: BudgetLimit::Deadline,
+                }
+            } else {
+                outcome
+            };
+            state.stopped = Some(outcome);
+            state.stopped_at.get_or_insert_with(Instant::now);
+        }
+        let outcome = state.stopped.clone().unwrap_or(RunOutcome::Cancelled);
+        drop(state);
+        self.0.abort.abort();
+        outcome
     }
 
     /// The stopping cause, checking the original deadline before returning.

@@ -53,8 +53,8 @@
 //! [`AgentSessionOptions::plugins`]) veto tool calls through the agent's
 //! `before_tool_call` hook, as Pi v1.3.0's `_beforeToolCall` runs
 //! `tool_call` handlers (in `agent_session/plugin_veto.rs`); each block is
-//! written as a `custom` entry before the denial result. With no plugins no
-//! hook is installed.
+//! written as a `custom` entry before the denial result. Opt-in recoverable
+//! runs journal allowed dispatches through the same boundary.
 //!
 //! Not ported (deferred): Pi's extensions and their other events (including
 //! `session_before_compact`, `session_compact`, and
@@ -65,10 +65,12 @@
 //! `entry_appended` event, and tool-loadout changes between turns.
 
 mod background_compaction;
+mod context_masking;
 mod navigation;
 mod plugin_veto;
 mod prompt_execution;
 mod recovery;
+mod run_journal;
 pub(crate) mod task_documents;
 
 use std::path::PathBuf;
@@ -84,6 +86,7 @@ use recovery::{Activity, Core, RunState};
 pub use recovery::{
     COMPACTION_CANCELLED, COMPACTION_WHILE_BUSY, COMPACTION_WHILE_STREAMING, CompactionReason,
 };
+pub use run_journal::{RecoverableRunResult, RunRecovery, RunRecoveryDisposition};
 
 use bake_agent::{
     AfterToolCallResult, Agent, AgentError, AgentEvent, AgentInitialState,
@@ -360,6 +363,8 @@ impl SessionStats {
 /// features' events.
 #[derive(Debug)]
 pub enum SessionEvent<'a> {
+    /// The run's durable start or continuation checkpoint is committed.
+    RecoverableRunStarted { run_id: String },
     /// An agent event other than `agent_end`.
     Agent(&'a AgentEvent),
     /// Pi's `agent_end`, with whether auto-retry will continue the run.
@@ -413,6 +418,17 @@ pub enum SessionEvent<'a> {
         elapsed_ms: u64,
         /// Every admitted attempt, including retries and partial failures.
         attempts: &'a [crate::compaction::SummaryAttempt],
+    },
+    /// An opt-in masking batch, after its edits and live context are committed.
+    ContextMasking {
+        /// The leaf whose visible observations were reduced.
+        source_leaf_id: &'a str,
+        /// Tool result contents replaced by persisted placeholders.
+        masked_results: u64,
+        /// Removed UTF-8 bytes of serialized content, excluding entry metadata.
+        removed_bytes: u64,
+        /// The protected tail of complete assistant tool batches.
+        retained_recent_batches: u64,
     },
     /// Pi's `auto_retry_start`.
     AutoRetryStart {
@@ -1092,6 +1108,10 @@ pub(crate) type FailHook = Box<dyn FnOnce() -> Box<dyn FnOnce() + Send> + Send>;
 #[cfg(test)]
 #[derive(Default)]
 pub(crate) struct TestHooks {
+    /// Before a recoverable interval closes under the session write lock.
+    pub before_run_terminal: Option<Box<dyn FnOnce() + Send>>,
+    /// After the interval closes, before its terminal record is appended.
+    pub after_run_terminal_admission: Option<Box<dyn FnOnce() + Send>>,
     /// Fails the next model change's group before its first line. Runs
     /// under the session lock as it fails; what it returns runs before the
     /// change goes on.
@@ -1107,6 +1127,10 @@ pub(crate) struct TestHooks {
     /// Runs under the session lock right after a compaction's entry was
     /// written.
     pub after_compaction_commit: Option<Box<dyn FnOnce() + Send>>,
+    /// Before a masking batch checks cancellation and takes the session lock.
+    pub before_context_masking: Option<Box<dyn FnOnce() + Send>>,
+    /// Under the session lock after the masking group is fully synced.
+    pub after_context_masking: Option<Box<dyn FnOnce() + Send>>,
     /// Fails the next compaction entry at the session's write boundary,
     /// running the hook under the session lock as it fails.
     pub fail_compaction_entry: Option<Box<dyn FnOnce() + Send>>,
@@ -1324,6 +1348,7 @@ impl AgentSession {
             plugins,
             work,
         } = options;
+        let max_concurrent_read_tools = settings.read_tool_concurrency()?;
         let plugins = VetoDispatcher::new(plugins).map(Arc::new);
         system_prompt.docs_command = docs_command.clone();
         let task_documents_enabled = settings.task_documents;
@@ -1420,10 +1445,16 @@ impl AgentSession {
         }
         let after_tool_core = Arc::clone(&core);
         let persist_error = Arc::new(Mutex::new(None));
+        let executions: prompt_execution::SharedExecutions = Arc::default();
         let before_tool_call = plugins.map(|plugins| {
             plugin_veto::plugin_veto_hook(Arc::clone(&core), Arc::clone(&persist_error), plugins)
         });
+        let before_tool_call = Some(run_journal::tool_hook(
+            Arc::clone(&executions),
+            before_tool_call,
+        ));
         let agent = Agent::new(AgentOptions {
+            max_concurrent_read_tools,
             initial_state: AgentInitialState {
                 system_prompt: None,
                 model: selection.model.clone(),
@@ -1443,6 +1474,10 @@ impl AgentSession {
             })),
             after_tool_call: Some(hook::after_tool_call(move |context, _signal| {
                 let content = context.result.content.clone();
+                let details = context_masking::observation_details(
+                    &context,
+                    read_settings(&after_tool_core.settings).context_masking,
+                );
                 let resize_options = after_tool_core
                     .model()
                     .and_then(|model| {
@@ -1455,7 +1490,10 @@ impl AgentSession {
                         .iter()
                         .any(|block| matches!(block, UserContentBlock::Image(_)))
                     {
-                        return Ok(None);
+                        return Ok(details.map(|details| AfterToolCallResult {
+                            details: Some(details),
+                            ..AfterToolCallResult::default()
+                        }));
                     }
                     // Owned by the gate, so a cancelled run's resize is
                     // still awaited by shutdown.
@@ -1465,15 +1503,20 @@ impl AgentSession {
                         return Ok(None);
                     };
                     let normalized = normalizing.await.ok().flatten();
-                    Ok(normalized.map(|content| AfterToolCallResult {
-                        content: Some(content),
-                        ..AfterToolCallResult::default()
-                    }))
+                    Ok(if normalized.is_some() || details.is_some() {
+                        Some(AfterToolCallResult {
+                            content: normalized,
+                            details,
+                            ..AfterToolCallResult::default()
+                        })
+                    } else {
+                        None
+                    })
                 })
             })),
             before_tool_call,
-            prepare_request: task_documents_enabled
-                .then(|| task_documents::request_hook(Arc::clone(&core))),
+            prepare_request: (task_documents_enabled || read_settings(&settings).context_masking)
+                .then(|| context_masking::request_hook(Arc::clone(&core), task_documents_enabled)),
             stream_fn: Some(stream_fn),
             prepare_next_turn_with_context: Some(next_turn_hook(
                 Arc::clone(&core),
@@ -1520,7 +1563,7 @@ impl AgentSession {
             apis,
             agent,
             core,
-            executions: Arc::default(),
+            executions,
             work,
             session,
             registry,
@@ -1554,6 +1597,7 @@ impl AgentSession {
         let persist_error = Arc::clone(&self.persist_error);
         let queue = Arc::clone(&self.queue);
         let write_failure = Arc::clone(&self.write_failure);
+        let executions = Arc::clone(&self.executions);
         // Weak: the agent owns this listener.
         let agent = Arc::downgrade(&self.agent);
         let subscription = self.agent.subscribe_critical(move |event, _signal| {
@@ -1561,6 +1605,7 @@ impl AgentSession {
             let persist_error = Arc::clone(&persist_error);
             let queue = Arc::clone(&queue);
             let write_failure = Arc::clone(&write_failure);
+            let executions = Arc::clone(&executions);
             let agent = agent.clone();
             Box::pin(async move {
                 if let AgentEvent::MessageStart { message } = event
@@ -1592,7 +1637,23 @@ impl AgentSession {
                             }
                             return;
                         }
-                        track_message(&core, message, entry_id.unwrap_or_default());
+                        let entry_id = entry_id.unwrap_or_default();
+                        if let Some(journal) = run_journal::current(&executions)
+                            && let Err(error) = journal.message(message, entry_id.clone()).await
+                        {
+                            persist_error
+                                .lock()
+                                .unwrap_or_else(PoisonError::into_inner)
+                                .get_or_insert(error.clone());
+                            if let Some(control) = core.control() {
+                                control.fail(error);
+                            }
+                            if let Some(agent) = agent.upgrade() {
+                                agent.abort();
+                            }
+                            return;
+                        }
+                        track_message(&core, message, entry_id);
                     }
                     AgentEvent::TurnEnd { .. } => {
                         let mut state = core.state();
@@ -2117,6 +2178,16 @@ impl AgentSession {
         images: Vec<ImageContent>,
         control: RunControl,
     ) -> Result<RunOutcome, String> {
+        self.execute_prompt(Some((text.to_owned(), images)), control, None)
+            .await
+    }
+
+    async fn execute_prompt(
+        &self,
+        input: Option<(String, Vec<ImageContent>)>,
+        control: RunControl,
+        journal: Option<Arc<run_journal::Journal>>,
+    ) -> Result<RunOutcome, String> {
         if let Some(reason) = self.closed_reason() {
             return Err(reason);
         }
@@ -2137,7 +2208,7 @@ impl AgentSession {
                 refusal = Some("Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message.".to_owned());
                 false
             } else {
-                let claimed = self.executions.lock().unwrap_or_else(PoisonError::into_inner).claim(control.clone());
+                let claimed = self.executions.lock().unwrap_or_else(PoisonError::into_inner).claim(control.clone(), journal.clone());
                 match claimed {
                     Ok(claimed) => execution = Some(claimed),
                     Err(error) => {
@@ -2159,14 +2230,12 @@ impl AgentSession {
         let driver = prompt_execution::PromptExecution::new(self);
         let owned_execution = Arc::clone(&execution);
         let owned_completion = completion.clone();
-        let text = text.to_owned();
         let task = {
             // Admission may be called from another executor; the session's
             // runtime owns the driver just as it owns shutdown.
             let _runtime = self.runtime.enter();
-            self.work.spawn(move |scope| {
-                driver.run(owned_execution, owned_completion, scope, text, images)
-            })
+            self.work
+                .spawn(move |scope| driver.run(owned_execution, owned_completion, scope, input))
         };
         match task {
             Ok(task) => drop(task),

@@ -87,7 +87,10 @@ function compact(sample: Sample) {
     ranCheck: sample.ranCheck ?? null, verifiedBeforeFinal: sample.verifiedBeforeFinal ?? null,
     backgroundStarts: sample.backgroundStarts ?? null, compactions: sample.compactions ?? null,
     backgroundCompactions: sample.backgroundCompactions ?? null,
+    contextMasking: sample.contextMasking ?? null,
+    nativeReadBatches: sample.nativeReadBatches ?? null,
     nativeSettings: sample.nativeSettings ?? null,
+    nativeSession: sample.nativeSession ?? null,
     skillLoads: (sample.skillLoads ?? null) as string[] | null, skillNeeded: (sample.skillNeeded ?? null) as string | null,
     contextWindow: sample.contextWindow ?? null, runaway: sample.runawayAbort === true,
   }
@@ -225,6 +228,7 @@ const summary = {
     roster: design.roster ?? null, capMsByScenario: design.capMsByScenario ?? null, requestFloors: design.requestFloors ?? null, contextWindows: design.contextWindows ?? null,
     piContextWindows: design.piContextWindows ?? null, piCompaction: design.piCompaction ?? null,
     armSettings: Object.fromEntries(Object.keys(armLabels).map(arm => [arm, designs.map(d => d.arms?.[arm]?.settings).find(value => value !== undefined) ?? null])),
+    nativeSessionModes: Object.fromEntries(Object.keys(armLabels).map(arm => [arm, designs.map(d => d.arms?.[arm]?.nativeSession).find(value => value !== undefined) ?? null])),
   },
   regressionRule: REGRESSION_RULE,
   regressions: flagged,

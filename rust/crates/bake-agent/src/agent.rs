@@ -192,6 +192,8 @@ pub struct AgentOptions {
     pub max_retry_delay_ms: Option<u64>,
     /// Tool execution mode; parallel by default.
     pub tool_execution: ToolExecutionMode,
+    /// Opt-in read-only batch bound; see [`AgentLoopConfig::max_concurrent_read_tools`].
+    pub max_concurrent_read_tools: Option<std::num::NonZeroUsize>,
 }
 
 /// What to prompt with, Pi's `prompt(input, images)` overloads.
@@ -428,6 +430,7 @@ struct Shared {
     thinking_budgets: Option<ThinkingBudgets>,
     max_retry_delay_ms: Option<u64>,
     tool_execution: ToolExecutionMode,
+    max_concurrent_read_tools: Option<std::num::NonZeroUsize>,
     active: Option<ActiveRun>,
     closed: bool,
 }
@@ -563,6 +566,7 @@ impl Agent {
             thinking_budgets: options.thinking_budgets,
             max_retry_delay_ms: options.max_retry_delay_ms,
             tool_execution: options.tool_execution,
+            max_concurrent_read_tools: options.max_concurrent_read_tools,
             active: None,
             closed: false,
         };
@@ -1099,6 +1103,7 @@ impl Agent {
             thinking_budgets: shared.thinking_budgets,
         };
         config.tool_execution = shared.tool_execution;
+        config.max_concurrent_read_tools = shared.max_concurrent_read_tools;
         config.transform_context = hooks.transform_context.clone();
         config.get_api_key = hooks.get_api_key.clone();
         config.before_tool_call = hooks.before_tool_call.clone();

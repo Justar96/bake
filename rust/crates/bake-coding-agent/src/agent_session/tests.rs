@@ -16,6 +16,9 @@ use bake_ai::{ApiRegistry, StopReason};
 use serde_json::json;
 use tokio::sync::Notify;
 
+#[cfg(unix)]
+mod read_shutdown;
+
 use super::*;
 use crate::auth_storage::AuthStorage;
 use crate::model_registry::config::ModelConfig;
@@ -764,15 +767,20 @@ async fn prompts_need_a_model_with_auth() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn abort_and_shutdown_end_the_run() {
     let h = harness();
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let reached = Arc::clone(&entered);
     // The response waits for the abort, which the faux stream honors.
     h.faux
         .set_responses(vec![FauxResponseStep::Factory(Arc::new(
-            |_, options, _, _| {
+            move |_, options, _, _| {
                 let signal = options.base.signal.clone();
+                let reached = Arc::clone(&reached);
                 Box::pin(async move {
-                    while !signal.as_ref().is_some_and(bake_ai::AbortSignal::aborted) {
-                        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-                    }
+                    reached.notify_one();
+                    signal
+                        .expect("provider cancellation signal")
+                        .cancelled()
+                        .await;
                     Ok(faux_assistant_message("never shown"))
                 })
             },
@@ -797,9 +805,9 @@ async fn abort_and_shutdown_end_the_run() {
         let session = Arc::clone(&session);
         tokio::spawn(async move { session.prompt("hang", Vec::new()).await })
     };
-    while !session.agent().is_streaming() {
-        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-    }
+    tokio::time::timeout(std::time::Duration::from_secs(5), entered.notified())
+        .await
+        .expect("provider request started");
     tokio::time::timeout(std::time::Duration::from_secs(5), session.abort())
         .await
         .expect("abort settles");

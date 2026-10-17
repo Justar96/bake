@@ -82,7 +82,7 @@ pub(crate) fn owned_grep_tool_definition(
     owner: Option<crate::owned_work::WorkGate>,
 ) -> ToolDefinition {
     let cwd = cwd.to_path_buf();
-    let tool = AgentTool::new(
+    let mut tool = AgentTool::new(
         "grep",
         "grep",
         format!(
@@ -93,6 +93,7 @@ pub(crate) fn owned_grep_tool_definition(
         parameters(),
         move |_id, args, signal, _update| boxed(execute(cwd.clone(), owner.clone(), args, signal)),
     );
+    tool.read_only = true;
     ToolDefinition {
         tool,
         prompt_snippet: Some(GREP_PROMPT_SNIPPET.into()),

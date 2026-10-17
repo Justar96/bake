@@ -19,6 +19,9 @@ use serde_json::{Value, json};
 #[path = "print_mode/windows.rs"]
 mod windows;
 
+#[path = "print_mode/recovery.rs"]
+mod recovery;
+
 // The command the messages name, from the source the binary uses.
 #[allow(dead_code)]
 #[path = "../src/docs.rs"]

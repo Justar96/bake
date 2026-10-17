@@ -738,12 +738,14 @@ async fn complete_summarization_with_run(
     request.base.signal = Some(signal.clone());
     let produce = || {
         let request = request.clone();
+        let external = external.clone();
         async move {
-            if request
-                .base
-                .signal
-                .as_ref()
-                .is_some_and(AbortSignal::aborted)
+            if external.as_ref().is_some_and(AbortSignal::aborted)
+                || request
+                    .base
+                    .signal
+                    .as_ref()
+                    .is_some_and(AbortSignal::aborted)
             {
                 return Err("This operation was aborted".to_owned());
             }
@@ -770,13 +772,15 @@ async fn complete_summarization_with_run(
                 ),
                 None => None,
             };
-            // A mandatory debit may outlast local cancellation. It remains
-            // charged, but an already-cancelled request is never dispatched.
-            let dispatched = !request
-                .base
-                .signal
-                .as_ref()
-                .is_some_and(AbortSignal::aborted);
+            // The select below may poll the request before forwarding a
+            // ready external cancellation to its internal controller. Check
+            // the original signal after the mandatory debit drains too.
+            let dispatched = !external.as_ref().is_some_and(AbortSignal::aborted)
+                && !request
+                    .base
+                    .signal
+                    .as_ref()
+                    .is_some_and(AbortSignal::aborted);
             let started = tokio::time::Instant::now();
             let result = if dispatched {
                 match stream_fn(model, context, request) {

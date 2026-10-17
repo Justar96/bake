@@ -29,8 +29,18 @@ export interface Arm {
   revision?: { prebuilt: boolean; commit: string | null; dirty: boolean | null }
   extra: unknown[]
   settings: string
+  /** Native persistence experiment; memory is the evaluator's default. */
+  nativeSession?: NativeSessionMode
   llmDeepseek: boolean
   composition: unknown[]
+}
+
+export type NativeSessionMode = 'memory' | 'persistent' | 'recoverable'
+
+export function nativeSessionMode(value: string | undefined): NativeSessionMode {
+  if (value === undefined) return 'memory'
+  if (value === 'memory' || value === 'persistent' || value === 'recoverable') return value
+  throw new Error('EVAL_NATIVE_SESSION must be memory, persistent, or recoverable')
 }
 
 /** The retired adapter owns its route in older checkouts; adding the same route through llm-pi-ai would collide. */
@@ -125,7 +135,8 @@ export function parseArms(spec: string, roster: Roster, env: NodeJS.ProcessEnv):
     if (root === 'pi' || root.startsWith('pi:')) return [name, piArm(root)]
     const settings = env[`EVAL_SETTINGS_${name.toUpperCase()}`] ?? '{}'
     parseSettings(settings)
-    if (root === 'native' || root.startsWith('native:')) return [name, { ...nativeArm(root), settings }]
+    if (root === 'native' || root.startsWith('native:')) return [name, { ...nativeArm(root), settings,
+      nativeSession: nativeSessionMode(env[`EVAL_NATIVE_SESSION_${name.toUpperCase()}`]) }]
     if (!existsSync(join(root, 'apps/cli/lib/bin.js'))) throw new Error(`arm ${name}: ${root} has no built apps/cli/lib/bin.js; run bun run build there`)
     return [name, {
       kind: 'bake', root: resolve(root), extra: JSON.parse(env[`EVAL_EXTRA_${name.toUpperCase()}`] ?? '[]'), settings, llmDeepseek: shipsLlmDeepseek(root),
@@ -198,11 +209,16 @@ export function bakeCommand(root: string, patch: string, prompt: string): string
 
 /**
  * The `bake-rs` print-mode launch for one native sample: Pi's JSON event
- * stream, no session file, the Bake arms' `danger-full-access` preset, and the
- * route's model and effort. The prompt follows `--`, so it is never an option.
+ * stream, no session file by default, the Bake arms' `danger-full-access` preset, and the
+ * route's model and effort. Persistent experiments supply a private file and
+ * fixed run limits. The prompt follows `--`, so it is never an option.
  */
-export function nativeCommand(bin: string, provider: string, model: string, effort: string, prompt: string): string[] {
-  return [bin, '-p', '--mode', 'json', '--no-session', '--permission', 'danger-full-access',
+export function nativeCommand(bin: string, provider: string, model: string, effort: string, prompt: string,
+  session?: { mode: Exclude<NativeSessionMode, 'memory'>; path: string; maxModelCalls: number; timeoutMs: number }): string[] {
+  const args = session === undefined ? ['--no-session'] : ['--session', session.path,
+    '--max-model-calls', String(session.maxModelCalls), '--run-timeout-ms', String(session.timeoutMs),
+    ...session.mode === 'recoverable' ? ['--recoverable'] : []]
+  return [bin, '-p', '--mode', 'json', ...args, '--permission', 'danger-full-access',
     '--model', `${provider}/${model}`, '--thinking', effort, '--', prompt]
 }
 

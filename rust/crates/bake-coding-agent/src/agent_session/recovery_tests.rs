@@ -1812,3 +1812,6 @@ async fn run_control_reports_current_failure_and_zero_allowance_after_stale_succ
 
 #[path = "run_control_lifetime_tests.rs"]
 mod run_control_lifetime;
+
+#[path = "run_journal_tests.rs"]
+mod run_journal_tests;

@@ -1129,6 +1129,7 @@ impl Core {
         skip_aborted_check: bool,
         tool_results: Vec<Option<String>>,
     ) -> Result<bool, String> {
+        self.mask_context(None).await?;
         let allow_background = !matches!(
             assistant.stop_reason,
             StopReason::Error | StopReason::Aborted | StopReason::Length
@@ -1220,6 +1221,12 @@ impl Core {
             return None;
         }
         let settings = self.compaction_settings(Some(&model)).ok()?;
+        let masked = self
+            .mask_context(signal.clone())
+            .await
+            .ok()
+            .flatten()
+            .is_some();
         let background_committed = self.background_compaction_boundary(true).await.ok()?;
         let (branch, projection) = self
             .with_session(|session| {
@@ -1236,7 +1243,7 @@ impl Core {
             .ok()?;
         let tokens = estimate_projected_context_tokens(&projection, &branch).tokens;
         if !should_compact(tokens, model.context_window, &settings) {
-            return background_committed.then(|| AgentLoopTurnUpdate {
+            return (masked || background_committed).then(|| AgentLoopTurnUpdate {
                 context: Some(AgentContext {
                     messages: projection
                         .messages

@@ -158,14 +158,29 @@ pub(crate) async fn run_blocking<T: Send + 'static>(
 /// Runs blocking work that stops at an abort, as Pi's tools that reject
 /// from their abort listener do: on abort the result is [`ABORTED`], but
 /// only after the work, which polls the signal, has returned.
+/// The owner retains the worker even if hard shutdown drops this future.
 pub(crate) async fn run_blocking_abortable<T: Send + 'static>(
     signal: Option<AbortSignal>,
+    owner: Option<crate::owned_work::WorkGate>,
     work: impl FnOnce() -> Result<T, String> + Send + 'static,
 ) -> Result<T, String> {
     if signal.as_ref().is_some_and(AbortSignal::aborted) {
         return Err(ABORTED.into());
     }
-    let mut task = tokio::task::spawn_blocking(work);
+    let permit = owner
+        .as_ref()
+        .map(|owner| {
+            owner
+                .enter()
+                .ok_or_else(|| crate::owned_work::Refused::Closed.to_string())
+        })
+        .transpose()?;
+    let mut task = tokio::task::spawn_blocking(move || {
+        let result = work();
+        // The work and its captures have dropped before shutdown can finish.
+        drop(permit);
+        result
+    });
     let joined = match &signal {
         Some(signal) => {
             tokio::select! {
@@ -224,5 +239,88 @@ pub(crate) fn bool_arg(args: &Value, key: &str) -> bool {
         Some(Value::Number(number)) => number.as_f64().is_some_and(|n| n != 0.0 && !n.is_nan()),
         Some(Value::String(text)) => !text.is_empty(),
         Some(_) => true,
+    }
+}
+
+#[cfg(test)]
+mod ownership_tests {
+    use super::*;
+    use std::io::Write;
+    use std::task::Poll;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn dropped_blocking_waiter_keeps_work_owned_through_file_cleanup() {
+        let dir = crate::test_support::TempDir::new("read-worker-cleanup");
+        let path = dir.join("worker");
+        let output = path.clone();
+        let gate = crate::owned_work::WorkGate::default();
+        let (entered, ready) = tokio::sync::oneshot::channel();
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        let waiter = tokio::spawn(run_blocking_abortable(
+            None,
+            Some(gate.clone()),
+            move || {
+                let mut file = std::fs::File::create(output).unwrap();
+                entered.send(()).unwrap();
+                let _ = held.recv();
+                file.write_all(b"settled").unwrap();
+                file.sync_all().unwrap();
+                Ok(())
+            },
+        ));
+        tokio::time::timeout(Duration::from_secs(10), ready)
+            .await
+            .unwrap()
+            .unwrap();
+        waiter.abort();
+        let _ = waiter.await;
+        let mut drained = Box::pin(gate.close());
+        let waiting =
+            std::future::poll_fn(|cx| Poll::Ready(drained.as_mut().poll(cx).is_pending())).await;
+        drop(release);
+        if waiting {
+            tokio::time::timeout(Duration::from_secs(10), drained)
+                .await
+                .unwrap();
+        }
+        assert!(
+            waiting,
+            "dropping a waiter released a still-running blocking worker"
+        );
+        assert_eq!(std::fs::read(path).unwrap(), b"settled");
+    }
+
+    #[tokio::test]
+    async fn native_read_and_ls_refuse_a_closed_owner() {
+        use crate::tools::index::{ToolsOptions, create_tool};
+        let dir = crate::test_support::TempDir::new("read-closed-owner");
+        std::fs::write(dir.join("present"), "hello").unwrap();
+        let owner = crate::owned_work::WorkGate::default();
+        owner.close().await;
+        for name in ["read", "ls"] {
+            let tool = create_tool(
+                name,
+                dir.path(),
+                &ToolsOptions {
+                    owner: Some(owner.clone()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let args = if name == "read" {
+                serde_json::json!({"path":"present"})
+            } else {
+                serde_json::json!({})
+            };
+            let result = (tool.execute)(
+                "call".into(),
+                args,
+                None,
+                bake_agent::AgentToolUpdateCallback::ignore(),
+            )
+            .await;
+            assert_eq!(result.unwrap_err(), "the session is shut down", "{name}");
+        }
     }
 }

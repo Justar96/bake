@@ -886,16 +886,29 @@ async fn execute_tool_calls(
     sink: &AgentEventSink,
 ) -> ExecutedToolCallBatch {
     let has_sequential_tool_call = tool_calls.iter().any(|tool_call| {
-        find_tool(&context.tools, &tool_call.name)
-            .is_some_and(|tool| tool.execution_mode == Some(ToolExecutionMode::Sequential))
+        find_tool(&context.tools, &tool_call.name).map_or(
+            config.max_concurrent_read_tools.is_some(),
+            |tool| {
+                tool.execution_mode == Some(ToolExecutionMode::Sequential)
+                    || (config.max_concurrent_read_tools.is_some() && !tool.read_only)
+            },
+        )
     });
     let hooks = ToolCallHooks::of(config);
     if config.tool_execution == ToolExecutionMode::Sequential || has_sequential_tool_call {
         execute_tool_calls_sequential(context, assistant_message, tool_calls, hooks, signal, sink)
             .await
     } else {
-        execute_tool_calls_parallel(context, assistant_message, tool_calls, hooks, signal, sink)
-            .await
+        execute_tool_calls_parallel(
+            context,
+            assistant_message,
+            tool_calls,
+            hooks,
+            signal,
+            sink,
+            config.max_concurrent_read_tools,
+        )
+        .await
     }
 }
 
@@ -973,6 +986,7 @@ async fn execute_tool_calls_parallel(
     hooks: ToolCallHooks<'_>,
     signal: Option<&AbortSignal>,
     sink: &AgentEventSink,
+    max_concurrent: Option<std::num::NonZeroUsize>,
 ) -> ExecutedToolCallBatch {
     let mut entries: Vec<BoxFuture<'_, AgentToolCallOutcome>> = Vec::new();
 
@@ -1035,7 +1049,7 @@ async fn execute_tool_calls_parallel(
         }
     }
 
-    let ordered = join_all(entries).await;
+    let ordered = join_all(entries, max_concurrent).await;
     let mut messages = Vec::new();
     for finalized in &ordered {
         let message = create_tool_result_message(finalized);
@@ -1048,22 +1062,38 @@ async fn execute_tool_calls_parallel(
     }
 }
 
-/// Polls every future on the current task and returns their outputs in
-/// order, Pi's `Promise.all`.
-async fn join_all<T>(mut futures: Vec<BoxFuture<'_, T>>) -> Vec<T> {
+/// Pi's ordered `Promise.all`, optionally bounding the futures that have
+/// started but not finished. The current task owns every future through
+/// result finalization; cancellation skips unstarted tool work inside it.
+async fn join_all<T>(
+    mut futures: Vec<BoxFuture<'_, T>>,
+    max_concurrent: Option<std::num::NonZeroUsize>,
+) -> Vec<T> {
     let mut outputs: Vec<Option<T>> = futures.iter().map(|_| None).collect();
+    let limit = max_concurrent.map_or(usize::MAX, std::num::NonZeroUsize::get);
+    let mut started = 0;
+    let mut active = 0;
     poll_fn(|cx| {
-        let mut pending = false;
-        for (future, output) in futures.iter_mut().zip(outputs.iter_mut()) {
+        for (index, (future, output)) in futures.iter_mut().zip(outputs.iter_mut()).enumerate() {
             if output.is_some() {
                 continue;
             }
+            if index == started {
+                if active == limit {
+                    break;
+                }
+                started += 1;
+                active += 1;
+            }
             match future.as_mut().poll(cx) {
-                Poll::Ready(value) => *output = Some(value),
-                Poll::Pending => pending = true,
+                Poll::Ready(value) => {
+                    *output = Some(value);
+                    active -= 1;
+                }
+                Poll::Pending => {}
             }
         }
-        if pending {
+        if active > 0 {
             Poll::Pending
         } else {
             Poll::Ready(())

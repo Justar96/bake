@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use bake_agent::{RunControl, RunOutcome};
 use bake_ai::{AssistantContentBlock, ImageContent, StopReason};
 
-use crate::agent_session::AgentSession;
+use crate::agent_session::{AgentSession, RecoverableRunResult, SessionEvent};
 use crate::json_event::session_event_json;
 
 /// Pi's print output modes.
@@ -33,12 +33,26 @@ pub enum PrintOutput {
 /// A writer shared with the event listener.
 pub type SharedWriter = Arc<Mutex<dyn Write + Send>>;
 
+/// Explicit selection of a persistent run interval in print mode.
+#[derive(Debug, Clone, Default)]
+pub enum PrintRunRecovery {
+    /// Ordinary prompts sharing this invocation's control.
+    #[default]
+    Disabled,
+    /// Start one journaled prompt with the control's original limits.
+    Start,
+    /// Continue only this recorded run on the selected session branch.
+    Resume(String),
+}
+
 /// Pi's `PrintModeOptions`.
 #[derive(Debug, Clone)]
 pub struct PrintModeOptions {
     /// One shared admission budget across every prompt in this invocation,
     /// including retries, continuations, and compaction summaries.
     pub control: RunControl,
+    /// Durable recovery is disabled unless explicitly selected.
+    pub recovery: PrintRunRecovery,
     /// The output mode.
     pub mode: PrintOutput,
     /// The first prompt, with stdin prepended.
@@ -91,6 +105,17 @@ async fn run(
         Some(session.subscribe(move |event| {
             write_out(&out, &format!("{}\n", session_event_json(event)));
         }))
+    } else if !matches!(options.recovery, PrintRunRecovery::Disabled) {
+        let out = Arc::clone(stderr);
+        let file = session.session_file();
+        Some(session.subscribe(move |event| {
+            if let SessionEvent::RecoverableRunStarted { run_id } = event {
+                write_out(&out, &format!("Run ID: {run_id}\n"));
+                if let Some(file) = &file {
+                    write_out(&out, &format!("Session: {file:?}\n"));
+                }
+            }
+        }))
     } else {
         None
     };
@@ -98,10 +123,31 @@ async fn run(
     if let Some(subscription) = subscription {
         subscription.unsubscribe();
     }
-    result?;
+    let final_message = if let Some(result) = result? {
+        if options.mode == PrintOutput::Json {
+            write_out(
+                stdout,
+                &format!(
+                    "{}\n",
+                    serde_json::json!({
+                        "type": "recoverable_run_result",
+                        "runId": result.run_id,
+                        "outcome": result.outcome,
+                        "finalMessage": result.final_message,
+                    })
+                ),
+            );
+        }
+        require_finished(result.outcome)?;
+        result.final_message
+    } else {
+        session
+            .messages()
+            .last()
+            .and_then(|message| message.as_assistant().cloned())
+    };
     if options.mode == PrintOutput::Text
-        && let Some(last) = session.messages().last()
-        && let Some(assistant) = last.as_assistant()
+        && let Some(assistant) = final_message
     {
         if matches!(
             assistant.stop_reason,
@@ -124,7 +170,35 @@ async fn run(
     Ok(0)
 }
 
-async fn prompts(session: &AgentSession, options: PrintModeOptions) -> Result<(), String> {
+async fn prompts(
+    session: &AgentSession,
+    options: PrintModeOptions,
+) -> Result<Option<RecoverableRunResult>, String> {
+    match options.recovery {
+        PrintRunRecovery::Start => {
+            if !options.messages.is_empty() {
+                return Err("--recoverable accepts one prompt per invocation.".into());
+            }
+            let initial = options
+                .initial_message
+                .filter(|text| !text.trim().is_empty())
+                .ok_or_else(|| "--recoverable requires one nonempty prompt.".to_owned())?;
+            return session
+                .prompt_recoverable(&initial, options.initial_images, options.control.limits())
+                .await
+                .map(Some);
+        }
+        PrintRunRecovery::Resume(run_id) => {
+            if options.initial_message.is_some()
+                || !options.initial_images.is_empty()
+                || !options.messages.is_empty()
+            {
+                return Err("--resume-run takes no new prompt, piped input, or files.".into());
+            }
+            return session.resume_run(&run_id).await.map(Some);
+        }
+        PrintRunRecovery::Disabled => {}
+    }
     if let Some(initial) = options.initial_message.filter(|text| !text.is_empty()) {
         let outcome = session
             .prompt_with_control(&initial, options.initial_images, options.control.clone())
@@ -137,7 +211,7 @@ async fn prompts(session: &AgentSession, options: PrintModeOptions) -> Result<()
             .await?;
         require_finished(outcome)?;
     }
-    Ok(())
+    Ok(None)
 }
 
 fn require_finished(outcome: RunOutcome) -> Result<(), String> {

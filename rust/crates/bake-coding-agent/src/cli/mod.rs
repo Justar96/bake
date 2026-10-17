@@ -77,7 +77,9 @@ use crate::permissions::{
     Approver, NoApprover, PermissionInputs, ToolPermissions, prepare_session_permission,
     sandbox_file_tools, sandboxed_bash_tool,
 };
-use crate::print_mode::{PrintModeOptions, PrintOutput, SharedWriter, run_print_mode, write_out};
+use crate::print_mode::{
+    PrintModeOptions, PrintOutput, PrintRunRecovery, SharedWriter, run_print_mode, write_out,
+};
 use crate::prompt_templates::{LoadPromptTemplatesOptions, load_prompt_templates};
 use crate::session::file::default_session_dir_path;
 use crate::session::id::assert_valid_session_id;
@@ -300,6 +302,9 @@ pub fn plan(
     if let Some(message) = validate_session_id_flags(&parsed) {
         return Action::Exit(error(stderr, &message));
     }
+    if let Some(message) = validate_run_recovery_flags(&parsed) {
+        return Action::Exit(error(stderr, &message));
+    }
     if let Some(name) = &parsed.name
         && normalize_session_name(name).is_none()
     {
@@ -315,6 +320,12 @@ pub fn plan(
             Mode::Text
         }
         None => {
+            if parsed.recoverable || parsed.resume_run.is_some() {
+                return Action::Exit(error(
+                    stderr,
+                    "--recoverable and --resume-run require print mode (--print or --mode)",
+                ));
+            }
             if parsed.max_model_calls.is_some() || parsed.run_timeout_ms.is_some() {
                 return Action::Exit(error(
                     stderr,
@@ -325,6 +336,42 @@ pub fn plan(
         }
     };
     Action::Print(Box::new(parsed), mode)
+}
+
+fn validate_run_recovery_flags(args: &Args) -> Option<String> {
+    if !args.recoverable && args.resume_run.is_none() {
+        return None;
+    }
+    if args.no_session {
+        return Some("Run recovery requires a persisted session; remove --no-session.".into());
+    }
+    if args.recoverable && args.resume_run.is_some() {
+        return Some("--recoverable and --resume-run cannot be combined.".into());
+    }
+    if args.resume_run.is_some() {
+        if !args.session.as_deref().is_some_and(is_session_path) {
+            return Some(
+                "--resume-run requires --session with an explicit session file path.".into(),
+            );
+        }
+        if args.continue_session || args.fork.is_some() || args.session_id.is_some() {
+            return Some(
+                "--resume-run cannot be combined with --continue, --fork, or --session-id.".into(),
+            );
+        }
+        if args.max_model_calls.is_some() || args.run_timeout_ms.is_some() {
+            return Some(
+                "--resume-run restores the recorded budget; new run limits cannot replace it."
+                    .into(),
+            );
+        }
+        if !args.messages.is_empty() || !args.file_args.is_empty() {
+            return Some("--resume-run takes no new prompt or file arguments.".into());
+        }
+    } else if args.messages.len() > 1 {
+        return Some("--recoverable accepts one prompt per invocation.".into());
+    }
+    None
 }
 
 /// Pi's `readPipedStdin`: the trimmed input, or `None` when empty.
@@ -527,6 +574,11 @@ fn create_session_manager(
     if let Some(arg) = &args.session {
         return match resolve_session_path(arg, cwd, session_dir, home) {
             ResolvedSession::Path(path) => {
+                if args.resume_run.is_some() && !path.is_file() {
+                    return Err(SessionStartError::Error(
+                        "--resume-run requires an existing session file.".into(),
+                    ));
+                }
                 SessionManager::open(&path, Some(&dir), None).map_err(failed)
             }
             // Neither mode prompts whether to fork yet; point at `--fork`.
@@ -594,6 +646,11 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
     }
     let max_model_calls = args.max_model_calls;
     let run_timeout_ms = args.run_timeout_ms;
+    let recovery = match (&args.resume_run, args.recoverable) {
+        (Some(run_id), _) => PrintRunRecovery::Resume(run_id.clone()),
+        (_, true) => PrintRunRecovery::Start,
+        _ => PrintRunRecovery::Disabled,
+    };
     let started = match start(environment, args).await {
         Ok(started) => started,
         Err(code) => return code,
@@ -643,6 +700,7 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
             deadline,
             max_model_calls,
         }),
+        recovery,
         mode: match mode {
             Mode::Text => PrintOutput::Text,
             Mode::Json => PrintOutput::Json,
@@ -1724,6 +1782,64 @@ mod tests {
             Action::Interactive(_)
         ));
         assert_eq!(text(&errors), "");
+    }
+
+    #[test]
+    fn recovery_flags_require_one_persisted_selected_run() {
+        for flags in [
+            vec!["-p", "--recoverable", "--no-session", "task"],
+            vec!["-p", "--recoverable", "first", "second"],
+            vec!["-p", "--resume-run", "run-1"],
+            vec!["-p", "--resume-run", "run-1", "--session", "prefix"],
+            vec![
+                "-p",
+                "--resume-run",
+                "run-1",
+                "--session",
+                "session.jsonl",
+                "extra",
+            ],
+            vec![
+                "-p",
+                "--resume-run",
+                "run-1",
+                "--session",
+                "session.jsonl",
+                "--max-model-calls",
+                "9",
+            ],
+            vec![
+                "-p",
+                "--resume-run",
+                "run-1",
+                "--session",
+                "session.jsonl",
+                "--recoverable",
+            ],
+            vec!["--recoverable", "task"],
+        ] {
+            let (stderr, errors) = sink();
+            assert_eq!(
+                plan(&strings(&flags), true, true, &stderr),
+                Action::Exit(1),
+                "{flags:?}"
+            );
+            assert!(!text(&errors).is_empty());
+        }
+        for flags in [
+            vec!["-p", "--recoverable", "--max-model-calls", "9", "task"],
+            vec!["-p", "--resume-run", "run-1", "--session", "session.jsonl"],
+        ] {
+            let (stderr, errors) = sink();
+            assert!(
+                matches!(
+                    plan(&strings(&flags), true, true, &stderr),
+                    Action::Print(_, _)
+                ),
+                "{}",
+                text(&errors)
+            );
+        }
     }
 
     #[test]

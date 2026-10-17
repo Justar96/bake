@@ -19,8 +19,8 @@ use crate::tools::definition::ToolDefinition;
 use crate::tools::edit::create_edit_tool_definition;
 use crate::tools::find::owned_find_tool_definition;
 use crate::tools::grep::owned_grep_tool_definition;
-use crate::tools::ls::create_ls_tool_definition;
-use crate::tools::read::{ReadToolOptions, create_read_tool_definition};
+use crate::tools::ls::owned_ls_tool_definition;
+use crate::tools::read::{ReadToolOptions, owned_read_tool_definition};
 use crate::tools::write::create_write_tool_definition;
 
 /// Pi's `allToolNames`, in Pi's order; `powershell` has no Bake port.
@@ -48,7 +48,8 @@ pub struct ToolsOptions {
     /// `createBashToolDefinition(cwd, options.bash)`. The bash port supplies
     /// it; `None` leaves `bash` out of every set.
     pub bash: Option<ToolDefinition>,
-    /// The owner of the `grep` and `find` tools' processes: the session's
+    /// The owner of `read` and `ls` blocking work and `grep` and `find`
+    /// processes: the session's
     /// [`crate::owned_work::WorkGate`], so its shutdown waits for them.
     /// `None` leaves them unowned. The `bash` tool takes its own owner
     /// ([`BashToolOptions::owner`]).
@@ -75,13 +76,17 @@ pub fn create_tool_definition(
     options: &ToolsOptions,
 ) -> Option<ToolDefinition> {
     match name {
-        "read" => Some(create_read_tool_definition(cwd, options.read.clone())),
+        "read" => Some(owned_read_tool_definition(
+            cwd,
+            options.read.clone(),
+            options.owner.clone(),
+        )),
         "bash" => options.bash.clone(),
         "edit" => Some(create_edit_tool_definition(cwd)),
         "write" => Some(create_write_tool_definition(cwd)),
         "grep" => Some(owned_grep_tool_definition(cwd, options.owner.clone())),
         "find" => Some(owned_find_tool_definition(cwd, options.owner.clone())),
-        "ls" => Some(create_ls_tool_definition(cwd)),
+        "ls" => Some(owned_ls_tool_definition(cwd, options.owner.clone())),
         _ => None,
     }
 }

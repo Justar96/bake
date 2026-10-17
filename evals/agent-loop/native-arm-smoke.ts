@@ -28,7 +28,7 @@ import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { checkpointCodes, noteNames, prompts } from './scenarios.ts'
+import { checkpointCodes, INDEPENDENT_FACTS, INDEPENDENT_NOTES, MASKING_FACTS, maskingProbe, noteNames, prompts } from './scenarios.ts'
 
 const root = resolve(import.meta.dir, '../..')
 const binary = join(root, 'rust/target/debug', `bake-rs${process.platform === 'win32' ? '.exe' : ''}`)
@@ -50,7 +50,7 @@ type Json = any
  * the check; `never` reads `test.cjs` instead, so no injection happens;
  * `raced` sends the read, edit, and check in one response.
  */
-type Mode = 'normal' | 'never' | 'raced' | 'background'
+type Mode = 'normal' | 'never' | 'raced' | 'background' | 'independent' | 'masking' | 'recovery'
 
 /** One Responses SSE stream: `response.created`, the items, and `response.completed` with usage. */
 function stream(id: string, n: number, items: Json[], reported?: { input: number; cached: number; output: number }): string {
@@ -137,6 +137,28 @@ async function smokeNativeArm(): Promise<void> {
       const sampleRoot = join(samplesDir, samples[0]!)
       configuration.push({ settings: JSON.parse(readFileSync(join(sampleRoot, 'home/settings.json'), 'utf8')),
         tools: (body.tools ?? []).map((tool: Json) => tool.name) })
+      if (mode === 'independent' || mode === 'masking') {
+        const summary = !Array.isArray(body.tools) || body.tools.length === 0
+        const n = foregroundTurns.get(sampleRoot) ?? 0
+        const facts = mode === 'independent' ? INDEPENDENT_FACTS : MASKING_FACTS
+        let items: Json[]
+        if (summary) {
+          items = [{ ...FINAL, content: [{ type: 'output_text', text: `Continue the diagnostic chain and preserve the required facts: ${facts.join('; ')}. Finish facts.txt and the money fix.`, annotations: [] }] }]
+        } else {
+          foregroundTurns.set(sampleRoot, n + 1)
+          if (mode === 'independent') {
+            items = n === 0 ? [...INDEPENDENT_NOTES.map((path, i) => call(`fact_${i}`, 'read', { path })), READ]
+              : n === 1 ? [call('facts', 'write', { path: 'facts.txt', content: facts.join('\n') + '\n' }), EDIT, CHECK] : [FINAL]
+          } else {
+            items = n < 20 ? [call(`probe_${n}`, 'grep', { pattern: maskingProbe(n), path: 'diagnostics.log' }),
+              ...n === 0 ? [call('requirements', 'read', { path: 'notes/requirements.txt' }), READ] : []]
+              : n === 20 ? [call('facts', 'write', { path: 'facts.txt', content: facts.join('\n') + '\n' }), EDIT, CHECK] : [FINAL]
+          }
+        }
+        return new Response(stream(`resp_${mode}_${n}_${summary}`, n + 1, items,
+          mode === 'masking' ? { input: Math.ceil(Buffer.byteLength(JSON.stringify(body)) / 4), cached: 0, output: 20 } : undefined),
+        { headers: { 'content-type': 'text/event-stream' } })
+      }
       if (mode === 'background') {
         const summary = !Array.isArray(body.tools) || body.tools.length === 0
         const n = foregroundTurns.get(sampleRoot) ?? 0
@@ -178,13 +200,20 @@ async function smokeNativeArm(): Promise<void> {
     /** Run the evaluator once in `mode`; resolves with its exit code and output. */
     const launch = async (next: Mode, cases: string[], out: string) => {
       mode = next
+      const armSettings = (candidate: boolean) => next === 'background' ? { backgroundCompaction: candidate }
+        : next === 'recovery' ? {}
+          : next === 'masking' ? { backgroundCompaction: false, contextMasking: candidate, defaultTools: ['read', 'write', 'edit', 'bash', 'grep'] }
+          : next === 'independent' ? { maxConcurrentReadTools: candidate ? 4 : 1 }
+            : candidate ? { defaultTools: ['read', 'edit', 'bash'] } : { images: { autoResize: false } }
       // A built environment: no ambient key or home reaches the evaluator or its agents.
       const env = {
         PATH: process.env.PATH ?? '', HOME: home, TMPDIR: samplesDir,
         EVAL_ARMS: `base=native:${binary},candidate=native:${binary}`, EVAL_MODELS: MODEL, EVAL_CASES: cases.join(','),
         EVAL_TRIALS: '1', EVAL_OUTPUT: out, EVAL_CONFIG_HOME: configHome,
-        EVAL_SETTINGS_BASE: JSON.stringify(next === 'background' ? { backgroundCompaction: false } : { images: { autoResize: false } }),
-        EVAL_SETTINGS_CANDIDATE: JSON.stringify(next === 'background' ? { backgroundCompaction: true } : { defaultTools: ['read', 'edit', 'bash'] }),
+        EVAL_SETTINGS_BASE: JSON.stringify(armSettings(false)),
+        EVAL_SETTINGS_CANDIDATE: JSON.stringify(armSettings(true)),
+        EVAL_NATIVE_SESSION_BASE: next === 'recovery' ? 'persistent' : 'memory',
+        EVAL_NATIVE_SESSION_CANDIDATE: next === 'recovery' ? 'recoverable' : 'memory',
       }
       const child = spawn(process.execPath, [RUN], { cwd: temp, env, stdio: ['ignore', 'pipe', 'pipe'] })
       let stdout = ''
@@ -295,6 +324,44 @@ async function smokeNativeArm(): Promise<void> {
     deepStrictEqual(recordDesign.settings.armSettings, { base: '{"backgroundCompaction":false}', candidate: '{"backgroundCompaction":true}' })
     console.log('pass native compaction settings and costs retained by record.ts')
 
+    for (const [mode, scenario] of [['independent', 'independent_reads'], ['masking', 'context_masking'], ['recovery', 'ordinary_edit']] as const) {
+      const paired = await evaluate(mode, [scenario])
+      for (const arm of ['base', 'candidate']) {
+        const { label, sample } = sampleOf(paired, scenario, arm)
+        if (!sample.success || (mode !== 'recovery' && !sample.fixturesUnchanged) || !sample.accounting.matches || !sample.usageComplete) {
+          throw new Error(`${label}: invalid experiment ${JSON.stringify(sample)}`)
+        }
+        if (mode === 'independent') {
+          deepStrictEqual(sample.nativeReadBatches, { batches: 1, multiCallBatches: 1, calls: 5, maxCalls: 5 })
+          deepStrictEqual(sample.nativeSettings, { maxConcurrentReadTools: arm === 'base' ? 1 : 4, retry: { enabled: false } })
+          if (sample.requests !== 3) throw new Error(`${label}: independent fixed-response fixture used ${sample.requests} requests`)
+        } else if (mode === 'masking') {
+          if (sample.nativeSettings.contextMasking !== (arm === 'candidate') || sample.nativeSettings.backgroundCompaction !== false
+            || sample.contextWindow !== 40_000 || sample.requests > 46 || sample.backgroundCompactions.started !== 0
+            || (arm === 'candidate' ? sample.contextMasking.commits < 1 || sample.contextMasking.maskedResults < 1 || sample.contextMasking.removedBytes < 1
+              : sample.contextMasking.commits !== 0)) throw new Error(`${label}: masking was not isolated ${JSON.stringify(sample)}`)
+        } else {
+          const session = sample.nativeSession
+          if (session.mode !== (arm === 'candidate' ? 'recoverable' : 'persistent') || !session.persisted
+            || session.maxModelCalls !== 14 || session.timeoutMs !== 180_000 || sample.requests !== 3
+            || (arm === 'candidate' ? session.recoverableRuns !== 1 || session.journalEntries < 1 : session.recoverableRuns !== 0 || session.journalEntries !== 0)
+            || !paired[`${label}.session.jsonl`]) throw new Error(`${label}: session mode failed ${JSON.stringify(session)}`)
+        }
+        console.log(`pass native ${mode} ${arm}: ${JSON.stringify({ requests: sample.requests, batches: sample.nativeReadBatches, masking: sample.contextMasking, compactions: sample.compactions, session: sample.nativeSession })}`)
+      }
+      const out = join(temp, `record-${mode}`)
+      const saved = spawnSync(process.execPath, [join(import.meta.dir, 'record.ts'), '--raw', join(temp, `out-${mode}`),
+        '--out', out, '--arm', 'base=smoke-base,candidate=smoke-candidate', '--candidate', 'candidate', '--base', 'base'],
+      { cwd: temp, encoding: 'utf8', timeout: 30_000 })
+      if (saved.error || saved.signal || saved.status !== 0) throw new Error(`experiment record failed: ${saved.stderr}`)
+      for (const sample of readFileSync(join(out, 'samples.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line))) {
+        const raw = sampleOf(paired, scenario, sample.arm).sample
+        deepStrictEqual(sample.nativeReadBatches, raw.nativeReadBatches)
+        deepStrictEqual(sample.contextMasking, raw.contextMasking)
+        deepStrictEqual(sample.nativeSession, raw.nativeSession)
+      }
+    }
+
     // Control: with no injection the edit finds no comment, and the evaluator must fail the sample as the agent's.
     injectedBeforeEdit.length = 0
     const never = await evaluate('never', ['stale_edit'])
@@ -327,7 +394,7 @@ async function smokeNativeArm(): Promise<void> {
     }
     console.log('pass native arm stray context file refused')
     console.log(JSON.stringify({ schema: 'bake/native-arm-smoke', version: 2, platform: process.platform, arch: process.arch,
-      samples: 10, requests: received.length, passed: true }))
+      samples: 16, requests: received.length, passed: true }))
   } finally {
     await server.stop(true)
     rmSync(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })

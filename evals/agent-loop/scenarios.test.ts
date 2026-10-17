@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   checkCommandFor, checkpointCodes, compactionBudget, CONTEXT_WINDOWS, EXPLORE_ANSWER, EXTENDED_CASES, fixture, LONG_SESSION_BUDGET,
-  maxRequestsFor, noteNames, PI_COMPACTION, PI_CONTEXT_WINDOWS, PI_RESERVE_TOKENS, piCompactionFor, piContextWindowFor, prompts, REQUEST_FLOORS, requestFloorFor, SKILL_SCENARIOS, slowCheckLine, STANDARD_CASES, SUMMARY_TOOL_RESULT_CHARS, usesSkills, validate,
+  INDEPENDENT_FACTS, INDEPENDENT_NOTES, MASKING_FACTS, maskingProbe, maxRequestsFor, noteNames, PI_COMPACTION, PI_CONTEXT_WINDOWS, PI_RESERVE_TOKENS, piCompactionFor, piContextWindowFor, prompts, REQUEST_FLOORS, requestFloorFor, SKILL_SCENARIOS, slowCheckLine, STANDARD_CASES, SUMMARY_TOOL_RESULT_CHARS, usesSkills, validate,
   type Fixture, type Outcome,
 } from './scenarios.ts'
 
@@ -340,6 +340,37 @@ describe('long_session', () => {
 })
 
 describe('protected fixtures', () => {
+  test('independent reads require every protected fact in source order', () => {
+    const built = build('independent_reads')
+    roundFix(built.workspace)
+    expect(validate('independent_reads', built, outcome()).validated).toBe(false)
+    writeFileSync(join(built.workspace, 'facts.txt'), INDEPENDENT_FACTS.join('\n'))
+    expect(validate('independent_reads', built, outcome()).validated).toBe(true)
+    expect(prompts.independent_reads).toContain('same assistant response')
+    expect(requestFloorFor('independent_reads')).toBe(3)
+    writeFileSync(join(built.workspace, INDEPENDENT_NOTES[0]!), 'changed')
+    expect(validate('independent_reads', built, outcome())).toMatchObject({ validated: false, fixturesUnchanged: false })
+  })
+
+  test('masking fixture protects older unique facts across twenty noisy chained searches', () => {
+    const built = build('context_masking')
+    const diagnostics = readFileSync(join(built.workspace, 'diagnostics.log'), 'utf8')
+    for (let index = 0; index < 20; index++) {
+      const matches = diagnostics.split('\n').filter(line => line.includes(maskingProbe(index)))
+      expect(matches.at(-1)).toBe(`${maskingProbe(index)} NEXT: ${index === 19 ? 'DONE' : maskingProbe(index + 1)}`)
+      expect(matches.join('\n').length).toBeGreaterThan(6000)
+    }
+    expect(PI_COMPACTION.context_masking).toEqual(PI_COMPACTION.background_compaction)
+    expect(PI_CONTEXT_WINDOWS.context_masking).toBe(40_000)
+    roundFix(built.workspace)
+    writeFileSync(join(built.workspace, 'facts.txt'), MASKING_FACTS.slice(1).join('\n'))
+    expect(validate('context_masking', built, outcome()).validated).toBe(false)
+    writeFileSync(join(built.workspace, 'facts.txt'), MASKING_FACTS.join('\n'))
+    expect(validate('context_masking', built, outcome()).validated).toBe(true)
+    writeFileSync(join(built.workspace, 'diagnostics.log'), diagnostics + 'changed\n')
+    expect(validate('context_masking', built, outcome())).toMatchObject({ validated: false, fixturesUnchanged: false })
+  })
+
   test('background compaction has a positive early band and protected twenty-note output', () => {
     const built = build('background_compaction')
     const window = PI_CONTEXT_WINDOWS.background_compaction!
