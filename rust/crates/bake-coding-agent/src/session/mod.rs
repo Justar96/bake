@@ -21,6 +21,7 @@
 //! | [`json`] | `JSON.stringify` and JavaScript value semantics |
 //! | [`json_line`] | `JSON.parse` of one line |
 //! | [`time`] | `Date.prototype.toISOString` and `Date.parse` |
+//! | [`unanswered`] | `ai/src/api/transform-messages.ts` (v1.3.0, its orphaned tool-call rule) |
 //!
 //! # Format
 //!
@@ -116,6 +117,7 @@ pub mod messages;
 pub mod paths;
 pub mod search;
 pub mod time;
+pub mod unanswered;
 
 use std::fmt;
 use std::io;
@@ -141,6 +143,7 @@ pub use manager::{
     GroupEntry, GroupWriteError, NewSessionOptions, SessionManager, SessionTree, SessionTreeNode,
 };
 pub use messages::{AgentMessage, OpaqueMessage};
+pub use unanswered::{UnansweredToolCall, build_unanswered_tool_calls, unanswered_tool_calls};
 
 /// A session operation's failure.
 #[derive(Debug)]
