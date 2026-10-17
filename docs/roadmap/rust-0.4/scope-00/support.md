@@ -214,7 +214,7 @@ Selection lives in [sandbox-local](../../../../packages/sandbox/sandbox-local/RE
 | Runtime watchdog | Samples V8 heap and event-loop delay and writes rate-limited records | Replace with native measurements; keep the file location and the no-stdout rule |
 | Late rejections | Appended to `rejections.*.jsonl`; the session continues | Native equivalent for task panics: record, notify, continue |
 | Update check | Hourly cached check, counted by the download service; `BAKE_NO_UPDATE_CHECK=1` disables both | Native parity |
-| Self-check | Hidden `--self-check` loads the shipped profiles, preset plugins, and runner modules ([self-check](../../../../apps/cli/src/self-check.ts), [test](../../../../apps/cli/tests/self-check.e2e.ts)) | Native parity, and still runnable by old updaters |
+| Self-check | Hidden `--self-check` loads the shipped profiles, preset plugins, and runner modules ([self-check](../../../../apps/cli/src/self-check.ts), [test](../../../../apps/cli/tests/self-check.e2e.ts)) | Native replacement, not parity: `bake-rs --self-check` prints a versioned JSON record of its Cargo version, release platform, and embedded documentation hashes, which the native packager checks ([distribution](../../../../distribution/README.md#native-preview-archive)). A 0.3 updater never runs it ([D32](#decision-register)); a native updater's launch check is still to be built |
 
 ### Packaging, update, and rollback
 
@@ -227,7 +227,7 @@ Scope 16 qualifies these native obligations:
 3. Preserve user-owned aliases and prevent the installer from taking a command link owned by another install.
 4. Keep TypeScript and Rust publication routes separate. The existing 0.3 `latest.json` route must not serve Rust archives to its updater. A 0.3 publication cannot replace a native stable manifest, a publication cannot move a channel to an older version, and D13 forbids new 0.3 publication after 0.4.0 ships.
 
-The native archive layout and publication routes still need implementation and tests. No preparatory TypeScript-to-Rust updater or shared Session-format compatibility layer is required.
+A local, host-only preview of the native archive layout and its self-check exists ([distribution](../../../../distribution/README.md#native-preview-archive)); it is unsigned, unpublished, and not yet a release layout, since it lacks the Cargo dependencies' license texts. Signing, installation, publication routes, update and rollback, and the five-platform rehearsal still need implementation and tests. No preparatory TypeScript-to-Rust updater or shared Session-format compatibility layer is required.
 
 ## Profile support and native extension strategy
 

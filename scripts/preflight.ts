@@ -288,6 +288,11 @@ export const STEPS: readonly Step[] = [
       : bun('run', 'test:rust:pty'),
   },
   {
+    name: 'rust-package', phase: 'e2e', group: 'native', needsBuild: true, buildStep: 'rust',
+    summary: 'native preview archive of the debug bake-rs, unpacked and run without Node or Bun',
+    command: () => bun('run', 'test:rust:package'),
+  },
+  {
     name: 'rust-eval', phase: 'e2e', group: 'native', needsBuild: true, buildStep: 'rust',
     summary: 'compiled Rust eval fixture arm, tamper rejection, and the keyless native bake-rs arm',
     command: () => bun('run', 'test:rust:eval'),

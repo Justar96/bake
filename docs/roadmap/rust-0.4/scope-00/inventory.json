@@ -1309,6 +1309,7 @@
     {"path":"scripts/release/installer-animation.test.ts","lane":"bun-scripts","owner":"scripts:release","scopes":["16"],"disposition":"replace-tooling","basis":"scripts:release"},
     {"path":"scripts/release/launcher.test.ts","lane":"bun-scripts","owner":"scripts:release","scopes":["16"],"disposition":"replace-tooling","basis":"scripts:release"},
     {"path":"scripts/release/manifest.test.ts","lane":"bun-scripts","owner":"scripts:release","scopes":["16"],"disposition":"replace-tooling","basis":"scripts:release"},
+    {"path":"scripts/release/pack-rust.test.ts","lane":"bun-scripts","owner":"scripts:release","scopes":["16"],"disposition":"replace-tooling","basis":"scripts:release"},
     {"path":"scripts/release/permissions.test.ts","lane":"bun-scripts","owner":"scripts:release","scopes":["16"],"disposition":"replace-tooling","basis":"scripts:release"},
     {"path":"scripts/release/prepare.test.ts","lane":"bun-scripts","owner":"scripts:release","scopes":["16"],"disposition":"replace-tooling","basis":"scripts:release"},
     {"path":"scripts/release/server.test.ts","lane":"bun-scripts","owner":"scripts:release","scopes":["16"],"disposition":"replace-tooling","basis":"scripts:release"},

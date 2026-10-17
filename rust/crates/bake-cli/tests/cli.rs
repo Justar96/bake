@@ -176,7 +176,8 @@ fn flags_named_in_the_docs_are_accepted() {
                 help.contains(&flag),
                 "{topic} names {flag}, which --help omits"
             );
-            if flag == "--inline" {
+            // Commands of the binary, not options of the agent command line.
+            if flag == "--inline" || flag == "--self-check" {
                 continue;
             }
             let args = bake_coding_agent::cli::parse_args(&[flag.clone(), "x".into()]);

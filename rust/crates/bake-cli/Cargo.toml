@@ -16,6 +16,7 @@ bake-coding-agent.workspace = true
 bake-sandbox.workspace = true
 bake-tui.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "signal", "macros"] }
-
-[dev-dependencies]
+# `--self-check`: its JSON record, and the SHA-256 of each embedded
+# documentation topic. Both are already in the binary through `bake-ai`.
 serde_json.workspace = true
+ring.workspace = true
