@@ -171,6 +171,43 @@ fn a_failed_replace_keeps_the_original_and_removes_its_temporary_file() {
     assert_eq!(read_json(&path), json!({ "keep": true, "a": 1 }));
 }
 
+/// The check sees the handle the update read, after the read: a refusal
+/// writes nothing and keeps the lock free, and a missing file is not
+/// checked.
+#[test]
+fn a_checked_update_checks_the_handle_it_read() {
+    use std::io::Seek;
+    let dir = TempDir::new("json-store-checked");
+    let path = dir.join("data.json");
+    let store = JsonFileStore::new(path.clone(), LIMIT);
+    let unchecked = |_: &File| -> Result<(), String> { panic!("no file to check") };
+    store
+        .update_checked(unchecked, |object| set_member(object, "a", json!(1)))
+        .expect("create");
+    // Contents written after the read reach the handle but not the update.
+    let later = path.clone();
+    let store = store.with_hook(Stage::AfterRead, move || {
+        fs::write(&later, "{\"b\":2}").expect("write");
+    });
+    let error = store
+        .update_checked(
+            |file| {
+                let mut text = String::new();
+                let mut file = file;
+                file.rewind().map_err(|error| error.to_string())?;
+                file.read_to_string(&mut text)
+                    .map_err(|error| error.to_string())?;
+                Err(format!("saw {text}"))
+            },
+            |object| set_member(object, "c", json!(3)),
+        )
+        .expect_err("refused");
+    assert!(!error.is_committed());
+    assert!(error.to_string().contains("saw {\"b\":2}"), "{error}");
+    assert_eq!(read_json(&path), json!({ "b": 2 }));
+    set_a(&JsonFileStore::new(path.clone(), LIMIT)).expect("lock released");
+}
+
 #[test]
 fn an_update_removes_temporary_files_left_by_a_dead_writer() {
     let dir = TempDir::new("json-store-orphans");
@@ -552,7 +589,10 @@ fn a_replacement_keeps_the_dacl() {
     let before = icacls(&[path.as_os_str()]);
     assert!(protected(&path));
     let store = JsonFileStore::new(path.clone(), LIMIT);
-    let current = store.read_current().expect("read").expect("existing");
+    let current = store
+        .read_current(|_| Ok(()))
+        .expect("read")
+        .expect("existing");
     let temp = store.create_temp().expect("stage");
     let file = temp.file.as_ref().expect("open stage");
     store

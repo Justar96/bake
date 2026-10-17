@@ -30,50 +30,33 @@
 //!   inside the session's workspace, nor the workspace inside it, where the
 //!   agent's own file tools under `workspace-write` could change it; nor
 //!   inside a git working tree (a directory with a `.git` entry), so a
-//!   repository's files never become plugin configuration. The sandbox's
+//!   repository's files never become plugin configuration. Directories are
+//!   compared by device and inode: those of the plugins directory and every
+//!   directory above it as opened by [`open_dir`], and those of the
+//!   workspace and its ancestors as `stat` finds them by its canonical path
+//!   when the check runs. Each opened directory is probed for `.git`
+//!   relative to its descriptor; an error other than "not found" refuses
+//!   the placement rather than reading as no repository. The sandbox's
 //!   other writable roots, such as temporary directories, are not checked,
 //!   and `danger-full-access`, or anything else running as the user, can
 //!   change whatever the user can.
+//! - **Updates** ([`TrustedDir::check_same_file`]): management checks the
+//!   configuration it changes on the handle the update read under its lock,
+//!   by opening the file again through the checked directories and
+//!   requiring the same device and inode, so it never rewrites contents
+//!   read from another object than the one checked.
 //!
 //! The checks bound who other than the user can change the files. They say
 //! nothing about the user's own processes; a store copy's integrity is its
 //! rehash at every read, and its read-only bits only keep accidental
 //! writes out.
 
-use std::path::Path;
-
 /// Whether this platform checks ownership and permissions. Where it does
 /// not, a configuration that enables a plugin is refused.
 pub(super) const SUPPORTED: bool = cfg!(any(target_os = "linux", target_os = "macos"));
 
-/// Checks that `root`, the canonical plugins directory, is outside
-/// `workspace` and any git working tree.
-pub(super) fn check_outside(root: &Path, workspace: Option<&Path>) -> Result<(), String> {
-    if let Some(workspace) = workspace {
-        let workspace = std::fs::canonicalize(workspace)
-            .map_err(|error| format!("cannot resolve {}: {error}", workspace.display()))?;
-        if root.starts_with(&workspace) || workspace.starts_with(root) {
-            return Err(format!(
-                "{} overlaps the session's workspace {}, where the agent's tools can change it; set BAKE_HOME outside the workspace",
-                root.display(),
-                workspace.display()
-            ));
-        }
-    }
-    for dir in root.ancestors() {
-        if std::fs::symlink_metadata(dir.join(".git")).is_ok() {
-            return Err(format!(
-                "{} is inside the git working tree {}, whose files are not plugin configuration; set BAKE_HOME outside any repository",
-                root.display(),
-                dir.display()
-            ));
-        }
-    }
-    Ok(())
-}
-
 #[cfg(unix)]
-pub(super) use unix::open_dir;
+pub(super) use unix::{TrustedPath, check_outside, open_dir};
 
 #[cfg(unix)]
 mod unix {
@@ -85,7 +68,7 @@ mod unix {
     use std::os::unix::fs::MetadataExt;
     use std::path::{Component, Path, PathBuf};
 
-    /// A directory opened and checked with every directory above it.
+    /// A directory opened and checked, with every directory above it.
     #[derive(Debug)]
     pub(in super::super) struct TrustedDir {
         fd: OwnedFd,
@@ -93,10 +76,71 @@ mod unix {
         user: u32,
     }
 
+    /// A directory opened by [`open_dir`] and the opened, checked
+    /// directories above it, from `/` down.
+    #[derive(Debug)]
+    pub(in super::super) struct TrustedPath {
+        above: Vec<TrustedDir>,
+        dir: TrustedDir,
+    }
+
+    impl TrustedPath {
+        /// The directory itself.
+        pub(in super::super) fn dir(&self) -> &TrustedDir {
+            &self.dir
+        }
+
+        /// The directory, then each directory above it up to `/`.
+        fn upwards(&self) -> impl Iterator<Item = &TrustedDir> {
+            std::iter::once(&self.dir).chain(self.above.iter().rev())
+        }
+    }
+
+    /// Checks that the opened plugins directory `root` is outside
+    /// `workspace` and any git working tree, as the module documentation
+    /// describes. Blocks.
+    pub(in super::super) fn check_outside(
+        root: &TrustedPath,
+        workspace: Option<&Path>,
+    ) -> Result<(), String> {
+        let shown = root.dir.path.display();
+        if let Some(workspace) = workspace {
+            let canonical = std::fs::canonicalize(workspace)
+                .map_err(|error| format!("cannot resolve {}: {error}", workspace.display()))?;
+            let mut ids = Vec::new();
+            for dir in canonical.ancestors() {
+                let metadata = std::fs::metadata(dir)
+                    .map_err(|error| format!("cannot inspect {}: {error}", dir.display()))?;
+                ids.push((metadata.dev(), metadata.ino()));
+            }
+            // The workspace lies in the plugins directory, or the plugins
+            // directory in the workspace.
+            let mut overlaps = ids.contains(&root.dir.id()?);
+            for dir in root.upwards() {
+                overlaps |= ids.first() == Some(&dir.id()?);
+            }
+            if overlaps {
+                return Err(format!(
+                    "{shown} overlaps the session's workspace {}, where the agent's tools can change it; set BAKE_HOME outside the workspace",
+                    canonical.display()
+                ));
+            }
+        }
+        for dir in root.upwards() {
+            if dir.has_entry(".git")? {
+                return Err(format!(
+                    "{shown} is inside the git working tree {}, whose files are not plugin configuration; set BAKE_HOME outside any repository",
+                    dir.path.display()
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// Opens and checks the directory `path` and every directory above it,
     /// as the module documentation describes; `None` when part of it does
     /// not exist. Blocks.
-    pub(in super::super) fn open_dir(path: &Path) -> Result<Option<TrustedDir>, String> {
+    pub(in super::super) fn open_dir(path: &Path) -> Result<Option<TrustedPath>, String> {
         // SAFETY: no arguments, cannot fail.
         let user = unsafe { libc::geteuid() };
         let given = std::path::absolute(path)
@@ -125,26 +169,22 @@ mod unix {
             user,
         };
         dir.check(true)?;
+        let mut above = Vec::new();
         for component in canonical.components() {
             match component {
                 Component::RootDir => {}
                 Component::Normal(name) => match dir.dir(Path::new(name))? {
-                    Some(next) => dir = next,
+                    Some(next) => above.push(std::mem::replace(&mut dir, next)),
                     None => return Ok(None),
                 },
                 // `canonicalize` leaves none of these.
                 _ => return Err(format!("cannot resolve {}", canonical.display())),
             }
         }
-        Ok(Some(dir))
+        Ok(Some(TrustedPath { above, dir }))
     }
 
     impl TrustedDir {
-        /// The canonical path this directory was opened at.
-        pub(in super::super) fn path(&self) -> &Path {
-            &self.path
-        }
-
         /// Opens and checks the subdirectory `name`; `None` when it does
         /// not exist. Blocks.
         pub(in super::super) fn dir(&self, name: &Path) -> Result<Option<TrustedDir>, String> {
@@ -200,19 +240,97 @@ mod unix {
             Ok(Some(bytes))
         }
 
+        /// Checks the regular file `name` as [`Self::read`] does, and that
+        /// it is the object `file` has open: the same device and inode. An
+        /// update checks the handle it read from this way, after reading,
+        /// so contents read from a replaced or swapped entry are refused.
+        /// Blocks.
+        pub(in super::super) fn check_same_file(
+            &self,
+            name: &str,
+            file: &File,
+        ) -> Result<(), String> {
+            let path = self.path.join(name);
+            let fd = match self.open(Path::new(name), libc::O_NONBLOCK) {
+                Ok(fd) => fd,
+                Err(error) if error.raw_os_error() == Some(libc::ELOOP) => {
+                    return Err(format!("{} is a symbolic link", path.display()));
+                }
+                Err(error) => return Err(format!("cannot open {}: {error}", path.display())),
+            };
+            let checked = TrustedDir {
+                fd,
+                path,
+                user: self.user,
+            };
+            checked.check(false)?;
+            let read = file
+                .metadata()
+                .map_err(|error| format!("cannot inspect {}: {error}", checked.path.display()))?;
+            if checked.id()? != (read.dev(), read.ino()) {
+                return Err(format!(
+                    "{} was replaced while it was read; try again",
+                    checked.path.display()
+                ));
+            }
+            Ok(())
+        }
+
         fn open(&self, name: &Path, flags: libc::c_int) -> std::io::Result<OwnedFd> {
             open(Some(&self.fd), name, flags)
         }
 
-        /// Checks the opened object: its type, owner, mode, and ACL.
-        fn check(&self, directory: bool) -> Result<(), String> {
-            let metadata = File::from(
+        fn metadata(&self) -> Result<std::fs::Metadata, String> {
+            File::from(
                 self.fd
                     .try_clone()
                     .map_err(|error| format!("cannot inspect {}: {error}", self.path.display()))?,
             )
             .metadata()
-            .map_err(|error| format!("cannot inspect {}: {error}", self.path.display()))?;
+            .map_err(|error| format!("cannot inspect {}: {error}", self.path.display()))
+        }
+
+        /// The opened object's device and inode.
+        fn id(&self) -> Result<(u64, u64), String> {
+            let metadata = self.metadata()?;
+            Ok((metadata.dev(), metadata.ino()))
+        }
+
+        /// Whether this directory has an entry `name`, not following a
+        /// link; an error other than "not found" is an error, not absence.
+        fn has_entry(&self, name: &str) -> Result<bool, String> {
+            let path = self.path.join(name);
+            let c_name = CString::new(name)
+                .map_err(|_| format!("cannot inspect {}: a NUL in the name", path.display()))?;
+            // SAFETY: an all-zero `stat` is valid output space.
+            let mut stat: libc::stat = unsafe { std::mem::zeroed() };
+            // SAFETY: an open directory descriptor, a NUL-terminated name,
+            // and that space.
+            let result = unsafe {
+                libc::fstatat(
+                    self.fd.as_raw_fd(),
+                    c_name.as_ptr(),
+                    &mut stat,
+                    libc::AT_SYMLINK_NOFOLLOW,
+                )
+            };
+            if result == 0 {
+                return Ok(true);
+            }
+            let error = std::io::Error::last_os_error();
+            if error.kind() == std::io::ErrorKind::NotFound {
+                Ok(false)
+            } else {
+                Err(format!(
+                    "cannot check {} for a git working tree: {error}",
+                    self.path.display()
+                ))
+            }
+        }
+
+        /// Checks the opened object: its type, owner, mode, and ACL.
+        fn check(&self, directory: bool) -> Result<(), String> {
+            let metadata = self.metadata()?;
             if directory != metadata.is_dir() || !(directory || metadata.is_file()) {
                 return Err(format!(
                     "{} is not a {}",

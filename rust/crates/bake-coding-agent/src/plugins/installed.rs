@@ -43,7 +43,9 @@
 //! must be owned by the user or root and not writable by others: by mode
 //! bits, and on macOS by no ACL entry that allows writing. While any
 //! plugin is enabled the plugins directory must lie outside the session's
-//! workspace and outside any git working tree. An untrusted `plugins.json`
+//! workspace and outside any git working tree. `enable`, `disable`, and a
+//! failure record check the file inside the update's lock, on the handle
+//! whose bytes they change. An untrusted `plugins.json`
 //! or placement stops the session's setup; an untrusted store copy makes
 //! that plugin unloadable, so its tools stay blocked. Owners and ACLs are
 //! checked on Linux and macOS only: elsewhere, Windows included, `enable`
@@ -84,6 +86,12 @@ pub const MAX_ENABLED: usize = 16;
 
 /// The store's directory within [`PLUGINS_DIR`].
 const STORE_DIR: &str = "store";
+
+/// The opened plugins directory a configuration was read from.
+#[cfg(unix)]
+type Opened = trust::TrustedPath;
+#[cfg(not(unix))]
+type Opened = std::convert::Infallible;
 
 /// Why no plugin can be enabled where [`trust::SUPPORTED`] is false.
 const UNSUPPORTED: &str = "bake-rs cannot yet check who can change plugin files on this platform (it checks owners and permissions on Linux and macOS only), so it enables no plugin here";
@@ -316,11 +324,11 @@ impl PluginHome {
         Ok(self.read_config()?.0)
     }
 
-    /// [`Self::enabled`], and on Unix the canonical plugins directory the
-    /// file was read from, when it exists.
+    /// [`Self::enabled`], and on Unix the opened plugins directory the file
+    /// was read from, when it exists.
     fn read_config(
         &self,
-    ) -> Result<(BTreeMap<String, EnabledPlugin>, Option<PathBuf>), PluginHomeError> {
+    ) -> Result<(BTreeMap<String, EnabledPlugin>, Option<Opened>), PluginHomeError> {
         let empty = || Ok((BTreeMap::new(), None));
         // A home without the file enables nothing and is not checked, so
         // an empty home works anywhere.
@@ -336,12 +344,13 @@ impl PluginHome {
                 return empty();
             };
             let Some(bytes) = root
+                .dir()
                 .read(CONFIG_FILE, MAX_CONFIG_BYTES as usize)
                 .map_err(|reason| self.untrusted(reason))?
             else {
                 return empty();
             };
-            (bytes, Some(root.path().to_owned()))
+            (bytes, Some(root))
         };
         #[cfg(not(unix))]
         let (bytes, root) = match read_regular(&self.config_path(), MAX_CONFIG_BYTES as usize) {
@@ -361,37 +370,71 @@ impl PluginHome {
         Ok((plugins, root))
     }
 
-    /// Checks an existing configuration's trust before updating it under
-    /// the store's lock. A private replacement must not endorse records
-    /// read from a file others could change. Writes only for `Ok(true)`.
-    /// A committed write whose directory flush fails still reports the
-    /// error: the new contents are visible but their durability is unknown.
-    /// Blocks.
+    /// Updates the configuration under the store's lock. On Unix an
+    /// existing file is first checked through the [trust checks](trust)
+    /// on the handle its bytes were read from, under that lock
+    /// ([`trust::TrustedDir::check_same_file`]): a replacement, which keeps
+    /// the file's access, must not carry records read from a file others
+    /// could change, or from another object than the one checked. Writes
+    /// only for `Ok(true)`. A committed write whose directory flush fails
+    /// still reports the error: the new contents are visible but their
+    /// durability is unknown. Blocks.
     fn update<T>(
         &self,
         change: impl FnOnce(&mut ConfigFile) -> Result<(bool, T), PluginHomeError>,
     ) -> Result<T, PluginHomeError> {
-        #[cfg(unix)]
-        self.read_config()?;
+        self.update_in(&self.store(), change)
+    }
+
+    /// [`Self::update`] through `store`, which tests give a hook.
+    fn update_in<T>(
+        &self,
+        store: &JsonFileStore,
+        change: impl FnOnce(&mut ConfigFile) -> Result<(bool, T), PluginHomeError>,
+    ) -> Result<T, PluginHomeError> {
         let mut outcome = None;
-        let updated = self.store().update(|object| {
-            let parsed =
-                parse_config(std::mem::take(object)).map_err(|reason| self.invalid(reason));
-            let result = parsed.and_then(|mut config| {
-                let changed = change(&mut config);
-                *object = to_object(&config);
-                changed
-            });
-            let write = matches!(result, Ok((true, _)));
-            outcome = Some(result.map(|(_, value)| value));
-            write
-        });
+        let updated = store.update_checked(
+            |file| self.check_read(file),
+            |object| {
+                let parsed =
+                    parse_config(std::mem::take(object)).map_err(|reason| self.invalid(reason));
+                let result = parsed.and_then(|mut config| {
+                    let changed = change(&mut config);
+                    *object = to_object(&config);
+                    changed
+                });
+                let write = matches!(result, Ok((true, _)));
+                outcome = Some(result.map(|(_, value)| value));
+                write
+            },
+        );
         match (updated, outcome) {
             (Ok(_), Some(outcome)) => outcome,
             // Refused before `change` ran (the file is not a regular JSON
             // object), or the write failed.
             (Err(failure), _) => Err(error(failure.to_string())),
             (Ok(_), None) => Err(error("the update did not run")),
+        }
+    }
+
+    /// Checks the configuration an update read through `file`. Unix only:
+    /// elsewhere no owner is checked, and a configuration that enables a
+    /// plugin is refused when enabling and loading instead.
+    fn check_read(&self, file: &std::fs::File) -> Result<(), String> {
+        #[cfg(unix)]
+        {
+            let untrusted = |reason: String| format!("it is not trusted: {reason}");
+            let root = trust::open_dir(&self.root)
+                .map_err(untrusted)?
+                .ok_or_else(|| untrusted("its directory no longer exists".to_owned()))?;
+            root.dir()
+                .check_same_file(CONFIG_FILE, file)
+                .map_err(untrusted)
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = file;
+            Ok(())
         }
     }
 
@@ -429,13 +472,15 @@ impl PluginHome {
                     dir.display()
                 ))
             };
-            let mut copy = trust::open_dir(&self.root).map_err(untrusted)?;
-            for name in [STORE_DIR, sha256] {
-                copy = match copy {
-                    Some(parent) => parent.dir(Path::new(name)).map_err(untrusted)?,
-                    None => None,
-                };
-            }
+            let root = trust::open_dir(&self.root).map_err(untrusted)?;
+            let mut copy = match root {
+                Some(root) => root.dir().dir(Path::new(STORE_DIR)).map_err(untrusted)?,
+                None => None,
+            };
+            copy = match copy {
+                Some(store) => store.dir(Path::new(sha256)).map_err(untrusted)?,
+                None => None,
+            };
             let copy = copy.ok_or_else(not_installed)?;
             let read = |name: &str, limit: usize| {
                 copy.read(name, limit)
@@ -600,8 +645,14 @@ impl PluginHome {
                     "{UNSUPPORTED}. Run `bake-rs plugin disable` for each enabled plugin, or remove the file"
                 )));
             }
-            let root = root.ok_or_else(|| self.untrusted("its directory cannot be resolved"))?;
-            trust::check_outside(&root, workspace).map_err(|reason| self.untrusted(reason))?;
+            #[cfg(unix)]
+            {
+                let root =
+                    root.ok_or_else(|| self.untrusted("its directory cannot be resolved"))?;
+                trust::check_outside(&root, workspace).map_err(|reason| self.untrusted(reason))?;
+            }
+            #[cfg(not(unix))]
+            let _ = (root, workspace);
         }
         let mut registry = PluginRegistry::new();
         let mut warnings = Vec::new();

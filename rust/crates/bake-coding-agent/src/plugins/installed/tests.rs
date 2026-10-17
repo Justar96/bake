@@ -563,3 +563,116 @@ fn management_does_not_make_an_untrusted_configuration_private() {
         0o620
     );
 }
+
+/// An update checks the object it read its contents from, under its lock:
+/// an entry swapped for one others can write before the read, the mode of
+/// the object read changed after it, or the entry swapped for a private
+/// file after an untrusted one was read are each refused, and the file is
+/// left as it was. The hooks run at fixed points under the update's lock.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn an_update_checks_the_object_it_read_under_its_lock() {
+    use crate::json_store::Stage;
+    use std::os::unix::fs::PermissionsExt;
+    let mode_of = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+    let set_mode = |path: &Path, bits: u32| {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(bits)).unwrap();
+    };
+    let dir = TempDir::new("plugin-update-bound");
+    let home = PluginHome::new(&dir.join("home"));
+    let installed = home.install(&guard()).unwrap();
+    home.enable(&installed.sha256).unwrap();
+    let path = home.config_path();
+    let disable = |config: &mut ConfigFile| {
+        let removed = config.plugins.remove("guard");
+        Ok((removed.is_some(), ()))
+    };
+    let swap_in = |bits: u32| {
+        let replacement = dir.path().join(format!("replacement-{bits:o}.json"));
+        std::fs::write(&replacement, std::fs::read(&path).unwrap()).unwrap();
+        set_mode(&replacement, bits);
+        let path = path.clone();
+        move || std::fs::rename(&replacement, &path).unwrap()
+    };
+
+    // Before the read, the entry becomes a file others can write. The
+    // file is trusted when the update starts, so a check before the lock
+    // would pass: the control shows that.
+    assert!(home.enabled().is_ok());
+    let store = home.store().with_hook(Stage::BeforeOpen, swap_in(0o620));
+    let error = home.update_in(&store, disable).unwrap_err().to_string();
+    assert!(error.contains("is not trusted"), "{error}");
+    assert_eq!(mode_of(&path), 0o620);
+    assert!(std::fs::read_to_string(&path).unwrap().contains("guard"));
+
+    // After the read, the object read becomes writable by others.
+    set_mode(&path, 0o600);
+    let hooked = path.clone();
+    let store = home
+        .store()
+        .with_hook(Stage::AfterRead, move || set_mode(&hooked, 0o620));
+    let error = home.update_in(&store, disable).unwrap_err().to_string();
+    assert!(error.contains("writable by its group"), "{error}");
+    assert_eq!(mode_of(&path), 0o620);
+
+    // An untrusted file is read, then a private file takes its name: the
+    // name checks out, but it is not the object read.
+    let store = home.store().with_hook(Stage::AfterRead, swap_in(0o600));
+    let error = home.update_in(&store, disable).unwrap_err().to_string();
+    assert!(error.contains("was replaced while it was read"), "{error}");
+    assert!(home.enabled().unwrap().contains_key("guard"));
+
+    // Undisturbed, the same update goes through.
+    assert_eq!(mode_of(&path), 0o600);
+    home.update_in(&home.store(), disable).unwrap();
+    assert!(home.enabled().unwrap().is_empty());
+}
+
+/// Same-file checks compare objects, not names: an open handle on another
+/// private file with the same contents is refused.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn the_same_file_check_compares_opened_objects() {
+    let dir = TempDir::new("plugin-same-file");
+    let home = PluginHome::new(&dir.join("home"));
+    let installed = home.install(&guard()).unwrap();
+    home.enable(&installed.sha256).unwrap();
+    let copy = dir.join("copy.json");
+    std::fs::copy(home.config_path(), &copy).unwrap();
+    let root = trust::open_dir(&home.root).unwrap().unwrap();
+    let same = std::fs::File::open(home.config_path()).unwrap();
+    assert!(root.dir().check_same_file(CONFIG_FILE, &same).is_ok());
+    let other = std::fs::File::open(&copy).unwrap();
+    let error = root.dir().check_same_file(CONFIG_FILE, &other).unwrap_err();
+    assert!(error.contains("was replaced while it was read"), "{error}");
+}
+
+/// A `.git` probe that fails for a reason other than absence refuses the
+/// placement. A directory above the home that the user cannot search makes
+/// the probe fail with `EACCES`, which a path-based existence test would
+/// read as no repository. Root searches any directory, so the case needs
+/// an unprivileged user.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn an_unknown_git_probe_error_refuses_the_placement() {
+    use std::os::unix::fs::PermissionsExt;
+    // SAFETY: no arguments, cannot fail.
+    if unsafe { libc::geteuid() } == 0 {
+        eprintln!("skipped: root bypasses directory search permission");
+        return;
+    }
+    let dir = TempDir::new("plugin-git-probe");
+    let home = PluginHome::new(&dir.join("home"));
+    home.install(&guard()).unwrap();
+    let root = trust::open_dir(&home.root).unwrap().unwrap();
+    assert!(trust::check_outside(&root, None).is_ok());
+    let above = dir.join("home");
+    std::fs::set_permissions(&above, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let result = trust::check_outside(&root, None);
+    std::fs::set_permissions(&above, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let error = result.unwrap_err();
+    assert!(
+        error.contains("cannot check") && error.contains("for a git working tree"),
+        "{error}"
+    );
+}
