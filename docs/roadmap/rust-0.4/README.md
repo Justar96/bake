@@ -279,23 +279,23 @@ Each scope below specifies implementation, review order, and observable proof. S
 
 ### 16 — Distribution and updates
 
-**Implement:** native archives for `darwin-arm64`, `darwin-x64`, `linux-arm64`, `linux-x64`, and `win32-x64`; signed manifests; installer/launcher changes; self-check; atomic update/rollback; release retention; and version/channel handling agreed in scope 00. Test old updaters' assumptions about Node entry points and archive layout before changing the layout. The transition route is open ([D14](scope-00/support.md#decision-register)), and it must end in Rust-only shipped artifacts.
+**Implement:** native archives for `darwin-arm64`, `darwin-x64`, `linux-arm64`, `linux-x64`, and `win32-x64`; signed manifests; native installers and self-check; atomic native update/rollback; release retention; and separate publication routes. D32 requires a new install and excludes TypeScript-to-Rust upgrades ([D14](scope-00/support.md#decision-register)). Existing 0.3 updaters must remain on TypeScript.
 
-**PR order:** package layout and self-check → updater/installers → old-to-new transition/rollback → five-target release rehearsal. Remove the Node prerequisite only after a no-Node host test succeeds; 0.4 archives ship no Node runtime.
+**PR order:** native package layout and self-check → native installer and publication channels → native updater/rollback → five-target release rehearsal. Prove installation on a host without Node; Rust archives contain no Node runtime or TypeScript product code.
 
-**Proof:** install from an empty home, update from the oldest supported updater and latest 0.3, restart/resume, then roll back. Corrupt signatures/hashes, truncated archives, disk-full, concurrent update, held Windows executables, interrupted pointer switching, and failed candidate self-check must preserve the working install. Leave a 0.3 install's `dsh --profile desktop` launch and user-owned aliases working. Use ephemeral signing keys in tests. Anchors: [distribution](../../../distribution/README.md), [release tooling](../../../scripts/release/), and [updater](../../../packages/boot/updater/tests/).
+**Proof:** install from an empty home, update between native 0.4 releases, restart/resume, and roll back across each supported native data boundary. Corrupt signatures/hashes, truncated archives, disk-full, concurrent update, held Windows executables, interrupted pointer switching, and failed candidate self-check must preserve the working native install. A fresh install beside 0.3 must leave its executable, data, and command links working and preserve user-owned aliases. Test that publication cannot route a Rust archive to a 0.3 updater or move either channel backward. Use ephemeral signing keys in tests. Anchors: [distribution](../../../distribution/README.md), [release tooling](../../../scripts/release/), and the [support register](scope-00/support.md#packaging-update-and-rollback).
 
-**Rollback:** a validated 0.3 executable and its readable data remain available; switching a binary alone does not prove data rollback.
+**Rollback:** a previously qualified native executable and usable native data remain available. Switching the binary alone does not prove data rollback; no rollback into TypeScript is required.
 
 ### 17 — Qualification and cutover
 
-**Implement:** close the support matrix, refresh oracle comparisons with intervening 0.3 fixes, run migration rehearsals and performance qualification, switch the default in one reviewable PR, and update owning documentation. Retire TypeScript production code only after checking imports, manifests, YAML composition, generators, platform artifacts, and compatibility consumers.
+**Implement:** close the Pi-first support matrix, qualify retained Bake contracts, run native installation and recovery rehearsals and performance checks, remove the frozen TypeScript product, and update owning documentation. Check imports, manifests, YAML composition, generators, platform artifacts, and remaining consumers before removing product code. Preserve frozen session and eval evidence.
 
-**PR order:** qualification report → default switch → release preparation → separately reviewed retirement. Keep the TypeScript test oracle and frozen evidence as long as migration verification uses them.
+**PR order:** qualification report → final native packaging and TypeScript product removal → final archive rehearsal → release preparation. Retained-contract fixtures name their TypeScript sources; the shipped binary and archives depend only on the native implementation.
 
-**Proof:** all scope evidence accepted, no unexplained skipped required tests, complete platform matrix, standard/extended model sets with three trials on the standard eval suite, supplemental long-session/delegation cases, and an independently verified edit/test task in both frontends. Repeat install/update/rollback tests on final archives; Desktop tests are not a 0.4.0 gate ([D9](scope-00/support.md#decision-register)). Demonstrate no unexplained regression in startup, first frame, memory, input response, long-session replay, or shutdown using the fixed method in [verification](verification.md#performance-and-soak).
+**Proof:** all scope evidence accepted, no unexplained skipped required tests, complete platform matrix, standard/extended model sets with three trials on the standard eval suite, supplemental long-session/delegation cases, and an independently verified native edit/test task. Repeat install, native update/rollback, and coexistence checks on final archives. Desktop integration and TypeScript session interoperability are excluded by D9 and D32. Demonstrate no unexplained regression in startup, first frame, memory, input response, long-session replay, or shutdown using the fixed method in [verification](verification.md#performance-and-soak).
 
-**Rollback:** default-selection revert and tested binary/data rollback. A tag is pushed only on an explicit request to release; completion of this plan does not authorize publication.
+**Rollback:** retain the last qualified native artifacts and their tested data recovery path. Existing 0.3 installs stay separate. A tag is pushed only on an explicit request to release; completion of this plan does not authorize publication.
 
 ## PR and completion rules
 

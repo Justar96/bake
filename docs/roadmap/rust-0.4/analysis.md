@@ -109,9 +109,9 @@ The existing [PTY driver](../../../apps/tui/scripts/pty-smoke.ts) exercises real
 
 ### Upgrade and rollback depend on archive layout
 
-The [updater launch check](../../../packages/boot/updater/src/verify.ts) looks for `apps/cli/lib/bin.js` and launches it with Node. Merely replacing the release archive with a Rust executable would fail this check on old installs. The route is open, and it must end in Rust-only shipped artifacts ([D14](scope-00/support.md#decision-register)). Pick and test it before native packaging is finalized.
+The [TypeScript updater launch check](../../../packages/boot/updater/src/verify.ts) looks for `apps/cli/lib/bin.js` and launches it with Node. A Rust archive cannot be substituted at that route. [D32](scope-00/support.md#decision-register) requires a fresh Rust install, so scope 16 keeps that route on TypeScript and separately qualifies native packaging, signed manifests, and updates and rollback between 0.4 releases.
 
-The [manifest](../../../packages/boot/updater/src/manifest.ts) is signed over its exact bytes and names one product version with platform artifacts. The release workflow and updater do not currently implement independent 0.3/0.4 channels. Native rollback must verify credentials, profile manifests, settings, session generations, attachment references, and indexes as well as the executable pointer.
+The [current manifest](../../../packages/boot/updater/src/manifest.ts) is signed over its exact bytes and names one product version with platform artifacts. Separate publication routes and their enforcement remain unimplemented. Native install tests must leave a neighboring 0.3 install and its data unchanged. Native rollback tests cover the state that native releases actually write; TypeScript profile and Session-format interoperability is outside the port.
 
 ### Home defaults have two layers
 

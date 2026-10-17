@@ -21,7 +21,7 @@ Since [D22](#decision-register), Pi is the primary port source and Bake's TypeSc
 
 ## How to read decisions
 
-Each decision has one of three classes. Only the first two are settled.
+Active decisions use the three classes below. A row marked settled or superseded links to the later owner decision that governs it.
 
 | Class | Meaning | Who can change it |
 |---|---|---|
@@ -41,14 +41,14 @@ Scope 01 may start on the settled rows. Scope 00 stays open until every **Owner 
 | D4 | Session data | Superseded by [D32](#decision-register) | Keep Session format 3, its adjacent migrations, and the retired vocabulary. A Rust port is not a reason for a format change. |
 | D5 | TypeScript runtime and custom profiles | Decided by request, updated 2026-10-07 | 0.4 ships Rust only. The owner now directs: "cut custom JavaScript/Cordis profiles." Custom Cordis compositions, user presets backed by `agent.cordis.yml`, user executable YAML, custom bundles, and npm profile plugins are excluded; supporting or converting them is not a 0.4.0 deliverable. This supersedes the earlier custom-profile migration requirement. The native entry rejects these inputs before execution or file changes. TypeScript remains a development oracle; no Node/TypeScript compatibility runtime ships. Built-in profiles, session data, Desktop, `run_code`, legacy names, and rollback keep their separate contracts ([strategy](#profile-support-and-native-extension-strategy)). |
 | D6 | Native plugin API | Decided by request, 2026-10-07 | The product owner answered: "Require a native plugin API in 0.4.0." MCP servers and hook processes stay supported; 0.4.0 also requires a native plugin API. Scope 12 designs its execution model, protocol or ABI, contributions, permissions, lifetimes, and versioning, and proves it with a named consumer ([strategy](#profile-support-and-native-extension-strategy)). The [native design](../native-plugins.md) proposes these choices; implementation and qualification remain open. |
-| D7 | Cordis preset and Cordis tooling | Decided by request, 2026-10-17 | The owner retired the Cordis/JavaScript-specific `cordis` preset, `cordis_inspect_*`, `plugin_manager`, Cordis host runner, and `bake plugin` implementations and requested a Rust-native replacement design. 0.4 ships no wrapper or compatibility layer and presents no Cordis API catalog to the model. Useful inspection and management capabilities remain required with the [D6](#decision-register) API in scope 12. The [native design](../native-plugins.md) proposes a component API, optional model tools, and CLI commands; it is not implemented or qualified. Any model-visible part needs a paired eval record. The frozen TypeScript packages and tests stay until the TypeScript agent's removal ([D34](#decision-register)). |
+| D7 | Cordis preset and Cordis tooling | Decided by request, 2026-10-17 | The owner retired the Cordis/JavaScript-specific `cordis` preset, `cordis_inspect_*`, `plugin_manager`, Cordis host runner, and `bake plugin` implementations and requested a Rust-native replacement design. 0.4 ships no wrapper or compatibility layer and presents no Cordis API catalog to the model. Useful inspection and management capabilities remain required with the [D6](#decision-register) API in scope 12. The [native design](../native-plugins.md) describes the implemented slice and proposes a component API, optional model tools, and CLI commands; the complete plugin and management surface is not qualified. Any model-visible part needs a paired eval record. The frozen TypeScript packages and tests stay until the TypeScript agent's removal ([D34](#decision-register)). |
 | D8 | Provider breadth | Decided by request, 2026-10-17 | 0.4.0 supports the CLIProxyAPI route only ([D22](#decision-register), [D25](#decision-register)). The three wire protocols CLIProxyAPI selects per model, `openai-responses`, `openai-completions`, and `anthropic-messages`, stay required, and their existing native implementations stay. Direct provider routes (`deepseek-official`, the other catalog API families, and direct API-key and OAuth logins) are deferred to a later release; 0.4.0 neither qualifies nor claims them, and no Node fallback exists ([D5](#decision-register)). The [provider section](#provider-routes-and-authentication) states the bounds. |
 | D9 | Bake Desktop launch | Decided by request, 2026-10-17: deferred beyond 0.4.0 | 0.4.0 ships no Bake Desktop integration: no native `dsh --profile desktop` entry, Desktop protocol, or Electron launch adapter, and no Desktop consumer test gates it. Nothing is deleted: the frozen TypeScript `desktop` bundle and its tests stay ([AGENTS](../../../../AGENTS.md#porting-from-upstream)). Native public and remote transports in scope 13 serve only consumers that 0.4.0 retains and names, each tested against that consumer, not Desktop parity. A later release that takes Desktop up again chooses its launch path with the Desktop maintainers; Bake's TypeScript runtime cannot serve as the bridge ([D5](#decision-register)). |
-| D10 | Legacy names | Scope-00 default; removal timing is an **Owner decision** | Keep the `dsh` alias, `DSH_*` fallbacks, `dsh.profile`, project `.dsh/skills`, and legacy package aliases through the 0.3 support window. Never remove them in the cutover PR. |
-| D11 | Default home for direct entries | **Owner decision** | The release launcher resolves `BAKE_HOME`, then `DSH_HOME`, then `~/.bake`. The shared helper still defaults to `~/.dsh` when no launcher has set either variable. Recommendation: native uses the launcher rule everywhere and never reads `~/.dsh` implicitly. |
-| D12 | Unreleased `develop` work | **Owner decision** | Recommendation: release it as the last feature-bearing 0.3 patch (0.3.9), after the gates in [the triage table](#unreleased-develop-work). Then freeze 0.3 to bug fixes and use that tag as the oracle. |
-| D13 | 0.3 maintenance channel and window | **Owner decision**; duration open | Recommended design in [release lines](#release-lines-and-support-window). Implement it in a separate governance PR before the 0.4 default switch. |
-| D14 | Packaging and Node | **Owner decision** for the transition | Shipped 0.4 artifacts are Rust only and need no Node ([D5](#decision-register)). The transition from released 0.3 launchers and updaters, which launch-check `apps/cli/lib/bin.js` with Node, is not designed yet; it must end in Rust-only shipped artifacts ([packaging](#packaging-update-and-rollback)). |
+| D10 | Legacy names | Scope-00 default; removal timing remains an **Owner decision** | Keep the frozen 0.3 agent’s `dsh` alias, `DSH_*` fallbacks, profile names, skill roots, and package aliases through its support window. Native environment settings keep the `BAKE_*` then `DSH_*` rule in [AGENTS](../../../../AGENTS.md#workspace), including the home rule settled by D32. Native installs preserve existing 0.3 and user-owned command links. Custom profile and package compatibility is excluded by D5; native skills follow the roots in the [Pi-first plan](../pi-first-plan.md#scope-plan). This row does not restore those excluded surfaces. |
+| D11 | Default home for direct entries | Settled by [D32](#decision-register), 2026-10-10 | Native entries resolve `BAKE_HOME`, then `DSH_HOME`, then `~/.bake`. The TypeScript helper’s `~/.dsh` default is not a native default. D25 governs the read-only import of the existing route, key, and default model. |
+| D12 | Unreleased `develop` work | Superseded by [D34](#decision-register), 2026-10-14 | The proposal for a final feature-bearing 0.3.9 release from `develop` is retired. The next release from `develop` is Rust 0.4.0; the TypeScript agent is frozen, and bug and security fixes belong on `release/0.3`, cut from v0.3.8. No feature-release triage blocks the Rust port. |
+| D13 | 0.3 maintenance channel and window | Branch settled by D34; duration remains an **Owner decision** | `release/0.3` is the maintenance branch. Scope 16 still needs publication channels that keep 0.3 installs on TypeScript and deliver Rust through a fresh install (D32). The maintenance duration, owner, and end-of-support notice remain open; [release lines](#release-lines-and-support-window) distinguishes those decisions from the implemented branch policy. |
+| D14 | Packaging and Node | Transition settled by [D32](#decision-register), 2026-10-10; native packaging belongs to scope 16 | Users install a new Rust-only binary. A 0.3 updater does not install, launch-check, or roll back a Rust archive, and Rust does not roll back into TypeScript. Signed native install, updates and rollback between 0.4 releases, publication channels, and coexistence with an untouched 0.3 install still require implementation and qualification ([packaging](#packaging-update-and-rollback)). |
 | D15 | Telemetry and feedback | Scope-00 default | Keep export disabled without a configured collector, both opt-out spellings, local-only feedback, and `BAKE_NO_UPDATE_CHECK`. |
 | D16 | Platforms | Scope-00 default | The five release targets are the native matrix. Minimum OS, kernel, libc, and macOS versions are missing evidence. |
 | D17 | Code mode | Scope-00 default | `run_code` keeps its language: model-written TypeScript in a confined QuickJS VM with the same bindings and limits. |
@@ -218,14 +218,16 @@ Selection lives in [sandbox-local](../../../../packages/sandbox/sandbox-local/RE
 
 ### Packaging, update, and rollback
 
-The current archive contains the Node launcher. The installers ([sh](../../../../distribution/host/install.sh), [PowerShell](../../../../distribution/host/install.ps1)) require Node 24, install into `~/.local/share/bake` (overridable with `BAKE_INSTALL_ROOT`), and link `bake` and `dsh` from `~/.local/bin` (overridable with `BAKE_BIN_DIR`). The updater downloads the single signed `latest.json` from `https://bake.justar.dev`, checks size and SHA-256, and runs the candidate's `apps/cli/lib/bin.js --self-check` under the running Node ([verify](../../../../packages/boot/updater/src/verify.ts)). Only then does it move `current`. `--rollback` moves to the newest older installed release.
+The shipped 0.3 archive contains the Node launcher. Its [installers](../../../../distribution/README.md) require Node 24 and its [updater](../../../../packages/boot/updater/src/verify.ts) checks `apps/cli/lib/bin.js` with Node before switching the installed release. These describe the TypeScript install; [D32](#decision-register) excludes upgrading it to Rust.
 
-Obligations for 0.4:
+Scope 16 qualifies these native obligations:
 
-1. A released 0.3 updater must be able to install, launch-check, and roll back the 0.4.0 archive, and the route must still leave the shipped 0.4 artifacts Rust only ([D14](#decision-register)). A preparatory 0.3.x updater is one candidate; the route is not chosen. It needs a test that starts from the oldest supported 0.3 updater.
-2. `bake update --rollback` from 0.4 must return to a working 0.3 release, and that release must read every [persisted domain](#persisted-data) 0.4 wrote.
-3. The `dsh` link, `dsh.cmd`, and user-owned aliases survive install, update, and rollback.
-4. No archive may overwrite `latest.json` with an older version, and a maintenance manifest can never replace the stable one ([D13](#decision-register)).
+1. Install a Rust-only archive on a host without Node. A fresh install beside 0.3 leaves that install, its data, and its existing command links working.
+2. Verify signed native manifests and archives, launch-check the candidate, and update or roll back between 0.4 releases atomically. Test each supported native data-format boundary; a successful executable switch alone does not establish usable data.
+3. Preserve user-owned aliases and prevent the installer from taking a command link owned by another install.
+4. Keep TypeScript and Rust publication routes separate. The existing 0.3 `latest.json` route must not serve Rust archives to its updater. A maintenance publication cannot replace a native stable manifest, and a publication cannot move a channel to an older version.
+
+The native archive layout and publication routes still need implementation and tests. No preparatory TypeScript-to-Rust updater or shared Session-format compatibility layer is required.
 
 ## Profile support and native extension strategy
 
@@ -242,7 +244,7 @@ Obligations for 0.4:
 - **Code mode stays JavaScript.** `run_code` executes model-written TypeScript in a confined QuickJS VM ([codemode](../../../../packages/ptc-runtime/ptc-runtime-codemode/README.md)). A native host embeds an equivalent confined engine. It does not change the language the model writes.
 - **Development comparison.** Work that runs in the TypeScript runtime never closes a native scope. A native profile never delegates to it.
 
-**Native extension surfaces in 0.4.0 ([D6](#decision-register)):** MCP servers (stdio and Streamable HTTP) and hook processes stay supported. They do not satisfy the plugin API requirement on their own. 0.4.0 must also ship a native plugin API. No API exists yet, and its form is not chosen. Scope 12 designs it and settles:
+**Native extension surfaces in 0.4.0 ([D6](#decision-register)):** MCP servers (stdio and Streamable HTTP) and hook processes stay supported. They do not satisfy the plugin API requirement on their own. 0.4.0 must also ship a native plugin API. The [native design](../native-plugins.md) owns the implementation status. Scope 12 must implement and qualify:
 
 - the protocol or ABI, including whether plugins run in process or out of process;
 - which contributions a plugin can make;
@@ -252,48 +254,27 @@ Obligations for 0.4:
 - the inspection and management capabilities that replace the retired Cordis tooling ([D7](#decision-register)): what a user or the model can list, query, enable, disable, or diagnose, and through which surface;
 - proof through at least one named consumer exercised against the real native runtime.
 
-Any model-visible catalog for the API must be generated from its real interface, never from the Cordis API catalog. The API does not migrate Cordis/JavaScript plugins. None of these choices, including tool names and whether plugins run in or out of process, is accepted yet.
+Any model-visible catalog for the API must be generated from its real interface, never from the Cordis API catalog. The API does not migrate Cordis/JavaScript plugins. Design text and a partial API do not establish the full consumer and management qualification.
 
 ## Unreleased develop work
 
-`v0.3.8` is the merge commit `dcb26d756e` on `main`, and its tree equals `develop` commit `a1ec50245e`. Since then, `develop` has merged PRs #43 to #50, 40 non-merge commits across 1,847 changed files. The table omits documentation-only commits. [The changelog](../../../../CHANGELOG.md) lists the user-visible items under Unreleased, and `evals/agent-loop/versions/unreleased/` holds two records: `2026-10-05-bake-core-names` and `2026-10-06-eval-fidelity`. This page reverts nothing. Each row needs an owner decision under [D12](#decision-register).
+The [2026-10-07 baseline](baseline-2026-10-07/README.md) records v0.3.8 and the then-current `develop`, including their different names, profile files, launchers, and tooling. Those frozen measurements remain evidence about their named commits.
 
-| Change | Commits | Kind | Recommended handling for the last 0.3 release |
-|---|---|---|---|
-| Terminal loss before `SIGHUP` no longer races shutdown | `f0b5b602d0` | Bug fix | Include |
-| Core, internal, plugin, and bundle packages renamed to `bake-*`, with deprecated aliases, automatic profile rewrite, and `package.json.bak` | `277a05fc73`, `f87310e428`, `eaba1648f6`, `b8ee76c01f`, `e3a537e9db`, `c835a8c06d` | Identity change that rewrites user profile files | Include only after this test passes: a profile migrated by `develop` boots on a real `v0.3.8` install after `bake update --rollback`, and an out-of-tree plugin importing an old name still loads |
-| `bake` becomes the launcher, with a `dsh` alias, installer and updater `dsh` links, and preservation of a `dsh` that belongs to another install | `e5ac162881`, `7f8c3834aa`, `9ae05abe27` | Identity and Desktop compatibility | Include after a Bake Desktop `dsh --profile desktop` launch test on Unix and Windows |
-| `BAKE_*` environment names with `DSH_*` fallback, blank read as unset, session facts under both names | `645fc92b46`, `2aeaf7f1e3`, `b9780f0ad0` | Compatibility | Include; verify that a `DSH_*`-only environment behaves as on 0.3.8 |
-| `bake.profile` manifest, with `dsh.profile` kept and the migration locked | `49c9c66fb5`, `5b72f18e5f` | Persisted-file change | Include, under the same rollback test as the rename |
-| TUI bundle inlining and bin classification | `c24576ab39`, `e104ea4db0` | Build | Include; gate on `release:preflight` and `--self-check` on all five targets |
-| Removal of unused upstream leftovers | `ff53e9e691` | Cleanup | Include after confirming that no shipped consumer is affected |
-| Eval fidelity, model-surface snapshots, eval records, preflight eval step, code-mode test timing | `2cce0125b7`, `6fd3b82bcb`, `eac853e994`, `e408faf28c`, `a47903e760`, `8a77fb7514`, `a20da688f0`, `a3853cd5d6`, `56991523c4`, `0070a2221d`, `7f18687d5f` | Development only | Include; no runtime effect |
-
-**Recommendation.** Release this work as 0.3.9 once the listed gates pass, then freeze 0.3 to bug fixes. Holding it back would require an immediate maintenance branch from `v0.3.8`, and the current rules do not allow one ([release lines](#release-lines-and-support-window)). The rename also defines the names and aliases that the native port must reproduce, so shipping it makes the 0.3 oracle and the 0.4 compatibility contract the same thing. Until the owner decides, the scope-00 baseline captures both `v0.3.8` and `develop` and records every difference.
+[D34](#decision-register) supersedes the proposed feature-bearing 0.3.9 release and its triage table. `develop` is Rust-first, the TypeScript product is frozen, and its removal belongs to scope 17. `release/0.3` takes bug and security fixes from its v0.3.8 base. The Rust port uses Pi and the explicitly retained Bake contracts; the historical baseline is not a requirement to reproduce every later TypeScript feature.
 
 ## Release lines and support window
 
-[D1](#decision-register) fixes the release lines. Everything else in this section is an **Owner decision** ([D13](#decision-register)). This page changes no branch protection, workflow, or AGENTS instruction.
+[D34](#decision-register) and [AGENTS](../../../../AGENTS.md#branches-and-releases) define the branch policy already in force. Rust changes target `develop`. Its next release is 0.4.0 through a merge-commit PR to `main`. TypeScript bug and security fixes target `release/0.3` and publish 0.3 tags there. Nothing from `release/0.3` merges into `develop` or `main`; a relevant Rust fix is ported separately with its own tests.
 
-**Before 0.4.0.** 0.3.x patch releases continue through the existing `develop` → `main` flow. Each 0.3 fix adds a language-independent regression case and names the Rust scope that must adopt it.
+Scope 16 must implement separate publication routes before publishing Rust archives. Existing 0.3 updaters read the signed `latest.json` route and must remain on TypeScript under D32. A native manifest, signing, installer, and update/rollback tests must establish the Rust route without sending a Rust archive to those updaters. The manifest paths and channel enforcement remain design and qualification work; the maintenance branch does not prove them.
 
-**Recommended post-0.4 design**, implemented by one separate governance PR that updates AGENTS, CONTRIBUTING, branch checks, release scripts, and the updater together:
-
-1. A protected maintenance branch for 0.3 (proposed name `release/0.3`), created from the last qualified 0.3 tag. Patch PRs target it, and each fix is also ported forward to `develop`.
-2. A separately signed maintenance manifest, for example `channels/0.3/latest.json` (proposed path), that the release workflow can never publish as `latest.json`.
-3. A preparatory 0.3.x updater that lets an install pin itself to the 0.3 channel. Released 0.3 updaters read only `latest.json`, so unpinned installs receive 0.4.0 on their next `bake update`. That makes [packaging obligation 1](#packaging-update-and-rollback) a cutover blocker.
-4. The governance PR lands before the scope-17 default-switch PR.
-
-**Support window.** Recommendation: after 0.4.0, the 0.3 maintenance line takes security, data-loss, update, and rollback fixes only, for a fixed window. A 90-day window, or until 0.4.2 ships if that is later, is a placeholder. **Duration: awaiting owner decision.** The owner also names the maintenance owner and the end-of-support notice.
+**Support window.** The duration of 0.3 maintenance, its owner, and its end-of-support notice remain owner decisions under D13. The earlier proposal of 90 days after 0.4.0, or until 0.4.2 if later, remains an unaccepted recommendation. No deadline is established here.
 
 ## Incremental delivery under the develop to main rule
 
-Every Rust scope merges to `develop` through ordinary PRs. `main` accepts only a `develop` merge, so any release cut before 0.4.0 also ships whatever Rust code is on `develop`. Incremental delivery is safe while these four conditions hold:
+Every Rust change starts from current `origin/develop` on its own branch and targets `develop`, with dependent changes using GitHub’s official PR stacks. Qualification governs when the Rust release can be prepared; the completed port does not authorize a tag or publication.
 
-1. Rust code stays in its own workspace, is excluded from release archives, and is never selected by default startup. Scope 01 adds a release check for this.
-2. Release notes and the changelog never claim native behavior that is not yet the default.
-3. A 0.3 hotfix during 0.4 development is a PR to `develop` followed by a normal release. This works only while the Rust code on `develop` is inert.
-4. Once a change on `develop` stops being inert, 0.3 releases need the maintenance branch. The first such change is the default switch, but a packaging change or a shared-data change also counts. So the governance PR must land first.
+Until scope 17 removes it, the frozen TypeScript agent still builds and its relevant gates pass. Native development does not change the 0.3 launcher’s default or add the preview to 0.3 archives. A 0.3 hotfix goes through `release/0.3`, not through the Rust-first `develop` branch. Scope 17 checks consumers before removing TypeScript product code, preserves frozen evidence, and qualifies the final Rust-only artifacts.
 
 ## Acceptance matrix
 

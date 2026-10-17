@@ -43,7 +43,7 @@ The inventory assigns owning scopes and dispositions to 167 packages, 815 TypeSc
 
 - Complete baseline qualification beyond the [initial measurements](baseline-2026-10-07/README.md#remaining-evidence) and [shutdown observations](terminal-2026-10-07/README.md#remaining-evidence): interleaved samples, noise characterization, process-tree memory, idle CPU, shutdown on the other targets, and frozen performance budgets.
 - Minimum OS, kernel, libc, and macOS deployment versions for each release target.
-- Owner answers to the decisions in [the decision register](support.md#decision-register), including the triage of unreleased `develop` work and the 0.3 support window. D7, D8, and D9 were decided on 2026-10-17; Desktop integration is deferred beyond 0.4.0, so no Desktop consumer test blocks this scope.
+- Owner answers for the remaining legacy-removal timing and 0.3 support window in [the decision register](support.md#decision-register). D32 settles the native home and fresh-install transition; D34 supersedes the proposed TypeScript feature release and establishes its maintenance branch. Native packaging and publication channels still need scope-16 design and evidence. D7, D8, and D9 were decided on 2026-10-17; Desktop integration is deferred beyond 0.4.0, so no Desktop consumer test blocks this scope.
 
 ## Run the tooling
 
