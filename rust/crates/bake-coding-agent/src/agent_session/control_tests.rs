@@ -83,6 +83,7 @@ impl Harness {
             tool_prompts: Vec::new(),
             system_prompt: crate::system_prompt::SystemPromptOptions::new("/tmp"),
             docs_command: "bake-rs docs".into(),
+            plugins: crate::plugins::PluginRegistry::default(),
         })
         .await
         .expect("session")
@@ -856,6 +857,7 @@ async fn a_new_sessions_model_and_level_are_one_group() {
             tool_prompts: Vec::new(),
             system_prompt: crate::system_prompt::SystemPromptOptions::new("/tmp"),
             docs_command: "bake-rs docs".into(),
+            plugins: Default::default(),
         })
         .await;
         let read = file_entries(&file);

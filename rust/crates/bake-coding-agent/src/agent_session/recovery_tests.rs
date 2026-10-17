@@ -85,6 +85,7 @@ fn options(h: &Harness, session: SessionManager, settings: Settings) -> AgentSes
         tool_prompts: Vec::new(),
         system_prompt: SystemPromptOptions::new("/tmp"),
         docs_command: "bake-rs docs".into(),
+        plugins: crate::plugins::PluginRegistry::default(),
     }
 }
 

@@ -70,6 +70,7 @@ fn options(harness: &Harness, session: SessionManager, cwd: &str) -> AgentSessio
         tool_prompts: Vec::new(),
         system_prompt: SystemPromptOptions::new(cwd),
         docs_command: "/opt/bake/bin/bake-rs docs".into(),
+        plugins: crate::plugins::PluginRegistry::default(),
     }
 }
 
