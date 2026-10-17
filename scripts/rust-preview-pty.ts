@@ -14,8 +14,8 @@
  * (`GAP`) instead of passing it.
  */
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync } from 'node:fs'
-import { chmod, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
+import { appendFileSync, existsSync, readFileSync } from 'node:fs'
+import { chmod, copyFile, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
@@ -2321,10 +2321,36 @@ for await (const line of createInterface({ input: process.stdin })) {
 }
 `
 
-/** The driver's copy of the fixture's `alive`, from the same source, so both judge a process alike. */
-const alive = new Function('readFileSync', 'execFileSync', `${IDENTITY_SOURCE}; return alive`)(
+/** The driver's copy of the fixture's `alive` and `identity`, from the same source, so both judge a process alike. */
+const { alive, identity } = new Function('readFileSync', 'execFileSync', `${IDENTITY_SOURCE}; return { alive, identity }`)(
   readFileSync, execFileSync,
-) as (pid: number, start: string) => boolean
+) as { alive: (pid: number, start: string) => boolean; identity: (pid: number) => { state: string; start: string } | undefined }
+
+/** The hidden argument that makes `bake-rs` a plugin helper. */
+const PLUGIN_HELPER_ARG = '__bake-wasm-plugin-host'
+
+/**
+ * Installs and enables, through the binary, a plugin whose manifest lists
+ * `mcp__fx__echo`, run by the hostile test component, which answers `none`
+ * for it: a session's first echo call starts that session's helper, which
+ * then runs until the session ends.
+ */
+async function enableEchoPlugin(world: LiveWorld): Promise<void> {
+  const dir = join(world.root, 'plugin')
+  await mkdir(dir)
+  await writeFile(join(dir, 'plugin.json'), JSON.stringify({ api: '0.1.0', id: 'echo-watch', version: '0.1.0', vetoTools: ['mcp__fx__echo'] }))
+  await copyFile(join(root, 'rust/plugins/fixtures/hostile/hostile.wasm'), join(dir, 'plugin.wasm'))
+  const user = join(world.root, 'user')
+  const manage = (args: string[]): string => {
+    const ran = Bun.spawnSync([binary, 'plugin', ...args], { cwd: world.project, env: { PATH: process.env.PATH, BAKE_HOME: world.home, HOME: user, USERPROFILE: user } })
+    assert.equal(ran.exitCode, 0, `bake-rs plugin ${args.join(' ')}: ${ran.stderr.toString()}`)
+    return ran.stdout.toString()
+  }
+  const installed = manage(['install', dir])
+  const hash = /^installed echo-watch 0\.1\.0 as sha256:([0-9a-f]{64})$/mu.exec(installed)?.[1]
+  assert(hash !== undefined, installed)
+  manage(['enable', hash])
+}
 
 interface McpStart { pid: number; descendant: number; overlapping: string[] }
 
@@ -2364,6 +2390,22 @@ class McpFixture {
 
   living(): number[] { return this.recorded().filter(entry => alive(entry.pid, entry.start)).map(entry => entry.pid) }
 
+  /**
+   * Records the session's one plugin helper in the registry, so the next
+   * server generation reports it as overlapping if it still runs when that
+   * server starts, and the cleanup reaps it.
+   */
+  async recordHelper(session: Preview): Promise<number> {
+    const helpers = [...(await session.owned())].filter(([, command]) => command.includes(PLUGIN_HELPER_ARG)).map(([pid]) => Number(pid))
+    assert.equal(helpers.length, 1, `expected one plugin helper, saw ${JSON.stringify(helpers)}`)
+    const [pid] = helpers
+    assert(pid !== undefined)
+    const seen = identity(pid)
+    assert(seen !== undefined && !seen.state.startsWith('Z'), `plugin helper ${pid} is not running`)
+    appendFileSync(join(this.dir, 'registry'), `${pid} ${seen.start}\n`)
+    return pid
+  }
+
   /** Waits for generation `count` to start and list its tools, then checks no earlier process was alive when it started. */
   async generation(session: Preview, count: number): Promise<McpStart> {
     await session.wait(`MCP server ${count} listed`, () => {
@@ -2374,7 +2416,7 @@ class McpFixture {
     assert.equal(starts.length, count, `expected ${count} server starts, saw ${JSON.stringify(starts)}`)
     const start = starts[count - 1]
     assert(start)
-    assert.deepEqual(start.overlapping, [], `server ${count} started while an earlier server or its descendant was alive`)
+    assert.deepEqual(start.overlapping, [], `server ${count} started while an earlier server, its descendant, or a plugin helper was alive`)
     return start
   }
 
@@ -2400,12 +2442,13 @@ function declared(request: unknown): string[] {
 }
 
 if (windows) {
-  console.log('SKIP Rust PTY: home MCP servers stop with their descendants before each /new, /resume, and /fork replacement starts its own (Windows owner/DACL trust for mcp.json is not implemented)')
+  console.log('SKIP Rust PTY: home MCP servers and plugin helpers stop before each /new, /resume, and /fork replacement starts its own (Windows owner/DACL trust for mcp.json is not implemented)')
   console.log('SKIP Rust PTY: with --no-tools the home MCP server never starts and requests declare no tool (Windows owner/DACL trust for mcp.json is not implemented)')
 } else {
-  await liveScenario('home MCP servers stop with their descendants before each /new, /resume, and /fork replacement starts its own', async (world) => {
+  await liveScenario('home MCP servers and plugin helpers stop before each /new, /resume, and /fork replacement starts its own', async (world) => {
     const fixture = new McpFixture(world)
     await fixture.install()
+    await enableEchoPlugin(world)
     const session = world.launch(['--sandbox', 'danger-full-access', '--exclude-tools', 'mcp__fx__hidden'])
     await session.ready()
     const first = await fixture.generation(session, 1)
@@ -2421,6 +2464,9 @@ if (windows) {
         const names = declared(request)
         assert(names.includes('mcp__fx__echo') && !names.includes('mcp__fx__hidden'), `declared tools: ${names.join(', ')}`)
       }
+      // The call asked this session's plugin helper, the only one running:
+      // the next generation's server checks it is gone when it starts.
+      await fixture.recordHelper(session)
     }
     await turn('one', first)
     session.send('/name First\r')
@@ -2468,10 +2514,10 @@ if (windows) {
     assert.equal(fixture.starts().length, 4, 'a cancelled sheet started a server')
 
     const recorded = fixture.recorded()
-    assert.equal(recorded.length, 8, 'expected four servers and four descendants')
+    assert.equal(recorded.length, 12, 'expected four servers, four descendants, and four plugin helpers')
     await session.quit()
-    // Checked at once after the exit: shutdown awaited every server and its tree.
-    assert.deepEqual(fixture.living(), [], 'an MCP server or its descendant outlived the double Ctrl+C quit')
+    // Checked at once after the exit: shutdown awaited every server and its tree, and every helper.
+    assert.deepEqual(fixture.living(), [], 'an MCP server, its descendant, or a plugin helper outlived the double Ctrl+C quit')
     const calls = fixture.events().filter(event => event.event === 'call')
     assert.deepEqual(calls.map(call => [call.name, call.pid]), [
       ['echo', first.pid], ['echo', second.pid], ['echo', third.pid], ['echo', fourth.pid],
