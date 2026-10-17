@@ -5,7 +5,8 @@
 //! line, or its error to standard error with exit code 1; JSON mode writes
 //! the session header and then every session event as one JSON line
 //! ([`crate::json_event`]). Either way the session is shut down before
-//! returning.
+//! returning. Pending speculative summaries publish their terminal accounting
+//! before shutdown closes observers; failed required accounting exits with 1.
 //!
 //! Pi's extension binding, session replacement, and its own signal handlers
 //! are not ported; the binary handles `SIGTERM` and `SIGHUP`. JSON lines go
@@ -128,6 +129,7 @@ async fn run(
         None
     };
     let result = prompts(session, options.clone(), stderr).await;
+    // Keep observers through owned summary and shutdown persistence.
     let background = session.finish_background_compaction(&options.control).await;
     session.shutdown().await;
     if let Some(subscription) = subscription {
