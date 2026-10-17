@@ -25,11 +25,27 @@ export function normalizeWire(api: string, events: readonly Record<string, any>[
     reportedTotalConsistent: extra === 0 || (reasoningTokens !== null && extra === reasoningTokens),
   }
 }
-export function reconcile(api: string, requests: readonly { status?: number; usage: Record<string, any>[] }[], observed: Record<string, number>) {
+interface WireRequest {
+  status?: number
+  usage: Record<string, any>[]
+  stream?: { lastEvent?: string | null } | undefined
+}
+
+function terminalUsage(api: string, request: WireRequest): boolean {
+  if (api !== 'anthropic-messages') return true
+  // Anthropic sends initial output in message_start, then one or more
+  // cumulative message_delta counters before the terminal message_stop.
+  const final = request.usage.at(-1)
+  return request.stream?.lastEvent === 'message_stop' && final?.event === 'message_delta'
+    && typeof final.output_tokens === 'number' && Number.isFinite(final.output_tokens) && final.output_tokens >= 0
+}
+
+/** Reconcile every request, preserving partial counters without treating them as complete cost. */
+export function reconcile(api: string, requests: readonly WireRequest[], observed: Record<string, number>) {
   const normalized = requests.map(request => normalizeWire(api, request.usage))
-  const complete = requests.length > 0 && requests.every(request => request.status === 200) && normalized.every(value => value !== undefined && value.reportedTotalConsistent)
+  const complete = requests.length > 0 && requests.every(request => request.status === 200 && terminalUsage(api, request)) && normalized.every(value => value !== undefined && value.reportedTotalConsistent)
   const totals: Record<string, number> = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0 }
-  for (const usage of normalized) if (usage !== undefined) for (const key of Object.keys(totals)) totals[key] += usage[key as keyof typeof usage] as number
+  for (const usage of normalized) if (usage !== undefined) for (const key of Object.keys(totals)) totals[key] = totals[key]! + (usage[key as keyof typeof usage] as number)
   return {
     complete,
     matches: complete && Object.keys(totals).every(key => totals[key] === observed[key]),
