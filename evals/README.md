@@ -70,6 +70,7 @@ DeepSeek offers `low`, `high`, and `max` but no `medium`, so it runs at `high`, 
 | `EVAL_ROSTER` | `headless`, the default, runs the headless bundle's own tool configs; `tui` gives every Bake arm the terminal's, as described under [Composition](#composition) |
 | `EVAL_TRIALS` | trials per scenario, default 3 |
 | `EVAL_OUTPUT` | raw output directory |
+| `EVAL_CONFIG_HOME` | Directory containing the evaluator’s `settings.yaml` and `.credentials.yaml`; defaults to `~/.bake`. Use a private directory to qualify a route without editing personal settings. Sample homes remain isolated. |
 | `EVAL_GATEWAY` | a JSON file of `{ baseUrl, apiKey }`, such as pi's `~/.pi/agent/cliproxyapi.json`, that replaces the `cliproxyapi` upstream and key for every arm; the proxy swaps each arm's key for this one, so both arms reach one upstream with one account. DeepSeek routes are unaffected |
 | `EVAL_EXTRA_<ARM>` | a JSON array of extra overlay rows for one Bake arm, for an attribution arm such as `[{"id":"fs-observation-policy","config":{"editGuard":"version"}}]` |
 | `EVAL_SETTINGS_<ARM>` | a JSON object deep-merged into one Bake arm's `settings.yaml`, for settings no overlay row carries; it can change one route key, such as `{"llm-pi-ai":{"providers":{"$PROVIDER":{"strictTools":true}}}}`, without replacing the route, and arrays replace; `$PROVIDER` and `$MODEL` become the route under test |
