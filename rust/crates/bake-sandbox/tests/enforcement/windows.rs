@@ -22,6 +22,10 @@
 //!
 //! Every process a scenario starts is owned by a guard that kills and awaits
 //! it on drop, a panic included, and every handshake is bounded.
+//!
+//! [`mechanisms`] records, without qualifying anything, how this token and
+//! two candidate replacements (low integrity, AppContainer) treat the same
+//! deletion, rename, read, and network effects.
 
 use std::ffi::OsString;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -37,6 +41,9 @@ use bake_sandbox::{Enforcement, SandboxMode, SandboxPolicy, SandboxProvider, def
 
 use super::{Run, Scratch, harness, run_argv, runtime};
 
+#[path = "windows_mechanisms.rs"]
+mod mechanisms;
+
 /// The hidden first argument that turns this binary into the probe.
 pub const PROBE_ARG: &str = "__bake-test-probe";
 
@@ -51,7 +58,18 @@ pub fn probe_main(args: Vec<OsString>) -> ! {
         .map(|arg| arg.into_string().expect("UTF-8 probe argument"))
         .collect();
     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    let result: std::io::Result<i32> = match refs.as_slice() {
+    // A mechanism-probe candidate, which inherits no handle, first sends
+    // its own output to files the launcher reads back.
+    let skip = match refs.as_slice() {
+        [mechanisms::OUTPUT_ARG, dir, ..] => {
+            if mechanisms::redirect(dir).is_err() {
+                std::process::exit(mechanisms::REDIRECT_FAILED);
+            }
+            2
+        }
+        _ => 0,
+    };
+    let result: std::io::Result<i32> = match &refs[skip..] {
         ["write", path, text] => std::fs::write(path, text).map(|()| 0),
         ["read", path] => std::fs::read_to_string(path).map(|text| {
             print!("{text}");
@@ -125,6 +143,7 @@ pub fn probe_main(args: Vec<OsString>) -> ! {
         ["park"] => loop {
             std::thread::park();
         },
+        ["mechanism", rest @ ..] => mechanisms::probe(rest),
         other => panic!("unknown probe operation {other:?}"),
     };
     let code = match result {
@@ -224,6 +243,7 @@ pub fn tests() -> Vec<harness::Test> {
             let scenario = *scenario;
             harness::Test::new(format!("windows-acl::{name}"), scenario)
         })
+        .chain(mechanisms::tests())
         .collect()
 }
 
@@ -491,15 +511,30 @@ impl Drop for OwnedPid {
     }
 }
 
-/// A Job this test puts an unconfined negative control in before the
-/// control starts any descendant. Dropped, it terminates every member and
-/// awaits each within [`BOUND`].
-struct TestJob(std::os::windows::io::OwnedHandle);
+/// A kill-on-close Job this test owns: an unconfined negative control joins
+/// it before the control starts any descendant, and each mechanism-probe
+/// candidate is born in one. Its handle is never inheritable, so this
+/// process holds the only one and an abrupt end of the test closes it and
+/// kills every member.
+///
+/// [`TestJob::finish`] terminates every member, waits until the Job counts
+/// none active within [`BOUND`], and reports what went wrong. A Job dropped
+/// without `finish` (a panic included) does the same as best effort: it
+/// panics with the error on a normal path and only prints it while
+/// unwinding, so cleanup never double-panics.
+struct TestJob {
+    handle: std::os::windows::io::OwnedHandle,
+    finished: bool,
+}
 
 impl TestJob {
     fn new() -> Self {
-        use std::os::windows::io::{FromRawHandle, OwnedHandle};
-        use windows_sys::Win32::System::JobObjects::CreateJobObjectW;
+        use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+        use windows_sys::Win32::System::JobObjects::{
+            CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+            SetInformationJobObject,
+        };
         // SAFETY: null attributes (not inheritable) and no name.
         let raw = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
         assert!(
@@ -507,16 +542,43 @@ impl TestJob {
             "CreateJobObjectW: {}",
             std::io::Error::last_os_error()
         );
-        // SAFETY: a fresh handle owned here.
-        Self(unsafe { OwnedHandle::from_raw_handle(raw) })
+        // SAFETY: a fresh handle owned here. Should the limit below fail,
+        // dropping it closes a Job that has no member yet.
+        let handle = unsafe { OwnedHandle::from_raw_handle(raw) };
+        // SAFETY: a zeroed struct is a valid starting value.
+        let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        // SAFETY: `limits` has the size passed.
+        let ok = unsafe {
+            SetInformationJobObject(
+                handle.as_raw_handle(),
+                JobObjectExtendedLimitInformation,
+                std::ptr::addr_of!(limits).cast(),
+                size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            )
+        };
+        assert_ne!(
+            ok,
+            0,
+            "SetInformationJobObject (kill on close): {}",
+            std::io::Error::last_os_error()
+        );
+        Self {
+            handle,
+            finished: false,
+        }
+    }
+
+    fn raw(&self) -> std::os::windows::io::RawHandle {
+        use std::os::windows::io::AsRawHandle;
+        self.handle.as_raw_handle()
     }
 
     fn assign(&self, child: &Owned) {
         use std::os::windows::io::AsRawHandle;
         use windows_sys::Win32::System::JobObjects::AssignProcessToJobObject;
         // SAFETY: two live handles.
-        let ok =
-            unsafe { AssignProcessToJobObject(self.0.as_raw_handle(), child.0.as_raw_handle()) };
+        let ok = unsafe { AssignProcessToJobObject(self.raw(), child.0.as_raw_handle()) };
         assert_ne!(
             ok,
             0,
@@ -525,61 +587,203 @@ impl TestJob {
         );
     }
 
-    fn members(&self) -> Vec<u32> {
-        use std::os::windows::io::AsRawHandle;
+    /// The ids of the Job's live members. A failed query, or a list that
+    /// stays incomplete after the buffer grows, is an error, never an empty
+    /// list.
+    fn members(&self) -> std::io::Result<Vec<u32>> {
+        use windows_sys::Win32::Foundation::ERROR_MORE_DATA;
         use windows_sys::Win32::System::JobObjects::{
             JOBOBJECT_BASIC_PROCESS_ID_LIST, JobObjectBasicProcessIdList, QueryInformationJobObject,
         };
         let header = std::mem::offset_of!(JOBOBJECT_BASIC_PROCESS_ID_LIST, ProcessIdList)
             / size_of::<usize>();
-        let mut buffer = vec![0usize; header + 256];
-        // SAFETY: `buffer` holds the bytes passed, aligned for the struct.
-        unsafe {
+        let mut capacity = 256usize;
+        for _ in 0..4 {
+            let mut buffer = vec![0usize; header + capacity];
+            // SAFETY: `buffer` holds the bytes passed, aligned for the struct.
+            let ok = unsafe {
+                QueryInformationJobObject(
+                    self.raw(),
+                    JobObjectBasicProcessIdList,
+                    buffer.as_mut_ptr().cast(),
+                    (buffer.len() * size_of::<usize>()) as u32,
+                    std::ptr::null_mut(),
+                )
+            };
+            let complete = if ok == 0 {
+                let error = std::io::Error::last_os_error();
+                if error.raw_os_error() != Some(ERROR_MORE_DATA as i32) {
+                    return Err(std::io::Error::new(
+                        error.kind(),
+                        format!("QueryInformationJobObject (process ids): {error}"),
+                    ));
+                }
+                false
+            } else {
+                true
+            };
+            // SAFETY: the call succeeded or reported ERROR_MORE_DATA, and
+            // either way wrote the header.
+            let (assigned, listed) = unsafe {
+                let list = &*buffer.as_ptr().cast::<JOBOBJECT_BASIC_PROCESS_ID_LIST>();
+                (
+                    list.NumberOfAssignedProcesses as usize,
+                    list.NumberOfProcessIdsInList as usize,
+                )
+            };
+            if complete && listed == assigned && listed <= capacity {
+                return Ok(buffer[header..][..listed]
+                    .iter()
+                    .map(|&id| id as u32)
+                    .collect());
+            }
+            capacity = assigned.max(capacity * 2);
+        }
+        Err(std::io::Error::other(
+            "QueryInformationJobObject (process ids): the list stayed incomplete",
+        ))
+    }
+
+    /// How many members the Job counts as active.
+    fn active(&self) -> std::io::Result<u32> {
+        use windows_sys::Win32::System::JobObjects::{
+            JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JobObjectBasicAccountingInformation,
+            QueryInformationJobObject,
+        };
+        // SAFETY: a zeroed struct is valid output space.
+        let mut info: JOBOBJECT_BASIC_ACCOUNTING_INFORMATION = unsafe { std::mem::zeroed() };
+        // SAFETY: `info` has the size passed.
+        let ok = unsafe {
             QueryInformationJobObject(
-                self.0.as_raw_handle(),
-                JobObjectBasicProcessIdList,
-                buffer.as_mut_ptr().cast(),
-                (buffer.len() * size_of::<usize>()) as u32,
+                self.raw(),
+                JobObjectBasicAccountingInformation,
+                std::ptr::addr_of_mut!(info).cast(),
+                size_of::<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>() as u32,
                 std::ptr::null_mut(),
             )
         };
-        // SAFETY: the header was written (or is still zero).
-        let listed = unsafe {
-            (*buffer.as_ptr().cast::<JOBOBJECT_BASIC_PROCESS_ID_LIST>()).NumberOfProcessIdsInList
+        if ok == 0 {
+            let error = std::io::Error::last_os_error();
+            return Err(std::io::Error::new(
+                error.kind(),
+                format!("QueryInformationJobObject (accounting): {error}"),
+            ));
+        }
+        Ok(info.ActiveProcesses)
+    }
+
+    /// Terminates every member and waits within [`BOUND`] until the Job
+    /// counts none active; a failed query
+    /// ends the wait as an error. It never panics, so a drop while
+    /// unwinding can call it. Each wait is on a handle checked with
+    /// `IsProcessInJob`, so a reused pid is never waited for.
+    fn terminate_and_reap(&self) -> Result<(), String> {
+        use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+        use windows_sys::Win32::Foundation::WAIT_FAILED;
+        use windows_sys::Win32::System::JobObjects::{IsProcessInJob, TerminateJobObject};
+        use windows_sys::Win32::System::Threading::{
+            OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
+            WaitForSingleObject,
         };
-        buffer[header..][..(listed as usize).min(256)]
-            .iter()
-            .map(|&id| id as u32)
-            .collect()
+        let mut errors = Vec::new();
+        // SAFETY: a live Job handle.
+        if unsafe { TerminateJobObject(self.raw(), 1) } == 0 {
+            // Still wait: the members may be gone already.
+            errors.push(format!(
+                "TerminateJobObject: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        let deadline = std::time::Instant::now() + BOUND;
+        'drain: loop {
+            match self.active() {
+                Ok(0) => break,
+                Ok(active) if std::time::Instant::now() >= deadline => {
+                    errors.push(format!(
+                        "{active} member(s) still active {BOUND:?} after termination"
+                    ));
+                    break;
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    errors.push(error.to_string());
+                    break;
+                }
+            }
+            let pids = match self.members() {
+                Ok(pids) => pids,
+                Err(error) => {
+                    errors.push(error.to_string());
+                    break;
+                }
+            };
+            let mut waited = false;
+            for pid in pids {
+                // SAFETY: plain call; null means the process is gone.
+                let raw = unsafe {
+                    OpenProcess(
+                        PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
+                        0,
+                        pid,
+                    )
+                };
+                if raw.is_null() {
+                    continue;
+                }
+                // SAFETY: a fresh handle owned here.
+                let process = unsafe { OwnedHandle::from_raw_handle(raw) };
+                let mut member = 0;
+                // SAFETY: two live handles and a valid out pointer.
+                let ok =
+                    unsafe { IsProcessInJob(process.as_raw_handle(), self.raw(), &mut member) };
+                if ok == 0 || member == 0 {
+                    continue;
+                }
+                let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+                // SAFETY: a live handle opened with SYNCHRONIZE. A timeout is
+                // caught by the accounting check above.
+                if unsafe { WaitForSingleObject(process.as_raw_handle(), millis(remaining)) }
+                    == WAIT_FAILED
+                {
+                    errors.push(format!(
+                        "WaitForSingleObject (Job member {pid}): {}",
+                        std::io::Error::last_os_error()
+                    ));
+                    break 'drain;
+                }
+                waited = true;
+            }
+            if !waited {
+                // Counted members that cannot be opened are being torn down.
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors.join("; "))
+        }
+    }
+
+    /// Terminates and reaps every member, reporting any failure. Closing
+    /// the handle afterwards kills whatever a failed reap left behind.
+    fn finish(mut self) -> Result<(), String> {
+        self.finished = true;
+        self.terminate_and_reap()
     }
 }
 
 impl Drop for TestJob {
     fn drop(&mut self) {
-        use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
-        use windows_sys::Win32::System::JobObjects::TerminateJobObject;
-        use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE};
-        // SAFETY: a live Job handle.
-        unsafe { TerminateJobObject(self.0.as_raw_handle(), 1) };
-        let deadline = std::time::Instant::now() + BOUND;
-        for pid in self.members() {
-            // SAFETY: plain call; null means the process is gone.
-            let raw = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
-            if raw.is_null() {
-                continue;
-            }
-            // SAFETY: a fresh handle owned here.
-            let process = unsafe { OwnedHandle::from_raw_handle(raw) };
-            signaled_within(
-                process.as_raw_handle(),
-                deadline.saturating_duration_since(std::time::Instant::now()),
-            );
+        if self.finished {
+            return;
         }
-        if !std::thread::panicking() {
-            assert!(
-                self.members().is_empty(),
-                "the test Job still holds processes"
-            );
+        if let Err(error) = self.terminate_and_reap() {
+            if std::thread::panicking() {
+                eprintln!("test Job cleanup while unwinding: {error}");
+            } else {
+                panic!("test Job cleanup: {error}");
+            }
         }
     }
 }
@@ -963,7 +1167,8 @@ fn descendants_end_with_the_command() {
     );
     drop(grandchild);
     drop(control);
-    drop(job);
+    job.finish()
+        .unwrap_or_else(|error| panic!("the control's Job was not reaped: {error}"));
 }
 
 fn a_killed_runner_takes_its_tree() {
@@ -1500,7 +1705,7 @@ mod win32 {
         }
     }
 
-    fn sid_text(sid: *mut c_void) -> String {
+    pub(super) fn sid_text(sid: *mut c_void) -> String {
         let mut text = null_mut();
         // SAFETY: a valid SID; `text` receives a LocalAlloc'd string.
         if unsafe { ConvertSidToStringSidW(sid, &mut text) } == 0 {
