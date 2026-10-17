@@ -4,6 +4,8 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 ## [Unreleased]
 
+- Rust sessions can opt into `taskDocuments` for versioned plans, todos, and goals, and `backgroundCompaction` for one speculative summary whose source snapshot is checked before commit. Both default to off. Dropping a prompt waiter leaves its admitted execution running; abort still cancels and awaits it.
+
 - Rust print runs accept shared model-call and time limits with `--max-model-calls` and `--run-timeout-ms`. JSON settlement events distinguish finished turns, cancellation, exhausted budgets, and failures; model failures exit with status 1 in both output modes.
 - Rust SDK task documents keep versioned plans, todos, and goals in Pi session branches. Verification evidence binds a recorded check to a document revision and declared file contents; it does not turn a model’s completion claim into a verified result.
 - Development: the Rust agent filters ambient credential variables from shell commands, keeps provider tool declarations aligned with executable tools, and commits finished messages before notifying observers. Provider streams have bounded idle waits and stop when their consumer leaves. Headless output remains cancellable when stdout is blocked, and MCP connection failures appear in the session view.

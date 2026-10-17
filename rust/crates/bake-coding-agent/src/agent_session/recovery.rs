@@ -349,6 +349,7 @@ pub(super) struct Core {
     /// Pi's `_agentRunAbortRequested`.
     pub abort_requested: AtomicBool,
     pub run_control: Mutex<Option<bake_agent::RunControl>>,
+    pub background_compaction: super::background_compaction::BackgroundCompaction,
     pub state: Mutex<RunState>,
     pub activity: watch::Sender<Activity>,
     /// Why the session file lacks an entry, once a write to it failed.
@@ -538,7 +539,10 @@ impl Core {
             .map_err(|error| format!("Session I/O task failed: {error}"))?
     }
 
-    fn compaction_settings(&self, model: Option<&Model>) -> Result<CompactionSettings, String> {
+    pub(super) fn compaction_settings(
+        &self,
+        model: Option<&Model>,
+    ) -> Result<CompactionSettings, String> {
         super::read_settings(&self.settings)
             .compaction_settings(model.map(|model| (model.provider.as_str(), model.id.as_str())))
     }
@@ -888,6 +892,8 @@ impl Core {
         will_retry: bool,
         run_signal: Option<&AbortSignal>,
     ) -> Result<bool, String> {
+        self.cancel_background_compaction("foreground compaction")
+            .await;
         // Registered before the branch read, so an abort during it cancels
         // the request.
         let (controller, slot) = self.register_abort(|state| &mut state.auto_compaction_abort);
@@ -1013,6 +1019,7 @@ impl Core {
         self.emit(&SessionEvent::CompactionStart {
             reason: CompactionReason::Manual,
         });
+        self.cancel_background_compaction("manual compaction").await;
         let cancelled =
             || controller.signal().aborted() || cancel.as_ref().is_some_and(AbortSignal::aborted);
         let work = async {
@@ -1122,6 +1129,12 @@ impl Core {
         skip_aborted_check: bool,
         tool_results: Vec<Option<String>>,
     ) -> Result<bool, String> {
+        let allow_background = !matches!(
+            assistant.stop_reason,
+            StopReason::Error | StopReason::Aborted | StopReason::Length
+        );
+        self.background_compaction_boundary(allow_background)
+            .await?;
         let model = self.model();
         let settings = self.compaction_settings(model.as_ref())?;
         if !settings.enabled {
@@ -1207,6 +1220,7 @@ impl Core {
             return None;
         }
         let settings = self.compaction_settings(Some(&model)).ok()?;
+        let background_committed = self.background_compaction_boundary(true).await.ok()?;
         let (branch, projection) = self
             .with_session(|session| {
                 (
@@ -1222,7 +1236,17 @@ impl Core {
             .ok()?;
         let tokens = estimate_projected_context_tokens(&projection, &branch).tokens;
         if !should_compact(tokens, model.context_window, &settings) {
-            return None;
+            return background_committed.then(|| AgentLoopTurnUpdate {
+                context: Some(AgentContext {
+                    messages: projection
+                        .messages
+                        .iter()
+                        .map(AgentMessage::to_agent)
+                        .collect(),
+                    tools,
+                }),
+                ..AgentLoopTurnUpdate::default()
+            });
         }
         // Failures are reported as events; the run goes on either way.
         let _ = self

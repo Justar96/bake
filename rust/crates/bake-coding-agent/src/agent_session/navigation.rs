@@ -146,6 +146,10 @@ impl AgentSession {
             let _claim = control
                 .core
                 .busy(|_| {}, |activity| activity.navigation = false);
+            control
+                .core
+                .cancel_background_compaction("navigation")
+                .await;
             let core = Arc::clone(&control.core);
             let navigate = move || {
                 #[cfg(test)]

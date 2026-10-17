@@ -174,6 +174,27 @@ pub fn session_event_json(event: &SessionEvent<'_>) -> Value {
             }
             Value::Object(out)
         }
+        SessionEvent::BackgroundCompaction {
+            status,
+            source_leaf_id,
+            result,
+            reason,
+            elapsed_ms,
+            attempts,
+        } => {
+            let mut out = object("background_compaction");
+            out.insert("status".into(), status.as_str().into());
+            out.insert("sourceLeafId".into(), (*source_leaf_id).into());
+            out.insert("elapsedMs".into(), (*elapsed_ms).into());
+            out.insert("attempts".into(), to_value(attempts));
+            if let Some(result) = result {
+                out.insert("result".into(), to_value(result));
+            }
+            if let Some(reason) = reason {
+                out.insert("reason".into(), (*reason).into());
+            }
+            Value::Object(out)
+        }
         SessionEvent::AutoRetryStart {
             attempt,
             max_attempts,

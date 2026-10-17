@@ -20,8 +20,11 @@
 //! - A message member of the wrong type counts zero characters where
 //!   JavaScript would produce `NaN` or throw.
 
+mod attempt;
 pub mod branch_summarization;
 pub mod utils;
+
+pub use attempt::{SummaryAttempt, SummaryAttemptObserver};
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -589,6 +592,12 @@ pub type RetryObserver = Arc<dyn Fn(RetryEvent) + Send + Sync>;
 pub struct SummarizationOptions {
     /// Shared foreground allowance, including each summary and retry.
     pub run_control: Option<bake_agent::RunControl>,
+    /// Calls preserved for foreground work. A speculative attempt refused
+    /// by this reserve leaves the shared run open. Zero uses ordinary limits.
+    pub foreground_call_reserve: u64,
+    /// Observes every admitted attempt after provider cleanup, including
+    /// retries and failed partial compactions. Panics are contained.
+    pub on_attempt: Option<SummaryAttemptObserver>,
     /// An explicit API key; the stream function resolves one otherwise.
     pub api_key: Option<String>,
     /// Request headers.
@@ -671,6 +680,48 @@ pub async fn complete_summarization_with_control(
     on_retry: Option<&RetryObserver>,
     control: Option<&bake_agent::RunControl>,
 ) -> Result<AssistantMessage, String> {
+    complete_summarization_with_run(
+        model,
+        context,
+        options,
+        stream_fn,
+        retry,
+        on_retry,
+        SummaryRun {
+            control,
+            ..SummaryRun::default()
+        },
+    )
+    .await
+}
+
+#[derive(Clone, Copy, Default)]
+struct SummaryRun<'a> {
+    control: Option<&'a bake_agent::RunControl>,
+    foreground_reserve: u64,
+    on_attempt: Option<&'a SummaryAttemptObserver>,
+}
+
+impl<'a> From<&'a SummarizationOptions> for SummaryRun<'a> {
+    fn from(options: &'a SummarizationOptions) -> Self {
+        Self {
+            control: options.run_control.as_ref(),
+            foreground_reserve: options.foreground_call_reserve,
+            on_attempt: options.on_attempt.as_ref(),
+        }
+    }
+}
+
+async fn complete_summarization_with_run(
+    model: &Model,
+    context: &TranscriptContext,
+    options: SimpleStreamOptions,
+    stream_fn: &StreamFn,
+    retry: Option<RetryPolicy>,
+    on_retry: Option<&RetryObserver>,
+    run: SummaryRun<'_>,
+) -> Result<AssistantMessage, String> {
+    let control = run.control;
     let mut request = options;
     request.base.cache_retention = Some(CacheRetention::None);
     if request.base.session_id.is_none() {
@@ -688,20 +739,64 @@ pub async fn complete_summarization_with_control(
     let produce = || {
         let request = request.clone();
         async move {
-            if let Some(control) = control {
-                control
-                    .admit_model_call(bake_agent::ModelCallKind::Summary, model)
-                    .await
-                    .map_err(|outcome| outcome.to_string())?;
+            if request
+                .base
+                .signal
+                .as_ref()
+                .is_some_and(AbortSignal::aborted)
+            {
+                return Err("This operation was aborted".to_owned());
             }
-            let stream = stream_fn(model, context, request)?;
-            let result = stream.result().await;
-            if control.is_some() {
-                let producer = stream.producer_watch();
-                drop(stream);
-                producer.ended().await;
-            }
-            result.ok_or_else(|| "Summarization stream ended without a result".to_owned())
+            let admission = match control {
+                Some(control) if run.foreground_reserve > 0 => Some(
+                    control
+                        .try_admit_model_call(
+                            bake_agent::ModelCallKind::Summary,
+                            model,
+                            run.foreground_reserve,
+                        )
+                        .await
+                        .map_err(|outcome| outcome.to_string())?
+                        .ok_or_else(|| {
+                            "Background compaction preserved the foreground model-call allowance"
+                                .to_owned()
+                        })?,
+                ),
+                Some(control) => Some(
+                    control
+                        .admit_model_call(bake_agent::ModelCallKind::Summary, model)
+                        .await
+                        .map_err(|outcome| outcome.to_string())?,
+                ),
+                None => None,
+            };
+            // A mandatory debit may outlast local cancellation. It remains
+            // charged, but an already-cancelled request is never dispatched.
+            let dispatched = !request
+                .base
+                .signal
+                .as_ref()
+                .is_some_and(AbortSignal::aborted);
+            let started = tokio::time::Instant::now();
+            let result = if dispatched {
+                match stream_fn(model, context, request) {
+                    Ok(stream) => {
+                        let result = stream.result().await;
+                        if control.is_some() {
+                            let producer = stream.producer_watch();
+                            drop(stream);
+                            producer.ended().await;
+                        }
+                        result
+                            .ok_or_else(|| "Summarization stream ended without a result".to_owned())
+                    }
+                    Err(error) => Err(error),
+                }
+            } else {
+                Err("This operation was aborted".to_owned())
+            };
+            attempt::observe(run.on_attempt, admission, dispatched, &result, started);
+            result
         }
     };
     let request = try_retry_assistant_call(produce, retry, Some(&signal), |event| {
@@ -725,6 +820,7 @@ pub async fn complete_summarization_with_control(
     };
     match control.and_then(bake_agent::RunControl::stopped) {
         Some(outcome) => Err(outcome.to_string()),
+        None if signal.aborted() => Err("This operation was aborted".to_owned()),
         None => result,
     }
 }
@@ -793,14 +889,14 @@ pub async fn generate_summary_with_usage(
         ));
     }
     prompt.push_str(&base_prompt);
-    let response = complete_summarization_with_control(
+    let response = complete_summarization_with_run(
         model,
         &build_summarization_context(prompt),
         create_summarization_options(model, max_tokens, options),
         stream_fn,
         options.retry,
         options.on_retry.as_ref(),
-        options.run_control.as_ref(),
+        options.into(),
     )
     .await?;
     if let Some(failure) = get_summarization_failure(&response, "Summarization") {
@@ -1157,14 +1253,14 @@ async fn generate_turn_prefix_summary(
     let prompt = format!(
         "# Conversation\n{conversation}\n\n# Instructions\n{TURN_PREFIX_SUMMARIZATION_PROMPT}"
     );
-    let response = complete_summarization_with_control(
+    let response = complete_summarization_with_run(
         model,
         &build_summarization_context(prompt),
         create_summarization_options(model, max_tokens, options),
         stream_fn,
         options.retry,
         options.on_retry.as_ref(),
-        options.run_control.as_ref(),
+        options.into(),
     )
     .await?;
     if let Some(failure) = get_summarization_failure(&response, "Turn prefix summarization") {

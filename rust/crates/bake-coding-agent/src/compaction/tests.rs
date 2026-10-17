@@ -21,6 +21,9 @@ use super::*;
 use crate::session::build_session_context;
 use crate::session::json::JsonObject;
 
+#[path = "attempt_tests.rs"]
+mod attempt;
+
 struct Entries {
     counter: usize,
     last: Option<String>,

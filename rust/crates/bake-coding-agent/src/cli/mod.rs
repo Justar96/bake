@@ -1005,10 +1005,21 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
         Path::new(&session_cwd),
         &tool_permissions,
     );
-    let available: Vec<String> = definitions
+    let mut available: Vec<String> = definitions
         .iter()
         .map(|definition| definition.name().to_owned())
         .collect();
+    if settings.task_documents {
+        available.push(crate::agent_session::task_documents::NAME.to_owned());
+    }
+    let mut defaults = settings.default_tools.clone();
+    if settings.task_documents && defaults.is_none() {
+        let mut names = crate::tools::index::DEFAULT_TOOL_NAMES
+            .map(str::to_owned)
+            .to_vec();
+        names.push(crate::agent_session::task_documents::NAME.to_owned());
+        defaults = Some(names);
+    }
     let selection_options = ToolSelectionOptions {
         tools: args.tools.clone(),
         exclude_tools: args.exclude_tools.clone(),
@@ -1020,11 +1031,7 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
             None
         },
     };
-    let selection = select_tools(
-        &selection_options,
-        settings.default_tools.as_deref(),
-        &available,
-    )?;
+    let selection = select_tools(&selection_options, defaults.as_deref(), &available)?;
     let registered: Vec<_> = definitions
         .into_iter()
         .filter(|definition| {
@@ -2033,6 +2040,73 @@ mod tests {
             interrupt: no_interrupt(),
         };
         (environment, buffer)
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn document_opt_in_obeys_cli_and_configured_tool_restrictions() {
+        use bake_ai::providers::faux::{
+            FauxProvider, FauxProviderOptions, FauxResponseStep, faux_assistant_message,
+        };
+        for (extra, defaults, expected) in [
+            (vec![], None, true),
+            (vec!["--no-tools"], None, false),
+            (vec!["--no-builtin-tools"], None, false),
+            (vec!["--tools", "read"], None, false),
+            (vec!["--exclude-tools", "task_document"], None, false),
+            (vec![], Some(serde_json::json!(["read"])), false),
+            (
+                vec!["--tools", "+task_document"],
+                Some(serde_json::json!([])),
+                true,
+            ),
+        ] {
+            let dir = setup_dirs("cli-document-selection");
+            let mut settings = serde_json::json!({"taskDocuments":true});
+            if let Some(defaults) = defaults {
+                settings["defaultTools"] = defaults;
+            }
+            write_owned(&dir.join("home/settings.json"), &settings.to_string());
+            let faux = Arc::new(FauxProvider::new(FauxProviderOptions::default()));
+            faux.set_responses(vec![FauxResponseStep::from_fn(move |context, _, _, _| {
+                assert_eq!(
+                    bake_ai::transcript::get_current_tools(context.messages())
+                        .iter()
+                        .any(|tool| tool.name == "task_document"),
+                    expected
+                );
+                Ok(faux_assistant_message("done"))
+            })]);
+            let (mut environment, errors) = setup_environment(dir.path());
+            environment.extra_providers.push((
+                "faux".into(),
+                serde_json::json!({
+                    "baseUrl":"http://127.0.0.1:9/unused", "api":faux.model().api,
+                    "models":[{"id":"faux-1"}]
+                }),
+                Some("test-key".into()),
+            ));
+            let mut args = vec![
+                "--model",
+                "faux/faux-1",
+                "--permission",
+                "danger-full-access",
+                "--no-session",
+                "--no-mcp",
+            ];
+            args.extend(extra);
+            let Ok(started) = start_interactive(environment, parse_args(&strings(&args))).await
+            else {
+                panic!("setup failed: {}", text(&errors));
+            };
+            started.session.apis().register(faux.clone());
+            started
+                .session
+                .prompt("Continue", Vec::new())
+                .await
+                .unwrap();
+            assert_eq!(faux.call_count(), 1);
+            started.session.shutdown().await;
+        }
     }
 
     // Interactive setup and every replacement session share print mode's

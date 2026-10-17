@@ -17,7 +17,9 @@ use std::collections::HashMap;
 
 use bake_agent::{AgentEvent, AgentMessage, AgentToolResult};
 use bake_ai::{AssistantContentBlock, AssistantMessage, StopReason, UserContent, UserContentBlock};
-use bake_coding_agent::agent_session::{CompactionReason, SessionEvent};
+use bake_coding_agent::agent_session::{
+    BackgroundCompactionStatus, CompactionReason, SessionEvent,
+};
 use bake_tui_view::runtime::{Pending, RuntimeUpdate, Target};
 use bake_tui_view::transcript::{CallState, Row};
 use serde_json::Value;
@@ -102,6 +104,14 @@ impl Projector {
                 &self.waiting,
             ))],
             SessionEvent::CompactionStart { .. } => self.set_phase("compacting"),
+            SessionEvent::BackgroundCompaction {
+                status: BackgroundCompactionStatus::Committed,
+                result: Some(result),
+                ..
+            } => vec![self.commit_now(Row::Info(format!(
+                "Compacted the conversation in the background ({} tokens before)",
+                result.tokens_before
+            )))],
             // `/compact` reports its own outcome, with its draft.
             SessionEvent::CompactionEnd {
                 reason: CompactionReason::Manual,
@@ -596,6 +606,46 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn background_commit_reports_context_without_replacing_foreground_phase() {
+        let mut projector = Projector {
+            phase: Some("running".into()),
+            ..Projector::default()
+        };
+        let result = bake_coding_agent::compaction::CompactionResult {
+            summary: "summary".into(),
+            first_kept_entry_id: "kept".into(),
+            tokens_before: 8000,
+            estimated_tokens_after: Some(1000),
+            usage: None,
+            details: None,
+        };
+        let started = SessionEvent::BackgroundCompaction {
+            status: BackgroundCompactionStatus::Started,
+            source_leaf_id: "source",
+            result: None,
+            reason: None,
+            elapsed_ms: 0,
+            attempts: &[],
+        };
+        assert!(projector.apply(&started).is_empty());
+        let committed = SessionEvent::BackgroundCompaction {
+            status: BackgroundCompactionStatus::Committed,
+            source_leaf_id: "source",
+            result: Some(&result),
+            reason: None,
+            elapsed_ms: 10,
+            attempts: &[],
+        };
+        assert_eq!(
+            projector.apply(&committed),
+            vec![RuntimeUpdate::Commit(vec![Row::Info(
+                "Compacted the conversation in the background (8000 tokens before)".into()
+            )])]
+        );
+        assert_eq!(projector.phase.as_deref(), Some("running"));
+    }
 
     fn user(text: &str) -> AgentMessage {
         Message::User(UserMessage {
