@@ -538,24 +538,210 @@ async fn components_outside_the_contract_are_refused_before_compiling() {
     ));
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+/// A wall-clock bound that works while Tokio's clock is paused: a thread
+/// this value owns completes `expired` after `timeout` of real time.
+/// [`RealTimer::stop`] (or dropping it) cancels the thread and joins it.
+struct RealTimer {
+    expired: tokio::sync::oneshot::Receiver<()>,
+    cancel: Option<std::sync::mpsc::Sender<()>>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl RealTimer {
+    fn start(timeout: Duration) -> Self {
+        let (expire, expired) = tokio::sync::oneshot::channel();
+        let (cancel, cancelled) = std::sync::mpsc::channel::<()>();
+        let thread = std::thread::spawn(move || {
+            // A dropped sender ends the wait at once.
+            if let Err(std::sync::mpsc::RecvTimeoutError::Timeout) = cancelled.recv_timeout(timeout)
+            {
+                let _ = expire.send(());
+            }
+        });
+        Self {
+            expired,
+            cancel: Some(cancel),
+            thread: Some(thread),
+        }
+    }
+
+    fn stop(&mut self) {
+        drop(self.cancel.take());
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+impl Drop for RealTimer {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+/// The start's task; a `JoinHandle` may be awaited only until it settles,
+/// so this remembers that it has.
+struct StartTask {
+    handle: tokio::task::JoinHandle<Result<(), StartError>>,
+    settled: bool,
+}
+
+impl StartTask {
+    /// Awaits the task; cancel-safe, and pending forever once settled.
+    async fn join(&mut self) -> Result<Result<(), StartError>, tokio::task::JoinError> {
+        if self.settled {
+            return std::future::pending().await;
+        }
+        let joined = (&mut self.handle).await;
+        self.settled = true;
+        joined
+    }
+
+    /// Cancels the task if it is still running and awaits it.
+    async fn cancel(&mut self) {
+        if !self.settled {
+            self.handle.abort();
+            let _ = (&mut self.handle).await;
+            self.settled = true;
+        }
+    }
+}
+
+/// Drives the paused-clock start to its outcome: `Ok` once the start task
+/// has settled after the advanced deadline, `Err` with the reason when the
+/// test must fail. Expected failures return to the caller for cleanup.
+async fn drive_past_compile_deadline(
+    start: &mut StartTask,
+    seen: &mut watch::Receiver<HostStatus>,
+    trace: &mut Vec<HostStatus>,
+    timer: &mut RealTimer,
+    paused: &mut bool,
+    deadline: Duration,
+) -> Result<Result<(), StartError>, String> {
+    loop {
+        tokio::select! {
+            changed = seen.changed() => {
+                if changed.is_err() {
+                    return Err(format!("the host dropped its status sender: {trace:?}"));
+                }
+                let state = *seen.borrow_and_update();
+                trace.push(state);
+                if matches!(state, HostStatus::Compiling(_)) {
+                    break;
+                }
+                if !matches!(state, HostStatus::Starting | HostStatus::New | HostStatus::Spawned(_)) {
+                    return Err(format!("the start ended before compiling: {trace:?}"));
+                }
+            }
+            joined = start.join() => {
+                return Err(format!("the start settled before compiling: {joined:?}; {trace:?}"));
+            }
+            _ = &mut timer.expired => {
+                return Err(format!("no Compiling within 120 s of real time: {trace:?}"));
+            }
+        }
+    }
+    // Past the deadline: the host's next poll sees it expired.
+    tokio::time::advance(deadline + Duration::from_secs(1)).await;
+    tokio::time::resume();
+    *paused = false;
+    match tokio::time::timeout(Duration::from_secs(60), start.join()).await {
+        Ok(Ok(result)) => Ok(result),
+        Ok(Err(error)) => Err(format!("the start task failed: {error:?}; {trace:?}")),
+        Err(_) => Err(format!(
+            "the start did not settle within 60 s of the deadline: {trace:?}"
+        )),
+    }
+}
+
+/// The compile deadline covers writing and validating the Load frame as
+/// well as compiling, and how long those take depends on the machine:
+/// on an Intel Mac under the full suite validation alone took 2.2 s. So
+/// the deadline is driven, not estimated. Tokio's clock is paused (a
+/// spinning task keeps the runtime from auto-advancing it), so the host's
+/// deadline cannot expire on its own; once the host reports `Compiling`,
+/// which the helper sends after validating and before compiling, the test
+/// advances the clock past the deadline and resumes it. The remaining
+/// assumption is that compiling this component (1.7 s on Linux, about
+/// 4 s on that Mac) outlasts the time from the helper's `Compiling` frame
+/// to the host acting on the expired deadline; the status trace in the
+/// failure message shows that order if it is ever violated.
+///
+/// The test owns everything it starts until it has finished with it: on
+/// each returned outcome it stops and awaits the spinner, resumes the clock,
+/// cancels and awaits a start still running (a dropped `initialize` leaves
+/// the helper with the host), attempts the host's `shutdown` with a bound,
+/// and joins the real-time timer. It checks teardown before the outcome;
+/// an incomplete teardown fails the test.
+#[tokio::test(start_paused = true)]
 async fn a_compile_past_its_deadline_is_killed_and_reaped() {
     let slow = package("slow", &["write"], slow_component(1400, 1000));
     let limits = HostLimits {
-        compile_timeout: Duration::from_millis(400),
+        compile_timeout: Duration::from_secs(30),
         max_component_bytes: 16 << 20,
         memory_budget: 512 << 20,
         ..limits()
     };
     let (status, mut seen) = watch::channel(HostStatus::Starting);
-    let compiling = tokio::spawn(async move {
-        wait_status(&mut seen, |state| matches!(state, HostStatus::Compiling(_))).await;
+    let host = std::sync::Arc::new(
+        new_host(
+            &command(),
+            &slow,
+            &limits,
+            CompileQueue::new(4),
+            Some(status),
+        )
+        .expect("a host"),
+    );
+    let mut trace = vec![*seen.borrow_and_update()];
+    let mut timer = RealTimer::start(Duration::from_secs(120));
+    let mut paused = true;
+    // Keeps the runtime busy so the paused clock never auto-advances, and
+    // with it the startup and compile deadlines stay where they are.
+    let spinner = tokio::spawn(async {
+        loop {
+            tokio::task::yield_now().await;
+        }
     });
-    let result = try_start_with(&command(), &slow, &limits, Some(status)).await;
-    compiling.await.expect("the helper reported compiling");
-    let Err(StartError::CompileTimeout { exit }) = result else {
-        panic!("expected a compile timeout, got {result:?}");
+    let mut start = StartTask {
+        handle: tokio::spawn({
+            let host = host.clone();
+            async move { host.initialize(None).await }
+        }),
+        settled: false,
     };
+
+    let outcome = drive_past_compile_deadline(
+        &mut start,
+        &mut seen,
+        &mut trace,
+        &mut timer,
+        &mut paused,
+        limits.compile_timeout,
+    )
+    .await;
+
+    // Cleanup, on every outcome, before any assertion.
+    spinner.abort();
+    let _ = spinner.await;
+    if paused {
+        tokio::time::resume();
+    }
+    start.cancel().await;
+    let exit = tokio::time::timeout(Duration::from_secs(60), host.shutdown()).await;
+    let pid = host.pid();
+    timer.stop();
+    let exit = exit.expect("the host's shutdown settles within 60 s");
+    assert!(exit.is_complete(), "{exit:?}; statuses {trace:?}");
+    if let Some(pid) = pid {
+        assert!(process_gone(pid), "helper {pid} survived the test");
+    }
+
+    let result = outcome.unwrap_or_else(|reason| panic!("{reason}"));
+    let Err(StartError::CompileTimeout { exit: reported }) = result else {
+        panic!("expected a compile timeout, got {result:?}; statuses {trace:?}");
+    };
+    assert_eq!(reported, exit, "the failed start reported its teardown");
     assert!(exit.killed && exit.reaped && exit.drained, "{exit:?}");
     #[cfg(unix)]
     assert_eq!(exit.signal, Some(libc::SIGKILL));
@@ -775,6 +961,57 @@ async fn helper_startup_failures_are_reported_and_reaped() {
     ));
 }
 
+/// On macOS the helper refuses to start without `MallocMediumZone=0` and
+/// `MallocMaxMagazines=1`: on a Mac with 32 GiB or more, libmalloc's medium
+/// allocator reserves 128 MiB of address space per region and CPU magazine,
+/// and ordinary loads under the budget aborted at allocations of 36 to
+/// 131 KiB; its tiny and small allocators map 1 MiB and 8 MiB regions per
+/// CPU magazine, which left a 128 MiB guard too little room for a call
+/// under the full suite. The host sets both; a shell removes or overrides
+/// one here. This checks the
+/// required setting, not allocator state; the positive guard and hostile
+/// tests are the native evidence.
+#[cfg(target_os = "macos")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_helper_with_the_medium_allocator_refuses_to_start() {
+    for (name, script, setting) in [
+        (
+            "unset",
+            "unset MallocMediumZone; exec \"$0\" \"$@\"",
+            "MallocMediumZone",
+        ),
+        (
+            "on",
+            "MallocMediumZone=1 exec \"$0\" \"$@\"",
+            "MallocMediumZone",
+        ),
+        (
+            "magazines unset",
+            "unset MallocMaxMagazines; exec \"$0\" \"$@\"",
+            "MallocMaxMagazines",
+        ),
+    ] {
+        let command = HelperCommand::new("/bin/sh", ["-c", script, BAKE_RS, HELPER_ARG]);
+        let Err(StartError::Handshake { exit, .. }) =
+            try_start_with(&command, &guard(), &limits(), None).await
+        else {
+            panic!("{name}: a helper with the medium allocator on started");
+        };
+        assert_eq!(
+            (exit.code, exit.reaped),
+            (Some(70), true),
+            "{name}: {exit:?}"
+        );
+        assert!(exit.stderr.contains(setting), "{name}: {exit:?}");
+    }
+    // The same shell path with the setting kept loads the guard.
+    let kept = HelperCommand::new("/bin/sh", ["-c", "exec \"$0\" \"$@\"", BAKE_RS, HELPER_ARG]);
+    let host = try_start_with(&kept, &guard(), &limits(), None)
+        .await
+        .expect("the guard loads with MallocMediumZone=0");
+    assert!(host.shutdown().await.is_complete());
+}
+
 /// A hard address-space limit the helper cannot raise to its budget: it
 /// must exit before its `Hello` rather than run with a smaller limit.
 /// Linux only: macOS refuses an address-space limit below a process's
@@ -843,8 +1080,9 @@ async fn the_os_memory_limit_stops_an_oversized_compile() {
         }
         other => panic!("expected the limit to stop the compile, got {other:?}"),
     }
-    // macOS spends several times more address space per compile; its
-    // budgets are calibrated separately.
+    // The roomy 512 MiB step runs on Linux only: how much address space
+    // this function needs to compile on macOS has not been measured, so
+    // there only the refusal is checked.
     #[cfg(target_os = "linux")]
     {
         let roomy = HostLimits {
@@ -933,6 +1171,12 @@ impl RawHelper {
                 "10000",
             ])
             .env_clear()
+            // As the host starts it; see `a_helper_with_the_medium_allocator_refuses_to_start`.
+            .envs(
+                [("MallocMediumZone", "0"), ("MallocMaxMagazines", "1")]
+                    .into_iter()
+                    .filter(|_| cfg!(target_os = "macos")),
+            )
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null())

@@ -194,8 +194,14 @@ impl HostLimits {
 /// cancelled, timed out, or refused therefore keeps the slot while its
 /// helper may still be compiling, until [`WasmPluginHost::shutdown`] or
 /// another operation observes the exit. Waiting only for the helper's
-/// pipes to close does not hold the slot. Dropping the host releases the
-/// slot with the helper, whose kill was sent but whose exit nobody awaits.
+/// pipes to close does not hold the slot.
+///
+/// The bound holds only across hosts that are shut down: `shutdown` keeps
+/// the slot until it observes the exit. Dropping a host without it sends
+/// the helper a kill (Tokio's kill-on-drop on Unix, the Job on Windows),
+/// awaits nothing, and releases the slot at once, so that helper may still
+/// be exiting, or compiling until the kill lands, while another start
+/// compiles.
 #[derive(Debug, Clone)]
 pub struct CompileQueue {
     inner: Arc<QueueInner>,

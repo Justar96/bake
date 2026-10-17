@@ -8,7 +8,17 @@
 //!   must still succeed. The budget is an increment so that the room left
 //!   for the plugin does not depend on how much the binary maps at startup
 //!   (about 62 MiB for a release build on Linux x86_64, tens of GiB on
-//!   macOS). On Linux the startup size is also capped at
+//!   macOS). On macOS the parent starts the helper with
+//!   `MallocMediumZone=0`, because libmalloc's medium allocator, active on
+//!   Macs with 32 GiB or more, reserves 128 MiB per region and CPU
+//!   magazine and consumed the budget with untouched reservations. The
+//!   helper requires the setting and checks that one medium-sized
+//!   allocation adds less than 32 MiB; that check is narrow and proves no
+//!   allocator state (`check_medium_allocator`). It also requires
+//!   `MallocMaxMagazines=1`: libmalloc's per-CPU tiny and small magazines
+//!   each map their own regions, so without it the reservations grow with
+//!   how many CPUs the helper's threads ran on. The hard limit is the
+//!   same either way. On Linux the startup size is also capped at
 //!   [`MAX_LINUX_BASELINE`](super::MAX_LINUX_BASELINE), so the absolute
 //!   limit is at most the budget plus 256 MiB. The probes show that the
 //!   kernel refuses a mapping past the limit and allows a small one; they
@@ -159,9 +169,90 @@ mod imp {
         Ok(())
     }
 
+    /// The size the medium-allocator probe allocates: inside libmalloc's
+    /// medium size class (32 KiB to 8 MiB), where the helper's ordinary
+    /// loads failed on macOS.
+    #[cfg(target_os = "macos")]
+    const MEDIUM_PROBE: usize = 64 << 10;
+
+    /// The most address space that one [`MEDIUM_PROBE`] allocation may add.
+    /// A small region is 8 MiB; a medium region is 128 MiB.
+    #[cfg(target_os = "macos")]
+    const MEDIUM_PROBE_LIMIT: u64 = 32 << 20;
+
+    /// Requires the setting that turns libmalloc's medium allocator off,
+    /// then runs one bounded check of it.
+    ///
+    /// On a Mac with at least 32 GiB of memory, libmalloc serves 32 KiB to
+    /// 8 MiB allocations from 128 MiB regions, one set per magazine (up to
+    /// one per logical CPU), so the first such allocation on a CPU reserves
+    /// 128 MiB of address space while touching a few KiB. Under the
+    /// `RLIMIT_AS` budget that turned ordinary allocations into aborts, at a
+    /// point that depends on scheduling. The parent starts the helper with
+    /// `MallocMediumZone=0`, which libmalloc reads before `main` (in its
+    /// `_malloc_initialize`) and which sends those sizes to the small and
+    /// large allocators instead. The variable is libmalloc's, not a
+    /// documented interface.
+    ///
+    /// libmalloc also picks the tiny and small magazine for each allocation
+    /// by the CPU the thread is running on (`rack_get_thread_index`), and
+    /// each magazine maps its own regions: 1 MiB tiny, 8 MiB small. From
+    /// libmalloc's source, on the 56-CPU Intel Mac (28 magazines after its
+    /// hyperthread shift) a helper whose threads migrate can reserve up to
+    /// about 250 MiB that way, depending only on scheduling. At a 128 MiB
+    /// budget that left too little for a call's 64 MiB linear memory under
+    /// the full test suite, and under heavier contention ordinary loads
+    /// aborted as well. The parent therefore also sets
+    /// `MallocMaxMagazines=1`, which libmalloc reads in the same place; the
+    /// helper runs a few threads, and the cost of sharing one magazine was
+    /// not measured.
+    ///
+    /// The helper refuses to start without those exact settings. The check
+    /// after it is narrow: one medium-sized allocation must add less than
+    /// [`MEDIUM_PROBE_LIMIT`] of address space. Passing shows only that this
+    /// allocation did not create a medium region; it would also pass if one
+    /// already existed, so it does not prove the allocator is off or rule
+    /// out later reservations. What bounds the helper either way is the
+    /// unchanged hard `RLIMIT_AS`: a reservation the setting fails to
+    /// prevent still fails inside the limit, as an abort, never as memory
+    /// past it.
+    #[cfg(target_os = "macos")]
+    fn check_medium_allocator() -> Result<(), String> {
+        if std::env::var_os("MallocMediumZone").as_deref() != Some(std::ffi::OsStr::new("0")) {
+            return Err("the helper must be started with MallocMediumZone=0".to_owned());
+        }
+        if std::env::var_os("MallocMaxMagazines").as_deref() != Some(std::ffi::OsStr::new("1")) {
+            return Err("the helper must be started with MallocMaxMagazines=1".to_owned());
+        }
+        let before = address_space()?;
+        // SAFETY: plain allocation; the block is freed below and never read.
+        let block = unsafe { libc::malloc(MEDIUM_PROBE) };
+        if block.is_null() {
+            return Err("the medium-allocator probe could not allocate".to_owned());
+        }
+        // Touch the block so the allocation cannot be elided.
+        // SAFETY: `block` is a live allocation of `MEDIUM_PROBE` bytes.
+        unsafe { std::ptr::write_volatile(block.cast::<u8>(), 1) };
+        let after = address_space();
+        // SAFETY: `block` came from `malloc` and is freed once.
+        unsafe { libc::free(block) };
+        let added = after?.saturating_sub(before);
+        if added >= MEDIUM_PROBE_LIMIT {
+            return Err(format!(
+                "a {MEDIUM_PROBE}-byte allocation added {added} bytes of address space \
+                 although MallocMediumZone=0; libmalloc's medium allocator appears to be on"
+            ));
+        }
+        Ok(())
+    }
+
     pub(super) fn establish(budget: u64) -> Result<MemoryLimit, String> {
         set(libc::RLIMIT_CORE as libc::c_int, 0, "RLIMIT_CORE")?;
         set(libc::RLIMIT_FSIZE as libc::c_int, 0, "RLIMIT_FSIZE")?;
+        // Before the baseline, so the probe's own small region is counted
+        // in it rather than in the budget.
+        #[cfg(target_os = "macos")]
+        check_medium_allocator()?;
         let baseline = address_space()?;
         // On Linux the absolute limit is bounded as well: a baseline over
         // the cap means something unexpected is mapped, and the helper

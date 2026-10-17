@@ -1,7 +1,9 @@
 //! The helper process as the parent sees it: how it is created, its three
 //! pipes, waiting for its exit, and killing it.
 //!
-//! - **Unix:** Tokio's `Command` with a cleared environment, `/` as the
+//! - **Unix:** Tokio's `Command` with a cleared environment (on macOS
+//!   holding only `MallocMediumZone=0` and `MallocMaxMagazines=1`; see
+//!   `os_limit`), `/` as the
 //!   working directory, piped standard streams, and `setsid` before `exec`,
 //!   so the helper has no controlling terminal. Only the three pipes are
 //!   inherited (Rust opens every other descriptor close-on-exec).
@@ -82,6 +84,17 @@ mod imp {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
+        // libmalloc's medium allocator reserves 128 MiB of address space per
+        // region and CPU magazine, which the helper's `RLIMIT_AS` budget
+        // cannot absorb. The helper refuses to start without this setting
+        // (`os_limit::check_medium_allocator`); the hard limit is unchanged.
+        #[cfg(target_os = "macos")]
+        cmd.env("MallocMediumZone", "0");
+        // libmalloc picks a tiny and small magazine by the CPU a thread is
+        // running on, and each magazine maps its own 1 MiB and 8 MiB
+        // regions; one magazine keeps that from growing with CPU spread.
+        #[cfg(target_os = "macos")]
+        cmd.env("MallocMaxMagazines", "1");
         // SAFETY: the closure runs in the forked child before `exec` and
         // calls only `setsid`, which is async-signal-safe, and reads errno.
         unsafe {

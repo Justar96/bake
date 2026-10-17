@@ -24,7 +24,9 @@ ring.workspace = true
 [dev-dependencies]
 # The Wasm plugin host tests: async drivers, and components built from
 # core-module text with the WIT tooling Wasmtime's bindings already use.
-tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "time", "process", "io-util", "sync"] }
+# `test-util` lets the compile-deadline test hold the host's clock until the
+# helper reports that it is compiling.
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "time", "process", "io-util", "sync", "test-util"] }
 wat = { version = "=1.258.3", default-features = false }
 wasm-encoder = { version = "=0.258.3", default-features = false }
 wit-component = { version = "=0.258.3", default-features = false }

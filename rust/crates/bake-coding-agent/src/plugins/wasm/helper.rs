@@ -151,6 +151,9 @@ pub fn helper_main(args: impl IntoIterator<Item = OsString>) -> ! {
     unsafe {
         libc::mallopt(libc::M_ARENA_MAX, 1);
     }
+    // macOS has no such call: libmalloc is configured before `main`, so the
+    // parent sets `MallocMediumZone=0` and `MallocMaxMagazines=1`, and `os_limit`
+    // requires both.
     let limit = match os_limit::establish(args.memory_budget) {
         Ok(limit) => limit,
         Err(message) => {
