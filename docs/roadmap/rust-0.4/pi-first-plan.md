@@ -4,7 +4,7 @@
 
 This page re-plans roadmap scopes 02 to 17 around [D22](scope-00/support.md#decision-register) and [D32](scope-00/support.md#decision-register): the Rust implementation is ported primarily from Pi's latest official source, Bake's TypeScript runtime is ported selectively, and 0.4 is a new binary with no migration from a TypeScript install. For each scope it names the Pi owners to port, the Bake behavior that must survive, and the exit evidence that replaces 0.3 parity.
 
-**Status: plan, 2026-10-09; D32 applied 2026-10-10; D7, D8, and D9 applied 2026-10-17.** This page defines the scope; the [roadmap](README.md#linear-development-sequence) records implementation progress. The [scope specifications](README.md#scope-specifications) for scopes 02 to 05 follow this page; those for scopes 06 to 17 still hold the 0.3-parity text. Where they conflict with this page, this page governs, and each scope's first PR replaces its specification text.
+**Status: plan, 2026-10-09; D32 applied 2026-10-10; D7–D10 and D13 applied 2026-10-17.** This page defines the scope; the [roadmap](README.md#linear-development-sequence) records implementation progress. The [scope specifications](README.md#scope-specifications) for scopes 02 to 05 follow this page; those for scopes 06 to 17 still hold the 0.3-parity text. Where they conflict with this page, this page governs, and each scope's first PR replaces its specification text.
 
 ## Table of Contents
 
@@ -92,6 +92,8 @@ Under D32, scopes 02 and 03 port Pi's session manager instead of Bake's Session 
 **D32, no TypeScript user migration (2026-10-10).** 0.4 is a new binary that users install. It writes Pi's session format, keeps the three contracts above, and drops Bake Session compatibility and the model-surface contract. It supersedes D4, D23, and D31.
 
 **D7, D8, and D9, support bounds (2026-10-17).** CLIProxyAPI is the only 0.4.0 provider route, with its three wire protocols; direct providers are deferred (D8). Bake Desktop integration is deferred beyond 0.4.0, without deleting the frozen TypeScript `desktop` bundle (D9). The Cordis-specific tooling is retired, and scope 12 designs Rust-native inspection and management capabilities with the D6 plugin API; the [native design](native-plugins.md) proposes their architecture and surfaces (D7).
+
+**D10 and D13, Rust-only support (2026-10-17).** 0.3 bug and security maintenance ends when 0.4.0 ships; from that release, only Rust Bake is shipped and maintained. Supported legacy `dsh`, profile, and package aliases retire with 0.3. Native environment fallbacks and existing user-owned command links remain preserved. Scope 16 must freeze the final TypeScript update route and prevent post-retirement 0.3 publication. Scope 17 owns the retirement notice and TypeScript product removal.
 
 Two earlier decisions were added to the [support register](scope-00/support.md#decision-register) with this plan and decided by request on 2026-10-09:
 
