@@ -41,6 +41,7 @@
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 /** The cargo-about release the bundle is generated with; any other version is refused. */
@@ -715,10 +716,21 @@ export function collect(root: string, runner: Runner = run, cargoAbout = process
   }
   if (aboutVersion !== `cargo-about ${CARGO_ABOUT_VERSION}`) throw new LicenseBundleError(`${cargoAbout} is ${JSON.stringify(aboutVersion)}; the bundle is generated with cargo-about ${CARGO_ABOUT_VERSION}`)
   const metadata = JSON.parse(runner('cargo', ['metadata', '--format-version', '1', '--locked', '--offline'], rust)) as CargoMetadata
-  const tree = ['tree', '--locked', '--offline', '-p', ROOT_PACKAGE]
+  // Cargo otherwise picks the tree's characters from `term.unicode` or the terminal; parseHostSide reads UTF-8 only.
+  const tree = ['tree', '--locked', '--offline', '--charset', 'utf8', '-p', ROOT_PACKAGE]
   const trees = PLATFORMS.map(platform => ({ id: platform.id, linked: runner('cargo', [...tree, '--target', platform.triple, '-e', 'normal,no-proc-macro', '--prefix', 'none', '-f', '{p}'], rust) }))
   const hostTree = runner('cargo', [...tree, '--target', 'all', '-e', 'normal,build', '--no-dedupe', '-f', '{p}'], rust)
-  const about = runner(cargoAbout, ['about', 'generate', '--frozen', '--fail', '-c', 'about.toml', '-m', join('crates', ROOT_PACKAGE, 'Cargo.toml'), '--format', 'json'], rust)
+  // cargo-about refuses redirected stdout under PowerShell. Its output-file
+  // option also keeps shell encoding out of the collected license text.
+  const scratch = mkdtempSync(join(tmpdir(), 'bake-license-collect-'))
+  let about: string
+  try {
+    const output = join(scratch, 'licenses.json')
+    runner(cargoAbout, ['about', 'generate', '--frozen', '--fail', '-c', 'about.toml', '-m', join('crates', ROOT_PACKAGE, 'Cargo.toml'), '--format', 'json', '--output-file', output], rust)
+    about = readFileSync(output, 'utf8')
+  } finally {
+    rmSync(scratch, { recursive: true, force: true })
+  }
   return {
     root,
     cargoLock: readFileSync(join(rust, 'Cargo.lock')),

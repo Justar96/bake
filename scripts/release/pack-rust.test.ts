@@ -2,8 +2,9 @@
  * The native preview packager refuses a binary that does not report this
  * build, keeps an earlier archive through every refusal, and archives only
  * regular payload files with their modes. These tests run stand-in binaries,
- * shell scripts that print what each case needs; `pack-rust.native.ts` runs
- * the real `bake-rs`.
+ * shell scripts that print what each case needs, and raw license bundles in
+ * the generator's output layout; `pack-rust.native.ts` runs the real
+ * `bake-rs` and the real generator.
  */
 import { afterEach, describe, expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
@@ -13,9 +14,10 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { BUNDLE_FILE, INVENTORY_FILE, PLATFORMS, SCHEMA } from './native-licenses.ts'
 import {
   archiveName, canonicalPath, checkOutputDir, docsDigests, hostTarget, inside, isNativeVersion, isRustTarget, packRust, parseSelfCheck,
-  payload, verifyArchive, workspaceInputs, type Expected, type PackOptions, type RustTarget,
+  payload, targetLicenses, verifyArchive, workspaceInputs, type Expected, type PackOptions, type RustTarget, type TargetLicenses,
 } from './pack-rust.ts'
 
 const roots: string[] = []
@@ -54,26 +56,88 @@ function fakeBinary(path: string, script: Script = {}): string {
   return path
 }
 
-/** A repository-shaped root: license, notices, docs, one crate NOTICE, and a stand-in binary. */
+const NOTICE = 'Pi, Copyright (c) 2025 Mario Zechner, MIT\n'
+const LOCK = '# locked\nversion = 4\n'
+const ABOUT = 'accepted = ["MIT"]\n'
+
+/** Each platform's stand-in license text; the heading is the generator's. */
+const licenseText = (id: string, triple: string): string =>
+  `Third-party licenses for bake-rs, ${id} (${triple})\n\nmemchr 2.8.3 | Unlicense OR MIT | runtime | MIT-0123456789ab\n\nCopyright (c) 2015 Andrew Gallant (${id})\n`
+
+/** The inventory fields the packager reads, as the generator writes them. */
+interface FixtureInventory {
+  schema: string
+  generator: { tool: string; cargo: string; toolchain: string }
+  inputs: Record<string, { path: string; sha256: string } | undefined>
+  platforms: { id: string; triple: string; file: string; sha256: string; crates: number }[]
+  workspace: { name: string; version: string; license: string; platforms: string[]; notice: { file: string; sha256: string } | null }[]
+}
+
+interface BundleEdit {
+  /** Text replacements by path, made before the texts are hashed; `null` leaves a text out. */
+  readonly texts?: Readonly<Record<string, string | null>>
+  /** Changes the inventory once the platform hashes are in it. */
+  readonly inventory?: (inventory: FixtureInventory) => void
+}
+
+/** A bundle in `native-licenses.ts`'s output layout for the fixture's `rust/Cargo.lock`, `rust/about.toml`, and bake-ai NOTICE. */
+function licenseBundle(edit: BundleEdit = {}): Record<string, string> {
+  const files: Record<string, string> = {}
+  for (const { id, triple } of PLATFORMS) {
+    const path = `${id}/${BUNDLE_FILE}`
+    const text = edit.texts?.[path] === undefined ? licenseText(id, triple) : edit.texts[path]
+    if (text !== null) files[path] = text
+  }
+  const ids = PLATFORMS.map(platform => platform.id)
+  const inventory: FixtureInventory = {
+    schema: SCHEMA,
+    generator: { tool: 'cargo-about 0.9.2', cargo: 'cargo 1.99.0 (5f94df478 2026-08-27)', toolchain: '1.99.0' },
+    inputs: { cargoLock: { path: 'rust/Cargo.lock', sha256: sha(LOCK) }, config: { path: 'rust/about.toml', sha256: sha(ABOUT) } },
+    platforms: PLATFORMS.map(({ id, triple }) => ({ id, triple, file: `${id}/${BUNDLE_FILE}`, sha256: sha(files[`${id}/${BUNDLE_FILE}`] ?? ''), crates: 1 })),
+    workspace: [
+      { name: 'bake-ai', version: VERSION, license: 'MIT', platforms: ids, notice: { file: 'rust/crates/bake-ai/NOTICE', sha256: sha(NOTICE) } },
+      { name: 'bake-cli', version: VERSION, license: 'MIT', platforms: ids, notice: null },
+    ],
+  }
+  edit.inventory?.(inventory)
+  files[INVENTORY_FILE] = `${JSON.stringify(inventory, null, 2)}\n`
+  return files
+}
+
+/** This host's text path in a bundle, and another platform's. */
+const OWN = `${target}/${BUNDLE_FILE}`
+const OTHER = PLATFORMS.find(platform => platform.id !== target) as typeof PLATFORMS[number]
+
+/** `bundle` with one file left out, or with bytes appended after hashing. */
+const without = (bundle: Record<string, string>, path: string): Record<string, string> =>
+  Object.fromEntries(Object.entries(bundle).filter(([name]) => name !== path))
+const tampered = (bundle: Record<string, string>, path: string): Record<string, string> => ({ ...bundle, [path]: `${bundle[path] ?? ''}edited\n` })
+
+/** A repository-shaped root: license, notices, docs, one crate NOTICE, the license inputs, and a stand-in binary. */
 function fixture(script: Script = {}): { root: string; options: PackOptions; destination: string } {
   const root = scratch()
   writeFileSync(join(root, 'LICENSE'), 'MIT License\n')
+  mkdirSync(join(root, 'rust'))
+  writeFileSync(join(root, 'rust/Cargo.lock'), LOCK)
+  writeFileSync(join(root, 'rust/about.toml'), ABOUT)
   writeFileSync(join(root, 'THIRD_PARTY_NOTICES.md'), '# Notices\n')
   mkdirSync(join(root, 'docs'))
   for (const [name, text] of Object.entries(DOCS)) writeFileSync(join(root, 'docs', `${name}.md`), text)
   writeFileSync(join(root, 'docs', 'README.txt'), 'not a topic\n')
   mkdirSync(join(root, 'crates/bake-ai'), { recursive: true })
-  writeFileSync(join(root, 'crates/bake-ai/NOTICE'), 'Pi, Copyright (c) 2025 Mario Zechner, MIT\n')
+  writeFileSync(join(root, 'crates/bake-ai/NOTICE'), NOTICE)
   mkdirSync(join(root, 'target'))
   const binary = fakeBinary(join(root, 'target/bake-rs'), script)
   const outputDir = join(root, '.artifacts/bake-rs-release', VERSION)
   const options: PackOptions = {
-    binary, root, docs: join(root, 'docs'), notices: { 'bake-ai': join(root, 'crates/bake-ai/NOTICE') }, version: VERSION, target, outputDir, timeoutMs: 5_000,
+    binary, root, docs: join(root, 'docs'), notices: { 'bake-ai': join(root, 'crates/bake-ai/NOTICE') }, licenses: licenseBundle(), version: VERSION, target, outputDir, timeoutMs: 5_000,
   }
   return { root, options, destination: join(outputDir, archiveName(VERSION, target)) }
 }
 
 const EARLIER = 'an earlier archive that must survive\n'
+/** License files for cases that never stage them. */
+const LICENSES: TargetLicenses = { text: 'licenses\n', inventory: '{}\n', notices: {} }
 
 /** Run a pack that must fail, over an existing archive that must be left as it was. */
 async function refused(options: PackOptions, destination: string, message: RegExp): Promise<void> {
@@ -170,7 +234,95 @@ describe('workspace inputs', () => {
   })
 
   test('crate names cannot leave the notices directory', () => {
-    expect(() => payload({ binary: 'b', root: 'r', notices: { '../x': 'n' } }, 'linux-x64')).toThrow(/cannot name a notice directory/)
+    expect(() => payload({ binary: 'b', root: 'r', notices: { '../x': 'n' } }, 'linux-x64', LICENSES)).toThrow(/cannot name a notice directory/)
+  })
+})
+
+describe('the license bundle', () => {
+  const check = (options: PackOptions, licenses: Readonly<Record<string, string>> = options.licenses): TargetLicenses =>
+    targetLicenses(licenses, { target, version: VERSION, root: options.root, notices: options.notices })
+
+  test.skipIf(!releaseHost)('yields this platform\'s text and the inventory, as generated', () => {
+    const { options } = fixture()
+    expect(check(options)).toEqual({ text: options.licenses[OWN] as string, inventory: options.licenses[INVENTORY_FILE] as string, notices: { 'bake-ai': sha(NOTICE) } })
+  })
+
+  const edited = (change: (inventory: FixtureInventory) => void): (() => Record<string, string>) =>
+    () => licenseBundle({ inventory: change })
+  test.skipIf(!releaseHost).each([
+    ['no inventory', () => without(licenseBundle(), INVENTORY_FILE), /has no inventory\.json/],
+    ['an inventory that is not JSON', () => ({ ...licenseBundle(), [INVENTORY_FILE]: '{ broken' }), /inventory\.json is not JSON/],
+    ['another schema', edited((inventory) => { inventory.schema = 'bake-native-licenses/0' }), /not a bake-native-licenses\/1 inventory/],
+    ['another cargo-about', edited((inventory) => { inventory.generator.tool = 'cargo-about 0.9.1' }), /generated by "cargo-about 0\.9\.1", not cargo-about 0\.9\.2/],
+    ['no Cargo.lock input', edited((inventory) => { inventory.inputs.cargoLock = undefined }), /does not record rust\/Cargo\.lock/],
+    ['an input outside the repository', edited((inventory) => { inventory.inputs.extra = { path: '../elsewhere', sha256: sha('') } }), /not a file of the repository/],
+    ['this platform\'s text omitted', () => licenseBundle({ texts: { [OWN]: null } }), new RegExp(`lacks ${OWN}`)],
+    ['this platform\'s text tampered with', () => tampered(licenseBundle(), OWN), new RegExp(`${OWN} that differs from its inventory hash`)],
+    ['another platform\'s text tampered with', () => tampered(licenseBundle(), `${OTHER.id}/${BUNDLE_FILE}`), /differs from its inventory hash/],
+    ['a file the inventory does not list', () => ({ ...licenseBundle(), [`${target}/notes.txt`]: 'x\n' }), new RegExp(`holds ${target}/notes\\.txt, which its inventory does not list`)],
+    ['no entry for this platform', () => licenseBundle({
+      texts: { [OWN]: null },
+      inventory: (inventory) => { inventory.platforms = inventory.platforms.filter(entry => entry.id !== target) },
+    }), new RegExp(`has no ${target} text`)],
+    ['this platform under another triple', edited((inventory) => {
+      for (const entry of inventory.platforms) if (entry.id === target) entry.triple = OTHER.triple
+    }), new RegExp(`lists ${target} as "${OTHER.triple}"`)],
+    ['another platform\'s text under this platform\'s name, rehashed', () => licenseBundle({ texts: { [OWN]: licenseText(OTHER.id, OTHER.triple) } }), /whose heading names another platform/],
+    ['another bake-cli version', edited((inventory) => { (inventory.workspace[1] as FixtureInventory['workspace'][number]).version = '0.4.1' }), /describes bake-cli "0\.4\.1", not 0\.4\.0-dev/],
+    ['a linked NOTICE left out', edited((inventory) => { (inventory.workspace[0] as FixtureInventory['workspace'][number]).notice = null }), /does not reproduce the NOTICE of bake-ai/],
+    ['a NOTICE reproduced only for other platforms', edited((inventory) => { (inventory.workspace[0] as FixtureInventory['workspace'][number]).platforms = [OTHER.id] }), /does not reproduce the NOTICE of bake-ai/],
+  ])('refuses %s', (_name, bundle, message) => {
+    const { options } = fixture()
+    expect(() => check(options, bundle())).toThrow(message)
+  })
+
+  test.skipIf(!releaseHost)('refuses a bundle the checkout has moved past', () => {
+    const { root, options } = fixture()
+    const licenses = licenseBundle()
+    writeFileSync(join(root, 'rust/Cargo.lock'), `${LOCK}# a dependency changed\n`)
+    expect(() => check(options, licenses)).toThrow(new RegExp(`generated from rust/Cargo\\.lock at sha256 ${sha(LOCK)}, but this checkout has [0-9a-f]{64}`))
+    rmSync(join(root, 'rust/Cargo.lock'))
+    expect(() => check(options, licenses)).toThrow(/but this checkout has missing/)
+    writeFileSync(join(root, 'rust/Cargo.lock'), LOCK)
+    writeFileSync(join(root, 'rust/about.toml'), `${ABOUT}accepted = ["MIT", "ISC"]\n`)
+    expect(() => check(options, licenses)).toThrow(/generated from rust\/about\.toml/)
+  })
+
+  // Inputs beyond the lock and config, such as reviewed upstream texts, are checked by
+  // whatever name the generator records them under, without knowing what they are.
+  test.skipIf(!releaseHost)('refuses a change to any other recorded source input', () => {
+    const { root, options } = fixture()
+    const manifest = 'rust/licenses/upstream.toml'
+    const vendored = 'rust/licenses/upstream/example-v1.0.0/LICENSE'
+    const sources = {
+      [manifest]: '[[text]]\nfile = "upstream/example-v1.0.0/LICENSE"\n',
+      [vendored]: 'Apache License\nVersion 2.0, January 2004\n',
+    }
+    for (const [path, text] of Object.entries(sources)) {
+      mkdirSync(join(root, path, '..'), { recursive: true })
+      writeFileSync(join(root, path), text)
+    }
+    const licenses = licenseBundle({
+      inventory: (inventory) => {
+        inventory.inputs.upstream = { path: manifest, sha256: sha(sources[manifest] as string) }
+        inventory.inputs.upstreamText = { path: vendored, sha256: sha(sources[vendored] as string) }
+      },
+    })
+    expect(check(options, licenses).text).toBe(licenses[OWN] as string)
+    writeFileSync(join(root, vendored), `${sources[vendored]}edited\n`)
+    const stale = new RegExp(`generated from ${vendored.replaceAll('.', '\\.')} at sha256 ${sha(sources[vendored] as string)}, but this checkout has [0-9a-f]{64}`)
+    expect(() => check(options, licenses)).toThrow(stale)
+    writeFileSync(join(root, vendored), sources[vendored] as string)
+    writeFileSync(join(root, manifest), `${sources[manifest]}# a pin changed\n`)
+    expect(() => check(options, licenses)).toThrow(/generated from rust\/licenses\/upstream\.toml/)
+    rmSync(join(root, manifest))
+    expect(() => check(options, licenses)).toThrow(/upstream\.toml at sha256 [0-9a-f]{64}, but this checkout has missing/)
+  })
+
+  test.skipIf(!releaseHost)('refuses NOTICE files of other crates than the archive\'s, and names the hashes the archived copies must have', () => {
+    const { options } = fixture()
+    expect(() => check({ ...options, notices: {} })).toThrow(/reproduces a NOTICE of bake-ai, which the archive does not carry/)
+    expect(check(options).notices).toEqual({ 'bake-ai': sha(NOTICE) })
   })
 })
 
@@ -184,6 +336,7 @@ describe.skipIf(process.platform === 'win32' || !releaseHost)('packing', () => {
     expect(result.record.target).toBe(target)
     expect([...result.listing].sort()).toEqual([
       '0644 LICENSE', '0644 THIRD_PARTY_NOTICES.md', '0755 bin/', '0755 bin/bake-rs',
+      '0755 licenses/', '0644 licenses/inventory.json', `0755 licenses/${target}/`, `0644 licenses/${target}/THIRD-PARTY-LICENSES.txt`,
       '0755 notices/', '0755 notices/bake-ai/', '0644 notices/bake-ai/NOTICE',
     ].sort())
     expect(readdirSync(options.outputDir)).toEqual([archiveName(VERSION, target)])
@@ -191,7 +344,11 @@ describe.skipIf(process.platform === 'win32' || !releaseHost)('packing', () => {
     expect(Bun.spawnSync(['tar', '-xzf', destination, '-C', unpacked]).exitCode).toBe(0)
     expect(statSync(join(unpacked, 'bin/bake-rs')).mode & 0o777).toBe(0o755)
     expect(readFileSync(join(unpacked, 'notices/bake-ai/NOTICE'), 'utf8')).toContain('Mario Zechner')
-    expect(readdirSync(unpacked).sort()).toEqual(['LICENSE', 'THIRD_PARTY_NOTICES.md', 'bin', 'notices'])
+    expect(readdirSync(unpacked).sort()).toEqual(['LICENSE', 'THIRD_PARTY_NOTICES.md', 'bin', 'licenses', 'notices'])
+    // This platform's text and the inventory, byte for byte, and no other platform's text.
+    expect(readdirSync(join(unpacked, 'licenses')).sort()).toEqual([target, 'inventory.json'].sort())
+    expect(readFileSync(join(unpacked, 'licenses', target, 'THIRD-PARTY-LICENSES.txt'), 'utf8')).toBe(options.licenses[`${target}/${BUNDLE_FILE}`] as string)
+    expect(readFileSync(join(unpacked, 'licenses/inventory.json'), 'utf8')).toBe(options.licenses[INVENTORY_FILE] as string)
   })
 
   test('a later pack replaces the earlier archive only once it passes', async () => {
@@ -267,6 +424,26 @@ describe.skipIf(process.platform === 'win32' || !releaseHost)('packing', () => {
         }
       }
     }
+  })
+
+  // The bundle is checked before the binary runs, so a refused one leaves no trace either.
+  test.each([
+    ['an omitted license text', () => licenseBundle({ texts: { [OWN]: null } }), /lacks/],
+    ['a tampered license text', () => tampered(licenseBundle(), OWN), /differs from its inventory hash/],
+    ['a stale license bundle', () => licenseBundle({ inventory: (inventory) => { inventory.inputs.cargoLock = { path: 'rust/Cargo.lock', sha256: sha('# an earlier lock\n') } } }), /generated from rust\/Cargo\.lock/],
+  ])('refuses %s before running the binary, and keeps the earlier archive', async (_name, licenses, message) => {
+    const marker = join(scratch(), 'ran')
+    const { options, destination } = fixture({ body: `printf x > ${quote(marker)}; exit 99` })
+    await refused({ ...options, licenses: licenses() }, destination, message)
+    expect(existsSync(marker)).toBe(false)
+  })
+
+  test('refuses a NOTICE that differs from the one the license text reproduces, before running the binary', async () => {
+    const marker = join(scratch(), 'ran')
+    const { root, options, destination } = fixture({ body: `printf x > ${quote(marker)}; exit 99` })
+    writeFileSync(join(root, 'crates/bake-ai/NOTICE'), `${NOTICE}edited\n`)
+    await refused(options, destination, /reproduces a NOTICE of bake-ai other than .*crates\/bake-ai\/NOTICE/)
+    expect(existsSync(marker)).toBe(false)
   })
 
   test('refuses an output link into the TypeScript release before running anything, and changes nothing there', async () => {
@@ -376,23 +553,24 @@ function tar(root: string, tree: string, names: string[]): string {
 }
 
 describe.skipIf(process.platform === 'win32')('reading an archive back', () => {
-  const files = payload({ binary: 'unused', root: 'unused', notices: { 'bake-ai': 'unused' } }, 'linux-x64')
+  const files = payload({ binary: 'unused', root: 'unused', notices: { 'bake-ai': 'unused' } }, 'linux-x64', LICENSES)
 
   /** A staged tree matching `files`, with the given binary mode. */
   function tree(root: string, binaryMode = 0o755): string {
     const stage = join(root, 'stage')
-    for (const dir of ['bin', 'notices', 'notices/bake-ai']) mkdirSync(join(stage, dir), { recursive: true })
+    const dirs = ['bin', 'licenses', 'licenses/linux-x64', 'notices', 'notices/bake-ai']
+    for (const dir of dirs) mkdirSync(join(stage, dir), { recursive: true })
     for (const file of files) writeFileSync(join(stage, file.path), `${file.path}\n`)
-    for (const dir of ['', 'bin', 'notices', 'notices/bake-ai']) chmodSync(join(stage, dir), 0o755)
+    for (const dir of ['', ...dirs]) chmodSync(join(stage, dir), 0o755)
     for (const file of files) chmodSync(join(stage, file.path), file.mode)
     chmodSync(join(stage, 'bin/bake-rs'), binaryMode)
     return stage
   }
-  const TOP = ['LICENSE', 'THIRD_PARTY_NOTICES.md', 'bin', 'notices']
+  const TOP = ['LICENSE', 'THIRD_PARTY_NOTICES.md', 'bin', 'licenses', 'notices']
 
   test('accepts the payload as staged', async () => {
     const root = scratch()
-    expect((await verifyArchive(tar(root, tree(root), TOP), files)).length).toBe(7)
+    expect((await verifyArchive(tar(root, tree(root), TOP), files)).length).toBe(11)
   })
 
   test('refuses a truncated archive', async () => {
@@ -420,7 +598,13 @@ describe.skipIf(process.platform === 'win32')('reading an archive back', () => {
 
     root = scratch()
     stage = tree(root)
-    await expect(verifyArchive(tar(root, stage, ['bin', 'notices', 'LICENSE']), files)).rejects.toThrow(/lacks THIRD_PARTY_NOTICES\.md/)
+    await expect(verifyArchive(tar(root, stage, ['bin', 'licenses', 'notices', 'LICENSE']), files)).rejects.toThrow(/lacks THIRD_PARTY_NOTICES\.md$/)
+
+    // A platform's license text left out, with its directory and the inventory still there.
+    root = scratch()
+    stage = tree(root)
+    rmSync(join(stage, 'licenses/linux-x64/THIRD-PARTY-LICENSES.txt'))
+    await expect(verifyArchive(tar(root, stage, TOP), files)).rejects.toThrow(/lacks licenses\/linux-x64\/THIRD-PARTY-LICENSES\.txt$/)
 
     root = scratch()
     stage = tree(root)
