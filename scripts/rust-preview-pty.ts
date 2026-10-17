@@ -1920,7 +1920,15 @@ for (const inline of [false, true]) {
     const requests = world.model.requests.length
     session.send('/session\r')
     await sheetReady(session, 'Session info')
-    assert(session.screen.includes('Alpha work') && /Messages/u.test(session.screen), session.screen)
+    assert(session.screen.includes('Alpha work'), session.screen)
+    // A long temporary path, as on macOS, wraps the File and Directory rows
+    // past the sheet's page, so the counts are reached by scrolling.
+    for (let step = 0; !/Messages/u.test(session.screen); step++) {
+      assert(step < 20, `no Messages heading in the session sheet\n${session.screen}`)
+      const before = session.screen
+      session.send('\x1b[B')
+      await session.wait('session sheet scrolled', () => session.screen !== before)
+    }
     session.send('\x1b')
     await composerReady(session)
     await session.wait('info closed', () => !session.screen.includes('Session info') && session.screen.includes('❯ Type a draft'))
