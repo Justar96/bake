@@ -1,0 +1,40 @@
+bake-mcp includes code ported from the following MIT-licensed project.
+Bake's own changes are under the workspace's MIT license.
+
+================================================================================
+Pi (packages/mcp)
+https://github.com/earendil-works/pi
+Release v1.3.0, revision 71023aec1546d6d677a65669c5665c0927ce0dd0.
+Ported: the JSON-RPC message shapes and checks of src/protocol/jsonrpc.ts, the
+protocol versions and initialize, tool, and tool-result shapes of
+src/protocol/types.ts and src/protocol/content.ts, the request correlation,
+initialization, tool listing and calling, cancellation, and close behavior of
+src/client.ts, the transport contract of src/transports/transport.ts, and the
+newline-delimited framing of src/transports/stdio.ts, with cases of
+test/client.test.ts and test/stdio.test.ts.
+Not ported: the OAuth client (src/oauth/, adapted by Pi from the MIT-licensed
+Model Context Protocol TypeScript SDK, whose notice Pi keeps under
+packages/mcp/LICENSES/), the Streamable HTTP transport, the stdio process
+spawning and shutdown, resources, progress, and roots.
+--------------------------------------------------------------------------------
+MIT License
+
+Copyright (c) 2025 Mario Zechner
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
