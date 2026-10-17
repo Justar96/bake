@@ -325,12 +325,18 @@ mod tests {
 
         std::fs::write(dir.join("plugin.json"), manifest).unwrap();
         std::fs::create_dir(dir.join("plugin.wasm")).unwrap();
-        assert_eq!(
-            WasmPackage::read_dir(dir.path()).unwrap_err(),
-            PackageError::Read {
-                file: "plugin.wasm",
-                message: "not a regular file".to_owned()
-            }
+        // Windows refuses opening a directory as a file; Unix reaches the
+        // metadata check. Both must reject it before reading any bytes.
+        let directory = WasmPackage::read_dir(dir.path()).unwrap_err();
+        assert!(
+            matches!(
+                directory,
+                PackageError::Read {
+                    file: "plugin.wasm",
+                    ..
+                }
+            ),
+            "{directory}"
         );
         std::fs::remove_dir(dir.join("plugin.wasm")).unwrap();
 
