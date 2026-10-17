@@ -4,15 +4,20 @@
 //! downloads them when missing. Bake only looks them up on `PATH`; a
 //! missing binary fails the call with Pi's message. The child's standard
 //! output is read line by line, lines longer than [`MAX_LINE_BYTES`] are
-//! skipped, and at most [`MAX_STDERR_BYTES`] of standard error are kept. An
-//! abort or the caller's stop kills the child, and the run returns only
-//! after the child has exited and its pipes have closed.
+//! skipped, and at most [`MAX_STDERR_BYTES`] of standard error are kept.
+//! The child is spawned through [`OwnedProcess`], in a process tree of its
+//! own, under the tool's owner. An abort or the caller's stop kills that
+//! tree, and the run returns only after the child and the tree are gone;
+//! dropping the run kills the tree and hands it to the owner
+//! ([`crate::child_process`]).
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 
 use bake_ai::AbortSignal;
+
+use crate::child_process::{OwnedProcess, ProcessSpec};
+use crate::owned_work::WorkGate;
 use tokio::io::AsyncReadExt;
 
 /// The longest output line passed on.
@@ -91,6 +96,7 @@ pub(crate) enum Ended {
 pub(crate) async fn run_lines<F, Fut>(
     program: &Path,
     args: &[OsString],
+    owner: Option<&WorkGate>,
     signal: Option<&AbortSignal>,
     mut on_line: F,
 ) -> std::io::Result<Ended>
@@ -98,15 +104,16 @@ where
     F: FnMut(Vec<u8>) -> Fut,
     Fut: std::future::Future<Output = Flow>,
 {
-    let mut child = tokio::process::Command::new(program)
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()?;
-    let mut stdout = child.stdout.take();
-    let mut stderr = child.stderr.take();
+    let spec = ProcessSpec {
+        program: program.as_os_str().to_os_string(),
+        args: args.to_vec(),
+        cwd: None,
+        env: None,
+        stdin: false,
+    };
+    let mut process = OwnedProcess::spawn(&spec, owner).await?;
+    let mut stdout = process.take_stdout();
+    let mut stderr = process.take_stderr();
     let mut out_chunk = vec![0u8; 16 * 1024];
     let mut err_chunk = vec![0u8; 4 * 1024];
     let mut line: Vec<u8> = Vec::new();
@@ -129,7 +136,7 @@ where
         tokio::select! {
             () = &mut cancelled, if !aborted => {
                 aborted = true;
-                let _ = child.start_kill();
+                process.kill();
             }
             read = async {
                 match stdout.as_mut() {
@@ -144,7 +151,7 @@ where
                         && on_line(std::mem::take(&mut line)).await == Flow::Stop
                     {
                         stopped = true;
-                        let _ = child.start_kill();
+                        process.kill();
                     }
                     continue;
                 }
@@ -162,7 +169,7 @@ where
                             && on_line(complete).await == Flow::Stop
                         {
                             stopped = true;
-                            let _ = child.start_kill();
+                            process.kill();
                         }
                         overflow = false;
                     } else if !overflow {
@@ -193,7 +200,10 @@ where
     }
     drop(stdout);
     drop(stderr);
-    let status = child.wait().await?;
+    // Pipes closed or killed: wait for the exit, then settle (reaping the
+    // child, and after a kill waiting for its tree).
+    process.wait_exit().await?;
+    let status = process.settle().await?.status;
     if aborted || signal.is_some_and(AbortSignal::aborted) {
         return Ok(Ended::Aborted);
     }
@@ -294,7 +304,7 @@ mod tests {
             .map(OsString::from)
             .to_vec();
         let mut seen = Vec::new();
-        let ended = run_lines(Path::new("/bin/sh"), &args, Some(&signal), |line| {
+        let ended = run_lines(Path::new("/bin/sh"), &args, None, Some(&signal), |line| {
             seen.push(line);
             std::future::ready(Flow::Continue)
         })
@@ -320,7 +330,7 @@ mod tests {
             .map(OsString::from)
             .to_vec();
         let mut seen = Vec::new();
-        let ended = run_lines(Path::new("/bin/sh"), &args, None, |line| {
+        let ended = run_lines(Path::new("/bin/sh"), &args, None, None, |line| {
             seen.push(String::from_utf8_lossy(&line).into_owned());
             std::future::ready(if seen.len() == 3 {
                 Flow::Stop

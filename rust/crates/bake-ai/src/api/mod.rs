@@ -9,6 +9,8 @@ pub mod simple_options;
 pub mod transform_messages;
 
 #[cfg(test)]
+mod producer_tests;
+#[cfg(test)]
 mod protocol_tests;
 #[cfg(test)]
 mod request_tests;
@@ -19,11 +21,19 @@ use serde_json::Value;
 
 use crate::types::{AssistantMessage, Model, StopReason};
 use crate::utils::event_stream::{
-    AssistantMessageEventSender, AssistantMessageEventStream, assistant_message_channel,
+    AssistantMessageEventSender, AssistantMessageEventStream, ProducerGuard,
+    assistant_message_channel,
 };
 
 /// Runs `run` on the current Tokio runtime and returns its stream at once.
 /// Outside a runtime the stream ends with an error message instead.
+///
+/// The task holds a [`ProducerGuard`] that it drops after `run`'s future
+/// and everything it holds, so the stream's
+/// [`producer_ended`](crate::utils::event_stream::EventStream::producer_ended)
+/// covers the task's whole cleanup, however it ends. The task is not
+/// cancelled from outside: it ends when `run` returns, which the protocols
+/// make prompt once the request's signal aborts.
 pub(crate) fn spawn_stream<F, Fut>(model: &Model, run: F) -> AssistantMessageEventStream
 where
     F: FnOnce(AssistantMessageEventSender) -> Fut,
@@ -32,7 +42,11 @@ where
     let (sender, stream) = assistant_message_channel();
     match tokio::runtime::Handle::try_current() {
         Ok(handle) => {
-            handle.spawn(run(sender));
+            let guard = sender.producer_guard();
+            handle.spawn(Produce {
+                run: Box::pin(run(sender)),
+                _guard: guard,
+            });
         }
         Err(_) => sender.finish(error_message(
             model,
@@ -40,6 +54,24 @@ where
         )),
     }
     stream
+}
+
+/// A producer task's future. Fields drop in order: the work first, then
+/// the guard that marks the producer ended.
+struct Produce<F> {
+    run: std::pin::Pin<Box<F>>,
+    _guard: ProducerGuard,
+}
+
+impl<F: Future> Future for Produce<F> {
+    type Output = F::Output;
+
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<F::Output> {
+        self.run.as_mut().poll(cx)
+    }
 }
 
 /// A failed response for `model` that never started.

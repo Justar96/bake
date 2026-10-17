@@ -241,6 +241,7 @@ impl Running {
                 ExecOptions {
                     signal: Some(signal),
                     timeout,
+                    owner: None,
                 },
             )
             .await

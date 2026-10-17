@@ -8,25 +8,31 @@
 use std::ffi::{OsStr, OsString};
 use std::io;
 use std::path::Path;
-use std::process::{ExitStatus, Stdio};
+use std::process::ExitStatus;
 use std::time::Duration;
 
 use bake_ai::AbortSignal;
-use tokio::process::Command;
 use tokio::time::Instant;
 
-use crate::child_process::wait_for_process;
-use crate::tools::bash::tree::configure;
+use crate::child_process::{OwnedProcess, ProcessSpec, wait_for_process};
+use crate::owned_work::WorkGate;
 
 /// Pi's exec options. The working directory is the required `cwd`
 /// argument, as in Pi; its unused `options.cwd` member is omitted.
 #[derive(Debug, Clone, Default)]
 pub struct ExecOptions {
     /// Cancellation before spawn prevents execution. Later cancellation
-    /// kills the process tree and awaits the immediate child's exit.
+    /// kills the process tree and awaits the immediate child's exit and
+    /// then the whole tree's, with no time limit.
     pub signal: Option<AbortSignal>,
     /// Elapsed runtime limit; zero and `None` disable it, as in Pi.
     pub timeout: Option<Duration>,
+    /// The owner of the process ([`crate::owned_work::WorkGate`]): a
+    /// closing owner refuses the call (an `Other` I/O error, nothing run),
+    /// and its close waits for the process tree, the call's own or one a
+    /// dropped call left. `None` leaves a dropped call's tree killed but
+    /// not awaited.
+    pub owner: Option<WorkGate>,
 }
 
 /// Pi's exec result, with independent termination facts for Bake callers.
@@ -65,9 +71,12 @@ pub struct ExecResult {
 /// tree rather than Pi's SIGTERM of only the direct child. Descendants
 /// that escape that group/job are outside its ownership.
 ///
-/// To await teardown, abort and then await this future. Dropping it kills
-/// the tree and leaves reaping the immediate child to Tokio. No task or
-/// timer is spawned by this function. OS failures are returned in the
+/// To await teardown, abort and then await this future: it returns once
+/// the killed child and every process left in its tree are gone
+/// ([`crate::child_process`] has the rules and the exceptions). Dropping it
+/// kills the tree; with [`ExecOptions::owner`] the process moves to a task
+/// that settles it and the owner's close waits for that, and without one
+/// the tree is killed but not awaited. OS failures are returned in the
 /// result, as Pi returns a code of 1 instead of rejecting its promise.
 pub async fn exec_command(
     command: &OsStr,
@@ -101,18 +110,14 @@ pub async fn exec_command(
         },
         None => None,
     };
-    let mut process = Command::new(command);
-    process
-        .args(args)
-        .current_dir(cwd)
-        .env_clear()
-        .envs(scrub_environment(std::env::vars_os()))
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-    configure(&mut process);
-    let exit = match process.spawn() {
+    let spec = ProcessSpec {
+        program: command.to_os_string(),
+        args: args.to_vec(),
+        cwd: Some(cwd.to_path_buf()),
+        env: Some(scrub_environment(std::env::vars_os()).collect()),
+        stdin: false,
+    };
+    let exit = match OwnedProcess::spawn(&spec, options.owner.as_ref()).await {
         Ok(child) => {
             wait_for_process(
                 child,

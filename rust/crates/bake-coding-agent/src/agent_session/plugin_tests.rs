@@ -188,6 +188,7 @@ impl Fixture {
             system_prompt: SystemPromptOptions::new(ws.to_string_lossy()),
             docs_command: "bake-rs docs".into(),
             plugins,
+            work: None,
         })
         .await
         .expect("session")

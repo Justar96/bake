@@ -17,8 +17,8 @@ use bake_agent::AgentTool;
 use crate::tools::bash::{BashToolOptions, bash_tool_prompt, create_bash_tool};
 use crate::tools::definition::ToolDefinition;
 use crate::tools::edit::create_edit_tool_definition;
-use crate::tools::find::create_find_tool_definition;
-use crate::tools::grep::create_grep_tool_definition;
+use crate::tools::find::owned_find_tool_definition;
+use crate::tools::grep::owned_grep_tool_definition;
 use crate::tools::ls::create_ls_tool_definition;
 use crate::tools::read::{ReadToolOptions, create_read_tool_definition};
 use crate::tools::write::create_write_tool_definition;
@@ -48,6 +48,11 @@ pub struct ToolsOptions {
     /// `createBashToolDefinition(cwd, options.bash)`. The bash port supplies
     /// it; `None` leaves `bash` out of every set.
     pub bash: Option<ToolDefinition>,
+    /// The owner of the `grep` and `find` tools' processes: the session's
+    /// [`crate::owned_work::WorkGate`], so its shutdown waits for them.
+    /// `None` leaves them unowned. The `bash` tool takes its own owner
+    /// ([`BashToolOptions::owner`]).
+    pub owner: Option<crate::owned_work::WorkGate>,
 }
 
 /// Pi's `createBashToolDefinition(cwd, options)`: the bash tool with its
@@ -74,8 +79,8 @@ pub fn create_tool_definition(
         "bash" => options.bash.clone(),
         "edit" => Some(create_edit_tool_definition(cwd)),
         "write" => Some(create_write_tool_definition(cwd)),
-        "grep" => Some(create_grep_tool_definition(cwd)),
-        "find" => Some(create_find_tool_definition(cwd)),
+        "grep" => Some(owned_grep_tool_definition(cwd, options.owner.clone())),
+        "find" => Some(owned_find_tool_definition(cwd, options.owner.clone())),
         "ls" => Some(create_ls_tool_definition(cwd)),
         _ => None,
     }

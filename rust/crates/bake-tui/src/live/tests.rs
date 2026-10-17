@@ -113,6 +113,7 @@ fn setup(
             system_prompt: SystemPromptOptions::new("/tmp"),
             docs_command: "bake-rs docs".into(),
             plugins: bake_coding_agent::plugins::PluginRegistry::default(),
+            work: None,
         }))
         .expect("agent session");
     let live = LiveSession {

@@ -1156,3 +1156,285 @@ async fn closing_the_gate_aborts_an_owned_request_and_waits_for_it() {
     );
     assert_eq!(faux.call_count(), 1);
 }
+
+/// Sets its flag when dropped: the end of a provider task's cleanup.
+struct ProviderCleanup(Arc<AtomicBool>);
+
+impl Drop for ProviderCleanup {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+}
+
+/// A faux response whose provider task reports its start and the abort it
+/// sees, then holds its cleanup until released. The cleanup flag is set
+/// when the provider's future, and so its task, is dropped.
+struct HeldProvider {
+    started: tokio::sync::oneshot::Receiver<bake_ai::AbortSignal>,
+    release: tokio::sync::oneshot::Sender<()>,
+    cleaned: Arc<AtomicBool>,
+}
+
+fn held_provider(faux: &bake_ai::providers::faux::FauxProvider) -> HeldProvider {
+    use bake_ai::providers::faux::{FauxResponseStep, faux_assistant_message};
+    let (started_tx, started) = tokio::sync::oneshot::channel();
+    let (release, released) = tokio::sync::oneshot::channel::<()>();
+    let parts = std::sync::Mutex::new(Some((started_tx, released)));
+    let cleaned = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&cleaned);
+    faux.set_responses(vec![FauxResponseStep::Factory(Arc::new(
+        move |_, options, _, _| {
+            let signal = options.base.signal.clone();
+            let parts = parts.lock().expect("lock").take();
+            let cleanup = ProviderCleanup(Arc::clone(&flag));
+            Box::pin(async move {
+                let _cleanup = cleanup;
+                let (Some(signal), Some((started, released))) = (signal, parts) else {
+                    return Err("the provider got no signal".to_owned());
+                };
+                let _ = started.send(signal.clone());
+                signal.cancelled().await;
+                // Cleanup that outlasts the abort.
+                let _ = released.await;
+                Ok(faux_assistant_message("never shown"))
+            })
+        },
+    ))]);
+    HeldProvider {
+        started,
+        release,
+        cleaned,
+    }
+}
+
+const OWNED_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+
+// Bake: closing the gate waits for the provider's own task, not only the
+// request task that forwards its stream. The consumer is gone, so the
+// request task has nothing left to forward; the provider holds its cleanup
+// after the abort, and the drain must not finish until it ends. The window
+// below only bounds how long a broken drain gets to finish early; with the
+// rule in place the drain cannot finish before the release at all.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn closing_the_gate_waits_for_the_provider_task() {
+    let (faux, apis, runtime) = faux_runtime("key");
+    let held = held_provider(&faux);
+    let gate = WorkGate::default();
+    let stream_fn = runtime.stream_fn_owned(apis, Some(gate.clone()));
+    let model = runtime.snapshot().model("faux", "faux-1").expect("model");
+    let stream = stream_fn(
+        &model,
+        &TranscriptContext::default(),
+        SimpleStreamOptions::default(),
+    )
+    .expect("stream");
+    let provider_signal = tokio::time::timeout(OWNED_WAIT, held.started)
+        .await
+        .expect("the provider starts")
+        .expect("started");
+    drop(stream);
+    let closing = tokio::spawn(gate.close());
+    tokio::time::timeout(OWNED_WAIT, provider_signal.cancelled())
+        .await
+        .expect("the provider sees the abort");
+    let mut closing = closing;
+    let finished_early = tokio::time::timeout(std::time::Duration::from_millis(500), &mut closing)
+        .await
+        .is_ok();
+    let cleaned_early = held.cleaned.load(Ordering::SeqCst);
+    let _ = held.release.send(());
+    if !finished_early {
+        tokio::time::timeout(OWNED_WAIT, closing)
+            .await
+            .expect("the drain finishes")
+            .expect("joined");
+    }
+    let cleaned = held.cleaned.load(Ordering::SeqCst);
+    assert!(!cleaned_early);
+    assert!(
+        !finished_early,
+        "the drain finished before the provider's task"
+    );
+    assert!(cleaned, "the drain returned before the provider's cleanup");
+}
+
+// Bake: a consumer that drops its stream stops the provider, without any
+// abort signal or gate close: the provider's signal aborts, and its task
+// ends and is awaited by the request task, which the gate then drains at
+// once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_dropped_consumer_stops_and_awaits_the_provider() {
+    let (faux, apis, runtime) = faux_runtime("key");
+    let held = held_provider(&faux);
+    let gate = WorkGate::default();
+    let stream_fn = runtime.stream_fn_owned(apis, Some(gate.clone()));
+    let model = runtime.snapshot().model("faux", "faux-1").expect("model");
+    let request = bake_ai::AbortController::new();
+    let mut options = SimpleStreamOptions::default();
+    options.base.signal = Some(request.signal());
+    let stream = stream_fn(&model, &TranscriptContext::default(), options).expect("stream");
+    let provider_signal = tokio::time::timeout(OWNED_WAIT, held.started)
+        .await
+        .expect("the provider starts")
+        .expect("started");
+    drop(stream);
+    let stopped = tokio::time::timeout(OWNED_WAIT, provider_signal.cancelled())
+        .await
+        .is_ok();
+    let _ = held.release.send(());
+    // Cleanup independent of the rule under test.
+    tokio::time::timeout(OWNED_WAIT, gate.close())
+        .await
+        .expect("the drain finishes");
+    assert!(stopped, "a dropped consumer left the provider running");
+    assert!(
+        !request.signal().aborted(),
+        "only the provider's signal aborted"
+    );
+    assert!(held.cleaned.load(Ordering::SeqCst));
+}
+
+/// A loopback server for one streaming request: it answers with SSE
+/// headers and holds the body open, and reports when the client closes the
+/// connection. The test owns the listener, its port, and the task.
+struct HeldServer {
+    base: String,
+    request_seen: tokio::sync::oneshot::Receiver<()>,
+    disconnected: tokio::sync::oneshot::Receiver<()>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+async fn held_server() -> HeldServer {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind loopback");
+    let base = format!("http://{}/v1", listener.local_addr().expect("address"));
+    let (seen_tx, request_seen) = tokio::sync::oneshot::channel();
+    let (gone_tx, disconnected) = tokio::sync::oneshot::channel();
+    let task = tokio::spawn(async move {
+        let Ok((mut socket, _)) = listener.accept().await else {
+            return;
+        };
+        let mut head = Vec::new();
+        let mut chunk = [0u8; 4096];
+        // Read the request head and its body, which the client sends at
+        // once; the length is unknown here, so read until the head ends.
+        loop {
+            match socket.read(&mut chunk).await {
+                Ok(0) | Err(_) => return,
+                Ok(read) => head.extend_from_slice(&chunk[..read]),
+            }
+            if head.windows(4).any(|window| window == b"\r\n\r\n") {
+                break;
+            }
+        }
+        let response = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n";
+        if socket.write_all(response.as_bytes()).await.is_err() {
+            return;
+        }
+        let _ = seen_tx.send(());
+        // Hold the body open; what the client sends next (the rest of its
+        // body) is discarded until it closes the connection.
+        loop {
+            match socket.read(&mut chunk).await {
+                Ok(0) | Err(_) => break,
+                Ok(_) => {}
+            }
+        }
+        let _ = gone_tx.send(());
+    });
+    HeldServer {
+        base,
+        request_seen,
+        disconnected,
+        task,
+    }
+}
+
+fn http_runtime(base: &str) -> ModelRuntime {
+    let mut registry = registry(json!({}), "{}");
+    registry
+        .add_provider_config(
+            "held",
+            json!({
+                "baseUrl": base,
+                "api": "openai-responses",
+                "models": [{ "id": "held-1" }],
+            }),
+            Some("test-key".into()),
+        )
+        .expect("held provider");
+    ModelRuntime::new(registry)
+}
+
+// Bake: over a real HTTP stream, a consumer that drops its stream makes
+// the provider close its connection, which the server observes, while the
+// gate stays open; the gate then drains at once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_dropped_consumer_closes_the_provider_connection() {
+    let server = held_server().await;
+    let runtime = http_runtime(&server.base);
+    let gate = WorkGate::default();
+    let stream_fn =
+        runtime.stream_fn_owned(Arc::new(ApiRegistry::with_builtins()), Some(gate.clone()));
+    let model = runtime.snapshot().model("held", "held-1").expect("model");
+    let stream = stream_fn(
+        &model,
+        &TranscriptContext::default(),
+        SimpleStreamOptions::default(),
+    )
+    .expect("stream");
+    tokio::time::timeout(OWNED_WAIT, server.request_seen)
+        .await
+        .expect("the request reaches the server")
+        .expect("seen");
+    drop(stream);
+    let disconnected = tokio::time::timeout(OWNED_WAIT, server.disconnected)
+        .await
+        .is_ok();
+    tokio::time::timeout(OWNED_WAIT, gate.close())
+        .await
+        .expect("the drain finishes");
+    server.task.abort();
+    let _ = server.task.await;
+    assert!(disconnected, "the provider kept its connection open");
+}
+
+// Bake: closing the gate under a real HTTP stream aborts the provider and
+// waits for its task; the server then sees the connection close.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn closing_the_gate_closes_the_provider_connection() {
+    let server = held_server().await;
+    let runtime = http_runtime(&server.base);
+    let gate = WorkGate::default();
+    let stream_fn =
+        runtime.stream_fn_owned(Arc::new(ApiRegistry::with_builtins()), Some(gate.clone()));
+    let model = runtime.snapshot().model("held", "held-1").expect("model");
+    let stream = stream_fn(
+        &model,
+        &TranscriptContext::default(),
+        SimpleStreamOptions::default(),
+    )
+    .expect("stream");
+    tokio::time::timeout(OWNED_WAIT, server.request_seen)
+        .await
+        .expect("the request reaches the server")
+        .expect("seen");
+    tokio::time::timeout(OWNED_WAIT, gate.close())
+        .await
+        .expect("the drain finishes");
+    let result = tokio::time::timeout(OWNED_WAIT, stream.result())
+        .await
+        .expect("the stream ends");
+    let disconnected = tokio::time::timeout(OWNED_WAIT, server.disconnected)
+        .await
+        .is_ok();
+    server.task.abort();
+    let _ = server.task.await;
+    assert_eq!(
+        result.map(|message| message.stop_reason),
+        Some(StopReason::Aborted)
+    );
+    assert!(disconnected, "the provider kept its connection open");
+}

@@ -75,6 +75,7 @@ pub(super) fn options(
         system_prompt: SystemPromptOptions::new(cwd),
         docs_command: "/opt/bake/bin/bake-rs docs".into(),
         plugins: crate::plugins::PluginRegistry::default(),
+        work: None,
     }
 }
 

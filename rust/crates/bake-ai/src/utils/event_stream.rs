@@ -7,6 +7,18 @@
 //! that fails or is cancelled cannot leave a consumer waiting. Consumers read
 //! with [`EventStream::next`] and await the final result with
 //! [`EventStream::result`], which is `None` when the stream ended without one.
+//!
+//! Bake adds the producer's lifetime, which Pi's single-threaded event loop
+//! does not need. The sender, and every [`ProducerGuard`] it hands out,
+//! count as the live producer; [`EventStream::producer_ended`] and
+//! [`ProducerWatch::ended`] complete once all of them are dropped. A producer
+//! task holds a guard as the last thing it drops, so a consumer that stops
+//! reading can await the task's own cleanup instead of detaching it.
+//! [`EventSender::closed`] is the other direction: it completes once every
+//! [`EventStream`] is gone, so a producer that is waiting on its source can
+//! stop. A [`ProducerWatch`] is not a consumer: a caller that drops its
+//! streams and keeps a watch both closes the stream and awaits the
+//! producer.
 
 use std::collections::VecDeque;
 use std::future::poll_fn;
@@ -22,6 +34,12 @@ struct Inner<T, R> {
     result: Option<R>,
     event_wakers: Vec<Waker>,
     result_wakers: Vec<Waker>,
+    /// Live [`EventStream`] handles.
+    consumers: usize,
+    /// The live sender and [`ProducerGuard`]s.
+    producers: usize,
+    closed_wakers: Vec<Waker>,
+    producer_wakers: Vec<Waker>,
 }
 
 struct Shared<T, R> {
@@ -59,6 +77,10 @@ pub fn event_channel<T, R>(
             result: None,
             event_wakers: Vec::new(),
             result_wakers: Vec::new(),
+            consumers: 1,
+            producers: 1,
+            closed_wakers: Vec::new(),
+            producer_wakers: Vec::new(),
         }),
         is_complete,
         extract_result,
@@ -118,13 +140,86 @@ impl<T, R> EventSender<T, R> {
 
     /// Whether every consumer is gone, so further events reach no one.
     pub fn is_closed(&self) -> bool {
-        Arc::strong_count(&self.shared) == 1
+        self.shared.lock().consumers == 0
+    }
+
+    /// Completes once every consumer is gone; at once if they already are.
+    pub async fn closed(&self) {
+        poll_fn(|cx| {
+            let mut inner = self.shared.lock();
+            if inner.consumers == 0 {
+                return Poll::Ready(());
+            }
+            register(&mut inner.closed_wakers, cx.waker());
+            Poll::Pending
+        })
+        .await;
+    }
+
+    /// A token that counts as a live producer until dropped, so
+    /// [`EventStream::producer_ended`] also waits for whatever its holder
+    /// drops before it. It cannot push.
+    pub fn producer_guard(&self) -> ProducerGuard
+    where
+        T: Send + 'static,
+        R: Send + 'static,
+    {
+        self.shared.lock().producers += 1;
+        ProducerGuard {
+            release: Arc::clone(&self.shared) as Arc<dyn ReleaseProducer>,
+        }
     }
 }
 
 impl<T, R> Drop for EventSender<T, R> {
     fn drop(&mut self) {
         self.end(None);
+        self.shared.release_producer();
+    }
+}
+
+/// Type-erased release of one producer count.
+trait ReleaseProducer: Send + Sync {
+    fn release_producer(&self);
+}
+
+impl<T: Send, R: Send> ReleaseProducer for Shared<T, R> {
+    fn release_producer(&self) {
+        Shared::release_producer(self);
+    }
+}
+
+impl<T, R> Shared<T, R> {
+    fn release_producer(&self) {
+        let wakers = {
+            let mut inner = self.lock();
+            inner.producers -= 1;
+            if inner.producers == 0 {
+                std::mem::take(&mut inner.producer_wakers)
+            } else {
+                Vec::new()
+            }
+        };
+        wakers.into_iter().for_each(Waker::wake);
+    }
+}
+
+/// Counts as a live producer of one stream until dropped
+/// ([`EventSender::producer_guard`]).
+#[must_use = "a dropped guard no longer holds the producer open"]
+pub struct ProducerGuard {
+    release: Arc<dyn ReleaseProducer>,
+}
+
+impl Drop for ProducerGuard {
+    fn drop(&mut self) {
+        self.release.release_producer();
+    }
+}
+
+impl std::fmt::Debug for ProducerGuard {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProducerGuard").finish_non_exhaustive()
     }
 }
 
@@ -142,9 +237,92 @@ pub struct EventStream<T, R> {
 
 impl<T, R> Clone for EventStream<T, R> {
     fn clone(&self) -> Self {
+        self.shared.lock().consumers += 1;
         Self {
             shared: Arc::clone(&self.shared),
         }
+    }
+}
+
+impl<T, R> Drop for EventStream<T, R> {
+    fn drop(&mut self) {
+        let wakers = {
+            let mut inner = self.shared.lock();
+            inner.consumers -= 1;
+            if inner.consumers == 0 {
+                std::mem::take(&mut inner.closed_wakers)
+            } else {
+                Vec::new()
+            }
+        };
+        wakers.into_iter().for_each(Waker::wake);
+    }
+}
+
+impl<T, R> EventStream<T, R> {
+    /// Completes once the producer has ended: its sender and every
+    /// [`ProducerGuard`] are dropped. This stream is itself a consumer, so
+    /// while it is awaited [`EventSender::closed`] cannot fire: a producer
+    /// that waits for its consumers to leave never ends here. Stop such a
+    /// producer some other way (its abort signal), or take a
+    /// [`Self::producer_watch`], drop every stream, and await the watch.
+    pub async fn producer_ended(&self) {
+        poll_fn(|cx| {
+            let mut inner = self.shared.lock();
+            if inner.producers == 0 {
+                return Poll::Ready(());
+            }
+            register(&mut inner.producer_wakers, cx.waker());
+            Poll::Pending
+        })
+        .await;
+    }
+
+    /// A handle that awaits the producer's end without being a consumer.
+    pub fn producer_watch(&self) -> ProducerWatch
+    where
+        T: Send + 'static,
+        R: Send + 'static,
+    {
+        ProducerWatch {
+            shared: Arc::clone(&self.shared) as Arc<dyn ProducerState>,
+        }
+    }
+}
+
+/// Type-erased view of a stream's producer count.
+trait ProducerState: Send + Sync {
+    fn poll_ended(&self, waker: &Waker) -> Poll<()>;
+}
+
+impl<T: Send, R: Send> ProducerState for Shared<T, R> {
+    fn poll_ended(&self, waker: &Waker) -> Poll<()> {
+        let mut inner = self.lock();
+        if inner.producers == 0 {
+            return Poll::Ready(());
+        }
+        register(&mut inner.producer_wakers, waker);
+        Poll::Pending
+    }
+}
+
+/// Awaits a stream's producer ([`EventStream::producer_watch`]) without
+/// counting as a consumer, so [`EventSender::closed`] fires once every
+/// [`EventStream`] is dropped even while this is held or awaited.
+pub struct ProducerWatch {
+    shared: Arc<dyn ProducerState>,
+}
+
+impl ProducerWatch {
+    /// Completes once the sender and every [`ProducerGuard`] are dropped.
+    pub async fn ended(&self) {
+        poll_fn(|cx| self.shared.poll_ended(cx.waker())).await;
+    }
+}
+
+impl std::fmt::Debug for ProducerWatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProducerWatch").finish_non_exhaustive()
     }
 }
 
@@ -252,6 +430,16 @@ impl AssistantMessageEventSender {
     /// Whether every consumer is gone; a producer may stop its work.
     pub fn is_closed(&self) -> bool {
         self.inner.is_closed()
+    }
+
+    /// [`EventSender::closed`].
+    pub async fn closed(&self) {
+        self.inner.closed().await;
+    }
+
+    /// [`EventSender::producer_guard`].
+    pub fn producer_guard(&self) -> ProducerGuard {
+        self.inner.producer_guard()
     }
 
     /// Pushes the terminal event for `message`: `done` for a completed stop
@@ -465,5 +653,77 @@ mod tests {
         sender.push(done(message(crate::now_ms(), None)));
         let events = stream.collect().await;
         assert_eq!(events.len(), 1);
+    }
+
+    fn poll_once<F: std::future::Future + Unpin>(future: &mut F) -> Poll<F::Output> {
+        let mut cx = std::task::Context::from_waker(Waker::noop());
+        std::pin::Pin::new(future).poll(&mut cx)
+    }
+
+    // Bake: `closed` completes only once every consumer, clones included,
+    // is gone, and wakes a producer already waiting on it.
+    #[tokio::test]
+    async fn closed_waits_for_every_consumer() {
+        let (sender, stream) = number_channel(None);
+        let clone = stream.clone();
+        let mut closed = Box::pin(sender.closed());
+        assert!(poll_once(&mut closed).is_pending());
+        drop(stream);
+        assert!(poll_once(&mut closed).is_pending(), "a clone still reads");
+        assert!(!sender.is_closed());
+        drop(clone);
+        assert!(sender.is_closed());
+        tokio::time::timeout(Duration::from_secs(10), closed)
+            .await
+            .expect("closed wakes its waiter");
+    }
+
+    // Bake: `producer_ended` waits for the sender and every guard, not for
+    // the end of the events: a producer's cleanup after its last event is
+    // covered.
+    #[tokio::test]
+    async fn producer_ended_waits_for_the_sender_and_its_guards() {
+        let (sender, stream) = number_channel(None);
+        let guard = sender.producer_guard();
+        sender.end(Some("done".into()));
+        let mut ended = Box::pin(stream.producer_ended());
+        assert!(poll_once(&mut ended).is_pending(), "the sender is alive");
+        drop(sender);
+        assert_eq!(stream.result().await.as_deref(), Some("done"));
+        assert!(poll_once(&mut ended).is_pending(), "a guard is alive");
+        drop(guard);
+        tokio::time::timeout(Duration::from_secs(10), ended)
+            .await
+            .expect("producer_ended wakes its waiter");
+    }
+
+    // Bake: a watch is not a consumer. A producer that waits for its
+    // consumers to leave ends once the last stream is dropped, and the
+    // watch sees it; the stream's own `producer_ended` could not, since
+    // that stream keeps `closed` from firing (the review's finding).
+    #[tokio::test]
+    async fn a_watch_awaits_a_producer_that_waits_for_its_consumers() {
+        let (sender, stream) = number_channel(None);
+        let guard = sender.producer_guard();
+        let (closed_tx, closed_rx) = tokio::sync::oneshot::channel();
+        let producer = tokio::spawn(async move {
+            sender.closed().await;
+            let _ = closed_tx.send(());
+            drop(sender);
+            drop(guard);
+        });
+        let watch = stream.producer_watch();
+        let mut by_stream = Box::pin(stream.producer_ended());
+        assert!(poll_once(&mut by_stream).is_pending());
+        drop(by_stream);
+        drop(stream);
+        tokio::time::timeout(Duration::from_secs(10), closed_rx)
+            .await
+            .expect("the producer sees its consumers leave")
+            .expect("sent");
+        tokio::time::timeout(Duration::from_secs(10), watch.ended())
+            .await
+            .expect("the watch sees the producer end");
+        producer.await.expect("joined");
     }
 }

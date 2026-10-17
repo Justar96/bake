@@ -62,7 +62,7 @@ pub use types::*;
 pub use utils::abort::{AbortController, AbortSignal};
 pub use utils::event_stream::{
     AssistantMessageEventSender, AssistantMessageEventStream, EventSender, EventStream,
-    assistant_message_channel, event_channel,
+    ProducerGuard, ProducerWatch, assistant_message_channel, event_channel,
 };
 pub use utils::tool_argument_guard::DEFAULT_MAX_TOOL_ARGUMENT_WHITESPACE;
 
