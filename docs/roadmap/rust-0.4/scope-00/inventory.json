@@ -1311,6 +1311,7 @@
     {"path":"scripts/release/install-animation.test.ts","lane":"bun-scripts","owner":"scripts:release","scopes":["16"],"disposition":"replace-tooling","basis":"scripts:release"},
     {"path":"scripts/release/install-windows.test.ts","lane":"bun-scripts","owner":"scripts:release","scopes":["16"],"disposition":"replace-tooling","basis":"scripts:release"},
     {"path":"scripts/release/installer-animation.test.ts","lane":"bun-scripts","owner":"scripts:release","scopes":["16"],"disposition":"replace-tooling","basis":"scripts:release"},
+    {"path":"scripts/release/installer-test-process.test.ts","lane":"bun-scripts","owner":"scripts:release","scopes":["16"],"disposition":"replace-tooling","basis":"scripts:release"},
     {"path":"scripts/release/launcher.test.ts","lane":"bun-scripts","owner":"scripts:release","scopes":["16"],"disposition":"replace-tooling","basis":"scripts:release"},
     {"path":"scripts/release/manifest.test.ts","lane":"bun-scripts","owner":"scripts:release","scopes":["16"],"disposition":"replace-tooling","basis":"scripts:release"},
     {"path":"scripts/release/native-licenses.test.ts","lane":"bun-scripts","owner":"scripts:release","scopes":["16"],"disposition":"replace-tooling","basis":"scripts:release"},
