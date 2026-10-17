@@ -40,7 +40,14 @@
 //! v1.2.0's `navigateTree` and runtime `fork` (in
 //! `agent_session/navigation.rs`).
 //!
-//! Not ported (deferred): extensions and their events (including
+//! Trusted compiled-in plugins ([`crate::plugins`], given as
+//! [`AgentSessionOptions::plugins`]) veto tool calls through the agent's
+//! `before_tool_call` hook, as Pi v1.3.0's `_beforeToolCall` runs
+//! `tool_call` handlers (in `agent_session/plugin_veto.rs`); each block is
+//! written as a `custom` entry before the denial result. With no plugins no
+//! hook is installed.
+//!
+//! Not ported (deferred): Pi's extensions and their other events (including
 //! `session_before_compact`, `session_compact`, and
 //! `session_compact_failed`), branch summaries during navigation, the
 //! `/skill:name` slash command list and its expansion error event, prompt
@@ -49,6 +56,7 @@
 //! `entry_appended` event, and tool-loadout changes between turns.
 
 mod navigation;
+mod plugin_veto;
 mod recovery;
 
 use std::path::PathBuf;
@@ -79,6 +87,8 @@ use crate::compaction::CompactionResult;
 use crate::model_registry::resolver::{DEFAULT_THINKING_LEVEL, find_initial_model};
 use crate::model_registry::{ModelRegistry, ModelRuntime};
 use crate::owned_work::{WorkGate, WorkPermit};
+use crate::plugins::PluginRegistry;
+use crate::plugins::veto::VetoDispatcher;
 use crate::prompt_templates::{PromptTemplate, expand_prompt_template};
 use crate::session::messages::{CustomMessage, convert_to_llm};
 use crate::session::{GroupEntry, SessionError, SessionManager};
@@ -175,6 +185,10 @@ pub struct AgentSessionOptions {
     /// which the prompt's `docs` section and the no-model and no-key
     /// messages name.
     pub docs_command: String,
+    /// The trusted plugins whose tool-call vetoes run before each call to
+    /// a tool they list ([`crate::plugins`]); empty, the default, installs
+    /// no hook.
+    pub plugins: PluginRegistry,
 }
 
 /// Tools whose calls change files or run commands. The prompt's round-trip
@@ -1004,6 +1018,15 @@ pub(crate) struct TestHooks {
     /// Fails the next compaction entry at the session's write boundary,
     /// running the hook under the session lock as it fails.
     pub fail_compaction_entry: Option<Box<dyn FnOnce() + Send>>,
+    /// Fails the next plugin decision entry at the session's write
+    /// boundary.
+    pub fail_plugin_decision: bool,
+    /// Runs on the blocking pool before the next plugin decision write
+    /// takes the session lock, that is before its cancellation admission.
+    pub before_plugin_decision_admission: Option<Box<dyn FnOnce() + Send>>,
+    /// Runs under the session lock once the next plugin decision write is
+    /// admitted, before its entry is appended.
+    pub plugin_decision_admitted: Option<Box<dyn FnOnce() + Send>>,
 }
 
 /// Pi's bookkeeping after persisting: the last assistant message and the
@@ -1182,7 +1205,9 @@ impl AgentSession {
             tool_prompts,
             mut system_prompt,
             docs_command,
+            plugins,
         } = options;
+        let plugins = VetoDispatcher::new(plugins).map(Arc::new);
         system_prompt.docs_command = docs_command.clone();
         let tools: Vec<Arc<AgentTool>> = tools.into_iter().map(run_in_order).collect();
         // Pi's `_toolPromptGuidelines`.
@@ -1264,6 +1289,10 @@ impl AgentSession {
             session_io: tokio::sync::watch::Sender::new(0),
         });
         let after_tool_core = Arc::clone(&core);
+        let persist_error = Arc::new(Mutex::new(None));
+        let before_tool_call = plugins.map(|plugins| {
+            plugin_veto::plugin_veto_hook(Arc::clone(&core), Arc::clone(&persist_error), plugins)
+        });
         let agent = Agent::new(AgentOptions {
             initial_state: AgentInitialState {
                 system_prompt: None,
@@ -1309,6 +1338,7 @@ impl AgentSession {
                     }))
                 })
             })),
+            before_tool_call,
             stream_fn: Some(stream_fn),
             prepare_next_turn_with_context: Some(next_turn_hook(
                 Arc::clone(&core),
@@ -1350,7 +1380,6 @@ impl AgentSession {
             .into_iter()
             .filter(|name| tools.iter().any(|tool| &tool.name == name))
             .collect();
-        let persist_error = Arc::new(Mutex::new(None));
         let gap = Arc::clone(&core.gap);
         let created = Self {
             apis,
@@ -2483,6 +2512,8 @@ impl Drop for RunGuard<'_> {
 mod control_tests;
 #[cfg(test)]
 mod navigation_tests;
+#[cfg(test)]
+mod plugin_tests;
 #[cfg(test)]
 mod recovery_tests;
 #[cfg(test)]

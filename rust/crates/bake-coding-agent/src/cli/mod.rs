@@ -909,6 +909,7 @@ async fn build_session(args: &Args, build: Build) -> Result<AgentSession, String
             .collect(),
         system_prompt,
         docs_command,
+        plugins: crate::plugins::PluginRegistry::default(),
     })
     .await?;
     session.set_prompt_templates(prompt_templates);

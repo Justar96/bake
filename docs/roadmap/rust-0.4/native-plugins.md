@@ -4,16 +4,17 @@
 
 This page proposes the native plugin API that [D6](scope-00/support.md#decision-register) requires for 0.4.0, and the inspection and management capabilities that replace the retired Cordis tooling under [D7](scope-00/support.md#decision-register). Trusted code compiled into `bake-rs` implements a Rust trait. Third-party plugins are Rust crates compiled to `wasm32-wasip2` and run as WASI 0.2 components in Wasmtime inside a trusted helper owned by Bake. The guest has no ambient authority: its only effects are a few bounded host calls. Both kinds go through one ordered dispatcher whose model-visible effects are written to the session file in Pi's existing entry types. OS tools and MCP servers stay separate processes under [D24](scope-00/support.md#decision-register); they are not a way for a plugin to run native code. 0.4.0 has no native-process or dynamic-library plugin adapter.
 
-**Status: proposed design, 2026-10-17.** No Bake plugin runtime is implemented or qualified. An [isolated Linux experiment](#exploratory-linux-results) has exercised the proposed component boundary; it does not qualify Bake's lifecycle or supported platforms. This is a proposal under D6 and D7 for review, not an accepted decision; the names and technical exclusions are this design's own choices, which review may change. Facts in [Sources](#sources) come from the linked primary sources or local code. Apart from the measured observations in [Exploratory Linux results](#exploratory-linux-results), the rest is proposed behavior. Each protection is an obligation the [qualification gates](#implementation-choices-and-qualification-gates) must prove.
+**Status: first trusted veto slice implemented, 2026-10-17; full design unqualified.** `bake-coding-agent::plugins` provides compiled-in Rust tool-call vetoes and records their decisions through `AgentSession`. The CLI passes an empty registry; no configuration enables a plugin. Wasm hosting, other contributions, inspection, and management remain proposed. Private Linux experiments have exercised the proposed component boundary, and an [Intel macOS follow-up](#exploratory-results) has tested address-space limits; it does not qualify Bake's lifecycle or supported platforms. This is a proposal under D6 and D7 for review, not an accepted decision; the names and technical exclusions are this design's own choices, which review may change. Facts in [Sources](#sources) come from the linked primary sources or local code. The [current implementation](#current-implementation) and measured observations in [Exploratory results](#exploratory-results) describe completed work; the other contracts remain proposed behavior. Each protection is an obligation the [qualification gates](#implementation-choices-and-qualification-gates) must prove.
 
 ## Table of Contents
 
 - [Sources](#sources)
+- [Current implementation](#current-implementation)
 - [Architecture](#architecture)
 - [Contribution contracts](#contribution-contracts)
 - [Host calls and concurrency](#host-calls-and-concurrency)
 - [Containment and limits](#containment-and-limits)
-- [Exploratory Linux results](#exploratory-linux-results)
+- [Exploratory results](#exploratory-results)
 - [Inspection and management](#inspection-and-management)
 - [Named consumer and tests](#named-consumer-and-tests)
 - [Implementation slices](#implementation-slices)
@@ -36,6 +37,14 @@ This page proposes the native plugin API that [D6](scope-00/support.md#decision-
 | Rust reference, [ABI](https://doc.rust-lang.org/reference/abi.html) | Read 2026-10-16 | The Rust ABI is unspecified across compilers, so a `dylib` plugin would be tied to Bake's exact toolchain |
 
 The Bake home is resolved by `resolve_bake_home` in [`home.rs`](../../../rust/crates/bake-coding-agent/src/home.rs): `BAKE_HOME`, then `DSH_HOME`, then `~/.bake`; this page writes it `$BAKE_HOME`. `bake-sandbox` confines file writes by its confined tree; reads, network, and process visibility stay outside its vocabulary ([`rust/crates/bake-sandbox/src/lib.rs`](../../../rust/crates/bake-sandbox/src/lib.rs)). A native plugin process could therefore read the home's credentials and open sockets, which is why this design excludes one.
+
+## Current implementation
+
+The trusted [`Plugin`](../../../rust/crates/bake-coding-agent/src/plugins/mod.rs) trait receives read-only tool-call arguments. A validated manifest lists the tools it may veto. `PluginRegistry` orders plugins by configured order and id; the first block wins. An error, panic, timeout, or oversized reason fails that plugin for the current `AgentSession`, which then blocks its listed tools without calling it again. D24 still evaluates every call a plugin lets through. `ProtectedPaths` is the compiled-in port of Pi’s example: case-sensitive substring matching on `write` and `edit` paths, not filesystem confinement.
+
+The session writes `bake.plugin.decision` before a denial result. A failed write stops later tool effects and requests. Cancellation itself creates no sticky failure: an earlier genuine failure remains. The cancellation check under the session lock decides whether to admit a decision write. An admitted write finishes before shutdown returns, even if the call is cancelled meanwhile. A decision without a matching denial result does not identify cancellation uniquely; a crash or a failed result write can leave the same trace.
+
+This slice has no configuration, restart, disable, Wasm adapter, or other contribution. Failed-plugin state is currently held only in memory and is not restored when a session file is reopened. That restoration must be implemented before configuration enables any plugin. Tests exercise real `AgentSession` dispatch, permissions, persistence failures, parallel calls, cancellation, and awaited shutdown. They do not qualify the complete A19 consumer or A20 management surface.
 
 ## Architecture
 
@@ -99,7 +108,7 @@ Each guest call carries an owner (the plugin), a generation (incremented by ever
 - `state-set` writes into the call's overlay, which `state-get` reads first. No session, registry, or state lock is held across an `.await`: the host takes the state mutex only to copy or swap in-memory values. Exclusive ownership of an instance still spans its guest call.
 - No host call enters any guest, and calls to an instance are serialized by its mutex, so an instance is never re-entered.
 - The dispatcher commits a call's entries and state overlay only if, at commit time, the generation is current, the gate is open, and the token is not cancelled. The state file write is atomic, owned, and awaited. Cancellation cannot undo an effect: an entry or state write committed before a cancellation stays, and `plugin_inspect` reports it.
-- On Esc or timeout, the parent rejects new calls to that generation, kills the helper before closing its control pipe, awaits process exit and pipe drains, discards uncommitted effects, and fails the instance. Shutdown first closes the plugin's `WorkGate` ([`owned_work.rs`](../../../rust/crates/bake-coding-agent/src/owned_work.rs)); it awaits all owned work, including a helper still starting. Restart creates a new helper and generation. Dropping an async guest future inside the helper drops its awaited host future in the tested bindings; host imports must own their work and must not spawn detached tasks.
+- On Esc or timeout, the parent rejects new calls to that generation, kills the helper before closing its control pipe, awaits process exit and pipe drains, and discards uncommitted effects. A timeout fails the plugin. Cancellation invalidates the Wasm instance but does not itself create a sticky plugin failure; another call needs a fresh instance, and an earlier genuine failure remains. The three-restart fault budget applies to failures, not ordinary user cancellation. Shutdown first closes the plugin's `WorkGate` ([`owned_work.rs`](../../../rust/crates/bake-coding-agent/src/owned_work.rs)); it awaits all owned work, including a helper still starting. Restart creates a new helper and generation. Dropping an async guest future inside the helper drops its awaited host future in the tested bindings; host imports must own their work and must not spawn detached tasks.
 
 Fuel and epoch deadlines bound guest instructions only. Every store must also configure async fuel or epoch yields so guest code cannot monopolize the executor. The parent's deadline covers the whole helper operation, including an awaited host call or compilation.
 
@@ -115,7 +124,7 @@ A control-pipe EOF watchdog handles parent death even while the main helper thre
 - **Faults:** a trap, an exceeded limit, a missed deadline, or an invalid return fails the instance. A restart creates a fresh `Store` and component instance, since a trapped instance cannot be re-entered. It restarts at most three times a session, then stays failed until restarted by hand; a failed veto still blocks its listed tools.
 - **Compilation:** fuel does not bound compiling, and a timeout cannot cancel an in-process compiler thread. Compilation and execution therefore share the helper. The parent admits one compile at a time behind a bounded queue and kills and reaps a helper that misses its deadline. A killable process still needs a qualified platform memory budget: guest limits do not bound compiler, JIT, WASI resource-table, or total process allocations. Compiled code is cached only in the helper's memory, keyed by component hash and engine configuration; killing it loses that cache. 0.4 has no persistent compiled cache and never deserializes a native artifact.
 
-## Exploratory Linux results
+## Exploratory results
 
 A private experiment on 2026-10-17 built a Rust guest with `wit-bindgen` 0.63.0 and Wasmtime/WASI 49.0.3 on Rust 1.99.0. It used a shared Intel i9-14900KS Linux x86_64 host. The synchronous component call returned a typed veto and invoked a host log import. A second orchestrator run rebuilt the locked host and checked 13 assertions against its output. Neither run entered Bake's agent runtime.
 
@@ -144,6 +153,19 @@ The local harness, locks, and logs remain under `.preflight/rust-orchestration/r
 The small guest's helper round trip took roughly 6–8 microseconds, startup about 1 ms, and load plus first call about 127 ms on that host. Its RSS high-water mark was about 22 MiB, excluding larger compilation peaks. Those observations support the helper as the proposed lifecycle boundary; they establish no production performance or memory budget.
 
 The second harness and logs are under `.preflight/rust-orchestration/research/plugin-async/`. It still lacks a total memory cap, a pre-compilation import check, bounded stderr capture, and macOS or Windows evidence. Its process runs as the user: Wasmtime's empty WASI context confines guest authority, while the helper separates memory and lifetime. Neither process groups nor Jobs provide filesystem or network confinement.
+
+A third private experiment tested process address-space limits with Wasmtime 49.0.3 on Linux 7.2.10 and Intel macOS 26.7.1. Each helper applied its own soft and hard `RLIMIT_AS` after startup, then checked that an over-budget reservation failed while a one-page reservation succeeded. Parent limits stayed unchanged. The orchestrator independently reproduced the normal guest call, rejected guest growth, and rejected host allocation on Linux; the macOS results below come from the worker’s runs.
+
+| Observation | Limit of the evidence |
+|---|---|
+| Under an absolute 256 MiB cap on Linux, the small guest touched 32 MiB successfully; a requested 512 MiB growth and host allocation failed | Tested mappings and allocations only; no kernel-memory or page-cache bound |
+| Intel macOS rejected an absolute 256 MiB cap because its existing mappings were about 32.5 GiB; a budget above the helper’s measured baseline allowed the small guest and rejected larger allocations | An incremental address-space budget, not a 256 MiB RSS cap; other VM paths and Apple Silicon remain untested |
+| A 28 MB compile aborted under the tested caps, and a parent deadline killed and reaped a compiling helper | The helper contains allocation failure; these fixtures establish no worst case for compiler memory |
+| Wasmtime’s default large reservation prevented instantiation under these caps; smaller reservations allowed the positive control | Reservation and compiler budgets need platform-specific calibration, including the production helper’s threads |
+
+`RLIMIT_AS` cannot be called a total-memory limit: an unmapped Linux memfd accepted 48 MiB of writes from a child with a 16 MiB address-space cap. The guest’s empty WASI context and the helper’s restricted host operations remain necessary. Windows Job committed-memory limits are a separate mechanism and have not been measured in this experiment. No platform gains a production memory qualification from these runs, and the helper must refuse a load when its required limits cannot be established.
+
+The sources and logs remain private under `.preflight/rust-orchestration/research/plugin-memory/`, with the independent checks in `plugin-memory-orchestrator-checks.json`. Mechanism references are [Linux getrlimit](https://man7.org/linux/man-pages/man2/getrlimit.2.html), Apple’s published [resource-limit implementation](https://github.com/apple-oss-distributions/xnu/blob/xnu-12377.121.6/bsd/kern/kern_resource.c) and [VM limit setter](https://github.com/apple-oss-distributions/xnu/blob/xnu-12377.121.6/osfmk/vm/vm_map.c), and Microsoft’s [Job memory limits](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-jobobject_extended_limit_information). The Apple source tag predates the tested host’s unpublished kernel revision; host behavior here rests on the measurements.
 
 ## Inspection and management
 
@@ -174,7 +196,7 @@ It is not a secret redactor: a fail-open result hook cannot promise redaction. I
 1. **Lifecycle:** load, disable, restart, failure, and shutdown with a pending entry buffer; a failed or exhausted veto plugin blocks its listed tools until disabled, including after a process restart.
 2. **Mismatches and caps:** API version or hash mismatches, an unknown import, and each manifest and schema cap, all refused before compiling.
 3. **Limits:** a guest loop, memory and table growth, oversized returns, and output floods.
-4. **Cancellation:** Esc and session disposal mid-hook leave no host call after stop and no uncommitted entry.
+4. **Cancellation:** Esc and session disposal mid-hook admit no later effect; an already admitted decision write finishes before shutdown returns. Cancellation alone fails no plugin, while an earlier genuine failure stays recorded.
 5. **Serialization:** a hook and a guest tool on one instance serialize without deadlock, and a plugin's own tool skips its own veto.
 6. **Ordering:** first block wins; a failure blocks a call; patches chain; a context contribution that targets a system, assistant, or tool-result omission is refused.
 7. **Crash reconstruction:** kill the process after a decision entry, after a context contribution, and mid guest tool. Each reopened request matches the request rebuilt without plugins, and an unanswered call gets Pi's synthetic result.
@@ -213,4 +235,4 @@ MCP, web, code mode, and hook processes remain separate scope 12 work and are no
 
 ## Dev Note
 
-This page owns the proposed plugin architecture and its Pi v1.3.0 provenance (`71023aec1546d6d677a65669c5665c0927ce0dd0`: the extension runner, types, and session, the protected-paths example, and the Chord spec). The [support register](scope-00/support.md#decision-register) owns D6 and D7; an accepted design moves its decisions there. Adopted Pi code keeps its MIT notice.
+The trusted veto implementation adapts the Pi sources below and is described in [Current implementation](#current-implementation); its full design and platform qualification remain open. This page owns the proposed plugin architecture and its Pi v1.3.0 provenance (`71023aec1546d6d677a65669c5665c0927ce0dd0`: the extension runner, types, and session, the protected-paths example, and the Chord spec). The [support register](scope-00/support.md#decision-register) owns D6 and D7; an accepted design moves its decisions there. Adopted Pi code keeps its MIT notice.

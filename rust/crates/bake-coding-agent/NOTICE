@@ -102,6 +102,17 @@ From release v1.3.0, revision 71023aec1546d6d677a65669c5665c0927ce0dd0:
 the orphaned tool-call rule of transformMessages
 (packages/ai/src/api/transform-messages.ts, its second pass), adapted as the
 unanswered-call projection in src/session/unanswered.rs.
+
+From release v1.3.0, revision 71023aec1546d6d677a65669c5665c0927ce0dd0, the
+tool-call veto: ExtensionRunner.emitToolCall in
+src/core/extensions/runner.ts (handlers in order, the first block returned)
+and AgentSession._beforeToolCall in src/core/agent-session.ts (a failing
+handler blocks the call), adapted in src/plugins/veto.rs and
+src/agent_session/plugin_veto.rs; ToolCallEventResult in
+src/core/extensions/types.ts, adapted as ToolCallVeto in src/plugins/mod.rs;
+and examples/extensions/protected-paths.ts, ported as ProtectedPaths in
+src/plugins/protected_paths.rs, with its cases in src/plugins/tests.rs and
+src/agent_session/plugin_tests.rs.
 --------------------------------------------------------------------------------
 MIT License
 
