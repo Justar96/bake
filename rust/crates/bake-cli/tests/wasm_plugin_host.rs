@@ -1150,26 +1150,41 @@ fn load_payload(component: &[u8]) -> Vec<u8> {
     bytes
 }
 
-/// The production helper driven directly with raw frames.
-struct RawHelper {
-    child: tokio::process::Child,
-    stdin: Option<tokio::process::ChildStdin>,
-    stdout: tokio::process::ChildStdout,
-}
+/// The host's helper launcher, compiled into this test from its private
+/// source. On Windows the helper refuses to start outside the Job the host
+/// creates it in (`os_limit::establish`), and only `CreateProcessW` with a
+/// Job list puts it there from creation: stable `std` cannot pass that
+/// attribute, and assigning a suspended process afterwards leaves a window
+/// in which a dying test would orphan it unconfined. Including the module
+/// keeps one launcher without widening the library's public API; a change
+/// to it that this test crate cannot compile shows in the Windows lint.
+#[cfg(windows)]
+#[path = "../../bake-coding-agent/src/plugins/wasm/process.rs"]
+// The host uses the kill switch; these tests need only the process.
+#[allow(dead_code, unused_imports)]
+mod process;
 
-impl RawHelper {
-    async fn start() -> Self {
+/// The helper's memory budget in the raw protocol tests.
+const RAW_BUDGET: u64 = 512 << 20;
+
+/// How much of a raw helper's standard error is kept, from its start,
+/// where a startup refusal is reported. The rest is read and discarded so
+/// the helper never blocks on a full pipe.
+const RAW_STDERR_KEPT: usize = 16 * 1024;
+
+type RawIn = Box<dyn tokio::io::AsyncWrite + Send + Unpin>;
+type RawOut = Box<dyn tokio::io::AsyncRead + Send + Unpin>;
+
+/// A raw helper's process: Tokio's child on Unix, the host's launcher's
+/// process (its handle and Job) on Windows.
+#[cfg(unix)]
+struct RawProcess(tokio::process::Child);
+
+#[cfg(unix)]
+impl RawProcess {
+    async fn spawn(args: &[String]) -> (Self, RawIn, RawOut, RawOut) {
         let mut child = tokio::process::Command::new(BAKE_RS)
-            .args([HELPER_ARG, "--generation", "1", "--memory-budget"])
-            .arg((512u64 << 20).to_string())
-            .args([
-                "--max-component",
-                "16777216",
-                "--call-fuel",
-                "1000000000",
-                "--call-timeout-ms",
-                "10000",
-            ])
+            .args(args)
             .env_clear()
             // As the host starts it; see `a_helper_with_the_medium_allocator_refuses_to_start`.
             .envs(
@@ -1179,20 +1194,152 @@ impl RawHelper {
             )
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
             .kill_on_drop(true)
             .spawn()
             .expect("spawn the helper");
-        let stdin = child.stdin.take();
-        let stdout = child.stdout.take().expect("stdout");
-        let mut helper = Self {
-            child,
-            stdin,
-            stdout,
+        // Owned from here: a missing pipe drops the child, which kills it.
+        let pipes = (child.stdin.take(), child.stdout.take(), child.stderr.take());
+        let (Some(stdin), Some(stdout), Some(stderr)) = pipes else {
+            panic!("the helper's pipes are missing");
         };
-        let (kind, _) = helper.read().await.expect("Hello");
-        assert_eq!(kind, 0x81);
-        helper
+        (
+            Self(child),
+            Box::new(stdin),
+            Box::new(stdout),
+            Box::new(stderr),
+        )
+    }
+
+    /// The exit code (`None` for a signal), if the helper has exited;
+    /// observing it reaps the helper.
+    fn try_exit(&mut self) -> Option<Option<i32>> {
+        let status = self.0.try_wait().expect("poll the helper");
+        status.map(|status| status.code())
+    }
+
+    async fn wait(&mut self) -> Option<i32> {
+        self.0.wait().await.expect("wait for the helper").code()
+    }
+
+    fn kill(&mut self) {
+        // Fails only once the exit was observed, when nothing is left to kill.
+        let _ = self.0.start_kill();
+    }
+}
+
+#[cfg(windows)]
+struct RawProcess(process::Process);
+
+#[cfg(windows)]
+impl RawProcess {
+    async fn spawn(args: &[String]) -> (Self, RawIn, RawOut, RawOut) {
+        let args: Vec<std::ffi::OsString> = args.iter().map(Into::into).collect();
+        // The process exists only once this returns (after its last await),
+        // and is owned at once.
+        let spawned = process::spawn(std::path::Path::new(BAKE_RS), &args, RAW_BUDGET)
+            .await
+            .expect("spawn the helper");
+        (
+            Self(spawned.process),
+            spawned.stdin,
+            spawned.stdout,
+            spawned.stderr,
+        )
+    }
+
+    fn try_exit(&mut self) -> Option<Option<i32>> {
+        self.0.try_exit().map(|exit| exit.code)
+    }
+
+    async fn wait(&mut self) -> Option<i32> {
+        self.0.wait().await.expect("wait for the helper").code
+    }
+
+    fn kill(&mut self) {
+        self.0.kill();
+    }
+}
+
+/// The start of a raw helper's standard error, read whenever the test
+/// awaits the helper.
+struct RawStderr {
+    pipe: Option<RawOut>,
+    kept: Vec<u8>,
+}
+
+impl RawStderr {
+    /// Reads one chunk; cancel-safe, and pending forever once closed.
+    async fn pump(&mut self) {
+        let Some(pipe) = self.pipe.as_mut() else {
+            return std::future::pending().await;
+        };
+        let mut chunk = [0u8; 4096];
+        match pipe.read(&mut chunk).await {
+            Ok(count) if count > 0 => {
+                let room = RAW_STDERR_KEPT.saturating_sub(self.kept.len());
+                self.kept.extend_from_slice(&chunk[..count.min(room)]);
+            }
+            _ => self.pipe = None,
+        }
+    }
+}
+
+/// The production helper driven directly with raw frames, started as the
+/// host starts it. Its owner from creation: a test that fails before
+/// [`RawHelper::exit`] kills it on drop and waits, bounded, for its exit.
+struct RawHelper {
+    process: RawProcess,
+    stdin: Option<RawIn>,
+    stdout: RawOut,
+    stderr: RawStderr,
+    /// The exit code, once the exit was observed.
+    exit: Option<Option<i32>>,
+}
+
+impl RawHelper {
+    async fn start() -> Self {
+        let args = [
+            HELPER_ARG.to_owned(),
+            "--generation".to_owned(),
+            "1".to_owned(),
+            "--memory-budget".to_owned(),
+            RAW_BUDGET.to_string(),
+            "--max-component".to_owned(),
+            "16777216".to_owned(),
+            "--call-fuel".to_owned(),
+            "1000000000".to_owned(),
+            "--call-timeout-ms".to_owned(),
+            "10000".to_owned(),
+        ];
+        let (process, stdin, stdout, stderr) = RawProcess::spawn(&args).await;
+        let mut helper = Self {
+            process,
+            stdin: Some(stdin),
+            stdout,
+            stderr: RawStderr {
+                pipe: Some(stderr),
+                kept: Vec::new(),
+            },
+            exit: None,
+        };
+        let first = helper.read().await;
+        if let Some((0x81, _)) = first {
+            return helper;
+        }
+        // No Hello: report how the helper ended and what it said. A helper
+        // that closed its output is ending on its own; one that said
+        // something else is killed.
+        if first.is_some() {
+            helper.process.kill();
+        }
+        let code = helper.wait().await;
+        helper.drain_stderr().await;
+        panic!(
+            "Hello expected, got {:?}; exit code {code:?}; stderr: {}",
+            first.map(|(kind, payload)| (kind, payload.len())),
+            String::from_utf8_lossy(&helper.stderr.kept)
+        );
     }
 
     async fn send(&mut self, bytes: &[u8]) {
@@ -1201,18 +1348,53 @@ impl RawHelper {
     }
 
     async fn read(&mut self) -> Option<(u8, Vec<u8>)> {
+        let Self { stdout, stderr, .. } = self;
         tokio::time::timeout(Duration::from_secs(60), async {
-            let mut header = [0u8; 5];
-            if self.stdout.read_exact(&mut header).await.is_err() {
-                return None;
+            // Pinned outside the loop: reading stderr never cuts a frame.
+            let frame = read_frame(stdout);
+            tokio::pin!(frame);
+            loop {
+                tokio::select! {
+                    frame = &mut frame => return frame,
+                    () = stderr.pump() => {}
+                }
             }
-            let len = u32::from_le_bytes([header[1], header[2], header[3], header[4]]) as usize;
-            let mut payload = vec![0; len];
-            self.stdout.read_exact(&mut payload).await.ok()?;
-            Some((header[0], payload))
         })
         .await
         .expect("a frame or end of output within 60 s")
+    }
+
+    /// Waits, bounded, for the helper's exit; its code.
+    async fn wait(&mut self) -> Option<i32> {
+        if let Some(code) = self.exit {
+            return code;
+        }
+        let Self {
+            process, stderr, ..
+        } = self;
+        let code = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                tokio::select! {
+                    code = process.wait() => return code,
+                    () = stderr.pump() => {}
+                }
+            }
+        })
+        .await
+        .expect("exit within 60 s");
+        self.exit = Some(code);
+        code
+    }
+
+    /// Reads standard error to its end, bounded.
+    async fn drain_stderr(&mut self) {
+        tokio::time::timeout(Duration::from_secs(60), async {
+            while self.stderr.pipe.is_some() {
+                self.stderr.pump().await;
+            }
+        })
+        .await
+        .expect("standard error closes within 60 s");
     }
 
     /// Reads to the helper's exit: the frame kinds seen, the last `Fatal`
@@ -1226,12 +1408,49 @@ impl RawHelper {
             }
             kinds.push(kind);
         }
-        let status = tokio::time::timeout(Duration::from_secs(60), self.child.wait())
-            .await
-            .expect("exit within 60 s")
-            .expect("wait");
-        (kinds, fatal, status.code())
+        let code = self.wait().await;
+        self.drain_stderr().await;
+        (kinds, fatal, code)
     }
+}
+
+impl Drop for RawHelper {
+    fn drop(&mut self) {
+        if self.exit.is_some() {
+            return;
+        }
+        // The test ended without observing the exit (it failed): kill the
+        // helper and observe its exit here, bounded, so none outlives it.
+        self.process.kill();
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while std::time::Instant::now() < deadline {
+            if let Some(code) = self.process.try_exit() {
+                self.exit = Some(code);
+                return;
+            }
+            std::thread::yield_now();
+        }
+        let message = "a raw helper did not exit within 10 s of its kill";
+        if std::thread::panicking() {
+            eprintln!("{message}");
+        } else {
+            panic!("{message}");
+        }
+    }
+}
+
+/// One frame, or `None` at the end of output.
+async fn read_frame(stdout: &mut RawOut) -> Option<(u8, Vec<u8>)> {
+    let mut header = [0u8; 5];
+    if stdout.read_exact(&mut header).await.is_err() {
+        return None;
+    }
+    let len = u32::from_le_bytes([header[1], header[2], header[3], header[4]]) as usize;
+    // No helper reply exceeds the protocol's 256 KiB frame ceiling.
+    assert!(len <= 256 * 1024, "oversized helper frame: {len} bytes");
+    let mut payload = vec![0; len];
+    stdout.read_exact(&mut payload).await.ok()?;
+    Some((header[0], payload))
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1575,7 +1794,10 @@ fn plugin_check_runs_the_guard_through_the_command_line() {
 
 /// A start dropped while the helper compiles leaves the helper with its
 /// host: the drop sends the kill at once, the host still owns the unreaped
-/// child, and `shutdown` awaits its exit and drains its pipes.
+/// child, and `shutdown` awaits its exit and drains its pipes. On Windows,
+/// which has no unreaped state, the killed helper exits before `shutdown`
+/// while the host keeps its handle; the test's own handle, opened while the
+/// host holds the helper, confirms that exit and its code.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_dropped_initialize_leaves_the_helper_with_its_host() {
     let slow = package("slow", &["write"], slow_component(1400, 1000));
@@ -1592,6 +1814,9 @@ async fn a_dropped_initialize_leaves_the_helper_with_its_host() {
         () = wait_status(&mut status, |state| matches!(state, HostStatus::Compiling(_))) => {}
     }
     let pid = host.pid().expect("the host knows its helper");
+    // The host holds its helper until `shutdown`, so the pid names it.
+    #[cfg(windows)]
+    let helper = ProcessHandle::open(pid);
     // Killed by the drop, and not reaped: the host still holds the child.
     #[cfg(target_os = "linux")]
     tokio::time::timeout(Duration::from_secs(30), async {
@@ -1601,7 +1826,13 @@ async fn a_dropped_initialize_leaves_the_helper_with_its_host() {
     })
     .await
     .expect("the dropped start killed the helper");
+    #[cfg(unix)]
     assert!(!process_gone(pid), "nobody but the host may reap it");
+    // Killed by the drop: the Job's termination code.
+    #[cfg(windows)]
+    let killed = helper.exited().await;
+    #[cfg(windows)]
+    assert_eq!(killed, 1, "the dropped start killed the helper");
     let exit = host.shutdown().await;
     assert!(
         exit.spawned && exit.killed && exit.is_complete(),
@@ -1609,6 +1840,9 @@ async fn a_dropped_initialize_leaves_the_helper_with_its_host() {
     );
     #[cfg(unix)]
     assert_eq!(exit.signal, Some(libc::SIGKILL));
+    // The host observed the exit the test's handle saw.
+    #[cfg(windows)]
+    assert_eq!((exit.code, exit.signal), (Some(killed as i32), None));
     assert!(process_gone(pid));
     assert_eq!(host.shutdown().await, exit, "a repeated shutdown is stable");
     assert_eq!(host.initialize(None).await, Err(StartError::AlreadyStarted));
@@ -2084,7 +2318,10 @@ impl Drop for OwnedRun {
 /// killed helper is still the host's, unreaped, and another host on the
 /// same queue (which admits no waiters) is refused until `shutdown` has
 /// observed the first helper's exit. No timing is involved: the first
-/// helper's exit is not observed by anyone until that `shutdown`.
+/// helper's exit is not observed by anyone until that `shutdown`. On
+/// Windows the killed helper exits before `shutdown`; the test's own handle
+/// waits for that exit before asking for the slot, so the refusal shows the
+/// slot follows the host's observation, not the process's end.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_cancelled_compile_keeps_its_slot_until_its_exit_is_observed() {
     let slow = package("slow", &["write"], slow_component(1400, 1000));
@@ -2101,7 +2338,16 @@ async fn a_cancelled_compile_keeps_its_slot_until_its_exit_is_observed() {
         () = wait_status(&mut status, |state| matches!(state, HostStatus::Compiling(_))) => {}
     }
     let pid = first.pid().expect("pid");
+    // The host holds its helper, and the slot with it, until `shutdown`;
+    // the refusal below proves it still did after this handle was opened.
+    #[cfg(windows)]
+    let helper = ProcessHandle::open(pid);
+    #[cfg(unix)]
     assert!(!process_gone(pid), "only the host may reap its helper");
+    #[cfg(windows)]
+    let killed = helper.exited().await;
+    #[cfg(windows)]
+    assert_eq!(killed, 1, "the dropped start killed the helper");
     let second = new_host(&command(), &guard(), &limits, queue.clone(), None).expect("second host");
     assert_eq!(
         second.initialize(None).await,
@@ -2111,6 +2357,8 @@ async fn a_cancelled_compile_keeps_its_slot_until_its_exit_is_observed() {
     assert_eq!(*second.status().borrow(), HostStatus::New);
     let exit = first.shutdown().await;
     assert!(exit.killed && exit.is_complete(), "{exit:?}");
+    #[cfg(windows)]
+    assert_eq!((exit.code, exit.signal), (Some(killed as i32), None));
     assert!(process_gone(pid));
     // The observed exit released the slot.
     second

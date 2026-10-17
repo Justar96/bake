@@ -135,6 +135,7 @@ dependencies = [
  "bake-coding-agent",
  "bake-sandbox",
  "bake-tui",
+ "getrandom 0.2.17",
  "libc",
  "ring",
  "serde_json",

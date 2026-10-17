@@ -173,7 +173,10 @@ pub async fn wait_status(
     .expect("the host keeps its status sender");
 }
 
-/// Whether process `pid` no longer exists (it exited and was reaped).
+/// Whether process `pid` no longer exists: on Unix, it exited and was
+/// reaped. Windows has no unreaped state, so there it means only that the
+/// process exited; it says nothing about whether its owner still holds a
+/// handle to it (see [`ProcessHandle`]).
 pub fn process_gone(pid: u32) -> bool {
     #[cfg(target_os = "linux")]
     {
@@ -188,22 +191,93 @@ pub fn process_gone(pid: u32) -> bool {
     }
     #[cfg(windows)]
     {
-        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::Foundation::{CloseHandle, ERROR_INVALID_PARAMETER, WAIT_OBJECT_0};
         use windows_sys::Win32::System::Threading::{
-            GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+            OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject,
         };
-        const STILL_ACTIVE: u32 = 259;
-        // SAFETY: plain call; a null handle means no such process.
-        let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+        // SAFETY: plain call; only ERROR_INVALID_PARAMETER proves the pid
+        // no longer names a process. Access denial is not an observed exit.
+        let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
         if handle.is_null() {
-            return true;
+            return std::io::Error::last_os_error().raw_os_error()
+                == Some(ERROR_INVALID_PARAMETER as i32);
         }
-        let mut code = 0u32;
-        // SAFETY: a live handle, closed below.
-        let ok = unsafe { GetExitCodeProcess(handle, &mut code) };
+        // The handle's signalled state, not `STILL_ACTIVE`, which a process
+        // may also return as its exit code.
+        // SAFETY: a live handle, closed below; a zero timeout only polls.
+        let exited = unsafe { WaitForSingleObject(handle, 0) } == WAIT_OBJECT_0;
         // SAFETY: the handle opened above.
         unsafe { CloseHandle(handle) };
-        ok != 0 && code != STILL_ACTIVE
+        exited
+    }
+}
+
+/// The test's own handle to a helper, to observe its exit independently of
+/// the host that owns it.
+///
+/// Open it only while the owner still holds its own handle to the process:
+/// Windows does not reuse a pid while any handle to its process is open, so
+/// the pid then names the owner's helper, and this handle keeps naming it.
+/// The process having exited (this handle signalled) is not the owner
+/// having observed the exit or closed its handle: Windows has no unreaped
+/// state, so ownership is shown by the host's own behaviour instead.
+#[cfg(windows)]
+pub struct ProcessHandle(std::os::windows::io::OwnedHandle);
+
+#[cfg(windows)]
+impl ProcessHandle {
+    /// Opens `pid`; the caller vouches that its owner still holds it.
+    pub fn open(pid: u32) -> Self {
+        use std::os::windows::io::FromRawHandle;
+        use windows_sys::Win32::System::Threading::{
+            OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
+        };
+        // SAFETY: plain call; a non-null result is a fresh handle.
+        let raw = unsafe {
+            OpenProcess(
+                PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
+                0,
+                pid,
+            )
+        };
+        assert!(
+            !raw.is_null(),
+            "open helper {pid}: {}",
+            std::io::Error::last_os_error()
+        );
+        // SAFETY: the fresh handle above, owned from here on.
+        Self(unsafe { std::os::windows::io::OwnedHandle::from_raw_handle(raw) })
+    }
+
+    /// The exit code, once the process has exited.
+    pub fn exit_code(&self) -> Option<u32> {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
+        use windows_sys::Win32::System::Threading::{GetExitCodeProcess, WaitForSingleObject};
+        // SAFETY: a live handle owned by `self`; a zero timeout only polls.
+        if unsafe { WaitForSingleObject(self.0.as_raw_handle(), 0) } != WAIT_OBJECT_0 {
+            return None;
+        }
+        let mut code = 0u32;
+        // SAFETY: a live handle and valid output space.
+        let read = unsafe { GetExitCodeProcess(self.0.as_raw_handle(), &mut code) };
+        assert!(read != 0, "{}", std::io::Error::last_os_error());
+        Some(code)
+    }
+
+    /// Waits, bounded, for the process to exit; its exit code. Keyed to
+    /// the process state, not to time.
+    pub async fn exited(&self) -> u32 {
+        tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(code) = self.exit_code() {
+                    return code;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the helper exits within 60 s")
     }
 }
 
