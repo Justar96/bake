@@ -24,20 +24,20 @@ Port Bake's runtime and terminal application to Rust in a sequence of independen
 
 ## Release lines and change policy
 
-The product split is 0.3.x maintenance and 0.4.x Rust development. [D34](scope-00/support.md#decision-register) adopted the policy below with the branches it names; this document does not change publication or updater routing.
+Until 0.4.0 ships, Bake has 0.3.x maintenance and 0.4.x Rust development. From that release, only Rust Bake is shipped and maintained ([D10 and D13](scope-00/support.md#decision-register)). [D34](scope-00/support.md#decision-register) owns the branch policy; scope 16 must enforce the separate publication routes and 0.3 retirement.
 
 | Line | Allowed work | Release condition |
 |---|---|---|
-| 0.3.x | Reproducible correctness, security, provider-compatibility, installation, and platform fixes; tests and documentation needed for those fixes | Existing Bake gates and release procedure; no new product features bundled with a fix |
+| 0.3.x, until 0.4.0 ships | Reproducible correctness, security, provider-compatibility, installation, and platform fixes; tests and documentation needed for those fixes | Existing Bake gates and release procedure; no new features; no 0.3 publication after 0.4.0 ships |
 | 0.4 development | Rust implementation and qualification on `develop`, where the TypeScript agent is frozen | Explicit development invocation in private test homes; the shipped 0.3 launcher still selects TypeScript |
-| 0.4.0 | Native default after every required scope closes | Full compatibility and platform evidence, reviewed upgrade/rollback, and an explicit release request |
+| 0.4.0 | Rust-only product after every required scope closes; ends 0.3 maintenance | Retained-contract and platform evidence, native install/update/rollback qualification, retirement notice, and an explicit release request |
 | 0.4.x after cutover | Bug fixes and measured improvements to the native implementation | Relevant regression tests and paired evals for model-visible changes |
 
 Start Rust port work on fresh branches from up-to-date `origin/develop`, with PRs against `develop` or a stack on it, as [CONTRIBUTING](../../../CONTRIBUTING.md#the-rust-agent-and-the-frozen-typescript-agent) describes. The `rust/0.4.0` integration branch that carried the port until 2026-10-14 is merged into `develop` and retired. 0.3 fixes land on `release/0.3` and are released from it. During coexistence, keep Rust in a separate workspace and exclude it from 0.3 release archives and default startup. A 0.3 fix names the Rust scope that must adopt it when the behavior carries forward. Refresh the TypeScript comparison revision deliberately; record changes to the baseline instead of letting it drift silently.
 
-**The 0.3 maintenance branch exists; its channel does not yet.** `release/0.3`, cut from v0.3.8 and protected by a ruleset, takes fixes through merge-commit pull requests, and its release workflow accepts only tags on it. Until 0.4.0 ships, it is the only line that publishes, so its releases still write the single newest-version `latest.json`. Before cutover, scope 16 must add the maintenance manifest that cannot replace the 0.4 stable manifest, and scope 00 must still set the 0.3 support window. Do not overwrite `latest.json` with an older version.
+**0.3 retires when 0.4.0 ships.** `release/0.3`, cut from v0.3.8 and protected by a ruleset, takes fixes through merge-commit pull requests until that release. Its current workflow accepts tags on that branch and publishes the single newest-version `latest.json`. Scope 16 must freeze that route at the final TypeScript release, give Rust a separate route, reject post-retirement 0.3 publication, and prevent either route from moving backward. These publication safeguards are not implemented by the support decision.
 
-Review already-landed, unreleased `develop` work in scope 00: decide which changes belong in the last 0.3 release before declaring the line frozen. This roadmap neither reverts that work nor assumes everything beyond the checked-out release is a bug fix.
+The TypeScript product stays frozen during qualification and is removed from `develop` under scope 17. D34 supersedes the proposed feature-bearing final 0.3 release; the port does not depend on that triage.
 
 ## Target architecture
 
@@ -314,11 +314,13 @@ During coexistence, run the current Bake gates for affected TypeScript paths and
 - Pi-format sessions resume after a killed writer, concurrent writers remain excluded, and installing 0.4 leaves a 0.3 install and its data working.
 - All five release targets pass native artifact tests; each OS's sandbox and terminal behavior is tested on that OS.
 - Every model-visible change has its required paired record. Regressions are fixed or their measured causes and acceptance are recorded in both the eval note and PR.
-- Signing, fresh install, update from 0.3, rollback, aliases, and, if [D9](scope-00/support.md#decision-register) keeps it, Desktop launch pass against final archives. Stable and maintenance channels cannot overwrite each other.
+- Signing, fresh native install, native update/rollback, and preservation of existing installs and user-owned command links pass against final archives. The final TypeScript update route cannot serve Rust or accept post-retirement 0.3 publication. D9 excludes Desktop integration, and D32 excludes TypeScript upgrades and rollback.
 - Performance thresholds fixed before candidate measurement pass; no unjoined tasks, orphan processes, leaked terminal modes, or unbounded growth remain in the qualified workloads.
-- The 0.3 maintenance owner, support window, fix-forward procedure, and post-cutover release rules are published.
+- The 0.4.0 release notes announce the end of 0.3 maintenance and supported legacy aliases, explain the separate Rust installation, and link the retirement policy in D10 and D13.
 
 ## Dev Note
+
+**Rust-only support at release (2026-10-17, [D10 and D13](scope-00/support.md#decision-register)).** The owner ended 0.3 bug/security maintenance at the 0.4.0 release and chose to keep only Rust Bake. Supported legacy `dsh`, profile, and package aliases retire with 0.3. Native environment fallbacks and existing installs and user-owned command links remain preserved. Scope 16 still needs a frozen final TypeScript route, a separate native route, and enforcement against post-retirement 0.3 publication; scope 17 owns TypeScript product removal and the release notice. These decisions do not qualify an artifact or authorize a release.
 
 **Support bounds for 0.4.0 (2026-10-17, [D7](scope-00/support.md#decision-register), [D8](scope-00/support.md#decision-register), [D9](scope-00/support.md#decision-register)).** The owner decided three scope-00 rows. CLIProxyAPI is the only 0.4.0 provider route; its three wire protocols stay required and their implementations stay, and direct providers are deferred. Bake Desktop integration is deferred beyond 0.4.0, the frozen TypeScript `desktop` bundle and its tests stay, and scope 13's transports follow retained consumers. The Cordis-specific tooling is retired, and scope 12 designs Rust-native inspection and management capabilities with the plugin API; no tool name or plugin execution architecture is accepted. The [support register](scope-00/support.md#acceptance-matrix) and scopes 07, 12, and 13 carry the bounds and their required evidence. No code changed, and no scope closes.
 

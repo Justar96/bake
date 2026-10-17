@@ -2,6 +2,8 @@
 
 The `bake-downloads` Railway service in project `28ff3000-7240-4c57-81d1-7bd05445c1ee` serves a release manifest and installers at `https://bake.justar.dev`, and redirects each versioned platform archive to the asset of the same name on that version's GitHub release. The service exists, but a release is available only after its archives are built, checked, and deployed. Bake still runs on Node; Bun builds the workspace and installs the production dependency graph into each archive.
 
+0.3 bug and security maintenance ends when 0.4.0 ships. That release ships only Rust Bake and retires supported legacy `dsh`, profile, and package aliases ([D10 and D13](../docs/roadmap/rust-0.4/scope-00/support.md#decision-register)). Scope 16 must leave the existing updater on the final TypeScript release, publish Rust through a separate route, and reject later 0.3 publication. Native packaging and these channel safeguards remain unimplemented; the commands below describe the current TypeScript distribution.
+
 ## Build and check one platform locally
 
 Use a clean checkout with stable Bun 1.4.2 (pinned in `package.json`), Node 24 or newer, and the host native build prerequisites. Run `bun install --frozen-lockfile`, `bun run build`, then:
