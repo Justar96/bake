@@ -1101,3 +1101,58 @@ async fn a_replaced_route_pairs_each_request_with_its_own_key() {
         ]
     );
 }
+
+// Bake: an owned request is a child of its gate's lifetime. Closing the
+// gate aborts a request whose own signal never aborts, the provider sees
+// the abort and ends the stream as aborted, and the drain waits for the
+// request's task; afterwards a request is refused as aborted at once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn closing_the_gate_aborts_an_owned_request_and_waits_for_it() {
+    use bake_ai::providers::faux::{FauxResponseStep, faux_assistant_message};
+    let (faux, apis, runtime) = faux_runtime("key");
+    let (started, request_started) = tokio::sync::oneshot::channel::<()>();
+    let started = std::sync::Mutex::new(Some(started));
+    faux.set_responses(vec![FauxResponseStep::Factory(Arc::new(
+        move |_, options, _, _| {
+            let signal = options.base.signal.clone();
+            if let Some(started) = started.lock().expect("lock").take() {
+                let _ = started.send(());
+            }
+            Box::pin(async move {
+                match signal {
+                    Some(signal) => signal.cancelled().await,
+                    None => return Err("the provider got no signal".to_owned()),
+                }
+                Ok(faux_assistant_message("never shown"))
+            })
+        },
+    ))]);
+    let gate = WorkGate::default();
+    let stream_fn = runtime.stream_fn_owned(apis, Some(gate.clone()));
+    let model = runtime.snapshot().model("faux", "faux-1").expect("model");
+    let request = bake_ai::AbortController::new();
+    let mut options = SimpleStreamOptions::default();
+    options.base.signal = Some(request.signal());
+    let stream = stream_fn(&model, &TranscriptContext::default(), options).expect("stream");
+    tokio::time::timeout(std::time::Duration::from_secs(10), request_started)
+        .await
+        .expect("the request starts")
+        .expect("started");
+    tokio::time::timeout(std::time::Duration::from_secs(10), gate.close())
+        .await
+        .expect("the drain finishes");
+    assert!(!request.signal().aborted(), "only the lifetime aborted");
+    let result = stream.result().await.expect("result");
+    assert_eq!(result.stop_reason, StopReason::Aborted);
+    let refused = stream_fn(
+        &model,
+        &TranscriptContext::default(),
+        SimpleStreamOptions::default(),
+    )
+    .expect("stream");
+    assert_eq!(
+        refused.result().await.map(|message| message.stop_reason),
+        Some(StopReason::Aborted)
+    );
+    assert_eq!(faux.call_count(), 1);
+}

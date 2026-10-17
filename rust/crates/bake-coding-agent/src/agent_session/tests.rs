@@ -23,13 +23,13 @@ use crate::session::NewSessionOptions;
 use crate::system_prompt::build_system_prompt;
 use crate::test_support::TempDir;
 
-struct Harness {
-    faux: Arc<FauxProvider>,
+pub(super) struct Harness {
+    pub(super) faux: Arc<FauxProvider>,
     registry: Arc<ModelRegistry>,
     apis: Arc<ApiRegistry>,
 }
 
-fn harness() -> Harness {
+pub(super) fn harness() -> Harness {
     let faux = Arc::new(FauxProvider::new(FauxProviderOptions::default()));
     let apis = Arc::new(ApiRegistry::new());
     apis.register(faux.clone());
@@ -55,7 +55,11 @@ fn harness() -> Harness {
     }
 }
 
-fn options(harness: &Harness, session: SessionManager, cwd: &str) -> AgentSessionOptions {
+pub(super) fn options(
+    harness: &Harness,
+    session: SessionManager,
+    cwd: &str,
+) -> AgentSessionOptions {
     AgentSessionOptions {
         session,
         registry: Arc::clone(&harness.registry).into(),
@@ -98,7 +102,7 @@ fn roles(messages: &[LiveMessage]) -> Vec<String> {
         .collect()
 }
 
-fn new_file_session(dir: &TempDir) -> SessionManager {
+pub(super) fn new_file_session(dir: &TempDir) -> SessionManager {
     SessionManager::create(
         &dir.path().to_string_lossy(),
         Some(&dir.join("sessions")),

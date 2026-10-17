@@ -80,7 +80,8 @@ fn aborted() -> BeforeToolCallResult {
 
 /// Writes `decision` at the session's write boundary unless `signal` has
 /// aborted by its admission (see the module docs); `Ok(false)` means it was
-/// not written for that reason. The permit lives in the blocking write, so
+/// not written for that reason. The write is blocking work of the
+/// session's gate, admitted under a permit taken before it starts, so
 /// shutdown waits for it even if the run is cancelled meanwhile. A failure
 /// records the gap, aborts the run (as a failed change's write does), and
 /// returns the reason.
@@ -105,8 +106,7 @@ async fn persist_decision(
             hooks.plugin_decision_admitted.take(),
         )
     };
-    let written = tokio::task::spawn_blocking(move || {
-        let _permit = permit;
+    let write = permit.spawn_blocking(move || {
         #[cfg(test)]
         if let Some(hook) = before_admission {
             hook();
@@ -129,8 +129,10 @@ async fn persist_decision(
                 .map(|_| true)
                 .map_err(|error| error.to_string())
         })
-    })
-    .await;
+    });
+    drop(permit);
+    // Refused only outside a runtime: nothing ran, as when the gate is shut.
+    let written = write.map_err(|refused| refused.to_string())?.await;
     let error = match written {
         Ok(Ok(written)) => return Ok(written),
         Ok(Err(WriteRefused::AfterGap(error) | WriteRefused::Failed(error))) => error,
