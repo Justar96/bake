@@ -4,12 +4,12 @@
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use bake_agent::RunControl;
+use bake_agent::{RunControl, RunOutcome};
 use bake_ai::{AbortSignal, Model, ModelThinkingLevel};
 use tokio::time::Instant;
 
 use super::recovery::Core;
-use super::{SessionEvent, WriteRefused, read_settings, write_session};
+use super::{AgentSession, SessionEvent, WriteRefused, lock_gap, read_settings, write_session};
 use crate::compaction::{
     CompactionPreparation, CompactionResult, CompactionSettings, SummarizationOptions,
     SummaryAttempt, compact, estimate_projected_context_tokens, estimate_tokens,
@@ -36,6 +36,36 @@ impl BackgroundCompactionStatus {
             Self::Started => "started",
             Self::Discarded => "discarded",
             Self::Committed => "committed",
+        }
+    }
+}
+
+impl AgentSession {
+    /// Print owns a finite invocation. Publish its last speculative attempt
+    /// before shutdown closes listeners; cancellation stays local to that
+    /// candidate, while required admission writes still determine success.
+    pub(crate) async fn finish_background_compaction(&self, control: &RunControl) -> RunOutcome {
+        let core = Arc::clone(&self.core);
+        let run_control = control.clone();
+        let task = {
+            let _runtime = self.runtime.enter();
+            self.work.spawn(move |_scope| async move {
+                core.cancel_background_compaction("print completed").await;
+                run_control.drain_admissions().await;
+                if let Some(error) = lock_gap(&core.gap).clone() {
+                    run_control.fail(error)
+                } else {
+                    run_control.stopped().unwrap_or(RunOutcome::FinishedTurn)
+                }
+            })
+        };
+        match task {
+            Ok(task) => task.await.unwrap_or_else(|error| {
+                control.fail(format!("Background compaction cleanup failed: {error}"))
+            }),
+            Err(error) => control.fail(format!(
+                "Background compaction cleanup was refused: {error}"
+            )),
         }
     }
 }
