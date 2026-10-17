@@ -441,7 +441,8 @@ mod platform {
             libc::proc_pidinfo(
                 pid as libc::c_int,
                 libc::PROC_PIDTBSDINFO,
-                0,
+                // Keep an exited but unreaped helper visible too.
+                1,
                 std::ptr::addr_of_mut!(info).cast(),
                 size,
             )
