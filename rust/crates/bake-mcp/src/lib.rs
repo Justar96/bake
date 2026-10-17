@@ -13,12 +13,13 @@
 //! | [`protocol`] | `src/protocol/types.ts`, `src/protocol/content.ts`, and the result checks of `src/client.ts` |
 //! | [`transport`] | `src/transports/transport.ts` and the framing of `src/transports/stdio.ts` |
 //! | [`client`] | `src/client.ts` |
+//! | [`stdio`] | the process lifecycle of `src/transports/stdio.ts` |
 //!
-//! The client does not start processes or open connections. The caller owns
-//! the server process (its environment, sandbox admission, and process-tree
-//! shutdown) and passes its output and input as a [`MessageReceiver`] and a
-//! [`MessageSender`], usually [`LineReader`] and [`LineWriter`] over the
-//! child's pipes. [`McpClient::start`] returns a [`Connecting`] that owns the
+//! The client runs over any [`MessageReceiver`] and [`MessageSender`],
+//! usually [`LineReader`] and [`LineWriter`] over a child's pipes. [`stdio`]
+//! spawns a server and owns its process, process tree, and standard error
+//! next to the client; the caller decides whether the server may run and
+//! confines it (D24), and gives it its environment. [`McpClient::start`] returns a [`Connecting`] that owns the
 //! client's task through initialization, and [`Connecting::shutdown`] and
 //! [`McpClient::shutdown`] return once that task has ended and dropped both
 //! halves, so the caller can then end the process, also when initialization
@@ -28,8 +29,7 @@
 //!
 //! This is the protocol boundary only. Not implemented here: the Streamable
 //! HTTP transport and OAuth (Pi `src/transports/streamable-http.ts`,
-//! `src/oauth/`), stdio process spawning and shutdown
-//! (`src/transports/stdio.ts`), resources, prompts, progress notifications
+//! `src/oauth/`), resources, prompts, progress notifications
 //! and their timeout renewal, roots, sampling, elicitation, and the stateless
 //! MCP 2026-07-28 revision (`server/discover`, per-request version metadata).
 //! The client negotiates only the handshake-based revisions of
@@ -37,11 +37,14 @@
 //! content conversion, the model tool adapter, configuration, and reconnects
 //! belong to the integration in `bake-coding-agent`.
 #![warn(missing_docs)]
-#![forbid(unsafe_code)]
+// `unsafe` is denied everywhere but `stdio`'s server module, whose
+// syscalls carry their contracts.
+#![deny(unsafe_code)]
 
 pub mod client;
 pub mod jsonrpc;
 pub mod protocol;
+pub mod stdio;
 pub mod transport;
 
 pub use client::{
@@ -52,6 +55,10 @@ pub use jsonrpc::{JsonRpcError, RequestId};
 pub use protocol::{
     CallToolResult, Implementation, InitializeResult, ProtocolVersion, ServerCapabilities, Tool,
     ToolsCapability, ToolsPage,
+};
+pub use stdio::{
+    ProcessReport, ShutdownIncomplete, SpawnError, StartError, StderrSnapshot, StdioCommand,
+    StdioOptions, StdioProcess, Stop, TreeEnd, scrubbed_parent_environment, spawn_stdio,
 };
 pub use transport::{
     DEFAULT_MAX_MESSAGE_BYTES, LineReader, LineWriter, MessageReceiver, MessageSender, ReceiveError,
