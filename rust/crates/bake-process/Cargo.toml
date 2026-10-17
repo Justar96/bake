@@ -25,3 +25,15 @@ windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Securit
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "time", "macros", "io-util"] }
+
+[target.'cfg(windows)'.dev-dependencies]
+# `tests/windows_job_rundown.rs`: its own job, membership checks, and
+# process handles.
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading"] }
+
+# The Windows job settlement observation and production-path case: the
+# binary re-executes itself as its helper processes, whose standard output
+# is the protocol. Prints a skip elsewhere.
+[[test]]
+name = "windows_job_rundown"
+harness = false
