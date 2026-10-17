@@ -7,6 +7,57 @@ use bake_agent::{RunControl, RunLimits};
 use super::*;
 
 #[tokio::test]
+async fn local_cancel_during_debit_completion_prevents_dispatch_in_the_same_poll() {
+    let controller = bake_ai::AbortController::new();
+    let cancelling = controller.clone();
+    let observer: bake_agent::AdmissionObserver = Arc::new(move |_| {
+        let cancelling = cancelling.clone();
+        Box::pin(async move {
+            // Complete the required write and cancel within the request's
+            // poll, before select can forward the signal to its controller.
+            cancelling.abort();
+            Ok(())
+        })
+    });
+    let control = RunControl::with_admission_observer(RunLimits::default(), Some(observer));
+    let calls = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&calls);
+    let stream_fn: StreamFn = Arc::new(move |_, _, _| {
+        counted.fetch_add(1, Ordering::SeqCst);
+        Err("a locally cancelled request must not be dispatched".into())
+    });
+    let attempts = Arc::new(Mutex::new(Vec::new()));
+    let recorded = Arc::clone(&attempts);
+    let options = SummarizationOptions {
+        run_control: Some(control.clone()),
+        foreground_call_reserve: 1,
+        signal: Some(controller.signal()),
+        on_attempt: Some(Arc::new(move |attempt| {
+            recorded.lock().unwrap().push(attempt.clone())
+        })),
+        ..key()
+    };
+    let result = generate_summary(
+        &summarize_this(),
+        &test_model(false, 8192),
+        2000,
+        None,
+        None,
+        &stream_fn,
+        &options,
+    )
+    .await;
+    assert!(result.is_err());
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert_eq!(control.model_calls(), 1);
+    assert_eq!(control.stopped(), None);
+    let attempts = attempts.lock().unwrap();
+    assert_eq!(attempts.len(), 1);
+    assert!(!attempts[0].dispatched);
+    assert_eq!(attempts[0].usage, None);
+}
+
+#[tokio::test]
 async fn retries_retain_attempt_usage_and_identity_when_the_next_dispatch_fails() {
     let calls = Arc::new(AtomicUsize::new(0));
     let counted = Arc::clone(&calls);

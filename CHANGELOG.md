@@ -4,6 +4,8 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 ## [Unreleased]
 
+- A cancelled Rust summary waits for its reserved model-call debit to finish and checks cancellation again before dispatching the provider request.
+
 - Rust sessions can opt into `taskDocuments` for versioned plans, todos, and goals, and `backgroundCompaction` for one speculative summary whose source snapshot is checked before commit. Both default to off. Dropping a prompt waiter leaves its admitted execution running; abort still cancels and awaits it.
 
 - Rust print runs accept shared model-call and time limits with `--max-model-calls` and `--run-timeout-ms`. JSON settlement events distinguish finished turns, cancellation, exhausted budgets, and failures; model failures exit with status 1 in both output modes.
