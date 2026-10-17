@@ -32,6 +32,103 @@ fn limited(calls: u64) -> RunControl {
     })
 }
 
+#[tokio::test]
+async fn restored_debits_keep_the_original_allowance_and_ordinals() {
+    let observed = Arc::new(Mutex::new(Vec::new()));
+    let writes = Arc::clone(&observed);
+    let control = RunControl::restore(
+        RunLimits {
+            deadline: None,
+            max_model_calls: Some(3),
+        },
+        2,
+        Some(Arc::new(move |admission| {
+            writes.lock().unwrap().push(admission.ordinal);
+            Box::pin(async { Ok(()) })
+        })),
+    );
+    let provider = bake_ai::providers::faux::FauxProvider::new(Default::default());
+    let model = provider.model();
+    assert_eq!(
+        control
+            .admit_model_call(ModelCallKind::Agent, model)
+            .await
+            .unwrap()
+            .ordinal,
+        3
+    );
+    assert_eq!(
+        control
+            .admit_model_call(ModelCallKind::Summary, model)
+            .await,
+        Err(RunOutcome::BudgetExhausted {
+            limit: BudgetLimit::ModelCalls
+        })
+    );
+    assert_eq!(control.model_calls(), 3);
+    assert_eq!(*observed.lock().unwrap(), [3]);
+    let exceeded = RunControl::restore(
+        RunLimits {
+            deadline: None,
+            max_model_calls: Some(1),
+        },
+        2,
+        None,
+    );
+    assert!(
+        exceeded
+            .admit_model_call(ModelCallKind::Agent, model)
+            .await
+            .is_err()
+    );
+    assert_eq!(exceeded.model_calls(), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn dedicated_interval_completion_closes_admission_without_rewriting_shared_settlement() {
+    let shared = RunControl::default();
+    assert_eq!(
+        shared.settle(RunOutcome::FinishedTurn),
+        RunOutcome::FinishedTurn
+    );
+    assert_eq!(shared.stopped(), None);
+    let control = RunControl::new(RunLimits {
+        deadline: Some(Instant::now() + Duration::from_secs(5)),
+        max_model_calls: None,
+    });
+    assert_eq!(
+        control.finish_interval(RunOutcome::FinishedTurn),
+        RunOutcome::FinishedTurn
+    );
+    tokio::time::advance(Duration::from_secs(10)).await;
+    control.cancel();
+    assert_eq!(control.stopped(), Some(RunOutcome::FinishedTurn));
+    let provider = bake_ai::providers::faux::FauxProvider::new(Default::default());
+    assert_eq!(
+        control
+            .admit_model_call(ModelCallKind::Agent, provider.model())
+            .await,
+        Err(RunOutcome::FinishedTurn)
+    );
+    assert_eq!(control.model_calls(), 0);
+    assert_eq!(
+        control.fail("terminal sync failed".into()),
+        RunOutcome::Failed {
+            message: "terminal sync failed".into()
+        }
+    );
+    let expired = RunControl::new(RunLimits {
+        deadline: Some(Instant::now()),
+        max_model_calls: None,
+    });
+    assert_eq!(
+        expired.finish_interval(RunOutcome::FinishedTurn),
+        RunOutcome::BudgetExhausted {
+            limit: BudgetLimit::Deadline
+        }
+    );
+}
+
 struct AdmissionJournal(std::path::PathBuf);
 
 impl AdmissionJournal {

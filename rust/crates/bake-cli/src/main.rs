@@ -64,6 +64,8 @@ Options:
       --max-model-calls <n> Print-mode request limit shared by all prompts,
                             retries, and summaries; 0 starts no model request
       --run-timeout-ms <n>  Print-mode deadline, starting before the first prompt
+      --recoverable        Journal one print prompt for selected-run recovery
+      --resume-run <id>    Resume a recorded run in an existing --session <path>
       --provider <name>     Provider of --model
       --model <pattern>     Model id, pattern, or provider/id, optionally :<thinking>
       --models <patterns>   Scope available models (comma-separated patterns or globs)

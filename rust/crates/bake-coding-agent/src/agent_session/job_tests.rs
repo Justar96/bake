@@ -17,6 +17,7 @@ use crate::print_mode::{PrintModeOptions, PrintOutput, SharedWriter, run_print_m
 fn print_options(job_wait: Duration) -> PrintModeOptions {
     PrintModeOptions {
         control: RunControl::default(),
+        recovery: crate::print_mode::PrintRunRecovery::Disabled,
         mode: PrintOutput::Text,
         initial_message: None,
         initial_images: Vec::new(),

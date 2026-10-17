@@ -6,6 +6,7 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 - Rust background jobs commit their start before executing and their terminal state before publication. Resumed sessions preserve recorded outcomes and observations, report uncertain effects honestly, and never restart a lost process automatically. Job waits also stop at their original deadline across notice-triggered turns.
 - A cancelled Rust summary waits for its reserved model-call debit to finish and checks cancellation again before dispatching the provider request.
+- Rust print mode can opt into selected-run recovery with `--recoverable` and `--resume-run`. It retains spent model calls, refuses uncertain effects and interrupted deadlines, and reports the selected run’s answer. Experimental context masking and a configurable read-tool concurrency bound remain off by default.
 
 - Rust sessions can opt into `taskDocuments` for versioned plans, todos, and goals, and `backgroundCompaction` for one speculative summary whose source snapshot is checked before commit. Both default to off. Dropping a prompt waiter leaves its admitted execution running; abort still cancels and awaits it.
 

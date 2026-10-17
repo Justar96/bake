@@ -16,6 +16,9 @@ use bake_ai::{ApiRegistry, StopReason};
 use serde_json::json;
 use tokio::sync::Notify;
 
+#[cfg(unix)]
+mod read_shutdown;
+
 use super::*;
 use crate::auth_storage::AuthStorage;
 use crate::model_registry::config::ModelConfig;

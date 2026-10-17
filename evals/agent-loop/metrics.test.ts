@@ -1,12 +1,22 @@
 /** Loop-shape metrics over synthetic Bake and pi event streams. */
 import { describe, expect, test } from 'bun:test'
 import {
-  backgroundCompactions, backgroundStarts, type Call, compactions, editCheckSplits, excessRequests, isBareGlob, jsonModeCompactions, nativeSummaryUsage, normalizeBake, normalizePi, orientationCalls, ranCheck,
+  backgroundCompactions, backgroundStarts, type Call, compactions, contextMasking, editCheckSplits, excessRequests, isBareGlob, jsonModeCompactions, nativeReadBatches, nativeSummaryUsage, normalizeBake, normalizePi, orientationCalls, ranCheck,
   readsFile, requestsOverFloor, runawayAbort, shellEdits, skillLoads, verifiedBeforeFinal,
 } from './metrics.ts'
 
 const TEST = /\bnode\s+(?:\.\/)?test\.cjs\b/
 const WORKSPACE = '/tmp/eval/workspace'
+
+test('native experiment metrics count committed masking and same-response read batches', () => {
+  expect(contextMasking([{ type: 'context_masking', maskedResults: 2, removedBytes: 1200 },
+    { type: 'context_masking', maskedResults: 3, removedBytes: 700 }, { type: 'compaction_end' }]))
+    .toEqual({ commits: 2, maskedResults: 5, removedBytes: 1900 })
+  const assistant = (names: string[]) => ({ type: 'message_end', message: { role: 'assistant', content: names.map(name => ({ type: 'toolCall', name })) } })
+  expect(nativeReadBatches([assistant(['read', 'read', 'ls', 'grep']), assistant(['read']),
+    assistant(['read', 'edit']), assistant([]), { type: 'tool_execution_start', toolName: 'read' }]))
+    .toEqual({ batches: 2, multiCallBatches: 1, calls: 5, maxCalls: 4 })
+})
 let nextId = 0
 const call = (step: number, tool: string, input: Record<string, unknown> = {}): Call => ({ tool, input, callId: `c${nextId++}`, step })
 const bash = (step: number, command: string, extra: Record<string, unknown> = {}) => call(step, 'bash', { command, ...extra })

@@ -126,24 +126,7 @@ fn stop(core: &Core, message: String) -> String {
     message
 }
 
-/// Runs immediately before a provider request, after pending messages and
-/// all preceding tool results are durable. The agent owns this boundary.
-pub(super) fn request_hook(core: Arc<Core>) -> bake_agent::PrepareRequest {
-    bake_agent::hook::prepare_request(move |request, signal| {
-        let core = Arc::clone(&core);
-        let tools = request.context.tools.clone();
-        Box::pin(async move {
-            expose(core, tools, signal)
-                .await
-                .map(|context| bake_agent::AgentRequestUpdate {
-                    context: Some(context),
-                    ..bake_agent::AgentRequestUpdate::default()
-                })
-        })
-    })
-}
-
-async fn expose(
+pub(super) async fn expose(
     core: Arc<Core>,
     tools: Vec<Arc<AgentTool>>,
     signal: Option<AbortSignal>,

@@ -69,6 +69,10 @@ pub struct Args {
     pub max_model_calls: Option<u64>,
     /// `--run-timeout-ms`: print-mode deadline starting before the first prompt.
     pub run_timeout_ms: Option<u64>,
+    /// `--recoverable`: journal one print prompt for explicit recovery.
+    pub recoverable: bool,
+    /// `--resume-run`: continue only this recorded run in `--session`.
+    pub resume_run: Option<String>,
     /// `--mode`.
     pub mode: Option<Mode>,
     /// `--continue`, `-c`.
@@ -179,6 +183,18 @@ pub fn parse_args(args: &[String]) -> Args {
                 break;
             }
             "--help" | "-h" => result.help = true,
+            "--recoverable" => result.recoverable = true,
+            "--resume-run" => {
+                match next.filter(|value| !value.is_empty() && !value.starts_with('-')) {
+                    Some(id) => {
+                        result.resume_run = Some(id.to_owned());
+                        i += 1;
+                    }
+                    None => result
+                        .diagnostics
+                        .push(Diagnostic::error("--resume-run requires a run id")),
+                }
+            }
             "--max-model-calls" | "--run-timeout-ms" => {
                 match next
                     .filter(|value| {

@@ -354,6 +354,11 @@ pub struct AgentTool {
     /// Per-tool execution mode; `sequential` forces the whole batch to run
     /// one call at a time.
     pub execution_mode: Option<ToolExecutionMode>,
+    /// Trusted host declaration that this implementation only observes state.
+    /// Used by `max_concurrent_read_tools`; never inferred from the name,
+    /// replay policy, or remote tool annotations. Wrappers that add effects
+    /// must clear this declaration. It is not sent to the model.
+    pub read_only: bool,
 }
 
 impl AgentTool {
@@ -387,6 +392,7 @@ impl AgentTool {
             execute: Arc::new(execute),
             replay: None,
             execution_mode: None,
+            read_only: false,
         }
     }
 
@@ -407,6 +413,7 @@ impl fmt::Debug for AgentTool {
             .field("name", &self.name)
             .field("label", &self.label)
             .field("execution_mode", &self.execution_mode)
+            .field("read_only", &self.read_only)
             .finish_non_exhaustive()
     }
 }
@@ -635,6 +642,10 @@ pub struct AgentLoopConfig {
     pub get_follow_up_messages: Option<GetMessages>,
     /// Tool execution mode; parallel by default.
     pub tool_execution: ToolExecutionMode,
+    /// Opt-in bound for batches containing only host-declared read-only
+    /// tools. Any other tool makes the entire batch sequential. `None`
+    /// preserves Pi's unlimited parallel batches and per-tool barriers.
+    pub max_concurrent_read_tools: Option<std::num::NonZeroUsize>,
     /// Runs before a tool executes, after validation; may block the call.
     pub before_tool_call: Option<BeforeToolCall>,
     /// Runs after a tool executes; may override parts of its result.
@@ -656,6 +667,7 @@ impl AgentLoopConfig {
             get_steering_messages: None,
             get_follow_up_messages: None,
             tool_execution: ToolExecutionMode::Parallel,
+            max_concurrent_read_tools: None,
             before_tool_call: None,
             after_tool_call: None,
         }
@@ -668,6 +680,7 @@ impl fmt::Debug for AgentLoopConfig {
             .field("model", &self.model.id)
             .field("stream_options", &self.stream_options)
             .field("tool_execution", &self.tool_execution)
+            .field("max_concurrent_read_tools", &self.max_concurrent_read_tools)
             .finish_non_exhaustive()
     }
 }

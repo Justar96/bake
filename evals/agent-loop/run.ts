@@ -19,6 +19,7 @@
  * EVAL_TRIALS  trials per scenario (default 3)
  * EVAL_OUTPUT  raw output directory (default .preflight/evals/agent-loop/<time>)
  * EVAL_EXTRA_<ARM>  optional JSON array of extra overlay rows for one arm
+ * EVAL_NATIVE_SESSION_<ARM> memory (default), persistent, or recoverable
  * EVAL_CONFIG_HOME optional directory holding settings.yaml and .credentials.yaml; defaults to ~/.bake
  * EVAL_GATEWAY optional JSON file of { baseUrl, apiKey } that replaces the
  *              cliproxyapi upstream and key for every arm, such as pi's
@@ -37,7 +38,7 @@ import { reconcile } from './accounting.ts'
 import { compositionCheck, ROSTERS, systemPromptOf, type Roster } from './composition.ts'
 import { bakeCommand, bakeOverlay, mergeSettings, nativeCommand, nativeSettings, nativeStaleWriter, parseArms, strayContextFiles, type Arm } from './arms.ts'
 import {
-  backgroundCompactions, backgroundStarts, compactions, editCheckSplits, excessRequests, jsonModeCompactions, nativeSummaryUsage, normalizeBake, normalizePi, orientationCalls, ranCheck,
+  backgroundCompactions, backgroundStarts, compactions, contextMasking, editCheckSplits, excessRequests, jsonModeCompactions, nativeReadBatches, nativeSummaryUsage, normalizeBake, normalizePi, orientationCalls, ranCheck,
   requestsOverFloor, routingDecisions, runawayAbort, shellEdits, skillLoads, verifiedBeforeFinal,
 } from './metrics.ts'
 import {
@@ -64,8 +65,8 @@ const models = [...new Set((process.env.EVAL_MODELS ?? 'standard,extended').spli
 const cases = [...new Set((process.env.EVAL_CASES ?? STANDARD_CASES.join(',')).split(',').filter(Boolean)
   .flatMap(entry => CASE_SETS[entry] ?? [entry]))]
 for (const scenario of cases) if (prompts[scenario] === undefined) throw new Error(`EVAL_CASES names unknown scenario ${scenario}`)
-if (cases.includes('background_compaction') && Object.values(ARMS).some(arm => arm.kind !== 'native')) {
-  throw new Error('background_compaction requires native arms with the same scenario window and reserve')
+if (cases.some(scenario => ['background_compaction', 'context_masking', 'independent_reads'].includes(scenario)) && Object.values(ARMS).some(arm => arm.kind !== 'native')) {
+  throw new Error('background_compaction, context_masking, and independent_reads require native arms')
 }
 const trials = Number(process.env.EVAL_TRIALS ?? 3)
 const configHome = resolve(process.env.EVAL_CONFIG_HOME ?? join(process.env.HOME!, '.bake'))
@@ -412,7 +413,10 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
       const stray = strayContextFiles(workspace, userHome, usesAgentInstructions(scenario), usesSkills(scenario))
       if (stray.length > 0) throw new Error(`${label}: bake-rs would load context files outside the fixture: ${stray.join(', ')}; move them or set TMPDIR to a directory without them`)
       if (scenario === 'stale_edit') nativeInjection = nativeStaleWriter(workspace, join(workspace, file), injectionPath)
-      command = nativeCommand(arm.bin!, nativeRoute.provider, model, route.effort, prompts[scenario]!)
+      command = nativeCommand(arm.bin!, nativeRoute.provider, model, route.effort, prompts[scenario]!,
+        arm.nativeSession === undefined || arm.nativeSession === 'memory' ? undefined : {
+          mode: arm.nativeSession, path: join(root, 'session.jsonl'), maxModelCalls: maxRequestsFor(scenario), timeoutMs: capMsFor(scenario),
+        })
     } else if (piRoute !== undefined) {
       const agentDir = join(root, 'pi-agent'); mkdirSync(agentDir, { mode: 0o700 })
       writeFileSync(join(agentDir, 'models.json'), JSON.stringify({ providers: { eval: {
@@ -474,6 +478,11 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
       child!.once('close', (code, signal) => resolve({ code, signal }))
     }))
     const { final, steps, calls, results } = (jsonMode ? normalizePi : normalizeBake)(events)
+    const nativeFile = join(root, 'session.jsonl')
+    const nativeLog = nativeRoute !== undefined && existsSync(nativeFile) ? readFileSync(nativeFile, 'utf8') : null
+    if (nativeLog !== null) writeFileSync(join(out, `${label}.session.jsonl`), nativeLog, { mode: 0o600 })
+    const journalEntries = nativeLog === null ? 0 : nativeLog.trim().split('\n')
+      .map(line => JSON.parse(line)).filter(entry => entry.type === 'custom' && entry.customType === 'bake.run.v1').length
     const byTool: Record<string, number> = {}
     for (const call of calls) byTool[call.tool] = (byTool[call.tool] ?? 0) + 1
     const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0 }
@@ -524,8 +533,15 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
       skillNeeded: SKILL_SCENARIOS[scenario] ?? null,
       contextWindow: contextWindowApplied ? armWindow : null,
       nativeSettings: nativeConfig,
+      nativeSession: nativeRoute === undefined ? null : { mode: arm.nativeSession ?? 'memory',
+        persisted: nativeLog !== null, journalEntries,
+        maxModelCalls: arm.nativeSession === 'persistent' || arm.nativeSession === 'recoverable' ? maxRequestsFor(scenario) : null,
+        timeoutMs: arm.nativeSession === 'persistent' || arm.nativeSession === 'recoverable' ? capMsFor(scenario) : null,
+        recoverableRuns: events.filter(event => event.type === 'recoverable_run_started').length },
       compactions: nativeRoute !== undefined ? jsonModeCompactions(events) : piRoute === undefined ? compactions(logged) : null,
       backgroundCompactions: nativeRoute === undefined ? null : backgroundCompactions(events),
+      contextMasking: nativeRoute === undefined ? null : contextMasking(events),
+      nativeReadBatches: nativeRoute === undefined ? null : nativeReadBatches(events),
       runawayAbort: runawayAbort([
         stderr, final,
         ...events.filter(event => event.type === 'unparsed').map(event => event.text),

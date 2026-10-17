@@ -128,6 +128,15 @@ fn output_schema() -> Value {
 
 /// Pi's `createReadToolDefinition`.
 pub fn create_read_tool_definition(cwd: &Path, options: ReadToolOptions) -> ToolDefinition {
+    owned_read_tool_definition(cwd, options, None)
+}
+
+/// The native read whose blocking worker belongs to the session's gate.
+pub(crate) fn owned_read_tool_definition(
+    cwd: &Path,
+    options: ReadToolOptions,
+    owner: Option<crate::owned_work::WorkGate>,
+) -> ToolDefinition {
     let cwd = cwd.to_path_buf();
     let options = Arc::new(options);
     let mut tool = AgentTool::new(
@@ -138,10 +147,11 @@ pub fn create_read_tool_definition(cwd: &Path, options: ReadToolOptions) -> Tool
         move |_id, args, signal, _update| {
             let cwd = cwd.clone();
             let options = Arc::clone(&options);
-            boxed(execute(cwd, options, args, signal))
+            boxed(execute(cwd, options, args, signal, owner.clone()))
         },
     );
     tool.output_schema = Some(output_schema());
+    tool.read_only = true;
     tool.constrained_sampling = Some(ConstrainedSampling::JsonSchema {
         strict: StrictPreference::Prefer,
     });
@@ -170,6 +180,7 @@ async fn execute(
     options: Arc<ReadToolOptions>,
     args: Value,
     signal: Option<AbortSignal>,
+    owner: Option<crate::owned_work::WorkGate>,
 ) -> Result<AgentToolResult, String> {
     if aborted(signal.as_ref()) {
         return Err(ABORTED.into());
@@ -188,7 +199,7 @@ async fn execute(
         .unwrap_or_default();
     let auto_resize = options.auto_resize_images;
     let work_signal = signal.clone();
-    let (content, details) = run_blocking_abortable(signal, move || {
+    let (content, details) = run_blocking_abortable(signal, owner, move || {
         let request = ReadRequest {
             cwd: &cwd,
             path: &path,

@@ -105,6 +105,16 @@ fn recovered_completion(
 /// each start on the selected branch without a durable observation there,
 /// in start order. A missing terminal fact means an unknown outcome.
 pub fn recover(session: &SessionManager, jobs: &JobRegistry) -> Vec<CustomMessage> {
+    project(session, Some(jobs))
+}
+
+/// Durable starts without a selected-branch terminal observation. A running
+/// job tool result is a start acknowledgement, never completion evidence.
+pub(super) fn unobserved(session: &SessionManager) -> Vec<CustomMessage> {
+    project(session, None)
+}
+
+fn project(session: &SessionManager, jobs: Option<&JobRegistry>) -> Vec<CustomMessage> {
     let branch: BTreeSet<&str> = session
         .branch_entries(None)
         .iter()
@@ -234,7 +244,9 @@ pub fn recover(session: &SessionManager, jobs: &JobRegistry) -> Vec<CustomMessag
         }
     }
     for (kind, through) in highest {
-        let _ = jobs.reserve_ordinals(kind, through);
+        if let Some(jobs) = jobs {
+            let _ = jobs.reserve_ordinals(kind, through);
+        }
     }
     order
         .iter()

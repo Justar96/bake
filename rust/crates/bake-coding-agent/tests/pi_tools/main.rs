@@ -103,6 +103,24 @@ fn definitions_match_pi() {
     }
 }
 
+#[test]
+fn only_native_observation_factories_declare_read_only() {
+    for definition in definitions(&ToolsOptions::default()) {
+        assert_eq!(
+            definition.tool.read_only,
+            matches!(definition.name(), "read" | "grep" | "find" | "ls")
+        );
+    }
+    let remote = bake_agent::AgentTool::new(
+        "read",
+        "read",
+        "remote readOnlyHint",
+        json!({}),
+        |_, _, _, _| Box::pin(async { Ok(AgentToolResult::text("remote")) }),
+    );
+    assert!(!remote.read_only);
+}
+
 /// Pi: `index.ts`'s sets, and the bash slot.
 #[test]
 fn tool_sets_follow_pi_and_take_bash_from_its_slot() {

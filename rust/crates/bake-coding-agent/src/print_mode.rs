@@ -19,7 +19,7 @@ use std::time::Duration;
 use bake_agent::{RunControl, RunOutcome};
 use bake_ai::{AssistantContentBlock, ImageContent, StopReason};
 
-use crate::agent_session::AgentSession;
+use crate::agent_session::{AgentSession, RecoverableRunResult, SessionEvent};
 use crate::json_event::session_event_json;
 
 /// Pi's print output modes.
@@ -34,12 +34,26 @@ pub enum PrintOutput {
 /// A writer shared with the event listener.
 pub type SharedWriter = Arc<Mutex<dyn Write + Send>>;
 
+/// Explicit selection of a persistent run interval in print mode.
+#[derive(Debug, Clone, Default)]
+pub enum PrintRunRecovery {
+    /// Ordinary prompts sharing this invocation's control.
+    #[default]
+    Disabled,
+    /// Start one journaled prompt with the control's original limits.
+    Start,
+    /// Continue only this recorded run on the selected session branch.
+    Resume(String),
+}
+
 /// Pi's `PrintModeOptions`.
 #[derive(Debug, Clone)]
 pub struct PrintModeOptions {
     /// One shared admission budget across every prompt in this invocation,
     /// including retries, continuations, and compaction summaries.
     pub control: RunControl,
+    /// Durable recovery is disabled unless explicitly selected.
+    pub recovery: PrintRunRecovery,
     /// The output mode.
     pub mode: PrintOutput,
     /// The first prompt, with stdin prepended.
@@ -49,7 +63,8 @@ pub struct PrintModeOptions {
     /// Further prompts, each sent after the previous one settles.
     pub messages: Vec<String>,
     /// How long, after the last prompt, to wait for background jobs and
-    /// the turns their notices open ([`DEFAULT_JOB_WAIT`]).
+    /// the turns their notices open ([`DEFAULT_JOB_WAIT`]). Recoverable
+    /// starts persist this policy; resume uses the selected run's policy.
     pub job_wait: Duration,
 }
 
@@ -98,20 +113,55 @@ async fn run(
         Some(session.subscribe(move |event| {
             write_out(&out, &format!("{}\n", session_event_json(event)));
         }))
+    } else if !matches!(options.recovery, PrintRunRecovery::Disabled) {
+        let out = Arc::clone(stderr);
+        let file = session.session_file();
+        Some(session.subscribe(move |event| {
+            if let SessionEvent::RecoverableRunStarted { run_id } = event {
+                write_out(&out, &format!("Run ID: {run_id}\n"));
+                if let Some(file) = &file {
+                    write_out(&out, &format!("Session: {file:?}\n"));
+                }
+            }
+        }))
     } else {
         None
     };
     let result = prompts(session, options.clone(), stderr).await;
-    // Paid summary attempts and job terminal writes settle during shutdown;
-    // keep their event listener attached until the owned work has drained.
+    let background = session.finish_background_compaction(&options.control).await;
     session.shutdown().await;
     if let Some(subscription) = subscription {
         subscription.unsubscribe();
     }
-    result?;
+    if let Some(error) = session.persistence_failure() {
+        return Err(error);
+    }
+    require_finished(background)?;
+    let final_message = if let Some(result) = result? {
+        if options.mode == PrintOutput::Json {
+            write_out(
+                stdout,
+                &format!(
+                    "{}\n",
+                    serde_json::json!({
+                        "type": "recoverable_run_result",
+                        "runId": result.run_id,
+                        "outcome": result.outcome,
+                        "finalMessage": result.final_message,
+                    })
+                ),
+            );
+        }
+        require_finished(result.outcome)?;
+        result.final_message
+    } else {
+        session
+            .messages()
+            .last()
+            .and_then(|message| message.as_assistant().cloned())
+    };
     if options.mode == PrintOutput::Text
-        && let Some(last) = session.messages().last()
-        && let Some(assistant) = last.as_assistant()
+        && let Some(assistant) = final_message
     {
         if matches!(
             assistant.stop_reason,
@@ -138,7 +188,40 @@ async fn prompts(
     session: &AgentSession,
     options: PrintModeOptions,
     stderr: &SharedWriter,
-) -> Result<(), String> {
+) -> Result<Option<RecoverableRunResult>, String> {
+    match options.recovery {
+        PrintRunRecovery::Start => {
+            if !options.messages.is_empty() {
+                return Err("--recoverable accepts one prompt per invocation.".into());
+            }
+            let initial = options
+                .initial_message
+                .filter(|text| !text.trim().is_empty())
+                .ok_or_else(|| "--recoverable requires one nonempty prompt.".to_owned())?;
+            let result = session
+                .prompt_recoverable_with_job_wait(
+                    &initial,
+                    options.initial_images,
+                    options.control.limits(),
+                    options.job_wait,
+                )
+                .await?;
+            report_remaining_recoverable_jobs(session, stderr);
+            return Ok(Some(result));
+        }
+        PrintRunRecovery::Resume(run_id) => {
+            if options.initial_message.is_some()
+                || !options.initial_images.is_empty()
+                || !options.messages.is_empty()
+            {
+                return Err("--resume-run takes no new prompt, piped input, or files.".into());
+            }
+            let result = session.resume_run(&run_id).await?;
+            report_remaining_recoverable_jobs(session, stderr);
+            return Ok(Some(result));
+        }
+        PrintRunRecovery::Disabled => {}
+    }
     if let Some(initial) = options.initial_message.filter(|text| !text.is_empty()) {
         let outcome = session
             .prompt_with_control(&initial, options.initial_images, options.control.clone())
@@ -161,7 +244,24 @@ async fn prompts(
             ),
         );
     }
-    Ok(())
+    Ok(None)
+}
+
+fn report_remaining_recoverable_jobs(session: &AgentSession, stderr: &SharedWriter) {
+    let live = session
+        .jobs()
+        .list()
+        .iter()
+        .filter(|job| !job.status.is_terminal())
+        .count();
+    if live > 0 {
+        write_out(
+            stderr,
+            &format!(
+                "{live} background job(s) still running at the end of the recoverable run were stopped\n"
+            ),
+        );
+    }
 }
 
 /// Bake 0.3 headless `settleJobs`: waits, up to `limit`, for the

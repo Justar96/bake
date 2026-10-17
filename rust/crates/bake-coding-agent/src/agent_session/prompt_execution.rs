@@ -18,6 +18,7 @@ pub(super) struct Execution {
     pending_notices: Arc<Mutex<Vec<CustomMessage>>>,
     delivery_only: bool,
     pub notice_turn_started: AtomicBool,
+    pub journal: Option<Arc<run_journal::Journal>>,
     finished: tokio::sync::watch::Receiver<Option<RunOutcome>>,
 }
 
@@ -29,6 +30,7 @@ pub(super) enum Input {
         images: Vec<ImageContent>,
     },
     Notices,
+    Continue,
 }
 
 impl Executions {
@@ -39,6 +41,7 @@ impl Executions {
         jobs: JobRegistry,
         pending_notices: Arc<Mutex<Vec<CustomMessage>>>,
         delivery_only: bool,
+        journal: Option<Arc<run_journal::Journal>>,
     ) -> Result<(Arc<Execution>, Completion), String> {
         if self.current.is_some() {
             return Err("The previous session execution has not finished.".into());
@@ -56,6 +59,7 @@ impl Executions {
             pending_notices,
             delivery_only,
             notice_turn_started: AtomicBool::new(false),
+            journal,
             finished,
         });
         self.current = Some(Arc::clone(&execution));
@@ -126,6 +130,9 @@ impl PromptExecution {
         scope: TaskScope,
         input: Input,
     ) {
+        if let Some(journal) = &execution.journal {
+            journal.bind(scope.permit());
+        }
         let guard = RunGuard {
             core: Arc::clone(&self.core),
             agent: Arc::clone(&self.agent),
@@ -139,11 +146,27 @@ impl PromptExecution {
         let control = &execution.control;
         let result = {
             let prompt = async {
-                match input {
+                if let Some(journal) = &execution.journal {
+                    self.core
+                        .cancel_background_compaction("recoverable run admission")
+                        .await;
+                    if let Some(outcome) = journal.begin().await? {
+                        return Ok(outcome);
+                    }
+                }
+                let outcome = match input {
                     Input::Prompt { text, images } => {
                         self.prompt_inner(&text, images, control).await
                     }
                     Input::Notices => self.deliver_notices(&execution).await,
+                    Input::Continue => self.continue_inner(control).await,
+                }?;
+                if outcome == RunOutcome::FinishedTurn
+                    && let Some(journal) = &execution.journal
+                {
+                    self.settle_journal_jobs(journal, control).await
+                } else {
+                    Ok(outcome)
                 }
             };
             tokio::pin!(prompt);
@@ -163,6 +186,11 @@ impl PromptExecution {
         if self.core.aborted() {
             self.core.finish_cancelled_retry();
         }
+        if execution.journal.is_some() {
+            self.core
+                .cancel_background_compaction("recoverable run settlement")
+                .await;
+        }
         drain_execution(&self.core, &self.agent, control).await;
         let persisted = self
             .persist_error
@@ -170,11 +198,18 @@ impl PromptExecution {
             .unwrap_or_else(PoisonError::into_inner)
             .take();
         let gap = lock_gap(&self.core.gap).clone();
-        let outcome = if let Some(error) = persisted.or(gap) {
+        let mut outcome = if let Some(error) = persisted.or(gap) {
             control.fail(error)
         } else {
             control.settle(result.unwrap_or_else(|message| RunOutcome::Failed { message }))
         };
+        if let Some(journal) = &execution.journal {
+            outcome = match journal.finish(outcome, control.clone()).await {
+                Ok(outcome) => outcome,
+                Err(error) => control.fail(error),
+            };
+            journal.release();
+        }
         guard.finish(outcome);
     }
 
@@ -366,8 +401,12 @@ impl Drop for RunGuard {
             // This share was admitted with the driver, so shutdown also
             // awaits its cleanup if the task unwinds after the gate closes.
             let _permit = permit;
+            if execution.journal.is_some() {
+                core.cancel_background_compaction("recoverable execution lost")
+                    .await;
+            }
             drain_execution(&core, &agent, &execution.control).await;
-            let outcome = if let Some(error) = lock_gap(&core.gap).clone() {
+            let mut outcome = if let Some(error) = lock_gap(&core.gap).clone() {
                 execution.control.fail(error)
             } else {
                 execution.control.stopped().unwrap_or_else(|| {
@@ -376,6 +415,13 @@ impl Drop for RunGuard {
                         .fail("The session prompt task ended before settlement.".into())
                 })
             };
+            if let Some(journal) = &execution.journal {
+                outcome = match journal.finish(outcome, execution.control.clone()).await {
+                    Ok(outcome) => outcome,
+                    Err(error) => execution.control.fail(error),
+                };
+                journal.release();
+            }
             publish_completion(&core, &executions, &execution, &completion, outcome);
         }));
     }
@@ -390,11 +436,21 @@ impl PromptExecution {
     }
 
     async fn deliver_notices(&self, execution: &Execution) -> Result<RunOutcome, String> {
-        if let Some(stopped) = execution.control.stopped() {
-            return Ok(stopped);
+        self.deliver_notice_turn(&execution.control, Some(&execution.notice_turn_started))
+            .await
+            .map(|(outcome, _)| outcome)
+    }
+
+    async fn deliver_notice_turn(
+        &self,
+        control: &RunControl,
+        started: Option<&AtomicBool>,
+    ) -> Result<(RunOutcome, bool), String> {
+        if let Some(stopped) = control.stopped() {
+            return Ok((stopped, false));
         }
         if self.closed_reason().is_some() {
-            return Ok(RunOutcome::FinishedTurn);
+            return Ok((RunOutcome::FinishedTurn, false));
         }
         let notices: Vec<CustomMessage> = self
             .jobs
@@ -403,16 +459,18 @@ impl PromptExecution {
             .map(job_notices::completion_notice)
             .collect();
         if notices.is_empty() {
-            return Ok(RunOutcome::FinishedTurn);
+            return Ok((RunOutcome::FinishedTurn, false));
         }
         if self.model().is_none() || !self.jobs.spend_wake() {
             self.pending_notices
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .extend(notices);
-            return Ok(RunOutcome::FinishedTurn);
+            return Ok((RunOutcome::FinishedTurn, false));
         }
-        execution.notice_turn_started.store(true, Ordering::SeqCst);
+        if let Some(started) = started {
+            started.store(true, Ordering::SeqCst);
+        }
         let mut messages = Vec::new();
         if let Some(update) = self.prepare_prompt_and_tools()? {
             messages.push(update.into());
@@ -423,7 +481,122 @@ impl PromptExecution {
                 .map(job_notices::live),
         );
         messages.extend(notices.into_iter().map(job_notices::live));
-        self.run_agent_prompt(messages, &execution.control).await
+        self.run_agent_input(Some(messages), control)
+            .await
+            .map(|outcome| (outcome, true))
+    }
+
+    async fn settle_journal_jobs(
+        &self,
+        journal: &run_journal::Journal,
+        control: &RunControl,
+    ) -> Result<RunOutcome, String> {
+        if journal.job_wait.is_zero() || self.jobs.list().is_empty() {
+            return Ok(control.stopped().unwrap_or(RunOutcome::FinishedTurn));
+        }
+        let deadline = tokio::time::Instant::now()
+            .checked_add(journal.job_wait)
+            .ok_or_else(|| "Job wait exceeds the supported duration".to_owned())?;
+        let mut events = self.jobs.subscribe();
+        journal.begin_job_wait().await?;
+        loop {
+            if let Some(stopped) = control.stopped() {
+                return Ok(stopped);
+            }
+            let live = self
+                .jobs
+                .list()
+                .iter()
+                .filter(|job| !job.status.is_terminal())
+                .count();
+            if tokio::time::Instant::now() >= deadline {
+                return Ok(RunOutcome::FinishedTurn);
+            }
+            let delivery = self.deliver_notice_turn(control, None);
+            tokio::pin!(delivery);
+            let mut polled = false;
+            let delivered = {
+                let poll_delivery = std::future::poll_fn(|cx| {
+                    polled = true;
+                    delivery.as_mut().poll(cx)
+                });
+                tokio::select! {
+                    biased;
+                    () = tokio::time::sleep_until(deadline) => None,
+                    _ = control.wait_stopped() => None,
+                    result = poll_delivery => Some(result?),
+                }
+            };
+            let Some((outcome, delivered)) = delivered else {
+                if !polled {
+                    return Ok(control.stopped().unwrap_or(RunOutcome::FinishedTurn));
+                }
+                self.request_abort();
+                // Retain the admitted future through its Agent work and
+                // required journal writes; the driver still owns the lease.
+                return delivery.await.map(|(outcome, _)| outcome);
+            };
+            if outcome != RunOutcome::FinishedTurn {
+                return Ok(outcome);
+            }
+            if delivered {
+                continue;
+            }
+            if live == 0 {
+                return Ok(RunOutcome::FinishedTurn);
+            }
+            tokio::select! {
+                () = tokio::time::sleep_until(deadline) => return Ok(RunOutcome::FinishedTurn),
+                outcome = control.wait_stopped() => return Ok(outcome),
+                changed = events.changed() => if !changed { return Ok(RunOutcome::FinishedTurn); },
+            }
+        }
+    }
+
+    async fn continue_inner(&self, control: &RunControl) -> Result<RunOutcome, String> {
+        if let Some(outcome) = control.stopped() {
+            return Ok(outcome);
+        }
+        if let Some(reason) = self.closed_reason() {
+            return Err(reason);
+        }
+        let model = self
+            .model()
+            .ok_or_else(|| format_no_model_selected_message(&self.docs_command))?;
+        let registry = self.registry.snapshot();
+        if !registry.has_configured_auth(&model.provider)
+            && registry.check_auth(&model.provider).is_none()
+        {
+            return Err(format_no_api_key_found_message(
+                &model.provider,
+                &self.docs_command,
+            ));
+        }
+        if let Some(mcp) = self.mcp.get() {
+            mcp.wait_for_startup(|| self.core.aborted() || self.closed_reason().is_some())
+                .await;
+        }
+        // A recovery notice already refreshed the durable context. The active
+        // tool set is selected afresh; a changed prompt patch is persisted by
+        // the agent as part of this execution before its first request.
+        let mut messages: Vec<LiveMessage> = self
+            .prepare_prompt_and_tools()?
+            .into_iter()
+            .map(Into::into)
+            .collect();
+        messages.extend(
+            self.pending_job_notices()
+                .into_iter()
+                .map(job_notices::live),
+        );
+        messages.extend(
+            self.jobs
+                .claim_unreported()
+                .iter()
+                .map(|job| job_notices::live(job_notices::completion_notice(job))),
+        );
+        self.run_agent_input((!messages.is_empty()).then_some(messages), control)
+            .await
     }
 
     /// The system message patching the sections the transcript replays,
@@ -556,6 +729,14 @@ impl PromptExecution {
         messages: Vec<LiveMessage>,
         control: &RunControl,
     ) -> Result<RunOutcome, String> {
+        self.run_agent_input(Some(messages), control).await
+    }
+
+    async fn run_agent_input(
+        &self,
+        messages: Option<Vec<LiveMessage>>,
+        control: &RunControl,
+    ) -> Result<RunOutcome, String> {
         let core = &self.core;
         {
             let mut state = core.state();
@@ -565,11 +746,16 @@ impl PromptExecution {
         }
         let mut result = if core.aborted() {
             Ok(control.stopped().unwrap_or(RunOutcome::Cancelled))
-        } else {
+        } else if let Some(messages) = messages {
             self.agent
                 .prompt_with_control(PromptInput::Messages(messages), control.clone())
                 .await
                 .map_err(|error: AgentError| error.to_string())
+        } else {
+            self.agent
+                .continue_with_control(control.clone())
+                .await
+                .map_err(|error| error.to_string())
         };
         while result.is_ok() && !core.aborted() {
             if matches!(result, Ok(RunOutcome::Cancelled)) {

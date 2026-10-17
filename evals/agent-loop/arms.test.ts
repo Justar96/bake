@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
-import { builtExecutable, mergeSettings, nativeCommand, nativeSettings, nativeStaleWriter, parseArms, strayContextFiles } from './arms.ts'
+import { builtExecutable, mergeSettings, nativeCommand, nativeSessionMode, nativeSettings, nativeStaleWriter, parseArms, strayContextFiles } from './arms.ts'
 
 const root = mkdtempSync(join(tmpdir(), 'bake-eval-arms-'))
 afterAll(() => rmSync(root, { recursive: true, force: true }))
@@ -20,6 +20,16 @@ function script(path: string, text: string): string {
 }
 
 describe('native arms', () => {
+  test('native persistence modes are explicit and keep fixed limits identical', () => {
+    expect(nativeSessionMode(undefined)).toBe('memory')
+    for (const invalid of ['', 'true', '--recoverable']) expect(() => nativeSessionMode(invalid)).toThrow()
+    for (const mode of ['persistent', 'recoverable'] as const) {
+      const command = nativeCommand('bake-rs', 'p', 'm', 'medium', '-prompt', { mode, path: '/private/session.jsonl', maxModelCalls: 14, timeoutMs: 180_000 })
+      expect(command).toEqual(['bake-rs', '-p', '--mode', 'json', '--session', '/private/session.jsonl',
+        '--max-model-calls', '14', '--run-timeout-ms', '180000', ...mode === 'recoverable' ? ['--recoverable'] : [],
+        '--permission', 'danger-full-access', '--model', 'p/m', '--thinking', 'medium', '--', '-prompt'])
+    }
+  })
   test('native settings retain opt-ins and substitute the route while keeping fixed controls', () => {
     expect(nativeSettings('{"backgroundCompaction":true,"images":{"autoResize":false},"marker":"$PROVIDER/$MODEL"}', 'eval', 'm',
       { reserveTokens: 16_384, keepRecentTokens: 2560 })).toEqual({
@@ -70,7 +80,7 @@ describe('native arms', () => {
     expect(parseArms(`cand=native:${bin}`, 'headless', { EVAL_SETTINGS_CAND: settings }).cand).toEqual({
       kind: 'native', root: realpathSync(join(checkout, 'rust/target/release')), bin: realpathSync(bin), version: 'bake-rs 9.9.9-test',
       binarySha256: sha256(text), revision: { prebuilt: true, commit: null, dirty: null },
-      extra: [], settings, llmDeepseek: false, composition: [],
+      extra: [], settings, nativeSession: 'memory', llmDeepseek: false, composition: [],
     })
   })
 

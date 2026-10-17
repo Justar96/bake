@@ -280,3 +280,20 @@ export function backgroundCompactions(events: readonly any[]) {
     elapsedMs: terminal.reduce((sum, event) => sum + (event.elapsedMs ?? 0), 0),
   }
 }
+
+/** Durable context reductions; counts bytes of replaced content, not tokens saved. */
+export function contextMasking(events: readonly any[]) {
+  const committed = events.filter(event => event.type === 'context_masking')
+  return { commits: committed.length,
+    maskedResults: committed.reduce((sum, event) => sum + event.maskedResults, 0),
+    removedBytes: committed.reduce((sum, event) => sum + event.removedBytes, 0) }
+}
+
+/** Same-response native read batches; execution-start events denote preparation and cannot measure overlap. */
+export function nativeReadBatches(events: readonly any[]) {
+  const batches = events.filter(event => event.type === 'message_end' && event.message?.role === 'assistant')
+    .map(event => (event.message.content ?? []).filter((block: any) => block.type === 'toolCall'))
+    .filter(calls => calls.length > 0 && calls.every((call: any) => ['read', 'ls', 'grep', 'find'].includes(call.name)))
+  return { batches: batches.length, multiCallBatches: batches.filter(calls => calls.length > 1).length,
+    calls: batches.reduce((sum, calls) => sum + calls.length, 0), maxCalls: Math.max(0, ...batches.map(calls => calls.length)) }
+}
