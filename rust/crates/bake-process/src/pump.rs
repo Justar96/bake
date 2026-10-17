@@ -15,9 +15,9 @@
 //! an await, drops nothing but its weak reference. Dropped with the runtime,
 //! the same holds.
 //!
-//! Bounds: a step takes at most a fixed number of messages (see
-//! `tree.rs`), retries unknown members, and closes the handles of members
-//! now signalled. After a step that found the queue non-empty the task
+//! Bounds: a step ([`crate::windows_job::Job::pump`]) takes at most a
+//! fixed number of messages, retries unknown members, and closes the
+//! handles of members now signalled. After a step that found the queue non-empty the task
 //! yields and steps again; after an empty one it waits with a backoff from
 //! 1 ms to 50 ms, or until stopped. The queue therefore stays at what
 //! arrives between two steps as long as the task gets CPU at least as fast
@@ -31,25 +31,13 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
-use std::time::Duration;
 
 use tokio::runtime::Handle;
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
 use crate::tree::ProcessTree;
-
-/// What one step did.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct Step {
-    /// Messages taken from the port.
-    pub(crate) taken: usize,
-    /// Whether the queue was seen empty.
-    pub(crate) empty: bool,
-}
-
-const MIN_PAUSE: Duration = Duration::from_millis(1);
-const MAX_PAUSE: Duration = Duration::from_millis(50);
+use crate::windows_job::{MAX_PAUSE, MIN_PAUSE, Step};
 
 /// Shared by the owner and its task.
 #[derive(Debug, Default)]

@@ -21,7 +21,8 @@
 //! handle is closed any way but a normal detach, the tree ends with it; a
 //! command whose job, limit, or completion port cannot be set up is not
 //! started. It kills by terminating the job, and settles only on the
-//! account in `job_ledger`: the job's active count reaches 0
+//! account in `job_ledger`, kept by `crate::windows_job::Job`, which
+//! `bake-sandbox`'s Windows runner shares: the job's active count reaches 0
 //! before a terminated member's handle is signalled, so the count alone is
 //! never read as the end. A command that exits normally has the limit
 //! cleared ([`ProcessTree::detach`]) before the handle is closed. The job
@@ -79,13 +80,11 @@ pub(crate) struct ProcessTree {
     /// Whether the tree may be signalled: true until its owner disarms it,
     /// which it does before it reaps the leader. Held while signalling.
     armed: Mutex<bool>,
-    #[cfg(windows)]
-    job: std::os::windows::io::OwnedHandle,
-    /// The completion port associated with the job before any process
-    /// existed, and the account of its new-process messages; the account
+    /// The job, with the completion port associated before any process
+    /// existed and the account of its new-process messages; the account
     /// lives with the tree, so a cancelled settle loses nothing.
     #[cfg(windows)]
-    account: windows::Account,
+    job: crate::windows_job::Job,
 }
 
 impl ProcessTree {
@@ -100,19 +99,13 @@ impl ProcessTree {
         })
     }
 
-    /// The tree of a process created inside `job`, whose completion `port`
-    /// was associated while the job was empty.
+    /// The tree of a process created inside `job`.
     #[cfg(windows)]
-    pub(crate) fn with_job(
-        pid: u32,
-        job: std::os::windows::io::OwnedHandle,
-        port: std::os::windows::io::OwnedHandle,
-    ) -> Self {
+    pub(crate) fn with_job(pid: u32, job: crate::windows_job::Job) -> Self {
         Self {
             pid,
             armed: Mutex::new(true),
             job,
-            account: windows::Account::new(port),
         }
     }
 
@@ -132,8 +125,9 @@ impl ProcessTree {
         }
         #[cfg(unix)]
         self.signal_group(libc::SIGKILL);
+        // The result is not read; only the job's account says what ended.
         #[cfg(windows)]
-        windows::terminate(&self.job);
+        let _ = self.job.terminate();
         drop(armed);
     }
 
@@ -174,11 +168,7 @@ impl ProcessTree {
     pub(crate) fn detach(&self) -> std::io::Result<()> {
         #[cfg(windows)]
         {
-            set_kill_on_close(&self.job, false)?;
-            // Nothing will drain the port again: stop the job queueing to
-            // it. Failing leaves messages queued until the job ends.
-            let _ = windows::dissociate_port(&self.job);
-            Ok(())
+            self.job.detach()
         }
         #[cfg(not(windows))]
         {
@@ -229,14 +219,14 @@ impl ProcessTree {
 
     /// One bounded step of the live pump ([`crate::pump`]).
     #[cfg(windows)]
-    pub(crate) fn pump_step(&self) -> Result<crate::pump::Step, ()> {
-        self.account.pump(&self.job)
+    pub(crate) fn pump_step(&self) -> std::io::Result<crate::windows_job::Step> {
+        self.job.pump()
     }
 
     /// The job account's distinct members and those still held or unknown.
     #[cfg(all(test, windows))]
     pub(crate) fn account_snapshot(&self) -> (u64, usize) {
-        self.account.snapshot()
+        self.job.snapshot()
     }
 
     /// How many processes other than the leader are in the tree; an error
@@ -260,10 +250,10 @@ impl ProcessTree {
         {
             // The leader is a member too: it is waited for before this is
             // asked, so it is never what remains.
-            match self.account.settle(&self.job) {
-                crate::job_ledger::Verdict::Settled => Ok(0),
-                crate::job_ledger::Verdict::Pending(_) => Ok(1),
-                crate::job_ledger::Verdict::Contradiction(why) => Err(why),
+            match self.job.settle() {
+                crate::windows_job::Verdict::Settled => Ok(0),
+                crate::windows_job::Verdict::Pending(_) => Ok(1),
+                crate::windows_job::Verdict::Contradiction(why) => Err(why),
             }
         }
         #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
@@ -697,343 +687,5 @@ pub fn kill_tracked_detached_children() {
     let trees = std::mem::take(&mut TRACKED.lock().unwrap_or_else(PoisonError::into_inner).trees);
     for (_, tree) in trees {
         tree.kill();
-    }
-}
-
-#[cfg(windows)]
-pub(crate) use windows::{associate_port, completion_port, set_kill_on_close};
-
-#[cfg(windows)]
-mod windows {
-    use std::io;
-    use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
-    use std::sync::{Mutex, PoisonError};
-
-    use windows_sys::Win32::Foundation::{
-        ERROR_INVALID_PARAMETER, FILETIME, INVALID_HANDLE_VALUE, WAIT_OBJECT_0, WAIT_TIMEOUT,
-    };
-    use windows_sys::Win32::System::IO::{
-        CreateIoCompletionPort, GetQueuedCompletionStatusEx, OVERLAPPED_ENTRY,
-    };
-    use windows_sys::Win32::System::JobObjects::{
-        IsProcessInJob, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_ASSOCIATE_COMPLETION_PORT,
-        JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-        JobObjectAssociateCompletionPortInformation, JobObjectBasicAccountingInformation,
-        JobObjectExtendedLimitInformation, QueryInformationJobObject, SetInformationJobObject,
-        TerminateJobObject,
-    };
-    use windows_sys::Win32::System::Threading::{
-        GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
-        WaitForSingleObject,
-    };
-
-    use crate::job_ledger::{Host, Ledger, Opened, Verdict};
-
-    /// `JOB_OBJECT_MSG_NEW_PROCESS` from `winnt.h`.
-    const JOB_OBJECT_MSG_NEW_PROCESS: u32 = 6;
-    /// The key the job's messages carry; the port serves only this job.
-    const KEY: usize = 1;
-    /// Messages taken per call, and per settle poll: a backlog left from a
-    /// long life is drained over several polls, never in one unbounded one.
-    const BATCH: usize = 64;
-    const PER_POLL: usize = 64 * BATCH;
-    /// Messages one live pump step takes before it yields.
-    const PER_STEP: usize = 4 * BATCH;
-
-    /// A completion port for one job: not inheritable, never shared, so
-    /// only the job posts to it.
-    pub(crate) fn completion_port() -> io::Result<OwnedHandle> {
-        // SAFETY: a new port, not tied to a file.
-        let port =
-            unsafe { CreateIoCompletionPort(INVALID_HANDLE_VALUE, std::ptr::null_mut(), 0, 1) };
-        if port.is_null() {
-            return Err(io::Error::last_os_error());
-        }
-        // SAFETY: a fresh handle owned here.
-        Ok(unsafe { OwnedHandle::from_raw_handle(port) })
-    }
-
-    /// Associates `port` with `job`. The caller does so while the job has
-    /// never had a process, so every association reports to the port.
-    pub(crate) fn associate_port(job: &OwnedHandle, port: &OwnedHandle) -> io::Result<()> {
-        set_port(job, port.as_raw_handle())
-    }
-
-    /// Removes the job's port association (Windows 8 and later).
-    pub(super) fn dissociate_port(job: &OwnedHandle) -> io::Result<()> {
-        set_port(job, std::ptr::null_mut())
-    }
-
-    fn set_port(job: &OwnedHandle, port: windows_sys::Win32::Foundation::HANDLE) -> io::Result<()> {
-        let info = JOBOBJECT_ASSOCIATE_COMPLETION_PORT {
-            CompletionKey: KEY as *mut core::ffi::c_void,
-            CompletionPort: port,
-        };
-        let size = u32::try_from(size_of::<JOBOBJECT_ASSOCIATE_COMPLETION_PORT>())
-            .map_err(|_| io::Error::other("size"))?;
-        // SAFETY: `info` has the size passed; both handles are live.
-        let ok = unsafe {
-            SetInformationJobObject(
-                job.as_raw_handle(),
-                JobObjectAssociateCompletionPortInformation,
-                std::ptr::addr_of!(info).cast(),
-                size,
-            )
-        };
-        if ok == 0 {
-            return Err(io::Error::last_os_error());
-        }
-        Ok(())
-    }
-
-    /// The port and the account of what it reported.
-    #[derive(Debug)]
-    pub(super) struct Account {
-        port: OwnedHandle,
-        ledger: Mutex<Ledger<OwnedHandle>>,
-    }
-
-    impl Account {
-        pub(super) fn new(port: OwnedHandle) -> Self {
-            Self {
-                port,
-                ledger: Mutex::new(Ledger::default()),
-            }
-        }
-
-        /// One settle poll: drains a bounded batch of messages, reads the
-        /// lifetime count, checks every member, and reads it again.
-        pub(super) fn settle(&self, job: &OwnedHandle) -> Verdict {
-            let mut ledger = self.ledger.lock().unwrap_or_else(PoisonError::into_inner);
-            let mut host = System { job };
-            match self.drain(&mut ledger, &mut host, PER_POLL) {
-                Ok((_, true)) => {}
-                Ok((_, false)) => return Verdict::Pending("messages are still queued"),
-                Err(()) => return Verdict::Pending("the completion port could not be read"),
-            }
-            ledger.retry(&mut host);
-            let Ok((before, _)) = accounting(job) else {
-                return Verdict::Pending("the job could not be queried");
-            };
-            // Messages for associations up to `before` may still arrive;
-            // a short account is pending, never settled.
-            match self.drain(&mut ledger, &mut host, PER_POLL) {
-                Ok((_, true)) => {}
-                Ok((_, false)) => return Verdict::Pending("messages are still queued"),
-                Err(()) => return Verdict::Pending("the completion port could not be read"),
-            }
-            let waiting = ledger.check(&mut host);
-            let Ok((after, active)) = accounting(job) else {
-                return Verdict::Pending("the job could not be queried");
-            };
-            ledger.verdict(before, after, active, waiting)
-        }
-
-        /// One step of the live pump ([`crate::pump`]): takes at most
-        /// [`PER_STEP`] queued messages into the account, retries unknown
-        /// members, and closes the handles of members now signalled. Reads
-        /// no verdict. `Ok(Step)` says how much it took and whether the
-        /// queue was seen empty; a port that cannot be read is `Err`, which
-        /// changes nothing: settling still drains and fails closed.
-        pub(super) fn pump(&self, job: &OwnedHandle) -> Result<crate::pump::Step, ()> {
-            let mut ledger = self.ledger.lock().unwrap_or_else(PoisonError::into_inner);
-            let mut host = System { job };
-            let (taken, empty) = self.drain(&mut ledger, &mut host, PER_STEP)?;
-            ledger.retry(&mut host);
-            // An unreadable handle stays held; settling reports it.
-            let _ = ledger.check(&mut host);
-            Ok(crate::pump::Step { taken, empty })
-        }
-
-        /// The account's distinct members and those still open.
-        #[cfg(test)]
-        pub(super) fn snapshot(&self) -> (u64, usize) {
-            let ledger = self.ledger.lock().unwrap_or_else(PoisonError::into_inner);
-            (ledger.counted(), ledger.open_members())
-        }
-
-        /// Records the queued new-process messages, at most `budget`
-        /// rounded up to a whole batch; returns how many messages were
-        /// taken and whether the queue was seen empty.
-        fn drain(
-            &self,
-            ledger: &mut Ledger<OwnedHandle>,
-            host: &mut System<'_>,
-            budget: usize,
-        ) -> Result<(usize, bool), ()> {
-            let mut taken = 0;
-            while taken < budget {
-                let mut entries = [OVERLAPPED_ENTRY::default(); BATCH];
-                let mut removed = 0u32;
-                // SAFETY: `entries` holds `BATCH` entries; a zero timeout
-                // only takes what is queued.
-                let ok = unsafe {
-                    GetQueuedCompletionStatusEx(
-                        self.port.as_raw_handle(),
-                        entries.as_mut_ptr(),
-                        BATCH as u32,
-                        &mut removed,
-                        0,
-                        0,
-                    )
-                };
-                if ok == 0 {
-                    return if io::Error::last_os_error().raw_os_error() == Some(WAIT_TIMEOUT as i32)
-                    {
-                        Ok((taken, true))
-                    } else {
-                        Err(())
-                    };
-                }
-                let removed = (removed as usize).min(BATCH);
-                for entry in &entries[..removed] {
-                    if entry.lpCompletionKey != KEY {
-                        ledger.contradict("a message on the job's port carried another key");
-                        continue;
-                    }
-                    if entry.dwNumberOfBytesTransferred != JOB_OBJECT_MSG_NEW_PROCESS {
-                        continue;
-                    }
-                    match u32::try_from(entry.lpOverlapped as usize) {
-                        Ok(pid) => ledger.reported(pid, host),
-                        Err(_) => ledger.contradict("a new-process message's pid is out of range"),
-                    }
-                }
-                taken += removed;
-                if removed < BATCH {
-                    return Ok((taken, true));
-                }
-            }
-            Ok((taken, false))
-        }
-    }
-
-    /// The system, for the ledger.
-    struct System<'a> {
-        job: &'a OwnedHandle,
-    }
-
-    impl Host for System<'_> {
-        type Handle = OwnedHandle;
-
-        fn open(&mut self, pid: u32) -> Opened<OwnedHandle> {
-            // SAFETY: plain call; a null handle is an error.
-            let raw = unsafe {
-                OpenProcess(
-                    PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
-                    0,
-                    pid,
-                )
-            };
-            if raw.is_null() {
-                return if io::Error::last_os_error().raw_os_error()
-                    == Some(ERROR_INVALID_PARAMETER as i32)
-                {
-                    Opened::NoSuchProcess
-                } else {
-                    Opened::Unknown
-                };
-            }
-            // SAFETY: a fresh handle owned here.
-            let handle = unsafe { OwnedHandle::from_raw_handle(raw) };
-            let mut member = 0;
-            // SAFETY: both handles are live.
-            if unsafe {
-                IsProcessInJob(
-                    handle.as_raw_handle(),
-                    self.job.as_raw_handle(),
-                    &mut member,
-                )
-            } == 0
-            {
-                return Opened::Unknown;
-            }
-            if member == 0 {
-                return Opened::OtherProcess;
-            }
-            let mut times = [FILETIME {
-                dwLowDateTime: 0,
-                dwHighDateTime: 0,
-            }; 4];
-            let [created, exited, kernel, user] = &mut times;
-            // A failed query leaves a member held, without a creation time;
-            // the failure never reads as an exit.
-            // SAFETY: a live handle with query access and valid out pointers.
-            let timed =
-                unsafe { GetProcessTimes(handle.as_raw_handle(), created, exited, kernel, user) }
-                    != 0;
-            let created = timed.then(|| {
-                (u64::from(times[0].dwHighDateTime) << 32) | u64::from(times[0].dwLowDateTime)
-            });
-            Opened::Member { created, handle }
-        }
-
-        fn signalled(&mut self, handle: &OwnedHandle) -> Option<bool> {
-            // SAFETY: a live handle opened with SYNCHRONIZE; a zero timeout
-            // only checks.
-            match unsafe { WaitForSingleObject(handle.as_raw_handle(), 0) } {
-                WAIT_OBJECT_0 => Some(true),
-                WAIT_TIMEOUT => Some(false),
-                _ => None,
-            }
-        }
-    }
-
-    /// Sets or clears the job's kill-on-close limit, the only limit Bake
-    /// sets on it.
-    pub(crate) fn set_kill_on_close(job: &OwnedHandle, on: bool) -> io::Result<()> {
-        // SAFETY: a zeroed struct is a valid starting value.
-        let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
-        if on {
-            limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-        }
-        let size = u32::try_from(size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>())
-            .map_err(|_| io::Error::other("size"))?;
-        // SAFETY: `limits` has the size passed; the job handle is live.
-        let ok = unsafe {
-            SetInformationJobObject(
-                job.as_raw_handle(),
-                JobObjectExtendedLimitInformation,
-                std::ptr::addr_of!(limits).cast(),
-                size,
-            )
-        };
-        if ok == 0 {
-            return Err(io::Error::last_os_error());
-        }
-        Ok(())
-    }
-
-    /// Terminates every process in the job with exit code 1, as
-    /// `taskkill /F` leaves. The result is not read; only the job's account
-    /// (`job_ledger`) says when its members have ended.
-    pub(super) fn terminate(job: &OwnedHandle) {
-        // SAFETY: `job` is a valid job handle owned by the tree.
-        unsafe {
-            TerminateJobObject(job.as_raw_handle(), 1);
-        }
-    }
-
-    /// The job's `(TotalProcesses, ActiveProcesses)`: every process ever
-    /// associated, failed associations included, and those still active.
-    fn accounting(job: &OwnedHandle) -> io::Result<(u32, u32)> {
-        // SAFETY: a zeroed struct is valid output space.
-        let mut info: JOBOBJECT_BASIC_ACCOUNTING_INFORMATION = unsafe { std::mem::zeroed() };
-        let size = u32::try_from(size_of::<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>())
-            .map_err(|_| io::Error::other("size"))?;
-        // SAFETY: `info` has the size passed; the job handle is live.
-        let ok = unsafe {
-            QueryInformationJobObject(
-                job.as_raw_handle(),
-                JobObjectBasicAccountingInformation,
-                std::ptr::addr_of_mut!(info).cast(),
-                size,
-                std::ptr::null_mut(),
-            )
-        };
-        if ok == 0 {
-            return Err(io::Error::last_os_error());
-        }
-        Ok((info.TotalProcesses, info.ActiveProcesses))
     }
 }

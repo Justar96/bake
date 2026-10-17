@@ -43,8 +43,9 @@
 //!    standard handles as the only inherited handles, `TMP` and `TEMP`
 //!    pointing at the private directory, and then resumes it;
 //! 5. waits for the command, terminates whatever is left in the Job and
-//!    waits until it is empty, revokes the temp grant, removes the private
-//!    directory, and exits with the command's exit code.
+//!    waits until the Job's account proves every member ended, revokes the
+//!    temp grant, removes the private directory, and exits with the
+//!    command's exit code.
 //!
 //! Under `read-only` there are no grants and no private directory: the
 //! restricting list is the logon SID and Everyone, the default DACL names
@@ -66,12 +67,26 @@
 //! - The child is created inside its Job (`PROC_THREAD_ATTRIBUTE_JOB_LIST`)
 //!   in addition to being created suspended, and inherits only its three
 //!   standard handles (`PROC_THREAD_ATTRIBUTE_HANDLE_LIST`).
-//! - The runner waits until its Job is empty before it cleans up and exits,
-//!   so the caller's wait on the runner covers the whole confined tree. When
-//!   that wait fails or exceeds its bound, the runner reports a failure and
-//!   leaves the private directory and its temp grant in place rather than
-//!   remove them under a process that may still run; the Job's kill-on-close
-//!   handle then closes with the runner.
+//! - The runner waits until its Job's members have all ended before it
+//!   cleans up and exits, so the caller's wait on the runner covers the
+//!   whole confined tree. The Job is `bake_process::windows_job::Job`, the
+//!   one the process owner keeps its Windows trees in: created empty with a
+//!   completion port associated before the command exists, so every
+//!   process the Job gains is reported to the port. While the command runs,
+//!   the runner's wait on it pumps that port in bounded steps, opening each
+//!   reported process soon after it starts. After the command's exit it
+//!   terminates the Job again on every poll until the account settles:
+//!   every reported process held by handle until signalled, with their
+//!   distinct number equal to the Job's lifetime count. The Job's active
+//!   count alone is never read as the end: it reaches 0 before a terminated
+//!   member's handle is signalled, which is how a count-only drain (the
+//!   TypeScript `isJobEmpty` in `packages/subprocess/win32-process/src/
+//!   process.ts`, and this runner's own until it shared the account) could
+//!   report an empty tree with a member still in rundown. When the account
+//!   does not settle within its bound (30 s) or contradicts itself, the
+//!   runner reports a failure and leaves the private directory and its temp
+//!   grant in place rather than remove them under a process that may still
+//!   run; the Job's kill-on-close handle then closes with the runner.
 //! - The environment is passed as an explicit block; TypeScript had to
 //!   rewrite its own environment because Koffi could not pass one.
 //!
@@ -144,6 +159,14 @@
 //!   the whole tree.
 //! - **A FAT volume has no DACLs**: a grant root on one fails, and targets
 //!   on one stay writable.
+//! - **The Job's account can fall short.** A process the Job counted but
+//!   never reported (a lost port message, a failed association counted by a
+//!   nested job's limits, a pid reused inside the Job before it was opened),
+//!   or a member the runner cannot open, leaves the account unsettled: the
+//!   run then ends as a cleanup failure with its grant and directory kept,
+//!   never as a false empty tree. A reported pid that no longer opens, or
+//!   names a process outside the Job, is read as ended on the process-id
+//!   lifetime inference `bake-process` documents for its account.
 //! - **The runner ignores Ctrl+C** (`SetConsoleCtrlHandler(NULL, TRUE)`, as
 //!   TypeScript did) so it survives to clean up, and the command inherits
 //!   that setting.

@@ -21,14 +21,20 @@
 //! explicit chain, to qualify what it does confine. There is no skip.
 //!
 //! Every process a scenario starts is owned by a guard that kills and awaits
-//! it on drop, a panic included, and every handshake is bounded.
+//! it on drop, a panic included. Handshakes are bounded; [`Lines`] reads
+//! only bytes available on its exclusively owned stdout pipe and starts no
+//! reader thread.
+//! A descendant's end is asserted on a handle the scenario opened while the
+//! descendant's pid was pinned by its parent's handle, never on a pid
+//! reopened after the parent exited: there an open that fails, or a query
+//! that is refused, is not evidence of an exit.
 //!
 //! [`mechanisms`] records, without qualifying anything, how this token and
 //! two candidate replacements (low integrity, AppContainer) treat the same
 //! deletion, rename, read, and network effects.
 
 use std::ffi::OsString;
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufRead, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
@@ -132,6 +138,26 @@ pub fn probe_main(args: Vec<OsString>) -> ! {
                 0
             })
         }
+        // After a line (or EOF) on stdin, a parked grandchild whose handle
+        // this process keeps, so its pid cannot be reused, until a second
+        // line (or EOF): a test can open it by pid, pinned, before this
+        // process exits and leaves it orphaned.
+        ["orphan-pinned"] => {
+            let mut stdin = std::io::stdin().lock();
+            let _ = stdin.read_line(&mut String::new());
+            spawn_parked_child().map(|grandchild| {
+                println!(
+                    "grandchild {} child {}",
+                    grandchild.id(),
+                    std::process::id()
+                );
+                let _ = std::io::stdout().flush();
+                let _ = stdin.read_line(&mut String::new());
+                // Released only now: the pid stayed pinned until here.
+                drop(grandchild);
+                0
+            })
+        }
         // A parked grandchild, then this process parks too.
         ["orphan-and-park"] => spawn_parked().map(|pid| {
             println!("grandchild {pid} child {}", std::process::id());
@@ -162,13 +188,17 @@ pub fn probe_main(args: Vec<OsString>) -> ! {
 }
 
 fn spawn_parked() -> std::io::Result<u32> {
-    let child = std::process::Command::new(std::env::current_exe()?)
+    spawn_parked_child().map(|child| child.id())
+}
+
+/// A parked probe holding none of this process's standard handles.
+fn spawn_parked_child() -> std::io::Result<std::process::Child> {
+    std::process::Command::new(std::env::current_exe()?)
         .args([PROBE_ARG, "park"])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .spawn()?;
-    Ok(child.id())
+        .spawn()
 }
 
 // ---------------------------------------------------------------------------
@@ -206,6 +236,10 @@ pub fn tests() -> Vec<harness::Test> {
         (
             "descendants_end_with_the_command",
             descendants_end_with_the_command,
+        ),
+        (
+            "an_owned_runner_killed_mid_run_settles_its_tree",
+            an_owned_runner_killed_mid_run_settles_its_tree,
         ),
         (
             "a_killed_runner_takes_its_tree",
@@ -380,13 +414,91 @@ fn signaled_within(handle: std::os::windows::io::RawHandle, budget: Duration) ->
     }
 }
 
-/// A child this test started. Dropped, a panic included, it is killed and
-/// awaited within [`BOUND`].
-struct Owned(std::process::Child);
+/// The sole reader of one child's anonymous stdout pipe. Peeking before a
+/// bounded read keeps handshake waits cancellable without a reader thread.
+/// No other thread uses this handle: a synchronous PeekNamedPipe may block
+/// behind another operation on the same handle.
+struct Lines {
+    pipe: std::process::ChildStdout,
+    pending: Vec<u8>,
+}
+
+/// The longest handshake this fixture accepts.
+const LINE_CAP: u64 = 4096;
+
+impl Lines {
+    fn new(pipe: std::process::ChildStdout) -> Self {
+        Self {
+            pipe,
+            pending: Vec::new(),
+        }
+    }
+
+    fn next(&mut self) -> Result<String, String> {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::System::Pipes::PeekNamedPipe;
+        let started = std::time::Instant::now();
+        loop {
+            if let Some(end) = self.pending.iter().position(|byte| *byte == b'\n') {
+                if end as u64 >= LINE_CAP {
+                    return Err(format!("handshake exceeds {LINE_CAP} bytes"));
+                }
+                return Ok(String::from_utf8_lossy(
+                    &self.pending.drain(..=end).collect::<Vec<_>>(),
+                )
+                .into_owned());
+            }
+            if self.pending.len() as u64 >= LINE_CAP {
+                return Err(format!("handshake exceeds {LINE_CAP} bytes"));
+            }
+            let mut available = 0;
+            // SAFETY: this exclusively owned read handle is live; no
+            // concurrent read can consume the bytes this call reports.
+            let ok = unsafe {
+                PeekNamedPipe(
+                    self.pipe.as_raw_handle(),
+                    std::ptr::null_mut(),
+                    0,
+                    std::ptr::null_mut(),
+                    &mut available,
+                    std::ptr::null_mut(),
+                )
+            };
+            if ok == 0 {
+                return Err(format!(
+                    "stdout ended or could not be queried: {}",
+                    std::io::Error::last_os_error()
+                ));
+            }
+            if available > 0 {
+                let mut bytes = [0; 4096];
+                let length = (available as usize).min(bytes.len());
+                let read = self
+                    .pipe
+                    .read(&mut bytes[..length])
+                    .map_err(|error| error.to_string())?;
+                if read == 0 {
+                    return Err("stdout ended before a handshake".into());
+                }
+                self.pending.extend_from_slice(&bytes[..read]);
+            } else if started.elapsed() >= BOUND {
+                return Err(format!("no line within {BOUND:?}"));
+            } else {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+    }
+}
+
+/// A child this test started, and the reader of its standard output once
+/// [`Owned::first_line`] or [`Owned::next_line`] started one. Dropped, a
+/// panic included, it is killed and awaited within [`BOUND`], and then its
+/// stdout handle is closed.
+struct Owned(std::process::Child, Option<Lines>);
 
 impl Owned {
     fn spawn(command: &mut std::process::Command) -> Self {
-        Self(command.spawn().expect("spawn"))
+        Self(command.spawn().expect("spawn"), None)
     }
 
     /// The exit status, if the child exits within `budget`.
@@ -395,24 +507,20 @@ impl Owned {
         signaled_within(self.0.as_raw_handle(), budget).then(|| self.0.wait().expect("reap"))
     }
 
-    /// The first stdout line, within [`BOUND`]. The reader thread ends at
-    /// that line or at EOF, whichever comes first.
+    /// The next stdout line, within [`BOUND`].
+    fn next_line(&mut self) -> Result<String, String> {
+        if self.1.is_none() {
+            let stdout = self.0.stdout.take().expect("piped stdout");
+            self.1 = Some(Lines::new(stdout));
+        }
+        self.1.as_mut().expect("a reader").next()
+    }
+
+    /// The first stdout line, within [`BOUND`].
     fn first_line(&mut self) -> String {
-        let stdout = self.0.stdout.take().expect("piped stdout");
-        let (send, receive) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let mut line = String::new();
-            let _ = BufReader::new(stdout).read_line(&mut line);
-            let _ = send.send(line);
-        });
-        let line = receive
-            .recv_timeout(BOUND)
-            .expect("a handshake line within the bound");
-        assert!(
-            !line.is_empty(),
-            "the process closed stdout before its handshake"
-        );
-        line
+        assert!(self.1.is_none(), "the first line was already read");
+        self.next_line()
+            .unwrap_or_else(|error| panic!("a handshake: {error}"))
     }
 }
 
@@ -427,6 +535,7 @@ impl Drop for Owned {
                 self.0.id()
             );
         }
+        // The stdout handle drops after this; no background read survives.
     }
 }
 
@@ -513,65 +622,36 @@ impl Drop for OwnedPid {
 
 /// A kill-on-close Job this test owns: an unconfined negative control joins
 /// it before the control starts any descendant, and each mechanism-probe
-/// candidate is born in one. Its handle is never inheritable, so this
+/// candidate is born in one. It is the production
+/// [`bake_process::windows_job::Job`], whose completion port is associated
+/// before anything joins it. Its handle is never inheritable, so this
 /// process holds the only one and an abrupt end of the test closes it and
 /// kills every member.
 ///
-/// [`TestJob::finish`] terminates every member, waits until the Job counts
-/// none active within [`BOUND`], and reports what went wrong. A Job dropped
-/// without `finish` (a panic included) does the same as best effort: it
-/// panics with the error on a normal path and only prints it while
-/// unwinding, so cleanup never double-panics.
+/// [`TestJob::finish`] terminates every member and waits, within [`BOUND`],
+/// for the Job's account to settle: every process the Job reported held by
+/// handle until signalled, never the active count alone. This is cleanup,
+/// not an assertion oracle: each scenario asserts on the handles it pinned
+/// itself. A Job dropped without `finish` (a panic included) does the same
+/// as best effort: it panics with the error on a normal path and only
+/// prints it while unwinding, so cleanup never double-panics.
 struct TestJob {
-    handle: std::os::windows::io::OwnedHandle,
+    job: bake_process::windows_job::Job,
     finished: bool,
 }
 
 impl TestJob {
     fn new() -> Self {
-        use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
-        use windows_sys::Win32::System::JobObjects::{
-            CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-            JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
-            SetInformationJobObject,
-        };
-        // SAFETY: null attributes (not inheritable) and no name.
-        let raw = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
-        assert!(
-            !raw.is_null(),
-            "CreateJobObjectW: {}",
-            std::io::Error::last_os_error()
-        );
-        // SAFETY: a fresh handle owned here. Should the limit below fail,
-        // dropping it closes a Job that has no member yet.
-        let handle = unsafe { OwnedHandle::from_raw_handle(raw) };
-        // SAFETY: a zeroed struct is a valid starting value.
-        let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
-        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-        // SAFETY: `limits` has the size passed.
-        let ok = unsafe {
-            SetInformationJobObject(
-                handle.as_raw_handle(),
-                JobObjectExtendedLimitInformation,
-                std::ptr::addr_of!(limits).cast(),
-                size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-            )
-        };
-        assert_ne!(
-            ok,
-            0,
-            "SetInformationJobObject (kill on close): {}",
-            std::io::Error::last_os_error()
-        );
         Self {
-            handle,
+            job: bake_process::windows_job::Job::new().expect("a kill-on-close Job and its port"),
             finished: false,
         }
     }
 
+    /// The Job's handle, borrowed for a creation's job list and queries.
     fn raw(&self) -> std::os::windows::io::RawHandle {
-        use std::os::windows::io::AsRawHandle;
-        self.handle.as_raw_handle()
+        use std::os::windows::io::{AsHandle, AsRawHandle};
+        self.job.as_handle().as_raw_handle()
     }
 
     fn assign(&self, child: &Owned) {
@@ -644,125 +724,13 @@ impl TestJob {
         ))
     }
 
-    /// How many members the Job counts as active.
-    fn active(&self) -> std::io::Result<u32> {
-        use windows_sys::Win32::System::JobObjects::{
-            JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JobObjectBasicAccountingInformation,
-            QueryInformationJobObject,
-        };
-        // SAFETY: a zeroed struct is valid output space.
-        let mut info: JOBOBJECT_BASIC_ACCOUNTING_INFORMATION = unsafe { std::mem::zeroed() };
-        // SAFETY: `info` has the size passed.
-        let ok = unsafe {
-            QueryInformationJobObject(
-                self.raw(),
-                JobObjectBasicAccountingInformation,
-                std::ptr::addr_of_mut!(info).cast(),
-                size_of::<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>() as u32,
-                std::ptr::null_mut(),
-            )
-        };
-        if ok == 0 {
-            let error = std::io::Error::last_os_error();
-            return Err(std::io::Error::new(
-                error.kind(),
-                format!("QueryInformationJobObject (accounting): {error}"),
-            ));
-        }
-        Ok(info.ActiveProcesses)
-    }
-
-    /// Terminates every member and waits within [`BOUND`] until the Job
-    /// counts none active; a failed query
-    /// ends the wait as an error. It never panics, so a drop while
-    /// unwinding can call it. Each wait is on a handle checked with
-    /// `IsProcessInJob`, so a reused pid is never waited for.
+    /// Terminates every member and waits within [`BOUND`] until the Job's
+    /// account settles. It never panics, so a drop while unwinding can call
+    /// it.
     fn terminate_and_reap(&self) -> Result<(), String> {
-        use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
-        use windows_sys::Win32::Foundation::WAIT_FAILED;
-        use windows_sys::Win32::System::JobObjects::{IsProcessInJob, TerminateJobObject};
-        use windows_sys::Win32::System::Threading::{
-            OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
-            WaitForSingleObject,
-        };
-        let mut errors = Vec::new();
-        // SAFETY: a live Job handle.
-        if unsafe { TerminateJobObject(self.raw(), 1) } == 0 {
-            // Still wait: the members may be gone already.
-            errors.push(format!(
-                "TerminateJobObject: {}",
-                std::io::Error::last_os_error()
-            ));
-        }
-        let deadline = std::time::Instant::now() + BOUND;
-        'drain: loop {
-            match self.active() {
-                Ok(0) => break,
-                Ok(active) if std::time::Instant::now() >= deadline => {
-                    errors.push(format!(
-                        "{active} member(s) still active {BOUND:?} after termination"
-                    ));
-                    break;
-                }
-                Ok(_) => {}
-                Err(error) => {
-                    errors.push(error.to_string());
-                    break;
-                }
-            }
-            let pids = match self.members() {
-                Ok(pids) => pids,
-                Err(error) => {
-                    errors.push(error.to_string());
-                    break;
-                }
-            };
-            let mut waited = false;
-            for pid in pids {
-                // SAFETY: plain call; null means the process is gone.
-                let raw = unsafe {
-                    OpenProcess(
-                        PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
-                        0,
-                        pid,
-                    )
-                };
-                if raw.is_null() {
-                    continue;
-                }
-                // SAFETY: a fresh handle owned here.
-                let process = unsafe { OwnedHandle::from_raw_handle(raw) };
-                let mut member = 0;
-                // SAFETY: two live handles and a valid out pointer.
-                let ok =
-                    unsafe { IsProcessInJob(process.as_raw_handle(), self.raw(), &mut member) };
-                if ok == 0 || member == 0 {
-                    continue;
-                }
-                let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-                // SAFETY: a live handle opened with SYNCHRONIZE. A timeout is
-                // caught by the accounting check above.
-                if unsafe { WaitForSingleObject(process.as_raw_handle(), millis(remaining)) }
-                    == WAIT_FAILED
-                {
-                    errors.push(format!(
-                        "WaitForSingleObject (Job member {pid}): {}",
-                        std::io::Error::last_os_error()
-                    ));
-                    break 'drain;
-                }
-                waited = true;
-            }
-            if !waited {
-                // Counted members that cannot be opened are being torn down.
-                std::thread::sleep(Duration::from_millis(1));
-            }
-        }
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(errors.join("; "))
-        }
+        self.job.terminate_and_settle(BOUND).map_err(|verdict| {
+            format!("the Job's account did not settle within {BOUND:?} of termination: {verdict}")
+        })
     }
 
     /// Terminates and reaps every member, reporting any failure. Closing
@@ -1096,79 +1064,288 @@ fn descendants_stay_confined() {
     assert!(workspace.join("child.txt").exists());
 }
 
+/// How many pinned cases [`descendants_end_with_the_command`] and
+/// [`an_owned_runner_killed_mid_run_settles_its_tree`] run:
+/// `BAKE_SANDBOX_DESCENDANT_RUNS` (1..=100), or 10.
+fn descendant_runs() -> usize {
+    const DEFAULT: usize = 10;
+    match std::env::var("BAKE_SANDBOX_DESCENDANT_RUNS") {
+        Err(_) => DEFAULT,
+        Ok(text) => match text.parse() {
+            Ok(runs @ 1..=100) => runs,
+            _ => {
+                eprintln!(
+                    "BAKE_SANDBOX_DESCENDANT_RUNS={text:?} is not 1..=100; running {DEFAULT}"
+                );
+                DEFAULT
+            }
+        },
+    }
+}
+
+/// The runner's arguments, `--` included, for `mode` on `workspace`, with
+/// its private directories under `root`, followed by the probe `ops`.
+fn runner_argv(workspace: &Scratch, root: &Scratch, mode: &str, ops: &[&str]) -> Vec<String> {
+    let mut argv: Vec<String> = vec![
+        RUNNER_ARG.into(),
+        "--workspace".into(),
+        text(&workspace.0),
+        "--temp".into(),
+        text(&root.0),
+        "--mode".into(),
+        mode.into(),
+        "--".into(),
+    ];
+    argv.extend(probe(ops));
+    argv
+}
+
+/// Parses an `orphan-pinned` handshake, `grandchild <pid> child <pid>`.
+fn pinned_pids(line: &str) -> (u32, u32) {
+    let mut words = line.split_whitespace();
+    match (words.next(), words.next(), words.next(), words.next()) {
+        (Some("grandchild"), Some(grandchild), Some("child"), Some(child)) => (
+            grandchild.parse().expect("grandchild pid"),
+            child.parse().expect("child pid"),
+        ),
+        _ => panic!("handshake {line:?}"),
+    }
+}
+
+/// Opens an `orphan-pinned` probe's grandchild and the probe itself from
+/// its handshake. The probe holds the grandchild's handle until it reads
+/// its second line, so the grandchild's pid cannot have been reused when it
+/// is opened here; the probe is checked still running after that open.
+fn open_pinned(line: &str) -> (OwnedPid, OwnedPid) {
+    let (grandchild, child) = pinned_pids(line);
+    let grandchild = OwnedPid::open(grandchild);
+    let child = OwnedPid::open(child);
+    assert!(
+        grandchild.running(),
+        "the grandchild ended before its release"
+    );
+    assert!(
+        child.running(),
+        "the probe ended, releasing its grandchild's pid, before the test opened it"
+    );
+    (grandchild, child)
+}
+
+/// Starts `orphan-pinned` in `process` (its stdin and stdout piped) and
+/// opens its pinned grandchild and itself; see [`open_pinned`]. Returns the
+/// probe's stdin, whose next line lets the probe exit. A missing handshake
+/// fails with `diagnose()`, which can show what the process reported.
+fn start_pinned(
+    process: &mut Owned,
+    diagnose: impl Fn() -> String,
+) -> (std::process::ChildStdin, OwnedPid, OwnedPid) {
+    let mut stdin = process.0.stdin.take().expect("piped stdin");
+    stdin.write_all(b"go\n").expect("go");
+    stdin.flush().expect("go");
+    let line = match process.next_line() {
+        Ok(line) => line,
+        Err(error) => {
+            drop(stdin);
+            let status = process.wait_within(BOUND);
+            panic!("no handshake ({error}); exit {status:?}\n{}", diagnose())
+        }
+    };
+    let (grandchild, child) = open_pinned(&line);
+    (stdin, grandchild, child)
+}
+
+/// The command's grandchild, orphaned when its parent exits, must have
+/// ended when the runner returns: checked at once, with no wait, on a
+/// handle the test opened while the grandchild's pid was pinned (by its
+/// parent's handle), never on a pid reopened after the exit. Repeated
+/// [`descendant_runs`] times, alternating the two modes. The runner's
+/// earlier drain returned once the Job counted no active process, which
+/// happens before a terminated member's handle is signalled; this check
+/// then caught the member unsignalled only when the runner's cleanup and
+/// exit outran the member's rundown, so against that drain each case could
+/// fail but none was certain to (a stochastic detector, not a reliable
+/// one). The runner also has to exit 0 with no cleanup line and with its
+/// private directory removed, which it does only once the account settles.
 fn descendants_end_with_the_command() {
     let (workspace, _outside) = workspace_and_outside();
-    let run = confined(&ww(&workspace), &workspace.0, &["orphan"]);
-    assert_ok(&run, "orphan a grandchild");
-    let pid: u32 = run
-        .stdout
-        .trim()
-        .strip_prefix("grandchild ")
-        .and_then(|pid| pid.parse().ok())
-        .unwrap_or_else(|| panic!("grandchild pid in {:?}", run.stdout));
-    // The runner exits only after its Job is empty, so the grandchild is
-    // gone (or its pid already names another program).
-    {
-        use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
-        use windows_sys::Win32::System::Threading::{
-            OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
+    let runs = descendant_runs();
+    for case in 0..runs {
+        let mode = if case % 2 == 0 {
+            "read-only"
+        } else {
+            "workspace-write"
         };
-        // SAFETY: plain call; null means no such process.
-        let raw = unsafe {
-            OpenProcess(
-                PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
-                0,
-                pid,
+        let root = Scratch::outside("acl-orphan-root");
+        let log = Scratch::outside("acl-orphan-log");
+        let stderr_path = log.join("stderr.txt");
+        let stderr = std::fs::File::create(&stderr_path).expect("stderr file");
+        let mut runner = Owned::spawn(
+            std::process::Command::new(exe())
+                .args(runner_argv(&workspace, &root, mode, &["orphan-pinned"]))
+                .current_dir(&workspace.0)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(stderr),
+        );
+        let (mut stdin, grandchild, child) = start_pinned(&mut runner, || {
+            format!(
+                "case {case} ({mode}): {}",
+                std::fs::read_to_string(&stderr_path).unwrap_or_default()
             )
-        };
-        if !raw.is_null() {
-            // SAFETY: a fresh handle owned here.
-            let handle = unsafe { OwnedHandle::from_raw_handle(raw) };
-            assert!(
-                signaled_within(handle.as_raw_handle(), Duration::ZERO)
-                    || !is_this_binary(handle.as_raw_handle()),
-                "grandchild {pid} outlived the run"
-            );
-        }
+        });
+        stdin.write_all(b"opened\n").expect("release");
+        drop(stdin);
+        let status = runner.wait_within(BOUND);
+        let grandchild_ended = !grandchild.running();
+        let child_ended = !child.running();
+        let stderr = std::fs::read_to_string(&stderr_path).unwrap_or_default();
+        let status = status.unwrap_or_else(|| {
+            panic!("case {case} ({mode}): the runner did not exit within {BOUND:?}\n{stderr}")
+        });
+        assert!(
+            grandchild_ended,
+            "case {case} ({mode}): grandchild {} was unsignalled when the runner returned\n{stderr}",
+            grandchild.1
+        );
+        assert!(
+            child_ended,
+            "case {case} ({mode}): the command {} was unsignalled when the runner returned",
+            child.1
+        );
+        assert_eq!(
+            status.code(),
+            Some(0),
+            "case {case} ({mode}): the command's code passes through\n{stderr}"
+        );
+        assert!(
+            !stderr.contains("windows-acl-run: "),
+            "case {case} ({mode}): {stderr}"
+        );
+        assert!(
+            entries(&root.0).is_empty(),
+            "case {case} ({mode}): the private directory is removed once the tree is settled"
+        );
     }
+    eprintln!("windows-acl: {runs} pinned descendant cases ended with their runner");
     // Negative control: unconfined, the orphan survives its parent. The
     // control joins a Job this test owns before it starts the grandchild,
-    // and the grandchild's inherited stdout is never awaited to EOF.
+    // and the grandchild's handle is pinned the same way before the
+    // control exits.
     let job = TestJob::new();
     let mut control = Owned::spawn(
         std::process::Command::new(exe())
-            .args([PROBE_ARG, "orphan"])
+            .args([PROBE_ARG, "orphan-pinned"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null()),
     );
     job.assign(&control);
-    control
-        .0
-        .stdin
-        .take()
-        .expect("stdin")
-        .write_all(b"go\n")
-        .expect("go");
-    let line = control.first_line();
-    let grandchild = OwnedPid::open(
-        line.trim()
-            .strip_prefix("grandchild ")
-            .and_then(|pid| pid.parse().ok())
-            .expect("control pid"),
-    );
+    let (mut stdin, grandchild, parent) = start_pinned(&mut control, String::new);
+    stdin.write_all(b"opened\n").expect("release");
+    drop(stdin);
     let status = control
         .wait_within(BOUND)
         .expect("the control exits within the bound");
     assert!(status.success(), "{status}");
+    assert!(!parent.running(), "the control's handle is signalled");
     assert!(
         grandchild.running(),
         "the unconfined orphan must outlive its parent"
     );
-    drop(grandchild);
+    drop((grandchild, parent));
     drop(control);
     job.finish()
         .unwrap_or_else(|error| panic!("the control's Job was not reaped: {error}"));
+}
+
+/// Cancellation as a caller does it: the runner owned by
+/// `bake_process::OwnedProcess`, as a tool runs a confined command, killed
+/// while its command and an orphaned grandchild both run. The owner's
+/// `TreeState::Gone` must come only once both, members of the runner's own
+/// Job nested in the owner's, are signalled: checked at once on handles the
+/// test pinned. Repeated [`descendant_runs`] times, alternating modes. The
+/// killed runner cannot clean up, so its private directory lands under a
+/// root this test owns.
+fn an_owned_runner_killed_mid_run_settles_its_tree() {
+    use bake_process::{OwnedProcess, ProcessSpec, TreeState};
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
+    let (workspace, _outside) = workspace_and_outside();
+    let runs = descendant_runs();
+    for case in 0..runs {
+        let mode = if case % 2 == 0 {
+            "workspace-write"
+        } else {
+            "read-only"
+        };
+        let root = Scratch::outside("acl-cancel-root");
+        let spec = ProcessSpec {
+            program: exe().into(),
+            args: runner_argv(&workspace, &root, mode, &["orphan-pinned"])
+                .into_iter()
+                .map(OsString::from)
+                .collect(),
+            cwd: Some(workspace.0.clone()),
+            env: None,
+            stdin: true,
+        };
+        runtime().block_on(async {
+            let mut process = tokio::time::timeout(BOUND, OwnedProcess::spawn(&spec, None))
+                .await
+                .expect("spawn within the bound")
+                .expect("spawn the runner");
+            let mut stdin = process.take_stdin().expect("piped stdin");
+            let mut stdout = tokio::io::BufReader::new(process.take_stdout().expect("stdout"));
+            let mut stderr = process.take_stderr().expect("stderr");
+            tokio::time::timeout(BOUND, async {
+                stdin.write_all(b"go\n").await?;
+                stdin.flush().await
+            })
+            .await
+            .expect("go within the bound")
+            .expect("go");
+            let mut line = String::new();
+            let read =
+                tokio::time::timeout(BOUND, (&mut stdout).take(LINE_CAP).read_line(&mut line))
+                    .await
+                    .expect("a handshake within the bound")
+                    .expect("read the handshake");
+            if read == 0 {
+                // The command never reported: show why, then fail.
+                process.kill();
+                let settled = tokio::time::timeout(BOUND, process.finish()).await;
+                let mut detail = Vec::new();
+                let _ = tokio::time::timeout(
+                    BOUND,
+                    (&mut stderr).take(64 * 1024).read_to_end(&mut detail),
+                )
+                .await;
+                panic!(
+                    "case {case} ({mode}): no handshake; {settled:?}\n{}",
+                    String::from_utf8_lossy(&detail)
+                );
+            }
+            let (grandchild, child) = open_pinned(&line);
+            process.kill();
+            let settled = tokio::time::timeout(BOUND, process.finish())
+                .await
+                .unwrap_or_else(|_| panic!("case {case} ({mode}): no settle within {BOUND:?}"))
+                .expect("finish");
+            let grandchild_ended = !grandchild.running();
+            let child_ended = !child.running();
+            assert_eq!(settled.tree, TreeState::Gone, "case {case} ({mode})");
+            assert!(
+                grandchild_ended,
+                "case {case} ({mode}): grandchild {} was unsignalled when the owner reported Gone",
+                grandchild.1
+            );
+            assert!(
+                child_ended,
+                "case {case} ({mode}): the command {} was unsignalled when the owner reported Gone",
+                child.1
+            );
+        });
+    }
+    eprintln!("windows-acl: {runs} owned runners killed mid-run settled with their trees");
 }
 
 fn a_killed_runner_takes_its_tree() {

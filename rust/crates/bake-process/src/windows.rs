@@ -23,7 +23,7 @@
 use std::ffi::{OsStr, OsString, c_void};
 use std::io;
 use std::os::windows::ffi::OsStrExt;
-use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+use std::os::windows::io::{AsHandle, AsRawHandle, FromRawHandle, OwnedHandle};
 use std::os::windows::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
 use std::process::ExitStatus;
@@ -34,7 +34,6 @@ use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 use windows_sys::Win32::Foundation::{
     HANDLE, HANDLE_FLAG_INHERIT, SetHandleInformation, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
-use windows_sys::Win32::System::JobObjects::{CreateJobObjectW, TerminateJobObject};
 use windows_sys::Win32::System::Threading::{
     CREATE_UNICODE_ENVIRONMENT, CreateProcessW, DeleteProcThreadAttributeList,
     EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess, InitializeProcThreadAttributeList,
@@ -125,9 +124,9 @@ impl Drop for Leader {
 /// A process just created in its job.
 pub(super) struct Spawned {
     pub(super) leader: Leader,
-    pub(super) job: OwnedHandle,
-    /// The job's completion port, associated before the leader existed.
-    pub(super) port: OwnedHandle,
+    /// The job, whose completion port was associated before the leader
+    /// existed.
+    pub(super) job: crate::windows_job::Job,
     pub(super) stdin: Option<ProcessStdin>,
     pub(super) stdout: Option<ProcessStdout>,
     pub(super) stderr: Option<ProcessStderr>,
@@ -394,19 +393,10 @@ pub(super) async fn spawn(spec: &ProcessSpec) -> io::Result<Spawned> {
     // the whole tree is ended. A command that exits normally has the limit
     // cleared first (`detach`), which leaves its descendants running, as Pi
     // does.
-    // SAFETY: null attributes (not inheritable) and no name.
-    let job = unsafe { CreateJobObjectW(null(), null()) };
-    if job.is_null() {
-        return Err(last_error());
-    }
-    // SAFETY: a fresh handle owned here.
-    let job = unsafe { OwnedHandle::from_raw_handle(job) };
-    crate::tree::set_kill_on_close(&job, true)?;
-    // Associated while the job has never had a process, so every
-    // association, the leader's first, reports to it: a settled kill names
-    // its members from these messages (`crate::job_ledger`).
-    let port = crate::tree::completion_port()?;
-    crate::tree::associate_port(&job, &port)?;
+    // Its completion port is associated while it has never had a process,
+    // so every association, the leader's first, reports to it: a settled
+    // kill names its members from these messages (`crate::job_ledger`).
+    let job = crate::windows_job::Job::new()?;
 
     let (stdout_read, stdout_write) = pipe(Direction::FromChild).await?;
     let (stderr_read, stderr_write) = pipe(Direction::FromChild).await?;
@@ -430,7 +420,7 @@ pub(super) async fn spawn(spec: &ProcessSpec) -> io::Result<Spawned> {
         stdout_write.as_raw_handle(),
         stderr_write.as_raw_handle(),
     ];
-    let job_list: [HANDLE; 1] = [job.as_raw_handle()];
+    let job_list: [HANDLE; 1] = [job.as_handle().as_raw_handle()];
     let mut attributes = Attributes::new(2)?;
     attributes.set(
         PROC_THREAD_ATTRIBUTE_JOB_LIST as usize,
@@ -487,10 +477,7 @@ pub(super) async fn spawn(spec: &ProcessSpec) -> io::Result<Spawned> {
         // `CreateProcessW` documents a valid process handle on success, so
         // this does not happen; if it did, there is no handle to wait on,
         // and the error says the tree's end was not observed.
-        // SAFETY: `job` is live.
-        unsafe {
-            TerminateJobObject(job.as_raw_handle(), 1);
-        }
+        let _ = job.terminate();
         return Err(io::Error::other(
             "CreateProcessW returned no process handle; its job was terminated, unobserved",
         ));
@@ -504,7 +491,6 @@ pub(super) async fn spawn(spec: &ProcessSpec) -> io::Result<Spawned> {
     Ok(Spawned {
         leader,
         job,
-        port,
         stdin: stdin_parent,
         stdout: Some(stdout_read),
         stderr: Some(stderr_read),
