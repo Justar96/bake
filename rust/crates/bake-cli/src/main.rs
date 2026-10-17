@@ -11,8 +11,8 @@
 //! ([`plugin_check`]). These commands need no Bake home.
 
 mod docs;
-mod self_check;
 mod plugin_check;
+mod self_check;
 
 use std::ffi::OsString;
 use std::io::{self, IsTerminal, Write};
