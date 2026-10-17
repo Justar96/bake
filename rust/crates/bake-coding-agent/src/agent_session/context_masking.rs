@@ -23,16 +23,15 @@ fn eligible_name(name: Option<&str>) -> bool {
 
 /// Record the executing host capability, not a tool name guessed on replay.
 /// This detail never enters model context. Non-object tool details retain
-/// their shape and are deliberately ineligible for this experiment.
+/// their shape and are deliberately ineligible for this experiment. Strip
+/// tool-supplied provenance even while disabled: later sessions may enable it.
 pub(super) fn observation_details(
     context: &bake_agent::AfterToolCallContext<'_>,
     enabled: bool,
 ) -> Option<Value> {
-    if !enabled {
-        return None;
-    }
     let name = &context.tool_call.name;
-    let eligible = !context.is_error
+    let eligible = enabled
+        && !context.is_error
         && eligible_name(Some(name))
         && context
             .context

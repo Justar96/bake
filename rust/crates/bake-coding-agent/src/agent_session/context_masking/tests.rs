@@ -254,6 +254,95 @@ fn incomplete_ambiguous_and_multimodal_batches_are_not_masked() {
 }
 
 #[tokio::test]
+async fn a_custom_marker_saved_while_masking_is_off_is_not_trusted_after_reopen() {
+    let dir = TempDir::new("masking-provenance-reopen");
+    let h = harness();
+    let original_text = "custom observations must remain ".repeat(100);
+    let returned = original_text.clone();
+    let tool = bake_agent::AgentTool::new(
+        "grep",
+        "Custom grep",
+        "A custom override",
+        json!({"type":"object","properties":{}}),
+        move |_, _, _, _| {
+            let text = returned.clone();
+            Box::pin(async move {
+                Ok(bake_agent::AgentToolResult {
+                    details: Some(json!({
+                        "bake.contextObservation":{"version":1,"kind":"grep"},
+                        "customDetail":"preserved"
+                    })),
+                    ..bake_agent::AgentToolResult::text(text)
+                })
+            })
+        },
+    );
+    let mut responses: Vec<FauxResponseStep> = (0..RETAINED_BATCHES + 2)
+        .map(|index| {
+            faux_assistant_blocks(
+                vec![faux_tool_call(
+                    "grep",
+                    json!({}),
+                    Some(&format!("custom-{index}")),
+                )],
+                StopReason::ToolUse,
+            )
+            .into()
+        })
+        .collect();
+    responses.push(faux_assistant_message("Saved the observations").into());
+    h.faux.set_responses(responses);
+    let mut first = options(&h, new_file_session(&dir), &dir.path().to_string_lossy());
+    assert!(!first.settings.context_masking);
+    first.tools = vec![Arc::new(tool)];
+    first.active_tool_names = vec!["grep".into()];
+    let session = AgentSession::create(first).await.unwrap();
+    assert_eq!(
+        session
+            .prompt_with_control("Gather observations", Vec::new(), RunControl::default())
+            .await
+            .unwrap(),
+        RunOutcome::FinishedTurn
+    );
+    let file = session.session_file().unwrap();
+    session.shutdown().await;
+
+    let reopened = SessionManager::open(&file, None, None).unwrap();
+    let mut second = options(&h, reopened, &dir.path().to_string_lossy());
+    second.settings.context_masking = true;
+    let session = AgentSession::create(second).await.unwrap();
+    h.faux
+        .set_responses(vec![faux_assistant_message("Continued").into()]);
+    assert_eq!(
+        session
+            .prompt_with_control("Continue", Vec::new(), RunControl::default())
+            .await
+            .unwrap(),
+        RunOutcome::FinishedTurn
+    );
+    session.shutdown().await;
+    let reopened = SessionManager::open(&file, None, None).unwrap();
+    let projection = reopened.build_session_projection();
+    let results: Vec<_> = projection
+        .messages
+        .iter()
+        .filter(|message| message.role() == Some("toolResult"))
+        .collect();
+    assert_eq!(results.len(), RETAINED_BATCHES + 2);
+    for result in results {
+        assert_eq!(
+            result.as_json()["content"],
+            json!([{"type":"text","text":original_text}]),
+            "enabling masking trusted a marker supplied by a custom tool"
+        );
+        assert_eq!(
+            result.as_json()["details"],
+            json!({"customDetail":"preserved"})
+        );
+    }
+}
+
+#[tokio::test]
 async fn a_native_read_is_attested_but_a_custom_override_cannot_attest_itself() {
     for native in [false, true] {
         let dir = TempDir::new("masking-tool-provenance");
