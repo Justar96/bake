@@ -29,7 +29,11 @@
 //!   before or after its exit, settles only once the leader has exited and
 //!   no process is observed left in its tree ([`TreeState::Gone`]), with no
 //!   time limit of its own. A sent kill is never read as the tree's end, and
-//!   a membership query that fails is retried, never read as empty.
+//!   a membership query that fails is retried, never read as empty. On
+//!   Windows the tree's end is an account of the job's new-process messages
+//!   against its lifetime count (`job_ledger`), since the job's active count
+//!   reaches 0 before its terminated members' handles are signalled; an
+//!   account that falls short never settles.
 //! - **Drop.** Dropping an unsettled process kills its tree at once. With a
 //!   claim, the process and its claim move to a task on the runtime it was
 //!   spawned on, which settles it, so the claim's owner waits for that
@@ -62,6 +66,8 @@ use crate::tree::{ProcessTree, TrackedTree};
 pub use crate::tree::{TreeState, kill_tracked_detached_children};
 
 mod command_line;
+#[cfg(any(windows, test))]
+mod job_ledger;
 mod tree;
 
 #[cfg(all(test, target_os = "linux"))]
@@ -422,7 +428,7 @@ async fn spawn_leader(spec: &ProcessSpec) -> io::Result<Spawned> {
     let spawned = windows::spawn(spec).await?;
     Ok(Spawned {
         pid: spawned.leader.pid(),
-        tree: ProcessTree::with_job(spawned.leader.pid(), spawned.job),
+        tree: ProcessTree::with_job(spawned.leader.pid(), spawned.job, spawned.port),
         leader: spawned.leader,
         stdin: spawned.stdin,
         stdout: spawned.stdout,

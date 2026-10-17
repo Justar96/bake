@@ -126,6 +126,8 @@ impl Drop for Leader {
 pub(super) struct Spawned {
     pub(super) leader: Leader,
     pub(super) job: OwnedHandle,
+    /// The job's completion port, associated before the leader existed.
+    pub(super) port: OwnedHandle,
     pub(super) stdin: Option<ProcessStdin>,
     pub(super) stdout: Option<ProcessStdout>,
     pub(super) stderr: Option<ProcessStderr>,
@@ -400,6 +402,11 @@ pub(super) async fn spawn(spec: &ProcessSpec) -> io::Result<Spawned> {
     // SAFETY: a fresh handle owned here.
     let job = unsafe { OwnedHandle::from_raw_handle(job) };
     crate::tree::set_kill_on_close(&job, true)?;
+    // Associated while the job has never had a process, so every
+    // association, the leader's first, reports to it: a settled kill names
+    // its members from these messages (`crate::job_ledger`).
+    let port = crate::tree::completion_port()?;
+    crate::tree::associate_port(&job, &port)?;
 
     let (stdout_read, stdout_write) = pipe(Direction::FromChild).await?;
     let (stderr_read, stderr_write) = pipe(Direction::FromChild).await?;
@@ -497,6 +504,7 @@ pub(super) async fn spawn(spec: &ProcessSpec) -> io::Result<Spawned> {
     Ok(Spawned {
         leader,
         job,
+        port,
         stdin: stdin_parent,
         stdout: Some(stdout_read),
         stderr: Some(stderr_read),

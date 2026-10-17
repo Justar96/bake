@@ -1,4 +1,4 @@
-//! Windows job settlement: a native observation and a production-path case.
+//! Windows job settlement: a native observation and production-path cases.
 //! `harness = false`: the binary re-executes itself as its own helper
 //! processes, so their standard output is the protocol.
 //!
@@ -20,6 +20,14 @@
 //!    MCP shutdown does. Once `finish` reports `TreeState::Gone`, the
 //!    retained handle must already be signalled, checked once with no wait.
 //!    A failure here is a real failure of the owner's settlement.
+//! 3. **Production path under churn.** The parent keeps starting children
+//!    that exit at once and long-lived children whose pids it reports and
+//!    whose handles it keeps; the test retains 16 of the long-lived ones
+//!    and kills the tree while the parent is still starting more. After
+//!    `Gone`, every retained handle must already be signalled. A settle
+//!    that does not report within the bound is counted apart, as
+//!    incomplete: it reported nothing false, but did not show the tree
+//!    settled.
 //!
 //! Containment: a parent spawns its child only after it has read the exact
 //! line `go` and confirmed, through the job's name, that it is in the job;
@@ -30,10 +38,11 @@
 //! pid that was not confirmed is never signalled. A cleanup that does not
 //! observe its processes and pipe end is a failure.
 //!
-//! Runs: 50 observations and 20 production-path cases by default;
-//! `BAKE_PROCESS_JOB_PROBE_RUNS` and `BAKE_PROCESS_SETTLEMENT_RUNS` change
-//! them, capped at 500 and 200. Exit status 1 means a fixture or cleanup
-//! failure, or a production-path failure; each is reported apart.
+//! Runs: 50 observations, 20 production-path cases, and 10 churn cases by
+//! default; `BAKE_PROCESS_JOB_PROBE_RUNS`, `BAKE_PROCESS_SETTLEMENT_RUNS`,
+//! and `BAKE_PROCESS_CHURN_RUNS` change them, capped at 500, 200, and 100.
+//! Exit status 1 means a fixture or cleanup failure, a production-path
+//! failure, or an incomplete settle; each is reported apart.
 
 #[cfg(not(windows))]
 fn main() {
@@ -88,6 +97,8 @@ mod windows {
         match std::env::var(MODE).as_deref() {
             Ok("parent") => std::process::exit(parent()),
             Ok("settle-parent") => std::process::exit(settle_parent()),
+            Ok("churn-parent") => std::process::exit(churn_parent()),
+            Ok("exit") => std::process::exit(0),
             Ok("child") => loop {
                 std::thread::sleep(Duration::from_secs(3600));
             },
@@ -95,6 +106,7 @@ mod windows {
         }
         let probe_runs = runs("BAKE_PROCESS_JOB_PROBE_RUNS", 50, 500);
         let settle_runs = runs("BAKE_PROCESS_SETTLEMENT_RUNS", 20, 200);
+        let churn_runs = runs("BAKE_PROCESS_CHURN_RUNS", 10, 100);
         let version = Command::new("cmd")
             .args(["/c", "ver"])
             .stdin(Stdio::null())
@@ -131,23 +143,25 @@ mod windows {
             .enable_all()
             .build()
             .expect("a runtime");
-        let (mut passed, mut failed, mut fixture) = (0, 0, 0);
+        let mut single = Tally::default();
         for case in 0..settle_runs {
             let outcome = runtime.block_on(settle_case());
-            match &outcome.verdict {
-                Verdict::Passed => passed += 1,
-                Verdict::Failed(_) => failed += 1,
-                Verdict::Fixture(_) => fixture += 1,
-            }
+            single.add(&outcome.verdict);
             println!("case {case}: {outcome}");
         }
-        drop(runtime);
-        println!(
-            "production path: cases={settle_runs} passed={passed} \
-             retained_descendant_unsignalled_after_gone={failed} fixture_or_cleanup_failures={fixture}"
-        );
+        single.print("production path", settle_runs);
 
-        if summary.fixture_failures > 0 || failed > 0 || fixture > 0 {
+        println!("\nproduction path under churn: {churn_runs} cases");
+        let mut churn = Tally::default();
+        for case in 0..churn_runs {
+            let outcome = runtime.block_on(churn_case());
+            churn.add(&outcome.verdict);
+            println!("churn {case}: {outcome}");
+        }
+        drop(runtime);
+        churn.print("production path under churn", churn_runs);
+
+        if summary.fixture_failures > 0 || !single.clean() || !churn.clean() {
             println!("\nresult: FAILED");
             std::process::exit(1);
         }
@@ -741,11 +755,46 @@ mod windows {
 
     // ------------------------------------------------------------ production path
 
+    #[derive(Default)]
+    struct Tally {
+        passed: usize,
+        failed: usize,
+        incomplete: usize,
+        fixture: usize,
+    }
+
+    impl Tally {
+        fn add(&mut self, verdict: &Verdict) {
+            match verdict {
+                Verdict::Passed => self.passed += 1,
+                Verdict::Failed(_) => self.failed += 1,
+                Verdict::Incomplete(_) => self.incomplete += 1,
+                Verdict::Fixture(_) => self.fixture += 1,
+            }
+        }
+
+        fn clean(&self) -> bool {
+            self.failed == 0 && self.incomplete == 0 && self.fixture == 0
+        }
+
+        fn print(&self, what: &str, cases: usize) {
+            println!(
+                "{what}: cases={cases} passed={} \
+                 retained_descendant_unsignalled_after_gone={} \
+                 settlement_incomplete_within_bound={} fixture_or_cleanup_failures={}",
+                self.passed, self.failed, self.incomplete, self.fixture
+            );
+        }
+    }
+
     enum Verdict {
         Passed,
         /// `finish` reported `Gone` while the retained descendant's handle
         /// was not signalled.
         Failed(String),
+        /// `finish` did not report within the bound: not unsafe (nothing
+        /// was reported gone), but the tree was not shown settled.
+        Incomplete(String),
         Fixture(String),
     }
 
@@ -759,6 +808,7 @@ mod windows {
             match &self.verdict {
                 Verdict::Passed => f.write_str("ok")?,
                 Verdict::Failed(why) => write!(f, "FAILED: {why}")?,
+                Verdict::Incomplete(why) => write!(f, "INCOMPLETE: {why}")?,
                 Verdict::Fixture(why) => write!(f, "FIXTURE FAILURE: {why}")?,
             }
             for note in &self.notes {
@@ -892,7 +942,7 @@ mod windows {
         let report = match tokio::time::timeout(BOUND, process.finish()).await {
             Ok(Ok(report)) => report,
             Ok(Err(error)) => return Verdict::Fixture(format!("finish: {error}")),
-            Err(_) => return Verdict::Fixture("finish did not complete".into()),
+            Err(_) => return Verdict::Incomplete(format!("finish did not complete in {BOUND:?}")),
         };
         *settled = true;
         if report.tree != TreeState::Gone {
@@ -917,6 +967,194 @@ mod windows {
                 ))
             }
             None => Verdict::Fixture("the retained handle could not be checked".into()),
+        }
+    }
+
+    // ------------------------------------------------------------ churn
+
+    /// Children the churn parent starts at most, of each kind.
+    const CHURN: usize = 200;
+    /// Long-lived children the test retains before it kills the tree.
+    const RETAINED: usize = 16;
+
+    /// The churn case's parent, born in the owner's job: starts, over and
+    /// over, a child that exits at once (its handle closed, so it is
+    /// already exiting or gone when the tree is killed) and a long-lived
+    /// child whose pid it reports and whose handle it keeps, so a reported
+    /// pid names that child while the parent runs. It is still starting
+    /// children when it is killed. After [`CHURN`] of each it waits for
+    /// input, keeping its handles.
+    fn churn_parent() -> i32 {
+        let program = std::env::current_exe().expect("own path");
+        let mut held = Vec::new();
+        for _ in 0..CHURN {
+            let _ = Command::new(&program)
+                .env(MODE, "exit")
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn();
+            let Ok(child) = Command::new(&program)
+                .env(MODE, "child")
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+            else {
+                return 4;
+            };
+            let mut out = std::io::stdout().lock();
+            if writeln!(out, "child {}", child.id())
+                .and_then(|()| out.flush())
+                .is_err()
+            {
+                return 5;
+            }
+            held.push(child);
+        }
+        let _ = read_exact_line("never");
+        drop(held);
+        0
+    }
+
+    async fn churn_case() -> Outcome {
+        let mut notes = Vec::new();
+        let program = match std::env::current_exe() {
+            Ok(program) => program,
+            Err(error) => {
+                return Outcome {
+                    verdict: Verdict::Fixture(error.to_string()),
+                    notes,
+                };
+            }
+        };
+        let mut env: Vec<_> = std::env::vars_os().collect();
+        env.push((MODE.into(), "churn-parent".into()));
+        let spec = ProcessSpec {
+            program: program.into_os_string(),
+            args: Vec::new(),
+            cwd: None,
+            env: Some(env),
+            stdin: true,
+        };
+        let mut process = match OwnedProcess::spawn(&spec, None).await {
+            Ok(process) => process,
+            Err(error) => {
+                return Outcome {
+                    verdict: Verdict::Fixture(format!("spawn: {error}")),
+                    notes,
+                };
+            }
+        };
+        let mut retained: Vec<(u32, OwnedHandle)> = Vec::new();
+        let mut settled = false;
+        let mut stdout = process.take_stdout();
+        let verdict = churn_body(&mut process, &mut retained, &mut settled, &mut stdout).await;
+        // Cleanup, on every path, as in `settle_case`.
+        if !settled {
+            process.kill();
+            match tokio::time::timeout(BOUND, process.finish()).await {
+                Ok(Ok(_)) => {}
+                Ok(Err(error)) => notes.push(format!("cleanup settle failed: {error}")),
+                Err(_) => notes.push("cleanup settle did not finish".into()),
+            }
+        }
+        for (pid, child) in retained.drain(..) {
+            if !wait_bounded(child.as_raw_handle()) {
+                // SAFETY: a live handle to a retained child.
+                unsafe {
+                    TerminateProcess(child.as_raw_handle(), 1);
+                }
+                if !wait_bounded(child.as_raw_handle()) {
+                    notes.push(format!("cleanup: retained child {pid} did not exit"));
+                }
+            }
+        }
+        if let Some(mut stdout) = stdout.take() {
+            let mut sink = Vec::new();
+            match tokio::time::timeout(BOUND, (&mut stdout).take(1 << 20).read_to_end(&mut sink))
+                .await
+            {
+                Ok(Ok(_)) => {}
+                Ok(Err(error)) => notes.push(format!("cleanup: output pipe error {error}")),
+                Err(_) => notes.push("cleanup: the output pipe did not end".into()),
+            }
+        }
+        let cleanup_failed = notes.iter().any(|note| note.starts_with("cleanup"));
+        let verdict = match verdict {
+            Verdict::Passed if cleanup_failed => Verdict::Fixture("cleanup".into()),
+            verdict => verdict,
+        };
+        Outcome { verdict, notes }
+    }
+
+    async fn churn_body(
+        process: &mut OwnedProcess,
+        retained: &mut Vec<(u32, OwnedHandle)>,
+        settled: &mut bool,
+        stdout: &mut Option<bake_process::ProcessStdout>,
+    ) -> Verdict {
+        let Some(pipe) = stdout.as_mut() else {
+            return Verdict::Fixture("no stdout".into());
+        };
+        let mut reader = tokio::io::BufReader::new(pipe);
+        while retained.len() < RETAINED {
+            let mut line = String::new();
+            match tokio::time::timeout(BOUND, (&mut reader).take(LINE_LIMIT).read_line(&mut line))
+                .await
+            {
+                Ok(Ok(n)) if n > 0 => {}
+                _ => return Verdict::Fixture("the parent stopped reporting children".into()),
+            }
+            let Some(pid) = line
+                .trim()
+                .strip_prefix("child ")
+                .and_then(|pid| pid.parse::<u32>().ok())
+            else {
+                return Verdict::Fixture(format!("unexpected parent output {line:?}"));
+            };
+            let Some(handle) = open(pid) else {
+                return Verdict::Fixture(format!("OpenProcess({pid}): {}", last_error()));
+            };
+            // The parent holds the child's handle while it runs, so the pid
+            // named that child if the parent is still running now.
+            let parent_running = tokio::select! {
+                biased;
+                _ = process.wait_exit() => false,
+                () = std::future::ready(()) => true,
+            };
+            if !parent_running {
+                return Verdict::Fixture("the parent exited while children were retained".into());
+            }
+            retained.push((pid, handle));
+        }
+        // Killed while it is still starting children, with exiting ones
+        // among them, as an MCP shutdown or a tool abort does.
+        process.kill();
+        let report = match tokio::time::timeout(BOUND, process.finish()).await {
+            Ok(Ok(report)) => report,
+            Ok(Err(error)) => return Verdict::Fixture(format!("finish: {error}")),
+            Err(_) => return Verdict::Incomplete(format!("finish did not complete in {BOUND:?}")),
+        };
+        *settled = true;
+        if report.tree != TreeState::Gone {
+            return Verdict::Failed(format!("the killed tree settled as {:?}", report.tree));
+        }
+        // Each checked once, with no wait.
+        let mut unsignalled = Vec::new();
+        for (pid, handle) in retained.iter() {
+            match signalled(handle.as_raw_handle()) {
+                Some(true) => {}
+                Some(false) => unsignalled.push(*pid),
+                None => return Verdict::Fixture("a retained handle could not be checked".into()),
+            }
+        }
+        if unsignalled.is_empty() {
+            Verdict::Passed
+        } else {
+            Verdict::Failed(format!(
+                "finish reported Gone with retained children {unsignalled:?} unsignalled"
+            ))
         }
     }
 }

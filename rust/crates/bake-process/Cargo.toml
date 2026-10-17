@@ -16,12 +16,12 @@ tokio = { workspace = true, features = ["rt", "time", "macros", "process", "io-u
 libc.workspace = true
 tokio = { workspace = true, features = ["signal"] }
 
-# `CreateProcessW` with a Job and handle list, the kill-on-close Job, and
-# overlapped named pipes with random names.
+# `CreateProcessW` with a Job and handle list, the kill-on-close Job and its
+# completion port, and overlapped named pipes with random names.
 [target.'cfg(windows)'.dependencies]
 getrandom.workspace = true
 tokio = { workspace = true, features = ["net"] }
-windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Pipes", "Win32_System_Threading"] }
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_System_IO", "Win32_System_JobObjects", "Win32_System_Pipes", "Win32_System_Threading"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "time", "macros", "io-util"] }

@@ -332,7 +332,7 @@ async fn gone(observed: &Observed, what: &str) {
 #[cfg(unix)]
 async fn exited(observed: &Observed, what: &str) {
     bounded(&format!("{what} ({}) to exit", observed.pid()), async {
-        while observed.is_running() {
+        while !observed.has_exited() {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     })

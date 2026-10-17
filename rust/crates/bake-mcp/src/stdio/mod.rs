@@ -62,8 +62,11 @@
 //! connected before creation. A bare program name is looked up on the
 //! command's own `PATH`, never in the current directory, and batch files are
 //! refused. Windows has no graceful termination signal: after the grace for
-//! standard input the Job is terminated, and it is awaited until it has no
-//! active process.
+//! standard input the Job is terminated, and it is awaited until every
+//! process the Job reported as added is observed ended by handle and their
+//! number matches the Job's lifetime count (`bake-process`'s Job account);
+//! an account that falls short never settles, so the shutdown stays
+//! incomplete.
 //!
 //! A descendant that leaves the group (`setsid`, `setpgid`) or the Job
 //! escapes cleanup; [`StdioProcess::shutdown`] bounds its wait for such a
@@ -315,7 +318,8 @@ pub enum Stop {
 pub enum TreeEnd {
     /// The tree was killed after the server exited and was observed with no
     /// process left in it before the server was reaped: no member of its
-    /// process group (Unix) or no active process in its Job (Windows). A
+    /// process group (Unix), or every process its Job ever associated named
+    /// and its handle observed signalled (Windows). A
     /// descendant that left the group or the Job is not in the tree.
     Empty,
     /// Unix: the leader was reaped by someone else, so its group was not

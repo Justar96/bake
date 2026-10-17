@@ -23,6 +23,13 @@
 //! signal re-checks the start time first, and a process that exits and whose
 //! pid is reused between that check and the signal could be signalled. That
 //! window is the macOS limitation of this fixture.
+//!
+//! A state that cannot be read (a failed `/proc` read other than the
+//! process being gone, `proc_pidinfo` failing with anything but `ESRCH`, as
+//! XNU's security policy may with `EPERM`, a failed handle wait) is
+//! [`sys::State::Unknown`]: never exited, never running, so it neither
+//! passes an exit assertion, verifies a descendant, nor authorizes a signal,
+//! and cleanup reports it as left.
 
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
@@ -106,6 +113,15 @@ impl Observed {
         self.identity.state() == sys::State::Reaped
     }
 
+    /// Exited, reaped or not; an unreadable state is not an exit.
+    #[cfg(unix)]
+    pub fn has_exited(&self) -> bool {
+        matches!(
+            self.identity.state(),
+            sys::State::Zombie | sys::State::Reaped
+        )
+    }
+
     /// Exited but not yet reaped (Unix).
     #[cfg(unix)]
     pub fn is_zombie(&self) -> bool {
@@ -143,7 +159,10 @@ impl Observed {
         let mut reaped_here = false;
         loop {
             let done = match self.role {
-                Role::Child => !self.is_running(),
+                Role::Child => !matches!(
+                    self.identity.state(),
+                    sys::State::Running | sys::State::Unknown
+                ),
                 Role::Descendant => {
                     #[cfg(unix)]
                     {
@@ -215,24 +234,46 @@ mod sys {
         Running,
         Zombie,
         Reaped,
+        /// The state could not be read.
+        Unknown,
     }
 
     pub struct Identity {
         pid: u32,
         pidfd: OwnedFd,
         /// `starttime` from `/proc/<pid>/stat`, read once the pidfd is open.
-        start: Option<u64>,
+        start: io::Result<Option<u64>>,
     }
 
-    fn start_time(pid: u32) -> Option<u64> {
-        let stat = std::fs::read(format!("/proc/{pid}/stat")).ok()?;
-        let close = stat.iter().rposition(|&byte| byte == b')')?;
+    /// The pid's start time; `Ok(None)` when no process has the pid, an
+    /// error when that cannot be read.
+    fn start_time(pid: u32) -> io::Result<Option<u64>> {
+        let stat = match std::fs::read(format!("/proc/{pid}/stat")) {
+            Ok(stat) => stat,
+            Err(error)
+                if error.kind() == io::ErrorKind::NotFound
+                    || error.raw_os_error() == Some(libc::ESRCH) =>
+            {
+                return Ok(None);
+            }
+            Err(error) => return Err(error),
+        };
+        let malformed = || io::Error::other("malformed /proc stat");
+        let close = stat
+            .iter()
+            .rposition(|&byte| byte == b')')
+            .ok_or_else(malformed)?;
         let fields: Vec<&[u8]> = stat[close + 1..]
             .split(u8::is_ascii_whitespace)
             .filter(|field| !field.is_empty())
             .collect();
         // Field 22, counted from the pid; the state is field 3.
-        std::str::from_utf8(fields.get(19)?).ok()?.parse().ok()
+        let field = fields.get(19).ok_or_else(malformed)?;
+        std::str::from_utf8(field)
+            .ok()
+            .and_then(|field| field.parse().ok())
+            .map(Some)
+            .ok_or_else(malformed)
     }
 
     impl Identity {
@@ -253,25 +294,36 @@ mod sys {
             })
         }
 
-        fn exited(&self) -> bool {
+        /// Whether the pidfd reports an exit; `None` when poll fails.
+        fn exited(&self) -> Option<bool> {
             let mut poll = libc::pollfd {
                 fd: self.pidfd.as_raw_fd(),
                 events: libc::POLLIN,
                 revents: 0,
             };
             // SAFETY: one valid pollfd, no wait.
-            unsafe { libc::poll(&mut poll, 1, 0) == 1 }
+            match unsafe { libc::poll(&mut poll, 1, 0) } {
+                0 => Some(false),
+                1 => Some(true),
+                _ => None,
+            }
         }
 
         pub fn state(&self) -> State {
-            if !self.exited() {
-                return State::Running;
+            match self.exited() {
+                None => return State::Unknown,
+                Some(false) => return State::Running,
+                Some(true) => {}
             }
             // Exited; a zombie keeps its `/proc` entry and start time.
-            if self.start.is_some() && start_time(self.pid) == self.start {
-                State::Zombie
-            } else {
-                State::Reaped
+            let Ok(Some(start)) = self.start else {
+                return State::Unknown;
+            };
+            match start_time(self.pid) {
+                Ok(Some(now)) if now == start => State::Zombie,
+                // Gone, or the pid names a later process.
+                Ok(_) => State::Reaped,
+                Err(_) => State::Unknown,
             }
         }
 
@@ -320,6 +372,8 @@ mod sys {
         Running,
         Zombie,
         Reaped,
+        /// The state could not be read.
+        Unknown,
     }
 
     pub struct Identity {
@@ -327,12 +381,15 @@ mod sys {
         start: (u64, u64),
     }
 
-    /// The process's start time and status, or `None` if no such process.
-    fn info(pid: u32) -> Option<((u64, u64), u32)> {
-        let raw = libc::c_int::try_from(pid).ok()?;
+    /// The process's start time and status; `Ok(None)` when no process has
+    /// the pid (`ESRCH`), an error for any other failure, which may be
+    /// XNU's security policy (`EPERM`) refusing a process that exists.
+    fn info(pid: u32) -> io::Result<Option<((u64, u64), u32)>> {
+        let raw = libc::c_int::try_from(pid).map_err(|_| io::Error::other("pid"))?;
         // SAFETY: a zeroed struct is valid output space.
         let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
-        let size = libc::c_int::try_from(size_of::<libc::proc_bsdinfo>()).ok()?;
+        let size = libc::c_int::try_from(size_of::<libc::proc_bsdinfo>())
+            .map_err(|_| io::Error::other("size"))?;
         // SAFETY: `info` has the size passed.
         let written = unsafe {
             libc::proc_pidinfo(
@@ -344,28 +401,41 @@ mod sys {
                 size,
             )
         };
-        (written == size).then_some((
-            (info.pbi_start_tvsec, info.pbi_start_tvusec),
-            info.pbi_status,
-        ))
+        if written == size {
+            return Ok(Some((
+                (info.pbi_start_tvsec, info.pbi_start_tvusec),
+                info.pbi_status,
+            )));
+        }
+        let error = io::Error::last_os_error();
+        if written <= 0 && error.raw_os_error() == Some(libc::ESRCH) {
+            return Ok(None);
+        }
+        Err(if written <= 0 {
+            error
+        } else {
+            io::Error::other("short proc_pidinfo record")
+        })
     }
 
     impl Identity {
         pub fn open(pid: u32) -> io::Result<Self> {
-            let (start, _) = info(pid).ok_or_else(|| io::Error::other("no such process"))?;
+            let (start, _) = info(pid)?.ok_or_else(|| io::Error::other("no such process"))?;
             Ok(Self { pid, start })
         }
 
         pub fn state(&self) -> State {
             match info(self.pid) {
-                Some((start, status)) if start == self.start => {
+                Ok(Some((start, status))) if start == self.start => {
                     if status == SZOMB {
                         State::Zombie
                     } else {
                         State::Running
                     }
                 }
-                _ => State::Reaped,
+                // Gone, or the pid names a later process.
+                Ok(_) => State::Reaped,
+                Err(_) => State::Unknown,
             }
         }
 
@@ -405,7 +475,7 @@ mod sys {
     use std::io;
     use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 
-    use windows_sys::Win32::Foundation::WAIT_TIMEOUT;
+    use windows_sys::Win32::Foundation::{WAIT_OBJECT_0, WAIT_TIMEOUT};
     use windows_sys::Win32::System::Threading::{
         OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
         TerminateProcess, WaitForSingleObject,
@@ -416,6 +486,8 @@ mod sys {
         Running,
         /// Windows has no zombie: an exited process counts as reaped.
         Reaped,
+        /// The handle's state could not be read.
+        Unknown,
     }
 
     /// A process handle, which keeps the pid from naming another process.
@@ -444,10 +516,10 @@ mod sys {
 
         pub fn state(&self) -> State {
             // SAFETY: a live handle; a zero timeout only checks.
-            if unsafe { WaitForSingleObject(self.handle.as_raw_handle(), 0) } == WAIT_TIMEOUT {
-                State::Running
-            } else {
-                State::Reaped
+            match unsafe { WaitForSingleObject(self.handle.as_raw_handle(), 0) } {
+                WAIT_TIMEOUT => State::Running,
+                WAIT_OBJECT_0 => State::Reaped,
+                _ => State::Unknown,
             }
         }
 
