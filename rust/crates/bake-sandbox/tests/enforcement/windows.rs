@@ -607,6 +607,22 @@ impl OwnedPid {
         !signaled_within(self.0.as_raw_handle(), Duration::ZERO)
     }
 
+    /// Terminates the process alone, with exit code 1; its end is observed
+    /// separately, never assumed.
+    fn terminate(&self) {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::System::Threading::TerminateProcess;
+        // SAFETY: a live handle opened with PROCESS_TERMINATE.
+        let ok = unsafe { TerminateProcess(self.0.as_raw_handle(), 1) };
+        assert_ne!(
+            ok,
+            0,
+            "TerminateProcess({}): {}",
+            self.1,
+            std::io::Error::last_os_error()
+        );
+    }
+
     fn exited_within(&self, budget: Duration) -> bool {
         use std::os::windows::io::AsRawHandle;
         signaled_within(self.0.as_raw_handle(), budget)

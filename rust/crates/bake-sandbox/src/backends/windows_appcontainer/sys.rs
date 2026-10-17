@@ -2,9 +2,11 @@
 //! failure before the resume returns an error, and the command never runs
 //! outside its AppContainer and Job.
 //!
-//! The DACL, token-query, Job, attribute-list, handle, and environment
-//! helpers are the restricted-token runner's (`windows_acl::sys`). The only
-//! `unsafe` code is the FFI calls, each with its contract.
+//! The Job is `bake_process::windows_job::Job`; its pumped wait and its
+//! settle within a budget, and the DACL, token-query, attribute-list,
+//! handle, and environment helpers, are the restricted-token runner's
+//! (`windows_acl::sys`). The only `unsafe` code is the FFI calls, each with
+//! its contract.
 
 use std::ffi::{OsStr, OsString, c_void};
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
@@ -467,10 +469,16 @@ pub(super) fn run(cli: &Cli) -> i32 {
                 eprintln!("{RUNNER_SIGNATURE}: cleanup: {failure}");
             }
         }
-        // A process that may still run must not lose its storage.
+        // A process that may still run must not lose its storage. The
+        // profile, its deny ACEs, and the grants stay; the Job's last handle
+        // closes with this process, which (kill-on-close) ends any member.
         Some(profile) => eprintln!(
-            "{RUNNER_SIGNATURE}: cleanup: AppContainer profile {} is left in place: the confined tree's exit was not confirmed",
-            profile.moniker
+            "{RUNNER_SIGNATURE}: cleanup: AppContainer profile {} ({}) is left in place: the confined tree's exit was not confirmed",
+            profile.moniker,
+            profile.root.as_deref().map_or_else(
+                || "root unresolved".to_owned(),
+                |root| root.display().to_string()
+            )
         ),
         None => {}
     }
@@ -538,9 +546,14 @@ fn run_inner(cli: &Cli, profile: &mut Option<OwnedProfile>, settled: &mut bool) 
             Ok(())
         }
     };
+    // Created, with its completion port, before the command: a failure here
+    // starts nothing, so the profile is deleted.
     let job = Job::new().map_err(|error| {
         format!("cannot create the kill-on-close Job and its completion port: {error}")
     })?;
+    // From here a member may exist: the profile is deleted only when the
+    // Job's account settles, whatever ended the command.
+    *settled = false;
     let outcome = spawn(
         package,
         &mut attributes,
@@ -550,6 +563,8 @@ fn run_inner(cli: &Cli, profile: &mut Option<OwnedProfile>, settled: &mut bool) 
         &before_resume,
     )
     .and_then(|process| wait_for_exit(&job, &process));
+    // Every path, a failed start or resume included, terminates the Job and
+    // must prove each member it ever had ended.
     let drained = terminate_and_drain(&job);
     *settled = drained.is_ok();
     match (outcome, drained) {
@@ -673,7 +688,8 @@ fn spawn(
         }
     });
     if let Err(detail) = resumed {
-        // SAFETY: a live process handle; the Job's drain also ends it.
+        // SAFETY: a live process handle. It stays a Job member the settle
+        // must see end; the Job's termination also ends it.
         unsafe {
             TerminateProcess(process.as_raw_handle(), RUNNER_FAILURE_EXIT as u32);
         }

@@ -79,12 +79,20 @@
 //!   anything there. The user's and `SYSTEM`'s ACEs are kept, and nothing
 //!   outside the run's own profile root is touched. Under
 //!   `workspace-write` the storage stays writable, as `TEMP`.
-//! - **Deletion after settlement.** Once the Job is proved empty, the
-//!   runner calls `DeleteAppContainerProfile` and checks that the profile
-//!   root is gone. When the drain cannot prove the tree gone, the profile
-//!   is left in place and reported, never removed under a live process;
-//!   failed starts, a failed resume, and normal exits all reach this
-//!   cleanup.
+//! - **Deletion after settlement.** The Job is `bake-process`'s
+//!   [`windows_job::Job`](bake_process::windows_job::Job), shared with the
+//!   restricted-token runner: its account is pumped while the command runs
+//!   and, after the command's exit, `terminate_and_settle` must report every
+//!   member it ever had ended (each held by handle until signalled, never
+//!   read from the active count) within 30 s. Only then does the runner
+//!   call `DeleteAppContainerProfile` and check that the profile root is
+//!   gone. A pending or contradicted account leaves the profile, its deny
+//!   ACEs, and the grants in place and reports why, never removing storage
+//!   under a live or unknown member. A failed start, a failed deny pass or
+//!   resume while the command is suspended (the suspended process is
+//!   terminated and stays a member the settle must see end), and a normal
+//!   exit all reach this cleanup; only a failure before the Job exists,
+//!   when no process can, skips the settle.
 //!
 //! Every workspace and read grant merges one explicit ACE into the DACL
 //! read under the per-path lock, keeping every other ACE. No stale DACL
@@ -111,9 +119,9 @@
 //!    that Job (`PROC_THREAD_ATTRIBUTE_JOB_LIST`), inheriting only its
 //!    standard handles, with `TEMP` and `TMP` set to the profile's
 //!    `AC\Temp`; under `read-only` it repeats the deny pass, then resumes.
-//! 5. Waits for the command, terminates the Job, waits until it reports no
-//!    active process, deletes the profile, and exits with the command's
-//!    status.
+//! 5. Waits for the command while pumping the Job's account, terminates
+//!    the Job and settles its account, deletes the profile, and exits with
+//!    the command's status.
 //!
 //! A failure before the resume prints one `windows-appcontainer-run: ` line
 //! and exits [`RUNNER_FAILURE_EXIT`] without running the command; there is
@@ -158,10 +166,10 @@
 //!   stops at junctions, symbolic links, and other reparse points inside a
 //!   root, and which descendants it rewrites, is unproven; a descendant
 //!   owned by another principal still receives the inherited ACE.
-//! - **Drain completeness.** The shared `terminate_and_drain` returns as
-//!   soon as the Job counts no active process; it waits on member handles
-//!   only while that count is nonzero. Profile deletion relies on that count
-//!   until native evidence shows no member can outlive it.
+//! - **Settlement under AppContainer.** The shared Job's account passed
+//!   natively for the restricted-token runner (PR 245); this runner's use
+//!   of it, including the suspended-start failure paths, has not run
+//!   natively.
 //!
 //! # Known limits and unverified behavior
 //!

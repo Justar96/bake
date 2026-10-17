@@ -19,8 +19,10 @@
 //! `appcontainer-blocker:` lines for the same reason.
 //!
 //! Each case owns its roots ([`user_scratch`], removed on drop) and its
-//! processes ([`Owned`], [`OwnedPid`], and the runner's own Job, killed and
-//! awaited on drop). Every run creates its own AppContainer profile under
+//! processes: every runner it starts is a [`Started`], owned through
+//! `bake_process::OwnedProcess` in a Job that nests the runner's own, and
+//! settled only when that Job's account shows every member ended; pids it
+//! learns from a handshake are pinned as [`OwnedPid`]s. Every run creates its own AppContainer profile under
 //! `%LOCALAPPDATA%\Packages`. Each case's runs pass its [`Fixture`]'s
 //! random [`ProfileTag`], so their profiles are named under it and no other
 //! process's profile is listed, counted, or deleted here; the cases still
@@ -34,7 +36,8 @@ use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use bake_sandbox::backends::windows_appcontainer::{
@@ -42,12 +45,12 @@ use bake_sandbox::backends::windows_appcontainer::{
     READ_EXECUTE, WORKSPACE_WRITE_MASK,
 };
 use bake_sandbox::backends::{LocalProvider, Runner};
-use bake_sandbox::{Enforcement, SandboxMode, SandboxPolicy};
+use bake_sandbox::{ConfinedCommand, Enforcement, SandboxMode, SandboxPolicy};
 
 use super::mechanisms::{acl, seed_without_delete, token};
 use super::{
-    BOUND, DENIED, Owned, OwnedPid, PROBE_ARG, Run, Scratch, assert_denied, assert_ok, harness,
-    is_image, mklink_junction, run_argv, runtime, signaled_within, text, user_scratch, win32,
+    BOUND, DENIED, OwnedPid, PROBE_ARG, Run, Scratch, assert_denied, assert_ok, harness, is_image,
+    mklink_junction, runtime, signaled_within, text, user_scratch, win32,
 };
 
 pub fn tests() -> Vec<harness::Test> {
@@ -109,6 +112,10 @@ pub fn tests() -> Vec<harness::Test> {
             "a_shared_profile_shares_its_temp_directory",
             a_shared_profile_shares_its_temp_directory,
         ),
+        (
+            "concurrent_fixtures_see_only_their_own_profiles",
+            concurrent_fixtures_see_only_their_own_profiles,
+        ),
         ("compatibility_observations", compatibility_observations),
     ];
     scenarios
@@ -133,13 +140,18 @@ pub fn tests() -> Vec<harness::Test> {
 /// never listed, counted, or deleted here. Where a run reports its
 /// profile, cases also check the exact name.
 ///
-/// Dropped last in each case, after its processes are killed and awaited,
-/// the fixture fails the case if a profile under its tag remains, and
-/// deletes each one, assertion failures included.
+/// Every runner it starts is a [`Started`], owned with its whole tree.
+/// Created first in each case, the fixture is dropped last, after every
+/// `Started` has settled. It then fails the case if a profile under its tag
+/// remains, and deletes each one, assertion failures included, but only
+/// when every run's tree was shown ended; otherwise it keeps them and
+/// reports them, never removing storage under a member that may live.
 struct Fixture {
     bin: Scratch,
     probe: PathBuf,
     tag: ProfileTag,
+    /// Set by a [`Started`] whose tree's end was not shown.
+    unsettled: Arc<AtomicBool>,
 }
 
 impl Fixture {
@@ -153,7 +165,12 @@ impl Fixture {
         let probe = bin.join("probe.exe");
         std::fs::copy(std::env::current_exe().expect("exe"), &probe)
             .expect("copy the test binary into the read root");
-        Self { bin, probe, tag }
+        Self {
+            bin,
+            probe,
+            tag,
+            unsettled: Arc::new(AtomicBool::new(false)),
+        }
     }
 
     /// The bin root, then `reads`, readable; `network` granted.
@@ -194,13 +211,50 @@ impl Fixture {
         ops: &[&str],
     ) -> Run {
         let argv = self.argv(ops);
-        let refs: Vec<&str> = argv.iter().map(String::as_str).collect();
-        run_argv(
-            &self.provider(reads, network),
-            &refs,
-            policy,
-            &policy.workspace_root,
-        )
+        self.run_argv(&self.provider(reads, network), &argv, policy)
+    }
+
+    /// Confines `argv` through `provider` under `policy` and runs it in the
+    /// workspace to its end.
+    fn run_argv(&self, provider: &LocalProvider, argv: &[String], policy: &SandboxPolicy) -> Run {
+        let (command, started) = self.start_with(provider, argv, policy, false);
+        started.output(command)
+    }
+
+    /// Confines `ops` under `policy`, with only the bin root granted, and
+    /// starts it in the workspace, stdin piped when `stdin`.
+    fn start(&self, policy: &SandboxPolicy, ops: &[&str], stdin: bool) -> Started {
+        self.start_with(&self.provider(&[], &[]), &self.argv(ops), policy, stdin)
+            .1
+    }
+
+    fn start_with(
+        &self,
+        provider: &LocalProvider,
+        argv: &[String],
+        policy: &SandboxPolicy,
+        stdin: bool,
+    ) -> (ConfinedCommand, Started) {
+        let argv: Vec<OsString> = argv.iter().map(OsString::from).collect();
+        let command = runtime()
+            .block_on(bake_sandbox::SandboxProvider::confine(
+                provider, &argv, policy,
+            ))
+            .expect("confine");
+        let env = (!command.env.is_empty()).then(|| {
+            std::env::vars_os()
+                .chain(command.env.iter().cloned())
+                .collect()
+        });
+        let spec = bake_process::ProcessSpec {
+            program: command.program.clone(),
+            args: command.args.clone(),
+            cwd: Some(policy.workspace_root.clone()),
+            env,
+            stdin,
+        };
+        let started = Started::spawn(&spec, self.unsettled.clone());
+        (command, started)
     }
 
     /// The runner's own arguments for a direct start: `--profile-tag` and
@@ -212,17 +266,47 @@ impl Fixture {
     /// The runner started directly in `cwd` with this fixture's tag, `args`
     /// before `--`, and `ops` after. The command inherits `cwd`, which its
     /// container must be able to read, so callers pass the workspace.
-    fn runner(&self, cwd: &Path, args: &[String], ops: &[&str]) -> std::process::Output {
-        std::process::Command::new(std::env::current_exe().expect("exe"))
-            .current_dir(cwd)
-            .arg(HELPER_ARG)
-            .args(args)
-            .args(self.tag_args())
-            .args(["--read".to_owned(), text(&self.bin.0), "--".to_owned()])
-            .args(self.argv(ops))
-            .stdin(Stdio::null())
-            .output()
-            .expect("runner")
+    fn start_runner(&self, cwd: &Path, args: &[String], ops: &[&str], stdin: bool) -> Started {
+        self.start_runner_command(cwd, args, &self.argv(ops), stdin)
+    }
+
+    /// The runner started directly in `cwd` with this fixture's tag, `args`
+    /// and the bin root's read grant before `--`, and `command` after.
+    fn start_runner_command(
+        &self,
+        cwd: &Path,
+        args: &[String],
+        command: &[String],
+        stdin: bool,
+    ) -> Started {
+        let mut argv: Vec<OsString> = vec![HELPER_ARG.into()];
+        argv.extend(args.iter().map(OsString::from));
+        argv.extend(self.tag_args().iter().map(OsString::from));
+        argv.extend([
+            "--read".into(),
+            self.bin.0.clone().into_os_string(),
+            "--".into(),
+        ]);
+        argv.extend(command.iter().map(OsString::from));
+        let spec = bake_process::ProcessSpec {
+            program: std::env::current_exe().expect("exe").into_os_string(),
+            args: argv,
+            cwd: Some(cwd.to_path_buf()),
+            env: None,
+            stdin,
+        };
+        Started::spawn(&spec, self.unsettled.clone())
+    }
+
+    /// [`Self::start_runner`] run to its end: its exit code and output.
+    fn runner(&self, cwd: &Path, args: &[String], ops: &[&str]) -> Ended {
+        let ended = self.start_runner(cwd, args, ops, false).settle();
+        assert!(
+            ended.code.is_some(),
+            "the runner did not finish: {}",
+            ended.stderr
+        );
+        ended
     }
 
     /// The profiles under this fixture's tag: those its runs created and
@@ -329,6 +413,19 @@ impl Fixture {
 impl Drop for Fixture {
     fn drop(&mut self) {
         let left = self.profiles();
+        if self.unsettled.load(Ordering::SeqCst) {
+            // A run's tree was not shown ended: its profile may still be in
+            // use, so nothing is deleted.
+            let error = format!(
+                "a run's tree was not shown ended; profiles under tag {} kept: {left:?}",
+                self.tag
+            );
+            if std::thread::panicking() {
+                eprintln!("{error}");
+                return;
+            }
+            panic!("{error}");
+        }
         let failures: Vec<String> = left
             .iter()
             .filter_map(|name| self.delete_profile(name).err())
@@ -340,6 +437,230 @@ impl Drop for Fixture {
             "runs left AppContainer profiles under tag {}, now deleted: {left:?} {failures:?}",
             self.tag
         );
+        if std::thread::panicking() {
+            eprintln!("{error}");
+        } else {
+            panic!("{error}");
+        }
+    }
+}
+
+/// One runner process a [`Fixture`] started, owned through
+/// `bake_process::OwnedProcess`. It is born in a kill-on-close Job of its
+/// own, which nests the runner's Job, so every process of the run, the
+/// confined command and its descendants included, is a member of it.
+///
+/// Settling it ([`Started::settle`], or its drop, a panic included) waits
+/// within [`BOUND`] for the runner's own exit and the pipes' end, then kills
+/// that Job and waits within [`BOUND`] until its account shows every member
+/// ended (`TreeState::Gone`): observed, never assumed from a kill. When that
+/// cannot be shown, it marks its fixture, which then keeps every profile
+/// under its tag instead of deleting storage a member may still use. Its
+/// pipes are read on its own current-thread runtime; no reader task or
+/// thread outlives it.
+struct Started {
+    runtime: tokio::runtime::Runtime,
+    process: Option<bake_process::OwnedProcess>,
+    stdin: Option<bake_process::ProcessStdin>,
+    stdout: Option<tokio::io::BufReader<bake_process::ProcessStdout>>,
+    stderr: Option<bake_process::ProcessStderr>,
+    unsettled: Arc<AtomicBool>,
+}
+
+/// What a settled [`Started`] reported: its exit code when it exited by
+/// itself within the bound, and the rest of its output.
+struct Ended {
+    code: Option<i32>,
+    stdout: String,
+    stderr: String,
+}
+
+/// The most one output stream a case reads keeps.
+const OUTPUT_CAP: u64 = 1024 * 1024;
+
+impl Started {
+    fn spawn(spec: &bake_process::ProcessSpec, unsettled: Arc<AtomicBool>) -> Self {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let mut process = runtime
+            .block_on(async {
+                tokio::time::timeout(BOUND, bake_process::OwnedProcess::spawn(spec, None)).await
+            })
+            .expect("spawn within the bound")
+            .expect("spawn the runner");
+        Self {
+            stdin: process.take_stdin(),
+            stdout: process.take_stdout().map(tokio::io::BufReader::new),
+            stderr: process.take_stderr(),
+            process: Some(process),
+            runtime,
+            unsettled,
+        }
+    }
+
+    /// The runner's pid, pinned while this owns it.
+    fn pid(&self) -> u32 {
+        self.process.as_ref().expect("owned").pid()
+    }
+
+    /// The next stdout line, without its line break, within [`BOUND`].
+    /// Panics at EOF or the bound, after settling.
+    fn line(&mut self) -> String {
+        use tokio::io::{AsyncBufReadExt, AsyncReadExt};
+        let stdout = self.stdout.as_mut().expect("piped stdout");
+        let mut line = String::new();
+        let read = self.runtime.block_on(async {
+            tokio::time::timeout(BOUND, stdout.take(OUTPUT_CAP).read_line(&mut line)).await
+        });
+        match read {
+            Ok(Ok(n)) if n > 0 => line.trim_end_matches(['\r', '\n']).to_owned(),
+            other => {
+                let ended = self.settle();
+                panic!(
+                    "no line from the run ({other:?}): exit={:?} stdout={:?} stderr={:?}",
+                    ended.code, ended.stdout, ended.stderr
+                );
+            }
+        }
+    }
+
+    /// Lines up to and including `last`, all within [`BOUND`]. Panics at
+    /// EOF or the bound, after settling.
+    fn lines_until(&mut self, last: &str) -> Vec<String> {
+        use tokio::io::{AsyncBufReadExt, AsyncReadExt};
+        let stdout = self.stdout.as_mut().expect("piped stdout");
+        let mut lines = Vec::new();
+        let read = self.runtime.block_on(async {
+            tokio::time::timeout(BOUND, async {
+                loop {
+                    let mut line = String::new();
+                    if stdout.take(OUTPUT_CAP).read_line(&mut line).await? == 0 {
+                        return Ok::<bool, std::io::Error>(false);
+                    }
+                    let line = line.trim_end_matches(['\r', '\n']).to_owned();
+                    let done = line == last;
+                    lines.push(line);
+                    if done {
+                        return Ok(true);
+                    }
+                }
+            })
+            .await
+        });
+        if !matches!(read, Ok(Ok(true))) {
+            let ended = self.settle();
+            panic!(
+                "the run did not print {last:?} ({read:?}): lines={lines:?} exit={:?} stderr={:?}",
+                ended.code, ended.stderr
+            );
+        }
+        lines
+    }
+
+    /// Closes the runner's stdin.
+    fn close_stdin(&mut self) {
+        let _guard = self.runtime.enter();
+        drop(self.stdin.take());
+    }
+
+    /// Reads the rest of both streams until EOF, waits for the runner's own
+    /// exit, then kills its Job and requires its account to settle, all
+    /// within [`BOUND`] each. Panics, after marking the fixture, when the
+    /// tree's end is not shown.
+    fn settle(&mut self) -> Ended {
+        use tokio::io::AsyncReadExt;
+        let _guard = self.runtime.enter();
+        drop(self.stdin.take());
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let stdout = self.stdout.take();
+        let stderr = self.stderr.take();
+        let process = self.process.as_mut().expect("not yet settled");
+        let (exited, settled) = self.runtime.block_on(async {
+            let _ = tokio::time::timeout(BOUND, async {
+                let read_out = async {
+                    if let Some(stdout) = stdout {
+                        let _ = stdout.take(OUTPUT_CAP).read_to_end(&mut out).await;
+                    }
+                };
+                let read_err = async {
+                    if let Some(stderr) = stderr {
+                        let _ = stderr.take(OUTPUT_CAP).read_to_end(&mut err).await;
+                    }
+                };
+                tokio::join!(read_out, read_err);
+            })
+            .await;
+            let exited = matches!(
+                tokio::time::timeout(BOUND, process.wait_exit()).await,
+                Ok(Ok(()))
+            );
+            process.kill();
+            (exited, tokio::time::timeout(BOUND, process.finish()).await)
+        });
+        let ended = |code| Ended {
+            code,
+            stdout: String::from_utf8_lossy(&out).into_owned(),
+            stderr: String::from_utf8_lossy(&err).into_owned(),
+        };
+        match settled {
+            Ok(Ok(settled)) if settled.tree == bake_process::TreeState::Gone => {
+                self.process = None;
+                ended(exited.then(|| settled.status.code()).flatten())
+            }
+            other => {
+                self.unsettled.store(true, Ordering::SeqCst);
+                let ended = ended(None);
+                panic!(
+                    "the run's Job did not settle within {BOUND:?} ({other:?}): stdout={:?} stderr={:?}",
+                    ended.stdout, ended.stderr
+                );
+            }
+        }
+    }
+
+    /// [`Self::settle`] for a run that must exit by itself: its result as a
+    /// [`Run`] of `command`.
+    fn output(mut self, command: ConfinedCommand) -> Run {
+        let ended = self.settle();
+        assert!(
+            ended.code.is_some(),
+            "the confined command did not finish within {BOUND:?}: stdout={:?} stderr={:?}",
+            ended.stdout,
+            ended.stderr
+        );
+        Run {
+            command,
+            code: ended.code,
+            stdout: ended.stdout,
+            stderr: ended.stderr,
+        }
+    }
+}
+
+impl Drop for Started {
+    fn drop(&mut self) {
+        if self.process.is_none() {
+            return;
+        }
+        let _guard = self.runtime.enter();
+        let process = self.process.as_mut().expect("owned");
+        drop(self.stdin.take());
+        drop(self.stdout.take());
+        drop(self.stderr.take());
+        process.kill();
+        let settled = self
+            .runtime
+            .block_on(async { tokio::time::timeout(BOUND, process.finish()).await });
+        if matches!(&settled, Ok(Ok(settled)) if settled.tree == bake_process::TreeState::Gone) {
+            self.process = None;
+            return;
+        }
+        // Dropped here, under the runtime: the owner kills the tree again.
+        self.process = None;
+        self.unsettled.store(true, Ordering::SeqCst);
+        let error = format!("a run's Job did not settle within {BOUND:?}: {settled:?}");
         if std::thread::panicking() {
             eprintln!("{error}");
         } else {
@@ -670,27 +991,12 @@ fn each_run_gets_a_private_temp_directory() {
     let fixture = Fixture::new();
     let workspace = user_scratch("ac-ws");
     let policy = ww(&workspace);
-    let argv: Vec<OsString> = fixture
-        .argv(&["appcontainer", "write-profile-temp-and-wait"])
-        .into_iter()
-        .map(OsString::from)
-        .collect();
-    let command = runtime()
-        .block_on(bake_sandbox::SandboxProvider::confine(
-            &fixture.provider(&[], &[]),
-            &argv,
-            &policy,
-        ))
-        .expect("confine");
-    let mut a = Owned::spawn(
-        std::process::Command::new(&command.program)
-            .args(&command.args)
-            .current_dir(&workspace.0)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null()),
+    let mut a = fixture.start(
+        &policy,
+        &["appcontainer", "write-profile-temp-and-wait"],
+        true,
     );
-    let held = PathBuf::from(a.first_line().trim());
+    let held = PathBuf::from(a.line());
     let a_temp = held.parent().expect("A's TEMP").to_path_buf();
     let a_root = a_temp
         .parent()
@@ -737,9 +1043,9 @@ fn each_run_gets_a_private_temp_directory() {
     let c_root = fixture.run_temp(&fixture.run(&policy, &["mechanism", "env-pair"]));
     assert!(!c_root.exists(), "{} must be deleted", c_root.display());
     assert!(a_root.exists(), "A's profile must outlive B and C");
-    drop(a.0.stdin.take());
-    let status = a.wait_within(BOUND).expect("A exits within the bound");
-    assert!(status.success(), "{status}");
+    a.close_stdin();
+    let ended = a.settle();
+    assert_eq!(ended.code, Some(0), "A: {}", ended.stderr);
     assert!(!a_root.exists(), "{} must be deleted", a_root.display());
 }
 
@@ -866,20 +1172,18 @@ fn descendants_end_with_the_command_and_cannot_break_away() {
 fn a_killed_runner_takes_its_tree() {
     let fixture = Fixture::new();
     let workspace = user_scratch("ac-ws");
-    let mut runner = Owned::spawn(
-        std::process::Command::new(std::env::current_exe().expect("exe"))
-            .arg(HELPER_ARG)
-            .args(["--workspace", &text(&workspace.0)])
-            .args(fixture.tag_args())
-            .args(["--mode", "workspace-write", "--read", &text(&fixture.bin.0)])
-            .arg("--")
-            .args(fixture.argv(&["appcontainer", "orphan-and-park"]))
-            .current_dir(&workspace.0)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null()),
+    let mut started = fixture.start_runner(
+        &workspace.0,
+        &[
+            "--workspace".into(),
+            text(&workspace.0),
+            "--mode".into(),
+            "workspace-write".into(),
+        ],
+        &["appcontainer", "orphan-and-park"],
+        false,
     );
-    let line = runner.first_line();
+    let line = started.line();
     let mut words = line.trim_end().splitn(6, ' ');
     let (
         Some("grandchild"),
@@ -905,16 +1209,25 @@ fn a_killed_runner_takes_its_tree() {
     // can have been reused.
     let grandchild = OwnedPid::open_image(grandchild.parse().expect("pid"), &fixture.probe);
     let direct = OwnedPid::open_image(direct.parse().expect("pid"), &fixture.probe);
-    assert!(grandchild.running() && direct.running());
-    runner.0.kill().expect("kill the runner");
-    runner
-        .wait_within(BOUND)
-        .expect("the runner exits within the bound");
+    // The runner alone is killed: its pid is pinned by its owner.
+    let runner = OwnedPid::open_image(started.pid(), &std::env::current_exe().expect("exe"));
+    assert!(grandchild.running() && direct.running() && runner.running());
+    runner.terminate();
+    assert!(
+        runner.exited_within(BOUND),
+        "the runner exits within the bound"
+    );
+    // Its Job closes with it, and kill-on-close ends the tree: observed on
+    // handles pinned before the kill.
     assert!(direct.exited_within(BOUND), "the child outlived its runner");
     assert!(
         grandchild.exited_within(BOUND),
         "the grandchild outlived its runner"
     );
+    // The owner's account must also show every member of the run ended
+    // before the profile is touched.
+    let ended = started.settle();
+    assert_eq!(ended.code, Some(1), "the killed runner's status");
     // The documented residue: exactly the killed runner's profile, by the
     // name its command reported. Its tree has exited, so this case deletes
     // it, as no runner does yet.
@@ -1060,9 +1373,9 @@ fn runner_failures_grant_nothing_and_clean_up() {
     ];
     for (args, expected) in cases {
         let output = fixture.runner(&workspace.0, &args, &["exit", "0"]);
-        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr = &output.stderr;
         assert_eq!(
-            output.status.code(),
+            output.code,
             Some(windows_appcontainer::RUNNER_FAILURE_EXIT),
             "{expected}: {stderr}"
         );
@@ -1093,18 +1406,12 @@ fn runner_failures_grant_nothing_and_clean_up() {
     // tagged profile, and that profile deleted again.
     let missing = workspace.join("no-such-program.exe");
     for mode in ["workspace-write", "read-only"] {
-        let output = std::process::Command::new(std::env::current_exe().expect("exe"))
-            .current_dir(&workspace.0)
-            .arg(HELPER_ARG)
-            .args(base(mode))
-            .args(fixture.tag_args())
-            .args(["--read", &text(&fixture.bin.0), "--", &text(&missing)])
-            .stdin(Stdio::null())
-            .output()
-            .expect("runner");
-        let stderr = String::from_utf8_lossy(&output.stderr);
+        let output = fixture
+            .start_runner_command(&workspace.0, &base(mode), &[text(&missing)], false)
+            .settle();
+        let stderr = &output.stderr;
         assert_eq!(
-            output.status.code(),
+            output.code,
             Some(windows_appcontainer::RUNNER_FAILURE_EXIT),
             "{mode}: {stderr}"
         );
@@ -1501,60 +1808,12 @@ fn profile_objects(root: &Path) -> Vec<PathBuf> {
 fn read_only_profile_storage_denies_every_mutation() {
     let fixture = Fixture::new();
     let workspace = user_scratch("ac-ws");
-    let argv: Vec<OsString> = fixture
-        .argv(&["appcontainer", "profile-attack-and-wait"])
-        .into_iter()
-        .map(OsString::from)
-        .collect();
-    let command = runtime()
-        .block_on(bake_sandbox::SandboxProvider::confine(
-            &fixture.provider(&[], &[]),
-            &argv,
-            &ro(&workspace),
-        ))
-        .expect("confine");
-    let mut child = Owned::spawn(
-        std::process::Command::new(&command.program)
-            .args(&command.args)
-            .current_dir(&workspace.0)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped()),
+    let mut child = fixture.start(
+        &ro(&workspace),
+        &["appcontainer", "profile-attack-and-wait"],
+        true,
     );
-    // Both readers end at EOF, which the runner's exit or this test's kill
-    // brings; the stdout reader also ends at `done`.
-    let stderr = child.0.stderr.take().expect("piped stderr");
-    let (err_send, err_receive) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        use std::io::Read;
-        let mut text = String::new();
-        let _ = std::io::BufReader::new(stderr).read_to_string(&mut text);
-        let _ = err_send.send(text);
-    });
-    let stdout = child.0.stdout.take().expect("piped stdout");
-    let (send, receive) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        use std::io::BufRead;
-        let mut lines = Vec::new();
-        for line in std::io::BufReader::new(stdout).lines() {
-            let Ok(line) = line else { break };
-            let done = line == "done";
-            lines.push(line);
-            if done {
-                break;
-            }
-        }
-        let _ = send.send(lines);
-    });
-    let lines: Vec<String> = receive
-        .recv_timeout(BOUND)
-        .expect("the attack report within the bound");
-    if lines.last().map(String::as_str) != Some("done") {
-        let _ = child.0.kill();
-        let _ = child.wait_within(BOUND);
-        let stderr = err_receive.recv_timeout(BOUND).unwrap_or_default();
-        panic!("the attack did not finish: stdout={lines:?} stderr={stderr:?}");
-    }
+    let lines = child.lines_until("done");
     let root_line = lines
         .first()
         .and_then(|line| line.strip_prefix("root "))
@@ -1639,14 +1898,52 @@ fn read_only_profile_storage_denies_every_mutation() {
         controls_allowed > 0,
         "no read control was allowed: {lines:?}"
     );
-    drop(child.0.stdin.take());
-    let status = child
-        .wait_within(BOUND)
-        .expect("the run exits within the bound");
-    let stderr = err_receive.recv_timeout(BOUND).unwrap_or_default();
-    assert!(failures.is_empty(), "{failures:#?}\nstderr: {stderr}");
-    assert!(status.success(), "{status}: {stderr}");
+    child.close_stdin();
+    let ended = child.settle();
+    assert!(
+        failures.is_empty(),
+        "{failures:#?}\nstderr: {}",
+        ended.stderr
+    );
+    assert_eq!(ended.code, Some(0), "{}", ended.stderr);
     assert!(!root.exists(), "{} must be deleted", root.display());
+}
+
+/// Two fixtures, each holding a live run at the same time, as two test
+/// processes would: each lists exactly its own run's profile, by the name
+/// that run reported, and neither's tag prefix matches the other's name.
+fn concurrent_fixtures_see_only_their_own_profiles() {
+    let (first, second) = (Fixture::new(), Fixture::new());
+    assert_ne!(first.tag, second.tag);
+    let workspace = user_scratch("ac-ws");
+    let held = |fixture: &Fixture| {
+        let mut run = fixture.start(
+            &ww(&workspace),
+            &["appcontainer", "write-profile-temp-and-wait"],
+            true,
+        );
+        let path = PathBuf::from(run.line());
+        let root = path
+            .parent()
+            .and_then(Path::parent)
+            .and_then(Path::parent)
+            .expect("the profile root")
+            .to_path_buf();
+        let (_, name) = fixture.run_profile(&text(&root.join("AC")));
+        (run, name)
+    };
+    let (mut a, a_name) = held(&first);
+    let (mut b, b_name) = held(&second);
+    assert_eq!(first.profiles(), BTreeSet::from([a_name.clone()]));
+    assert_eq!(second.profiles(), BTreeSet::from([b_name.clone()]));
+    assert!(!b_name.starts_with(&first.tag.moniker_prefix()));
+    assert!(!a_name.starts_with(&second.tag.moniker_prefix()));
+    for run in [&mut a, &mut b] {
+        run.close_stdin();
+        let ended = run.settle();
+        assert_eq!(ended.code, Some(0), "{}", ended.stderr);
+    }
+    assert!(first.profiles().is_empty() && second.profiles().is_empty());
 }
 
 fn compatibility_observations() {
@@ -1671,7 +1968,8 @@ fn compatibility_observations() {
         ][..],
         &["git", "--version"][..],
     ] {
-        let run = run_argv(&provider, argv, &ww(&workspace), &workspace.0);
+        let argv: Vec<String> = argv.iter().map(|arg| (*arg).to_owned()).collect();
+        let run = fixture.run_argv(&provider, &argv, &ww(&workspace));
         observe(format_args!(
             "case=program argv={argv:?} exit={:?} stdout={:?} stderr={:?}",
             run.code,
