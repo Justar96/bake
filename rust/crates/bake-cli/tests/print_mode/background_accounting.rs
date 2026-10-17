@@ -10,7 +10,7 @@ struct HeldSummaryServer {
     ready: Arc<(Mutex<bool>, Condvar)>,
     sockets: Arc<Mutex<Vec<TcpStream>>>,
     requests: Arc<AtomicUsize>,
-    summary_closed: Arc<AtomicBool>,
+    summary_closed: Arc<(Mutex<Option<bool>>, Condvar)>,
     thread: Option<JoinHandle<()>>,
 }
 
@@ -66,7 +66,7 @@ impl HeldSummaryServer {
         let ready = Arc::new((Mutex::new(false), Condvar::new()));
         let sockets = Arc::new(Mutex::new(Vec::new()));
         let requests = Arc::new(AtomicUsize::new(0));
-        let summary_closed = Arc::new(AtomicBool::new(false));
+        let summary_closed = Arc::new((Mutex::new(None), Condvar::new()));
         let thread = {
             let stop = Arc::clone(&stop);
             let ready = Arc::clone(&ready);
@@ -104,7 +104,8 @@ impl HeldSummaryServer {
                                         ),
                                         Ok(_) => false,
                                     };
-                                    summary_closed.store(closed, Ordering::SeqCst);
+                                    *summary_closed.0.lock().unwrap() = Some(closed);
+                                    summary_closed.1.notify_all();
                                 } else if foreground.fetch_add(1, Ordering::SeqCst) == 0 {
                                     let mut reply = Reply::read_call();
                                     reply.body = reply
@@ -231,8 +232,19 @@ fn final_background_dispatch_is_accounted_before_json_print_exit() {
         server.requests.load(Ordering::SeqCst),
         foreground + attempts.len()
     );
-    assert!(
-        server.summary_closed.load(Ordering::SeqCst),
-        "print awaits provider connection cleanup"
+    let (closed, timeout) = server
+        .summary_closed
+        .1
+        .wait_timeout_while(
+            server.summary_closed.0.lock().unwrap(),
+            RUN_TIMEOUT,
+            |closed| closed.is_none(),
+        )
+        .unwrap();
+    assert!(!timeout.timed_out(), "server observed the connection close");
+    assert_eq!(
+        *closed,
+        Some(true),
+        "print cleans up its provider connection"
     );
 }
