@@ -159,9 +159,13 @@ const PATH_DELIMITER: &str = ":";
 /// Pi's `getShellEnv`: this process's environment, with `bin_dir` (Pi's
 /// `getBinDir()`, the agent's managed binaries) put first on `PATH` unless
 /// already listed. The `PATH` key is found case-insensitively, as on
-/// Windows. Without `bin_dir` the environment is unchanged.
+/// Windows. Bake removes inherited credential-shaped names through
+/// [`bake_process::environment::scrub_environment`] before adding the path.
 pub fn get_shell_env(bin_dir: Option<&Path>) -> Vec<(OsString, OsString)> {
-    shell_env_from(std::env::vars_os().collect(), bin_dir)
+    shell_env_from(
+        bake_process::environment::scrub_environment(std::env::vars_os()).collect(),
+        bin_dir,
+    )
 }
 
 pub(super) fn shell_env_from(

@@ -1122,6 +1122,92 @@ async fn prepare_request_runs_after_pending_messages_and_replaces_state() {
     assert_eq!(seen_model.lock().unwrap().as_deref(), Some("replacement"));
 }
 
+/// Bake: a request hook can replace tools or rebuild the transcript. The
+/// provider must see the executable set, with every declaration emitted
+/// before that request so a listener can persist it.
+#[tokio::test]
+async fn prepare_request_reconciles_tool_declarations_before_the_request() {
+    for change in ["replace", "remove", "rebuild"] {
+        let executed = executed();
+        let initial = echo_tool(Arc::clone(&executed));
+        let mut replacement = echo_tool(Arc::clone(&executed));
+        if change == "replace" {
+            replacement.name = "replacement".to_owned();
+        }
+        let tools = if change == "remove" {
+            Vec::new()
+        } else {
+            vec![Arc::new(replacement)]
+        };
+        let expected: Vec<_> = tools.iter().map(|tool| tool.declaration()).collect();
+        let mut config = config();
+        config.prepare_request = Some(hook::prepare_request(move |request, _| {
+            let mut context = request.context.clone();
+            context.tools = tools.clone();
+            if change == "rebuild" {
+                context
+                    .messages
+                    .retain(|message| message.as_system().is_none());
+            }
+            Box::pin(async move {
+                Some(AgentRequestUpdate {
+                    context: Some(context),
+                    ..Default::default()
+                })
+            })
+        }));
+        let (sink, events) = recorder();
+        let observed = Arc::clone(&events);
+        let stream_fn = scripted(move |index, context, _| {
+            let advertised = bake_ai::transcript::get_current_tools(context.messages());
+            assert_eq!(advertised, expected, "{change}");
+            let persisted: Vec<Message> = observed
+                .lock()
+                .unwrap()
+                .iter()
+                .filter_map(|event| match event {
+                    AgentEvent::MessageEnd { message } => message.as_llm().cloned(),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                bake_ai::transcript::get_current_tools(&persisted),
+                advertised,
+                "{change}: declarations must be emitted before the request"
+            );
+            if index == 0
+                && let Some(tool) = advertised.first()
+            {
+                tool_use(vec![call("call_1", &tool.name, json!({ "value": change }))])
+            } else {
+                assistant_text("done")
+            }
+        });
+        let messages = run_agent_loop(
+            vec![user("go")],
+            context(vec![initial]),
+            config,
+            sink,
+            None,
+            Some(stream_fn),
+        )
+        .await
+        .unwrap();
+        let results: Vec<_> = messages
+            .iter()
+            .filter_map(AgentMessage::as_tool_result)
+            .collect();
+        assert!(results.iter().all(|result| !result.is_error), "{change}");
+        if change == "remove" {
+            assert!(executed.lock().unwrap().is_empty());
+            assert!(results.is_empty());
+        } else {
+            assert_eq!(*executed.lock().unwrap(), [change], "{change}");
+            assert_eq!(results.len(), 1, "{change}");
+        }
+    }
+}
+
 /// Pi: "does not poll steering after prepareRequest".
 #[tokio::test]
 async fn does_not_poll_steering_after_prepare_request() {

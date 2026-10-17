@@ -21,7 +21,7 @@ pub enum ProviderErrorKind {
     Http,
     /// No response: connection, DNS, or TLS failure.
     Connection,
-    /// No response within the request timeout.
+    /// Response headers or the next body chunk missed its timeout.
     Timeout,
     /// The request's signal aborted.
     Aborted,
