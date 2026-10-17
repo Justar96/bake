@@ -191,6 +191,8 @@ Run-control tests hold real journal writes across cancellation and shutdown, all
 
 The task-document tests cover exact revision conflicts, branch-local updates, unchanged kinds, completion claims distinct from verification, initial-session and fork durability, failed writes at each group line, recovery of missing context exposures, and bounded artifact fingerprints. Verification tests reject stale document and artifact versions, missing inputs, ambiguous call IDs, off-branch results, malformed provenance, and failed evidence writes; label recreation during a fork preserves valid evidence. Unix artifact tests substitute a parent symlink or FIFO at the actual open boundary and check that no outside bytes are read and no blocking reader remains. `append_durable_group` shares the existing group fault tests while explicitly creating a file before a conversation; ordinary group appends remain lazy. Selected-run recovery remains a separate opt-in integration.
 
+Artifact verification is a trusted-host SDK operation; the CLI and model-facing document tool do not automatically run it or present a verified goal state. `Fresh` means that the declared document and file-content versions still match the recorded check. It does not establish that undeclared dependencies are unchanged or that the user’s goal is complete. The host supplies the trusted native execution, working directory, environment, and capture root; the ticket binds the command text and persisted call/result. The native-bash fixture proves this contract without treating model-authored completion claims as evidence.
+
 ```sh
 cd rust
 cargo fmt --all -- --check
