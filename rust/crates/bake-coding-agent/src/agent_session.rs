@@ -93,6 +93,7 @@ use bake_ai::{
 };
 
 use crate::compaction::CompactionResult;
+use crate::mcp::{McpOptions, McpServers};
 use crate::model_registry::resolver::{DEFAULT_THINKING_LEVEL, find_initial_model};
 use crate::model_registry::{ModelRegistry, ModelRuntime};
 use crate::owned_work::{OwnedTask, Refused, TaskScope, WorkGate, WorkPermit};
@@ -696,6 +697,8 @@ pub struct AgentSession {
     /// The first session write that failed. The file then misses a
     /// message, so no later prompt is accepted.
     write_failure: Arc<Mutex<Option<String>>>,
+    /// The MCP servers [`Self::start_mcp`] started, once it has.
+    mcp: OnceLock<McpServers>,
 }
 
 impl std::fmt::Debug for AgentSession {
@@ -1500,6 +1503,7 @@ impl AgentSession {
             model_fallback_message: selection.fallback_message,
             queue: Arc::default(),
             write_failure: gap,
+            mcp: OnceLock::new(),
         };
         created.connect();
         Ok(created)
@@ -2049,12 +2053,17 @@ impl AgentSession {
     /// The system message patching the sections the transcript replays,
     /// Pi's `_preparePromptAndToolLoadout`; it also activates the tools.
     fn prepare_prompt_and_tools(&self) -> Result<Option<SystemMessage>, String> {
-        let active: Vec<Arc<AgentTool>> = self
+        let mut active: Vec<Arc<AgentTool>> = self
             .active_tool_names
             .iter()
             .filter_map(|name| self.tools.iter().find(|tool| &tool.name == name))
             .cloned()
             .collect();
+        // The MCP tools published now, one generation per server; the run
+        // keeps these for its whole length.
+        if let Some(mcp) = self.mcp.get() {
+            active.extend(mcp.tools());
+        }
         self.agent.set_tools(active);
         let mut options = self.prompt_options.clone();
         options.selected_tools = self.active_tool_names.clone();
@@ -2146,6 +2155,16 @@ impl AgentSession {
         // Preparation may outlast a shutdown or a failed write.
         if let Some(reason) = self.closed_reason() {
             return Err(reason);
+        }
+        // The first prompt waits for MCP servers still connecting, so their
+        // tools are declared in its first request, as Pi's
+        // `waitForDirectServers` does.
+        if let Some(mcp) = self.mcp.get() {
+            mcp.wait_for_startup(|| self.core.aborted() || self.closed_reason().is_some())
+                .await;
+            if let Some(reason) = self.closed_reason() {
+                return Err(reason);
+            }
         }
         let mut content = vec![UserContentBlock::Text(TextContent::new(text))];
         content.extend(images.into_iter().map(UserContentBlock::Image));
@@ -2565,9 +2584,52 @@ impl AgentSession {
             self.core.abort_requested.store(true, Ordering::SeqCst);
         }
         self.core.abort_retry_and_compaction();
+        if let Some(mcp) = self.mcp.get() {
+            mcp.interrupt_startup_wait();
+        }
         self.agent.abort();
         self.agent.wait_for_idle().await;
         self.core.wait_for_idle().await;
+    }
+
+    /// Starts the MCP servers of `options` ([`crate::mcp`]), each as a task
+    /// the session's gate owns, admitted under the session's sandbox mode
+    /// before it is spawned. Returns at once; the first prompt waits up to
+    /// [`crate::mcp::McpTimings::startup_wait`] for servers still
+    /// connecting, and each prompt declares the tools published when it
+    /// starts. [`Self::shutdown`] stops every server and returns only once
+    /// each server's process and tree are gone.
+    ///
+    /// Refused once shutdown has started, when called a second time, or,
+    /// before anything starts, when a wait in `options` gives a deadline
+    /// the clock cannot represent ([`crate::mcp`]'s checks).
+    pub fn start_mcp(&self, options: McpOptions) -> Result<McpServers, String> {
+        if self.work.is_closing() {
+            return Err(refused_message(Refused::Closed));
+        }
+        // Before anything is stored or started, so the session may start
+        // corrected options later.
+        crate::mcp::validate(&options)?;
+        let reserved: Vec<String> = self.tools.iter().map(|tool| tool.name.clone()).collect();
+        let cwd = PathBuf::from(self.cwd());
+        let mut started = None;
+        let servers = self.mcp.get_or_init(|| {
+            let (servers, refused) = crate::mcp::start(options, cwd, reserved, &self.work);
+            started = Some(refused);
+            servers
+        });
+        match started {
+            None => Err("MCP servers were already started for this session.".to_owned()),
+            Some(Some(refused)) => Err(format!(
+                "The session could not start its MCP servers: {refused}."
+            )),
+            Some(None) => Ok(servers.clone()),
+        }
+    }
+
+    /// The MCP servers [`Self::start_mcp`] started, if it has.
+    pub fn mcp_servers(&self) -> Option<&McpServers> {
+        self.mcp.get()
     }
 
     /// Starts work the session owns in the background, beside its turns:
@@ -2639,6 +2701,11 @@ impl AgentSession {
         self.listeners.close();
         self.core.abort_requested.store(true, Ordering::SeqCst);
         self.core.abort_retry_and_compaction();
+        if let Some(mcp) = self.mcp.get() {
+            mcp.interrupt_startup_wait();
+        }
+        // Also cancels every MCP server's task, which stops its server
+        // before its permit is released.
         let drained = self.work.close();
         let agent = Arc::clone(&self.agent);
         let listeners = Arc::clone(&self.listeners);
