@@ -12,6 +12,126 @@ use serde_json::Value;
 use super::control_tests::{harness, in_memory};
 use super::*;
 use crate::jobs::{JobId, JobOutcome, JobSpec, MAX_CONSECUTIVE_WAKES, OutputMode};
+use crate::print_mode::{PrintModeOptions, PrintOutput, SharedWriter, run_print_mode};
+
+fn print_options(job_wait: Duration) -> PrintModeOptions {
+    PrintModeOptions {
+        mode: PrintOutput::Text,
+        initial_message: None,
+        initial_images: Vec::new(),
+        messages: Vec::new(),
+        job_wait,
+    }
+}
+
+fn sink() -> SharedWriter {
+    Arc::new(Mutex::new(Vec::<u8>::new()))
+}
+
+#[tokio::test]
+async fn zero_print_job_budget_admits_no_notice_request() {
+    let h = harness();
+    let session = h
+        .session(in_memory(), Settings::default(), None, Vec::new())
+        .await;
+    finished(&session, "already complete").await;
+    h.faux.append_responses(vec![
+        faux_assistant_message("unexpected notice turn").into(),
+    ]);
+    let code = run_print_mode(&session, print_options(Duration::ZERO), sink(), sink()).await;
+    assert_eq!(code, 0);
+    assert_eq!(h.faux.call_count(), 0, "zero wait admitted a model request");
+}
+
+#[tokio::test]
+async fn the_print_job_deadline_aborts_and_awaits_a_notice_turn() {
+    let h = harness();
+    let session = Arc::new(
+        h.session(in_memory(), Settings::default(), None, Vec::new())
+            .await,
+    );
+    finished(&session, "already complete").await;
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let aborted = Arc::new(tokio::sync::Notify::new());
+    let cleanup = Arc::new(tokio::sync::Notify::new());
+    let cleaned = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let settled = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let settled_events = Arc::clone(&settled);
+    let _subscription = session.subscribe(move |event| {
+        if matches!(event, SessionEvent::AgentSettled { aborted: true }) {
+            settled_events.fetch_add(1, Ordering::SeqCst);
+        }
+    });
+    h.faux
+        .append_responses(vec![bake_ai::providers::faux::FauxResponseStep::Factory(
+            Arc::new({
+                let entered = Arc::clone(&entered);
+                let aborted = Arc::clone(&aborted);
+                let cleanup = Arc::clone(&cleanup);
+                let cleaned = Arc::clone(&cleaned);
+                move |_, options, _, _| {
+                    let signal = options.base.signal.clone().expect("request signal");
+                    let entered = Arc::clone(&entered);
+                    let aborted = Arc::clone(&aborted);
+                    let cleanup = Arc::clone(&cleanup);
+                    let cleaned = Arc::clone(&cleaned);
+                    Box::pin(async move {
+                        entered.notify_one();
+                        signal.cancelled().await;
+                        aborted.notify_one();
+                        cleanup.notified().await;
+                        cleaned.store(true, Ordering::SeqCst);
+                        Err("request cancelled".into())
+                    })
+                }
+            }),
+        )]);
+    let owner = Arc::clone(&session);
+    let mut run = tokio::spawn(async move {
+        run_print_mode(
+            &owner,
+            print_options(Duration::from_secs(60)),
+            sink(),
+            sink(),
+        )
+        .await
+    });
+    tokio::time::timeout(Duration::from_secs(10), entered.notified())
+        .await
+        .expect("notice request started");
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(60)).await;
+    tokio::time::resume();
+    let cancelled_at_deadline = tokio::time::timeout(Duration::from_secs(1), aborted.notified())
+        .await
+        .is_ok();
+    let returned_before_cleanup = run.is_finished();
+    cleanup.notify_one();
+    if !cancelled_at_deadline {
+        // A failing negative control still owns and drains its request.
+        session.abort().await;
+    }
+    let result = tokio::time::timeout(Duration::from_secs(10), &mut run).await;
+    session.shutdown().await;
+    assert!(
+        cancelled_at_deadline,
+        "the notice turn escaped the print job deadline"
+    );
+    assert!(
+        !returned_before_cleanup,
+        "print returned before request cleanup"
+    );
+    assert!(result.expect("print settled").is_ok());
+    assert!(
+        cleaned.load(Ordering::SeqCst),
+        "owned request was not drained"
+    );
+    assert_eq!(
+        settled.load(Ordering::SeqCst),
+        1,
+        "the admitted notice delivery must settle, not be dropped"
+    );
+}
 
 /// Starts a job that completes at once and waits until it has settled.
 async fn finished(session: &AgentSession, label: &str) -> JobId {

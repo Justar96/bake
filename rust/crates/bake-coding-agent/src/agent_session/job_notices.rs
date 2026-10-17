@@ -14,10 +14,12 @@
 //! Recovery is Bake's own, for the scope 11 rule that a job is lost with
 //! its process and reported to the agent once. A `bash` result whose
 //! details hold [`BACKGROUND_JOB_DETAIL`] records that a job started; a
-//! notice entry records that it was reported. On resume every recorded id
-//! is reserved, so an id is never issued twice in one session file, and
-//! every job started on the current branch without a notice anywhere in
-//! the file gets a lost notice, delivered with the next prompt. A notice
+//! notice entry or terminal job-tool result records that it was reported.
+//! Tool results acknowledge a job on the branch that received them.
+//! On resume every recorded id is reserved, so an id is never issued
+//! twice in one session file. A job started on the current branch without
+//! a notice in the file or a terminal observation on that branch gets a
+//! lost notice, delivered with the next prompt. A notice
 //! claimed but not yet written when the process ended is reported as lost
 //! instead; no notice is written twice.
 
@@ -30,7 +32,7 @@ use crate::jobs::{JobRegistry, JobSnapshot};
 use crate::session::SessionManager;
 use crate::session::messages::CustomMessage;
 use crate::tools::bash::BACKGROUND_JOB_DETAIL;
-use crate::tools::job_tools::status_line;
+use crate::tools::job_tools::{JOB_OBSERVATION_DETAIL, status_line};
 
 /// The `customType` of a job notice.
 pub const NOTICE_TYPE: &str = "bake.job.notice";
@@ -81,9 +83,10 @@ struct Started {
 }
 
 /// Reserves every job id `session` records in `jobs` and returns a lost
-/// notice for each job started on the current branch and reported
-/// nowhere in the file, in the order they were started. Ids of a kind the
-/// registry cannot hold, or malformed details, are skipped.
+/// notice for each job started on the current branch without a notice in
+/// the file or a terminal tool observation on that branch, in start
+/// order. Ids of a kind the registry cannot hold, or malformed details,
+/// are skipped.
 pub fn recover(session: &SessionManager, jobs: &JobRegistry) -> Vec<CustomMessage> {
     let branch: BTreeSet<&str> = session
         .branch_entries(None)
@@ -93,15 +96,23 @@ pub fn recover(session: &SessionManager, jobs: &JobRegistry) -> Vec<CustomMessag
     let mut started: BTreeMap<String, Started> = BTreeMap::new();
     let mut order: Vec<String> = Vec::new();
     let mut reported: BTreeSet<String> = BTreeSet::new();
+    let mut recorded: BTreeSet<String> = BTreeSet::new();
     for entry in session.entries() {
         match entry.entry_type() {
             "message" => {
                 let Some(message) = entry.get("message") else {
                     continue;
                 };
-                if message.get("role").and_then(Value::as_str) != Some("toolResult")
-                    || message.get("toolName").and_then(Value::as_str) != Some("bash")
-                {
+                if message.get("role").and_then(Value::as_str) != Some("toolResult") {
+                    continue;
+                }
+                if let Some(id) = terminal_observation(message) {
+                    recorded.insert(id.to_owned());
+                    if branch.contains(entry.id()) {
+                        reported.insert(id.to_owned());
+                    }
+                }
+                if message.get("toolName").and_then(Value::as_str) != Some("bash") {
                     continue;
                 }
                 let Some(job) = message
@@ -119,6 +130,7 @@ pub fn recover(session: &SessionManager, jobs: &JobRegistry) -> Vec<CustomMessag
                 let Some((kind, _)) = id.rsplit_once('-') else {
                     continue;
                 };
+                recorded.insert(id.to_owned());
                 let on_branch = branch.contains(entry.id());
                 let known = started.entry(id.to_owned()).or_insert_with(|| {
                     order.push(id.to_owned());
@@ -140,13 +152,14 @@ pub fn recover(session: &SessionManager, jobs: &JobRegistry) -> Vec<CustomMessag
                     .and_then(Value::as_str)
                 {
                     reported.insert(id.to_owned());
+                    recorded.insert(id.to_owned());
                 }
             }
             _ => {}
         }
     }
     let mut highest: BTreeMap<&'static str, u64> = BTreeMap::new();
-    for id in &order {
+    for id in &recorded {
         if let Some((kind, ordinal)) = parse(id) {
             let slot = highest.entry(kind).or_default();
             *slot = (*slot).max(ordinal);
@@ -164,6 +177,26 @@ pub fn recover(session: &SessionManager, jobs: &JobRegistry) -> Vec<CustomMessag
                 .then(|| lost_notice(id, &job.kind, &job.label))
         })
         .collect()
+}
+
+/// Only a successful job-addressing tool can acknowledge a terminal
+/// observation. Output text is untrusted and is never parsed as state.
+fn terminal_observation(message: &Value) -> Option<&str> {
+    if !matches!(
+        message.get("toolName")?.as_str()?,
+        "job_output" | "job_kill"
+    ) || message.get("isError")?.as_bool()?
+    {
+        return None;
+    }
+    let observation = message.get("details")?.get(JOB_OBSERVATION_DETAIL)?;
+    let id = observation.get("id")?.as_str()?;
+    parse(id)?;
+    matches!(
+        observation.get("status")?.as_str()?,
+        "completed" | "failed" | "killed"
+    )
+    .then_some(id)
 }
 
 /// `bash-<n>`: the only kind a session records today, as the registry's

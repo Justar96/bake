@@ -155,20 +155,53 @@ async fn prompts(
 /// session's background jobs and for the turns their completion notices
 /// open, so the answer printed is the last turn's. Returns how many jobs
 /// were still running at the limit; the session's shutdown stops them.
+/// A notice turn still running at the limit is aborted and awaited,
+/// including its cleanup, before this returns.
 async fn settle_jobs(session: &AgentSession, limit: Duration) -> Result<usize, String> {
     let deadline = tokio::time::Instant::now() + limit;
     let jobs = session.jobs().clone();
     // Subscribed before the first check, so no settlement is missed.
     let mut events = jobs.subscribe();
+    let live_count = || {
+        jobs.list()
+            .iter()
+            .filter(|job| !job.status.is_terminal())
+            .count()
+    };
     loop {
         // Counted before the delivery, so a job that settles after the
         // delivery's claim is still waited for and delivered next time.
-        let live = jobs
-            .list()
-            .iter()
-            .filter(|job| !job.status.is_terminal())
-            .count();
-        if session.deliver_job_notices().await? {
+        let live = live_count();
+        // In particular, a zero budget must not admit a notice turn.
+        if tokio::time::Instant::now() >= deadline {
+            return Ok(live);
+        }
+        let delivery = session.deliver_job_notices();
+        tokio::pin!(delivery);
+        let mut delivery_polled = false;
+        let delivered = {
+            let poll_delivery = std::future::poll_fn(|cx| {
+                delivery_polled = true;
+                delivery.as_mut().poll(cx)
+            });
+            tokio::select! {
+                biased;
+                () = tokio::time::sleep_until(deadline) => None,
+                result = poll_delivery => Some(result?),
+            }
+        };
+        let Some(delivered) = delivered else {
+            // If the deadline won before delivery's first poll, there is
+            // no admitted turn to drain and polling it would start one.
+            if delivery_polled {
+                // Keep polling while abort waits for the delivery's run
+                // guard and owned request to settle.
+                let ((), result) = tokio::join!(session.abort(), &mut delivery);
+                result?;
+            }
+            return Ok(live_count());
+        };
+        if delivered {
             continue;
         }
         // Every settled job's notice was delivered, or waits for a prompt
@@ -180,7 +213,7 @@ async fn settle_jobs(session: &AgentSession, limit: Duration) -> Result<usize, S
             changed = events.changed() => if !changed {
                 return Ok(0);
             },
-            () = tokio::time::sleep_until(deadline) => return Ok(live),
+            () = tokio::time::sleep_until(deadline) => return Ok(live_count()),
         }
     }
 }

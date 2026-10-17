@@ -2,6 +2,7 @@
 //! every recorded id is reserved, and a job started on the current branch
 //! and reported nowhere gets one lost notice.
 
+use bake_agent::{AgentToolResult, AgentToolUpdateCallback};
 use bake_ai::{TextContent, ToolResultMessage, UserContent, UserContentBlock};
 use serde_json::{Value, json};
 
@@ -9,6 +10,107 @@ use super::*;
 use crate::jobs::JobLimits;
 use crate::owned_work::WorkGate;
 use crate::session::{NewSessionOptions, SessionManager};
+use crate::test_support::TempDir;
+use crate::tools::bash::{BashToolOptions, create_bash_tool};
+use crate::tools::job_tools::create_job_tool_definitions;
+
+fn tool_result(session: &mut SessionManager, name: &str, result: AgentToolResult) -> String {
+    session
+        .append_message(ToolResultMessage {
+            tool_call_id: format!("call-{name}"),
+            tool_name: name.into(),
+            content: result.content,
+            details: result.details,
+            usage: None,
+            nested_calls: None,
+            is_error: result.is_error,
+            timestamp: 0,
+            duration_ms: None,
+        })
+        .expect("tool result appended")
+}
+
+#[tokio::test]
+async fn a_completed_bash_job_observed_by_its_output_is_not_lost_after_reopen() {
+    if crate::tools::bash::shell::get_shell_config(None).is_err() {
+        eprintln!("skipping job recovery shell fixture: bash unavailable");
+        return;
+    }
+    for wait in [false, true] {
+        let dir = TempDir::new("job-observation");
+        let mut file = SessionManager::create(
+            &dir.path().to_string_lossy(),
+            Some(dir.path()),
+            NewSessionOptions::default(),
+        )
+        .expect("persisted session");
+        file.append_message(bake_ai::UserMessage {
+            content: UserContent::Text("run the job".into()),
+            timestamp: 0,
+        })
+        .expect("conversation persisted");
+        let path = file.session_file().expect("file").to_owned();
+        let jobs = JobRegistry::new(WorkGate::default(), JobLimits::default());
+        let bash = create_bash_tool(
+            dir.path(),
+            BashToolOptions {
+                jobs: Some(jobs.clone()),
+                ..BashToolOptions::default()
+            },
+        );
+        let started = (bash.execute)(
+            "start".into(),
+            json!({
+                "command": "printf done", "run_in_background": true
+            }),
+            None,
+            AgentToolUpdateCallback::ignore(),
+        )
+        .await
+        .expect("bash started");
+        tool_result(&mut file, "bash", started);
+        let id = jobs.id("bash-1").expect("id");
+        if !wait {
+            jobs.wait(id, std::time::Duration::from_secs(10), None)
+                .await
+                .expect("job ended");
+        }
+        let output = create_job_tool_definitions(&jobs)
+            .into_iter()
+            .find(|definition| definition.name() == "job_output")
+            .expect("output tool")
+            .tool;
+        let result = (output.execute)(
+            "output".into(),
+            json!({
+                "job_id": "bash-1", "wait": wait, "timeout_ms": 10_000
+            }),
+            None,
+            AgentToolUpdateCallback::ignore(),
+        )
+        .await
+        .expect("job read");
+        assert_eq!(
+            result.content,
+            vec![UserContentBlock::Text(TextContent::new(
+                "done\n[status: completed, exit code: 0]"
+            ))]
+        );
+        tool_result(&mut file, "job_output", result);
+        jobs.close().await;
+        file.close_writer();
+        let reopened = SessionManager::open(&path, None, None).expect("reopened");
+        let resumed = JobRegistry::new(WorkGate::default(), JobLimits::default());
+        let recovered = recover(&reopened, &resumed);
+        let reserved = resumed.id("bash-1");
+        resumed.close().await;
+        assert!(
+            recovered.is_empty(),
+            "observed terminal job recovered as lost: {recovered:?}"
+        );
+        assert!(reserved.is_ok(), "the completed id must remain reserved");
+    }
+}
 
 fn session() -> SessionManager {
     SessionManager::in_memory(Some("/tmp"), NewSessionOptions::default(), Vec::new())
@@ -49,6 +151,102 @@ fn ids(notices: &[CustomMessage]) -> Vec<Value> {
         .iter()
         .map(|notice| notice.details.as_ref().expect("details")["jobId"].clone())
         .collect()
+}
+
+fn observed(session: &mut SessionManager, name: &str, details: Value, is_error: bool) {
+    tool_result(
+        session,
+        name,
+        AgentToolResult {
+            details: Some(json!({ "backgroundJobObservation": details })),
+            is_error,
+            ..AgentToolResult::default()
+        },
+    );
+}
+
+#[tokio::test]
+async fn only_valid_terminal_observations_on_the_selected_branch_acknowledge_jobs() {
+    let mut file = session();
+    for number in 1..=6 {
+        started(&mut file, &format!("bash-{number}"), "job");
+    }
+    observed(
+        &mut file,
+        "job_output",
+        json!({ "id": "bash-1", "status": "completed" }),
+        false,
+    );
+    observed(
+        &mut file,
+        "job_output",
+        json!({ "id": "bash-2", "status": "running" }),
+        false,
+    );
+    observed(
+        &mut file,
+        "job_list",
+        json!({ "id": "bash-3", "status": "completed" }),
+        false,
+    );
+    observed(
+        &mut file,
+        "job_output",
+        json!({ "id": "bash-4", "status": "completed" }),
+        true,
+    );
+    observed(
+        &mut file,
+        "job_output",
+        json!({ "id": "bash-5", "status": 1 }),
+        false,
+    );
+    observed(
+        &mut file,
+        "job_kill",
+        json!({ "id": "bash-6", "status": "killed" }),
+        false,
+    );
+    // An observation can remain after an imported or compacted prefix;
+    // its id must not be reissued even without the original start.
+    observed(
+        &mut file,
+        "job_output",
+        json!({ "id": "bash-9", "status": "failed" }),
+        false,
+    );
+    let jobs = JobRegistry::new(WorkGate::default(), JobLimits::default());
+    let recovered = ids(&recover(&file, &jobs));
+    let reserved = jobs.id("bash-9");
+    jobs.close().await;
+    assert_eq!(
+        recovered,
+        [
+            json!("bash-2"),
+            json!("bash-3"),
+            json!("bash-4"),
+            json!("bash-5")
+        ]
+    );
+    assert!(reserved.is_ok());
+
+    let mut file = session();
+    let branch = started(&mut file, "bash-1", "job");
+    observed(
+        &mut file,
+        "job_output",
+        json!({ "id": "bash-1", "status": "completed" }),
+        false,
+    );
+    file.branch(&branch).expect("earlier branch");
+    let jobs = JobRegistry::new(WorkGate::default(), JobLimits::default());
+    let recovered = ids(&recover(&file, &jobs));
+    jobs.close().await;
+    assert_eq!(
+        recovered,
+        [json!("bash-1")],
+        "another branch has not delivered this branch's result"
+    );
 }
 
 #[tokio::test]

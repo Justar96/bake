@@ -7,12 +7,12 @@
 //! `[status: ...]` line, the still-running guidance, the list and kill
 //! texts, and the unknown-job explanation. Differences: the `job_id`
 //! description and the unknown-job text leave out the TypeScript's
-//! mention of subagent ids until subagents exist; a result is text only,
-//! with no structured value; a `completing` job, which the TypeScript did
-//! not have, reads as `running`; output a stream dropped between reads is
-//! announced on its own line; and a read longer than Pi's output limits
-//! keeps its tail, as Pi's `bash` does, with a marker instead of a spill
-//! file.
+//! mention of subagent ids until subagents exist; terminal observations
+//! carry recovery metadata in result details; a `completing` job, which
+//! the TypeScript did not have, reads as `running`; output a stream dropped
+//! between reads is announced on its own line; and a read longer than
+//! Pi's output limits keeps its tail, as Pi's `bash` does, with a marker
+//! instead of a spill file.
 //!
 //! The completion notice the descriptions promise is delivered by the
 //! session ([`crate::agent_session`]); a still-running read adds
@@ -31,6 +31,10 @@ use crate::tools::truncate::{TruncationOptions, truncate_tail};
 
 /// The names of the job tools, in the order they are declared.
 pub const JOB_TOOL_NAMES: [&str; 3] = ["job_output", "job_list", "job_kill"];
+
+/// A terminal status delivered in a tool result, acknowledged by the
+/// session only when that result has been written.
+pub(crate) const JOB_OBSERVATION_DETAIL: &str = "backgroundJobObservation";
 
 /// `waitTimeoutMs`'s default: a `wait` without `timeout_ms`.
 pub const DEFAULT_WAIT: Duration = Duration::from_secs(30);
@@ -64,6 +68,16 @@ fn text_result(text: String) -> AgentToolResult {
         content: vec![UserContentBlock::Text(TextContent::new(text))],
         ..AgentToolResult::default()
     }
+}
+
+fn observation(text: String, snapshot: &JobSnapshot) -> AgentToolResult {
+    let mut result = text_result(text);
+    if snapshot.status.is_terminal() {
+        result.details = Some(json!({ JOB_OBSERVATION_DETAIL: {
+            "id": snapshot.id.to_string(), "status": snapshot.status.as_str()
+        } }));
+    }
+    result
 }
 
 /// The status word the model sees: the TypeScript's five, with a
@@ -184,7 +198,7 @@ async fn job_output(
         text.push('\n');
         text.push_str(STILL_RUNNING);
     }
-    Ok(text_result(text))
+    Ok(observation(text, &read.snapshot))
 }
 
 fn job_list_tool(jobs: JobRegistry) -> ToolDefinition {
@@ -250,14 +264,15 @@ fn job_kill(jobs: &JobRegistry, args: &Value) -> Result<AgentToolResult, String>
         .map(str::to_owned);
     let outcome = jobs.kill(id, reason).map_err(explain)?;
     let snapshot = jobs.get(id).map_err(explain)?;
-    Ok(text_result(match outcome {
-        KillResult::AlreadyFinished => {
-            format!("job {id} had already finished {}", status_line(&snapshot))
-        }
+    Ok(match outcome {
+        KillResult::AlreadyFinished => observation(
+            format!("job {id} had already finished {}", status_line(&snapshot)),
+            &snapshot,
+        ),
         KillResult::Requested | KillResult::AlreadyStopping => {
-            format!("requested cancellation of job {id}")
+            text_result(format!("requested cancellation of job {id}"))
         }
-    }))
+    })
 }
 
 #[cfg(test)]
