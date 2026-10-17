@@ -20,6 +20,26 @@ pub(super) fn validate_prefix(prefix: &str) -> io::Result<()> {
 }
 
 pub(super) fn create(parent: &Path, prefix: &str) -> io::Result<(PathBuf, File)> {
+    create_with_extension(parent, prefix, ".log")
+}
+
+/// [`create`] for a file named `<prefix><extension>`, such as `.txt`.
+pub(crate) fn create_with_extension(
+    parent: &Path,
+    prefix: &str,
+    extension: &str,
+) -> io::Result<(PathBuf, File)> {
+    validate_prefix(prefix)?;
+    if !extension.starts_with('.')
+        || !extension[1..]
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric())
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Output file extension must be '.' and ASCII letters or digits.",
+        ));
+    }
     let mut random = [0; 16];
     getrandom::getrandom(&mut random).map_err(|error| io::Error::other(error.to_string()))?;
     let id: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
@@ -33,7 +53,7 @@ pub(super) fn create(parent: &Path, prefix: &str) -> io::Result<(PathBuf, File)>
         builder
     };
     builder.create(&directory)?;
-    let path = directory.join(format!("{prefix}.log"));
+    let path = directory.join(format!("{prefix}{extension}"));
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]

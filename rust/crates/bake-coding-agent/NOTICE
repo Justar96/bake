@@ -120,6 +120,18 @@ whether or not a caller waits, aborting tasks before awaiting them), adapted
 in src/owned_work.rs, with cases of packages/chord/test/host.test.ts (forced
 disposal aborts in-flight calls) and test/review.test.ts (an aborted task
 context cannot start fresh calls) in src/owned_work/tests.rs.
+
+From release v1.3.0, revision 71023aec1546d6d677a65669c5665c0927ce0dd0, the
+MCP integration: the configuration of src/extensions/mcp/config.ts (the
+mcpServers shape, server names, transports, exposures, timeouts, and its
+messages), the connection and tool lifecycle of src/extensions/mcp/runtime.ts
+and src/extensions/mcp/index.ts, the tool wrapping and result conversion of
+src/extensions/mcp/tools.ts (convertMcpResult, binary resources saved to
+files, and middle truncation), and the startup wait and tool declaration of
+src/core/mcp-servers.ts and src/core/agent-session.ts, adapted in src/mcp/,
+with the cases of test/mcp-extension.test.ts and
+test/suite/agent-session-mcp.test.ts that src/mcp/ and tests/mcp_session.rs
+name.
 --------------------------------------------------------------------------------
 MIT License
 

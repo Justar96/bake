@@ -278,22 +278,12 @@ pub struct ToolSelection {
     pub active: Vec<String>,
 }
 
-/// Pi's selection of the initial tools from the options, the
-/// `defaultTools` setting (already resolved), and the `available` tool
-/// names, with no extension tools.
-pub fn select_tools(
+/// The selected names (`--tools` after its modifiers) and the allowlist
+/// (`None` when every tool is allowed) of Pi's selection, from `defaults`.
+fn selection_lists(
     options: &ToolSelectionOptions,
-    default_tools: Option<&[String]>,
-    available: &[String],
-) -> Result<ToolSelection, String> {
-    if let Some(error) = options.tools.as_deref().and_then(get_tool_list_error) {
-        return Err(format!("Invalid tools option: {error}"));
-    }
-    let default_names: Vec<String> = if options.no_tools.is_some() {
-        Vec::new()
-    } else {
-        default_tools.map_or_else(defaults, <[String]>::to_vec)
-    };
+    default_names: Vec<String>,
+) -> (Option<Vec<String>>, Option<Vec<String>>) {
     let modifiers = options
         .tools
         .as_ref()
@@ -310,6 +300,42 @@ pub fn select_tools(
             .clone()
             .or_else(|| (options.no_tools == Some(NoTools::All)).then(Vec::new)),
     };
+    (selected, allowed)
+}
+
+/// The user's tool restrictions for tools that are not built in, such as
+/// MCP tools, which [`select_tools`] never sees because they are
+/// published later: Pi v1.3.0's `_isAllowedTool` and `_isActivatable`
+/// (`core/agent-session.ts`) for a session without tool search. A tool is
+/// declared only when `--exclude-tools` does not match it and the
+/// allowlist, if any, does: a `--tools` list of names or patterns, or
+/// `--no-tools` (with `--tools` modifiers, the names they add). A list of
+/// only `+name` and `-name` entries changes the built-in defaults and is no
+/// allowlist. Returns the allowlist and the exclusions.
+pub fn dynamic_tool_restrictions(
+    options: &ToolSelectionOptions,
+) -> (Option<Vec<String>>, Vec<String>) {
+    let (_, allowed) = selection_lists(options, Vec::new());
+    (allowed, options.exclude_tools.clone().unwrap_or_default())
+}
+
+/// Pi's selection of the initial tools from the options, the
+/// `defaultTools` setting (already resolved), and the `available` tool
+/// names, with no extension tools.
+pub fn select_tools(
+    options: &ToolSelectionOptions,
+    default_tools: Option<&[String]>,
+    available: &[String],
+) -> Result<ToolSelection, String> {
+    if let Some(error) = options.tools.as_deref().and_then(get_tool_list_error) {
+        return Err(format!("Invalid tools option: {error}"));
+    }
+    let default_names: Vec<String> = if options.no_tools.is_some() {
+        Vec::new()
+    } else {
+        default_tools.map_or_else(defaults, <[String]>::to_vec)
+    };
+    let (selected, allowed) = selection_lists(options, default_names.clone());
     let excluded = options.exclude_tools.as_deref().map(tool_name_matcher);
     let allowed_matcher = allowed.as_deref().map(tool_name_matcher);
     let is_allowed = |name: &str| {
@@ -341,4 +367,49 @@ pub fn select_tools(
         registered,
         active: unique,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn restrictions(
+        tools: Option<&[&str]>,
+        exclude: Option<&[&str]>,
+        no_tools: Option<NoTools>,
+    ) -> (Option<Vec<String>>, Vec<String>) {
+        let list = |entries: &[&str]| entries.iter().map(|entry| (*entry).to_owned()).collect();
+        dynamic_tool_restrictions(&ToolSelectionOptions {
+            tools: tools.map(list),
+            exclude_tools: exclude.map(list),
+            no_tools,
+        })
+    }
+
+    // Pi v1.3.0 `_isAllowedTool`/`_isActivatable` for tools published after
+    // selection, such as MCP tools, without tool search: an allowlist must
+    // match them, `--no-tools` alone allows none, modifiers are no
+    // allowlist, and exclusions always apply.
+    #[test]
+    fn dynamic_restrictions_follow_the_selection() {
+        assert_eq!(restrictions(None, None, None), (None, Vec::new()));
+        assert_eq!(
+            restrictions(Some(&["read", "mcp__a__*"]), None, None).0,
+            Some(vec!["read".to_owned(), "mcp__a__*".to_owned()])
+        );
+        assert_eq!(
+            restrictions(None, None, Some(NoTools::All)).0,
+            Some(Vec::new())
+        );
+        assert_eq!(restrictions(None, None, Some(NoTools::Builtin)).0, None);
+        assert_eq!(restrictions(Some(&["+grep", "-bash"]), None, None).0, None);
+        assert_eq!(
+            restrictions(Some(&["+mcp__a__x"]), None, Some(NoTools::All)).0,
+            Some(vec!["mcp__a__x".to_owned()])
+        );
+        assert_eq!(
+            restrictions(None, Some(&["mcp__a__*"]), None).1,
+            ["mcp__a__*"]
+        );
+    }
 }

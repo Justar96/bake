@@ -97,9 +97,11 @@ dependencies = [
  "bake-coding-agent",
  "bake-sandbox",
  "bake-tui",
+ "libc",
  "ring",
  "serde_json",
  "tokio",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -108,6 +110,7 @@ version = "0.4.0-dev"
 dependencies = [
  "bake-agent",
  "bake-ai",
+ "bake-mcp",
  "bake-process",
  "bake-sandbox",
  "base64 0.22.1",
@@ -120,6 +123,7 @@ dependencies = [
  "loom",
  "regex",
  "reqwest",
+ "ring",
  "serde",
  "serde-saphyr",
  "serde_json",

@@ -983,7 +983,9 @@ impl Driver {
     /// then the new one takes its place, its events reach the loop through
     /// a fresh projector, and the transcript starts over with its replay.
     /// The old session's listeners are closed by its shutdown, so none of
-    /// its events reach the new transcript.
+    /// its events reach the new transcript, and its MCP servers have
+    /// stopped before the new session starts its own
+    /// ([`bake_coding_agent::cli::Replacement::start_servers`]).
     async fn replace(&mut self, replacement: bake_coding_agent::cli::Replacement, note: String) {
         if let Some((task, abort)) = self.startup.take() {
             abort.abort();
@@ -992,11 +994,23 @@ impl Driver {
         for abort in self.aborts.drain(..) {
             let _ = abort.await;
         }
-        let bake_coding_agent::cli::Replacement { session, warnings } = replacement;
-        let session = Arc::new(session);
+        let mut replacement = replacement;
         // The approval broker stays connected: the new session's tools ask
         // the same broker, which the old session's shutdown leaves open.
+        // The old session's MCP servers are gone when this returns; only
+        // then do the new session's start, as Pi tears the current session
+        // down before it creates the next.
         self.session.shutdown().await;
+        let started = replacement.start_servers();
+        let bake_coding_agent::cli::Replacement {
+            session,
+            mut warnings,
+            ..
+        } = replacement;
+        if let Err(message) = started {
+            warnings.push(message);
+        }
+        let session = Arc::new(session);
         if let Some(subscription) = self.subscription.take() {
             subscription.unsubscribe();
         }

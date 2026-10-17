@@ -5,7 +5,8 @@
 //! when no extension registers it, and a short one is an error.
 //!
 //! `--skill <path>` and `--no-skills` (`-ns`) select skills
-//! ([`crate::skills`]).
+//! ([`crate::skills`]), and `--no-mcp` (Pi v1.3.0) starts no MCP server
+//! ([`crate::mcp::home`]).
 //!
 //! Bake adds `--permission <preset>`, `--sandbox <mode>`, and
 //! `--approval <policy>`, which select the session's permission (D24) the
@@ -113,6 +114,8 @@ pub struct Args {
     pub no_prompt_templates: bool,
     /// `--no-context-files`, `-nc`.
     pub no_context_files: bool,
+    /// `--no-mcp`: read no `mcp.json` and start no MCP server.
+    pub no_mcp: bool,
     /// `--list-models [search]`: `Some(None)` when given without a search
     /// pattern, `Some(Some(pattern))` with one.
     pub list_models: Option<Option<String>>,
@@ -256,6 +259,7 @@ pub fn parse_args(args: &[String]) -> Args {
             }
             "--no-prompt-templates" | "-np" => result.no_prompt_templates = true,
             "--no-context-files" | "-nc" => result.no_context_files = true,
+            "--no-mcp" => result.no_mcp = true,
             "--list-models" => {
                 if let Some(search) = next
                     && !search.starts_with('-')
@@ -452,6 +456,16 @@ mod tests {
         assert_eq!(args.exclude_tools, Some(vec!["ls".into(), "mcp__*".into()]));
         assert!(args.no_tools && args.no_builtin_tools);
         assert!(args.diagnostics.is_empty());
+    }
+
+    // Pi v1.3.0 `args.ts`: `--no-mcp` takes no value.
+    #[test]
+    fn no_mcp_flag() {
+        assert!(!parse(&["-p", "hi"]).no_mcp);
+        let args = parse(&["--no-mcp", "-p", "hi"]);
+        assert!(args.no_mcp);
+        assert_eq!(args.messages, ["hi"]);
+        assert!(args.diagnostics.is_empty() && args.unknown_flags.is_empty());
     }
 
     #[test]

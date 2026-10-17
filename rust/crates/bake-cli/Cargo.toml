@@ -20,3 +20,18 @@ tokio = { workspace = true, features = ["rt", "rt-multi-thread", "signal", "macr
 # documentation topic. Both are already in the binary through `bake-ai`.
 serde_json.workspace = true
 ring.workspace = true
+
+# `tests/mcp.rs`'s process identities (`bake-coding-agent`'s
+# `tests/mcp_session/probe.rs`) and its stop request.
+[target.'cfg(unix)'.dev-dependencies]
+libc.workspace = true
+
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Threading"] }
+
+# The shipped binary as the consumer of `mcp.json`: the test binary
+# re-executes itself as the stdio MCP server, so its standard output must
+# carry only protocol messages, which libtest's harness would break.
+[[test]]
+name = "mcp"
+harness = false

@@ -5,7 +5,8 @@
  */
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
-import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -782,9 +783,12 @@ class FakeModel {
     }
     if (toolOutput !== undefined) {
       if (prompt.startsWith('READ ')) return sse(text(n, `Read it: ${toolOutput.split('\n')[0]}`))
+      if (prompt.startsWith('MCP ')) return sse(text(n, `MCP said: ${toolOutput.split('\n')[0]}`))
       return sse(text(n, 'Slept.'))
     }
     if (prompt.startsWith('READ ')) return sse(call(n, 'read', { path: prompt.slice(5).trim() }))
+    // `MCP <text>` calls the configured fixture server's `echo` tool.
+    if (prompt.startsWith('MCP ')) return sse(call(n, 'mcp__fx__echo', { text: prompt.slice(4).trim() }))
     if (prompt.startsWith('SLEEP')) return sse(call(n, 'bash', { command: 'sleep 30' }))
     if (prompt.startsWith('STEER ')) return sse(text(n, `Steered: ${prompt.slice(6).trim()}.`))
     if (prompt.startsWith('HOLD')) {
@@ -869,6 +873,8 @@ interface LiveWorld {
   readonly project: string
   readonly model: FakeModel
   launch(args?: readonly string[], inline?: boolean): Preview
+  /** Runs `cleanup` once every launched session is closed, whatever the outcome; its failure fails the scenario. */
+  defer(cleanup: () => Promise<void>): void
 }
 
 /** The session files the home holds, each as its parsed entries. */
@@ -910,32 +916,42 @@ async function liveScenario(name: string, run: (world: LiveWorld) => Promise<voi
     providers: { loop: { baseUrl: `http://127.0.0.1:${model.port}/v1`, api: 'openai-responses', apiKey: 'test-key', models: [{ id: 'loop-model', name: 'Loop', contextWindow: 1000, input: ['text', 'image'] }] } },
   }))
   const launched: Preview[] = []
+  const cleanups: (() => Promise<void>)[] = []
   const world: LiveWorld = {
     root, home, project, model,
+    defer: (cleanup) => { cleanups.push(cleanup) },
     launch: (args = [], inline = false) => {
       const preview = new Preview(project, inline, { args: inline ? ['--inline', ...args] : args, env: { BAKE_HOME: home, HOME: user, USERPROFILE: user } })
       launched.push(preview)
       return preview
     },
   }
+  // Every cleanup runs whatever the outcome; a cleanup failure fails the
+  // scenario but never hides the scenario's own failure.
+  let failure: { error: unknown } | undefined
   try {
     await run(world)
-    console.log(`PASS Rust PTY: ${name}`)
   } catch (error) {
+    failure = { error }
     const last = launched.at(-1)
     if (last !== undefined) {
-      await mkdir(join(root, '..', basename(root)), { recursive: true })
-      await mkdir(join(join(import.meta.dir, '..'), '.preflight'), { recursive: true })
-      const transcript = join(import.meta.dir, '..', '.preflight', `${basename(root)}.ansi`)
-      await last.saveFailure(transcript)
-      console.error(`Rust PTY transcript: ${transcript}`)
+      try {
+        await mkdir(join(join(import.meta.dir, '..'), '.preflight'), { recursive: true })
+        const transcript = join(import.meta.dir, '..', '.preflight', `${basename(root)}.ansi`)
+        await last.saveFailure(transcript)
+        console.error(`Rust PTY transcript: ${transcript}`)
+      } catch (saveError) { console.error('Rust PTY transcript was not saved:', saveError) }
     }
-    throw error
-  } finally {
-    for (const preview of launched) await preview.close()
-    await model.stop()
-    await rm(root, { recursive: true, force: true })
   }
+  const cleanupFailures: unknown[] = []
+  for (const preview of launched) await preview.close().catch((error: unknown) => { cleanupFailures.push(error) })
+  for (const cleanup of cleanups.splice(0)) await cleanup().catch((error: unknown) => { cleanupFailures.push(error) })
+  await model.stop()
+  await rm(root, { recursive: true, force: true })
+  for (const cleanupFailure of cleanupFailures) console.error('Rust PTY cleanup failed:', cleanupFailure)
+  if (failure !== undefined) throw failure.error
+  if (cleanupFailures.length > 0) throw cleanupFailures[0]
+  console.log(`PASS Rust PTY: ${name}`)
 }
 
 await liveScenario('a live session streams an answer and a tool call, takes a second prompt, and resumes', async (world) => {
@@ -1921,3 +1937,247 @@ for (const inline of [false, true]) {
     assert.deepEqual(await readdir(world.project), [], 'the session wrote into the project')
   })
 }
+
+// ---- MCP servers from the Bake home's mcp.json across session replacements ----
+
+/**
+ * One process as it was when observed: its pid and start time, so a pid
+ * reused by a later process is not mistaken for it. Read from `/proc` on
+ * Linux and from `ps` elsewhere (macOS); a zombie has exited, so it counts
+ * as gone.
+ */
+const IDENTITY_SOURCE = String.raw`
+function identity(pid) {
+  try {
+    if (process.platform === 'linux') {
+      const stat = readFileSync('/proc/' + pid + '/stat', 'utf8')
+      const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ')
+      return { state: fields[0], start: fields[19] }
+    }
+    const out = execFileSync('/bin/ps', ['-o', 'stat=', '-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+    if (out === '') return undefined
+    const [state, ...start] = out.split(/\s+/u)
+    return { state, start: start.join(' ') }
+  } catch { return undefined }
+}
+function alive(pid, start) {
+  const now = identity(pid)
+  return now !== undefined && !now.state.startsWith('Z') && now.start === start
+}
+`
+
+/**
+ * A stdio MCP server for the PTY scenarios, run by this script's Bun. On
+ * start it reads every server and descendant earlier generations recorded
+ * in `$FIXTURE_DIR/registry` and logs those still alive, so a replacement
+ * started while its predecessor's processes run is caught by the process
+ * that would overlap them, at the moment it starts. It then starts a
+ * descendant that never exits by itself (only the session's process-tree
+ * shutdown ends it), records both, and serves `echo` and `hidden`.
+ */
+const MCP_SERVER_SOURCE = String.raw`
+import { appendFileSync, existsSync, readFileSync } from 'node:fs'
+import { execFileSync, spawn } from 'node:child_process'
+import { createInterface } from 'node:readline'
+${IDENTITY_SOURCE}
+const dir = process.env.FIXTURE_DIR
+const log = line => appendFileSync(dir + '/events', line + '\n')
+const registry = dir + '/registry'
+const earlier = existsSync(registry) ? readFileSync(registry, 'utf8').trim().split('\n').filter(Boolean) : []
+const overlapping = earlier.filter(line => { const [pid, ...start] = line.split(' '); return alive(Number(pid), start.join(' ')) })
+const child = spawn('/bin/sleep', ['3600'], { stdio: 'ignore' })
+const me = identity(process.pid), held = identity(child.pid)
+appendFileSync(registry, process.pid + ' ' + me.start + '\n' + child.pid + ' ' + held.start + '\n')
+log(JSON.stringify({ event: 'start', pid: process.pid, descendant: child.pid, overlapping }))
+const send = message => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...message }) + '\n')
+const tool = (name, description) => ({ name, description, inputSchema: { type: 'object', properties: { text: { type: 'string' } } } })
+for await (const line of createInterface({ input: process.stdin })) {
+  if (line.trim() === '') continue
+  const { id, method, params } = JSON.parse(line)
+  if (id === undefined) continue
+  if (method === 'initialize') send({ id, result: { protocolVersion: params?.protocolVersion ?? '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'pty-fixture', version: '1' } } })
+  else if (method === 'tools/list') {
+    log(JSON.stringify({ event: 'list', pid: process.pid }))
+    send({ id, result: { tools: [tool('echo', 'Echo the text.'), tool('hidden', 'Never declared.')] } })
+  }
+  else if (method === 'tools/call') {
+    log(JSON.stringify({ event: 'call', pid: process.pid, name: params?.name, text: params?.arguments?.text }))
+    send({ id, result: { content: [{ type: 'text', text: 'echo ' + String(params?.arguments?.text) + ' from ' + process.pid }] } })
+  } else if (method === 'ping') send({ id, result: {} })
+  else send({ id, error: { code: -32601, message: 'unknown method ' + method } })
+}
+`
+
+/** The driver's copy of the fixture's `alive`, from the same source, so both judge a process alike. */
+const alive = new Function('readFileSync', 'execFileSync', `${IDENTITY_SOURCE}; return alive`)(
+  readFileSync, execFileSync,
+) as (pid: number, start: string) => boolean
+
+interface McpStart { pid: number; descendant: number; overlapping: string[] }
+
+/** The fixture server's home entry, its events, and the processes every generation recorded. */
+class McpFixture {
+  readonly dir: string
+  constructor(readonly world: LiveWorld) { this.dir = join(world.root, 'mcp-fixture') }
+
+  /** Writes the server and the owner-only `mcp.json` that starts it, and owns every process it records. */
+  async install(): Promise<void> {
+    await mkdir(this.dir, { recursive: true })
+    const server = join(this.dir, 'server.mjs')
+    await writeFile(server, MCP_SERVER_SOURCE)
+    const config = join(this.world.home, 'mcp.json')
+    const entry = { command: process.execPath, args: [server], env: { FIXTURE_DIR: this.dir } }
+    await writeFile(config, JSON.stringify({ mcpServers: { fx: entry } }))
+    await chmod(config, 0o600)
+    this.world.defer(() => this.reap())
+  }
+
+  events(): Record<string, unknown>[] {
+    const path = join(this.dir, 'events')
+    return existsSync(path) ? readFileSync(path, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as Record<string, unknown>) : []
+  }
+
+  starts(): McpStart[] { return this.events().filter(event => event.event === 'start') as unknown as McpStart[] }
+
+  /** Every process every generation recorded, descendants and servers, with its start time. */
+  recorded(): { pid: number; start: string }[] {
+    const path = join(this.dir, 'registry')
+    if (!existsSync(path)) return []
+    return readFileSync(path, 'utf8').trim().split('\n').filter(Boolean).map((line) => {
+      const [pid, ...start] = line.split(' ')
+      return { pid: Number(pid), start: start.join(' ') }
+    })
+  }
+
+  living(): number[] { return this.recorded().filter(entry => alive(entry.pid, entry.start)).map(entry => entry.pid) }
+
+  /** Waits for generation `count` to start and list its tools, then checks no earlier process was alive when it started. */
+  async generation(session: Preview, count: number): Promise<McpStart> {
+    await session.wait(`MCP server ${count} listed`, () => {
+      const start = this.starts()[count - 1]
+      return start !== undefined && this.events().some(event => event.event === 'list' && event.pid === start.pid)
+    }, false)
+    const starts = this.starts()
+    assert.equal(starts.length, count, `expected ${count} server starts, saw ${JSON.stringify(starts)}`)
+    const start = starts[count - 1]
+    assert(start)
+    assert.deepEqual(start.overlapping, [], `server ${count} started while an earlier server or its descendant was alive`)
+    return start
+  }
+
+  /** Kills whatever a failed scenario left running, descendants first, and waits a bounded time for each to go. */
+  async reap(): Promise<void> {
+    const left = this.recorded().filter(entry => alive(entry.pid, entry.start)).reverse()
+    for (const entry of left) {
+      try { process.kill(entry.pid, 'SIGKILL') } catch { /* already gone */ }
+    }
+    const deadline = performance.now() + 5_000
+    while (left.some(entry => alive(entry.pid, entry.start))) {
+      if (performance.now() > deadline) throw new Error(`MCP fixture processes survived SIGKILL: ${left.map(entry => entry.pid).join(' ')}`)
+      await delay(5)
+    }
+    assert.deepEqual(left, [], 'MCP fixture processes outlived the scenario')
+  }
+}
+
+/** The tool names a model request declared. */
+function declared(request: unknown): string[] {
+  const tools = (request as { tools?: { name?: string }[] }).tools ?? []
+  return tools.map(tool => tool.name ?? '').sort()
+}
+
+await liveScenario('home MCP servers stop with their descendants before each /new, /resume, and /fork replacement starts its own', async (world) => {
+  const fixture = new McpFixture(world)
+  await fixture.install()
+  const session = world.launch(['--sandbox', 'danger-full-access', '--exclude-tools', 'mcp__fx__hidden'])
+  await session.ready()
+  const first = await fixture.generation(session, 1)
+  const turn = async (word: string, server: McpStart): Promise<void> => {
+    const before = world.model.requests.length
+    session.send(`MCP ${word}\r`)
+    await turnSettled(session, `MCP said: echo ${word} from ${server.pid}`)
+    await composerReady(session)
+    // Every request the turn sent declares the server's allowed tool and never the excluded one.
+    const requests = world.model.requests.slice(before)
+    assert.equal(requests.length, 2, 'expected the call and its answer')
+    for (const request of requests) {
+      const names = declared(request)
+      assert(names.includes('mcp__fx__echo') && !names.includes('mcp__fx__hidden'), `declared tools: ${names.join(', ')}`)
+    }
+  }
+  await turn('one', first)
+  session.send('/name First\r')
+  await session.wait('named', () => session.screen.includes('Session name set: First'))
+  await composerReady(session)
+
+  session.send('/new\r')
+  await session.wait('new session', () => session.screen.includes('New session started'))
+  const second = await fixture.generation(session, 2)
+  assert.deepEqual(fixture.living().sort(), [second.pid, second.descendant].sort(), 'only the new server and its descendant run')
+  await turn('two', second)
+
+  session.send('/resume\r')
+  await sheetReady(session, 'Resume session')
+  // A phrase only the first session holds: a bare word is matched loosely and can list the current session too.
+  const phrase = '"MCP one"'
+  await type(session, phrase, typed => session.screen.includes(`> ${phrase.slice(0, typed)}`))
+  await session.wait('one match', () => session.screen.includes('▸ First') && session.screen.includes('1/1'))
+  session.send('\r')
+  await session.wait('resumed', () => session.screen.includes('Resumed session First'))
+  const third = await fixture.generation(session, 3)
+  assert.deepEqual(fixture.living().sort(), [third.pid, third.descendant].sort(), 'only the resumed session\'s server runs')
+  await turn('three', third)
+
+  session.send('/fork\r')
+  await sheetReady(session, 'Fork from message')
+  session.send('\r')
+  await session.wait('forked', () => session.screen.includes('Forked to new session') && !session.screen.includes('Fork from message'))
+  const fourth = await fixture.generation(session, 4)
+  assert.deepEqual(fixture.living().sort(), [fourth.pid, fourth.descendant].sort(), 'only the fork\'s server runs')
+  session.send('\x15')
+  await session.wait('fork draft cleared', () => session.screen.includes('❯ Type a draft'))
+
+  // Cancelled sheets replace nothing: the fork's server keeps serving and no other starts.
+  for (const [command, title] of [['/resume', 'Resume session'], ['/fork', 'Fork from message']] as const) {
+    session.send(`${command}\r`)
+    await sheetReady(session, title)
+    session.send('\x1b')
+    await session.wait(`${command} cancelled`, () => session.screen.includes('Cancelled') && !session.screen.includes(title))
+    await composerReady(session)
+    session.send('\x15')
+    await session.wait('draft cleared', () => session.screen.includes('❯ Type a draft'))
+  }
+  await turn('four', fourth)
+  assert.equal(fixture.starts().length, 4, 'a cancelled sheet started a server')
+
+  const recorded = fixture.recorded()
+  assert.equal(recorded.length, 8, 'expected four servers and four descendants')
+  await session.quit()
+  // Checked at once after the exit: shutdown awaited every server and its tree.
+  assert.deepEqual(fixture.living(), [], 'an MCP server or its descendant outlived the double Ctrl+C quit')
+  const calls = fixture.events().filter(event => event.event === 'call')
+  assert.deepEqual(calls.map(call => [call.name, call.pid]), [
+    ['echo', first.pid], ['echo', second.pid], ['echo', third.pid], ['echo', fourth.pid],
+  ], 'each call reached the server of the session that sent it')
+  assert.deepEqual(await readdir(world.project), [], 'the session wrote into the project')
+})
+
+await liveScenario('with --no-tools the home MCP server never starts and requests declare no tool', async (world) => {
+  const fixture = new McpFixture(world)
+  await fixture.install()
+  const session = world.launch(['--sandbox', 'danger-full-access', '-nt'])
+  await session.ready()
+  session.send('ECHO bare\r')
+  // The first prompt waits for servers still connecting, so a server the session had started is recorded by now.
+  await turnSettled(session, 'Echo: bare.')
+  assert.deepEqual(declared(world.model.requests.at(-1)), [], 'a --no-tools request declared tools')
+  session.send('/new\r')
+  await session.wait('new session', () => session.screen.includes('New session started'))
+  await composerReady(session)
+  session.send('ECHO again\r')
+  await turnSettled(session, 'Echo: again.')
+  assert.deepEqual(declared(world.model.requests.at(-1)), [], 'the replacement declared tools')
+  await session.quit()
+  assert.deepEqual(fixture.events(), [], 'a --no-tools session started the MCP server')
+  assert.deepEqual(fixture.recorded(), [])
+})

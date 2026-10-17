@@ -40,7 +40,7 @@ bake-rs --mode json -p "List the tests" > events.jsonl
 - `--append-system-prompt <text|path>` appends literal text or a file's contents to the system prompt. Give it more than once to join several parts with blank lines.
 - `--prompt-template <path>` loads a Markdown prompt template file or directory (repeatable); `-np`, `--no-prompt-templates` skips the default `prompts/` directories (`$BAKE_HOME/prompts` and `<cwd>/.bake/prompts`). A prompt starting with `/<name> [args...]` expands that template (`$1`, `$2`, `$@`, `$ARGUMENTS`, `${N:-default}`, `${@:N}`, `${@:N:L}`).
 
-Model flags are in `bake-rs docs models`, session flags in `bake-rs docs sessions`, context flags in `bake-rs docs context`, permission flags in `bake-rs docs permissions`, and `--skill`, `--no-skills`, and `/skill:<name>` prompts in `bake-rs docs skills`.
+Model flags are in `bake-rs docs models`, session flags in `bake-rs docs sessions`, context flags in `bake-rs docs context`, permission flags in `bake-rs docs permissions`, `--no-mcp` in `bake-rs docs mcp`, and `--skill`, `--no-skills`, and `/skill:<name>` prompts in `bake-rs docs skills`.
 
 ## Tools
 
@@ -53,6 +53,8 @@ A session starts with `read`, `bash`, `edit`, and `write` (or the `defaultTools`
 
 For example, `bake-rs -t +grep,+find -p "..."` adds `grep` and `find` to the defaults.
 
+MCP servers configured in the Bake home's `mcp.json` add tools named `mcp__<server>__<tool>`. These flags restrict them too, including tools a server adds later: a `--tools` list of names or patterns must match one (`+name`/`-name` lists leave them alone), `--exclude-tools` removes the ones it matches, and `--no-tools` alone starts no server. `--no-mcp` starts no MCP server, so a session has none of their tools (`bake-rs docs mcp`).
+
 When the model sends several tool calls in one response, they run at once if they only read; a response with a `bash`, `edit`, or `write` call runs its calls one at a time, in the order the model wrote them, so a command that checks an edit sees the edited file.
 
 Commands the `bash` tool runs receive the session's details: `BAKE_SESSION_ID`, `BAKE_SESSION_FILE` (when the session is saved), `BAKE_PROVIDER`, `BAKE_MODEL`, and `BAKE_REASONING_LEVEL`. Output too long for the result is saved to a `bake-bash-…` or `bake-output-…` file in the temporary directory, which the result names.
@@ -64,7 +66,7 @@ Commands the `bash` tool runs receive the session's details: `BAKE_SESSION_ID`, 
 | 0 | The turn finished, or the interactive session was quit |
 | 1 | An error: a bad option, a startup failure, no usable model, or, in text mode, a model error (JSON mode reports it as an event) |
 | 2 | An argument bake-rs cannot parse: one that is not UTF-8, or a bad argument to `preview`, `docs`, or `--self-check` |
-| 129, 130, 143 | Stopped by `SIGHUP` or a closed terminal, `SIGINT` (interactive only), or `SIGTERM`; the session is closed first |
+| 129, 130, 143 | Stopped by `SIGHUP` or a closed terminal, `SIGINT` (Ctrl+C; also Ctrl+Break on Windows), or `SIGTERM`; the session, its MCP servers, and the processes its tools started are closed first |
 
 Startup errors and warnings go to standard error, most as `Error: ` and `Warning: ` lines; `No models available` and `No session found matching` print without the prefix, as in Pi. A model error in text mode prints as its message.
 
