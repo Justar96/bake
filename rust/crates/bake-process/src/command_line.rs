@@ -3,11 +3,8 @@
 //! rule is `bake-sandbox`'s `quote_arg` and `build_command_line`, from Bake's
 //! TypeScript `quoteArg` (`packages/subprocess/win32-process/src/process.ts`);
 //! it is kept here so the owner needs no sandbox dependency. Pure, so it is
-//! compiled and tested on every platform.
-#![cfg_attr(
-    not(windows),
-    allow(dead_code, reason = "Windows spawns use it; tested everywhere")
-)]
+//! compiled and tested on every platform. Public for the ConPTY test host
+//! (`examples/conpty`), which starts its pseudoconsole client with it.
 
 /// Appends `argument` to a command line, as UTF-16 code units.
 fn quote_arg(argument: &[u16], out: &mut Vec<u16>) {
@@ -47,7 +44,7 @@ fn quote_arg(argument: &[u16], out: &mut Vec<u16>) {
 
 /// The command line for `argv`: each entry quoted, one space apart, without
 /// a terminating NUL.
-pub(crate) fn build_command_line<A: AsRef<[u16]>>(argv: &[A]) -> Vec<u16> {
+pub fn build_command_line<A: AsRef<[u16]>>(argv: &[A]) -> Vec<u16> {
     let mut line = Vec::new();
     for (index, argument) in argv.iter().enumerate() {
         if index > 0 {

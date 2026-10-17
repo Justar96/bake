@@ -1,7 +1,17 @@
 #!/usr/bin/env bun
 /**
  * Drive the built Rust preview, and live `bake-rs` sessions against a fake
- * streaming model, in a real PTY and check their return to the shell.
+ * streaming model, in a real terminal and check their return to the shell.
+ *
+ * On Linux and macOS the terminal is a POSIX PTY (`Bun.Terminal`) with a
+ * shell that waits for a handshake before it `exec`s the program, so the
+ * driver reads cooked termios flags first. On Windows it is a pseudoconsole
+ * (ConPTY) owned by the host in `rust/crates/bake-process/examples/conpty`
+ * (`rust-pty-conpty.ts`): its first client reads the console modes before
+ * the program starts and after it exits, and every process runs in the
+ * host's kill-on-close job. The scenarios are the same on both; where
+ * Windows cannot do or show what a scenario needs, the run names the gap
+ * (`GAP`) instead of passing it.
  */
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
@@ -13,34 +23,77 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { parseArgs } from 'node:util'
 import xterm from '@xterm/headless'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
+import { buildConPtyHost, ConPty, modeRestoration, rawModeProblem, STATUS_CONTROL_C_EXIT, windowsEnv } from './rust-pty-conpty.ts'
 
 const root = resolve(import.meta.dir, '..')
-const { values } = parseArgs({ options: { binary: { type: 'string' }, filter: { type: 'string' } } })
-const binary = resolve(values.binary ?? join(root, 'rust/target/debug/bake-rs'))
+const { values } = parseArgs({ options: { binary: { type: 'string' }, filter: { type: 'string' }, conpty: { type: 'string' } } })
+const windows = process.platform === 'win32'
+const binary = resolve(values.binary ?? join(root, `rust/target/debug/bake-rs${windows ? '.exe' : ''}`))
+/** The ConPTY host, on Windows: given with `--conpty`, or built now. */
+const conptyHost = windows ? values.conpty === undefined ? buildConPtyHost(root) : resolve(values.conpty) : undefined
 
 /** A live session's command line and the isolated environment it runs in. */
 interface Live { readonly args: readonly string[]; readonly env: Readonly<Record<string, string>> }
 
-class Preview {
-  private readonly terminal = new xterm.Terminal({ cols: 80, rows: 24, allowProposedApi: true })
-  private readonly pty: Bun.Terminal
-  private readonly initialModes: readonly number[]
-  private readonly process: Bun.Subprocess
-  private readonly exited: Promise<number>
-  private parsed = Promise.resolve()
-  /** Whether the emulator has parsed the start of a synchronized update but not its end. */
-  private frameOpen = false
-  private parsedTail = ''
-  private code: number | undefined
-  private streamStatus: number | undefined
-  /** Everything the preview wrote, its last MiB, for sequences the screen does not show. */
-  raw = ''
+type Signal = 'SIGINT' | 'SIGTERM' | 'SIGHUP'
 
-  constructor(cwd: string, readonly inline = false, readonly live?: Live) {
-    // Emoji cases use Unicode 11 widths, matching modern terminal cell allocation.
-    this.terminal.loadAddon(new Unicode11Addon())
-    this.terminal.unicode.activeVersion = '11'
-    const decoder = new TextDecoder()
+/**
+ * What a scenario could not do or show on this platform, by message. A
+ * scenario that ends in one is reported as a gap, never as a pass; one
+ * noted while a scenario passes is listed with the results.
+ */
+const gaps = new Set<string>()
+
+/** A scenario ended where this platform has a named gap: reported as `GAP`, not a pass or a failure. */
+class GapError extends Error {}
+
+const NO_CONSOLE_HANDLER = 'bake-rs installs no Windows console control handler, so'
+
+/** The terminal under the program: a POSIX PTY or a pseudoconsole, and the process on it. */
+interface Backend {
+  write(text: string): void
+  resize(cols: number, rows: number): void
+  /** The program's exit status. */
+  readonly exited: Promise<number>
+  readonly code: number | undefined
+  /** The signal that ended the program, on POSIX; a Windows exit is only ever a code. */
+  readonly signalCode: string | null
+  /** Whether the terminal's output has ended, so every byte the program wrote has been read. */
+  readonly streamEnded: boolean
+  /** Asserts the program changed the terminal's modes to raw. */
+  assertRaw(): Promise<void>
+  /** Asserts the modes read after exit equal those read before the program started. */
+  assertRestored(): Promise<void>
+  unchangedModes(): Promise<boolean>
+  signal(signal: Signal): void
+  /** Ends the program at once, with no chance to restore anything: SIGKILL, or `TerminateProcess`. */
+  kill(): void
+  /** Closes the terminal under the program, as an emulator window closing does. */
+  hangUp(): void
+  /** Stops every thread of the program; [`resume`] continues it. */
+  pause(): Promise<void>
+  resume(): Promise<void>
+  /** The program's descendants and other processes it started, by key, with a label: a command line or an image path. */
+  owned(): Promise<Map<string, string>>
+  /** Which of `owned` are still live. */
+  survivors(owned: ReadonlyMap<string, string>): Promise<string[]>
+  /** Ends what `survivors` found, after a failed check. */
+  release(owned: ReadonlyMap<string, string>): Promise<void>
+  /** Asserts nothing the program started is left. */
+  assertGone(): Promise<void>
+  close(): Promise<void>
+}
+
+/** A POSIX PTY with a shell that `exec`s the program after the driver's handshake. */
+class PosixPty implements Backend {
+  private readonly pty: Bun.Terminal
+  private readonly process: Bun.Subprocess
+  private readonly initialModes: readonly number[]
+  readonly exited: Promise<number>
+  code: number | undefined
+  private streamStatus: number | undefined
+
+  constructor(cwd: string, inline: boolean, live: Live | undefined, onData: (bytes: Uint8Array) => void) {
     // The shell waits for our handshake before exec, preserving its PID. This
     // lets us read cooked modes before the native process can enable raw mode.
     const history = 'i=0; while [ "$i" -lt 40 ]; do printf "SHELL_HISTORY_%02d\\n" "$i"; i=$((i + 1)); done; '
@@ -53,24 +106,206 @@ class Preview {
       env: { PATH: process.env.PATH, TERM: 'xterm-256color', LANG: 'C.UTF-8', SSH_TTY: '/dev/pts/bake-pty', ...live?.env },
       terminal: {
         cols: 80, rows: 24,
-        data: (_terminal, bytes) => {
-          const text = decoder.decode(bytes, { stream: true })
-          this.raw = (this.raw + text).slice(-1_048_576)
-          this.parsed = this.parsed.then(() => new Promise<void>(done => this.terminal.write(text, () => {
-            this.track(text)
-            done()
-          })))
-        },
+        data: (_terminal, bytes) => onData(bytes),
         exit: (_terminal, status) => { this.streamStatus = status },
       },
     })
     const pty = this.process.terminal
     assert(pty)
     this.pty = pty
-    this.terminal.onData((data) => { this.pty.write(data) })
     this.initialModes = this.modes()
     this.pty.write('start\n')
     this.exited = this.process.exited.then((code) => { this.code = code; return code })
+  }
+
+  private modes(): readonly number[] {
+    return [this.pty.inputFlags, this.pty.outputFlags, this.pty.localFlags, this.pty.controlFlags]
+  }
+
+  write(text: string): void { this.pty.write(text) }
+
+  resize(cols: number, rows: number): void { this.pty.resize(cols, rows) }
+
+  get streamEnded(): boolean { return this.streamStatus !== undefined }
+
+  get signalCode(): string | null { return this.process.signalCode }
+
+  async assertRaw(): Promise<void> {
+    assert.notDeepEqual(this.modes(), this.initialModes, 'preview did not acquire raw mode')
+  }
+
+  async assertRestored(): Promise<void> {
+    assert.equal(this.signalCode, null)
+    // Linux reports EIO when the last slave closes, including a clean exit.
+    assert(this.streamStatus === 0 || (process.platform === 'linux' && this.streamStatus === 1))
+    assert.deepEqual(this.modes(), this.initialModes, 'terminal mode flags were not restored')
+  }
+
+  async unchangedModes(): Promise<boolean> { return JSON.stringify(this.modes()) === JSON.stringify(this.initialModes) }
+
+  signal(signal: Signal): void { this.process.kill(signal) }
+
+  kill(): void { this.process.kill('SIGKILL') }
+
+  hangUp(): void { this.pty.close() }
+
+  async pause(): Promise<void> {
+    this.process.kill('SIGSTOP')
+    // Hold every application thread while the emulator reflows. Only Linux
+    // shows the stopped state, so only Linux runs these scenarios.
+    const deadline = performance.now() + 30_000
+    while (!/^State:\s+T/mu.test(readFileSync(`/proc/${this.process.pid}/status`, 'utf8'))) {
+      if (performance.now() > deadline) {
+        this.process.kill('SIGCONT')
+        throw new Error('the preview did not stop')
+      }
+      await delay(5)
+    }
+  }
+
+  async resume(): Promise<void> { this.process.kill('SIGCONT') }
+
+  async owned(): Promise<Map<string, string>> {
+    return new Map([...descendants(this.process.pid)].map(([pid, command]) => [String(pid), command]))
+  }
+
+  async survivors(owned: ReadonlyMap<string, string>): Promise<string[]> {
+    const table = processTable()
+    return [...owned].filter(([pid, command]) => table.get(Number(pid))?.command === command).map(([pid]) => pid)
+  }
+
+  async release(owned: ReadonlyMap<string, string>): Promise<void> {
+    for (const pid of await this.survivors(owned)) {
+      try {
+        process.kill(Number(pid), 'SIGKILL')
+      } catch (error) {
+        // It exited after the listing, or with a parent killed before it.
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
+      }
+    }
+  }
+
+  async assertGone(): Promise<void> {
+    assert.throws(() => process.kill(this.process.pid, 0), 'application remains alive after exit')
+  }
+
+  async close(): Promise<void> {
+    if (this.code === undefined) this.process.kill('SIGKILL')
+    await this.exited
+    this.pty.close()
+  }
+}
+
+/**
+ * A pseudoconsole from the ConPTY host. Signals map as `consoleSignal`
+ * documents; the program's exit and the job's settlement come from the
+ * host's own handles and account.
+ */
+class WindowsConsole implements Backend {
+  private readonly console: ConPty
+
+  constructor(cwd: string, inline: boolean, live: Live | undefined, onData: (bytes: Uint8Array) => void) {
+    assert(conptyHost)
+    const args = live?.args ?? (inline ? ['preview', '--inline'] : ['preview'])
+    this.console = new ConPty({
+      host: [conptyHost], program: binary, args, cwd, cols: 80, rows: 24, history: inline, onData,
+      env: windowsEnv(process.env, { TERM: 'xterm-256color', LANG: 'C.UTF-8', SSH_TTY: '/dev/pts/bake-pty', ...live?.env }),
+    })
+  }
+
+  write(text: string): void { this.console.write(text) }
+
+  resize(cols: number, rows: number): void { this.console.resize(cols, rows) }
+
+  get exited(): Promise<number> { return this.console.exited }
+
+  get code(): number | undefined { return this.console.exitCode }
+
+  get streamEnded(): boolean { return this.console.closed }
+
+  get signalCode(): null { return null }
+
+  async assertRaw(): Promise<void> {
+    const problem = rawModeProblem(await this.console.initial, await this.console.modes())
+    assert.equal(problem, undefined, problem)
+  }
+
+  async assertRestored(): Promise<void> {
+    await this.console.ended
+    const { problem, gap } = modeRestoration(await this.console.initial, await this.console.final)
+    assert.equal(problem, undefined, problem)
+    if (gap !== undefined) gaps.add(gap)
+    assert.deepEqual(this.console.errors, [], 'the ConPTY host reported errors')
+  }
+
+  async unchangedModes(): Promise<boolean> {
+    const [initial, final] = await Promise.all([this.console.initial, this.console.final])
+    return initial.input === final.input && initial.output === final.output
+  }
+
+  signal(signal: Signal): void { this.console.signal(signal) }
+
+  kill(): void { this.console.signal('SIGKILL') }
+
+  hangUp(): void { this.console.signal('SIGHUP') }
+
+  async pause(): Promise<void> { await this.console.suspend() }
+
+  async resume(): Promise<void> { await this.console.resume() }
+
+  async owned(): Promise<Map<string, string>> {
+    const members = await this.console.members()
+    return new Map(members.filter(member => member.role === 'member' && member.alive).map(member => [String(member.pid), member.image]))
+  }
+
+  async survivors(owned: ReadonlyMap<string, string>): Promise<string[]> {
+    // Every pin is held open, so a pid names the same process until unpinned.
+    const members = await this.console.members()
+    return members.filter(member => member.alive && owned.has(String(member.pid))).map(member => String(member.pid))
+  }
+
+  async release(): Promise<void> {
+    // The host's job ends what is left when it closes; pins only hold handles.
+    this.console.unpin()
+  }
+
+  async assertGone(): Promise<void> {
+    await this.console.ended
+    assert(this.console.settled, 'the job did not settle')
+    assert.equal(this.console.settled.terminated, false, 'processes outlived the program until the job was terminated')
+  }
+
+  async close(): Promise<void> { await this.console.close() }
+}
+
+class Preview {
+  private readonly terminal = new xterm.Terminal({ cols: 80, rows: 24, allowProposedApi: true })
+  private readonly backend: Backend
+  private parsed = Promise.resolve()
+  /** Whether the emulator has parsed the start of a synchronized update but not its end. */
+  private frameOpen = false
+  private parsedTail = ''
+  /** Everything the preview wrote, its last MiB, for sequences the screen does not show. */
+  raw = ''
+
+  constructor(cwd: string, readonly inline = false, readonly live?: Live) {
+    // Emoji cases use Unicode 11 widths, matching modern terminal cell allocation.
+    this.terminal.loadAddon(new Unicode11Addon())
+    this.terminal.unicode.activeVersion = '11'
+    const decoder = new TextDecoder()
+    const data = (bytes: Uint8Array) => {
+      const text = decoder.decode(bytes, { stream: true })
+      this.raw = (this.raw + text).slice(-1_048_576)
+      this.parsed = this.parsed.then(() => new Promise<void>(done => this.terminal.write(text, () => {
+        this.track(text)
+        done()
+      })))
+    }
+    this.backend = windows ? new WindowsConsole(cwd, inline, live, data) : new PosixPty(cwd, inline, live, data)
+    // The emulator's replies to the program's queries; none once the terminal is gone.
+    this.terminal.onData((reply) => {
+      if (!this.backend.streamEnded) this.backend.write(reply)
+    })
   }
 
   /**
@@ -86,10 +321,6 @@ class Preview {
     const end = seen.lastIndexOf('\x1b[?2026l')
     if (begin !== end) this.frameOpen = begin > end
     this.parsedTail = seen.slice(-7)
-  }
-
-  private modes(): readonly number[] {
-    return [this.pty.inputFlags, this.pty.outputFlags, this.pty.localFlags, this.pty.controlFlags]
   }
 
   get screen(): string {
@@ -128,36 +359,60 @@ class Preview {
     assert(!scrollback.includes('❯') && !/^ {2}Agents .*Ctrl\+G$/mu.test(scrollback), 'live controls escaped into scrollback')
   }
 
+  /**
+   * Asserts the terminal saw `off` after its last `on`. A pseudoconsole
+   * renders the program's screen itself and forwards a VT mode only when
+   * its conhost passes it through; one it never forwarded is a named gap,
+   * since conhost's own state for it is not observed.
+   */
+  private assertReleased(on: string, off: string, label: string, message: string): void {
+    if (windows && !this.raw.includes(on)) {
+      gaps.add(`ConPTY did not forward ${label} (${JSON.stringify(on)}); conhost's own state for it is not observed`)
+      return
+    }
+    assert(this.raw.lastIndexOf(off) > this.raw.lastIndexOf(on), message)
+  }
+
   /** Waits until `condition` holds of a whole frame, or of any output when `framed` is false. */
   async wait(label: string, condition: () => boolean, framed = true): Promise<void> {
     const deadline = performance.now() + 30_000
     while (true) {
       await this.parsed
       if ((!framed || !this.frameOpen) && condition()) return
-      if ((this.code !== undefined && this.streamStatus !== undefined) || performance.now() > deadline) {
-        throw new Error(`${label}: ${this.code === undefined ? 'timed out' : `exited ${this.code}`}\n${this.screen}`)
+      if ((this.backend.code !== undefined && this.backend.streamEnded) || performance.now() > deadline) {
+        throw new Error(`${label}: ${this.backend.code === undefined ? 'timed out' : `exited ${this.backend.code}`}\n${this.screen}`)
       }
       await delay(5)
     }
   }
 
   async ready(): Promise<void> {
-    await this.wait('Rust preview ready', () => this.terminal.buffer.active.type === (this.inline ? 'normal' : 'alternate')
+    // A pseudoconsole may keep the alternate screen to itself; quit names that gap.
+    const screenType = () => this.terminal.buffer.active.type === (this.inline ? 'normal' : 'alternate')
+      || (windows && !this.inline && !this.raw.includes('\x1b[?1049h'))
+    await this.wait('Rust preview ready', () => screenType()
       // The sample session's newest lines show on the first frame, and so does the composer.
       && (this.live !== undefined || this.screen.includes('rejects it before splitting.')) && this.screen.includes('❯ ')
-      && this.raw.includes('\x1b[?2004h') && this.raw.includes('\x1b[?1000h\x1b[?1002h\x1b[?1006h'))
-    assert.notDeepEqual(this.modes(), this.initialModes, 'preview did not acquire raw mode')
+      && (windows || (this.raw.includes('\x1b[?2004h') && this.raw.includes('\x1b[?1000h\x1b[?1002h\x1b[?1006h'))))
+    await this.backend.assertRaw()
   }
 
-  send(text: string): void { this.pty.write(text) }
+  send(text: string): void { this.backend.write(text) }
+
+  /** Whether the composer's frame spans `cols` cells. */
+  private composerSpans(cols: number): boolean {
+    return this.screen.split('\n').some(line => /^╭─.*╮$/u.test(line) && line.length === cols)
+  }
 
   async resize(cols: number, rows: number): Promise<void> {
     const offset = this.raw.length
     this.terminal.resize(cols, rows)
-    this.pty.resize(cols, rows)
+    this.backend.resize(cols, rows)
+    // Fullscreen clears the screen on a resize; a pseudoconsole repaints its
+    // own buffer instead of forwarding the clear, so only the redraw shows.
     await this.wait('resize redraw', () => this.inline
-      ? this.raw.length > offset && this.screen.split('\n').some(line => /^╭─.*╮$/u.test(line) && line.length === cols)
-      : this.raw.slice(offset).includes('\x1b[2J'))
+      ? this.raw.length > offset && this.composerSpans(cols)
+      : this.raw.slice(offset).includes('\x1b[2J') || (windows && this.raw.length > offset && this.screen.includes('❯')))
   }
 
   /**
@@ -165,22 +420,21 @@ class Preview {
    * wakes to input and a resize at once and must read both.
    */
   async resizeBurst(keys: string): Promise<void> {
-    this.process.kill('SIGSTOP')
     const offset = this.raw.length
+    await this.backend.pause()
     try {
       // Hold every application thread while the emulator reflows twice. The
-      // final kernel size equals the previous frame, but that frame is stale.
-      await this.wait('preview stopped', () => /^State:\s+T/mu.test(readFileSync(`/proc/${this.process.pid}/status`, 'utf8')), false)
+      // final terminal size equals the previous frame, but that frame is stale.
       this.send(keys)
       for (const [cols, rows] of [[40, 12], [80, 24]] as const) {
         this.terminal.resize(cols, rows)
-        this.pty.resize(cols, rows)
+        this.backend.resize(cols, rows)
       }
-    } finally { this.process.kill('SIGCONT') }
-    await this.wait('coalesced resize redraw', () => this.raw.slice(offset).includes(this.inline ? '╭─' : '\x1b[2J'))
+    } finally { await this.backend.resume() }
+    await this.wait('coalesced resize redraw', () => this.raw.slice(offset).includes(this.inline || windows ? '╭─' : '\x1b[2J'))
   }
 
-  async quit(signal?: 'SIGINT' | 'SIGTERM' | 'SIGHUP'): Promise<void> {
+  async quit(signal?: Signal): Promise<void> {
     if (signal === 'SIGTERM' && this.live === undefined) {
       this.send('\x07')
       await this.wait('agent list with hidden cursor', () => this.screen.includes('Fixed examples · nothing is running')
@@ -190,56 +444,79 @@ class Preview {
       // The first Ctrl+C only arms the quit; the second, inside its window, quits.
       this.send('\x03')
       await this.wait('quit armed', () => this.screen.includes('Press Ctrl-C again to quit'))
-      assert.equal(this.code, undefined, 'one Ctrl+C quit the preview')
+      assert.equal(this.backend.code, undefined, 'one Ctrl+C quit the preview')
       this.send('\x03')
-    } else this.process.kill(signal)
-    await this.wait('preview process and PTY exit', () => this.code !== undefined && this.streamStatus !== undefined, false)
+    } else this.backend.signal(signal)
+    await this.wait('preview process and PTY exit', () => this.backend.code !== undefined && this.backend.streamEnded, false)
     // The wait read the parse queue before its last output arrived; the
     // stream has ended now, so this queue holds every byte the preview wrote.
     await this.parsed
-    assert.equal(await this.exited, signal === 'SIGTERM' ? 143 : signal === 'SIGHUP' ? 129 : signal === 'SIGINT' ? 130 : 0)
-    assert.equal(this.process.signalCode, null)
-    // Linux reports EIO when the last slave closes, including a clean exit.
-    assert(this.streamStatus === 0 || (process.platform === 'linux' && this.streamStatus === 1))
-    assert.deepEqual(this.modes(), this.initialModes, 'terminal mode flags were not restored')
+    const code = await this.backend.exited
+    if (windows && signal !== undefined && code === STATUS_CONTROL_C_EXIT) {
+      throw new GapError(`${NO_CONSOLE_HANDLER} ${signal === 'SIGHUP' ? 'a closed pseudoconsole (CTRL_CLOSE_EVENT)' : `${signal === 'SIGINT' ? 'CTRL_C_EVENT' : 'CTRL_BREAK_EVENT'}`} ends it through the default handler, without restoring the console`)
+    }
+    assert.equal(code, signal === 'SIGTERM' ? 143 : signal === 'SIGHUP' ? 129 : signal === 'SIGINT' ? 130 : 0)
+    await this.backend.assertRestored()
     assert.equal(this.terminal.buffer.active.type, 'normal', 'alternate screen was not released')
-    assert(this.raw.lastIndexOf('\x1b[?2004l') > this.raw.lastIndexOf('\x1b[?2004h'), 'paste mode was not released')
-    assert(this.raw.lastIndexOf('\x1b[?7h') > this.raw.lastIndexOf('\x1b[?7l'), 'autowrap was not restored')
+    if (windows && !this.inline && !this.raw.includes('\x1b[?1049h')) gaps.add('ConPTY did not forward the alternate screen ("\\u001b[?1049h"); conhost keeps it')
+    this.assertReleased('\x1b[?2004h', '\x1b[?2004l', 'bracketed paste', 'paste mode was not released')
+    this.assertReleased('\x1b[?7l', '\x1b[?7h', 'autowrap', 'autowrap was not restored')
     for (const mode of ['1000', '1002', '1006'])
-      assert(this.raw.lastIndexOf(`\x1b[?${mode}l`) > this.raw.lastIndexOf(`\x1b[?${mode}h`), `mouse mode ${mode} was not released`)
-    assert(this.raw.lastIndexOf('\x1b[?2026l') > this.raw.lastIndexOf('\x1b[?2026h'), 'synchronized output was left open')
+      this.assertReleased(`\x1b[?${mode}h`, `\x1b[?${mode}l`, `mouse mode ${mode}`, `mouse mode ${mode} was not released`)
+    this.assertReleased('\x1b[?2026h', '\x1b[?2026l', 'synchronized output', 'synchronized output was left open')
     assert(this.raw.lastIndexOf('\x1b[?25h') > this.raw.lastIndexOf('\x1b[?25l'), 'cursor was not restored')
-    assert.throws(() => process.kill(this.process.pid, 0), 'application remains alive after exit')
+    await this.backend.assertGone()
+  }
+
+  /**
+   * Ends the program abruptly and waits for its terminal to drain: the
+   * control for the restoration checks, which must then see changed modes.
+   */
+  async terminate(): Promise<void> {
+    this.backend.kill()
+    await this.wait('killed process and terminal exit', () => this.backend.code !== undefined && this.backend.streamEnded, false)
+    await this.parsed
+    assert(!(await this.backend.unchangedModes()), 'the mode reads did not see the raw mode an abrupt exit leaves')
+    await this.backend.assertGone()
   }
 
   /** Waits for the process to exit by itself and returns its status, for a run that never takes the terminal. */
   async exit(): Promise<number> {
-    const code = await Promise.race([this.exited, delay(30_000).then(() => 'timed out')])
+    const code = await Promise.race([this.backend.exited, delay(30_000).then(() => 'timed out')])
     assert.equal(typeof code, 'number', 'the process did not exit')
-    await this.wait('PTY drained', () => this.streamStatus !== undefined, false)
+    await this.wait('PTY drained', () => this.backend.streamEnded, false)
     await this.parsed
     return code as number
   }
 
-  /** The preview's process id: the shell that `exec`s the binary. */
-  get pid(): number { return this.process.pid }
+  /** Whether the terminal's modes after exit equal those before the program started. */
+  unchangedModes(): Promise<boolean> { return this.backend.unchangedModes() }
 
-  get unchangedModes(): boolean { return JSON.stringify(this.modes()) === JSON.stringify(this.initialModes) }
+  /** The processes the program started: its descendants, or the other members of its job. */
+  owned(): Promise<Map<string, string>> { return this.backend.owned() }
+
+  survivors(owned: ReadonlyMap<string, string>): Promise<string[]> { return this.backend.survivors(owned) }
+
+  release(owned: ReadonlyMap<string, string>): Promise<void> { return this.backend.release(owned) }
 
   /** Close the terminal under the preview, as an emulator window closing does, and expect the quiet hangup exit. */
   async hangUp(): Promise<void> {
-    this.pty.close()
-    const code = await Promise.race([this.exited, delay(5_000).then(() => 'timed out')])
+    this.backend.hangUp()
+    const code = await Promise.race([this.backend.exited, delay(5_000).then(() => 'timed out')])
+    if (windows && code === STATUS_CONTROL_C_EXIT) {
+      throw new GapError(`${NO_CONSOLE_HANDLER} a closed pseudoconsole (CTRL_CLOSE_EVENT) ends it through the default handler instead of the quiet hangup exit`)
+    }
     assert.equal(code, 129, 'a closed terminal did not end the preview as a hangup')
-    assert.equal(this.process.signalCode, null)
+    assert.equal(this.backend.signalCode, null)
   }
 
   async close(): Promise<void> {
-    if (this.code === undefined) this.process.kill('SIGKILL')
-    await this.exited
-    this.pty.close()
-    await this.parsed
-    this.terminal.dispose()
+    try {
+      await this.backend.close()
+    } finally {
+      await this.parsed
+      this.terminal.dispose()
+    }
   }
 
   async saveFailure(path: string): Promise<void> {
@@ -249,42 +526,64 @@ class Preview {
   }
 }
 
+/** Results by outcome, printed at the end. */
+const results = { passed: [] as string[], failed: [] as string[], gapped: [] as string[] }
+
+/** Runs `body` as the scenario `name`, recording a pass, a failure, or a named gap; the run continues either way. */
+async function run(name: string, body: () => Promise<void>): Promise<void> {
+  try {
+    await body()
+    results.passed.push(name)
+    console.log(`PASS Rust PTY: ${name}`)
+  } catch (error) {
+    if (error instanceof GapError) {
+      results.gapped.push(name)
+      gaps.add(error.message)
+      console.log(`GAP  Rust PTY: ${name}: ${error.message}`)
+      return
+    }
+    results.failed.push(name)
+    console.error(`FAIL Rust PTY: ${name}`)
+    console.error(error)
+  }
+}
+
 /** Run one scenario in a fresh working directory holding only `files`, which must be all it holds at the end. */
 async function scenario(
-  name: string, run: (preview: Preview) => Promise<void>, files: readonly string[] = [], inline = false,
+  name: string, body: (preview: Preview) => Promise<void>, files: readonly string[] = [], inline = false,
 ): Promise<void> {
   if (values.filter !== undefined && !name.includes(values.filter)) {
     console.log(`SKIP Rust PTY: ${name} (filter ${values.filter})`)
     return
   }
-  const cwd = await mkdtemp(join(tmpdir(), 'bake-rust-pty-'))
-  let preview: Preview | undefined
-  try {
-    for (const file of files) {
-      await mkdir(dirname(join(cwd, file)), { recursive: true })
-      await writeFile(join(cwd, file), '')
+  await run(name, async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'bake-rust-pty-'))
+    let preview: Preview | undefined
+    try {
+      for (const file of files) {
+        await mkdir(dirname(join(cwd, file)), { recursive: true })
+        await writeFile(join(cwd, file), '')
+      }
+      preview = new Preview(cwd, inline)
+      await preview.ready()
+      await body(preview)
+      const seeded = [...new Set(files.map(file => file.split('/')[0]))].sort()
+      assert.deepEqual((await readdir(cwd)).sort(), seeded, 'preview wrote files into the working directory')
+    } catch (error) {
+      if (preview !== undefined && !(error instanceof GapError)) {
+        await mkdir(join(root, '.preflight'), { recursive: true })
+        const transcript = join(root, '.preflight', `${basename(cwd)}.ansi`)
+        await preview.saveFailure(transcript)
+        console.error(`Rust PTY transcript: ${transcript}`)
+      }
+      throw error
+    } finally {
+      await preview?.close()
+      await rm(cwd, { recursive: true, force: true })
     }
-    preview = new Preview(cwd, inline)
-    await preview.ready()
-    await run(preview)
-    const seeded = [...new Set(files.map(file => file.split('/')[0]))].sort()
-    assert.deepEqual((await readdir(cwd)).sort(), seeded, 'preview wrote files into the working directory')
-    console.log(`PASS Rust PTY: ${name}`)
-  } catch (error) {
-    if (preview !== undefined) {
-      await mkdir(join(root, '.preflight'), { recursive: true })
-      const transcript = join(root, '.preflight', `${basename(cwd)}.ansi`)
-      await preview.saveFailure(transcript)
-      console.error(`Rust PTY transcript: ${transcript}`)
-    }
-    throw error
-  } finally {
-    await preview?.close()
-    await rm(cwd, { recursive: true })
-  }
+  })
 }
 
-if (process.platform === 'win32') throw new Error('Rust PTY scenarios require POSIX; ConPTY qualification remains open')
 
 await scenario('composer, agent inspection, paste, and resize', async (preview) => {
   preview.send('draftAB\x1b[D')
@@ -513,7 +812,8 @@ await scenario('a terminal that closes during a turn ends the preview quietly as
   await preview.hangUp()
 })
 
-if (process.platform === 'linux') {
+// Stopping the program needs Linux's process state, or Windows thread suspension.
+if (process.platform === 'linux' || windows) {
   await scenario('coalesced resize invalidates stale screen', async (preview) => {
     preview.send('RESIZE_DRAFT')
     await preview.wait('draft before resize', () => preview.screen.includes('RESIZE_DRAFT'))
@@ -522,11 +822,17 @@ if (process.platform === 'linux') {
     assert.equal(preview.screen.split('RESIZE_DRAFT').length - 1, 1, 'resize duplicated the draft')
     await preview.quit()
   })
-} else console.log('SKIP Rust PTY: coalesced resize barrier needs Linux /proc process state')
+} else console.log('SKIP Rust PTY: coalesced resize barrier needs Linux /proc process state or Windows thread suspension')
 
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
   await scenario(`${signal} restores terminal`, async (preview) => { await preview.quit(signal) })
 }
+
+// The control for every restoration check above: the same reads must see
+// the raw modes a program leaves when it cannot restore them.
+await scenario('an abrupt termination leaves raw modes, which the mode reads report', async (preview) => {
+  await preview.terminate()
+})
 
 await scenario('fullscreen Unicode 11 draft keeps the terminal caret at grapheme boundaries', async (preview) => {
   const draft = '漢字🙂e\u0301'
@@ -644,7 +950,7 @@ await scenario('inline terminal hangup while streaming exits quietly', async (pr
 }, [], true)
 
 
-if (process.platform === 'linux') {
+if (process.platform === 'linux' || windows) {
   await scenario('inline coalesced resize keeps shell scrollback and live controls out of history', async (preview) => {
     preview.send('INLINE_BURST_UNIQUE\r')
     await preview.wait('inline stream before burst', () => preview.screen.includes('Esc interrupts'))
@@ -667,7 +973,7 @@ if (process.platform === 'linux') {
     preview.assertShellHistory()
     preview.assertNoChromeResidue(true)
   }, [], true)
-} else console.log('SKIP Rust PTY: inline coalesced resize barrier needs Linux /proc process state')
+} else console.log('SKIP Rust PTY: inline coalesced resize barrier needs Linux /proc process state or Windows thread suspension')
 
 /**
  * A fake OpenAI Responses model on a loopback port. It answers by the last
@@ -901,12 +1207,18 @@ function messageTexts(entries: Record<string, unknown>[], role: string): string[
 }
 
 /** Run one live scenario against a fresh fake model and isolated homes. */
-async function liveScenario(name: string, run: (world: LiveWorld) => Promise<void>): Promise<void> {
+async function liveScenario(name: string, body: (world: LiveWorld) => Promise<void>): Promise<void> {
   if (values.filter !== undefined && !name.includes(values.filter)) {
     console.log(`SKIP Rust PTY: ${name} (filter ${values.filter})`)
     return
   }
-  const root = await mkdtemp(join(tmpdir(), 'bake-rust-live-'))
+  await run(name, () => live(body))
+}
+
+async function live(body: (world: LiveWorld) => Promise<void>): Promise<void> {
+  // A space and a non-ASCII letter in every path the session is given: its
+  // home, project, and user directories, quoted on a Windows command line.
+  const root = await mkdtemp(join(tmpdir(), 'bake rust-live ü-'))
   const home = join(root, 'home')
   const project = join(root, 'project')
   const user = join(root, 'user')
@@ -930,14 +1242,14 @@ async function liveScenario(name: string, run: (world: LiveWorld) => Promise<voi
   // scenario but never hides the scenario's own failure.
   let failure: { error: unknown } | undefined
   try {
-    await run(world)
+    await body(world)
   } catch (error) {
     failure = { error }
     const last = launched.at(-1)
-    if (last !== undefined) {
+    if (last !== undefined && !(error instanceof GapError)) {
       try {
         await mkdir(join(join(import.meta.dir, '..'), '.preflight'), { recursive: true })
-        const transcript = join(import.meta.dir, '..', '.preflight', `${basename(root)}.ansi`)
+        const transcript = join(import.meta.dir, '..', '.preflight', `${basename(root).replaceAll(' ', '-')}.ansi`)
         await last.saveFailure(transcript)
         console.error(`Rust PTY transcript: ${transcript}`)
       } catch (saveError) { console.error('Rust PTY transcript was not saved:', saveError) }
@@ -949,9 +1261,11 @@ async function liveScenario(name: string, run: (world: LiveWorld) => Promise<voi
   await model.stop()
   await rm(root, { recursive: true, force: true })
   for (const cleanupFailure of cleanupFailures) console.error('Rust PTY cleanup failed:', cleanupFailure)
+  if (failure?.error instanceof GapError && cleanupFailures.length > 0) {
+    throw new AggregateError([failure.error, ...cleanupFailures], 'A scenario reached a platform gap and its cleanup failed')
+  }
   if (failure !== undefined) throw failure.error
   if (cleanupFailures.length > 0) throw cleanupFailures[0]
-  console.log(`PASS Rust PTY: ${name}`)
 }
 
 await liveScenario('a live session streams an answer and a tool call, takes a second prompt, and resumes', async (world) => {
@@ -1082,40 +1396,31 @@ function descendants(root: number): Map<number, string> {
   return found
 }
 
-/** Which of `owned` (pid → command line) are still live: the same pid with the same command line. */
-function survivors(owned: Map<number, string>): number[] {
-  const table = processTable()
-  return [...owned].filter(([pid, command]) => table.get(pid)?.command === command).map(([pid]) => pid)
-}
 
 await liveScenario('a live bash call cancelled by Esc fails its card and leaves no process', async (world) => {
   const session = world.launch()
   await session.ready()
   session.send('SLEEP\r')
-  // The call's own process tree (its sandbox runner, shell, and `sleep 30`),
-  // found under this session's process; other processes on the host with
-  // the same command line are not this test's.
-  let owned = new Map<number, string>()
-  await session.wait('bash running', () => {
-    if (!session.screen.includes('running bash') || !session.screen.includes('sleep 30')) return false
-    owned = descendants(session.pid)
-    return [...owned.values()].includes('sleep 30')
-  })
+  // The call's own process tree (its sandbox runner, shell, and `sleep 30`):
+  // on POSIX found under this session's process, so other processes on the
+  // host with the same command line are not this test's; on Windows the
+  // members of the job the session runs in, each pinned by the host.
+  let owned = new Map<string, string>()
+  const sleeping = (label: string) => label === 'sleep 30' || /(?:^|[\\/])sleep\.exe$/iu.test(label)
+  await session.wait('bash running', () => session.screen.includes('running bash') && session.screen.includes('sleep 30'))
+  const deadline = performance.now() + 30_000
+  for (owned = await session.owned(); ![...owned.values()].some(sleeping); owned = await session.owned()) {
+    if (performance.now() > deadline) throw new Error(`no sleep among the session's processes: ${[...owned.values()].join(', ')}`)
+    await delay(5)
+  }
   try {
     session.send('\x1b')
     await session.wait('bash interrupted', () => /^ {2}■ Interrupted/mu.test(session.screen))
-    const left = survivors(owned)
-    assert.deepEqual(left, [], `the cancelled bash call left its process: ${left.join(', ')}`)
+    const left = await session.survivors(owned)
+    assert.deepEqual(left, [], `the cancelled bash call left its process: ${left.map(pid => `${pid} ${owned.get(pid)}`).join(', ')}`)
     await session.quit()
   } finally {
-    for (const pid of survivors(owned)) {
-      try {
-        process.kill(pid, 'SIGKILL')
-      } catch (error) {
-        // It exited after the listing, or with a parent killed before it.
-        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
-      }
-    }
+    await session.release(owned)
   }
 })
 
@@ -1156,7 +1461,7 @@ await liveScenario('live command-line prompts run first, and a setup failure exi
   assert.equal(await failed.exit(), 1)
   assert(failed.raw.includes('missing-model'), `the error was not reported\n${failed.raw}`)
   assert(!failed.raw.includes('\x1b[?2004h') && !failed.raw.includes('\x1b[?1049h'), 'setup failure changed the terminal')
-  assert(failed.unchangedModes, 'setup failure left terminal modes changed')
+  assert(await failed.unchangedModes(), 'setup failure left terminal modes changed')
 
   // A model without a key opens the terminal, so /login can set one up; a
   // prompt is refused with its draft kept, and no session file is written.
@@ -2086,98 +2391,110 @@ function declared(request: unknown): string[] {
   return tools.map(tool => tool.name ?? '').sort()
 }
 
-await liveScenario('home MCP servers stop with their descendants before each /new, /resume, and /fork replacement starts its own', async (world) => {
-  const fixture = new McpFixture(world)
-  await fixture.install()
-  const session = world.launch(['--sandbox', 'danger-full-access', '--exclude-tools', 'mcp__fx__hidden'])
-  await session.ready()
-  const first = await fixture.generation(session, 1)
-  const turn = async (word: string, server: McpStart): Promise<void> => {
-    const before = world.model.requests.length
-    session.send(`MCP ${word}\r`)
-    await turnSettled(session, `MCP said: echo ${word} from ${server.pid}`)
-    await composerReady(session)
-    // Every request the turn sent declares the server's allowed tool and never the excluded one.
-    const requests = world.model.requests.slice(before)
-    assert.equal(requests.length, 2, 'expected the call and its answer')
-    for (const request of requests) {
-      const names = declared(request)
-      assert(names.includes('mcp__fx__echo') && !names.includes('mcp__fx__hidden'), `declared tools: ${names.join(', ')}`)
+if (windows) {
+  console.log('SKIP Rust PTY: home MCP servers stop with their descendants before each /new, /resume, and /fork replacement starts its own (Windows owner/DACL trust for mcp.json is not implemented)')
+  console.log('SKIP Rust PTY: with --no-tools the home MCP server never starts and requests declare no tool (Windows owner/DACL trust for mcp.json is not implemented)')
+} else {
+  await liveScenario('home MCP servers stop with their descendants before each /new, /resume, and /fork replacement starts its own', async (world) => {
+    const fixture = new McpFixture(world)
+    await fixture.install()
+    const session = world.launch(['--sandbox', 'danger-full-access', '--exclude-tools', 'mcp__fx__hidden'])
+    await session.ready()
+    const first = await fixture.generation(session, 1)
+    const turn = async (word: string, server: McpStart): Promise<void> => {
+      const before = world.model.requests.length
+      session.send(`MCP ${word}\r`)
+      await turnSettled(session, `MCP said: echo ${word} from ${server.pid}`)
+      await composerReady(session)
+      // Every request the turn sent declares the server's allowed tool and never the excluded one.
+      const requests = world.model.requests.slice(before)
+      assert.equal(requests.length, 2, 'expected the call and its answer')
+      for (const request of requests) {
+        const names = declared(request)
+        assert(names.includes('mcp__fx__echo') && !names.includes('mcp__fx__hidden'), `declared tools: ${names.join(', ')}`)
+      }
     }
-  }
-  await turn('one', first)
-  session.send('/name First\r')
-  await session.wait('named', () => session.screen.includes('Session name set: First'))
-  await composerReady(session)
-
-  session.send('/new\r')
-  await session.wait('new session', () => session.screen.includes('New session started'))
-  const second = await fixture.generation(session, 2)
-  assert.deepEqual(fixture.living().sort(), [second.pid, second.descendant].sort(), 'only the new server and its descendant run')
-  await turn('two', second)
-
-  session.send('/resume\r')
-  await sheetReady(session, 'Resume session')
-  // A phrase only the first session holds: a bare word is matched loosely and can list the current session too.
-  const phrase = '"MCP one"'
-  await type(session, phrase, typed => session.screen.includes(`> ${phrase.slice(0, typed)}`))
-  await session.wait('one match', () => session.screen.includes('▸ First') && session.screen.includes('1/1'))
-  session.send('\r')
-  await session.wait('resumed', () => session.screen.includes('Resumed session First'))
-  const third = await fixture.generation(session, 3)
-  assert.deepEqual(fixture.living().sort(), [third.pid, third.descendant].sort(), 'only the resumed session\'s server runs')
-  await turn('three', third)
-
-  session.send('/fork\r')
-  await sheetReady(session, 'Fork from message')
-  session.send('\r')
-  await session.wait('forked', () => session.screen.includes('Forked to new session') && !session.screen.includes('Fork from message'))
-  const fourth = await fixture.generation(session, 4)
-  assert.deepEqual(fixture.living().sort(), [fourth.pid, fourth.descendant].sort(), 'only the fork\'s server runs')
-  session.send('\x15')
-  await session.wait('fork draft cleared', () => session.screen.includes('❯ Type a draft'))
-
-  // Cancelled sheets replace nothing: the fork's server keeps serving and no other starts.
-  for (const [command, title] of [['/resume', 'Resume session'], ['/fork', 'Fork from message']] as const) {
-    session.send(`${command}\r`)
-    await sheetReady(session, title)
-    session.send('\x1b')
-    await session.wait(`${command} cancelled`, () => session.screen.includes('Cancelled') && !session.screen.includes(title))
+    await turn('one', first)
+    session.send('/name First\r')
+    await session.wait('named', () => session.screen.includes('Session name set: First'))
     await composerReady(session)
+
+    session.send('/new\r')
+    await session.wait('new session', () => session.screen.includes('New session started'))
+    const second = await fixture.generation(session, 2)
+    assert.deepEqual(fixture.living().sort(), [second.pid, second.descendant].sort(), 'only the new server and its descendant run')
+    await turn('two', second)
+
+    session.send('/resume\r')
+    await sheetReady(session, 'Resume session')
+    // A phrase only the first session holds: a bare word is matched loosely and can list the current session too.
+    const phrase = '"MCP one"'
+    await type(session, phrase, typed => session.screen.includes(`> ${phrase.slice(0, typed)}`))
+    await session.wait('one match', () => session.screen.includes('▸ First') && session.screen.includes('1/1'))
+    session.send('\r')
+    await session.wait('resumed', () => session.screen.includes('Resumed session First'))
+    const third = await fixture.generation(session, 3)
+    assert.deepEqual(fixture.living().sort(), [third.pid, third.descendant].sort(), 'only the resumed session\'s server runs')
+    await turn('three', third)
+
+    session.send('/fork\r')
+    await sheetReady(session, 'Fork from message')
+    session.send('\r')
+    await session.wait('forked', () => session.screen.includes('Forked to new session') && !session.screen.includes('Fork from message'))
+    const fourth = await fixture.generation(session, 4)
+    assert.deepEqual(fixture.living().sort(), [fourth.pid, fourth.descendant].sort(), 'only the fork\'s server runs')
     session.send('\x15')
-    await session.wait('draft cleared', () => session.screen.includes('❯ Type a draft'))
-  }
-  await turn('four', fourth)
-  assert.equal(fixture.starts().length, 4, 'a cancelled sheet started a server')
+    await session.wait('fork draft cleared', () => session.screen.includes('❯ Type a draft'))
 
-  const recorded = fixture.recorded()
-  assert.equal(recorded.length, 8, 'expected four servers and four descendants')
-  await session.quit()
-  // Checked at once after the exit: shutdown awaited every server and its tree.
-  assert.deepEqual(fixture.living(), [], 'an MCP server or its descendant outlived the double Ctrl+C quit')
-  const calls = fixture.events().filter(event => event.event === 'call')
-  assert.deepEqual(calls.map(call => [call.name, call.pid]), [
-    ['echo', first.pid], ['echo', second.pid], ['echo', third.pid], ['echo', fourth.pid],
-  ], 'each call reached the server of the session that sent it')
-  assert.deepEqual(await readdir(world.project), [], 'the session wrote into the project')
-})
+    // Cancelled sheets replace nothing: the fork's server keeps serving and no other starts.
+    for (const [command, title] of [['/resume', 'Resume session'], ['/fork', 'Fork from message']] as const) {
+      session.send(`${command}\r`)
+      await sheetReady(session, title)
+      session.send('\x1b')
+      await session.wait(`${command} cancelled`, () => session.screen.includes('Cancelled') && !session.screen.includes(title))
+      await composerReady(session)
+      session.send('\x15')
+      await session.wait('draft cleared', () => session.screen.includes('❯ Type a draft'))
+    }
+    await turn('four', fourth)
+    assert.equal(fixture.starts().length, 4, 'a cancelled sheet started a server')
 
-await liveScenario('with --no-tools the home MCP server never starts and requests declare no tool', async (world) => {
-  const fixture = new McpFixture(world)
-  await fixture.install()
-  const session = world.launch(['--sandbox', 'danger-full-access', '-nt'])
-  await session.ready()
-  session.send('ECHO bare\r')
-  // The first prompt waits for servers still connecting, so a server the session had started is recorded by now.
-  await turnSettled(session, 'Echo: bare.')
-  assert.deepEqual(declared(world.model.requests.at(-1)), [], 'a --no-tools request declared tools')
-  session.send('/new\r')
-  await session.wait('new session', () => session.screen.includes('New session started'))
-  await composerReady(session)
-  session.send('ECHO again\r')
-  await turnSettled(session, 'Echo: again.')
-  assert.deepEqual(declared(world.model.requests.at(-1)), [], 'the replacement declared tools')
-  await session.quit()
-  assert.deepEqual(fixture.events(), [], 'a --no-tools session started the MCP server')
-  assert.deepEqual(fixture.recorded(), [])
-})
+    const recorded = fixture.recorded()
+    assert.equal(recorded.length, 8, 'expected four servers and four descendants')
+    await session.quit()
+    // Checked at once after the exit: shutdown awaited every server and its tree.
+    assert.deepEqual(fixture.living(), [], 'an MCP server or its descendant outlived the double Ctrl+C quit')
+    const calls = fixture.events().filter(event => event.event === 'call')
+    assert.deepEqual(calls.map(call => [call.name, call.pid]), [
+      ['echo', first.pid], ['echo', second.pid], ['echo', third.pid], ['echo', fourth.pid],
+    ], 'each call reached the server of the session that sent it')
+    assert.deepEqual(await readdir(world.project), [], 'the session wrote into the project')
+  })
+
+  await liveScenario('with --no-tools the home MCP server never starts and requests declare no tool', async (world) => {
+    const fixture = new McpFixture(world)
+    await fixture.install()
+    const session = world.launch(['--sandbox', 'danger-full-access', '-nt'])
+    await session.ready()
+    session.send('ECHO bare\r')
+    // The first prompt waits for servers still connecting, so a server the session had started is recorded by now.
+    await turnSettled(session, 'Echo: bare.')
+    assert.deepEqual(declared(world.model.requests.at(-1)), [], 'a --no-tools request declared tools')
+    session.send('/new\r')
+    await session.wait('new session', () => session.screen.includes('New session started'))
+    await composerReady(session)
+    session.send('ECHO again\r')
+    await turnSettled(session, 'Echo: again.')
+    assert.deepEqual(declared(world.model.requests.at(-1)), [], 'the replacement declared tools')
+    await session.quit()
+    assert.deepEqual(fixture.events(), [], 'a --no-tools session started the MCP server')
+    assert.deepEqual(fixture.recorded(), [])
+  })
+}
+
+console.log(`Rust PTY: ${results.passed.length} passed, ${results.gapped.length} ended in a named gap, ${results.failed.length} failed`)
+for (const gap of [...gaps].sort()) console.log(`GAP  Rust PTY: ${gap}`)
+if (results.failed.length > 0) {
+  console.error(`Rust PTY failed: ${results.failed.join('; ')}`)
+  process.exit(1)
+}
