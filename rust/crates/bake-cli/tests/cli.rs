@@ -144,9 +144,21 @@ fn help_mentions_docs() {
     assert!(help.contains("Run 'bake-rs docs'"));
 }
 
-/// Every `-flag` the documentation names, outside the word it uses as a
-/// placeholder (`-name`) and session directory names (`--a-b--`).
+/// Agent flags named by the documentation. Inline examples of external
+/// permission-inspection commands have their own options.
 fn documented_flags(page: &str) -> Vec<String> {
+    let page: String = page
+        .split('`')
+        .enumerate()
+        .map(|(index, span)| {
+            if index % 2 == 1 && matches!(span.split_whitespace().next(), Some("ls" | "chmod")) {
+                " "
+            } else {
+                span
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
     let mut flags: Vec<String> = Vec::new();
     for word in page.split(|c: char| c.is_whitespace() || "`(),\"".contains(c)) {
         let word = word.trim_end_matches(['.', ':', ';']);
@@ -162,6 +174,16 @@ fn documented_flags(page: &str) -> Vec<String> {
         }
     }
     flags
+}
+
+#[test]
+fn external_command_examples_do_not_hide_agent_flags() {
+    assert_eq!(
+        documented_flags(
+            "`ls -le` and `chmod -a# 0` inspect permissions; `bake-rs --typo` still fails, as does `--unknown`."
+        ),
+        ["--typo", "--unknown"]
+    );
 }
 
 #[test]
