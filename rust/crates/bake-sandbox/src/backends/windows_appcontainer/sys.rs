@@ -7,7 +7,7 @@
 //! `unsafe` code is the FFI calls, each with its contract.
 
 use std::ffi::{OsStr, OsString, c_void};
-use std::os::windows::ffi::OsStrExt;
+use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::os::windows::io::OwnedHandle;
 use std::os::windows::io::{AsHandle, AsRawHandle};
 use std::path::{Path, PathBuf};
@@ -18,12 +18,13 @@ use windows_sys::Win32::Security::Authorization::{
     ConvertSidToStringSidW, GetNamedSecurityInfoW, SE_FILE_OBJECT,
 };
 use windows_sys::Win32::Security::Isolation::{
-    CreateAppContainerProfile, DeriveAppContainerSidFromAppContainerName,
+    DeriveAppContainerSidFromAppContainerName, GetAppContainerFolderPath,
 };
 use windows_sys::Win32::Security::{
     DeriveCapabilitySidsFromName, FreeSid, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
     SECURITY_CAPABILITIES, SID_AND_ATTRIBUTES, TOKEN_OWNER, TOKEN_USER, TokenOwner, TokenUser,
 };
+use windows_sys::Win32::System::Com::CoTaskMemFree;
 use windows_sys::Win32::System::Console::SetConsoleCtrlHandler;
 use windows_sys::Win32::System::Threading::{
     CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessW, EXTENDED_STARTUPINFO_PRESENT,
@@ -41,13 +42,11 @@ use super::super::windows_acl::sys::{
     wait_for_exit, wide, win32_error,
 };
 use super::{
-    Cli, PRIVATE_TEMP_PREFIX, READ_EXECUTE, RUNNER_FAILURE_EXIT, RUNNER_SIGNATURE, RunnerMode,
-    WORKSPACE_WRITE_MASK, profile_name, read_capability_name, write_capability_name,
+    Cli, PRIVATE_TEMP_PREFIX, READ_EXECUTE, RUN_MONIKER_PREFIX, RUNNER_FAILURE_EXIT,
+    RUNNER_SIGNATURE, RunnerMode, WORKSPACE_WRITE_MASK, read_capability_name,
+    workspace_read_capability_name, write_capability_name,
 };
 
-/// `HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS)`, which
-/// `CreateAppContainerProfile` returns for an existing profile.
-const PROFILE_EXISTS: i32 = 0x8007_00B7_u32 as i32;
 /// `SE_GROUP_ENABLED`: a capability the access check consults.
 const GROUP_ENABLED: u32 = 0x4;
 const SW_HIDE: u16 = 0;
@@ -72,46 +71,79 @@ fn sid_text(sid: PSID) -> String {
     out
 }
 
-/// The workspace's package SID: its profile created, or derived when the
-/// profile already exists (Microsoft: `CreateAppContainerProfile` returns
-/// `HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS)`).
-fn package_sid(name: &str) -> Result<Sid> {
-    let units = wide(OsStr::new(name))?;
-    let display = wide(OsStr::new("Bake sandbox workspace"))?;
+/// 32 hex digits from the OS random source.
+fn random_hex() -> Result<String> {
+    let rng = ring::rand::SystemRandom::new();
+    let mut bytes = [0u8; 16];
+    ring::rand::SecureRandom::fill(&rng, &mut bytes)
+        .map_err(|_| "the OS random source failed".to_owned())?;
+    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+/// The package SID `DeriveAppContainerSidFromAppContainerName` derives for
+/// `moniker`. No profile is created or looked up.
+fn derived_package_sid(moniker: &str) -> Result<Sid> {
+    let units = wide(OsStr::new(moniker))?;
     let mut sid: PSID = null_mut();
-    // SAFETY: NUL-terminated strings, no capabilities, a valid out pointer.
-    let status = unsafe {
-        CreateAppContainerProfile(
-            units.as_ptr(),
-            display.as_ptr(),
-            display.as_ptr(),
-            null(),
-            0,
-            &mut sid,
-        )
-    };
-    if status == PROFILE_EXISTS {
-        sid = null_mut();
-        // SAFETY: a NUL-terminated name and a valid out pointer.
-        let status = unsafe { DeriveAppContainerSidFromAppContainerName(units.as_ptr(), &mut sid) };
-        if status < 0 {
-            return Err(format!(
-                "DeriveAppContainerSidFromAppContainerName failed ({name}): HRESULT {status:#010x}"
-            ));
-        }
-    } else if status < 0 {
+    // SAFETY: a NUL-terminated name and a valid out pointer.
+    let status = unsafe { DeriveAppContainerSidFromAppContainerName(units.as_ptr(), &mut sid) };
+    if status < 0 || sid.is_null() {
         return Err(format!(
-            "CreateAppContainerProfile failed ({name}): HRESULT {status:#010x}"
+            "DeriveAppContainerSidFromAppContainerName failed ({moniker}): HRESULT {status:#010x}"
         ));
     }
-    if sid.is_null() {
-        return Err(format!("the AppContainer profile {name} returned no SID"));
-    }
     let copy = Sid::copy_of(sid, "package SID");
-    // SAFETY: allocated by the profile API, documented as freed with
-    // `FreeSid`, and freed once.
+    // SAFETY: documented as freed with `FreeSid`, and freed once.
     unsafe { FreeSid(sid) };
     copy
+}
+
+/// Refuses a package SID for which profile storage already exists: Windows
+/// reroutes `TEMP`, `TMP`, and `LOCALAPPDATA` into a profile's folder, which
+/// the package can write, so a run must never adopt one. Only an explicit
+/// not-found error or a path confirmed absent passes; other lookup errors
+/// refuse the run.
+fn refuse_existing_profile_storage(package: &Sid) -> Result<()> {
+    let text = sid_text(package.as_psid());
+    let units = wide(OsStr::new(&text))?;
+    let mut path: *mut u16 = null_mut();
+    // SAFETY: a NUL-terminated SID string and a valid out pointer; the
+    // returned string is freed with `CoTaskMemFree` as documented.
+    let status = unsafe { GetAppContainerFolderPath(units.as_ptr(), &mut path) };
+    if status < 0 {
+        // HRESULT_FROM_WIN32: file, path, or object not found.
+        if matches!(status as u32, 0x8007_0002 | 0x8007_0003 | 0x8007_0490) {
+            return Ok(());
+        }
+        return Err(format!(
+            "GetAppContainerFolderPath failed for {text}: HRESULT {status:#010x}"
+        ));
+    }
+    if path.is_null() {
+        return Err("GetAppContainerFolderPath returned no path".to_owned());
+    }
+    let mut length = 0;
+    // SAFETY: a NUL-terminated string returned by the call.
+    while unsafe { *path.add(length) } != 0 {
+        length += 1;
+    }
+    // SAFETY: `length` units precede the NUL.
+    let folder = OsString::from_wide(unsafe { std::slice::from_raw_parts(path, length) });
+    // SAFETY: allocated by the call, freed once.
+    unsafe { CoTaskMemFree(path.cast()) };
+    let exists = Path::new(&folder).try_exists().map_err(|error| {
+        format!(
+            "cannot inspect profile storage {}: {error}",
+            Path::new(&folder).display()
+        )
+    })?;
+    if exists {
+        return Err(format!(
+            "profile storage {} already exists for AppContainer {text}; refusing to run in it",
+            Path::new(&folder).display()
+        ));
+    }
+    Ok(())
 }
 
 /// Frees a `DeriveCapabilitySidsFromName` array: each SID, then the array.
@@ -232,11 +264,7 @@ struct PrivateTemp {
 
 impl PrivateTemp {
     fn create(root: &Path) -> Result<Self> {
-        let rng = ring::rand::SystemRandom::new();
-        let mut bytes = [0u8; 16];
-        ring::rand::SecureRandom::fill(&rng, &mut bytes)
-            .map_err(|_| "the OS random source failed".to_owned())?;
-        let name: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+        let name = random_hex()?;
         // The capability first: a failure leaves no directory behind.
         let sid = capability_sid(&format!("bake.temp.{name}"))?;
         let path = root.join(format!("{PRIVATE_TEMP_PREFIX}{name}"));
@@ -299,9 +327,11 @@ fn run_inner(cli: &Cli, temp: &mut Option<PrivateTemp>, settled: &mut bool) -> R
     for root in cli.grants.read_roots() {
         check_owner(root, &owners)?;
     }
-    let package = package_sid(&profile_name(workspace))?;
-    grant_exact(&cli.workspace, &package, READ_EXECUTE)?;
-    let mut capabilities: Vec<Sid> = Vec::new();
+    let package = derived_package_sid(&format!("{RUN_MONIKER_PREFIX}{}", random_hex()?))?;
+    refuse_existing_profile_storage(&package)?;
+    let read = capability_sid(&workspace_read_capability_name(workspace))?;
+    grant_exact(&cli.workspace, &read, READ_EXECUTE)?;
+    let mut capabilities: Vec<Sid> = vec![read];
     for root in cli.grants.read_roots() {
         let sid = capability_sid(&read_capability_name(utf8(root)?))?;
         grant_exact(root, &sid, READ_EXECUTE)?;

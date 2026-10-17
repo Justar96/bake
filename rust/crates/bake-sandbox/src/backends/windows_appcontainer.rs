@@ -24,7 +24,8 @@
 //!
 //! | Identity | Derived from | Granted | Lifetime |
 //! |---|---|---|---|
-//! | Package SID | AppContainer profile [`profile_name`] of the canonical workspace | [`READ_EXECUTE`] on the workspace | Standing profile and ACE |
+//! | Package SID | `DeriveAppContainerSidFromAppContainerName` of a random [`RUN_MONIKER_PREFIX`] moniker; no profile is created | — | One run |
+//! | Workspace read capability | [`workspace_read_capability_name`] | [`READ_EXECUTE`] on the workspace | Standing ACE; in every run's token |
 //! | Workspace write capability | [`write_capability_name`] | [`WORKSPACE_WRITE_MASK`] on the workspace | Standing ACE; in the token only under `workspace-write` |
 //! | Read capability, one per read root | [`read_capability_name`] of the canonical root | [`READ_EXECUTE`] on that root | Standing ACE; in the token only when the run grants that root |
 //! | Temp capability | a random name per run | [`WORKSPACE_WRITE_MASK`] on the run's private directory | Revoked, and the directory removed, after the tree drains |
@@ -32,9 +33,31 @@
 //!
 //! An AppContainer access check needs both the user's own ACEs and an ACE
 //! for the package SID or one of the token's capability SIDs (Microsoft,
-//! "Launch an AppContainer"). Another workspace's package and capabilities
-//! are never in this token, so its standing ACEs do not apply here, and two
-//! runs on one workspace hold different temp capabilities.
+//! "Launch an AppContainer"). Another workspace's capabilities are never in
+//! this token, so its standing ACEs do not apply here; two runs on one
+//! workspace hold different package SIDs and different temp capabilities.
+//!
+//! # Why no profile
+//!
+//! The first native run (PR 243, CI 39033317835) ran each workspace under a
+//! standing `CreateAppContainerProfile` profile. Windows then set the
+//! command's `TEMP` to that profile's `AC\Temp`, ignoring the environment the
+//! runner passed, in `read-only` as well as `workspace-write`. Microsoft
+//! documents this: for a profile, "Both the TMP and TEMP environment
+//! variables are also rerouted to a directory accessible to the AppContainer
+//! under the profile location", along with `LOCALAPPDATA` ("Launch an
+//! AppContainer"). A shared, standing profile therefore gave every run on a
+//! workspace one writable `TEMP` and gave `read-only` runs writable profile
+//! storage. This runner instead derives a fresh package SID per run with
+//! `DeriveAppContainerSidFromAppContainerName` and never registers a
+//! profile, as Chromium's sandbox does for its derived AppContainer type
+//! (`AppContainerBase::Open`, `AppContainerType::kDerived`). Whether
+//! `CreateProcessW` then keeps the runner's `TEMP` and creates no profile
+//! storage is **unproven** until the native scenarios in
+//! `tests/enforcement/windows_appcontainer.rs` pass. Before each launch the
+//! runner refuses when `GetAppContainerFolderPath` names an existing folder
+//! for the run's SID, so existing profile storage is never adopted
+//! silently.
 //!
 //! Every grant merges one explicit ACE into the DACL read under the per-path
 //! lock, keeping every other ACE; revocation removes only the run's temp
@@ -51,7 +74,8 @@
 //! # What one run does
 //!
 //! 1. Validates the arguments and every root, before any grant.
-//! 2. Creates the workspace's profile, or derives its SID when it exists.
+//! 2. Derives a fresh package SID from a random moniker, without creating
+//!    a profile, and refuses when profile storage already exists for it.
 //! 3. Grants the standing ACEs that are missing (an exact standing ACE skips
 //!    the full-tree propagation), and under `workspace-write` creates and
 //!    grants the private temp directory.
@@ -75,16 +99,21 @@
 //! [`Enforcement::Partial`](crate::Enforcement::Partial), until native
 //! evidence settles each of these:
 //!
-//! - **Standing host mutations.** Each workspace leaves a per-user profile
-//!   (registry and `%LOCALAPPDATA%\Packages` state), and each workspace and
-//!   read root leaves explicit ACEs propagated through its whole tree.
-//!   Nothing removes them, and they are not inert while their workspace
-//!   lives: any later run on that workspace holds the identities.
-//! - **Hard-link alias widening.** A file under a granted root that is
-//!   hard-linked to a path outside it when an ACE propagates receives that
-//!   ACE on the one shared descriptor, so the outside path gains the
-//!   workspace's write grant, or a read root's read grant. Nothing detects
-//!   or refuses such links.
+//! - **Profileless launch.** That a derived, unregistered package SID
+//!   starts with the runner's environment (`TEMP`, `TMP`, `LOCALAPPDATA`)
+//!   and creates no profile storage. The first native run, with profiles,
+//!   failed exactly here (see [Why no profile](#why-no-profile)).
+//! - **Standing host mutations.** Each workspace and read root leaves
+//!   explicit ACEs propagated through its whole tree. Nothing removes them,
+//!   and they are not inert while their workspace lives: any later run on
+//!   that workspace holds the capabilities.
+//! - **Hard-link alias widening, confirmed natively.** A file under a
+//!   granted root that is hard-linked to a path outside it when an ACE
+//!   propagates receives that ACE on the one shared descriptor, so the
+//!   outside path gains the workspace's write grant, or a read root's read
+//!   grant. CI 39033317835 measured both (`acl_widened=true
+//!   outside_write=effect`, `outside_read=allowed`). Nothing detects or
+//!   refuses such links.
 //! - **Descendant ownership and reparse points.** The owner and reparse
 //!   checks apply to grant roots only. Whether propagation follows or
 //!   stops at junctions, symbolic links, and other reparse points inside a
@@ -102,11 +131,12 @@
 //!
 //! # Known limits and unverified behavior
 //!
-//! - **Not qualified.** No native Windows run of this runner is recorded.
-//!   The mechanism probe measured AppContainer deletion, rename, and read
-//!   confinement and Job containment for a test-built container, not this
-//!   runner. Console attachment, inherited pipes, `cmd`, PowerShell, `git`,
-//!   and Cargo inside the container are unverified.
+//! - **Not qualified.** One native run (CI 39033317835, the profile
+//!   design) passed 34 enforcement cases and failed the two `TEMP` cases
+//!   above; the profileless design has not run natively. In that run `cmd`,
+//!   Windows PowerShell, and `pwsh` started and printed through inherited
+//!   pipes; `git --version` failed with "could not open '/dev/null' for
+//!   reading and writing: Permission denied". Cargo is untested.
 //! - **Reads are not limited to the grants.** Windows grants
 //!   `ALL APPLICATION PACKAGES` read and execute on most of `%SystemRoot%`
 //!   and `Program Files`, and on any object whose DACL names it; those
@@ -115,10 +145,11 @@
 //! - **Loopback is unsupported.** A container reaches the host's loopback
 //!   only through a network isolation loopback exemption, a persistent host
 //!   setting this runner never changes: [`NetworkGrant::Loopback`] fails
-//!   validation. Microsoft documents loopback within one process as
-//!   allowed; that is untested here. Whether the granted
-//!   network capabilities behave as documented on every host (firewall
-//!   service state, enterprise policy) is unverified.
+//!   validation. In CI 39033317835 a remote connection failed with
+//!   `WSAEACCES` (10013) without a capability and succeeded with
+//!   `internetClient`, while a loopback connection timed out with and
+//!   without capabilities; a timeout is not proof of a deliberate denial.
+//!   Firewall-service state and enterprise policy are untested.
 //! - **Residue.** A renamed root leaves its ACEs behind. A killed runner
 //!   leaves its private directory and its temp ACE.
 //! - **Grant propagation is eager.** The first grant on a root walks the
@@ -601,13 +632,16 @@ fn hex_digest(domain: &str, value: &str) -> String {
         .collect()
 }
 
-/// The AppContainer profile name of a canonical workspace path:
-/// `bake.ws.` and 32 hex digits of a domain-separated SHA-256, within the
-/// API's 64-character limit.
-pub fn profile_name(workspace: &str) -> String {
+/// The prefix of each run's random AppContainer moniker, from which its
+/// package SID is derived; 32 hex digits follow, within the API's
+/// 64-character limit. No profile of that name is created.
+pub const RUN_MONIKER_PREFIX: &str = "bake.run.";
+
+/// The capability name whose SID carries a workspace's read grant.
+pub fn workspace_read_capability_name(workspace: &str) -> String {
     format!(
-        "bake.ws.{}",
-        hex_digest("bake.appcontainer.workspace", workspace)
+        "bake.ws-read.{}",
+        hex_digest("bake.appcontainer.workspace-read", workspace)
     )
 }
 

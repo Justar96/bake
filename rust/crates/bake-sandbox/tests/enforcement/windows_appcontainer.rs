@@ -20,10 +20,14 @@
 //!
 //! Each case owns its roots ([`user_scratch`], removed on drop) and its
 //! processes ([`Owned`], [`OwnedPid`], and the runner's own Job, killed and awaited on
-//! drop). Every workspace a run uses is an [`AcWorkspace`], which also
-//! deletes the standing AppContainer profile the runner created for it,
-//! because the runner never removes profiles and each case's workspace is
-//! fresh.
+//! drop). Every workspace a run uses is an [`AcWorkspace`], which fails the
+//! case when a run left profile storage under `%LOCALAPPDATA%\Packages`
+//! for a `bake.run.*` moniker: the runner registers no profile, and one
+//! appearing would mean Windows created writable storage for it.
+//!
+//! [`a_shared_profile_shares_its_temp_directory`] keeps the evidence for
+//! that design choice: under one profile, as the first native run used,
+//! `TEMP` is the profile's own folder for every run.
 
 use std::ffi::OsString;
 use std::io::Write;
@@ -95,6 +99,10 @@ pub fn tests() -> Vec<harness::Test> {
         (
             "hard_link_aliases_are_measured",
             hard_link_aliases_are_measured,
+        ),
+        (
+            "a_shared_profile_shares_its_temp_directory",
+            a_shared_profile_shares_its_temp_directory,
         ),
         ("compatibility_observations", compatibility_observations),
     ];
@@ -185,12 +193,37 @@ impl Fixture {
     }
 }
 
-/// A workspace root this test owns, with the per-user AppContainer profile
-/// the runner creates for it. Dropped after the case's runs are awaited, it
-/// deletes that profile (absent when no run reached profile creation), then
-/// the directory.
+/// The `bake.run.*` folders under `%LOCALAPPDATA%\Packages`, where
+/// Windows keeps AppContainer profile storage. Empty when the folder does
+/// not exist.
+fn run_profile_folders() -> std::collections::BTreeSet<OsString> {
+    let local = std::env::var_os("LOCALAPPDATA").expect("LOCALAPPDATA");
+    let packages = PathBuf::from(local).join("Packages");
+    let listing = match std::fs::read_dir(&packages) {
+        Ok(listing) => listing,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Default::default(),
+        Err(error) => panic!("cannot inspect {}: {error}", packages.display()),
+    };
+    listing
+        .map(|entry| entry.expect("a Packages entry").file_name())
+        .filter(|name| {
+            name.to_str().is_some_and(|name| {
+                name.to_ascii_lowercase()
+                    .starts_with(windows_appcontainer::RUN_MONIKER_PREFIX)
+            })
+        })
+        .collect()
+}
+
+/// A workspace root this test owns. It records the `bake.run.*` profile
+/// folders when created, and when dropped after the case's runs are awaited
+/// it fails the case if any new one appeared, then removes the directory.
+/// A failure keeps the folders as evidence. Another case running at the
+/// same time can be blamed for a folder its own run left; either way a
+/// folder is a failure of the profileless design.
 struct AcWorkspace {
     scratch: Scratch,
+    folders: std::collections::BTreeSet<OsString>,
 }
 
 impl std::ops::Deref for AcWorkspace {
@@ -203,15 +236,12 @@ impl std::ops::Deref for AcWorkspace {
 
 impl Drop for AcWorkspace {
     fn drop(&mut self) {
-        use windows_sys::Win32::Security::Isolation::DeleteAppContainerProfile;
-        let name = windows_appcontainer::profile_name(&text(&self.scratch.0));
-        let units: Vec<u16> = name.encode_utf16().chain([0]).collect();
-        // SAFETY: a NUL-terminated name. DeleteAppContainerProfile documents
-        // success for an absent profile too, so every failure is a cleanup
-        // failure, including a case refused before profile creation.
-        let status = unsafe { DeleteAppContainerProfile(units.as_ptr()) };
-        if status < 0 {
-            let error = format!("profile cleanup failed: name={name} hresult={status:#010x}");
+        let new: Vec<OsString> = run_profile_folders()
+            .difference(&self.folders)
+            .cloned()
+            .collect();
+        if !new.is_empty() {
+            let error = format!("runs left AppContainer profile storage: {new:?}");
             if std::thread::panicking() {
                 eprintln!("{error}");
             } else {
@@ -223,6 +253,7 @@ impl Drop for AcWorkspace {
 
 fn ac_workspace(label: &str) -> AcWorkspace {
     AcWorkspace {
+        folders: run_profile_folders(),
         scratch: user_scratch(label),
     }
 }
@@ -325,10 +356,43 @@ fn read_only_reads_the_workspace_and_denies_effects() {
         std::fs::read_to_string(&foreign).expect("control"),
         "outside"
     );
-    // Read-only has no private TEMP.
-    let run = fixture.run(&policy, &["env", "TEMP"]);
-    assert_ok(&run, "read-only TEMP");
-    assert_eq!(run.stdout.trim(), std::env::var("TEMP").unwrap_or_default());
+    // Read-only keeps the environment it was given and has no writable
+    // TEMP. The first native run, under a profile, failed here: its TEMP
+    // was the profile's `AC\Temp`.
+    for name in ["TEMP", "TMP", "LOCALAPPDATA"] {
+        let run = fixture.run(&policy, &["env", name]);
+        assert_ok(&run, "read-only environment");
+        assert_eq!(
+            run.stdout.trim(),
+            std::env::var(name).unwrap_or_default(),
+            "read-only {name}"
+        );
+    }
+    // The failed-enforcement path may write, so give it an atomically
+    // claimed namespace instead of risking a pre-existing TEMP/probe.txt.
+    let mut random = [0_u8; 16];
+    ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut random)
+        .expect("random temp namespace");
+    let name = format!(
+        "bake-ro-temp-{}",
+        random
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    );
+    let directory = PathBuf::from(std::env::var_os("TEMP").expect("TEMP")).join(&name);
+    std::fs::create_dir(&directory).expect("claim temp namespace exclusively");
+    let owned = Scratch(directory);
+    let host_temp = owned.join("probe.txt");
+    std::fs::write(&host_temp, "control").expect("unconfined TEMP write");
+    std::fs::remove_file(&host_temp).expect("remove control");
+    let run = fixture.run(&policy, &["write-temp-under", &name]);
+    assert_denied(&run, "read-only writes its TEMP");
+    assert!(
+        !host_temp.exists(),
+        "read-only created {}",
+        host_temp.display()
+    );
 }
 
 fn workspace_write_allows_effects_inside() {
@@ -367,14 +431,15 @@ fn workspace_write_allows_effects_inside() {
         "a descendant writes inside",
     );
     assert!(workspace.join("child.txt").exists());
-    // The standing grants: every earlier ACE kept, plus the package's read
-    // ACE and the write capability's ACE, explicit and inheritable.
+    // The standing grants: every earlier ACE kept, plus the read and write
+    // capabilities' ACEs, explicit and inheritable. No package SID is
+    // granted: each run has its own.
     let extra = added(&before, &dacl(&workspace.0), &workspace.0);
     assert_eq!(extra.len(), 2, "{extra:?}");
     assert!(
         extra
             .iter()
-            .any(|ace| explicit(READ_EXECUTE, "S-1-15-2-", ace)),
+            .any(|ace| explicit(READ_EXECUTE, "S-1-15-3-", ace)),
         "{extra:?}"
     );
     assert!(
@@ -587,6 +652,16 @@ fn each_run_gets_a_private_temp_directory() {
         b_temp.display()
     );
     assert!(!b_temp.exists(), "{} must be removed", b_temp.display());
+    // TMP is the same private directory; LOCALAPPDATA is the host's.
+    let run = fixture.run(&policy, &["mechanism", "env-pair"]);
+    assert_ok(&run, "workspace-write TEMP and TMP");
+    let mut lines = run.stdout.lines();
+    let (Some(temp), Some(tmp), Some(local)) = (lines.next(), lines.next(), lines.next()) else {
+        panic!("env-pair output {:?}", run.stdout);
+    };
+    assert!(is_private(Path::new(temp)), "{temp}");
+    assert_eq!(temp, tmp);
+    assert_eq!(local, std::env::var("LOCALAPPDATA").unwrap_or_default());
     drop(a.0.stdin.take());
     let status = a.wait_within(BOUND).expect("A exits within the bound");
     assert!(status.success(), "{status}");
@@ -1007,6 +1082,65 @@ fn hard_link_aliases_are_measured() {
         _ => panic!("neither success nor a denial: {}", run.stderr),
     };
     eprintln!("appcontainer-blocker: case=hardlink-alias-read-root outside_read={observed}");
+}
+
+/// The evidence behind the profileless design, not a runner case: two
+/// processes of one AppContainer profile, launched directly as the first
+/// native run's per-workspace profile was, with no write grant beyond their
+/// output directory. Each reports its `TEMP`; the first writes a file there
+/// and the second reads it back. Each step is decided from the disk and
+/// printed as an `appcontainer-defect:` line; the case asserts only that
+/// the reports agree with the disk and that `TEMP` is the profile's.
+fn a_shared_profile_shares_its_temp_directory() {
+    use super::mechanisms::{CONTAINER_WORKSPACE, Profile, launch};
+    // Created exclusively (an existing name fails) and deleted on drop,
+    // after both processes are reaped.
+    let profile = Profile::create();
+    let output = user_scratch("ac-defect-out");
+    let bin = user_scratch("ac-defect-bin");
+    let sid = token::Sid::parse(&profile.sid_text).expect("package SID");
+    acl::grant(&output.0, &sid, CONTAINER_WORKSPACE).expect("output grant");
+    acl::grant(&bin.0, &sid, READ_EXECUTE).expect("bin grant");
+    let exe = bin.join("probe.exe");
+    std::fs::copy(std::env::current_exe().expect("exe"), &exe).expect("copy the test binary");
+    let first = launch(None, Some(profile.sid), &exe, &["write-temp"], &output.0);
+    assert_eq!(first.code, Some(0), "write-temp: {}", first.stderr);
+    let written = PathBuf::from(first.stdout.trim());
+    assert_eq!(
+        std::fs::read_to_string(&written).ok().as_deref(),
+        Some("t"),
+        "the first process's TEMP file {}",
+        written.display()
+    );
+    let temp = written.parent().expect("TEMP").to_path_buf();
+    eprintln!(
+        "appcontainer-defect: case=profile-temp-written path={} host_temp={}",
+        temp.display(),
+        std::env::var("TEMP").unwrap_or_default()
+    );
+    assert!(
+        text(&temp)
+            .to_ascii_lowercase()
+            .contains(&format!("\\packages\\{}", "bake.probe.")),
+        "TEMP is not the profile's folder: {}",
+        temp.display()
+    );
+    let second = launch(
+        None,
+        Some(profile.sid),
+        &exe,
+        &["read", &text(&written)],
+        &output.0,
+    );
+    let read = match second.code {
+        Some(0) => {
+            assert_eq!(second.stdout, "t", "{}", second.stderr);
+            "allowed"
+        }
+        Some(DENIED) => "denied",
+        _ => panic!("neither success nor a denial: {}", second.stderr),
+    };
+    eprintln!("appcontainer-defect: case=profile-temp-second-process read={read}");
 }
 
 fn compatibility_observations() {

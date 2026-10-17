@@ -177,7 +177,7 @@ fn network_capabilities_are_the_well_known_sids() {
 fn identities_are_separated_bounded_and_stable() {
     let path = r"C:\Users\agent\repo";
     let names = [
-        profile_name(path),
+        workspace_read_capability_name(path),
         write_capability_name(path),
         read_capability_name(path),
     ];
@@ -187,7 +187,7 @@ fn identities_are_separated_bounded_and_stable() {
     assert_eq!(
         names,
         [
-            "bake.ws.1fd401d76a318383c68b5875f8dc73ef",
+            "bake.ws-read.26854e915a2f8cf888cb57e8fbad1cb6",
             "bake.ws-write.4ac5ca9887097f69e30e4c46bbfc566d",
             "bake.read.71b2eba1a341d29fb0b46dd5ebac334b",
         ]
@@ -195,7 +195,11 @@ fn identities_are_separated_bounded_and_stable() {
     for name in &names {
         assert!(name.len() <= 64, "{name}");
     }
-    assert_ne!(profile_name(path), profile_name(r"C:\Users\agent\repo2"));
+    assert_ne!(
+        workspace_read_capability_name(path),
+        workspace_read_capability_name(r"C:\Users\agent\repo2")
+    );
+    const _: () = assert!(RUN_MONIKER_PREFIX.len() + 32 <= 64);
     assert_eq!(WORKSPACE_WRITE_MASK, 0x0013_01FF);
     const WRITE_DAC: u32 = 0x0004_0000;
     const WRITE_OWNER: u32 = 0x0008_0000;
@@ -340,7 +344,7 @@ fn the_runner_refuses_bad_roots_before_running() {
         "{error}"
     );
     // A temp root inside the workspace is refused in both modes: the
-    // standing package ACE would reach every private directory.
+    // standing workspace read ACE would reach every private directory.
     let inner = workspace.0.join("t");
     std::fs::create_dir(&inner).expect("inner temp");
     let mut list = runner_profile_args(

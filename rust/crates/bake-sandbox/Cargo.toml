@@ -22,9 +22,10 @@ libc.workspace = true
 # The Windows runners' Job and the account its end is settled on
 # (`bake_process::windows_job`), shared with the process owner.
 bake-process.workspace = true
-# The Windows runners' restricted token, AppContainer profiles and
-# capabilities, DACL grants, and process creation.
-windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Security_Isolation", "Win32_System_Console", "Win32_System_Threading"] }
+# The Windows runners' restricted token, derived AppContainer and
+# capability SIDs, the profile-folder check (`CoTaskMemFree`), DACL grants,
+# and process creation.
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Security_Isolation", "Win32_System_Com", "Win32_System_Console", "Win32_System_Threading"] }
 
 [target.'cfg(windows)'.dev-dependencies]
 # The enforcement tests' raw deletion, open, token, and SDDL probes and

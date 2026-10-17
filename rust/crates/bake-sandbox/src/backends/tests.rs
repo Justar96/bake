@@ -341,7 +341,7 @@ fn the_appcontainer_rung_refuses_unsafe_policies_and_grants() {
     };
     let plain = LocalProvider::with_chain(vec![Runner::WindowsAppContainer]);
     // A workspace holding the temp root, under both modes: the standing
-    // package ACE would reach every private directory.
+    // workspace read ACE would reach every private directory.
     for policy in [ro(), ww()] {
         refused(&plain, &policy, "temp root must be outside the workspace");
     }

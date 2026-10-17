@@ -452,8 +452,8 @@ impl LocalProvider {
                 let (code, _) = run_probe(runner, &args, self.probe_timeout, false).await?;
                 (code == Some(0)).then_some(Enforcement::Partial)
             }
-            // Never probed: a real launch would create a standing profile
-            // and workspace ACE for the probe's own directory. The rung is
+            // Never probed: a real launch would leave standing workspace
+            // ACEs on the probe's own directory. The rung is
             // selectable only as a sole candidate, whose launch failure is
             // the fail-closed end.
             Runner::WindowsAppContainer => None,
@@ -588,8 +588,8 @@ fn windows_acl_profile(policy: &SandboxPolicy) -> Result<Vec<OsString>, String> 
 /// restricted-token runner, extra writable roots are refused and the ambient
 /// temporary directory is never granted; the temp root must lie outside the
 /// workspace under both modes, because even a read-only run leaves the
-/// package's standing read ACE on the workspace, which every later private
-/// directory would inherit. The grants pass their path and disk checks
+/// workspace read capability's standing ACE on the workspace, which every
+/// later private directory would inherit. The grants pass their path and disk checks
 /// against this host's locations before the wrap is returned.
 fn windows_appcontainer_profile(
     policy: &SandboxPolicy,

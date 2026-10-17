@@ -61,6 +61,14 @@ use super::{
 pub fn probe(ops: &[&str]) -> std::io::Result<i32> {
     match ops {
         // The integrity level and AppContainer flag of this process's token.
+        // TEMP, TMP, and LOCALAPPDATA as this process sees them, one per
+        // line: Windows reroutes all three for a profile.
+        ["env-pair"] => {
+            for name in ["TEMP", "TMP", "LOCALAPPDATA"] {
+                println!("{}", std::env::var(name).unwrap_or_default());
+            }
+            Ok(0)
+        }
         ["identity"] => identity().map(|line| {
             println!("{line}");
             0
@@ -174,7 +182,7 @@ pub(super) const READ_EXECUTE: u32 = 0x0012_00A9;
 /// The package SID's grant on its own workspace: [`READ_EXECUTE`] plus the
 /// runner's write grant (0x1301FF), still without `WRITE_DAC` and
 /// `WRITE_OWNER`.
-const CONTAINER_WORKSPACE: u32 = READ_EXECUTE | GRANT_MASK;
+pub(super) const CONTAINER_WORKSPACE: u32 = READ_EXECUTE | GRANT_MASK;
 
 // The runner's write grant, `GENERIC_WRITE`'s file rights, `DELETE`,
 // `FILE_DELETE_CHILD`, and `SYNCHRONIZE` (`icacls` `WD,AD,WEA,WA,D,DC,S`),
@@ -215,10 +223,10 @@ enum Launch<'a> {
 
 /// One run's result, with the live members of its Job when its direct
 /// process exited (empty for the runner, which owns its own Job).
-struct Outcome {
-    code: Option<i32>,
-    stdout: String,
-    stderr: String,
+pub(super) struct Outcome {
+    pub(super) code: Option<i32>,
+    pub(super) stdout: String,
+    pub(super) stderr: String,
     left_in_job: Vec<u32>,
 }
 
@@ -911,7 +919,7 @@ fn read_output(dir: &Path, name: &str) -> Option<String> {
 /// [`TestJob::finish`] must report the Job reaped, and only then are the
 /// files read. A launch that overruns [`BOUND`] or leaves no output files
 /// panics with whatever evidence there is.
-fn launch(
+pub(super) fn launch(
     token: Option<&OwnedHandle>,
     container: Option<*mut c_void>,
     exe: &Path,
@@ -1148,14 +1156,14 @@ impl Drop for Attributes {
 
 /// An AppContainer profile with a name no other run uses. Dropped, it is
 /// deleted, its registry and folder state with it, and its SID freed.
-struct Profile {
+pub(super) struct Profile {
     name: Vec<u16>,
-    sid: *mut c_void,
-    sid_text: String,
+    pub(super) sid: *mut c_void,
+    pub(super) sid_text: String,
 }
 
 impl Profile {
-    fn create() -> Self {
+    pub(super) fn create() -> Self {
         use std::sync::atomic::{AtomicUsize, Ordering};
         use windows_sys::Win32::Security::Isolation::CreateAppContainerProfile;
         static NEXT: AtomicUsize = AtomicUsize::new(0);
