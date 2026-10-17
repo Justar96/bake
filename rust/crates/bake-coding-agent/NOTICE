@@ -113,6 +113,13 @@ src/core/extensions/types.ts, adapted as ToolCallVeto in src/plugins/mod.rs;
 and examples/extensions/protected-paths.ts, ported as ProtectedPaths in
 src/plugins/protected_paths.rs, with its cases in src/plugins/tests.rs and
 src/agent_session/plugin_tests.rs.
+
+From release v1.3.0, revision 71023aec1546d6d677a65669c5665c0927ce0dd0, the
+object disposal of packages/chord/src/object.ts (a memoized dispose that runs
+whether or not a caller waits, aborting tasks before awaiting them), adapted
+in src/owned_work.rs, with cases of packages/chord/test/host.test.ts (forced
+disposal aborts in-flight calls) and test/review.test.ts (an aborted task
+context cannot start fresh calls) in src/owned_work/tests.rs.
 --------------------------------------------------------------------------------
 MIT License
 

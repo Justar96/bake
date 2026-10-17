@@ -860,6 +860,70 @@ async fn shutdown_waits_for_an_admitted_decision_write() {
     );
 }
 
+// Integration of the plugin veto with the session's work gate: a decision
+// write that has started but is not yet admitted under the session lock is
+// the gate's blocking work. Shutdown aborts the run, whose hook future is
+// dropped, but the write keeps its gate permit, so the gate is not drained
+// while it runs; the write then sees the abort at its admission and records
+// nothing. The session lock alone would not show this: the write has not
+// taken it yet.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn shutdown_owns_a_decision_write_before_its_admission() {
+    let fx = Fixture::new("plugin-shutdown-pre-admission");
+    fx.script(&[("write", json!({ "path": "a.txt", "content": "x" }), "w1")]);
+    let session = Arc::new(
+        fx.session(
+            fx.new_store(),
+            SandboxMode::DangerFullAccess,
+            EscalationOutcome::Rejected,
+            registry(vec![(
+                Arc::new(Scripted::new("guard", &["write"], block("no"))),
+                0,
+            )]),
+        )
+        .await,
+    );
+    let entered = Arc::new(Notify::new());
+    let (release, released) = std::sync::mpsc::channel::<()>();
+    session.core.hooks().before_plugin_decision_admission = Some(Box::new({
+        let entered = Arc::clone(&entered);
+        // Bounded, so the blocking write cannot outlive the test even if
+        // no release is sent.
+        move || {
+            entered.notify_one();
+            let _ = released.recv_timeout(WAIT);
+        }
+    }));
+    let running = tokio::spawn({
+        let session = Arc::clone(&session);
+        async move { session.prompt("go", Vec::new()).await }
+    });
+    // Every wait is bounded, and on every path the write is released, then
+    // shutdown and the prompt are joined, before anything is asserted.
+    let started = within("the decision write's start", entered.notified()).await;
+    let shutting = tokio::spawn({
+        let session = Arc::clone(&session);
+        async move { session.shutdown().await }
+    });
+    // Once the prompt has returned, the run is gone and the decision write
+    // is the only work the session could still own.
+    let prompted = join("the prompt", running).await;
+    let owned = session.work.is_closing() && !session.work.is_closed();
+    let _ = release.send(());
+    drop(release);
+    let shut = join("shutdown", shutting).await;
+    if let Err(error) = started.and(prompted.map(drop)).and(shut) {
+        fail_after_shutdown(&session, error).await;
+    }
+    assert!(owned, "the gate does not own the decision write");
+    let entries = file_entries(&session);
+    assert!(
+        decisions(&entries).is_empty(),
+        "nothing admitted after the abort"
+    );
+    assert_eq!(read(&fx.ws().join("a.txt")), None);
+}
+
 // A block with `terminate`, as Pi's `terminate`: the batch's only call is
 // blocked and the agent stops without another model request.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

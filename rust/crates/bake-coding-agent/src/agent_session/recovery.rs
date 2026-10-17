@@ -474,18 +474,19 @@ impl Core {
         self.session_io.send_modify(|count| *count += 1);
         let session = Arc::clone(&self.session);
         let gap = Arc::clone(&self.gap);
-        tokio::task::spawn_blocking(move || {
-            let _permit = permit;
-            let mut session = lock(&session);
-            if let Some(error) = super::lock_gap(&gap).clone() {
-                return Err(format!(
-                    "The session file could not be written ({error}), so nothing more is written to it"
-                ));
-            }
-            Ok(work(&mut session))
-        })
-        .await
-        .map_err(|error| format!("Session I/O task failed: {error}"))?
+        let task = permit
+            .spawn_blocking(move || {
+                let mut session = lock(&session);
+                if let Some(error) = super::lock_gap(&gap).clone() {
+                    return Err(format!(
+                        "The session file could not be written ({error}), so nothing more is written to it"
+                    ));
+                }
+                Ok(work(&mut session))
+            })
+            .map_err(|refused| format!("Session I/O task failed: {refused}"))?;
+        task.await
+            .map_err(|error| format!("Session I/O task failed: {error}"))?
     }
 
     fn compaction_settings(&self, model: Option<&Model>) -> Result<CompactionSettings, String> {
@@ -640,8 +641,7 @@ impl Core {
         self.session_io.send_modify(|count| *count += 1);
         let session = Arc::clone(&self.session);
         let gap = Arc::clone(&self.gap);
-        let written = tokio::task::spawn_blocking(move || {
-            let _permit = permit;
+        let write = permit.spawn_blocking(move || {
             super::write_session(&session, &gap, |session| {
                 match session.append_group(edits) {
                     Ok(_) => Ok(session.build_session_projection()),
@@ -655,9 +655,12 @@ impl Core {
                     }
                 }
             })
-        })
-        .await
-        .map_err(|error| format!("Session I/O task failed: {error}"))?;
+        });
+        drop(permit);
+        let written = write
+            .map_err(|refused| format!("Session I/O task failed: {refused}"))?
+            .await
+            .map_err(|error| format!("Session I/O task failed: {error}"))?;
         match written {
             Ok(projection) => {
                 self.refresh_context(&projection);
@@ -751,8 +754,7 @@ impl Core {
         self.session_io.send_modify(|count| *count += 1);
         let entry = result.clone();
         let core = Arc::clone(self);
-        let committed = tokio::task::spawn_blocking(move || {
-            let _permit = permit;
+        let commit = permit.spawn_blocking(move || {
             #[cfg(test)]
             {
                 let hook = core.hooks().before_compaction_commit.take();
@@ -802,9 +804,15 @@ impl Core {
                 }
             }
             written
-        })
-        .await
-        .map_err(|error| CompactionError::Failed(format!("Session I/O task failed: {error}")))?;
+        });
+        let committed = commit
+            .map_err(|refused| {
+                CompactionError::Failed(format!("Session I/O task failed: {refused}"))
+            })?
+            .await
+            .map_err(|error| {
+                CompactionError::Failed(format!("Session I/O task failed: {error}"))
+            })?;
         let projection = match committed {
             Ok(Some(projection)) => projection,
             Ok(None) => return Err(CompactionError::Cancelled),

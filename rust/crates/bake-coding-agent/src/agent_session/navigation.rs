@@ -147,7 +147,7 @@ impl AgentSession {
                 .core
                 .busy(|_| {}, |activity| activity.navigation = false);
             let core = Arc::clone(&control.core);
-            tokio::task::spawn_blocking(move || {
+            let navigate = move || {
                 #[cfg(test)]
                 {
                     let hook = core.hooks().before_navigation.take();
@@ -187,9 +187,8 @@ impl AgentSession {
                     moved: true,
                     editor_text,
                 })
-            })
-            .await
-            .map_err(|error| format!("Session I/O task failed: {error}"))?
+            };
+            control.blocking(navigate, "Session I/O").await?
         })
         .await
     }
@@ -234,8 +233,7 @@ impl AgentSession {
         let permit = self.change_permit()?;
         let session = Arc::clone(&self.session);
         let entry_id = entry_id.to_owned();
-        tokio::task::spawn_blocking(move || {
-            let _permit = permit;
+        let fork = permit.spawn_blocking(move || {
             let source = lock(&session);
             let invalid = || "Invalid entry ID for forking".to_owned();
             let entry = source.entry(&entry_id).ok_or_else(invalid)?;
@@ -257,8 +255,9 @@ impl AgentSession {
                 session: forked,
                 selected_text,
             })
-        })
-        .await
-        .map_err(|error| format!("Session I/O task failed: {error}"))?
+        });
+        fork.map_err(|refused| format!("Session I/O task failed: {refused}"))?
+            .await
+            .map_err(|error| format!("Session I/O task failed: {error}"))?
     }
 }
