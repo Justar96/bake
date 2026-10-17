@@ -11,15 +11,31 @@
 //! Ordering comes from barriers the fixture writes to standard error ("got
 //! initialize", "grandchild PID"), awaited through the owner's
 //! `stderr_updates`; waits are bounded, never used as the condition. Every
-//! process a test starts is recorded, and if any test fails the runner kills
-//! what is left before it exits.
+//! process a test starts is observed by a stable identity (`observe`), and
+//! after each test, passing or failing, the runner kills and awaits whatever
+//! of it is left before the next test starts, reporting a cleanup failure
+//! apart from an assertion failure.
+//!
+//! `BAKE_MCP_STDIO_INJECT=<label>` makes the test holding that label fail at
+//! that point, with its processes still running: the failure control for the
+//! cleanup.
+//!
+//! Platform coverage: the escalation through `SIGTERM`, the group-escape,
+//! stderr-drain, and reaped-leader cases are Unix only (Windows has no
+//! `SIGTERM`, `setsid`, or reaping by another party); the subreaper case is
+//! Linux only (`PR_SET_CHILD_SUBREAPER`).
+
+#[path = "stdio/observe.rs"]
+mod observe;
 
 use std::future::Future;
 use std::io::{BufRead, Write};
 use std::panic::AssertUnwindSafe;
 use std::pin::Pin;
-use std::sync::Mutex;
+use std::sync::Arc;
 use std::time::Duration;
+
+use observe::Observed;
 
 use bake_mcp::stdio::{
     ProcessReport, SpawnError, StdioCommand, StdioOptions, StdioProcess, Stop, TreeEnd,
@@ -204,11 +220,13 @@ fn leave_process_group() {}
 
 // ------------------------------------------------------------------ helpers
 
-/// Every pid a test started, killed by the runner if a test fails.
-static STARTED: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+const INJECT: &str = "BAKE_MCP_STDIO_INJECT";
 
-fn record(pid: u32) {
-    STARTED.lock().unwrap_or_else(|e| e.into_inner()).push(pid);
+/// Fails here when `BAKE_MCP_STDIO_INJECT` names `label`.
+fn inject(label: &str) {
+    if std::env::var(INJECT).is_ok_and(|value| value == label) {
+        panic!("injected failure at {label:?}");
+    }
 }
 
 fn fixture(mode: &str) -> StdioCommand {
@@ -240,10 +258,22 @@ fn stubborn_options() -> StdioOptions {
     options
 }
 
-fn spawn(command: StdioCommand, options: StdioOptions) -> (StdioProcess, bake_mcp::Connecting) {
-    let (process, connecting) = spawn_stdio(command, options).expect("spawn the fixture");
-    record(process.pid());
-    (process, connecting)
+struct Spawned {
+    process: StdioProcess,
+    connecting: bake_mcp::Connecting,
+    server: Arc<Observed>,
+}
+
+async fn spawn(command: StdioCommand, options: StdioOptions) -> Spawned {
+    let (process, connecting) = spawn_stdio(command, options)
+        .await
+        .expect("spawn the fixture");
+    let server = Observed::child(process.pid(), "the server");
+    Spawned {
+        process,
+        connecting,
+        server,
+    }
 }
 
 async fn bounded<F: Future>(what: &str, work: F) -> F::Output {
@@ -270,15 +300,15 @@ async fn stderr_shows(process: &StdioProcess, needle: &str) -> String {
     .await
 }
 
-async fn grandchild(process: &StdioProcess) -> u32 {
-    let text = stderr_shows(process, "grandchild ").await;
+/// The grandchild the server announced, observed while the server runs.
+async fn grandchild(spawned: &Spawned) -> Arc<Observed> {
+    let text = stderr_shows(&spawned.process, "grandchild ").await;
     let pid = text
         .lines()
         .find_map(|line| line.strip_prefix("grandchild "))
         .and_then(|pid| pid.trim().parse().ok())
         .expect("a grandchild pid");
-    record(pid);
-    pid
+    Observed::descendant(&spawned.server, pid, "the grandchild")
 }
 
 async fn initialize(connecting: &mut bake_mcp::Connecting) -> (McpClient, bake_mcp::ClientEvents) {
@@ -287,86 +317,63 @@ async fn initialize(connecting: &mut bake_mcp::Connecting) -> (McpClient, bake_m
         .expect("initialize")
 }
 
-/// Whether `pid` names a live or unreaped process.
-#[cfg(unix)]
-fn exists(pid: u32) -> bool {
-    // SAFETY: signal 0 only checks; the pid fits as it came from the OS.
-    unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
-}
-
-/// Whether `pid` names a running process. A pid can be reused once every
-/// handle to its process closes; the tests probe only processes they started
-/// moments before.
-#[cfg(windows)]
-fn exists(pid: u32) -> bool {
-    use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
-    use windows_sys::Win32::System::Threading::{
-        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
-    };
-    // SAFETY: plain calls; the handle is closed before returning.
-    unsafe {
-        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
-        if handle.is_null() {
-            return false;
-        }
-        let mut code = 0_u32;
-        let running = GetExitCodeProcess(handle, &mut code) != 0 && code == STILL_ACTIVE as u32;
-        CloseHandle(handle);
-        running
-    }
-}
-
-/// Wait until `pid` is gone. A killed grandchild is reaped by whoever
-/// inherits it (init or a subreaper), not by this process, so its
-/// disappearance is polled, bounded.
-async fn gone(pid: u32, what: &str) {
-    bounded(&format!("{what} ({pid}) to be gone"), async {
-        while exists(pid) {
+/// Wait until `observed` has exited and been reaped by its parent (for a
+/// killed grandchild, whoever inherited it), bounded.
+async fn gone(observed: &Observed, what: &str) {
+    bounded(&format!("{what} ({}) to be gone", observed.pid()), async {
+        while !observed.is_reaped() {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     })
     .await;
 }
 
-/// Assert `pid` stays alive for a while: a `SIGKILL` already sent takes
-/// effect asynchronously, so one probe right after it proves nothing.
+/// Wait until `observed` has exited (it may stay a zombie), bounded.
 #[cfg(unix)]
-async fn stays(pid: u32, failure: &str) {
+async fn exited(observed: &Observed, what: &str) {
+    bounded(&format!("{what} ({}) to exit", observed.pid()), async {
+        while observed.is_running() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await;
+}
+
+/// Assert `observed` keeps running, not even a zombie, for a while: a
+/// `SIGKILL` already sent takes effect asynchronously, so one probe right
+/// after it proves nothing.
+#[cfg(unix)]
+async fn stays(observed: &Observed, failure: &str) {
     let until = tokio::time::Instant::now() + Duration::from_millis(500);
     while tokio::time::Instant::now() < until {
-        // A killed process is a zombie until its new parent reaps it.
-        let zombie = std::fs::read_to_string(format!("/proc/{pid}/stat"))
-            .ok()
-            .and_then(|stat| {
-                stat.rsplit_once(") ")
-                    .map(|(_, rest)| rest.starts_with('Z'))
-            })
-            .unwrap_or(false);
-        assert!(exists(pid) && !zombie, "{failure}");
+        assert!(observed.is_running(), "{failure}");
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 }
 
+/// Reap the server as a host's `waitpid(-1)` would, behind its owner's back:
+/// kill it through its identity, wait (bounded) for its exit, then reap it
+/// without blocking.
 #[cfg(unix)]
-fn kill_now(pid: u32) {
-    // SAFETY: plain syscall on a pid this test recorded.
-    unsafe {
-        libc::kill(pid as libc::pid_t, libc::SIGKILL);
-    }
+async fn reap_behind_the_owner(server: &Observed) {
+    server.kill();
+    exited(server, "the server").await;
+    assert!(
+        server.reap_if_own_exited_child(),
+        "the exited server could not be reaped"
+    );
 }
 
-#[cfg(windows)]
-fn kill_now(pid: u32) {
-    use windows_sys::Win32::Foundation::CloseHandle;
-    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_TERMINATE, TerminateProcess};
-    // SAFETY: plain calls on a pid this test recorded; the handle is closed.
-    unsafe {
-        let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
-        if !handle.is_null() {
-            TerminateProcess(handle, 1);
-            CloseHandle(handle);
-        }
-    }
+/// `observed`, a member of a tree a completed shutdown reported empty, must
+/// already be gone: not running, and on Unix not even a zombie, since the
+/// owner waits for the group's last member to be reaped before it reaps the
+/// server. Checked once, with no wait: a later exit would not prove it.
+fn ended(observed: &Observed, what: &str) {
+    assert!(
+        observed.is_reaped(),
+        "{what} ({}) outlived a shutdown that reported its tree empty",
+        observed.pid()
+    );
 }
 
 async fn shutdown(process: &StdioProcess) -> ProcessReport {
@@ -380,7 +387,11 @@ async fn shutdown(process: &StdioProcess) -> ProcessReport {
 async fn connects_lists_calls_and_captures_stderr() {
     // Pi `test/stdio.test.ts`: "connects to a newline-delimited MCP server
     // and captures stderr".
-    let (process, mut connecting) = spawn(fixture("server"), options());
+    let Spawned {
+        process,
+        mut connecting,
+        server,
+    } = spawn(fixture("server"), options()).await;
     let (client, _events) = initialize(&mut connecting).await;
     let tools = client.list_tools().await.unwrap();
     assert_eq!(
@@ -411,16 +422,22 @@ async fn connects_lists_calls_and_captures_stderr() {
         "{report:?}"
     );
     assert!(report.stderr_ended);
-    assert!(!exists(process.pid()), "the server was not reaped");
+    assert!(server.is_reaped(), "the server was not reaped");
 }
 
 async fn kills_a_server_that_ignores_shutdown_including_its_children() {
     // Pi `test/stdio.test.ts`: "kills a server that ignores shutdown,
     // including its children". The grandchild ignores SIGTERM and holds the
     // server's standard output and error.
-    let (process, mut connecting) = spawn(fixture("stubborn"), stubborn_options());
-    let grandchild = grandchild(&process).await;
+    let spawned = spawn(fixture("stubborn"), stubborn_options()).await;
+    let grandchild = grandchild(&spawned).await;
+    let Spawned {
+        process,
+        mut connecting,
+        server,
+    } = spawned;
     let (client, _events) = initialize(&mut connecting).await;
+    inject("stubborn-before-shutdown");
     assert_eq!(
         bounded("client shutdown", client.shutdown()).await,
         CloseReason::Shutdown
@@ -428,22 +445,25 @@ async fn kills_a_server_that_ignores_shutdown_including_its_children() {
     let report = shutdown(&process).await;
     assert_eq!(report.stop, Stop::Killed, "{report:?}");
     assert!(report.status.is_some_and(|status| !status.success()));
+    assert_eq!(report.tree, TreeEnd::Empty, "{report:?}");
     // Standard error ended, so every holder of the pipe, the grandchild
     // included, has exited.
     assert!(report.stderr_ended, "{report:?}");
-    {
-        assert!(!exists(process.pid()), "the server was not reaped");
-        gone(grandchild, "the grandchild").await;
-    }
-    let _ = grandchild;
+    assert!(server.is_reaped(), "the server was not reaped");
+    ended(&grandchild, "the grandchild");
 }
 
 async fn a_cancelled_initialize_is_drained_by_its_owner() {
     // The server reads `initialize` and never answers. The initialize future
     // is cancelled; the owner still holds the protocol task and the process,
     // and its two shutdowns leave nothing behind.
-    let (process, mut connecting) = spawn(fixture("stall"), stubborn_options());
-    let grandchild = grandchild(&process).await;
+    let spawned = spawn(fixture("stall"), stubborn_options()).await;
+    let grandchild = grandchild(&spawned).await;
+    let Spawned {
+        process,
+        mut connecting,
+        server,
+    } = spawned;
     {
         let mut initializing = Box::pin(connecting.initialize());
         tokio::select! {
@@ -453,7 +473,7 @@ async fn a_cancelled_initialize_is_drained_by_its_owner() {
         // Dropped here: the caller gave up on initialization.
     }
     // Nothing was torn down behind the owner's back.
-    assert!(exists(process.pid()) && exists(grandchild));
+    assert!(server.is_running() && grandchild.is_running());
     assert!(!process.stderr().ended);
 
     assert_eq!(
@@ -462,19 +482,22 @@ async fn a_cancelled_initialize_is_drained_by_its_owner() {
     );
     let report = shutdown(&process).await;
     assert_eq!(report.stop, Stop::Killed, "{report:?}");
+    assert_eq!(report.tree, TreeEnd::Empty, "{report:?}");
     assert!(report.stderr_ended, "{report:?}");
-    {
-        assert!(!exists(process.pid()), "the server was not reaped");
-        gone(grandchild, "the grandchild").await;
-    }
-    let _ = grandchild;
+    assert!(server.is_reaped(), "the server was not reaped");
+    ended(&grandchild, "the grandchild");
 }
 
 async fn a_stalled_initialize_times_out_and_the_owner_reaps() {
     let mut options = stubborn_options();
     options.client.request_timeout = Some(Duration::from_millis(300));
-    let (process, mut connecting) = spawn(fixture("stall"), options);
-    let grandchild = grandchild(&process).await;
+    let spawned = spawn(fixture("stall"), options).await;
+    let grandchild = grandchild(&spawned).await;
+    let Spawned {
+        process,
+        mut connecting,
+        ..
+    } = spawned;
     let error = bounded("initialize", connecting.initialize())
         .await
         .unwrap_err();
@@ -493,13 +516,16 @@ async fn a_stalled_initialize_times_out_and_the_owner_reaps() {
     let report = shutdown(&process).await;
     assert_eq!(report.stop, Stop::Killed);
     assert!(report.stderr_ended);
-    gone(grandchild, "the grandchild").await;
-    let _ = grandchild;
+    ended(&grandchild, "the grandchild");
 }
 
 async fn the_environment_is_explicit_and_scrubbed() {
     async fn names(command: StdioCommand) -> Vec<String> {
-        let (process, mut connecting) = spawn(command, options());
+        let Spawned {
+            process,
+            mut connecting,
+            ..
+        } = spawn(command, options()).await;
         let (client, _events) = initialize(&mut connecting).await;
         let result = client.call_tool("env", None).await.unwrap();
         client.shutdown().await;
@@ -547,7 +573,11 @@ async fn stderr_is_bounded_while_a_server_floods_it() {
     // keeps up, so the server is not blocked, and keeps only the tail.
     let mut options = options();
     options.max_stderr_bytes = std::num::NonZeroUsize::new(4096).unwrap();
-    let (process, mut connecting) = spawn(fixture("flood"), options);
+    let Spawned {
+        process,
+        mut connecting,
+        ..
+    } = spawn(fixture("flood"), options).await;
     let (client, _events) = initialize(&mut connecting).await;
     client.shutdown().await;
     let report = shutdown(&process).await;
@@ -567,7 +597,11 @@ async fn stderr_is_bounded_while_a_server_floods_it() {
 }
 
 async fn a_partial_frame_then_end_of_output_fails_the_call() {
-    let (process, mut connecting) = spawn(fixture("server"), options());
+    let Spawned {
+        process,
+        mut connecting,
+        ..
+    } = spawn(fixture("server"), options()).await;
     let (client, _events) = initialize(&mut connecting).await;
     let error = client.call_tool("partial", None).await.unwrap_err();
     assert!(
@@ -584,7 +618,11 @@ async fn a_partial_frame_then_end_of_output_fails_the_call() {
 }
 
 async fn malformed_output_is_reported_and_the_call_completes() {
-    let (process, mut connecting) = spawn(fixture("server"), options());
+    let Spawned {
+        process,
+        mut connecting,
+        ..
+    } = spawn(fixture("server"), options()).await;
     let (client, mut events) = initialize(&mut connecting).await;
     let result = client.call_tool("malformed", None).await.unwrap();
     assert_eq!(result.content[0]["text"], "after noise");
@@ -597,7 +635,11 @@ async fn malformed_output_is_reported_and_the_call_completes() {
 }
 
 async fn a_server_that_exits_before_initialize_reports_its_status() {
-    let (process, mut connecting) = spawn(fixture("exit"), options());
+    let Spawned {
+        process,
+        mut connecting,
+        ..
+    } = spawn(fixture("exit"), options()).await;
     let error = bounded("initialize", connecting.initialize())
         .await
         .unwrap_err();
@@ -626,56 +668,70 @@ async fn a_server_that_exits_before_initialize_reports_its_status() {
 
 async fn spawn_failures_start_nothing() {
     let missing = std::env::temp_dir().join("bake-mcp-no-such-server-program");
-    match spawn_stdio(StdioCommand::new(&missing), options()) {
+    match spawn_stdio(StdioCommand::new(&missing), options()).await {
         Err(SpawnError::Spawn(error)) => assert_eq!(error.kind(), std::io::ErrorKind::NotFound),
         other => panic!("expected a spawn error, got {:?}", other.map(|_| ())),
     }
     let mut refused = options();
     refused.terminate_grace = Duration::MAX;
     assert!(matches!(
-        spawn_stdio(fixture("server"), refused),
+        spawn_stdio(fixture("server"), refused).await,
         Err(SpawnError::InvalidOptions(_))
     ));
     let mut refused = options();
     refused.client.limits.max_events = std::num::NonZeroUsize::MAX;
     assert!(matches!(
-        spawn_stdio(fixture("server"), refused),
+        spawn_stdio(fixture("server"), refused).await,
         Err(SpawnError::InvalidOptions(_))
     ));
-    let outside = std::thread::spawn(|| spawn_stdio(fixture("server"), options()).map(|_| ()))
-        .join()
-        .unwrap();
-    assert!(matches!(outside, Err(SpawnError::NoRuntime)));
+    // Polled once on a thread with no runtime: refused at its first poll,
+    // before anything is created.
+    let outside = std::thread::spawn(|| {
+        let mut spawning = std::pin::pin!(spawn_stdio(fixture("server"), options()));
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        match spawning.as_mut().poll(&mut context) {
+            std::task::Poll::Ready(result) => Some(result.map(|_| ())),
+            std::task::Poll::Pending => None,
+        }
+    })
+    .join()
+    .unwrap();
+    assert!(matches!(outside, Some(Err(SpawnError::NoRuntime))));
 }
 
 async fn repeated_and_concurrent_shutdowns_share_one_report() {
-    let (process, mut connecting) = spawn(fixture("stubborn"), stubborn_options());
-    // Recorded, so a failed run still kills it.
-    let grandchild = grandchild(&process).await;
+    let spawned = spawn(fixture("stubborn"), stubborn_options()).await;
+    let grandchild = grandchild(&spawned).await;
+    let Spawned {
+        process,
+        mut connecting,
+        ..
+    } = spawned;
     let (client, _events) = initialize(&mut connecting).await;
     client.shutdown().await;
     let (first, second) = tokio::join!(shutdown(&process), shutdown(&process));
     assert_eq!(first, second);
     assert_eq!(shutdown(&process).await, first);
     assert_eq!(first.stop, Stop::Killed);
-    gone(grandchild, "the grandchild").await;
-    let _ = grandchild;
+    assert_eq!(first.tree, TreeEnd::Empty);
+    ended(&grandchild, "the grandchild");
 }
 
 async fn dropping_the_owners_kills_the_tree_without_waiting() {
     // The drop fallback: nothing is awaited, but nothing is left either.
-    let (process, mut connecting) = spawn(fixture("stubborn"), stubborn_options());
-    let grandchild = grandchild(&process).await;
+    let spawned = spawn(fixture("stubborn"), stubborn_options()).await;
+    let grandchild = grandchild(&spawned).await;
+    let Spawned {
+        process,
+        mut connecting,
+        server,
+    } = spawned;
     let (client, _events) = initialize(&mut connecting).await;
-    let pid = process.pid();
     drop(client);
     drop(connecting);
     drop(process);
-    {
-        gone(pid, "the server").await;
-        gone(grandchild, "the grandchild").await;
-    }
-    let _ = (pid, grandchild);
+    gone(&server, "the server").await;
+    gone(&grandchild, "the grandchild").await;
 }
 
 #[cfg(unix)]
@@ -685,8 +741,13 @@ async fn a_descendant_that_leaves_the_group_is_not_waited_for() {
     // `stderr_drain` and says so; the test then removes it itself.
     let mut options = stubborn_options();
     options.stderr_drain = Duration::from_millis(300);
-    let (process, mut connecting) = spawn(fixture("escape"), options);
-    let escaped = grandchild(&process).await;
+    let spawned = spawn(fixture("escape"), options).await;
+    let escaped = grandchild(&spawned).await;
+    let Spawned {
+        process,
+        mut connecting,
+        server,
+    } = spawned;
     stderr_shows(&process, "sleeper left the group").await;
     let (client, _events) = initialize(&mut connecting).await;
     client.shutdown().await;
@@ -694,22 +755,30 @@ async fn a_descendant_that_leaves_the_group_is_not_waited_for() {
     let report = shutdown(&process).await;
     assert!(started.elapsed() < Duration::from_secs(10));
     assert_eq!(report.stop, Stop::Killed);
+    // The group's own members are gone; the escaped one is not in it.
+    assert_eq!(report.tree, TreeEnd::Empty, "{report:?}");
     assert!(!report.stderr_ended, "{report:?}");
-    assert!(!exists(process.pid()), "the server was not reaped");
+    assert!(server.is_reaped(), "the server was not reaped");
     assert!(
-        exists(escaped),
+        escaped.is_running(),
         "the escaped grandchild was killed after all"
     );
-    kill_now(escaped);
-    gone(escaped, "the escaped grandchild").await;
+    inject("escaped-survivor");
+    escaped.kill();
+    gone(&escaped, "the escaped grandchild").await;
 }
 
 async fn descendants_of_a_server_that_exits_by_itself_are_killed() {
     // The server exits when its input closes, as servers should, but leaves
     // a grandchild (ignoring SIGTERM) holding its standard output and error.
     // Pi signals the group once the server is gone; Bake kills it.
-    let (process, mut connecting) = spawn(fixture("parent"), options());
-    let grandchild = grandchild(&process).await;
+    let spawned = spawn(fixture("parent"), options()).await;
+    let grandchild = grandchild(&spawned).await;
+    let Spawned {
+        process,
+        mut connecting,
+        ..
+    } = spawned;
     let (client, _events) = initialize(&mut connecting).await;
     client.shutdown().await;
     let report = shutdown(&process).await;
@@ -719,16 +788,10 @@ async fn descendants_of_a_server_that_exits_by_itself_are_killed() {
         report.stderr_ended,
         "the grandchild still held standard error: {report:?}"
     );
-    // Windows waits for the Job to be empty before reporting, so the
-    // grandchild has already exited; Unix reports the kill it sent.
-    #[cfg(windows)]
-    {
-        assert_eq!(report.tree, TreeEnd::Empty, "{report:?}");
-        assert!(!exists(grandchild), "the Job was reported empty too early");
-    }
-    #[cfg(unix)]
-    assert_eq!(report.tree, TreeEnd::Killed, "{report:?}");
-    gone(grandchild, "the grandchild").await;
+    // The group or Job was awaited until empty before the server was
+    // reaped, so the grandchild has already exited.
+    assert_eq!(report.tree, TreeEnd::Empty, "{report:?}");
+    ended(&grandchild, "the grandchild");
 }
 
 #[cfg(unix)]
@@ -736,14 +799,20 @@ async fn a_server_that_ignores_end_of_input_stops_on_sigterm() {
     // Long enough after SIGTERM that only an ignored SIGTERM leads to SIGKILL.
     let mut options = stubborn_options();
     options.terminate_grace = Duration::from_secs(5);
-    let (process, mut connecting) = spawn(fixture("term"), options);
-    let grandchild = grandchild(&process).await;
+    let spawned = spawn(fixture("term"), options).await;
+    let grandchild = grandchild(&spawned).await;
+    let Spawned {
+        process,
+        mut connecting,
+        ..
+    } = spawned;
     let (client, _events) = initialize(&mut connecting).await;
     client.shutdown().await;
     let report = shutdown(&process).await;
     assert_eq!(report.stop, Stop::Terminated, "{report:?}");
+    assert_eq!(report.tree, TreeEnd::Empty, "{report:?}");
     assert!(report.stderr_ended);
-    gone(grandchild, "the grandchild").await;
+    ended(&grandchild, "the grandchild");
 }
 
 #[cfg(unix)]
@@ -756,28 +825,32 @@ async fn a_dropped_shutdown_during_the_stderr_drain_keeps_the_reader_owned() {
     // which the grandchild's next write fails and it exits by itself.
     let mut options = options();
     options.stderr_drain = Duration::from_secs(3);
-    let (process, mut connecting) = spawn(fixture("ticker-parent"), options);
-    let ticker = grandchild(&process).await;
+    let spawned = spawn(fixture("ticker-parent"), options).await;
+    let ticker = grandchild(&spawned).await;
+    let Spawned {
+        process,
+        mut connecting,
+        server,
+    } = spawned;
     stderr_shows(&process, "ticker left the group").await;
     let (client, _events) = initialize(&mut connecting).await;
     client.shutdown().await;
-    let pid = process.pid();
     {
         let mut first = Box::pin(process.shutdown());
         tokio::select! {
             _ = &mut first => panic!("finished while an escaped grandchild holds standard error"),
-            () = gone(pid, "the server") => {}
+            () = gone(&server, "the server") => {}
         }
         // Reaped, so the shutdown is now waiting in the drain; dropped here.
     }
     assert!(
-        exists(ticker),
+        ticker.is_running(),
         "the ticker stopped while its reader was owned"
     );
     let report = shutdown(&process).await;
     assert_eq!(report.stop, Stop::Exited, "{report:?}");
     assert!(!report.stderr_ended, "{report:?}");
-    gone(ticker, "the ticker, once its reader was stopped").await;
+    gone(&ticker, "the ticker, once its reader was stopped").await;
 }
 
 #[cfg(unix)]
@@ -787,27 +860,48 @@ async fn a_leader_reaped_elsewhere_is_never_signalled_as_a_group() {
     // test reaps the leader itself (as a host `waitpid(-1)` would) while a
     // grandchild that ignores SIGTERM stays in the group. Neither shutdown
     // nor drop may signal the group: the grandchild must survive both.
-    let (process, mut connecting) = spawn(fixture("stubborn"), stubborn_options());
-    let grandchild = grandchild(&process).await;
+    let spawned = spawn(fixture("stubborn"), stubborn_options()).await;
+    let grandchild = grandchild(&spawned).await;
+    let Spawned {
+        process,
+        mut connecting,
+        server,
+    } = spawned;
     let (client, _events) = initialize(&mut connecting).await;
     client.shutdown().await;
-    let pid = process.pid() as libc::pid_t;
-    let mut status = 0;
-    // SAFETY: plain syscalls on the test's own child.
-    let reaped = unsafe {
-        libc::kill(pid, libc::SIGKILL);
-        libc::waitpid(pid, &mut status, 0)
-    };
-    assert_eq!(reaped, pid);
+    reap_behind_the_owner(&server).await;
     let report = shutdown(&process).await;
     assert_eq!(report.status, None, "{report:?}");
     assert_eq!(report.tree, TreeEnd::NotSignalled, "{report:?}");
-    stays(grandchild, "shutdown signalled an obsolete process group").await;
+    stays(&grandchild, "shutdown signalled an obsolete process group").await;
     drop(process);
     drop(connecting);
-    stays(grandchild, "drop signalled an obsolete process group").await;
-    kill_now(grandchild);
-    gone(grandchild, "the grandchild").await;
+    stays(&grandchild, "drop signalled an obsolete process group").await;
+    inject("unowned-group-member");
+    grandchild.kill();
+    gone(&grandchild, "the grandchild").await;
+}
+
+#[cfg(unix)]
+async fn a_dropped_owner_whose_leader_was_reaped_elsewhere_signals_nothing() {
+    // The drop fallback checks the leader's identity before it signals: with
+    // no shutdown first to notice the reap, the drop must still not signal a
+    // group whose id may now be reused.
+    let spawned = spawn(fixture("stubborn"), stubborn_options()).await;
+    let grandchild = grandchild(&spawned).await;
+    let Spawned {
+        process,
+        mut connecting,
+        server,
+    } = spawned;
+    let (client, _events) = initialize(&mut connecting).await;
+    client.shutdown().await;
+    reap_behind_the_owner(&server).await;
+    drop(process);
+    drop(connecting);
+    stays(&grandchild, "drop signalled an obsolete process group").await;
+    grandchild.kill();
+    gone(&grandchild, "the grandchild").await;
 }
 
 async fn an_incomplete_shutdown_keeps_everything_and_resumes() {
@@ -818,33 +912,147 @@ async fn an_incomplete_shutdown_keeps_everything_and_resumes() {
     // reaped and its tree gone.
     let mut options = stubborn_options();
     options.kill_wait = Duration::ZERO;
-    let (process, mut connecting) = spawn(fixture("stubborn"), options);
-    let grandchild = grandchild(&process).await;
+    let spawned = spawn(fixture("stubborn"), options).await;
+    let grandchild = grandchild(&spawned).await;
+    let Spawned {
+        process,
+        mut connecting,
+        server,
+    } = spawned;
     let (client, _events) = initialize(&mut connecting).await;
     client.shutdown().await;
-    let mut incomplete = 0;
+    let (mut running, mut tree_left) = (0, 0);
     let report = bounded("a completed shutdown", async {
         loop {
             match process.shutdown().await {
                 Ok(report) => return report,
                 Err(error) => {
                     assert_eq!(error.stop, Stop::Killed);
-                    incomplete += 1;
+                    if error.exited {
+                        // Exited but held unreaped while its tree is awaited.
+                        #[cfg(unix)]
+                        assert!(server.is_zombie(), "reaped before its tree ended");
+                        tree_left += 1;
+                    } else {
+                        running += 1;
+                    }
                     tokio::time::sleep(Duration::from_millis(10)).await;
                 }
             }
         }
     })
     .await;
-    println!("    (incomplete shutdowns before completion: {incomplete})");
+    println!(
+        "    (incomplete shutdowns before completion: {running} before the exit, {tree_left} after)"
+    );
     assert!(report.status.is_some(), "{report:?}");
     assert_eq!(report.stop, Stop::Killed);
+    assert_eq!(report.tree, TreeEnd::Empty, "{report:?}");
     assert!(report.stderr_ended, "{report:?}");
-    {
-        assert!(!exists(process.pid()), "the server was not reaped");
-        gone(grandchild, "the grandchild").await;
+    assert!(server.is_reaped(), "the server was not reaped");
+    ended(&grandchild, "the grandchild");
+}
+
+/// Makes this process a child subreaper while it lives (Linux), so a killed
+/// grandchild whose parent is gone becomes this process's zombie and stays
+/// in its process group until it is reaped; restores the previous setting
+/// on drop. The runner's cleanup reaps such a zombie through its pidfd if
+/// the test fails first.
+#[cfg(target_os = "linux")]
+struct Subreaper {
+    previous: libc::c_int,
+}
+
+#[cfg(target_os = "linux")]
+impl Subreaper {
+    fn get() -> libc::c_int {
+        let mut value: libc::c_int = 0;
+        // SAFETY: `prctl` writes one int through the valid pointer.
+        let got = unsafe {
+            libc::prctl(
+                libc::PR_GET_CHILD_SUBREAPER,
+                std::ptr::addr_of_mut!(value),
+                0,
+                0,
+                0,
+            )
+        };
+        assert_eq!(got, 0, "PR_GET_CHILD_SUBREAPER");
+        value
     }
-    let _ = grandchild;
+
+    fn set_to(value: libc::c_int) -> bool {
+        // SAFETY: plain `prctl` with integer arguments.
+        unsafe { libc::prctl(libc::PR_SET_CHILD_SUBREAPER, value, 0, 0, 0) == 0 }
+    }
+
+    fn enable() -> Self {
+        let previous = Self::get();
+        assert!(Self::set_to(1), "PR_SET_CHILD_SUBREAPER");
+        Self { previous }
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for Subreaper {
+    fn drop(&mut self) {
+        let restored = Self::set_to(self.previous) && Self::get() == self.previous;
+        println!(
+            "    (child subreaper restored to {}: {})",
+            self.previous,
+            if restored { "ok" } else { "FAILED" }
+        );
+        if !restored && !std::thread::panicking() {
+            panic!("the child subreaper setting was not restored");
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+async fn a_killed_member_left_in_the_group_holds_the_shutdown_and_the_server() {
+    // A sent kill is not the tree's end. The server exits on end of input
+    // and leaves a grandchild in its group; with this process a subreaper,
+    // the killed grandchild stays a zombie member of the group until the
+    // test reaps it. Until then every shutdown is incomplete, with the
+    // server exited but held unreaped (its pid still pins the group's id);
+    // once the member is reaped, the next shutdown completes.
+    let _subreaper = Subreaper::enable();
+    let mut options = options();
+    options.kill_wait = Duration::from_millis(300);
+    let spawned = spawn(fixture("parent"), options).await;
+    let grandchild = grandchild(&spawned).await;
+    let Spawned {
+        process,
+        mut connecting,
+        server,
+    } = spawned;
+    let (client, _events) = initialize(&mut connecting).await;
+    client.shutdown().await;
+    for attempt in 0..2 {
+        let error = bounded("an incomplete shutdown", process.shutdown())
+            .await
+            .expect_err("the shutdown completed with a member left in the group");
+        assert!(error.exited, "attempt {attempt}: {error:?}");
+        assert_eq!(error.stop, Stop::Exited, "attempt {attempt}");
+        assert!(
+            server.is_zombie(),
+            "attempt {attempt}: the server was reaped before its tree ended"
+        );
+        assert!(
+            grandchild.is_zombie(),
+            "attempt {attempt}: the member is not a zombie"
+        );
+    }
+    inject("subreaper-before-reap");
+    assert!(
+        grandchild.reap_if_own_exited_child(),
+        "the zombie member could not be reaped"
+    );
+    let report = shutdown(&process).await;
+    assert_eq!(report.stop, Stop::Exited, "{report:?}");
+    assert!(report.status.is_some_and(|status| status.success()));
+    assert_eq!(report.tree, TreeEnd::Empty, "{report:?}");
+    assert!(server.is_reaped(), "the server was not reaped");
 }
 
 // ------------------------------------------------------------------ runner
@@ -855,6 +1063,13 @@ macro_rules! tests {
     ($($name:ident),* $(,)?) => {
         vec![$((stringify!($name), (|| Box::pin($name()) as Pin<Box<dyn Future<Output = ()> + Send>>) as Test)),*]
     };
+}
+
+/// How a test ended, before its cleanup.
+enum Outcome {
+    Passed,
+    TimedOut,
+    Panicked,
 }
 
 fn main() {
@@ -890,6 +1105,11 @@ fn main() {
         a_server_that_ignores_end_of_input_stops_on_sigterm,
         a_dropped_shutdown_during_the_stderr_drain_keeps_the_reader_owned,
         a_leader_reaped_elsewhere_is_never_signalled_as_a_group,
+        a_dropped_owner_whose_leader_was_reaped_elsewhere_signals_nothing,
+    ]);
+    #[cfg(target_os = "linux")]
+    tests.extend(tests![
+        a_killed_member_left_in_the_group_holds_the_shutdown_and_the_server
     ]);
     let filters: Vec<String> = std::env::args()
         .skip(1)
@@ -904,36 +1124,56 @@ fn main() {
     println!("\nrunning {} tests", selected.len());
     let mut failed = Vec::new();
     for (name, test) in selected {
-        let outcome = std::thread::spawn(move || {
+        // The test runs on a thread and runtime of its own; a panic is
+        // caught there, so the runtime is always dropped (running every
+        // owner's drop fallback) before the cleanup, on that same thread.
+        let joined = std::thread::spawn(move || {
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(2)
                 .enable_all()
                 .build()
                 .expect("a runtime");
-            let result = runtime
-                .block_on(async { tokio::time::timeout(BOUND, AssertUnwindSafe(test())).await });
-            // Dropping the runtime here also runs every owner's drop fallback.
+            let run = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                runtime
+                    .block_on(async { tokio::time::timeout(BOUND, AssertUnwindSafe(test())).await })
+            }));
             drop(runtime);
-            result.is_ok()
+            let outcome = match run {
+                Ok(Ok(())) => Outcome::Passed,
+                Ok(Err(_)) => Outcome::TimedOut,
+                Err(_) => Outcome::Panicked,
+            };
+            (outcome, observe::drain())
         })
         .join();
-        match outcome {
-            Ok(true) => println!("test {name} ... ok"),
-            Ok(false) => {
-                println!("test {name} ... FAILED (no result within {BOUND:?})");
-                failed.push(name);
+        let (outcome, (cleanup, clean)) = match joined {
+            Ok(result) => result,
+            // The cleanup itself panicked; nothing more can be done for it.
+            Err(_) => (
+                Outcome::Panicked,
+                (vec!["LEFT: the cleanup panicked".into()], false),
+            ),
+        };
+        let verdict = match (&outcome, clean) {
+            (Outcome::Passed, true) => "ok".to_owned(),
+            (Outcome::Passed, false) => "FAILED (cleanup)".to_owned(),
+            (Outcome::TimedOut, clean) => format!(
+                "FAILED (no result within {BOUND:?}){}",
+                if clean { "" } else { "; cleanup FAILED" }
+            ),
+            (Outcome::Panicked, clean) => {
+                format!("FAILED{}", if clean { "" } else { "; cleanup FAILED" })
             }
-            Err(_) => {
-                println!("test {name} ... FAILED");
-                failed.push(name);
+        };
+        if !matches!(outcome, Outcome::Passed) || !clean {
+            for line in &cleanup {
+                println!("    cleanup: {line}");
             }
+            failed.push(name);
         }
+        println!("test {name} ... {verdict}");
     }
     if !failed.is_empty() {
-        // A failed test may have left processes; kill everything recorded.
-        for pid in STARTED.lock().unwrap_or_else(|e| e.into_inner()).iter() {
-            kill_now(*pid);
-        }
         println!("\nfailures:\n    {}", failed.join("\n    "));
         println!("\ntest result: FAILED. {} failed", failed.len());
         std::process::exit(101);

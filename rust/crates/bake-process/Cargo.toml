@@ -1,0 +1,27 @@
+[package]
+name = "bake-process"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "The owner of a spawned child and its whole process tree, shared by Bake's coding tools and MCP stdio servers: admission before creation, pinned leader identity, a Unix process group or a Windows Job the child is born in, and kill or detach settled to observed quiescence"
+
+[dependencies]
+tokio = { workspace = true, features = ["rt", "time", "macros", "process", "io-util"] }
+
+# `setsid`, `kill(-pgid)`, `waitid(WNOWAIT)`, and macOS `proc_listpids`;
+# Tokio's `signal` wakes an exit wait on `SIGCHLD`.
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+tokio = { workspace = true, features = ["signal"] }
+
+# `CreateProcessW` with a Job and handle list, the kill-on-close Job, and
+# overlapped named pipes with random names.
+[target.'cfg(windows)'.dependencies]
+getrandom.workspace = true
+tokio = { workspace = true, features = ["net"] }
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Pipes", "Win32_System_Threading"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "time", "macros", "io-util"] }

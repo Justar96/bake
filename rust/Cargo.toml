@@ -7,6 +7,7 @@ members = [
     "crates/bake-coding-agent",
     "crates/bake-conformance",
     "crates/bake-mcp",
+    "crates/bake-process",
     "crates/bake-sandbox",
     "crates/bake-tui",
     "crates/bake-tui-view",
@@ -24,6 +25,7 @@ bake-agent = { path = "crates/bake-agent" }
 bake-ai = { path = "crates/bake-ai" }
 bake-coding-agent = { path = "crates/bake-coding-agent" }
 bake-mcp = { path = "crates/bake-mcp" }
+bake-process = { path = "crates/bake-process" }
 bake-sandbox = { path = "crates/bake-sandbox" }
 bake-tui = { path = "crates/bake-tui" }
 bake-tui-view = { path = "crates/bake-tui-view" }

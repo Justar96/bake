@@ -14,7 +14,7 @@ use std::time::Duration;
 use bake_ai::AbortSignal;
 use tokio::time::Instant;
 
-use crate::child_process::{OwnedProcess, ProcessSpec, wait_for_process};
+use crate::child_process::{self, ProcessSpec, wait_for_process};
 use crate::owned_work::WorkGate;
 
 /// Pi's exec options. The working directory is the required `cwd`
@@ -73,7 +73,7 @@ pub struct ExecResult {
 ///
 /// To await teardown, abort and then await this future: it returns once
 /// the killed child and every process left in its tree are gone
-/// ([`crate::child_process`] has the rules and the exceptions). Dropping it
+/// ([`bake_process`] has the rules and the exceptions). Dropping it
 /// kills the tree; with [`ExecOptions::owner`] the process moves to a task
 /// that settles it and the owner's close waits for that, and without one
 /// the tree is killed but not awaited. OS failures are returned in the
@@ -117,7 +117,7 @@ pub async fn exec_command(
         env: Some(scrub_environment(std::env::vars_os()).collect()),
         stdin: false,
     };
-    let exit = match OwnedProcess::spawn(&spec, options.owner.as_ref()).await {
+    let exit = match child_process::spawn(&spec, options.owner.as_ref()).await {
         Ok(child) => {
             wait_for_process(
                 child,

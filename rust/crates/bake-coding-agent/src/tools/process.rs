@@ -5,7 +5,7 @@
 //! missing binary fails the call with Pi's message. The child's standard
 //! output is read line by line, lines longer than [`MAX_LINE_BYTES`] are
 //! skipped, and at most [`MAX_STDERR_BYTES`] of standard error are kept.
-//! The child is spawned through [`OwnedProcess`], in a process tree of its
+//! The child is a [`bake_process::OwnedProcess`], in a process tree of its
 //! own, under the tool's owner. An abort or the caller's stop kills that
 //! tree, and the run returns only after the child and the tree are gone;
 //! dropping the run kills the tree and hands it to the owner
@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 
 use bake_ai::AbortSignal;
 
-use crate::child_process::{OwnedProcess, ProcessSpec};
+use crate::child_process::{self, ProcessSpec};
 use crate::owned_work::WorkGate;
 use tokio::io::AsyncReadExt;
 
@@ -111,7 +111,7 @@ where
         env: None,
         stdin: false,
     };
-    let mut process = OwnedProcess::spawn(&spec, owner).await?;
+    let mut process = child_process::spawn(&spec, owner).await?;
     let mut stdout = process.take_stdout();
     let mut stderr = process.take_stderr();
     let mut out_chunk = vec![0u8; 16 * 1024];

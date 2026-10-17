@@ -2620,7 +2620,7 @@ impl AgentSession {
     /// limit; a process that cannot die (uninterruptible sleep) holds it.
     /// Processes of other sessions, or of tools given no owner, are not
     /// waited for, and a descendant that left its tree is not owned
-    /// ([`crate::child_process`]). A model request's task awaits the
+    /// ([`bake_process`]). A model request's task awaits the
     /// provider task behind its stream, so draining the gate awaits both.
     pub async fn shutdown(&self) {
         let mut done = self.shutdown.get_or_init(|| self.begin_shutdown()).clone();

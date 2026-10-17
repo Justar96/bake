@@ -1,4 +1,4 @@
-//! Process-tree ownership for spawned commands: Pi's `detached` spawn,
+//! Process-tree ownership for spawned processes: Pi's `detached` spawn,
 //! `killProcessTree`, and its detached-child tracking from
 //! `src/utils/shell.ts`, with the identity and wait rules Pi's Node runtime
 //! does not need.
@@ -14,7 +14,7 @@
 //!
 //! Windows: Pi runs `taskkill /F /T /PID`. This port creates the command
 //! inside a new job object (`PROC_THREAD_ATTRIBUTE_JOB_LIST` at
-//! `CreateProcessW`, in [`crate::child_process`]), so the command and every
+//! `CreateProcessW`, in [`crate::OwnedProcess::spawn`]), so the command and every
 //! descendant it starts are members from their first instruction, with no
 //! window in which a fast child could leave one outside. The job is
 //! kill-on-close from before the command exists, so if Bake dies, or the
@@ -103,6 +103,12 @@ impl ProcessTree {
         }
     }
 
+    /// The leader's pid as adopted.
+    #[cfg(unix)]
+    pub(crate) fn pid(&self) -> u32 {
+        self.pid
+    }
+
     /// Kills every process in the tree if it is still armed. The call's
     /// result is not read: only [`Self::gone`] establishes that the tree
     /// has ended.
@@ -112,23 +118,39 @@ impl ProcessTree {
             return;
         }
         #[cfg(unix)]
-        {
-            // `kill(-1)` and `kill(0)` would signal this process's own
-            // group or every process the user owns.
-            let Ok(pgid) = libc::pid_t::try_from(self.pid) else {
-                return;
-            };
-            if pgid > 1 {
-                // SAFETY: plain syscall with integer arguments. The group
-                // id is the unreaped leader's pid (the tree is armed).
-                unsafe {
-                    libc::kill(-pgid, libc::SIGKILL);
-                }
-            }
-        }
+        self.signal_group(libc::SIGKILL);
         #[cfg(windows)]
         windows::terminate(&self.job);
         drop(armed);
+    }
+
+    /// Sends `SIGTERM` to the group if the tree is still armed (Unix); a
+    /// request only. Windows has no such request, so nothing is sent.
+    pub(crate) fn terminate(&self) {
+        let armed = self.armed.lock().unwrap_or_else(PoisonError::into_inner);
+        if !*armed {
+            return;
+        }
+        #[cfg(unix)]
+        self.signal_group(libc::SIGTERM);
+        drop(armed);
+    }
+
+    /// Signals the group; the caller holds the armed lock.
+    #[cfg(unix)]
+    fn signal_group(&self, signal: libc::c_int) {
+        // `kill(-1)` and `kill(0)` would signal this process's own group
+        // or every process the user owns.
+        let Ok(pgid) = libc::pid_t::try_from(self.pid) else {
+            return;
+        };
+        if pgid > 1 {
+            // SAFETY: plain syscall with integer arguments. The group id
+            // is the unreaped leader's pid (the tree is armed).
+            unsafe {
+                libc::kill(-pgid, signal);
+            }
+        }
     }
 
     /// Releases a normally exited command's descendants from the tree's
@@ -317,7 +339,7 @@ mod linux {
         use super::*;
 
         fn table() -> crate::test_support::TempDir {
-            let root = crate::test_support::TempDir::new("bake-proc-table");
+            let root = crate::test_support::TempDir::new();
             let write = |pid: &str, stat: &str| {
                 std::fs::create_dir(root.join(pid)).expect("dir");
                 std::fs::write(root.join(pid).join("stat"), stat).expect("stat");
@@ -578,6 +600,11 @@ impl TrackedTree {
         self.tree.kill();
     }
 
+    /// [`ProcessTree::terminate`].
+    pub(crate) fn terminate(&self) {
+        self.tree.terminate();
+    }
+
     /// [`ProcessTree::detach`].
     pub(crate) fn detach(&self) -> std::io::Result<()> {
         self.tree.detach()
@@ -607,10 +634,11 @@ impl Drop for TrackedTree {
     }
 }
 
-/// Pi's `killTrackedDetachedChildren`: kills the tree of every command still
-/// running, for a shutdown that cannot await each call (Pi runs it on
-/// `SIGHUP` and `SIGTERM`). Returns at once and awaits nothing; each call's
-/// owner still waits for its own tree. A tree whose owner has disarmed it,
+/// Pi's `killTrackedDetachedChildren`: kills the tree of every owned
+/// process still running (tool commands and MCP servers alike), for a
+/// shutdown that cannot await each owner (Pi runs it on `SIGHUP` and
+/// `SIGTERM`). Returns at once and awaits nothing; each owner still waits
+/// for its own tree. A tree whose owner has disarmed it,
 /// because its command exited normally or it is about to reap the leader,
 /// is not signalled; neither are the descendants a normally exited command
 /// left running.
