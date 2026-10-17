@@ -234,7 +234,23 @@ describe.skipIf(process.platform === 'win32' || !releaseHost)('packing', () => {
     } finally {
       // The packager kills only its immediate child; the test owns the descendant.
       const pid = Number(readFileSync(pidFile, 'utf8'))
-      if (Number.isInteger(pid) && pid > 0) try { process.kill(pid, 'SIGKILL') } catch { /* already gone */ }
+      if (Number.isInteger(pid) && pid > 0) {
+        try { process.kill(pid, 'SIGKILL') } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
+        }
+        // The orphan's new parent reaps it; a zombie has already stopped.
+        // Observe that stop before afterEach removes its temporary paths.
+        const deadline = performance.now() + 10_000
+        for (;;) {
+          const observed = Bun.spawnSync(['/bin/ps', '-p', String(pid), '-o', 'stat='], { stdout: 'pipe', stderr: 'pipe' })
+          const state = observed.stdout.toString().trim()
+          if (observed.exitCode === 1 && state === '') break
+          if (observed.exitCode !== 0) throw new Error(`Cannot observe fixture process ${pid}: ${observed.stderr.toString()}`)
+          if (state.startsWith('Z')) break
+          if (performance.now() >= deadline) throw new Error(`Fixture process ${pid} survived its termination request`)
+          await Bun.sleep(10)
+        }
+      }
     }
   })
 
