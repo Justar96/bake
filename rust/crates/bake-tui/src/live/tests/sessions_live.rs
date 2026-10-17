@@ -218,6 +218,7 @@ fn settings_harness(
             docs_command: "bake-rs docs".into(),
             plugins: bake_coding_agent::plugins::PluginRegistry::default(),
             work: None,
+            jobs: None,
         }))
         .expect("agent session");
     let factory = SessionFactory::new(
@@ -843,6 +844,7 @@ fn a_session_from_another_directory_is_not_opened() {
             docs_command: "bake-rs docs".into(),
             plugins: bake_coding_agent::plugins::PluginRegistry::default(),
             work: None,
+            jobs: None,
         })
         .await
         .expect("session")

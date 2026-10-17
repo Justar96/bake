@@ -93,7 +93,7 @@ use crate::system_prompt::{
     user_agents_dir,
 };
 use crate::tools::index::{
-    NoTools, ToolSelectionOptions, ToolsOptions, create_all_tool_definitions, select_tools,
+    NoTools, ToolSelectionOptions, ToolsOptions, create_bake_tool_definitions, select_tools,
 };
 use crate::tools::read::ReadToolOptions;
 
@@ -621,6 +621,7 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
         }
     }
     let options = PrintModeOptions {
+        job_wait: crate::print_mode::DEFAULT_JOB_WAIT,
         mode: match mode {
             Mode::Text => PrintOutput::Text,
             Mode::Json => PrintOutput::Json,
@@ -953,6 +954,9 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
     // The session's owner of its work, given to the tools that spawn
     // processes so that shutdown waits for every tree they start.
     let work = crate::owned_work::WorkGate::default();
+    // The session's background jobs, shared by `bash`, the job tools, and
+    // the session that delivers their notices.
+    let jobs = crate::jobs::JobRegistry::new(work.clone(), crate::jobs::JobLimits::default());
     let bash_context: crate::tools::bash::BashToolContextFn = {
         let selection = published.clone();
         let session_cwd = PathBuf::from(&session_cwd);
@@ -982,16 +986,17 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
         bash: Some(sandboxed_bash_tool(
             Path::new(&session_cwd),
             crate::tools::bash::BashToolOptions {
-                context: Some(bash_context),
+                context: Some(bash_context.clone()),
                 owner: Some(work.clone()),
                 ..Default::default()
             },
             &tool_permissions,
         )?),
         owner: Some(work.clone()),
+        jobs: Some(jobs.clone()),
     };
     let definitions = sandbox_file_tools(
-        create_all_tool_definitions(Path::new(&session_cwd), &tools_options),
+        create_bake_tool_definitions(Path::new(&session_cwd), &tools_options),
         Path::new(&session_cwd),
         &tool_permissions,
     );
@@ -1010,12 +1015,23 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
             None
         },
     };
+    let bake_defaults: Vec<String> = crate::tools::index::BAKE_DEFAULT_TOOL_NAMES
+        .map(str::to_owned)
+        .to_vec();
     let selection = select_tools(
         &selection_options,
-        settings.default_tools.as_deref(),
+        Some(settings.default_tools.as_deref().unwrap_or(&bake_defaults)),
         &available,
     )?;
-    let registered: Vec<_> = definitions
+    // The job tools control `bash`'s background jobs, their only producer:
+    // without `bash` they are not active.
+    let mut selection = selection;
+    if !selection.active.iter().any(|name| name == "bash") {
+        selection
+            .active
+            .retain(|name| !crate::tools::job_tools::JOB_TOOL_NAMES.contains(&name.as_str()));
+    }
+    let mut registered: Vec<_> = definitions
         .into_iter()
         .filter(|definition| {
             selection
@@ -1024,6 +1040,25 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
                 .any(|name| name == definition.name())
         })
         .collect();
+    // `bash` takes `run_in_background` only when the model can read the
+    // job it starts.
+    if selection.active.iter().any(|name| name == "job_output") {
+        let background = sandboxed_bash_tool(
+            Path::new(&session_cwd),
+            crate::tools::bash::BashToolOptions {
+                context: Some(bash_context),
+                owner: Some(work.clone()),
+                jobs: Some(jobs.clone()),
+                ..Default::default()
+            },
+            &tool_permissions,
+        )?;
+        for definition in &mut registered {
+            if definition.name() == "bash" {
+                *definition = background.clone();
+            }
+        }
+    }
 
     // The session header's start, so a resumed session states the same
     // date and patches nothing.
@@ -1065,6 +1100,7 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
         docs_command,
         plugins,
         work: Some(work),
+        jobs: Some(jobs),
     })
     .await?;
     session.set_prompt_templates(prompt_templates);

@@ -569,6 +569,7 @@ async fn shutdown_waits_for_a_cancelled_bash_call_group() {
             docs_command: "bake-rs docs".into(),
             plugins: bake_coding_agent::plugins::PluginRegistry::default(),
             work: Some(work),
+            jobs: None,
         })
         .await
         .expect("session"),

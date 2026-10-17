@@ -395,6 +395,8 @@ struct Running {
     id: Option<u64>,
     text: String,
     cancelled: bool,
+    /// A turn background job notices opened, with no prompt of its own.
+    notice: bool,
 }
 
 /// A command that is running ([`commands`]), and the prompt that named it,
@@ -416,6 +418,8 @@ struct CommandRun {
 /// What the driver does next.
 enum Next {
     Settled(Result<Result<(), String>, tokio::task::JoinError>),
+    /// A background job may have settled while the session was idle.
+    Jobs,
     Commanded(Result<commands::Outcome, tokio::task::JoinError>),
     Request(Option<Request>),
 }
@@ -506,6 +510,13 @@ impl Driver {
         }
         self.publish_pending();
         while !self.gone.is_set() {
+            // Subscribed before the check, so a job that settles after it
+            // still wakes the loop.
+            let mut jobs = self.session.jobs().subscribe();
+            if running.is_none() && self.command.is_none() && self.waiting.is_empty() {
+                running = self.deliver_notices().await;
+            }
+            let idle = running.is_none() && self.command.is_none();
             let next = {
                 let settle = async {
                     match running.as_mut() {
@@ -519,8 +530,15 @@ impl Driver {
                         None => std::future::pending().await,
                     }
                 };
+                let settled_job = async {
+                    if idle && jobs.changed().await {
+                        return;
+                    }
+                    std::future::pending::<()>().await;
+                };
                 tokio::select! {
                     joined = settle => Next::Settled(joined),
+                    () = settled_job => Next::Jobs,
                     done = commanded => Next::Commanded(done),
                     request = inbox.recv() => Next::Request(request),
                     () = self.gone.notify.notified() => Next::Request(None),
@@ -536,6 +554,8 @@ impl Driver {
                         self.publish_pending();
                     }
                 }
+                // Checked at the top of the loop.
+                Next::Jobs => {}
                 Next::Commanded(done) => self.commanded(done, running.as_ref()).await,
                 Next::Request(None) => break,
                 Next::Request(Some(request)) => self.request(request, &mut running).await,
@@ -605,7 +625,45 @@ impl Driver {
             id,
             text,
             cancelled: false,
+            notice: false,
         }
+    }
+
+    /// Opens a turn for the notices of background jobs that settled while
+    /// the session was idle, `tool-jobs`' `wakeup` delivery, while the
+    /// wake budget lasts; past it the session keeps them for the next
+    /// prompt ([`AgentSession::deliver_job_notices`]).
+    async fn deliver_notices(&mut self) -> Option<Running> {
+        let jobs = self.session.jobs();
+        let unreported = jobs
+            .list()
+            .iter()
+            .any(|job| job.status.is_terminal() && !job.reported);
+        if !unreported {
+            return None;
+        }
+        if !jobs.notice_would_wake() {
+            // Kept for the next prompt; no turn opens.
+            let _ = self.session.deliver_job_notices().await;
+            return None;
+        }
+        self.projector
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .begin(None);
+        self.turns += 1;
+        self.send(RuntimeUpdate::TurnStarted {
+            seed: format!("{}-{}", self.session.session_id(), self.turns),
+        });
+        let session = Arc::clone(&self.session);
+        let task = tokio::spawn(async move { session.deliver_job_notices().await.map(drop) });
+        Some(Running {
+            task,
+            id: None,
+            text: String::new(),
+            cancelled: false,
+            notice: true,
+        })
     }
 
     async fn request(&mut self, request: Request, running: &mut Option<Running>) {
@@ -788,6 +846,11 @@ impl Driver {
             self.send(update);
         }
         if admitted {
+            if let Some(message) = failure {
+                self.send(RuntimeUpdate::Commit(vec![Row::Error(message)]));
+            }
+        } else if run.notice {
+            // A notice turn has no draft to give back.
             if let Some(message) = failure {
                 self.send(RuntimeUpdate::Commit(vec![Row::Error(message)]));
             }

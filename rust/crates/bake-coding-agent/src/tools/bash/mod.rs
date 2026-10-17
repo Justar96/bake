@@ -41,6 +41,7 @@ use tokio::sync::Notify;
 use tokio::time::Instant;
 
 use crate::agent_session::ToolPrompt;
+use crate::jobs::{JobContext, JobOutcome, JobRegistry, JobSpec, OutputMode};
 use crate::session::json::js_number_to_string;
 use crate::tools::output_accumulator::{
     OutputAccumulator, OutputAccumulatorOptions, OutputSnapshot,
@@ -197,6 +198,11 @@ pub struct BashToolOptions {
     /// [`crate::owned_work::WorkGate`], so its shutdown waits for every
     /// command's tree. Ignored with custom `operations`.
     pub owner: Option<crate::owned_work::WorkGate>,
+    /// The session's background jobs. With them the tool takes
+    /// `run_in_background`, which starts the command as a `bash` job
+    /// through the same `operations`, so a sandbox confines it alike, and
+    /// returns its id at once. `None` keeps Pi's tool.
+    pub jobs: Option<JobRegistry>,
 }
 
 impl Default for BashToolOptions {
@@ -211,6 +217,7 @@ impl Default for BashToolOptions {
             bin_dir: None,
             spill_directory: None,
             owner: None,
+            jobs: None,
         }
     }
 }
@@ -228,6 +235,41 @@ impl std::fmt::Debug for BashToolOptions {
             .field("spill_directory", &self.spill_directory)
             .finish_non_exhaustive()
     }
+}
+
+/// The key of a background start's `details`: `{ "id", "label" }`.
+pub const BACKGROUND_JOB_DETAIL: &str = "backgroundJob";
+
+/// Bake's TypeScript `bashDescription` sentence for background runs, after
+/// Pi's description when the tool takes `run_in_background`.
+pub const BASH_BACKGROUND_DESCRIPTION: &str =
+    " Use `run_in_background` for long builds and tests, then `job_output` and `job_kill`.";
+
+/// The `run_in_background` parameter, from `tool-bash`.
+fn background_parameter() -> Value {
+    json!({ "type": "boolean", "description": "No timeout." })
+}
+
+/// Pi's description, with [`BASH_BACKGROUND_DESCRIPTION`] when `background`.
+pub fn bash_tool_description_for(background: bool) -> String {
+    let mut description = bash_tool_description();
+    if background {
+        description.push_str(BASH_BACKGROUND_DESCRIPTION);
+    }
+    description
+}
+
+/// Pi's parameters, with `run_in_background` when `background`.
+pub fn bash_tool_parameters_for(background: bool) -> Value {
+    let mut parameters = bash_tool_parameters();
+    if background
+        && let Some(properties) = parameters
+            .get_mut("properties")
+            .and_then(Value::as_object_mut)
+    {
+        properties.insert("run_in_background".to_owned(), background_parameter());
+    }
+    parameters
 }
 
 /// Pi's tool description.
@@ -289,6 +331,7 @@ pub fn create_bash_tool(cwd: impl Into<PathBuf>, options: BashToolOptions) -> Ag
                 .with_owner(options.owner.clone()),
         )
     });
+    let background = options.jobs.is_some();
     let shared = Arc::new(Shared {
         cwd: cwd.into(),
         operations,
@@ -297,8 +340,8 @@ pub fn create_bash_tool(cwd: impl Into<PathBuf>, options: BashToolOptions) -> Ag
     let mut tool = AgentTool::new(
         "bash",
         "bash",
-        bash_tool_description(),
-        bash_tool_parameters(),
+        bash_tool_description_for(background),
+        bash_tool_parameters_for(background),
         move |_id, params, signal, on_update| {
             let shared = Arc::clone(&shared);
             Box::pin(async move { shared.execute(params, signal, on_update).await })
@@ -518,6 +561,7 @@ impl Shared {
         on_update: AgentToolUpdateCallback,
     ) -> Result<AgentToolResult, String> {
         let (command, timeout) = parse_params(&params)?;
+        let label = command.clone();
         let command = match self
             .options
             .command_prefix
@@ -528,6 +572,9 @@ impl Shared {
             None => command,
         };
         let spawn = self.spawn_context(command);
+        if params.get("run_in_background").and_then(Value::as_bool) == Some(true) {
+            return self.start_background(label, spawn, signal.as_ref());
+        }
         let output = OutputAccumulator::new(OutputAccumulatorOptions {
             temp_directory: self
                 .options
@@ -683,6 +730,82 @@ impl Shared {
             structured_content: Some(Value::Object(structured)),
             ..AgentToolResult::default()
         })
+    }
+}
+
+impl Shared {
+    /// `tool-bash`'s background branch: the command becomes a `bash` job
+    /// that streams its output into the job, with no timeout, and the call
+    /// returns its id. A stop of the job aborts the command, which kills
+    /// its tree; the job ends once `exec` has settled it.
+    fn start_background(
+        &self,
+        label: String,
+        spawn: BashSpawnContext,
+        signal: Option<&AbortSignal>,
+    ) -> Result<AgentToolResult, String> {
+        let Some(jobs) = &self.options.jobs else {
+            return Err("run_in_background is not available in this session".to_owned());
+        };
+        // The caller owns cancellation until the registry admits the job.
+        if signal.is_some_and(AbortSignal::aborted) {
+            return Err("Command aborted".to_owned());
+        }
+        let operations = Arc::clone(&self.operations);
+        let spec = JobSpec {
+            kind: "bash",
+            label,
+            output: OutputMode::Stream,
+        };
+        let id = jobs
+            .start(spec, move |context| run_job(context, operations, spawn))
+            .map_err(|error| error.to_string())?;
+        let label = jobs.get(id).map(|job| job.label).unwrap_or_default();
+        // The details name the job in the session file, so a resumed
+        // session reserves its id and reports it lost
+        // ([`crate::agent_session::job_notices`]).
+        Ok(AgentToolResult {
+            content: text_result(format!("started background job {id}")),
+            details: Some(
+                json!({ BACKGROUND_JOB_DETAIL: { "id": id.to_string(), "label": label } }),
+            ),
+            ..AgentToolResult::default()
+        })
+    }
+}
+
+/// Runs a background command as its job, `processOutcome`'s mapping: an
+/// exit, nonzero included, is `completed` with its code; a stop is
+/// `killed`; a failure to run is `failed` with its message.
+async fn run_job(
+    context: JobContext,
+    operations: Arc<dyn BashOperations>,
+    spawn: BashSpawnContext,
+) -> JobOutcome {
+    let killed = || JobOutcome::killed("killed before exit");
+    if context.signal().aborted() {
+        return killed();
+    }
+    let output = context.output().cloned();
+    let on_data: BashDataCallback = Arc::new(move |data: &[u8]| {
+        if let Some(output) = &output {
+            output.append(data);
+        }
+    });
+    let exec = operations.exec(
+        spawn.command,
+        spawn.cwd,
+        BashExecOptions {
+            on_data,
+            signal: Some(context.signal().clone()),
+            timeout: None,
+            env: Some(spawn.env),
+        },
+    );
+    match exec.await {
+        Ok(Some(code)) => JobOutcome::completed(format!("exit code: {code}")),
+        Ok(None) | Err(BashExecError::Aborted | BashExecError::TimedOut(_)) => killed(),
+        Err(BashExecError::Failed(message)) => JobOutcome::failed(message),
     }
 }
 

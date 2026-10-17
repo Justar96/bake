@@ -87,7 +87,7 @@ use std::fmt;
 use std::future::Future;
 use std::io;
 use std::pin::pin;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
@@ -101,6 +101,11 @@ use crate::owned_work::{Refused, TaskScope, WorkGate};
 /// The longest label, detail, or stop reason kept, in bytes; longer text is
 /// cut at a character boundary.
 pub const MAX_TEXT_BYTES: usize = 1024;
+
+/// Turns completion notices may open on an idle session before the next
+/// user prompt, `tool-jobs`' `maxConsecutiveWakes`: it bounds a chain in
+/// which a woken turn starts the job whose completion wakes it again.
+pub const MAX_CONSECUTIVE_WAKES: usize = 3;
 
 /// The longest kind name, in bytes.
 pub const MAX_KIND_BYTES: usize = 32;
@@ -445,6 +450,9 @@ pub struct JobRegistry {
 
 struct Inner {
     id: u64,
+    /// Turns completion notices opened since the last user prompt
+    /// ([`JobRegistry::spend_wake`]).
+    wakes: AtomicUsize,
     gate: WorkGate,
     limits: JobLimits,
     state: Mutex<State>,
@@ -718,6 +726,7 @@ impl JobRegistry {
         Self {
             inner: Arc::new(Inner {
                 id: REGISTRIES.fetch_add(1, Ordering::Relaxed),
+                wakes: AtomicUsize::new(0),
                 gate,
                 limits,
                 state: Mutex::default(),
@@ -725,6 +734,33 @@ impl JobRegistry {
                 events: watch::Sender::new(Events::default()),
             }),
         }
+    }
+
+    /// Whether a completion notice would open a turn on an idle session:
+    /// fewer than [`MAX_CONSECUTIVE_WAKES`] turns were opened by notices
+    /// since the last user prompt.
+    pub fn notice_would_wake(&self) -> bool {
+        self.inner.wakes.load(Ordering::SeqCst) < MAX_CONSECUTIVE_WAKES
+    }
+
+    /// Takes one wake from the budget: true when a notice may open a turn.
+    pub fn spend_wake(&self) -> bool {
+        self.inner
+            .wakes
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |spent| {
+                (spent < MAX_CONSECUTIVE_WAKES).then_some(spent + 1)
+            })
+            .is_ok()
+    }
+
+    /// Refills the wake budget: a user prompt was sent.
+    pub fn reset_wakes(&self) {
+        self.inner.wakes.store(0, Ordering::SeqCst);
+    }
+
+    /// Whether `gate` owns this registry's jobs.
+    pub fn is_owned_by(&self, gate: &WorkGate) -> bool {
+        self.inner.gate.is_same(gate)
     }
 
     /// The registry's bounds.

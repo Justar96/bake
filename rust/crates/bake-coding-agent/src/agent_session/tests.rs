@@ -76,6 +76,7 @@ pub(super) fn options(
         docs_command: "/opt/bake/bin/bake-rs docs".into(),
         plugins: crate::plugins::PluginRegistry::default(),
         work: None,
+        jobs: None,
     }
 }
 

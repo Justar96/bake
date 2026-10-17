@@ -28,6 +28,7 @@ pub mod find;
 pub mod grep;
 pub mod image;
 pub mod index;
+pub mod job_tools;
 pub mod ls;
 pub mod output_accumulator;
 pub mod path_utils;

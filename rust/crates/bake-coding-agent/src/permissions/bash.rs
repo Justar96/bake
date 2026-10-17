@@ -42,8 +42,8 @@ use super::engine::{BlankJustification, ToolCall};
 use super::with_escalation_parameters;
 use crate::tools::bash::{
     BashDataCallback, BashExecError, BashExecOptions, BashOperations, BashToolOptions,
-    LocalShellOperations, PreparedExecError, PreparedSpawn, bash_tool_description,
-    bash_tool_parameters, bash_tool_prompt, create_bash_tool, create_local_bash_operations,
+    LocalShellOperations, PreparedExecError, PreparedSpawn, bash_tool_description_for,
+    bash_tool_parameters_for, bash_tool_prompt, create_bash_tool, create_local_bash_operations,
 };
 use crate::tools::definition::ToolDefinition;
 
@@ -61,13 +61,28 @@ pub const STDERR_CLASSIFY_BYTES: usize = 64 * 1024;
 
 /// Pi's description with the sandbox paragraph.
 pub fn sandboxed_bash_tool_description() -> String {
-    format!("{}{BASH_SANDBOX_DESCRIPTION}", bash_tool_description())
+    sandboxed_bash_tool_description_for(false)
+}
+
+/// [`sandboxed_bash_tool_description`], with the background sentence when
+/// the tool takes `run_in_background`.
+pub fn sandboxed_bash_tool_description_for(background: bool) -> String {
+    format!(
+        "{}{BASH_SANDBOX_DESCRIPTION}",
+        bash_tool_description_for(background)
+    )
 }
 
 /// Pi's parameters with `sandbox_permissions` and `justification`.
 pub fn sandboxed_bash_tool_parameters() -> Value {
+    sandboxed_bash_tool_parameters_for(false)
+}
+
+/// [`sandboxed_bash_tool_parameters`], with `run_in_background` when
+/// `background`.
+pub fn sandboxed_bash_tool_parameters_for(background: bool) -> Value {
     with_escalation_parameters(
-        bash_tool_parameters(),
+        bash_tool_parameters_for(background),
         BASH_SANDBOX_PERMISSIONS_DESCRIPTION,
         BASH_JUSTIFICATION_DESCRIPTION,
     )
@@ -295,8 +310,9 @@ pub fn create_sandboxed_bash_tool_definition(
     let mut tool = create_bash_tool(cwd, options.clone());
     let cwd = cwd.to_path_buf();
     let permissions = permissions.clone();
-    tool.description = sandboxed_bash_tool_description();
-    tool.parameters = sandboxed_bash_tool_parameters();
+    let background = options.jobs.is_some();
+    tool.description = sandboxed_bash_tool_description_for(background);
+    tool.parameters = sandboxed_bash_tool_parameters_for(background);
     tool.execute = Arc::new(
         move |id: String, args: Value, signal: Option<AbortSignal>, on_update| {
             let cwd = cwd.clone();

@@ -67,6 +67,7 @@
 //! models, virtual models and their failed-response routing, the
 //! `entry_appended` event, and tool-loadout changes between turns.
 
+pub mod job_notices;
 mod navigation;
 mod plugin_veto;
 mod recovery;
@@ -212,6 +213,13 @@ pub struct AgentSessionOptions {
     /// every process tree they started, a dropped call's included. One gate
     /// per session: closing it is the session's shutdown.
     pub work: Option<WorkGate>,
+    /// The session's background jobs, built over `work`
+    /// ([`JobRegistry::new`]); `None` makes a registry of its own. Give the
+    /// same registry to the job tools and to `bash`
+    /// ([`crate::tools::index::ToolsOptions::jobs`]) so their jobs are the
+    /// ones the session delivers notices for and shuts down. A registry
+    /// over another gate is refused.
+    pub jobs: Option<JobRegistry>,
 }
 
 /// Tools whose calls change files or run commands. The prompt's round-trip
@@ -676,6 +684,9 @@ pub struct AgentSession {
     work: WorkGate,
     /// The session's background jobs, owned by `work`.
     jobs: JobRegistry,
+    /// Job notices that wait for the next prompt: lost jobs found at
+    /// creation, and completions when the wake budget is spent.
+    pending_notices: Arc<Mutex<Vec<CustomMessage>>>,
     session: SharedSession,
     registry: ModelRuntime,
     /// The live settings, shared with the core: the setters change them,
@@ -945,16 +956,25 @@ fn persist(session: &mut SessionManager, message: &LiveMessage) -> Result<Option
 fn next_turn_hook(
     core: Arc<Core>,
     selection: SessionSelection,
+    jobs: JobRegistry,
 ) -> bake_agent::agent::AgentPrepareNextTurnWithContext {
     Arc::new(move |turn, signal| {
         let tools = turn.context.tools.clone();
         let core = Arc::clone(&core);
         let selection = selection.clone();
+        let jobs = jobs.clone();
         Box::pin(async move {
             let mut update = core
                 .compact_before_next_response(tools, signal)
                 .await
                 .unwrap_or_default();
+            // Jobs that settled during the step reach its next request,
+            // `tool-jobs`' injection into a busy owner.
+            update.messages.extend(
+                jobs.claim_unreported()
+                    .iter()
+                    .map(|job| job_notices::live(job_notices::completion_notice(job))),
+            );
             // One read, so the model and level come from one change.
             let selected = selection.get();
             if let Some(model) = selected.model {
@@ -1308,6 +1328,7 @@ impl AgentSession {
             docs_command,
             plugins,
             work,
+            jobs,
         } = options;
         let plugins = VetoDispatcher::new(plugins).map(Arc::new);
         system_prompt.docs_command = docs_command.clone();
@@ -1328,6 +1349,13 @@ impl AgentSession {
             .map_err(|_| "An agent session must be created inside a Tokio runtime.".to_owned())?;
         let session: SharedSession = Arc::new(Mutex::new(session));
         let work = work.unwrap_or_default();
+        if jobs.as_ref().is_some_and(|jobs| !jobs.is_owned_by(&work)) {
+            return Err("The session's job registry must be built over its work gate.".to_owned());
+        }
+        let jobs = jobs.unwrap_or_else(|| JobRegistry::new(work.clone(), JobLimits::default()));
+        // Jobs an earlier process ran: their ids stay reserved, and those
+        // never reported are reported lost with the next prompt.
+        let pending_notices = Arc::new(Mutex::new(job_notices::recover(&lock(&session), &jobs)));
         let (context, has_thinking_entry) = with_session(&work, &session, |session| {
             let context = session.build_session_context();
             let has_thinking_entry = session
@@ -1454,6 +1482,7 @@ impl AgentSession {
             prepare_next_turn_with_context: Some(next_turn_hook(
                 Arc::clone(&core),
                 published.clone(),
+                jobs.clone(),
             )),
             steering_mode,
             follow_up_mode,
@@ -1497,13 +1526,13 @@ impl AgentSession {
             plugins.attach(&work).map_err(refused_message)?;
         }
         let gap = Arc::clone(&core.gap);
-        let jobs = JobRegistry::new(work.clone(), JobLimits::default());
         let created = Self {
             apis,
             agent,
             core,
             work,
             jobs,
+            pending_notices,
             session,
             registry,
             settings,
@@ -2193,6 +2222,17 @@ impl AgentSession {
         if let Some(update) = self.prepare_prompt_and_tools()? {
             messages.push(update.into());
         }
+        // A user prompt refills the notices' wake budget and carries the
+        // notices that waited for it, and those of jobs settled since,
+        // before its own text.
+        self.jobs.reset_wakes();
+        messages.extend(self.take_notices().into_iter().map(job_notices::live));
+        messages.extend(
+            self.jobs
+                .claim_unreported()
+                .iter()
+                .map(|job| job_notices::live(job_notices::completion_notice(job))),
+        );
         messages.push(
             UserMessage {
                 content: UserContent::Blocks(content),
@@ -2201,6 +2241,69 @@ impl AgentSession {
             .into(),
         );
         self.run_agent_prompt(messages, run).await
+    }
+
+    /// The job notices waiting for a prompt, taken.
+    fn take_notices(&self) -> Vec<CustomMessage> {
+        std::mem::take(
+            &mut *self
+                .pending_notices
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner),
+        )
+    }
+
+    /// Delivers the notices of jobs that settled while the session was
+    /// idle, `tool-jobs`' `wakeup` delivery: while the wake budget lasts
+    /// ([`JobRegistry::spend_wake`]) they open a turn, as Pi's
+    /// `sendCustomMessage` with `triggerTurn` does, and the call returns
+    /// once that turn settles; past it they wait for the next prompt.
+    /// Returns whether a turn ran. Does nothing while a run, compaction,
+    /// or navigation is in progress (the run delivers them itself), or
+    /// once the session is shut down. A driver calls this when it is idle
+    /// and [`JobRegistry::subscribe`] reports a change.
+    pub async fn deliver_job_notices(&self) -> Result<bool, String> {
+        let agent_streaming = self.agent.is_streaming();
+        let claimed = self.core.activity.send_if_modified(|activity| {
+            if activity.manual_compaction || activity.navigation || activity.run || agent_streaming
+            {
+                false
+            } else {
+                activity.run = true;
+                true
+            }
+        });
+        if !claimed {
+            return Ok(false);
+        }
+        let run = RunGuard(&self.core);
+        if self.closed_reason().is_some() {
+            return Ok(false);
+        }
+        let notices: Vec<CustomMessage> = self
+            .jobs
+            .claim_unreported()
+            .iter()
+            .map(job_notices::completion_notice)
+            .collect();
+        if notices.is_empty() {
+            return Ok(false);
+        }
+        if self.model().is_none() || !self.jobs.spend_wake() {
+            self.pending_notices
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .extend(notices);
+            return Ok(false);
+        }
+        self.core.abort_requested.store(false, Ordering::SeqCst);
+        let mut messages: Vec<LiveMessage> = Vec::with_capacity(notices.len() + 1);
+        if let Some(update) = self.prepare_prompt_and_tools()? {
+            messages.push(update.into());
+        }
+        messages.extend(self.take_notices().into_iter().map(job_notices::live));
+        messages.extend(notices.into_iter().map(job_notices::live));
+        self.run_agent_prompt(messages, run).await.map(|()| true)
     }
 
     /// Pi's `_runAgentPrompt`: the run, then retries, overflow recovery,
@@ -2238,6 +2341,15 @@ impl AgentSession {
                 Err(error) => {
                     result = Err(error);
                     break;
+                }
+            }
+            // Jobs that settled after the last step's preparation would
+            // otherwise wait for the next prompt: the run continues with
+            // them, as a busy owner's notices do.
+            if !core.aborted() {
+                for job in self.jobs.claim_unreported() {
+                    self.agent
+                        .steer(job_notices::live(job_notices::completion_notice(&job)));
                 }
             }
             // Without extensions, Pi's pre-settlement boundary continues
@@ -2798,6 +2910,8 @@ impl Drop for RunGuard<'_> {
 
 #[cfg(test)]
 mod control_tests;
+#[cfg(test)]
+mod job_tests;
 #[cfg(test)]
 mod navigation_tests;
 #[cfg(test)]

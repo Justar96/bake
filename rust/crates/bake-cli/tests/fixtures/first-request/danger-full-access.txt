@@ -87,7 +87,7 @@ Session started: <date> (UTC)
     {
       "type": "function",
       "name": "bash",
-      "description": "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds. A file sandbox may block commands; trying is safe. `[sandbox: file access denied under <mode> mode]` is a policy denial: do not work around it. If a wider mode would help, retry the same command once this turn with the narrowest `sandbox_permissions` and a `justification`; that asks the user, so do not ask in chat. Request wider access up front only after this session was denied the same access. A rejection is final for that command.",
+      "description": "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds. Use `run_in_background` for long builds and tests, then `job_output` and `job_kill`. A file sandbox may block commands; trying is safe. `[sandbox: file access denied under <mode> mode]` is a policy denial: do not work around it. If a wider mode would help, retry the same command once this turn with the narrowest `sandbox_permissions` and a `justification`; that asks the user, so do not ask in chat. Request wider access up front only after this session was denied the same access. A rejection is final for that command.",
       "parameters": {
         "type": "object",
         "required": [
@@ -101,6 +101,10 @@ Session started: <date> (UTC)
           "timeout": {
             "type": "number",
             "description": "Timeout in seconds (optional, no default timeout)"
+          },
+          "run_in_background": {
+            "type": "boolean",
+            "description": "No timeout."
           },
           "sandbox_permissions": {
             "type": "string",
@@ -198,6 +202,60 @@ Session started: <date> (UTC)
           "justification": {
             "type": "string",
             "description": "One sentence for the user; required with sandbox_permissions."
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "name": "job_output",
+      "description": "Read a background job's new output since your last read, or its result once done; ends with `[status: ...]`. You are notified when it finishes; do not poll or sleep. The notice starts a new turn if yours has ended, so end your turn rather than wait.",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "job_id"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "description": "A job id."
+          },
+          "wait": {
+            "type": "boolean",
+            "description": "Block until done or timeout; only for a job about to finish that you cannot continue without."
+          },
+          "timeout_ms": {
+            "type": "number",
+            "description": "Default 30000, max 60000."
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "name": "job_list",
+      "description": "List your background jobs, running and finished.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "type": "function",
+      "name": "job_kill",
+      "description": "Stop a background job (jobs outlive your turn).",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "job_id"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "description": "A job id."
+          },
+          "reason": {
+            "type": "string"
           }
         }
       }
