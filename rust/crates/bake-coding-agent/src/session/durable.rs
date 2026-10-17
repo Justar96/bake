@@ -55,6 +55,11 @@
 //!   `sync_data`. When the file does not end in a newline, as after a writer
 //!   was killed mid-append, the entry is preceded by one, so a torn line
 //!   stays an unparseable line of its own and the new entry is read.
+//! - A group of entries ([`append_lines`]) is written one line at a time,
+//!   each written and synced before the next, from one open of the file. A
+//!   failure stops the group there and reports the lines synced and what
+//!   happened to the next one ([`FailedLine`]); a process killed meanwhile
+//!   leaves the synced lines and possibly a torn prefix of the next.
 //! - A new file is created exclusively, written, and synced.
 //! - A rewrite (migration, an empty file's first header, a branched
 //!   session) writes a temporary file beside the real file (a symbolic link
@@ -289,6 +294,215 @@ pub(crate) fn append(path: &Path, bytes: &[u8]) -> io::Result<()> {
     sync(&file, false)?;
     if len == 0 {
         sync_parent_dir(path);
+    }
+    Ok(())
+}
+
+/// What happened to the line a group append stopped at
+/// ([`crate::session::SessionManager::append_group`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FailedLine {
+    /// No byte of it reached the file. A file that ended in a torn line may
+    /// have gained the newline that sets that line apart.
+    NotWritten,
+    /// Some of its bytes may be in the file, without its newline: a torn
+    /// last line. Loading skips it as Pi's loader does, unless all of the
+    /// entry's JSON reached the file, when it reads as the entry.
+    Torn,
+    /// All of its bytes were written but syncing them failed: a reader may
+    /// see the line now, and a crash may still lose it.
+    Unsynced,
+}
+
+/// Why [`append_lines`] stopped: the lines before `synced` are written and
+/// synced, line `synced` is in the state `line` says, and no later line was
+/// written.
+#[derive(Debug)]
+pub(crate) struct LinesFailure {
+    pub(crate) synced: usize,
+    pub(crate) line: FailedLine,
+    pub(crate) error: io::Error,
+}
+
+/// Faults the crate's unit tests inject into [`append_lines`]; empty, and
+/// never consulted, outside tests.
+#[derive(Debug, Default)]
+pub(crate) struct Faults {
+    #[cfg(test)]
+    next: Option<Fault>,
+}
+
+/// A fault at one line of the next [`append_lines`] call.
+#[cfg(test)]
+pub(crate) struct Fault {
+    /// The index of the line, within the call, it strikes.
+    pub line: usize,
+    pub kind: FaultKind,
+}
+
+#[cfg(test)]
+impl std::fmt::Debug for Fault {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Fault").field("line", &self.line).finish()
+    }
+}
+
+/// What a [`Fault`] does at its line.
+#[cfg(test)]
+pub(crate) enum FaultKind {
+    /// Fail before writing any of its bytes.
+    Refuse,
+    /// Write its first `n` bytes, then fail.
+    Tear(usize),
+    /// Write all of it, then fail the sync.
+    FailSync,
+    /// Write its first `n` bytes, then run the callback, which a test uses
+    /// to stop the process there; the write fails if the callback returns.
+    Hold(usize, Box<dyn FnOnce() + Send>),
+}
+
+impl Faults {
+    /// Arm `fault` for the next [`append_lines`] call.
+    #[cfg(test)]
+    pub(crate) fn arm(&mut self, fault: Fault) {
+        self.next = Some(fault);
+    }
+
+    /// The fault armed for line `line`, taken.
+    #[cfg(test)]
+    fn take(&mut self, line: usize) -> Option<FaultKind> {
+        if self.next.as_ref().is_some_and(|fault| fault.line == line) {
+            return self.next.take().map(|fault| fault.kind);
+        }
+        None
+    }
+}
+
+/// Writes `bytes` to `file` as far as it can, returning how many it wrote
+/// before an error.
+fn write_counted(file: &mut File, bytes: &[u8]) -> Result<(), (usize, io::Error)> {
+    let mut written = 0;
+    while written < bytes.len() {
+        match file.write(&bytes[written..]) {
+            Ok(0) => return Err((written, io::ErrorKind::WriteZero.into())),
+            Ok(n) => written += n,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Err(error) => return Err((written, error)),
+        }
+    }
+    Ok(())
+}
+
+/// Append `lines`, each ending in a newline, in order, the first on a line
+/// of its own as [`append`] does, writing and syncing each line before the
+/// next. On failure no later line is written, and [`LinesFailure`] says
+/// which lines are durable. A process killed meanwhile leaves the lines it
+/// synced and possibly a torn prefix of the next one.
+pub(crate) fn append_lines(
+    path: &Path,
+    lines: &[Vec<u8>],
+    faults: &mut Faults,
+) -> Result<(), LinesFailure> {
+    let failure = |synced, line, error| LinesFailure {
+        synced,
+        line,
+        error,
+    };
+    let not_written = |error| failure(0, FailedLine::NotWritten, error);
+    let mut file = OpenOptions::new()
+        .read(true)
+        .append(true)
+        .create(true)
+        .open(path)
+        .map_err(not_written)?;
+    let len = file.metadata().map_err(not_written)?.len();
+    let mut separator = false;
+    if len > 0 {
+        file.seek(SeekFrom::End(-1)).map_err(not_written)?;
+        let mut last = [0u8; 1];
+        file.read_exact(&mut last).map_err(not_written)?;
+        separator = last[0] != b'\n';
+    }
+    if separator {
+        write_counted(&mut file, b"\n").map_err(|(_, error)| not_written(error))?;
+    }
+    #[cfg(not(test))]
+    let _ = faults;
+    for (index, line) in lines.iter().enumerate() {
+        // The seam's own writes and syncs must succeed: a real failure of
+        // one panics the test rather than pass for the injected stage.
+        #[cfg(test)]
+        let real_write = |file: &mut File, bytes: &[u8]| {
+            if let Err((written, error)) = write_counted(file, bytes) {
+                panic!("test seam: real write failed after {written} bytes: {error}");
+            }
+        };
+        // How many bytes a tear leaves: never the newline, so a torn line
+        // stays the last line, and none reports the line not written.
+        #[cfg(test)]
+        let torn = |n: usize| {
+            let n = n.min(line.len().saturating_sub(1));
+            let state = if n == 0 {
+                FailedLine::NotWritten
+            } else {
+                FailedLine::Torn
+            };
+            (n, state)
+        };
+        #[cfg(test)]
+        match faults.take(index) {
+            None => {}
+            Some(FaultKind::Refuse) => {
+                return Err(failure(
+                    index,
+                    FailedLine::NotWritten,
+                    io::Error::other("injected: line refused"),
+                ));
+            }
+            Some(FaultKind::Tear(n)) => {
+                let (n, state) = torn(n);
+                real_write(&mut file, &line[..n]);
+                return Err(failure(
+                    index,
+                    state,
+                    io::Error::other("injected: line torn"),
+                ));
+            }
+            Some(FaultKind::FailSync) => {
+                // The whole line, newline included, and no sync.
+                real_write(&mut file, line);
+                return Err(failure(
+                    index,
+                    FailedLine::Unsynced,
+                    io::Error::other("injected: sync failed"),
+                ));
+            }
+            Some(FaultKind::Hold(n, hold)) => {
+                let (n, state) = torn(n);
+                real_write(&mut file, &line[..n]);
+                if let Err(error) = sync(&file, false) {
+                    panic!("test seam: real sync of the held prefix failed: {error}");
+                }
+                hold();
+                return Err(failure(
+                    index,
+                    state,
+                    io::Error::other("injected: held line"),
+                ));
+            }
+        }
+        write_counted(&mut file, line).map_err(|(written, error)| {
+            let state = if written == 0 {
+                FailedLine::NotWritten
+            } else {
+                FailedLine::Torn
+            };
+            failure(index, state, error)
+        })?;
+        sync(&file, false).map_err(|error| failure(index, FailedLine::Unsynced, error))?;
+        if len == 0 && index == 0 {
+            sync_parent_dir(path);
+        }
     }
     Ok(())
 }

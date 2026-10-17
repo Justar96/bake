@@ -28,7 +28,7 @@ Review the core deliverables in the roadmap's PR order: support decisions first,
 
 ## What is implemented and what is missing
 
-The inventory assigns owning scopes and dispositions to 167 packages, 821 TypeScript test files, 188 recorded scenarios, all 42 PTY scenarios, three shipped profiles, four presets, 18 tool packages, and six model surfaces. A listed test records an available oracle, not a passing result. The inventory's `gaps` list names missing coverage. Native crate tests belong to the [Cargo workspace](../../../../rust/README.md#checks).
+The inventory assigns owning scopes and dispositions to 167 packages, 815 TypeScript test files, 188 recorded scenarios, all 42 PTY scenarios, three shipped profiles, four presets, 18 tool packages, and six model surfaces. A listed test records an available oracle, not a passing result. The inventory's `gaps` list names missing coverage. Native crate tests belong to the [Cargo workspace](../../../../rust/README.md#checks).
 
 **Implemented:**
 
@@ -43,8 +43,7 @@ The inventory assigns owning scopes and dispositions to 167 packages, 821 TypeSc
 
 - Complete baseline qualification beyond the [initial measurements](baseline-2026-10-07/README.md#remaining-evidence) and [shutdown observations](terminal-2026-10-07/README.md#remaining-evidence): interleaved samples, noise characterization, process-tree memory, idle CPU, shutdown on the other targets, and frozen performance budgets.
 - Minimum OS, kernel, libc, and macOS deployment versions for each release target.
-- Owner answers to the decisions in [the decision register](support.md#decision-register), including the triage of unreleased `develop` work and the 0.3 support window.
-- A test run against the external Bake Desktop consumer, or a named qualification owner for it.
+- Owner answers to the decisions in [the decision register](support.md#decision-register), including the triage of unreleased `develop` work and the 0.3 support window. D7, D8, and D9 were decided on 2026-10-17; Desktop integration is deferred beyond 0.4.0, so no Desktop consumer test blocks this scope.
 
 ## Run the tooling
 

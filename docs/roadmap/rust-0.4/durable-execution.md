@@ -75,13 +75,31 @@ Mark the boundary between foreground and background work explicitly. Foreground 
 
 Pi's format appends entries one line at a time, so a crash can leave any prefix of a group that belongs together (a tool result and the context it adds, an inbox claim and its user message, a goal change and the entry that caused it). The native writer exposes a group append that writes a group in order, and the owner publishes no view until the group is written. Loading must handle every prefix of every group. Scope 03 enumerates the groups and tests a crash after each line. True all-or-nothing commits would need a format change and stay out of 0.4.0.
 
+`SessionManager::append_group` is that writer. It takes typed `GroupEntry` values, each the entry its single append writes with the same checks; there is no raw-JSON entry and no callback into the manager. The group's semantics:
+
+- **Checks first.** Every entry is built and checked before anything is written. A failed check (a context edit's target missing, off the active branch, or not editable) returns its error and changes nothing in memory or on disk. Recovery omission treats a failed check as a session gap and stops later writes and requests, even though the group wrote nothing.
+- **Order and exclusion.** The entries are chained (the first a child of the leaf, each later one a child of the one before) and written while the caller holds the manager: in `AgentSession`, under the session lock at the write boundary, so no other entry lands between them and no caller reading through that manager or under that lock sees part of the group. The writer lock excludes other writers, not readers: another process reading the file meanwhile sees whatever prefix has reached it.
+- **Line by line.** From one open of the file, each line is written and then synced before the next. A session whose file is not due yet writes nothing, as for every append; one whose file is due creates it with the entries before the group, then appends the group.
+- **Not atomic.** A crash leaves any prefix of the group, possibly ending in a torn line, which loads as Pi's loader reads any file. A torn line whose whole JSON reached the file reads as its entry.
+- **Failure before the first line** (writer lock held or closed, file not creatable): an error other than `SessionError::GroupWrite`; nothing of the group is written or kept in memory.
+- **Failure at a line**: `SessionError::GroupWrite` (`GroupWriteError`) names the entries written and synced, which the manager keeps with the leaf on the last of them, and says what happened to the next line (`FailedLine`): `NotWritten`, `Torn` (some of its bytes are in the file), or `Unsynced` (all its bytes were written but the sync failed, so a reader may see the line now and a crash may lose it). No later line is written. Unlike a single append, which keeps a failed entry in memory as Pi does, the manager keeps only the known synced prefix. That is not always what an immediate reopen reads: an `Unsynced` line, or a `Torn` one whose whole JSON reached the file, reads as one entry more, and a crash may still lose it. Owners show the known synced prefix and halt; nothing reconciles the two views within the run.
+- **No retry.** A failed group is never written again: the file may hold its prefix, and a second copy would follow it under new ids. `AgentSession` records the failure as the session's gap at the write boundary, so nothing more is written, the running turn stops, and later prompts are refused.
+
+| Group | Consumer | Entries, in order | On a failed write |
+|---|---|---|---|
+| Model switch | `AgentSession::set_model` | `model_change`, then `thinking_level_change` when the level changes | Nothing applied unless the model line is known synced; then the new model with the previous level clamped to it. The session stops. A reopen projects the same only when the level line is unreadable; an unsynced or whole-JSON torn level line reads as the new level |
+| Recovery omission | `Core::omit_recovery_attempt` (retry and overflow recovery) | A `context_edit` per tool result of the failed attempt, then the attempt's | The transcript is refreshed to the edits known synced, and the failure ends the run before another provider request (no retry wait, no compaction); the session stops. Pi writes the attempt's edit first; Bake writes it last, so no prefix leaves a tool result whose call is omitted, which a provider refuses. The written group projects as Pi's order does |
+| New session's model and level | `AgentSession::create` | `model_change` when there is a model, then `thinking_level_change` | Creation fails. A new session's file is created with these entries and its first message in one write; only a file already written without a conversation appends them as a group |
+
+Not groups: a compaction is one entry, its usage inside it; a message, a session name, a thinking-level change alone, and a label are single entries. Future groups use the same API with a new `GroupEntry` kind: a tool result and the context it adds, an inbox claim and its user message, a goal change and the entry that caused it, and plugin entries under the D6 plugin API. Each needs its own prefix analysis, as the omission's order shows.
+
 ### 5. Compaction is a task, not a phase of the loop
 
 Implement compaction as a task owned by the agent, with its own cancellation, retries, usage accounting, and recovered status, instead of a step the loop calls inline. In 0.4.0 the loop still waits for it where Pi waits, so prompts and placement are unchanged. The structure lets a later release start a summary in the background and place it at a turn boundary without redesigning the loop.
 
 ### 6. Clients attach to the owner's view
 
-The agent owner publishes one view: transcript projection, live stream, running tasks and their output, inbox, usage, and context pressure. The TUI, headless output, and Desktop each take the current view, then deltas; a client that joins late or reconnects starts from the current view and receives no replay of missed deltas. A slow client's queue is bounded and collapses to the newest full view. This makes the existing "render projections, keep no competing copy" rule a transport property, and gives scope 15's child inspection the same mechanism as the main agent.
+The agent owner publishes one view: transcript projection, live stream, running tasks and their output, inbox, usage, and context pressure. The TUI, headless output, and any retained transport client each take the current view, then deltas; a client that joins late or reconnects starts from the current view and receives no replay of missed deltas. A slow client's queue is bounded and collapses to the newest full view. This makes the existing "render projections, keep no competing copy" rule a transport property, and gives scope 15's child inspection the same mechanism as the main agent.
 
 ### 7. Decisions are recorded once
 
@@ -89,15 +107,16 @@ Any human or hook decision that gates an effect, such as an approval, a question
 
 ## Current implementation
 
-At candidate `e32476594bace82b57980fe8e1d57e48e3c4c53c`. "Tested" names the test that shows the behavior; "not tested" means the code path exists without a test of the property.
+At candidate `e32476594bace82b57980fe8e1d57e48e3c4c53c`, with the group append added on 2026-10-17 at `41e5e867a3` ([ledger record](ledger/scope-03/2026-10-17-session-group-append.json)). "Tested" names the test that shows the behavior; "not tested" means the code path exists without a test of the property.
 
 | Rule or property | State in `bake-rs` | Evidence |
 |---|---|---|
 | One writer per session file | Implemented: an exclusive `File::try_lock` on a `.jsonl.lock` sidecar; a second writer fails with `SessionError::Locked` and takes over after the holder releases, exits, or is killed | Tested: `tests/session/writer_exclusion.rs` in `bake-coding-agent`, on Linux and Windows CI and locally on Linux |
-| Durable appends and rewrites | Implemented: each append is synced and starts on a new line after a torn tail; rewrites go through a synced temporary file renamed over the session | Tested with written torn bytes (`a_torn_tail_resumes_and_appends`, `golden::torn_tail_repairs_the_same`); no process is killed during an append |
+| Durable appends and rewrites | Implemented: each append is synced and starts on a new line after a torn tail; rewrites go through a synced temporary file renamed over the session | Tested with written torn bytes (`a_torn_tail_resumes_and_appends`, `golden::torn_tail_repairs_the_same`) and a writer process killed after each synced line of a group and after part of a line it wrote (rule 4 row); no process is killed inside a `write` system call |
 | Intent before effect (rule 2) | In a persisted session, assistant messages are appended at `message_end`, and the agent awaits that listener before it prepares the message's tools; a failed append aborts the agent, and tool preparation checks the abort before running a tool. A `--no-session` run writes nothing | Not tested, by a crash or by a failed append |
 | Unfinished-work projection (rule 1) | Not implemented. Pi's `transformMessages` closes orphaned calls in each request it builds, leaving the file unchanged; this is request repair, not the projection the rule requires | `bake-ai` `transform_messages` unit tests |
-| Replay classes, group append, compaction as a task, attached views, logged decisions (rules 2 to 7) | Not implemented | None |
+| Group append (rule 4) | Implemented for the model switch, the recovery omission, and a new session's model and level ([rule 4](#4-commit-related-entries-as-a-recoverable-group)) | Tested: `session::manager::group::tests` in `bake-coding-agent` loads every byte prefix of both consumer groups, checks each against the projection of the entries it holds and a provider-valid request, and takes over as a writer at each line boundary and at every 13th byte; injects a refused, torn, and unsynced line at each line of a group and checks the file bytes, the kept entries, and that no later line is written; kills a child writer process after each synced line and after a partial line it wrote; checks that an unsynced line, or a torn one whose whole JSON was written, is read by an immediate reopen though the manager keeps only the synced prefix; the seam panics if its own write or sync fails; the killed child's exit status must be the parent's kill, not its watchdog or a returned write; `agent_session::{control_tests, recovery_tests}` check each consumer's failure through real file bytes, including an overflow-recovery omission that publishes only its synced prefix and makes no compaction request. Not tested: a kill inside a `write` system call, real `ENOSPC` or `EIO` |
+| Replay classes, compaction as a task, attached views, logged decisions (rules 2, 3, 5 to 7) | Not implemented | None |
 | Ownership tree (rule 3) | Partial: the bash tool and exec own and await their process trees; `AgentSession::shutdown` removes listeners and closes the writer | Tested for bash and exec process trees; no tree spans agents, jobs, or children |
 
 ## Post-0.4.0 candidates
@@ -109,7 +128,7 @@ Each of these changes what the model sees, what a released reader must understan
 | Continue an interrupted run on resume | A crash or sleep no longer ends the user's request | Must not rerun `report` tools; the resumed request must be reconstructable from the session file |
 | Automatically rerun `safe` tools after a crash | Fewer wasted model round trips after recovery | Changes the model surface; eval against Pi's synthetic `No result provided` result |
 | Background compaction placed at a turn boundary | Long sessions stop pausing for summaries | New placement and staleness rules; prompt-cache and request reconstruction proofs; long-session eval |
-| Idempotent submissions keyed by a client request id | Headless and Desktop retries after a crash cannot double-submit | The Desktop launch and protocol are open under [D9](scope-00/support.md#decision-register); needs a coordinated protocol change |
+| Idempotent submissions keyed by a client request id | Headless and retained transport clients' retries after a crash cannot double-submit | Desktop is deferred beyond 0.4.0 ([D9](scope-00/support.md#decision-register)); a Desktop client needs a coordinated protocol change in a later release |
 | Durable background jobs and schedules | Background work survives restarts | Process and sandbox ownership after restart; scope 04 proofs for adopting or killing orphans |
 | Typed agent documents (plans, todos, goals) with fork rules | Application state stays consistent with the transcript through forks | New entry kinds that Pi's reader must still open; a decision on extending Pi's format |
 | Hook memos and plugin-defined task types | Native plugins get crash-safe decisions and long-running work | Part of the D6 plugin API design; needs a named consumer |
@@ -140,11 +159,11 @@ These additions extend the scope specifications in the [roadmap](README.md#scope
 
 ## Crash-recovery matrix
 
-Add these cases to [verification](verification.md#acceptance-matrix) as each scope begins. Every case kills the process (not a graceful shutdown) at the named point, restarts against the same home, and asserts on the session file, the files, the process table, and the next rebuilt request. The *evidence* column records what exists at candidate `e32476594b`; a passing writer-lock or torn-tail test does not prove the other rows.
+Add these cases to [verification](verification.md#acceptance-matrix) as each scope begins. Every case kills the process (not a graceful shutdown) at the named point, restarts against the same home, and asserts on the session file, the files, the process table, and the next rebuilt request. The *evidence* column records what exists at candidate `e32476594b`, with the group-append row updated on 2026-10-17; a passing writer-lock or torn-tail test does not prove the other rows.
 
 | Kill point | Expected outcome | Evidence |
 |---|---|---|
-| During an append of any entry | The torn last line is skipped as Pi's loader skips it; the next append starts on a new line | Written torn bytes only; no process killed mid-append |
+| During an append of any entry | The torn last line is skipped as Pi's loader skips it; the next append starts on a new line | Written torn bytes, and a writer process killed after it wrote part of a group's line (`a_writer_killed_between_group_lines_leaves_a_loadable_prefix`); no process killed inside a `write` system call |
 | While another process holds the writer lock | The next writer takes over once the holder dies | Tested: `a_killed_holder_process_is_taken_over` |
 | During a rewrite (migration, branched session) | The old or the new file is complete, never a mix | Rename path tested without a kill |
 | After the assistant message with a `toolCall`, before the tool's first effect | The next request carries Pi's synthetic error result; no effect on disk | Not tested |
@@ -152,7 +171,7 @@ Add these cases to [verification](verification.md#acceptance-matrix) as each sco
 | During a `safe` tool | Same as `report` in 0.4.0 | Not tested |
 | Mid model stream | The file ends at the last finished entry; the next request is provider-valid | Not tested |
 | During compaction summary | The file loads; no half-applied replacement; the next request is provider-valid | Not tested |
-| Between lines of an entry group | Deterministic loading; the projection matches the file | Not tested; groups not implemented |
+| Between lines of an entry group | Deterministic loading; the projection matches the file | Tested: a writer process killed after each synced line of a recovery omission, and after a partial line it wrote, leaves a file that loads to the synced lines, rebuilds a provider-valid request, and is taken over (`a_writer_killed_between_group_lines_leaves_a_loadable_prefix`); every byte prefix of the model-switch and omission groups is loaded without a kill. A kill inside a `write` system call is not tested |
 | While a child agent runs | Parent and child files both load; no duplicate completion notice; the child's processes are gone | Not implemented |
 | While a background job runs | The job is lost with the process and reported to the agent, with no orphan process | Not implemented |
 

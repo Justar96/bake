@@ -80,8 +80,8 @@ use crate::model_registry::resolver::{DEFAULT_THINKING_LEVEL, find_initial_model
 use crate::model_registry::{ModelRegistry, ModelRuntime};
 use crate::owned_work::{WorkGate, WorkPermit};
 use crate::prompt_templates::{PromptTemplate, expand_prompt_template};
-use crate::session::SessionManager;
 use crate::session::messages::{CustomMessage, convert_to_llm};
+use crate::session::{GroupEntry, SessionError, SessionManager};
 use crate::settings::{Settings, SettingsStore};
 use crate::skills::expand_skill_command;
 use crate::system_prompt::{
@@ -934,27 +934,40 @@ fn persist_after_gap_check(
 
 /// Why [`write_session`] wrote nothing more.
 #[derive(Debug)]
-enum WriteRefused {
+enum WriteRefused<E = String> {
     /// An earlier write failed; its reason.
     AfterGap(String),
     /// This write failed; the session now has a gap.
-    Failed(String),
+    Failed(E),
+}
+
+impl<E: std::fmt::Display> WriteRefused<E> {
+    /// The reason, as the session reports it.
+    fn message(&self) -> String {
+        match self {
+            Self::AfterGap(error) => error.clone(),
+            Self::Failed(error) => error.to_string(),
+        }
+    }
 }
 
 /// The session's write boundary: under the session lock, refuses once a
 /// write has failed, and records this write's failure before the lock is
-/// released, so a write queued behind a failing one sees it. Blocks.
-fn write_session<R>(
+/// released, so a write queued behind a failing one sees it. A write that
+/// fails part-way through a group of entries
+/// ([`SessionManager::append_group`]) is a failure too: nothing is written
+/// after its prefix, and the group is never written again. Blocks.
+fn write_session<R, E: std::fmt::Display>(
     session: &SharedSession,
     gap: &Mutex<Option<String>>,
-    write: impl FnOnce(&mut SessionManager) -> Result<R, String>,
-) -> Result<R, WriteRefused> {
+    write: impl FnOnce(&mut SessionManager) -> Result<R, E>,
+) -> Result<R, WriteRefused<E>> {
     let mut session = lock(session);
     if let Some(error) = lock_gap(gap).clone() {
         return Err(WriteRefused::AfterGap(error));
     }
     write(&mut session).map_err(|error| {
-        lock_gap(gap).get_or_insert_with(|| error.clone());
+        lock_gap(gap).get_or_insert_with(|| error.to_string());
         WriteRefused::Failed(error)
     })
 }
@@ -973,10 +986,9 @@ pub(crate) type FailHook = Box<dyn FnOnce() -> Box<dyn FnOnce() + Send> + Send>;
 #[cfg(test)]
 #[derive(Default)]
 pub(crate) struct TestHooks {
-    /// Fails the next thinking-level entry of a model change.
-    pub fail_level_entry: bool,
-    /// Fails the next model-change entry. Runs under the session lock as
-    /// it fails; what it returns runs before the change goes on.
+    /// Fails the next model change's group before its first line. Runs
+    /// under the session lock as it fails; what it returns runs before the
+    /// change goes on.
     pub fail_model_entry: Option<FailHook>,
     /// What [`Self::fail_model_entry`] returned.
     pub before_continuing: Option<Box<dyn FnOnce() + Send>>,
@@ -1055,13 +1067,21 @@ impl Control {
         + Send
         + 'static,
     ) -> Result<(), String> {
+        self.write(write).await.map_err(|refused| refused.message())
+    }
+
+    /// [`Self::append`], keeping the session's error.
+    async fn write(
+        &self,
+        write: impl FnOnce(&mut SessionManager) -> Result<(), crate::session::SessionError>
+        + Send
+        + 'static,
+    ) -> Result<(), WriteRefused<crate::session::SessionError>> {
         let session = Arc::clone(&self.session);
         let core = Arc::clone(&self.core);
         let agent = Arc::clone(&self.agent);
         let written = tokio::task::spawn_blocking(move || {
-            let written = write_session(&session, &core.gap, |session| {
-                write(session).map_err(|error| error.to_string())
-            });
+            let written = write_session(&session, &core.gap, write);
             // The run stops here, as soon as the write has failed and the
             // session lock is released, so a turn between steps takes no
             // further step while this change's task waits for a worker.
@@ -1072,7 +1092,9 @@ impl Control {
             written
         })
         .await
-        .map_err(|error| format!("Session I/O task failed: {error}"))?;
+        // A task that did not finish reports only its reason, as a write
+        // refused before it started does.
+        .map_err(|error| WriteRefused::AfterGap(format!("Session I/O task failed: {error}")))?;
         // Off the async workers, with the hooks' lock released, so a test
         // that holds the change here never holds up the run it watches.
         #[cfg(test)]
@@ -1084,9 +1106,7 @@ impl Control {
                     .expect("the test hook");
             }
         }
-        written.map_err(|refused| match refused {
-            WriteRefused::AfterGap(error) | WriteRefused::Failed(error) => error,
-        })
+        written
     }
 
     /// A change's session write failed: the file now lacks an entry, so the
@@ -1145,8 +1165,8 @@ impl Control {
 impl AgentSession {
     /// Pi's `createAgentSession`: selects the model and thinking level,
     /// restores the transcript, records a new session's initial model and
-    /// thinking level, and creates the agent. Must run inside a Tokio
-    /// runtime.
+    /// thinking level as one group ([`SessionManager::append_group`]), and
+    /// creates the agent. Must run inside a Tokio runtime.
     pub async fn create(options: AgentSessionOptions) -> Result<Self, String> {
         let AgentSessionOptions {
             session,
@@ -1311,10 +1331,15 @@ impl AgentSession {
                     session.append_thinking_level_change(thinking.as_str())?;
                 }
             } else {
+                // One group. A new session writes nothing until its first
+                // message, which creates the file with both entries; a
+                // written file without a conversation gets them in order.
+                let mut group = Vec::with_capacity(2);
                 if let Some(model) = &model {
-                    session.append_model_change(&model.provider, &model.id)?;
+                    group.push(GroupEntry::model_change(&model.provider, &model.id));
                 }
-                session.append_thinking_level_change(thinking.as_str())?;
+                group.push(GroupEntry::thinking_level_change(thinking.as_str()));
+                session.append_group(group)?;
             }
             Ok::<(), crate::session::SessionError>(())
         })
@@ -1742,10 +1767,16 @@ impl AgentSession {
     /// else the default level, else the current one), applies both
     /// together, and saves the model as the default when `persist` is set.
     /// Serialized, owned, refused after shutdown, and effective from the
-    /// next model request, as [`Self::set_thinking_level`] is. When the
-    /// model entry is written but the thinking-level entry is not, the
-    /// session applies what its file holds, the new model with the previous
-    /// level clamped to it, then stops as for any failed write.
+    /// next model request, as [`Self::set_thinking_level`] is. The model
+    /// and thinking-level entries are one group
+    /// ([`SessionManager::append_group`]), written in order with no entry
+    /// between them, and the change is applied only once both are written.
+    /// When the group's write fails, the session applies the entries known
+    /// to be synced, then stops as for any failed write: nothing when the
+    /// model entry is not known to be synced, else the new model with the
+    /// previous level clamped to it. A line written without a sync may
+    /// still be read by a later open of the file, so that open can differ
+    /// ([`crate::session::GroupWriteError`]).
     pub async fn set_model(&self, model: Model, persist: bool) -> Result<DefaultSave, String> {
         self.run_change(move |control| async move {
             if control
@@ -1766,46 +1797,48 @@ impl AgentSession {
             };
             let effective = bake_ai::models::clamp_thinking_level(&model, level);
             let changes_level = effective != previous;
-            let (provider, id) = (model.provider.clone(), model.id.clone());
+            // One group, written under one hold of the session: no message
+            // lands between the model and its level.
+            let mut group = vec![GroupEntry::model_change(&model.provider, &model.id)];
+            if changes_level {
+                group.push(GroupEntry::thinking_level_change(effective.as_str()));
+            }
             #[cfg(test)]
             let injected = control.core.hooks().fail_model_entry.take();
             #[cfg(test)]
             let core = Arc::clone(&control.core);
-            let model_written = control
-                .append(move |session| {
+            let written = control
+                .write(move |session| {
                     #[cfg(test)]
                     if let Some(hook) = injected {
                         core.hooks().before_continuing = Some(hook());
                         return Err(injected_failure());
                     }
-                    session.append_model_change(&provider, &id).map(|_| ())
+                    session.append_group(group).map(|_| ())
                 })
                 .await;
-            if let Err(error) = model_written {
-                return Err(control.stop_after_failed_write(&error, "The model change"));
-            }
-            if changes_level {
-                #[cfg(test)]
-                let injected = std::mem::take(&mut control.core.hooks().fail_level_entry);
-                let level_written = control
-                    .append(move |session| {
-                        #[cfg(test)]
-                        if injected {
-                            return Err(injected_failure());
-                        }
-                        session
-                            .append_thinking_level_change(effective.as_str())
-                            .map(|_| ())
-                    })
-                    .await;
-                if let Err(error) = level_written {
-                    // The file holds the model change alone.
+            match written {
+                Ok(()) => {}
+                // The model change is synced and its thinking level is not
+                // known to be: the session applies the known synced prefix,
+                // the new model with the previous level clamped to it, and
+                // halts. A reopen projects the same only when the level's
+                // line is not readable; an unsynced line, or a torn one
+                // whose whole JSON was written, reads as the new level.
+                Err(WriteRefused::Failed(SessionError::GroupWrite(failure)))
+                    if !failure.written.is_empty() =>
+                {
                     let kept = bake_ai::models::clamp_thinking_level(&model, previous);
                     control.apply(Some(model.clone()), kept);
                     return Err(control.stop_after_failed_write(
-                        &error,
+                        &failure.to_string(),
                         "The model change was recorded, but its thinking level",
                     ));
+                }
+                Err(refused) => {
+                    return Err(
+                        control.stop_after_failed_write(&refused.message(), "The model change")
+                    );
                 }
             }
             control.apply(Some(model.clone()), effective);

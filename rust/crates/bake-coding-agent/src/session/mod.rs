@@ -57,7 +57,9 @@
 //!   first repeated entry.
 //! - **Results.** Operations that write return [`SessionError`] where Pi
 //!   throws. As in Pi, an append that fails to write keeps its entry in
-//!   memory and advances the leaf.
+//!   memory and advances the leaf. A group append
+//!   ([`SessionManager::append_group`]), which Pi does not have, keeps only
+//!   the entries it knows it wrote and synced.
 //! - **Paths.** `file://` URLs are not accepted ([`paths`]); non-UTF-8 paths
 //!   are stored lossily in headers, which are JSON strings.
 //!
@@ -92,6 +94,13 @@
 //! - **Torn tails.** A writer killed mid-append leaves a partial last line,
 //!   which loading skips as Pi does. The next append starts on a new line,
 //!   so the torn fragment cannot join the new entry.
+//! - **Groups.** Entries that belong together, such as a model change and
+//!   its thinking level, are appended as one group: checked first, then
+//!   written in order with each line synced before the next, and no other
+//!   entry between them. A group is not atomic; a crash leaves any prefix,
+//!   which loads as Pi loads any file, and a failed group reports which of
+//!   its entries are written and synced ([`GroupWriteError`]) and is never
+//!   written again.
 
 pub mod context;
 pub mod cwd;
@@ -117,6 +126,9 @@ pub use context::{
     build_context_entries, build_session_context, build_session_projection,
     get_latest_compaction_entry, session_entry_to_context_messages,
 };
+pub use durable::FailedLine;
+#[cfg(test)]
+pub(crate) use durable::{Fault, FaultKind};
 pub use entry::{
     CURRENT_SESSION_VERSION, EditContent, FileEntry, SessionEntry, SessionHeader, TypedEntry,
 };
@@ -125,7 +137,9 @@ pub use file::{
     parse_session_entries,
 };
 pub use list::{ListProgress, SessionInfo};
-pub use manager::{NewSessionOptions, SessionManager, SessionTree, SessionTreeNode};
+pub use manager::{
+    GroupEntry, GroupWriteError, NewSessionOptions, SessionManager, SessionTree, SessionTreeNode,
+};
 pub use messages::{AgentMessage, OpaqueMessage};
 
 /// A session operation's failure.
@@ -155,6 +169,9 @@ pub enum SessionError {
     /// [`SessionManager::append_message`] was given a summary message, which
     /// Pi's types exclude: summaries are entries of their own.
     SummaryMessage(String),
+    /// A group append stopped part-way
+    /// ([`SessionManager::append_group`]).
+    GroupWrite(GroupWriteError),
     /// Another writer holds this session file's writer lock.
     Locked(PathBuf),
     /// A write after [`SessionManager::close_writer`].
@@ -204,6 +221,7 @@ impl fmt::Display for SessionError {
                 formatter,
                 "A {role} message is not appended as a message; append a compaction or branch summary entry"
             ),
+            Self::GroupWrite(error) => error.fmt(formatter),
             Self::Locked(path) => write!(
                 formatter,
                 "Session file is in use by another writer: {}",
@@ -224,7 +242,9 @@ impl fmt::Display for SessionError {
 impl std::error::Error for SessionError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Io { source, .. } => Some(source),
+            Self::Io { source, .. } | Self::GroupWrite(GroupWriteError { source, .. }) => {
+                Some(source)
+            }
             _ => None,
         }
     }

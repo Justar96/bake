@@ -621,16 +621,42 @@ async fn shutdown_awaits_a_change_in_flight() {
     );
 }
 
-// Bake: a model change whose model entry is written but whose
-// thinking-level entry is not applies what the file holds, the new model
-// with the previous level clamped to it, and stops the session.
+/// The entries a reader finds in `file`, which the session holds.
+fn file_entries(file: &std::path::Path) -> Vec<crate::session::SessionEntry> {
+    crate::session::load_entries_from_file(file)
+        .expect("load")
+        .into_iter()
+        .filter_map(|entry| entry.as_entry().cloned())
+        .collect()
+}
+
+/// A file session that has written its first exchange.
+async fn written_session(h: &Harness, dir: &TempDir) -> (AgentSession, std::path::PathBuf) {
+    h.faux
+        .set_responses(vec![faux_assistant_message("first").into()]);
+    let session = h
+        .session(file_session(dir), Settings::default(), None, Vec::new())
+        .await;
+    session.prompt("one", Vec::new()).await.expect("flush");
+    let file = session.session_file().expect("file");
+    (session, file)
+}
+
+// Bake: a model change is one group, the model entry then its level. When
+// the level's line fails after the model's line is written, the session
+// applies what the file holds, the new model with the previous level
+// clamped to it, reports the torn line, stops, and writes nothing more.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_half_written_model_change_applies_what_the_file_holds() {
+    use crate::session::{Fault, FaultKind};
+    let dir = TempDir::new("control-half-written");
     let h = harness();
-    let session = h
-        .session(in_memory(), Settings::default(), None, Vec::new())
-        .await;
-    session.core.hooks().fail_level_entry = true;
+    let (session, file) = written_session(&h, &dir).await;
+    let before = std::fs::read(&file).expect("read");
+    lock(&session.session).arm_group_fault(Fault {
+        line: 1,
+        kind: FaultKind::Tear(12),
+    });
     let error = session
         .set_model(h.model("plain"), false)
         .await
@@ -639,14 +665,216 @@ async fn a_half_written_model_change_applies_what_the_file_holds() {
         error.contains("was recorded, but its thinking level"),
         "{error}"
     );
+    assert!(error.contains("1 of 2 grouped entries written"), "{error}");
+    assert!(error.contains("may be partly written"), "{error}");
     assert_eq!(session.model(), Some(h.model("plain")));
     assert_eq!(session.thinking_level(), ModelThinkingLevel::Off);
+    assert_eq!(
+        session.selection().get(),
+        Selected {
+            model: Some(h.model("plain")),
+            thinking_level: ModelThinkingLevel::Off,
+        }
+    );
+    // The file: the model line, then a torn fragment of the level's.
+    let after = std::fs::read(&file).expect("read");
+    let added = String::from_utf8(after[before.len()..].to_vec()).expect("utf-8");
+    let (model_line, torn) = added.split_once('\n').expect("model line");
+    assert!(
+        model_line.contains(r#""type":"model_change""#),
+        "{model_line}"
+    );
+    assert_eq!(torn.len(), 12, "{torn}");
+    // The session holds what a reader finds, and a reader projects the new
+    // model with the level the file last recorded.
+    let read = file_entries(&file);
+    let ids = |entries: Vec<&crate::session::SessionEntry>| -> Vec<String> {
+        entries.iter().map(|entry| entry.id().to_owned()).collect()
+    };
+    assert_eq!(
+        ids(read.iter().collect()),
+        ids(lock(&session.session).entries())
+    );
+    let context = crate::session::build_session_context(&read, crate::session::LeafSelector::Last);
+    assert_eq!(
+        context.model.map(|model| model.model_id),
+        Some("plain".into())
+    );
+    assert_eq!(context.thinking_level, "high");
     assert_eq!(
         changes(&session),
         ["model faux-1", "thinking high", "model plain"]
     );
+    // Nothing more is written: not another change, not a prompt.
+    assert!(
+        session
+            .set_thinking_level(ModelThinkingLevel::Low, false)
+            .await
+            .is_err()
+    );
     assert!(session.prompt("hi", Vec::new()).await.is_err());
     session.shutdown().await;
+    assert_eq!(std::fs::read(&file).expect("read"), after);
+}
+
+// Bake: when the level's line is written in full but its sync fails, the
+// session still applies only the known synced prefix, the new model with
+// the previous level clamped to it, and halts; an immediate reader of the
+// file sees the unsynced level line as well, so it is not claimed equal.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_unsynced_level_line_is_not_applied() {
+    use crate::session::{Fault, FaultKind};
+    let dir = TempDir::new("control-unsynced-level");
+    let h = harness();
+    h.faux
+        .set_responses(vec![faux_assistant_message("first").into()]);
+    // A default level, so switching to faux-2 moves the level from high.
+    let settings = Settings::from_object(
+        json!({"defaultThinkingLevel": "low"})
+            .as_object()
+            .expect("object"),
+    );
+    let session = h
+        .session(file_session(&dir), settings, None, Vec::new())
+        .await;
+    session.prompt("one", Vec::new()).await.expect("flush");
+    let file = session.session_file().expect("file");
+    assert_eq!(session.thinking_level(), ModelThinkingLevel::High);
+    lock(&session.session).arm_group_fault(Fault {
+        line: 1,
+        kind: FaultKind::FailSync,
+    });
+    let error = session
+        .set_model(h.model("faux-2"), false)
+        .await
+        .expect_err("fails");
+    assert!(
+        error.contains("1 of 2 grouped entries written; the next was written but not synced"),
+        "{error}"
+    );
+    assert_eq!(session.model(), Some(h.model("faux-2")));
+    assert_eq!(session.thinking_level(), ModelThinkingLevel::High);
+    let after = std::fs::read(&file).expect("read");
+    let read = file_entries(&file);
+    let held = lock(&session.session).entries().len();
+    assert_eq!(read.len(), held + 1);
+    assert_eq!(
+        read.last().map(crate::session::SessionEntry::entry_type),
+        Some("thinking_level_change")
+    );
+    let context = crate::session::build_session_context(&read, crate::session::LeafSelector::Last);
+    assert_eq!(context.thinking_level, "low");
+    assert!(session.prompt("two", Vec::new()).await.is_err());
+    session.shutdown().await;
+    assert_eq!(std::fs::read(&file).expect("read"), after);
+}
+
+// Bake: when the model's own line fails, the change is not applied,
+// whether nothing of it was written or it was written without a sync,
+// which a reader may see but a crash may lose; the report says which.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_model_change_whose_first_line_fails_is_not_applied() {
+    use crate::session::{Fault, FaultKind};
+    for (name, kind, state, lines) in [
+        ("refused", FaultKind::Refuse, "was not written", 0),
+        (
+            "unsynced",
+            FaultKind::FailSync,
+            "was written but not synced",
+            1,
+        ),
+    ] {
+        let dir = TempDir::new(&format!("control-first-line-{name}"));
+        let h = harness();
+        let (session, file) = written_session(&h, &dir).await;
+        let before = std::fs::read(&file).expect("read");
+        lock(&session.session).arm_group_fault(Fault { line: 0, kind });
+        let error = session
+            .set_model(h.model("plain"), false)
+            .await
+            .expect_err("fails");
+        assert!(
+            error.starts_with("The model change could not be written"),
+            "{error}"
+        );
+        assert!(
+            error.contains(&format!("0 of 2 grouped entries written; the next {state}")),
+            "{error}"
+        );
+        assert_eq!(session.model(), Some(h.model("faux-1")));
+        assert_eq!(session.thinking_level(), ModelThinkingLevel::High);
+        assert_eq!(session.selection().get().model, Some(h.model("faux-1")));
+        let after = std::fs::read(&file).expect("read");
+        assert_eq!(
+            after[before.len()..]
+                .iter()
+                .filter(|b| **b == b'\n')
+                .count(),
+            lines
+        );
+        assert_eq!(
+            file_entries(&file).len(),
+            lock(&session.session).entries().len() + lines
+        );
+        assert!(session.prompt("two", Vec::new()).await.is_err());
+        session.shutdown().await;
+        assert_eq!(std::fs::read(&file).expect("read"), after);
+    }
+}
+
+// Pi's `createAgentSession` records a new session's model and level. A
+// session file without a conversation is already written, so the two
+// entries are written then, as one group, in order; a group that fails
+// part-way fails the creation, and the file keeps the written prefix.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_new_sessions_model_and_level_are_one_group() {
+    use crate::session::{Fault, FaultKind};
+    let h = harness();
+    for fail in [false, true] {
+        let dir = TempDir::new(&format!("control-initial-group-{fail}"));
+        let file = dir.join("empty.jsonl");
+        std::fs::write(&file, b"").expect("empty file");
+        let mut manager = SessionManager::open(&file, None, None).expect("open");
+        let header = std::fs::read(&file).expect("read");
+        if fail {
+            manager.arm_group_fault(Fault {
+                line: 1,
+                kind: FaultKind::Refuse,
+            });
+        }
+        let created = AgentSession::create(AgentSessionOptions {
+            session: manager,
+            registry: h.runtime.clone(),
+            apis: Arc::clone(&h.apis),
+            settings: Settings::default(),
+            settings_store: None,
+            selection: None,
+            model: Some(h.model("faux-1")),
+            thinking_level: Some(ModelThinkingLevel::High),
+            tools: Vec::new(),
+            active_tool_names: Vec::new(),
+            tool_prompts: Vec::new(),
+            system_prompt: crate::system_prompt::SystemPromptOptions::new("/tmp"),
+            docs_command: "bake-rs docs".into(),
+        })
+        .await;
+        let read = file_entries(&file);
+        let types: Vec<&str> = read.iter().map(|entry| entry.entry_type()).collect();
+        assert!(std::fs::read(&file).expect("read").starts_with(&header));
+        match created {
+            Ok(session) => {
+                assert!(!fail);
+                assert_eq!(types, ["model_change", "thinking_level_change"]);
+                assert_eq!(read[1].parent_id(), Some(read[0].id()));
+                session.shutdown().await;
+            }
+            Err(error) => {
+                assert!(fail, "{error}");
+                assert!(error.contains("1 of 2 grouped entries written"), "{error}");
+                assert_eq!(types, ["model_change"]);
+            }
+        }
+    }
 }
 
 // Bake: the gap is recorded where writes are serialized. A message write
