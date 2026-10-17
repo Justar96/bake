@@ -4,6 +4,8 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 ## [Unreleased]
 
+- Development: the Rust agent filters ambient credential variables from shell commands, keeps provider tool declarations aligned with executable tools, and commits finished messages before notifying observers. Provider streams have bounded idle waits and stop when their consumer leaves. Headless output remains cancellable when stdout is blocked, and MCP connection failures appear in the session view.
+
 - Development: the opt-in Rust preview splits its pure view into `bake-tui-view` and frames the composer in a rounded box with its hints on the edges. It adds a sample transcript with calls, diffs, and a code-mode script, a scrollbar, wheel scrolling, mouse selection and copy, readline editing with a yank ring, prompt recall, collapsed pastes, staged images, a slash-command menu over a sample catalog, and a double Ctrl+C to quit. It still runs no model or tools.
 - Development: typing `@` in the opt-in Rust preview opens a file menu over the working directory's paths, found and ranked as the TypeScript TUI finds them; Tab puts the selected path into the draft. Only paths are listed, and the preview still sends nothing to a model.
 - Development: Enter in the opt-in Rust preview sends the draft through a runtime port to a scripted fixture, which streams one fixed turn into the transcript. A prompt sent while that turn runs joins it as a steer and is listed under `Pending input` until it does or Alt+↑ sends it at once; Esc interrupts the turn. No model or tool runs, and the answer says so.
