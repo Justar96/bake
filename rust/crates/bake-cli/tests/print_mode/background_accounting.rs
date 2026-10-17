@@ -79,6 +79,8 @@ impl HeldSummaryServer {
                 while !stop.load(Ordering::SeqCst) {
                     match listener.accept() {
                         Ok((mut socket, _)) => {
+                            // Winsock accepts inherit the listener's nonblocking mode.
+                            socket.set_nonblocking(false).unwrap();
                             sockets.lock().unwrap().push(socket.try_clone().unwrap());
                             let stop = Arc::clone(&stop);
                             let ready = Arc::clone(&ready);
