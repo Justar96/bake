@@ -54,6 +54,12 @@
 //! descendant that leaves the tree (`setsid`, a job breakaway) is outside
 //! this ownership: the tree is cleanup, not containment, and D24's sandbox
 //! is the boundary.
+//!
+//! On Windows the job and its account are `windows_job::Job`, public so
+//! that `bake-sandbox`'s synchronous Windows runner keeps its confined tree
+//! in the same kind of job and settles it on the same account: created
+//! empty with its completion port already associated, pumped while members
+//! run, and never read as ended from its active count alone.
 #![warn(missing_docs)]
 
 use std::any::Any;
@@ -78,6 +84,8 @@ mod job_ledger;
 #[cfg(windows)]
 mod pump;
 mod tree;
+#[cfg(windows)]
+pub mod windows_job;
 
 #[cfg(all(test, target_os = "linux"))]
 mod test_support {
@@ -461,7 +469,7 @@ async fn spawn_leader(spec: &ProcessSpec) -> io::Result<Spawned> {
     let spawned = windows::spawn(spec).await?;
     Ok(Spawned {
         pid: spawned.leader.pid(),
-        tree: ProcessTree::with_job(spawned.leader.pid(), spawned.job, spawned.port),
+        tree: ProcessTree::with_job(spawned.leader.pid(), spawned.job),
         leader: spawned.leader,
         stdin: spawned.stdin,
         stdout: spawned.stdout,

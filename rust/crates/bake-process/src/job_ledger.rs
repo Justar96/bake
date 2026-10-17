@@ -38,7 +38,7 @@
 //! [process-id lifetime explanation]: https://devblogs.microsoft.com/oldnewthing/20110107-00/?p=11803/
 //!
 //! Pure bookkeeping over a [`Host`], so the rules are tested on every
-//! platform; the Windows host is in `tree.rs`.
+//! platform; the Windows host is in `windows_job.rs`.
 
 use std::collections::{HashMap, HashSet};
 
@@ -93,15 +93,25 @@ enum Record<H> {
     Unresolved,
 }
 
-/// The settlement state; see [`Ledger::verdict`].
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) enum Verdict {
+/// Whether a job's account is settled: one settle poll's result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Verdict {
     /// Every associated process was named and observed ended.
     Settled,
     /// Not yet: waiting on members, messages, or a stable count.
     Pending(&'static str),
     /// The account cannot be trusted again; never settles.
     Contradiction(&'static str),
+}
+
+impl std::fmt::Display for Verdict {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Verdict::Settled => f.write_str("settled"),
+            Verdict::Pending(why) => write!(f, "not settled: {why}"),
+            Verdict::Contradiction(why) => write!(f, "the account contradicts itself: {why}"),
+        }
+    }
 }
 
 /// The account of one job.
