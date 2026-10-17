@@ -182,7 +182,7 @@ The `--mode json` stream is pi's, so `normalizePi` reads it. Each assistant `mes
 | `routingDecisions`, `subagentCalls` | empty and 0; the `delegation` scenarios are skipped, since `bake-rs` has no `subagent` tool |
 | `duplicateRefusals`, `guardRefusals`, `editedLineEchoes`, `toolHelpCalls` | 0 by construction: they match Bake's tool texts and tools |
 | `multiEditCalls` | every `edit` call, since Pi's `edit` always takes an `edits` array, as for a pi arm |
-| `runaway` | always false: the whitespace-runaway guard belongs to `llm-pi-ai` |
+| `runaway` | true when Bake's native tool-argument whitespace guard stops an unfinished tool call; the failure remains in the record |
 | `toolErrors` | counts a command that exits non-zero, since Pi's `bash` reports it as an error; a Bake arm's `bash` returns the exit code in a completed result, so the same failing command counts only on the native arm |
 
 Check the arm without a key:
