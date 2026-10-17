@@ -700,7 +700,7 @@ mod tests {
     // Bake: a watch is not a consumer. A producer that waits for its
     // consumers to leave ends once the last stream is dropped, and the
     // watch sees it; the stream's own `producer_ended` could not, since
-    // that stream keeps `closed` from firing (the review's finding).
+    // that stream keeps `closed` from firing.
     #[tokio::test]
     async fn a_watch_awaits_a_producer_that_waits_for_its_consumers() {
         let (sender, stream) = number_channel(None);
