@@ -17,8 +17,8 @@ use std::ptr::{null, null_mut};
 
 use windows_sys::Win32::Foundation::{ERROR_SUCCESS, HANDLE, LocalFree};
 use windows_sys::Win32::Security::Authorization::{
-    ConvertSidToStringSidW, DENY_ACCESS, EXPLICIT_ACCESS_W, GetNamedSecurityInfoW,
-    NO_MULTIPLE_TRUSTEE, SE_FILE_OBJECT, TRUSTEE_IS_SID, TRUSTEE_IS_UNKNOWN, TRUSTEE_W,
+    ConvertSidToStringSidW, EXPLICIT_ACCESS_W, GetNamedSecurityInfoW, NO_MULTIPLE_TRUSTEE,
+    SE_FILE_OBJECT, SET_ACCESS, TRUSTEE_IS_SID, TRUSTEE_IS_UNKNOWN, TRUSTEE_W,
 };
 use windows_sys::Win32::Security::Isolation::{
     CreateAppContainerProfile, DeleteAppContainerProfile, GetAppContainerFolderPath,
@@ -47,7 +47,7 @@ use super::super::windows_acl::sys::{
     token_information, wait_for_exit, wide, win32_error,
 };
 use super::{
-    Cli, MAX_PROFILE_OBJECTS, PROFILE_DENY_MASK, ProfileCreation, READ_EXECUTE,
+    Cli, MAX_PROFILE_OBJECTS, PROFILE_WRITE_MASK, ProfileCreation, READ_EXECUTE,
     RUNNER_FAILURE_EXIT, RUNNER_SIGNATURE, RunnerMode, WORKSPACE_WRITE_MASK,
     check_not_reparse_point, check_profile_outside_grants, classify_profile_creation,
     profile_root_for, read_capability_name, run_moniker, workspace_read_capability_name,
@@ -352,16 +352,20 @@ fn delete_profile(moniker: &str) -> Result<()> {
     Ok(())
 }
 
-/// `ACCESS_DENIED_ACE_TYPE`.
-const ACCESS_DENIED_ACE_TYPE: u8 = 1;
-/// `INHERITED_ACE`.
-const INHERITED_ACE: u8 = 0x10;
+/// `ACCESS_ALLOWED_ACE_TYPE` and `ACCESS_ALLOWED_CALLBACK_ACE_TYPE`: the
+/// allow ACEs whose layout starts with a mask and an inline SID.
+const ALLOW_ACE_TYPES: [u8; 2] = [0, 9];
+/// `GENERIC_ALL | GENERIC_WRITE`: what an inherit-only ACE may still hold
+/// unmapped for the objects that inherit it.
+const GENERIC_WRITE_RIGHTS: u32 = 0x1000_0000 | 0x4000_0000;
 
-/// Whether `dacl` already holds this runner's explicit deny ACE for `sid`
-/// with every right of [`PROFILE_DENY_MASK`].
-fn has_profile_deny(dacl: *mut ACL, sid: &Sid) -> Result<bool> {
+/// Whether an allow ACE in `dacl` for `sid`, explicit or inherited,
+/// critical or not, carries any right of [`PROFILE_WRITE_MASK`] or a
+/// generic write right.
+fn package_may_write(dacl: *mut ACL, sid: &Sid) -> Result<bool> {
     if dacl.is_null() {
-        return Ok(false);
+        // A null DACL grants everyone everything.
+        return Ok(true);
     }
     // SAFETY: `dacl` is a valid ACL owned by a live descriptor.
     let count = unsafe { (*dacl).AceCount };
@@ -373,15 +377,13 @@ fn has_profile_deny(dacl: *mut ACL, sid: &Sid) -> Result<bool> {
         }
         // SAFETY: every ACE starts with an ACE_HEADER.
         let header = unsafe { *ace.cast::<ACE_HEADER>() };
-        // A deny ACE has the allow ACE's layout.
-        if header.AceType != ACCESS_DENIED_ACE_TYPE
-            || header.AceFlags & INHERITED_ACE != 0
+        if !ALLOW_ACE_TYPES.contains(&header.AceType)
             || usize::from(header.AceSize) < size_of::<ACCESS_ALLOWED_ACE>()
         {
             continue;
         }
         let body = ace.cast::<ACCESS_ALLOWED_ACE>();
-        // SAFETY: a deny ACE of at least this size holds a mask and an
+        // SAFETY: an allow ACE of at least this size holds a mask and an
         // inline SID at `SidStart`.
         let (mask, ace_sid) = unsafe {
             (
@@ -389,24 +391,28 @@ fn has_profile_deny(dacl: *mut ACL, sid: &Sid) -> Result<bool> {
                 std::ptr::addr_of_mut!((*body).SidStart).cast::<c_void>(),
             )
         };
-        if mask & PROFILE_DENY_MASK == PROFILE_DENY_MASK && same_sid(ace_sid, sid) {
+        if mask & (PROFILE_WRITE_MASK | GENERIC_WRITE_RIGHTS) != 0 && same_sid(ace_sid, sid) {
             return Ok(true);
         }
     }
     Ok(false)
 }
 
-/// Adds the explicit deny ACE for `package` to `path` unless it is already
-/// there; inheritable (OI|CI) on a directory. Returns whether it wrote.
-/// Profile paths are this run's alone, so no cross-run lock is taken.
-fn deny_profile_object(path: &Path, package: &Sid, directory: bool) -> Result<bool> {
+/// Replaces every explicit ACE for `package` on `path` with one
+/// [`READ_EXECUTE`] allow ACE, inheritable (OI|CI) on a directory, unless no
+/// allow ACE for it can write there. `SET_ACCESS` drops the profile's own
+/// critical full-control ACE too; the inherited ones below a rewritten
+/// directory are recomputed from it as the DACL is applied. Returns whether
+/// it wrote. Profile paths are this run's alone, so no cross-run lock is
+/// taken.
+fn restrict_profile_object(path: &Path, package: &Sid, directory: bool) -> Result<bool> {
     let (_descriptor, dacl) = read_dacl(path)?;
-    if has_profile_deny(dacl, package)? {
+    if !package_may_write(dacl, package)? {
         return Ok(false);
     }
     let entry = EXPLICIT_ACCESS_W {
-        grfAccessPermissions: PROFILE_DENY_MASK,
-        grfAccessMode: DENY_ACCESS,
+        grfAccessPermissions: READ_EXECUTE,
+        grfAccessMode: SET_ACCESS,
         grfInheritance: if directory {
             SUB_CONTAINERS_AND_OBJECTS_INHERIT
         } else {
@@ -420,15 +426,22 @@ fn deny_profile_object(path: &Path, package: &Sid, directory: bool) -> Result<bo
             ptstrName: package.as_psid().cast(),
         },
     };
-    merge_and_apply(path, &entry, dacl, "profile deny")?;
+    merge_and_apply(path, &entry, dacl, "profile read-only")?;
+    let (_descriptor, dacl) = read_dacl(path)?;
+    if package_may_write(dacl, package)? {
+        return Err(format!(
+            "the package can still write {} after its ACEs were replaced",
+            path.display()
+        ));
+    }
     Ok(true)
 }
 
-/// The `read-only` deny pass: every object under `root`, the root
-/// included, gets the package's explicit deny ACE. A reparse point, an
+/// The `read-only` pass: on every object under `root`, the root included,
+/// the package keeps read and execute access only. A reparse point, an
 /// unreadable entry, or more than [`MAX_PROFILE_OBJECTS`] objects fails the
 /// pass, and the run with it. Returns how many objects it wrote.
-fn deny_profile_tree(root: &Path, package: &Sid) -> Result<usize> {
+fn restrict_profile_tree(root: &Path, package: &Sid) -> Result<usize> {
     let mut pending = vec![root.to_path_buf()];
     let (mut seen, mut written) = (0usize, 0usize);
     while let Some(path) = pending.pop() {
@@ -443,7 +456,7 @@ fn deny_profile_tree(root: &Path, package: &Sid) -> Result<usize> {
         let meta = std::fs::symlink_metadata(&path)
             .map_err(|error| format!("cannot inspect {}: {error}", path.display()))?;
         let directory = meta.is_dir();
-        if deny_profile_object(&path, package, directory)? {
+        if restrict_profile_object(&path, package, directory)? {
             written += 1;
         }
         if directory {
@@ -470,7 +483,7 @@ pub(super) fn run(cli: &Cli) -> i32 {
             }
         }
         // A process that may still run must not lose its storage. The
-        // profile, its deny ACEs, and the grants stay; the Job's last handle
+        // profile, its restricted DACLs, and the grants stay; the Job's last handle
         // closes with this process, which (kill-on-close) ends any member.
         Some(profile) => eprintln!(
             "{RUNNER_SIGNATURE}: cleanup: AppContainer profile {} ({}) is left in place: the confined tree's exit was not confirmed",
@@ -515,7 +528,7 @@ fn run_inner(cli: &Cli, profile: &mut Option<OwnedProfile>, settled: &mut bool) 
     }
     let read_only = cli.mode == RunnerMode::ReadOnly;
     if read_only {
-        deny_profile_tree(&root, &owned.sid)?;
+        restrict_profile_tree(&root, &owned.sid)?;
     } else {
         let write = capability_sid(&write_capability_name(workspace))?;
         grant_exact(&cli.workspace, &write, WORKSPACE_WRITE_MASK)?;
@@ -537,11 +550,11 @@ fn run_inner(cli: &Cli, profile: &mut Option<OwnedProfile>, settled: &mut bool) 
     let temp = root.join("AC").join("Temp");
     let environment = environment_block(Some(&temp))?;
     let package = &owned.sid;
-    // Objects process creation added under the profile get the deny ACE
+    // Objects process creation added under the profile are restricted
     // before the command's first instruction.
     let before_resume = || {
         if read_only {
-            deny_profile_tree(&root, package).map(drop)
+            restrict_profile_tree(&root, package).map(drop)
         } else {
             Ok(())
         }

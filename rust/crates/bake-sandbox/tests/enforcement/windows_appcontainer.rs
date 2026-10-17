@@ -41,7 +41,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use bake_sandbox::backends::windows_appcontainer::{
-    self, AppContainerGrants, HELPER_ARG, NetworkGrant, PROFILE_DENY_MASK, ProfileTag,
+    self, AppContainerGrants, HELPER_ARG, NetworkGrant, PROFILE_WRITE_MASK, ProfileTag,
     READ_EXECUTE, WORKSPACE_WRITE_MASK,
 };
 use bake_sandbox::backends::{LocalProvider, Runner};
@@ -1580,7 +1580,7 @@ const _: () = {
         all |= ATTACK_RIGHTS[index].1;
         index += 1;
     }
-    assert!(all == PROFILE_DENY_MASK);
+    assert!(all == PROFILE_WRITE_MASK);
 };
 
 /// The probe operations behind `PROBE_ARG appcontainer ...`, with the same
@@ -1698,7 +1698,15 @@ fn profile_attack() -> std::io::Result<()> {
         if visited.len() > windows_appcontainer::MAX_PROFILE_OBJECTS {
             return Err(std::io::Error::other("too many profile objects"));
         }
-        let meta = std::fs::symlink_metadata(&path)?;
+        // Above `AC` the container may not read even attributes; the test
+        // records such a line as unreached instead of failing the walk.
+        let meta = match std::fs::symlink_metadata(&path) {
+            Ok(meta) => meta,
+            Err(error) => {
+                println!("walk inspect {} {}", verdict(Err(error)), path.display());
+                continue;
+            }
+        };
         if meta.file_attributes() & 0x400 != 0 {
             println!("walk reparse-point skipped {}", path.display());
             continue;
@@ -1803,7 +1811,8 @@ fn profile_objects(root: &Path) -> Vec<PathBuf> {
 /// A read-only run attacks every object of its own profile while this
 /// test reads the disk: every mutation is denied, every read control
 /// allowed, nothing was created, renamed, or removed, and every object,
-/// launch-created ones included, carries the package's explicit deny ACE.
+/// launch-created ones included, leaves the package no allow ACE with a
+/// write right.
 /// The profile is gone once the run ends.
 fn read_only_profile_storage_denies_every_mutation() {
     let fixture = Fixture::new();
@@ -1875,15 +1884,15 @@ fn read_only_profile_storage_denies_every_mutation() {
                 ));
             }
         }
-        let denies = dacl(path).iter().any(|ace| {
-            ace.kind == acl::ACCESS_DENIED
-                && ace.flags & 0x10 == 0
-                && ace.mask & PROFILE_DENY_MASK == PROFILE_DENY_MASK
+        // GENERIC_ALL and GENERIC_WRITE, which an inherit-only ACE may hold.
+        let writes = dacl(path).iter().any(|ace| {
+            ace.kind == acl::ACCESS_ALLOWED
+                && ace.mask & (PROFILE_WRITE_MASK | 0x1000_0000 | 0x4000_0000) != 0
                 && ace.sid == package
         });
-        if !denies {
+        if writes {
             failures.push(format!(
-                "no explicit deny ACE for {package}: {} {}",
+                "{package} still holds a write right: {} {}",
                 path.display(),
                 win32::sddl(path)
             ));

@@ -518,15 +518,15 @@ fn only_a_successful_creation_owns_the_profile() {
 }
 
 #[test]
-fn the_profile_deny_mask_takes_every_mutation_and_no_read() {
+fn the_profile_write_mask_is_every_mutation_and_no_read() {
     // icacls `WD,AD,WEA,DC,WA,D,WDAC,WO`.
-    assert_eq!(PROFILE_DENY_MASK, 0x000D_0156);
+    assert_eq!(PROFILE_WRITE_MASK, 0x000D_0156);
     // Nothing a read or traversal needs: list, read data, read EA, execute
     // or traverse, read attributes, READ_CONTROL, SYNCHRONIZE.
-    assert_eq!(PROFILE_DENY_MASK & READ_EXECUTE, 0);
+    assert_eq!(PROFILE_WRITE_MASK & READ_EXECUTE, 0);
     // Every write right the workspace grant gives, and the DACL and owner.
     assert_eq!(
-        PROFILE_DENY_MASK,
+        PROFILE_WRITE_MASK,
         (WORKSPACE_WRITE_MASK & !READ_EXECUTE) | 0x0004_0000 | 0x0008_0000
     );
 }

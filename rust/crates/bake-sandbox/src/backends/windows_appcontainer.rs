@@ -68,17 +68,22 @@
 //!   containing the profile root is refused: its standing capability ACEs
 //!   would be inherited into the profile, where other runs holding them
 //!   could reach this run's storage.
-//! - **Read-only storage.** Under `read-only` the runner adds one explicit
-//!   deny ACE for the package SID with [`PROFILE_DENY_MASK`] to every object
-//!   under the profile root ([`MAX_PROFILE_OBJECTS`] at most, any reparse
-//!   point refused), first before process creation and again while the
-//!   command is still suspended, so objects that creation added are
-//!   covered. Explicit deny ACEs precede explicit allow ACEs in canonical
-//!   order, so the profile's own grant to the package no longer lets the
-//!   command create, write, delete, rename, or change the DACL or owner of
-//!   anything there. The user's and `SYSTEM`'s ACEs are kept, and nothing
-//!   outside the run's own profile root is touched. Under
-//!   `workspace-write` the storage stays writable, as `TEMP`.
+//! - **Read-only storage.** Under `read-only` the runner leaves the package
+//!   SID only [`READ_EXECUTE`] on every object under the profile root
+//!   ([`MAX_PROFILE_OBJECTS`] at most, any reparse point refused), first
+//!   before process creation and again while the command is still
+//!   suspended, so objects that creation added are covered. An object where
+//!   any allow ACE for the package carries a right of
+//!   [`PROFILE_WRITE_MASK`] has its explicit package ACEs replaced by one
+//!   read grant (`SET_ACCESS`), the profile's critical full-control ACE
+//!   included; inherited ones are recomputed from the rewritten parent, and
+//!   the pass fails if a write right remains. A deny ACE cannot do this:
+//!   on Windows build 26300 the AppContainer access check ignored explicit
+//!   deny ACEs for the package SID and for `ALL APPLICATION PACKAGES`, and
+//!   the command wrote its `TEMP` past them (CI 39044471477, then a local
+//!   run). The user's and `SYSTEM`'s ACEs are kept, and nothing outside the
+//!   run's own profile root is touched. Under `workspace-write` the storage
+//!   stays writable, as `TEMP`.
 //! - **Deletion after settlement.** The Job is `bake-process`'s
 //!   [`windows_job::Job`](bake_process::windows_job::Job), shared with the
 //!   restricted-token runner: its account is pumped while the command runs
@@ -86,9 +91,9 @@
 //!   member it ever had ended (each held by handle until signalled, never
 //!   read from the active count) within 30 s. Only then does the runner
 //!   call `DeleteAppContainerProfile` and check that the profile root is
-//!   gone. A pending or contradicted account leaves the profile, its deny
-//!   ACEs, and the grants in place and reports why, never removing storage
-//!   under a live or unknown member. A failed start, a failed deny pass or
+//!   gone. A pending or contradicted account leaves the profile, its restricted
+//!   DACLs, and the grants in place and reports why, never removing storage
+//!   under a live or unknown member. A failed start, a failed read-only pass or
 //!   resume while the command is suspended (the suspended process is
 //!   terminated and stays a member the settle must see end), and a normal
 //!   exit all reach this cleanup; only a failure before the Job exists,
@@ -112,13 +117,13 @@
 //! 2. Creates the run's profile exclusively and resolves its root, refusing
 //!    a grant root that contains it.
 //! 3. Grants the standing ACEs that are missing (an exact standing ACE skips
-//!    the full-tree propagation), and under `read-only` adds the profile's
-//!    deny ACEs.
+//!    the full-tree propagation), and under `read-only` restricts the
+//!    profile's storage to reads.
 //! 4. Creates a kill-on-close Job without breakaway, starts the command
 //!    suspended with `PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES`, born in
 //!    that Job (`PROC_THREAD_ATTRIBUTE_JOB_LIST`), inheriting only its
 //!    standard handles, with `TEMP` and `TMP` set to the profile's
-//!    `AC\Temp`; under `read-only` it repeats the deny pass, then resumes.
+//!    `AC\Temp`; under `read-only` it repeats the read-only pass, then resumes.
 //! 5. Waits for the command while pumping the Job's account, terminates
 //!    the Job and settles its account, deletes the profile, and exits with
 //!    the command's status.
@@ -134,19 +139,19 @@
 //! evidence settles each of these:
 //!
 //! - **Per-run profile, unproven natively.** That each run's `TEMP` is its
-//!   own profile's `AC\Temp` while two runs overlap, that the deny pass
+//!   own profile's `AC\Temp` while two runs overlap, that the read-only pass
 //!   leaves no writable object and survives the command's own attempts to
 //!   change a DACL or owner (an owner's implicit rights included), and that
 //!   the profile is gone after every settled run
 //!   (`tests/enforcement/windows_appcontainer.rs`).
 //! - **Registry and object storage.** A profile also has per-user registry
-//!   storage and a named-object namespace. The deny pass covers only the
+//!   storage and a named-object namespace. The read-only pass covers only the
 //!   filesystem; whether a `read-only` command can write that registry key
 //!   is unmeasured. Both are deleted with the profile.
 //! - **Brokered objects.** A system broker that creates an object under the
 //!   profile after the resume, with its own explicit ACEs, is not covered by
-//!   either deny pass; only the inheritable deny ACE on its parent reaches
-//!   it.
+//!   either read-only pass; only its parent's inheritable read grant
+//!   reaches it, and its own explicit ACEs may still grant writes.
 //! - **Killed-runner residue.** A runner killed before its cleanup leaves
 //!   its profile (folder and registry storage) behind; nothing reclaims it
 //!   yet.
@@ -234,15 +239,15 @@ pub const READ_EXECUTE: u32 = 0x0012_00A9;
 /// so a confined command cannot widen its own grant.
 pub const WORKSPACE_WRITE_MASK: u32 = READ_EXECUTE | GRANT_MASK;
 
-/// What the `read-only` deny ACE takes from the package SID on every object
-/// under the run's profile root: `FILE_WRITE_DATA` (add file),
+/// The rights the package SID holds on no object under a `read-only` run's
+/// profile root: `FILE_WRITE_DATA` (add file),
 /// `FILE_APPEND_DATA` (add subdirectory), `FILE_WRITE_EA`,
 /// `FILE_DELETE_CHILD`, `FILE_WRITE_ATTRIBUTES`, `DELETE`, `WRITE_DAC`, and
 /// `WRITE_OWNER`. Reading, listing, and traversal stay allowed.
-pub const PROFILE_DENY_MASK: u32 =
+pub const PROFILE_WRITE_MASK: u32 =
     0x0002 | 0x0004 | 0x0010 | 0x0040 | 0x0100 | 0x0001_0000 | 0x0004_0000 | 0x0008_0000;
 
-/// The most objects one `read-only` deny pass covers under a profile root;
+/// The most objects one `read-only` pass covers under a profile root;
 /// a larger tree refuses the run. A fresh profile holds a few dozen.
 pub const MAX_PROFILE_OBJECTS: usize = 4096;
 
