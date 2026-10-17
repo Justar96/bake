@@ -105,7 +105,8 @@ impl Drop for Cleanup {
 
 /// A producer that leaves a resource in its job's gate and returns
 /// `Completed` at once. The resource sees the job's cancellation, then
-/// holds its cleanup until released.
+/// holds its cleanup until released. Starting one waits for the resource's
+/// admission, so a later close cannot race the producer's first poll.
 struct Resource {
     id: JobId,
     cancelled: oneshot::Receiver<()>,
@@ -113,8 +114,9 @@ struct Resource {
     cleaned: Arc<AtomicBool>,
 }
 
-fn start_with_resource(registry: &JobRegistry) -> Resource {
+async fn start_with_resource(registry: &JobRegistry) -> Resource {
     let cleaned = Arc::new(AtomicBool::new(false));
+    let (admit, admitted) = oneshot::channel();
     let (saw_cancel, cancelled) = oneshot::channel();
     let (release, released) = oneshot::channel::<()>();
     let flag = Arc::clone(&cleaned);
@@ -132,8 +134,12 @@ fn start_with_resource(registry: &JobRegistry) -> Resource {
                     })
                     .expect("the resource is admitted"),
             );
+            let _ = admit.send(());
             JobOutcome::completed("exit code: 0")
         })
+        .expect("admitted");
+    bounded("the resource's admission", admitted)
+        .await
         .expect("admitted");
     Resource {
         id,
@@ -245,7 +251,7 @@ async fn the_limit_counts_running_stopping_and_completing_jobs() {
         ..JobLimits::default()
     });
     let held = start_held(&registry, "bash");
-    let resource = start_with_resource(&registry);
+    let resource = start_with_resource(&registry).await;
     let ran = Arc::new(AtomicBool::new(false));
     let refused = |registry: &JobRegistry| {
         let ran = Arc::clone(&ran);
@@ -546,7 +552,7 @@ async fn completion_before_during_and_after_a_stop() {
     assert_eq!(registry.get(after.id).expect("kept").stop, None);
 
     // While completing: the outcome is decided; the drain continues.
-    let resource = start_with_resource(&registry);
+    let resource = start_with_resource(&registry).await;
     reaches(&registry, resource.id, JobStatus::Completing).await;
     assert_eq!(
         registry.kill(resource.id, None),
@@ -587,7 +593,7 @@ async fn a_stop_before_the_producer_starts_runs_nothing() {
 async fn a_job_is_terminal_only_once_its_resources_settle() {
     let (_gate, registry) = registry(JobLimits::default());
     let mut events = registry.subscribe();
-    let resource = start_with_resource(&registry);
+    let resource = start_with_resource(&registry).await;
     bounded("the resource's cancel", resource.cancelled)
         .await
         .expect("the producer's return cancels what it left");
@@ -930,7 +936,7 @@ async fn close_stops_claims_and_awaits_every_job() {
     let (_gate, registry) = registry(JobLimits::default());
     let mut events = registry.subscribe();
     let stubborn = start_held(&registry, "bash");
-    let resource = start_with_resource(&registry);
+    let resource = start_with_resource(&registry).await;
     let finished = registry
         .start(spec("bash", OutputMode::Final), |_| async {
             JobOutcome::completed("")
@@ -992,7 +998,7 @@ async fn close_stops_claims_and_awaits_every_job() {
 async fn the_owning_gate_stops_and_awaits_its_jobs() {
     let (gate, registry) = registry(JobLimits::default());
     let held = start_held(&registry, "bash");
-    let resource = start_with_resource(&registry);
+    let resource = start_with_resource(&registry).await;
     let signal = bounded("the start", held.started).await.expect("started");
     let mut drained = Box::pin(gate.close());
     assert_eq!(
