@@ -19,16 +19,18 @@
 //! `appcontainer-blocker:` lines for the same reason.
 //!
 //! Each case owns its roots ([`user_scratch`], removed on drop) and its
-//! processes ([`Owned`], [`OwnedPid`], and the runner's own Job, killed and awaited on
-//! drop). Every workspace a run uses is an [`AcWorkspace`], which fails the
-//! case when a run left profile storage under `%LOCALAPPDATA%\Packages`
-//! for a `bake.run.*` moniker: the runner registers no profile, and one
-//! appearing would mean Windows created writable storage for it.
+//! processes ([`Owned`], [`OwnedPid`], and the runner's own Job, killed and
+//! awaited on drop). Every run creates its own AppContainer profile under
+//! `%LOCALAPPDATA%\Packages`. Each case's runs pass its [`Fixture`]'s
+//! random [`ProfileTag`], so their profiles are named under it and no other
+//! process's profile is listed, counted, or deleted here; the cases still
+//! run concurrently, with each other and with anything else on the host.
 //!
-//! [`a_shared_profile_shares_its_temp_directory`] keeps the evidence for
-//! that design choice: under one profile, as the first native run used,
-//! `TEMP` is the profile's own folder for every run.
+//! [`a_shared_profile_shares_its_temp_directory`] keeps the evidence that
+//! ruled out a profile shared between runs: under one profile, `TEMP` is
+//! the profile's own folder for every process.
 
+use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -36,17 +38,16 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use bake_sandbox::backends::windows_appcontainer::{
-    self, AppContainerGrants, HELPER_ARG, NetworkGrant, PRIVATE_TEMP_PREFIX, READ_EXECUTE,
-    WORKSPACE_WRITE_MASK,
+    self, AppContainerGrants, HELPER_ARG, NetworkGrant, PROFILE_DENY_MASK, ProfileTag,
+    READ_EXECUTE, WORKSPACE_WRITE_MASK,
 };
 use bake_sandbox::backends::{LocalProvider, Runner};
 use bake_sandbox::{Enforcement, SandboxMode, SandboxPolicy};
 
 use super::mechanisms::{acl, seed_without_delete, token};
 use super::{
-    BOUND, DENIED, Owned, OwnedPid, PROBE_ARG, Run, Scratch, assert_denied, assert_ok, entries,
-    harness, is_image, mklink_junction, run_argv, runtime, signaled_within, text, user_scratch,
-    win32,
+    BOUND, DENIED, Owned, OwnedPid, PROBE_ARG, Run, Scratch, assert_denied, assert_ok, harness,
+    is_image, mklink_junction, run_argv, runtime, signaled_within, text, user_scratch, win32,
 };
 
 pub fn tests() -> Vec<harness::Test> {
@@ -74,6 +75,10 @@ pub fn tests() -> Vec<harness::Test> {
         (
             "each_run_gets_a_private_temp_directory",
             each_run_gets_a_private_temp_directory,
+        ),
+        (
+            "read_only_profile_storage_denies_every_mutation",
+            read_only_profile_storage_denies_every_mutation,
         ),
         ("junction_escapes_are_denied", junction_escapes_are_denied),
         (
@@ -116,19 +121,39 @@ pub fn tests() -> Vec<harness::Test> {
 }
 
 /// A copy of this binary in a root the run grants for reading and
-/// execution: the confined program of every case.
+/// execution, the confined program of every case, and the case's own
+/// profile namespace.
+///
+/// Every run a fixture starts passes its [`ProfileTag`], 16 hex digits
+/// minted here from the OS random source, so each run profile's name is
+/// `bake.run.<tag>.<32 random hex>`. Only this fixture's runs use the tag,
+/// and the runner creates every profile exclusively, so a profile named
+/// under the tag is one this fixture's runner created: other test
+/// processes, CI jobs, and Bake itself never use it, and their profiles are
+/// never listed, counted, or deleted here. Where a run reports its
+/// profile, cases also check the exact name.
+///
+/// Dropped last in each case, after its processes are killed and awaited,
+/// the fixture fails the case if a profile under its tag remains, and
+/// deletes each one, assertion failures included.
 struct Fixture {
     bin: Scratch,
     probe: PathBuf,
+    tag: ProfileTag,
 }
 
 impl Fixture {
     fn new() -> Self {
+        let mut random = [0_u8; 8];
+        ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut random)
+            .expect("random profile tag");
+        let hex: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
+        let tag = ProfileTag::parse(&hex).expect("16 lowercase hex digits");
         let bin = user_scratch("ac-bin");
         let probe = bin.join("probe.exe");
         std::fs::copy(std::env::current_exe().expect("exe"), &probe)
             .expect("copy the test binary into the read root");
-        Self { bin, probe }
+        Self { bin, probe, tag }
     }
 
     /// The bin root, then `reads`, readable; `network` granted.
@@ -146,6 +171,7 @@ impl Fixture {
     fn provider(&self, reads: &[&Path], network: &[NetworkGrant]) -> LocalProvider {
         LocalProvider::with_chain(vec![Runner::WindowsAppContainer])
             .with_windows_appcontainer_grants(self.grants(reads, network))
+            .with_windows_appcontainer_profile_tag(self.tag.clone())
     }
 
     /// `[probe, PROBE_ARG, ops...]`.
@@ -177,85 +203,161 @@ impl Fixture {
         )
     }
 
-    /// The runner started directly in `cwd` with `args` before `--` and
-    /// `ops` after. The command inherits `cwd`, which its container must be
-    /// able to read, so callers pass the workspace.
+    /// The runner's own arguments for a direct start: `--profile-tag` and
+    /// this fixture's tag.
+    fn tag_args(&self) -> [String; 2] {
+        ["--profile-tag".to_owned(), self.tag.as_str().to_owned()]
+    }
+
+    /// The runner started directly in `cwd` with this fixture's tag, `args`
+    /// before `--`, and `ops` after. The command inherits `cwd`, which its
+    /// container must be able to read, so callers pass the workspace.
     fn runner(&self, cwd: &Path, args: &[String], ops: &[&str]) -> std::process::Output {
         std::process::Command::new(std::env::current_exe().expect("exe"))
             .current_dir(cwd)
             .arg(HELPER_ARG)
             .args(args)
+            .args(self.tag_args())
             .args(["--read".to_owned(), text(&self.bin.0), "--".to_owned()])
             .args(self.argv(ops))
             .stdin(Stdio::null())
             .output()
             .expect("runner")
     }
-}
 
-/// The `bake.run.*` folders under `%LOCALAPPDATA%\Packages`, where
-/// Windows keeps AppContainer profile storage. Empty when the folder does
-/// not exist.
-fn run_profile_folders() -> std::collections::BTreeSet<OsString> {
-    let local = std::env::var_os("LOCALAPPDATA").expect("LOCALAPPDATA");
-    let packages = PathBuf::from(local).join("Packages");
-    let listing = match std::fs::read_dir(&packages) {
-        Ok(listing) => listing,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Default::default(),
-        Err(error) => panic!("cannot inspect {}: {error}", packages.display()),
-    };
-    listing
-        .map(|entry| entry.expect("a Packages entry").file_name())
-        .filter(|name| {
-            name.to_str().is_some_and(|name| {
-                name.to_ascii_lowercase()
-                    .starts_with(windows_appcontainer::RUN_MONIKER_PREFIX)
+    /// The profiles under this fixture's tag: those its runs created and
+    /// have not deleted. Empty when `Packages` does not exist.
+    fn profiles(&self) -> BTreeSet<String> {
+        let prefix = self.tag.moniker_prefix();
+        let packages = packages_dir();
+        let listing = match std::fs::read_dir(&packages) {
+            Ok(listing) => listing,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return BTreeSet::new(),
+            Err(error) => panic!("cannot inspect {}: {error}", packages.display()),
+        };
+        listing
+            .filter_map(|entry| {
+                let name = entry.expect("a Packages entry").file_name();
+                name.to_str()
+                    .filter(|name| name.to_ascii_lowercase().starts_with(&prefix))
+                    .map(str::to_owned)
             })
-        })
-        .collect()
-}
+            .collect()
+    }
 
-/// A workspace root this test owns. It records the `bake.run.*` profile
-/// folders when created, and when dropped after the case's runs are awaited
-/// it fails the case if any new one appeared, then removes the directory.
-/// A failure keeps the folders as evidence. Another case running at the
-/// same time can be blamed for a folder its own run left; either way a
-/// folder is a failure of the profileless design.
-struct AcWorkspace {
-    scratch: Scratch,
-    folders: std::collections::BTreeSet<OsString>,
-}
+    /// Checks that `name` is one of this fixture's run profile names,
+    /// `bake.run.<tag>.<32 hex>`, and returns it.
+    fn own<'a>(&self, name: &'a str) -> &'a str {
+        let random = name
+            .strip_prefix(&self.tag.moniker_prefix())
+            .unwrap_or_else(|| panic!("{name} is not a profile of this fixture's runs"));
+        assert!(
+            random.len() == 32 && random.bytes().all(|byte| byte.is_ascii_hexdigit()),
+            "{name}"
+        );
+        name
+    }
 
-impl std::ops::Deref for AcWorkspace {
-    type Target = Scratch;
+    /// Deletes profile `name`, which must be one of this fixture's own.
+    fn delete_profile(&self, name: &str) -> Result<(), String> {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Security::Isolation::DeleteAppContainerProfile;
+        let name = self.own(name);
+        let units: Vec<u16> = std::ffi::OsStr::new(name)
+            .encode_wide()
+            .chain([0])
+            .collect();
+        // SAFETY: a NUL-terminated profile name.
+        let status = unsafe { DeleteAppContainerProfile(units.as_ptr()) };
+        if status < 0 {
+            return Err(format!(
+                "DeleteAppContainerProfile({name}): HRESULT {status:#010x}"
+            ));
+        }
+        Ok(())
+    }
 
-    fn deref(&self) -> &Scratch {
-        &self.scratch
+    /// The run profile whose `LOCALAPPDATA` a confined command reported:
+    /// `<Packages>\bake.run.<tag>.<32 hex>\AC`, with [`packages_dir`] as its
+    /// parent's parent, named under this fixture's tag. Returns the profile
+    /// root and its name.
+    fn run_profile(&self, local: &str) -> (PathBuf, String) {
+        let local = PathBuf::from(local.trim());
+        let root = local.parent().expect("the profile root").to_path_buf();
+        let name = root
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("a profile name")
+            .to_owned();
+        self.own(&name);
+        assert_eq!(
+            windows_appcontainer::profile_root_for(&local, &name).as_deref(),
+            Some(root.as_path()),
+            "LOCALAPPDATA {} is not the profile's AC folder",
+            local.display()
+        );
+        assert_eq!(
+            folded(root.parent().expect("Packages")),
+            folded(&packages_dir()),
+            "{}",
+            root.display()
+        );
+        (root, name)
+    }
+
+    /// The profile root of one confined `mechanism env-pair` run, after
+    /// checking that its `TEMP` and `TMP` are that profile's `AC\Temp` and
+    /// its `LOCALAPPDATA` the profile's `AC`.
+    fn run_temp(&self, run: &Run) -> PathBuf {
+        assert_ok(run, "env-pair");
+        let mut lines = run.stdout.lines();
+        let (Some(temp), Some(tmp), Some(local)) = (lines.next(), lines.next(), lines.next())
+        else {
+            panic!("env-pair output {:?}", run.stdout);
+        };
+        let (root, _) = self.run_profile(local);
+        assert_eq!(temp, tmp, "TEMP and TMP");
+        assert_eq!(
+            folded(Path::new(temp)),
+            folded(&root.join("AC").join("Temp")),
+            "TEMP is not the run profile's AC\\Temp"
+        );
+        root
     }
 }
 
-impl Drop for AcWorkspace {
+impl Drop for Fixture {
     fn drop(&mut self) {
-        let new: Vec<OsString> = run_profile_folders()
-            .difference(&self.folders)
-            .cloned()
+        let left = self.profiles();
+        let failures: Vec<String> = left
+            .iter()
+            .filter_map(|name| self.delete_profile(name).err())
             .collect();
-        if !new.is_empty() {
-            let error = format!("runs left AppContainer profile storage: {new:?}");
-            if std::thread::panicking() {
-                eprintln!("{error}");
-            } else {
-                panic!("{error}");
-            }
+        if left.is_empty() {
+            return;
+        }
+        let error = format!(
+            "runs left AppContainer profiles under tag {}, now deleted: {left:?} {failures:?}",
+            self.tag
+        );
+        if std::thread::panicking() {
+            eprintln!("{error}");
+        } else {
+            panic!("{error}");
         }
     }
 }
 
-fn ac_workspace(label: &str) -> AcWorkspace {
-    AcWorkspace {
-        folders: run_profile_folders(),
-        scratch: user_scratch(label),
-    }
+/// `%LOCALAPPDATA%\Packages` as this unconfined process sees it, where
+/// Windows keeps AppContainer profile storage.
+fn packages_dir() -> PathBuf {
+    PathBuf::from(std::env::var_os("LOCALAPPDATA").expect("LOCALAPPDATA")).join("Packages")
+}
+
+/// Lowercase canonical text, for comparing Windows paths that may differ
+/// in case or 8.3 spelling.
+fn folded(path: &Path) -> String {
+    text(&bake_sandbox::canonical_path(path)).to_ascii_lowercase()
 }
 
 fn ww(workspace: &Scratch) -> SandboxPolicy {
@@ -308,7 +410,7 @@ fn an_explicit_chain_selects_the_unqualified_runner() {
         runtime().block_on(provider.selected()),
         Some((Runner::WindowsAppContainer, Enforcement::Partial))
     );
-    let workspace = ac_workspace("ac-ws");
+    let workspace = user_scratch("ac-ws");
     let run = fixture.run(&ro(&workspace), &["mechanism", "identity"]);
     assert_ok(&run, "identity");
     assert!(
@@ -325,7 +427,7 @@ fn an_explicit_chain_selects_the_unqualified_runner() {
 
 fn read_only_reads_the_workspace_and_denies_effects() {
     let fixture = Fixture::new();
-    let (workspace, outside) = (ac_workspace("ac-ws"), user_scratch("ac-out"));
+    let (workspace, outside) = (user_scratch("ac-ws"), user_scratch("ac-out"));
     let policy = ro(&workspace);
     let inside = workspace.write("readme.txt", "inside");
     let run = fixture.run(&policy, &["read", &text(&inside)]);
@@ -356,48 +458,19 @@ fn read_only_reads_the_workspace_and_denies_effects() {
         std::fs::read_to_string(&foreign).expect("control"),
         "outside"
     );
-    // Read-only keeps the environment it was given and has no writable
-    // TEMP. The first native run, under a profile, failed here: its TEMP
-    // was the profile's `AC\Temp`.
-    for name in ["TEMP", "TMP", "LOCALAPPDATA"] {
-        let run = fixture.run(&policy, &["env", name]);
-        assert_ok(&run, "read-only environment");
-        assert_eq!(
-            run.stdout.trim(),
-            std::env::var(name).unwrap_or_default(),
-            "read-only {name}"
-        );
-    }
-    // The failed-enforcement path may write, so give it an atomically
-    // claimed namespace instead of risking a pre-existing TEMP/probe.txt.
-    let mut random = [0_u8; 16];
-    ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut random)
-        .expect("random temp namespace");
-    let name = format!(
-        "bake-ro-temp-{}",
-        random
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>()
-    );
-    let directory = PathBuf::from(std::env::var_os("TEMP").expect("TEMP")).join(&name);
-    std::fs::create_dir(&directory).expect("claim temp namespace exclusively");
-    let owned = Scratch(directory);
-    let host_temp = owned.join("probe.txt");
-    std::fs::write(&host_temp, "control").expect("unconfined TEMP write");
-    std::fs::remove_file(&host_temp).expect("remove control");
-    let run = fixture.run(&policy, &["write-temp-under", &name]);
+    // TEMP, TMP, and LOCALAPPDATA are this run's own profile storage, which
+    // is gone once the run has ended.
+    let root = fixture.run_temp(&fixture.run(&policy, &["mechanism", "env-pair"]));
+    assert!(!root.exists(), "{} must be deleted", root.display());
+    // That storage is read-only: a write into TEMP is denied. The file
+    // would land in the run's own profile, never in a host directory.
+    let run = fixture.run(&policy, &["appcontainer", "write-profile-temp"]);
     assert_denied(&run, "read-only writes its TEMP");
-    assert!(
-        !host_temp.exists(),
-        "read-only created {}",
-        host_temp.display()
-    );
 }
 
 fn workspace_write_allows_effects_inside() {
     let fixture = Fixture::new();
-    let workspace = ac_workspace("ac-ws");
+    let workspace = user_scratch("ac-ws");
     let before = dacl(&workspace.0);
     let policy = ww(&workspace);
     let created = workspace.join("created.txt");
@@ -455,7 +528,7 @@ fn workspace_write_allows_effects_inside() {
 
 fn workspace_write_denies_effects_outside() {
     let fixture = Fixture::new();
-    let (workspace, outside) = (ac_workspace("ac-ws"), user_scratch("ac-out"));
+    let (workspace, outside) = (user_scratch("ac-ws"), user_scratch("ac-out"));
     let policy = ww(&workspace);
     let user = win32::user_sid().expect("this process's user SID");
     let written = outside.join("new.txt");
@@ -508,7 +581,7 @@ fn workspace_write_denies_effects_outside() {
     );
     assert!(own.exists() && !out.exists());
     // Another workspace, holding its own standing grants after a run there.
-    let foreign = ac_workspace("ac-foreign");
+    let foreign = user_scratch("ac-foreign");
     assert_ok(
         &fixture.run(&ww(&foreign), &["exit", "0"]),
         "a run in the other workspace",
@@ -532,7 +605,7 @@ fn workspace_write_denies_effects_outside() {
 
 fn read_grants_are_per_root_read_only_and_standing() {
     let fixture = Fixture::new();
-    let workspace = ac_workspace("ac-ws");
+    let workspace = user_scratch("ac-ws");
     let (granted, other) = (user_scratch("ac-read"), user_scratch("ac-other"));
     let doc = granted.write("doc.txt", "granted");
     let hidden = other.write("doc.txt", "other");
@@ -595,18 +668,10 @@ fn read_grants_are_per_root_read_only_and_standing() {
 
 fn each_run_gets_a_private_temp_directory() {
     let fixture = Fixture::new();
-    let workspace = ac_workspace("ac-ws");
+    let workspace = user_scratch("ac-ws");
     let policy = ww(&workspace);
-    let temp_root = bake_sandbox::canonical_path(&std::env::temp_dir());
-    let is_private = |path: &Path| {
-        path.parent() == Some(temp_root.as_path())
-            && path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.starts_with(PRIVATE_TEMP_PREFIX))
-    };
     let argv: Vec<OsString> = fixture
-        .argv(&["write-temp-and-wait"])
+        .argv(&["appcontainer", "write-profile-temp-and-wait"])
         .into_iter()
         .map(OsString::from)
         .collect();
@@ -627,9 +692,17 @@ fn each_run_gets_a_private_temp_directory() {
     );
     let held = PathBuf::from(a.first_line().trim());
     let a_temp = held.parent().expect("A's TEMP").to_path_buf();
-    assert!(is_private(&a_temp), "{}", a_temp.display());
+    let a_root = a_temp
+        .parent()
+        .and_then(Path::parent)
+        .expect("A's profile root")
+        .to_path_buf();
+    fixture.run_profile(&text(&a_root.join("AC")));
+    assert_eq!(folded(&a_temp), folded(&a_root.join("AC").join("Temp")));
+    // The control: this user reads A's file while A still runs.
     assert_eq!(std::fs::read_to_string(&held).expect("A's file"), "held");
-    // B, on the same workspace, holds another temp capability.
+    // B, on the same workspace and alive at the same time, holds another
+    // package SID and so another profile.
     let intruder = a_temp.join("from-b.txt");
     assert_denied(
         &fixture.run(&policy, &["write", &text(&intruder), "x"]),
@@ -639,60 +712,40 @@ fn each_run_gets_a_private_temp_directory() {
         &fixture.run(&policy, &["read", &text(&held)]),
         "B reads A's file",
     );
+    assert_denied(
+        &fixture.run(&policy, &["win32-delete", "DeleteFileW", &text(&held)]),
+        "B deletes A's file",
+    );
     assert!(!intruder.exists());
-    let b = fixture.run(&policy, &["spawn", "write-temp"]);
+    assert_eq!(std::fs::read_to_string(&held).expect("kept"), "held");
+    let b = fixture.run(&policy, &["spawn", "appcontainer", "write-profile-temp"]);
     assert_ok(&b, "B's descendant writes B's TEMP");
     let b_temp = PathBuf::from(b.stdout.trim())
         .parent()
         .expect("B's TEMP")
         .to_path_buf();
-    assert!(
-        is_private(&b_temp) && b_temp != a_temp,
-        "{}",
-        b_temp.display()
-    );
-    assert!(!b_temp.exists(), "{} must be removed", b_temp.display());
-    // TMP is the same private directory; LOCALAPPDATA is the host's.
-    let run = fixture.run(&policy, &["mechanism", "env-pair"]);
-    assert_ok(&run, "workspace-write TEMP and TMP");
-    let mut lines = run.stdout.lines();
-    let (Some(temp), Some(tmp), Some(local)) = (lines.next(), lines.next(), lines.next()) else {
-        panic!("env-pair output {:?}", run.stdout);
-    };
-    assert!(is_private(Path::new(temp)), "{temp}");
-    assert_eq!(temp, tmp);
-    assert_eq!(local, std::env::var("LOCALAPPDATA").unwrap_or_default());
+    assert_ne!(folded(&b_temp), folded(&a_temp));
+    let b_root = b_temp
+        .parent()
+        .and_then(Path::parent)
+        .expect("B's profile root")
+        .to_path_buf();
+    fixture.run_profile(&text(&b_root.join("AC")));
+    assert!(!b_root.exists(), "{} must be deleted", b_root.display());
+    // Under workspace-write, too, TEMP and TMP are the profile's AC\Temp
+    // and LOCALAPPDATA its AC.
+    let c_root = fixture.run_temp(&fixture.run(&policy, &["mechanism", "env-pair"]));
+    assert!(!c_root.exists(), "{} must be deleted", c_root.display());
+    assert!(a_root.exists(), "A's profile must outlive B and C");
     drop(a.0.stdin.take());
     let status = a.wait_within(BOUND).expect("A exits within the bound");
     assert!(status.success(), "{status}");
-    assert!(!a_temp.exists(), "{} must be removed", a_temp.display());
-    // Under a temp root this test owns, nothing is left and no ACE stands.
-    let root = user_scratch("ac-temp-root");
-    let before = dacl(&root.0);
-    let output = fixture.runner(
-        &workspace.0,
-        &[
-            "--workspace".into(),
-            text(&workspace.0),
-            "--temp".into(),
-            text(&root.0),
-            "--mode".into(),
-            "workspace-write".into(),
-        ],
-        &["spawn", "write-temp"],
-    );
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(entries(&root.0).is_empty(), "the private directory remains");
-    assert_eq!(dacl(&root.0), before);
+    assert!(!a_root.exists(), "{} must be deleted", a_root.display());
 }
 
 fn junction_escapes_are_denied() {
     let fixture = Fixture::new();
-    let (workspace, outside) = (ac_workspace("ac-ws"), user_scratch("ac-out"));
+    let (workspace, outside) = (user_scratch("ac-ws"), user_scratch("ac-out"));
     let link = workspace.join("escape");
     mklink_junction(&link, &outside.0);
     let outside_before = dacl(&outside.0);
@@ -764,7 +817,7 @@ fn junction_escapes_are_denied() {
 
 fn descendants_end_with_the_command_and_cannot_break_away() {
     let fixture = Fixture::new();
-    let workspace = ac_workspace("ac-ws");
+    let workspace = user_scratch("ac-ws");
     // The mechanism probe's orphan inherits its standard handles rather than
     // opening `NUL`, which an AppContainer may not be able to open.
     let run = fixture.run(&ww(&workspace), &["mechanism", "orphan"]);
@@ -812,27 +865,42 @@ fn descendants_end_with_the_command_and_cannot_break_away() {
 
 fn a_killed_runner_takes_its_tree() {
     let fixture = Fixture::new();
-    let workspace = ac_workspace("ac-ws");
-    let root = user_scratch("ac-killed-root");
+    let workspace = user_scratch("ac-ws");
     let mut runner = Owned::spawn(
         std::process::Command::new(std::env::current_exe().expect("exe"))
             .arg(HELPER_ARG)
-            .args(["--workspace", &text(&workspace.0), "--temp", &text(&root.0)])
+            .args(["--workspace", &text(&workspace.0)])
+            .args(fixture.tag_args())
             .args(["--mode", "workspace-write", "--read", &text(&fixture.bin.0)])
             .arg("--")
-            .args(fixture.argv(&["mechanism", "orphan-and-park"]))
+            .args(fixture.argv(&["appcontainer", "orphan-and-park"]))
             .current_dir(&workspace.0)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::null()),
     );
     let line = runner.first_line();
-    let mut words = line.split_whitespace();
-    let (Some("grandchild"), Some(grandchild), Some("child"), Some(direct)) =
-        (words.next(), words.next(), words.next(), words.next())
+    let mut words = line.trim_end().splitn(6, ' ');
+    let (
+        Some("grandchild"),
+        Some(grandchild),
+        Some("child"),
+        Some(direct),
+        Some("local"),
+        Some(local),
+    ) = (
+        words.next(),
+        words.next(),
+        words.next(),
+        words.next(),
+        words.next(),
+        words.next(),
+    )
     else {
         panic!("handshake {line:?}");
     };
+    // The run's own profile, by the name its command reported.
+    let (root, name) = fixture.run_profile(local);
     // Both are opened while the runner still holds its Job, so neither pid
     // can have been reused.
     let grandchild = OwnedPid::open_image(grandchild.parse().expect("pid"), &fixture.probe);
@@ -847,13 +915,25 @@ fn a_killed_runner_takes_its_tree() {
         grandchild.exited_within(BOUND),
         "the grandchild outlived its runner"
     );
-    // The documented residue: one private directory, removed with `root`.
-    assert_eq!(entries(&root.0).len(), 1);
+    // The documented residue: exactly the killed runner's profile, by the
+    // name its command reported. Its tree has exited, so this case deletes
+    // it, as no runner does yet.
+    assert!(
+        root.is_dir(),
+        "the killed runner's profile {}",
+        root.display()
+    );
+    assert_eq!(fixture.profiles(), BTreeSet::from([name.clone()]));
+    observe(format_args!("case=killed-runner-residue profile={name}"));
+    fixture
+        .delete_profile(&name)
+        .expect("delete the killed runner's profile");
+    assert!(!root.exists(), "{} must be deleted", root.display());
 }
 
 fn loopback_stays_closed_with_and_without_network_grants() {
     let fixture = Fixture::new();
-    let workspace = ac_workspace("ac-ws");
+    let workspace = user_scratch("ac-ws");
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a loopback listener");
     let address = listener.local_addr().expect("listener address").to_string();
     // The control: the destination is reachable unconfined.
@@ -934,16 +1014,13 @@ fn loopback_stays_closed_with_and_without_network_grants() {
 
 fn runner_failures_grant_nothing_and_clean_up() {
     let fixture = Fixture::new();
-    let (workspace, outside) = (ac_workspace("ac-ws"), user_scratch("ac-out"));
-    let root = user_scratch("ac-fail-root");
+    let (workspace, outside) = (user_scratch("ac-ws"), user_scratch("ac-out"));
     let before_ws = dacl(&workspace.0);
     let before_out = dacl(&outside.0);
     let base = |mode: &str| {
         vec![
             "--workspace".to_owned(),
             text(&workspace.0),
-            "--temp".to_owned(),
-            text(&root.0),
             "--mode".to_owned(),
             mode.to_owned(),
         ]
@@ -976,6 +1053,10 @@ fn runner_failures_grant_nothing_and_clean_up() {
             "more than once",
         ),
         (base("everything"), "unknown mode"),
+        (
+            with(&["--temp".into(), text(&outside.0)]),
+            "unknown argument: --temp",
+        ),
     ];
     for (args, expected) in cases {
         let output = fixture.runner(&workspace.0, &args, &["exit", "0"]);
@@ -1000,33 +1081,46 @@ fn runner_failures_grant_nothing_and_clean_up() {
         before_out,
         "a refused run granted a read root"
     );
-    assert!(entries(&root.0).is_empty());
-    // A program that cannot start: a runner failure, its temp removed.
-    let missing = workspace.join("no-such-program.exe");
-    let output = std::process::Command::new(std::env::current_exe().expect("exe"))
-        .current_dir(&workspace.0)
-        .arg(HELPER_ARG)
-        .args(base("workspace-write"))
-        .args(["--read", &text(&fixture.bin.0), "--", &text(&missing)])
-        .stdin(Stdio::null())
-        .output()
-        .expect("runner");
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    // The fixture's tag is fresh, so any profile under it is a refused
+    // run's.
     assert_eq!(
-        output.status.code(),
-        Some(windows_appcontainer::RUNNER_FAILURE_EXIT),
-        "{stderr}"
+        fixture.profiles(),
+        BTreeSet::new(),
+        "a refused run created a profile"
     );
-    assert!(stderr.contains("CreateProcessW"), "{stderr}");
-    assert!(
-        entries(&root.0).is_empty(),
-        "the private directory must be removed after a failed spawn"
-    );
+    // A program that cannot start, in both modes: a runner failure from
+    // `CreateProcessW`, which the runner reaches only after it created the
+    // tagged profile, and that profile deleted again.
+    let missing = workspace.join("no-such-program.exe");
+    for mode in ["workspace-write", "read-only"] {
+        let output = std::process::Command::new(std::env::current_exe().expect("exe"))
+            .current_dir(&workspace.0)
+            .arg(HELPER_ARG)
+            .args(base(mode))
+            .args(fixture.tag_args())
+            .args(["--read", &text(&fixture.bin.0), "--", &text(&missing)])
+            .stdin(Stdio::null())
+            .output()
+            .expect("runner");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(
+            output.status.code(),
+            Some(windows_appcontainer::RUNNER_FAILURE_EXIT),
+            "{mode}: {stderr}"
+        );
+        assert!(stderr.contains("CreateProcessW"), "{mode}: {stderr}");
+        assert!(!stderr.contains("cleanup:"), "{mode}: {stderr}");
+        assert_eq!(
+            fixture.profiles(),
+            BTreeSet::new(),
+            "{mode}: the profile must be deleted after a failed spawn"
+        );
+    }
 }
 
 fn exit_codes_and_output_pass_through() {
     let fixture = Fixture::new();
-    let workspace = ac_workspace("ac-ws");
+    let workspace = user_scratch("ac-ws");
     for code in [0, 1, 3, 127] {
         let run = fixture.run(&ww(&workspace), &["exit", &code.to_string()]);
         assert_eq!(run.code, Some(code), "{}", run.stderr);
@@ -1048,7 +1142,7 @@ fn exit_codes_and_output_pass_through() {
 /// Windows behaves. Enabling confinement needs this line read natively.
 fn hard_link_aliases_are_measured() {
     let fixture = Fixture::new();
-    let (workspace, outside) = (ac_workspace("ac-ws"), user_scratch("ac-out"));
+    let (workspace, outside) = (user_scratch("ac-ws"), user_scratch("ac-out"));
     let victim = outside.write("victim.txt", "keep");
     std::fs::hard_link(&victim, workspace.join("alias.txt")).expect("an unconfined hard link");
     let before = dacl(&victim);
@@ -1084,10 +1178,11 @@ fn hard_link_aliases_are_measured() {
     eprintln!("appcontainer-blocker: case=hardlink-alias-read-root outside_read={observed}");
 }
 
-/// The evidence behind the profileless design, not a runner case: two
-/// processes of one AppContainer profile, launched directly as the first
-/// native run's per-workspace profile was, with no write grant beyond their
-/// output directory. Each reports its `TEMP`; the first writes a file there
+/// The evidence that each run needs its own profile, not a runner case:
+/// two processes of one AppContainer profile, launched directly as the
+/// first native run's per-workspace profile was, with no write grant beyond
+/// their output directory. CI 39035318623 recorded the second process
+/// reading the first one's file. Each reports its `TEMP`; the first writes a file there
 /// and the second reads it back. Each step is decided from the disk and
 /// printed as an `appcontainer-defect:` line; the case asserts only that
 /// the reports agree with the disk and that `TEMP` is the profile's.
@@ -1103,7 +1198,13 @@ fn a_shared_profile_shares_its_temp_directory() {
     acl::grant(&bin.0, &sid, READ_EXECUTE).expect("bin grant");
     let exe = bin.join("probe.exe");
     std::fs::copy(std::env::current_exe().expect("exe"), &exe).expect("copy the test binary");
-    let first = launch(None, Some(profile.sid), &exe, &["write-temp"], &output.0);
+    let first = launch(
+        None,
+        Some(profile.sid),
+        &exe,
+        &["appcontainer", "write-profile-temp"],
+        &output.0,
+    );
     assert_eq!(first.code, Some(0), "write-temp: {}", first.stderr);
     let written = PathBuf::from(first.stdout.trim());
     assert_eq!(
@@ -1143,9 +1244,414 @@ fn a_shared_profile_shares_its_temp_directory() {
     eprintln!("appcontainer-defect: case=profile-temp-second-process read={read}");
 }
 
+// ---------------------------------------------------------------------------
+// The read-only profile attack.
+
+/// The rights the deny pass must take from the package, each attempted as
+/// an open of every object under the profile root: an open for a right is
+/// that right's access check.
+const ATTACK_RIGHTS: [(&str, u32); 8] = [
+    ("write-data", 0x0002),
+    ("append-data", 0x0004),
+    ("write-ea", 0x0010),
+    ("delete-child", 0x0040),
+    ("write-attributes", 0x0100),
+    ("delete", 0x0001_0000),
+    ("write-dac", 0x0004_0000),
+    ("write-owner", 0x0008_0000),
+];
+
+/// The rights a read needs, attempted on the same objects: the control
+/// that shows a denial is the deny pass's, not a blanket refusal.
+const CONTROL_RIGHTS: [(&str, u32); 2] =
+    [("read-control", 0x0002_0000), ("read-attributes", 0x0080)];
+
+const _: () = {
+    let mut all = 0;
+    let mut index = 0;
+    while index < ATTACK_RIGHTS.len() {
+        all |= ATTACK_RIGHTS[index].1;
+        index += 1;
+    }
+    assert!(all == PROFILE_DENY_MASK);
+};
+
+/// The probe operations behind `PROBE_ARG appcontainer ...`, with the same
+/// exit convention as [`super::probe_main`].
+pub fn probe(ops: &[&str]) -> std::io::Result<i32> {
+    match ops {
+        // Every mutation of every object under this process's profile
+        // root, one line each, then `done`; then held until stdin closes,
+        // so the test can read the disk while the profile still exists.
+        ["profile-attack-and-wait"] => {
+            use std::io::Read;
+            profile_attack()?;
+            println!("done");
+            std::io::stdout().flush()?;
+            let _ = std::io::stdin().read_to_end(&mut Vec::new());
+            Ok(0)
+        }
+        // A parked descendant, then this process parks too, after a
+        // handshake naming both and this process's LOCALAPPDATA, its
+        // profile's `AC`: a confined tree, and a profile, for a runner to
+        // lose.
+        ["orphan-and-park"] => {
+            let child = std::process::Command::new(std::env::current_exe()?)
+                .args([PROBE_ARG, "park"])
+                .spawn()?;
+            println!(
+                "grandchild {} child {} local {}",
+                child.id(),
+                std::process::id(),
+                std::env::var("LOCALAPPDATA").unwrap_or_default()
+            );
+            std::io::stdout().flush()?;
+            loop {
+                std::thread::park();
+            }
+        }
+        // A write of `probe.txt` into TEMP, only once TEMP is shown to be
+        // this process's profile storage, so a TEMP Windows did not reroute
+        // is never written; the path is printed.
+        ["write-profile-temp"] => {
+            let path = profile_temp()?.join("probe.txt");
+            std::fs::write(&path, "t").map(|()| {
+                println!("{}", path.display());
+                0
+            })
+        }
+        // The same for `held.txt`, reported, then held until stdin closes,
+        // so a second run can act while this one still owns it.
+        ["write-profile-temp-and-wait"] => {
+            use std::io::Read;
+            let path = profile_temp()?.join("held.txt");
+            std::fs::write(&path, "held")?;
+            println!("{}", path.display());
+            std::io::stdout().flush()?;
+            let _ = std::io::stdin().read_to_end(&mut Vec::new());
+            Ok(0)
+        }
+        other => panic!("unknown appcontainer operation {other:?}"),
+    }
+}
+
+/// TEMP, when it is `LOCALAPPDATA\Temp` and `LOCALAPPDATA` is an `AC`
+/// folder under `Packages\<profile>`: an AppContainer profile's own
+/// storage, never a host directory. Otherwise an error the case reports.
+fn profile_temp() -> std::io::Result<PathBuf> {
+    let var = |name: &str| PathBuf::from(std::env::var_os(name).unwrap_or_default());
+    let (temp, local) = (var("TEMP"), var("LOCALAPPDATA"));
+    let is = |path: Option<&Path>, name: &str| {
+        path.and_then(Path::file_name)
+            .and_then(|found| found.to_str())
+            .is_some_and(|found| found.eq_ignore_ascii_case(name))
+    };
+    let packages = local.parent().and_then(Path::parent);
+    let profile = text(&temp).eq_ignore_ascii_case(&text(&local.join("Temp")))
+        && is(Some(&local), "AC")
+        && is(packages, "Packages");
+    if !profile {
+        return Err(std::io::Error::other(format!(
+            "TEMP {} is not profile storage (LOCALAPPDATA {})",
+            temp.display(),
+            local.display()
+        )));
+    }
+    Ok(temp)
+}
+
+fn verdict(result: std::io::Result<()>) -> String {
+    match result {
+        Ok(()) => "allowed".to_owned(),
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => "denied".to_owned(),
+        Err(error) => format!("error:{}", error.raw_os_error().unwrap_or(-1)),
+    }
+}
+
+/// The confined side: walks the profile root (`LOCALAPPDATA`'s parent)
+/// and `LOCALAPPDATA` itself, in case the root cannot be listed, at most
+/// `MAX_PROFILE_OBJECTS` objects and no reparse point, and attempts each
+/// mutation on each object. Prints `root <path>`, then `attempt <kind>
+/// <verdict> <path>` and `control <kind> <verdict> <path>` lines, and
+/// `walk <kind> <verdict> <path>` for a directory it cannot list.
+fn profile_attack() -> std::io::Result<()> {
+    use std::os::windows::fs::MetadataExt;
+    let local = PathBuf::from(std::env::var_os("LOCALAPPDATA").unwrap_or_default());
+    let root = local
+        .parent()
+        .ok_or_else(|| std::io::Error::other("LOCALAPPDATA has no parent"))?
+        .to_path_buf();
+    println!("root {}", root.display());
+    let mut pending = vec![local, root];
+    let mut visited = BTreeSet::new();
+    while let Some(path) = pending.pop() {
+        if !visited.insert(path.clone()) {
+            continue;
+        }
+        if visited.len() > windows_appcontainer::MAX_PROFILE_OBJECTS {
+            return Err(std::io::Error::other("too many profile objects"));
+        }
+        let meta = std::fs::symlink_metadata(&path)?;
+        if meta.file_attributes() & 0x400 != 0 {
+            println!("walk reparse-point skipped {}", path.display());
+            continue;
+        }
+        let shown = path.display();
+        for (kind, mask) in CONTROL_RIGHTS {
+            let result = win32::open(&format!("{mask:x}"), &text(&path));
+            println!("control {kind} {} {shown}", verdict(result));
+        }
+        for (kind, mask) in ATTACK_RIGHTS {
+            let result = win32::open(&format!("{mask:x}"), &text(&path));
+            println!("attempt {kind} {} {shown}", verdict(result));
+        }
+        let renamed = path.with_extension("bake-attack");
+        let result = std::fs::rename(&path, &renamed);
+        println!("attempt rename {} {shown}", verdict(result));
+        if meta.is_dir() {
+            let file = path.join("bake-attack-file");
+            let result = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&file)
+                .map(drop);
+            println!("attempt create-file {} {shown}", verdict(result));
+            let result = std::fs::create_dir(path.join("bake-attack-dir"));
+            println!("attempt create-dir {} {shown}", verdict(result));
+            match std::fs::read_dir(&path) {
+                Ok(listing) => {
+                    for entry in listing {
+                        pending.push(entry?.path());
+                    }
+                }
+                Err(error) => println!("walk list {} {shown}", verdict(Err(error))),
+            }
+        } else {
+            let result = std::fs::OpenOptions::new()
+                .append(true)
+                .open(&path)
+                .and_then(|mut file| file.write_all(b"x"));
+            println!("attempt append {} {shown}", verdict(result));
+            let result = win32::delete("DeleteFileW", &text(&path));
+            println!("attempt delete-file {} {shown}", verdict(result));
+        }
+    }
+    Ok(())
+}
+
+/// The package SID Windows derives for profile `name`, as text.
+fn package_sid(name: &str) -> String {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Security::FreeSid;
+    use windows_sys::Win32::Security::Isolation::DeriveAppContainerSidFromAppContainerName;
+    let units: Vec<u16> = std::ffi::OsStr::new(name)
+        .encode_wide()
+        .chain([0])
+        .collect();
+    let mut sid = std::ptr::null_mut();
+    // SAFETY: a NUL-terminated name and a valid out pointer.
+    let status = unsafe { DeriveAppContainerSidFromAppContainerName(units.as_ptr(), &mut sid) };
+    assert!(
+        status >= 0 && !sid.is_null(),
+        "DeriveAppContainerSidFromAppContainerName({name}): HRESULT {status:#010x}"
+    );
+    let text = win32::sid_text(sid);
+    // SAFETY: documented as freed with `FreeSid`, and freed once.
+    unsafe { FreeSid(sid) };
+    text
+}
+
+/// Every object under `root`, the root included, as this unconfined
+/// process lists it: bounded, and failing on a reparse point.
+fn profile_objects(root: &Path) -> Vec<PathBuf> {
+    use std::os::windows::fs::MetadataExt;
+    let mut objects = Vec::new();
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(path) = pending.pop() {
+        assert!(
+            objects.len() < windows_appcontainer::MAX_PROFILE_OBJECTS,
+            "the profile {} is too large",
+            root.display()
+        );
+        let meta = std::fs::symlink_metadata(&path)
+            .unwrap_or_else(|error| panic!("inspect {}: {error}", path.display()));
+        assert_eq!(
+            meta.file_attributes() & 0x400,
+            0,
+            "{} is a reparse point",
+            path.display()
+        );
+        if meta.is_dir() {
+            for entry in std::fs::read_dir(&path)
+                .unwrap_or_else(|error| panic!("list {}: {error}", path.display()))
+            {
+                pending.push(entry.expect("a profile entry").path());
+            }
+        }
+        objects.push(path);
+    }
+    objects
+}
+
+/// A read-only run attacks every object of its own profile while this
+/// test reads the disk: every mutation is denied, every read control
+/// allowed, nothing was created, renamed, or removed, and every object,
+/// launch-created ones included, carries the package's explicit deny ACE.
+/// The profile is gone once the run ends.
+fn read_only_profile_storage_denies_every_mutation() {
+    let fixture = Fixture::new();
+    let workspace = user_scratch("ac-ws");
+    let argv: Vec<OsString> = fixture
+        .argv(&["appcontainer", "profile-attack-and-wait"])
+        .into_iter()
+        .map(OsString::from)
+        .collect();
+    let command = runtime()
+        .block_on(bake_sandbox::SandboxProvider::confine(
+            &fixture.provider(&[], &[]),
+            &argv,
+            &ro(&workspace),
+        ))
+        .expect("confine");
+    let mut child = Owned::spawn(
+        std::process::Command::new(&command.program)
+            .args(&command.args)
+            .current_dir(&workspace.0)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped()),
+    );
+    // Both readers end at EOF, which the runner's exit or this test's kill
+    // brings; the stdout reader also ends at `done`.
+    let stderr = child.0.stderr.take().expect("piped stderr");
+    let (err_send, err_receive) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        use std::io::Read;
+        let mut text = String::new();
+        let _ = std::io::BufReader::new(stderr).read_to_string(&mut text);
+        let _ = err_send.send(text);
+    });
+    let stdout = child.0.stdout.take().expect("piped stdout");
+    let (send, receive) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        use std::io::BufRead;
+        let mut lines = Vec::new();
+        for line in std::io::BufReader::new(stdout).lines() {
+            let Ok(line) = line else { break };
+            let done = line == "done";
+            lines.push(line);
+            if done {
+                break;
+            }
+        }
+        let _ = send.send(lines);
+    });
+    let lines: Vec<String> = receive
+        .recv_timeout(BOUND)
+        .expect("the attack report within the bound");
+    if lines.last().map(String::as_str) != Some("done") {
+        let _ = child.0.kill();
+        let _ = child.wait_within(BOUND);
+        let stderr = err_receive.recv_timeout(BOUND).unwrap_or_default();
+        panic!("the attack did not finish: stdout={lines:?} stderr={stderr:?}");
+    }
+    let root_line = lines
+        .first()
+        .and_then(|line| line.strip_prefix("root "))
+        .unwrap_or_else(|| panic!("no root line: {lines:?}"));
+    let (root, name) = fixture.run_profile(&text(&Path::new(root_line).join("AC")));
+    let package = package_sid(&name);
+    let ac = folded(&root.join("AC"));
+    // The confined report.
+    let mut attempted = BTreeSet::new();
+    let mut failures = Vec::new();
+    let mut controls_allowed = 0;
+    for line in &lines[1..lines.len() - 1] {
+        let mut words = line.splitn(4, ' ');
+        let (Some(what), Some(_kind), Some(verdict), Some(path)) =
+            (words.next(), words.next(), words.next(), words.next())
+        else {
+            panic!("report line {line:?}");
+        };
+        match (what, verdict) {
+            ("attempt", "denied") => {
+                attempted.insert(folded(Path::new(path)));
+            }
+            ("control", "allowed") => controls_allowed += 1,
+            // Above `AC`, the container may lack read access; what it
+            // cannot open it cannot change either.
+            ("control" | "walk", _) if !folded(Path::new(path)).starts_with(&ac) => {
+                observe(format_args!("case=read-only-profile outside-ac={line:?}"));
+            }
+            _ => failures.push(line.clone()),
+        }
+    }
+    // The disk, read while the profile still exists.
+    let objects = profile_objects(&root);
+    let names: Vec<String> = objects
+        .iter()
+        .map(|path| text(path.strip_prefix(&root).expect("under the root")))
+        .collect();
+    observe(format_args!(
+        "case=read-only-profile objects={} paths={names:?}",
+        objects.len()
+    ));
+    for path in &objects {
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("");
+        if name.contains("bake-attack") {
+            failures.push(format!("created {}", path.display()));
+        }
+        if !attempted.contains(&folded(path)) {
+            // An object the container could not reach above `AC` is
+            // recorded; inside `AC` it is a failure of this measurement.
+            if folded(path).starts_with(&ac) {
+                failures.push(format!("not attacked from inside: {}", path.display()));
+            } else {
+                observe(format_args!(
+                    "case=read-only-profile unreached={}",
+                    path.display()
+                ));
+            }
+        }
+        let denies = dacl(path).iter().any(|ace| {
+            ace.kind == acl::ACCESS_DENIED
+                && ace.flags & 0x10 == 0
+                && ace.mask & PROFILE_DENY_MASK == PROFILE_DENY_MASK
+                && ace.sid == package
+        });
+        if !denies {
+            failures.push(format!(
+                "no explicit deny ACE for {package}: {} {}",
+                path.display(),
+                win32::sddl(path)
+            ));
+        }
+    }
+    for expected in [root.clone(), root.join("AC"), root.join("AC").join("Temp")] {
+        if !objects.iter().any(|path| folded(path) == folded(&expected)) {
+            failures.push(format!("missing {}", expected.display()));
+        }
+    }
+    assert!(
+        controls_allowed > 0,
+        "no read control was allowed: {lines:?}"
+    );
+    drop(child.0.stdin.take());
+    let status = child
+        .wait_within(BOUND)
+        .expect("the run exits within the bound");
+    let stderr = err_receive.recv_timeout(BOUND).unwrap_or_default();
+    assert!(failures.is_empty(), "{failures:#?}\nstderr: {stderr}");
+    assert!(status.success(), "{status}: {stderr}");
+    assert!(!root.exists(), "{} must be deleted", root.display());
+}
+
 fn compatibility_observations() {
     let fixture = Fixture::new();
-    let workspace = ac_workspace("ac-ws");
+    let workspace = user_scratch("ac-ws");
     let provider = fixture.provider(&[], &[]);
     for argv in [
         &["cmd", "/d", "/c", "echo ok"][..],

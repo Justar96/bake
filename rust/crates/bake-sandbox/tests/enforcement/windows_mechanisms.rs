@@ -1431,7 +1431,7 @@ pub(super) mod acl {
     /// `ACCESS_ALLOWED_ACE_TYPE`.
     pub const ACCESS_ALLOWED: u8 = 0x0;
     /// `ACCESS_DENIED_ACE_TYPE`, laid out as an allow ACE.
-    const ACCESS_DENIED: u8 = 0x1;
+    pub const ACCESS_DENIED: u8 = 0x1;
     /// `SYSTEM_MANDATORY_LABEL_ACE_TYPE`, laid out as an allow ACE.
     pub const MANDATORY_LABEL: u8 = 0x11;
     /// `OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE`, and nothing else: not

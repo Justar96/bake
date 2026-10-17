@@ -230,6 +230,8 @@ pub struct LocalProvider {
     windows_appcontainer: Option<Invocation>,
     /// The AppContainer runner's read and network grants.
     appcontainer_grants: windows_appcontainer::AppContainerGrants,
+    /// The AppContainer runner's observation tag; `None` in Bake.
+    appcontainer_profile_tag: Option<windows_appcontainer::ProfileTag>,
     probe_timeout: Duration,
     verdict: OnceCell<Verdict>,
 }
@@ -280,6 +282,7 @@ impl LocalProvider {
             windows_acl,
             windows_appcontainer,
             appcontainer_grants: windows_appcontainer::AppContainerGrants::new(),
+            appcontainer_profile_tag: None,
             probe_timeout: DEFAULT_PROBE_TIMEOUT,
             verdict: OnceCell::new(),
         }
@@ -346,7 +349,7 @@ impl LocalProvider {
     }
 
     /// Gives every AppContainer wrap `grants`: read roots and network
-    /// capabilities beyond the workspace and its private temp directory.
+    /// capabilities beyond the workspace and the run's own profile storage.
     /// They are validated on each wrap, and again by the runner, and a wrap
     /// whose grants fail is refused. The default grants nothing.
     pub fn with_windows_appcontainer_grants(
@@ -354,6 +357,19 @@ impl LocalProvider {
         grants: windows_appcontainer::AppContainerGrants,
     ) -> Self {
         self.appcontainer_grants = grants;
+        self
+    }
+
+    /// Passes `tag` to every AppContainer wrap, so each run's profile name
+    /// starts with [`ProfileTag::moniker_prefix`](windows_appcontainer::ProfileTag::moniker_prefix).
+    /// It only lets the caller attribute its own runs' profiles; creation
+    /// stays exclusive and random. Bake never sets one; the enforcement
+    /// tests do.
+    pub fn with_windows_appcontainer_profile_tag(
+        mut self,
+        tag: windows_appcontainer::ProfileTag,
+    ) -> Self {
+        self.appcontainer_profile_tag = Some(tag);
         self
     }
 
@@ -514,8 +530,12 @@ impl LocalProvider {
                 };
                 (
                     runner,
-                    windows_appcontainer_profile(policy, &self.appcontainer_grants)
-                        .map_err(|detail| refuse(Some(detail)))?,
+                    windows_appcontainer_profile(
+                        policy,
+                        &self.appcontainer_grants,
+                        self.appcontainer_profile_tag.as_ref(),
+                    )
+                    .map_err(|detail| refuse(Some(detail)))?,
                 )
             }
             Runner::Seatbelt => match profiles::seatbelt_profile_args(policy) {
@@ -586,14 +606,14 @@ fn windows_acl_profile(policy: &SandboxPolicy) -> Result<Vec<OsString>, String> 
 
 /// The AppContainer runner's profile for `policy` and `grants`. As for the
 /// restricted-token runner, extra writable roots are refused and the ambient
-/// temporary directory is never granted; the temp root must lie outside the
-/// workspace under both modes, because even a read-only run leaves the
-/// workspace read capability's standing ACE on the workspace, which every
-/// later private directory would inherit. The grants pass their path and disk checks
-/// against this host's locations before the wrap is returned.
+/// temporary directory is never granted: each run's `TEMP` is its own
+/// AppContainer profile's storage, which the runner creates and deletes.
+/// The grants pass their path and disk checks against this host's
+/// locations before the wrap is returned.
 fn windows_appcontainer_profile(
     policy: &SandboxPolicy,
     grants: &windows_appcontainer::AppContainerGrants,
+    tag: Option<&windows_appcontainer::ProfileTag>,
 ) -> Result<Vec<OsString>, String> {
     let mode = match policy.mode {
         SandboxMode::ReadOnly => windows_acl::RunnerMode::ReadOnly,
@@ -604,23 +624,17 @@ fn windows_appcontainer_profile(
     };
     if !policy.extra_writable_roots.is_empty() {
         return Err(
-            "the Windows AppContainer runner grants only the workspace and a private temporary directory; extra writable roots are not supported"
+            "the Windows AppContainer runner grants only the workspace and its own profile storage; extra writable roots are not supported"
                 .to_owned(),
         );
     }
-    let temp_root = canonical_path(&std::env::temp_dir());
     let workspace = crate::paths::normalize_lexically(&policy.workspace_root);
-    windows_acl::check_temp_root_outside_workspace(&workspace, &temp_root)?;
     grants
-        .validate_shape(
-            &workspace,
-            &temp_root,
-            &windows_appcontainer::HostRoots::from_env(),
-        )
+        .validate_shape(&workspace, &windows_appcontainer::HostRoots::from_env())
         .and_then(|()| grants.check_on_disk())
         .map_err(|error| error.to_string())?;
     Ok(windows_appcontainer::runner_profile_args(
-        mode, &workspace, &temp_root, grants,
+        mode, &workspace, grants, tag,
     ))
 }
 

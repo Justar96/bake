@@ -7,61 +7,87 @@
 //! qualification records otherwise.
 //!
 //! Pi has no sandbox; nothing here comes from Pi. The runner reuses the
-//! retained restricted-token runner's seams ([`super::windows_acl`]: the CLI
-//! shape, command-line quoting, the per-path DACL lock and merge, the
-//! kill-on-close Job given at creation, the drain before cleanup, and the
-//! private temp directory), which port Bake's TypeScript
-//! `packages/sandbox/sandbox-windows-acl`. The AppContainer launch follows
-//! Microsoft's "Launch an AppContainer" sequence and the mechanism probe in
-//! `tests/enforcement/windows_mechanisms.rs`.
+//! retained restricted-token runner's seams ([`super::windows_acl`]: the
+//! command-line quoting, the per-path DACL lock and merge, the kill-on-close
+//! Job given at creation, and the drain before cleanup), which port Bake's
+//! TypeScript `packages/sandbox/sandbox-windows-acl`. The AppContainer
+//! launch follows Microsoft's "Launch an AppContainer" sequence and the
+//! mechanism probe in `tests/enforcement/windows_mechanisms.rs`.
 //!
 //! ```text
-//! <exe> __bake-windows-appcontainer-run --workspace <dir> --temp <dir>
-//!     --mode <read-only|workspace-write> [--read <dir>]... [--network <grant>]... -- <argv>...
+//! <exe> __bake-windows-appcontainer-run --workspace <dir>
+//!     --mode <read-only|workspace-write> [--profile-tag <16 hex>]
+//!     [--read <dir>]... [--network <grant>]... -- <argv>...
 //! ```
 //!
 //! # Identities
 //!
 //! | Identity | Derived from | Granted | Lifetime |
 //! |---|---|---|---|
-//! | Package SID | `DeriveAppContainerSidFromAppContainerName` of a random [`RUN_MONIKER_PREFIX`] moniker; no profile is created | — | One run |
+//! | Package SID | `CreateAppContainerProfile` of a fresh random [`RUN_MONIKER_PREFIX`] name | Its own profile storage, by Windows | One run: the profile is deleted after the tree drains |
 //! | Workspace read capability | [`workspace_read_capability_name`] | [`READ_EXECUTE`] on the workspace | Standing ACE; in every run's token |
 //! | Workspace write capability | [`write_capability_name`] | [`WORKSPACE_WRITE_MASK`] on the workspace | Standing ACE; in the token only under `workspace-write` |
 //! | Read capability, one per read root | [`read_capability_name`] of the canonical root | [`READ_EXECUTE`] on that root | Standing ACE; in the token only when the run grants that root |
-//! | Temp capability | a random name per run | [`WORKSPACE_WRITE_MASK`] on the run's private directory | Revoked, and the directory removed, after the tree drains |
 //! | Network capabilities | [`NetworkGrant`] | — | In the token only when granted |
 //!
 //! An AppContainer access check needs both the user's own ACEs and an ACE
 //! for the package SID or one of the token's capability SIDs (Microsoft,
 //! "Launch an AppContainer"). Another workspace's capabilities are never in
 //! this token, so its standing ACEs do not apply here; two runs on one
-//! workspace hold different package SIDs and different temp capabilities.
+//! workspace hold different package SIDs and so different profile storage.
 //!
-//! # Why no profile
+//! # Per-run profile
 //!
-//! The first native run (PR 243, CI 39033317835) ran each workspace under a
-//! standing `CreateAppContainerProfile` profile. Windows then set the
-//! command's `TEMP` to that profile's `AC\Temp`, ignoring the environment the
-//! runner passed, in `read-only` as well as `workspace-write`. Microsoft
-//! documents this: for a profile, "Both the TMP and TEMP environment
-//! variables are also rerouted to a directory accessible to the AppContainer
-//! under the profile location", along with `LOCALAPPDATA` ("Launch an
-//! AppContainer"). A shared, standing profile therefore gave every run on a
-//! workspace one writable `TEMP` and gave `read-only` runs writable profile
-//! storage. This runner instead derives a fresh package SID per run with
-//! `DeriveAppContainerSidFromAppContainerName` and never registers a
-//! profile, as Chromium's sandbox does for its derived AppContainer type
-//! (`AppContainerBase::Open`, `AppContainerType::kDerived`). Whether
-//! `CreateProcessW` then keeps the runner's `TEMP` and creates no profile
-//! storage is **unproven** until the native scenarios in
-//! `tests/enforcement/windows_appcontainer.rs` pass. Before each launch the
-//! runner refuses when `GetAppContainerFolderPath` names an existing folder
-//! for the run's SID, so existing profile storage is never adopted
-//! silently.
+//! Native runs ruled out both earlier designs. A standing profile per
+//! workspace (CI 39033317835) gave every run on that workspace one `TEMP`:
+//! Windows set `TEMP`, `TMP`, and `LOCALAPPDATA` to the profile's `AC`
+//! folder and ignored the environment the runner passed, as Microsoft
+//! documents ("Both the TMP and TEMP environment variables are also
+//! rerouted to a directory accessible to the AppContainer under the profile
+//! location"). A package SID derived from an unregistered name
+//! (`DeriveAppContainerSidFromAppContainerName`, CI 39035318623) could not
+//! start any program: `CreateProcessW` failed with `ERROR_FILE_NOT_FOUND`.
 //!
-//! Every grant merges one explicit ACE into the DACL read under the per-path
-//! lock, keeping every other ACE; revocation removes only the run's temp
-//! capability from the DACL read again under that lock. No stale DACL
+//! Each run therefore creates its own profile, with a random name, and owns
+//! it:
+//!
+//! - **Observable names.** A caller may pass a [`ProfileTag`], which only
+//!   inserts itself into the name ([`run_moniker`]), so the caller can
+//!   attribute its own runs' profiles; the random part and the exclusive
+//!   creation stay. Bake never passes one.
+//! - **Exclusive creation.** Only a `CreateAppContainerProfile` that
+//!   succeeds grants cleanup authority. An existing name
+//!   (`HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS)`) or any other failure
+//!   refuses the run and deletes nothing.
+//! - **The profile's storage is the run's storage.** `GetAppContainerFolderPath`
+//!   names the profile's `LOCALAPPDATA`; its parent must be
+//!   `Packages\<moniker>`, the profile root, or the run is refused. The
+//!   runner passes `TEMP` and `TMP` as `<root>\AC\Temp`, the directory
+//!   Windows would choose, and creates no other temporary directory.
+//! - **Grant roots stay outside it.** A workspace or read root equal to or
+//!   containing the profile root is refused: its standing capability ACEs
+//!   would be inherited into the profile, where other runs holding them
+//!   could reach this run's storage.
+//! - **Read-only storage.** Under `read-only` the runner adds one explicit
+//!   deny ACE for the package SID with [`PROFILE_DENY_MASK`] to every object
+//!   under the profile root ([`MAX_PROFILE_OBJECTS`] at most, any reparse
+//!   point refused), first before process creation and again while the
+//!   command is still suspended, so objects that creation added are
+//!   covered. Explicit deny ACEs precede explicit allow ACEs in canonical
+//!   order, so the profile's own grant to the package no longer lets the
+//!   command create, write, delete, rename, or change the DACL or owner of
+//!   anything there. The user's and `SYSTEM`'s ACEs are kept, and nothing
+//!   outside the run's own profile root is touched. Under
+//!   `workspace-write` the storage stays writable, as `TEMP`.
+//! - **Deletion after settlement.** Once the Job is proved empty, the
+//!   runner calls `DeleteAppContainerProfile` and checks that the profile
+//!   root is gone. When the drain cannot prove the tree gone, the profile
+//!   is left in place and reported, never removed under a live process;
+//!   failed starts, a failed resume, and normal exits all reach this
+//!   cleanup.
+//!
+//! Every workspace and read grant merges one explicit ACE into the DACL
+//! read under the per-path lock, keeping every other ACE. No stale DACL
 //! snapshot is ever written back, and owner, group, and label stay as they
 //! are. Each grant root's own owner must be the token's user or its default
 //! owner, which on an elevated administrator token is `Administrators`.
@@ -73,25 +99,25 @@
 //!
 //! # What one run does
 //!
-//! 1. Validates the arguments and every root, before any grant.
-//! 2. Derives a fresh package SID from a random moniker, without creating
-//!    a profile, and refuses when profile storage already exists for it.
+//! 1. Validates the arguments and every root, and checks each grant root's
+//!    owner, before any change.
+//! 2. Creates the run's profile exclusively and resolves its root, refusing
+//!    a grant root that contains it.
 //! 3. Grants the standing ACEs that are missing (an exact standing ACE skips
-//!    the full-tree propagation), and under `workspace-write` creates and
-//!    grants the private temp directory.
+//!    the full-tree propagation), and under `read-only` adds the profile's
+//!    deny ACEs.
 //! 4. Creates a kill-on-close Job without breakaway, starts the command
 //!    suspended with `PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES`, born in
 //!    that Job (`PROC_THREAD_ATTRIBUTE_JOB_LIST`), inheriting only its
-//!    standard handles, with `TMP` and `TEMP` set to the private directory
-//!    under `workspace-write`, and resumes it.
+//!    standard handles, with `TEMP` and `TMP` set to the profile's
+//!    `AC\Temp`; under `read-only` it repeats the deny pass, then resumes.
 //! 5. Waits for the command, terminates the Job, waits until it reports no
-//!    active process, revokes the temp grant, removes the private directory,
-//!    and exits with the command's status.
+//!    active process, deletes the profile, and exits with the command's
+//!    status.
 //!
 //! A failure before the resume prints one `windows-appcontainer-run: ` line
 //! and exits [`RUNNER_FAILURE_EXIT`] without running the command; there is
-//! no unconfined or restricted-token fallback. When the drain cannot prove
-//! the Job empty, the private directory and its grant stay in place.
+//! no unconfined or restricted-token fallback.
 //!
 //! # Qualification blockers
 //!
@@ -99,10 +125,23 @@
 //! [`Enforcement::Partial`](crate::Enforcement::Partial), until native
 //! evidence settles each of these:
 //!
-//! - **Profileless launch.** That a derived, unregistered package SID
-//!   starts with the runner's environment (`TEMP`, `TMP`, `LOCALAPPDATA`)
-//!   and creates no profile storage. The first native run, with profiles,
-//!   failed exactly here (see [Why no profile](#why-no-profile)).
+//! - **Per-run profile, unproven natively.** That each run's `TEMP` is its
+//!   own profile's `AC\Temp` while two runs overlap, that the deny pass
+//!   leaves no writable object and survives the command's own attempts to
+//!   change a DACL or owner (an owner's implicit rights included), and that
+//!   the profile is gone after every settled run
+//!   (`tests/enforcement/windows_appcontainer.rs`).
+//! - **Registry and object storage.** A profile also has per-user registry
+//!   storage and a named-object namespace. The deny pass covers only the
+//!   filesystem; whether a `read-only` command can write that registry key
+//!   is unmeasured. Both are deleted with the profile.
+//! - **Brokered objects.** A system broker that creates an object under the
+//!   profile after the resume, with its own explicit ACEs, is not covered by
+//!   either deny pass; only the inheritable deny ACE on its parent reaches
+//!   it.
+//! - **Killed-runner residue.** A runner killed before its cleanup leaves
+//!   its profile (folder and registry storage) behind; nothing reclaims it
+//!   yet.
 //! - **Standing host mutations.** Each workspace and read root leaves
 //!   explicit ACEs propagated through its whole tree. Nothing removes them,
 //!   and they are not inert while their workspace lives: any later run on
@@ -119,24 +158,20 @@
 //!   stops at junctions, symbolic links, and other reparse points inside a
 //!   root, and which descendants it rewrites, is unproven; a descendant
 //!   owned by another principal still receives the inherited ACE.
-//! - **Junction and hard-link behavior** must be observed on native
-//!   Windows (`tests/enforcement/windows_appcontainer.rs`), not inferred
-//!   from the root checks.
-//! - **Capability grants.** That a capability SID's ACE satisfies the
-//!   AppContainer check, as the package SID's did in the mechanism probe.
 //! - **Drain completeness.** The shared `terminate_and_drain` returns as
 //!   soon as the Job counts no active process; it waits on member handles
-//!   only while that count is nonzero. Cleanup must not rely on that count
-//!   alone until native evidence shows no member can outlive it.
+//!   only while that count is nonzero. Profile deletion relies on that count
+//!   until native evidence shows no member can outlive it.
 //!
 //! # Known limits and unverified behavior
 //!
-//! - **Not qualified.** One native run (CI 39033317835, the profile
-//!   design) passed 34 enforcement cases and failed the two `TEMP` cases
-//!   above; the profileless design has not run natively. In that run `cmd`,
+//! - **Not qualified.** With a standing profile (CI 39033317835), 34
+//!   enforcement cases passed and the two `TEMP` cases failed; `cmd`,
 //!   Windows PowerShell, and `pwsh` started and printed through inherited
-//!   pipes; `git --version` failed with "could not open '/dev/null' for
-//!   reading and writing: Permission denied". Cargo is untested.
+//!   pipes, and `git --version` failed with "could not open '/dev/null' for
+//!   reading and writing: Permission denied". With derived, unregistered
+//!   SIDs (CI 39035318623) no program started. The per-run profile has not
+//!   run natively. Cargo is untested.
 //! - **Reads are not limited to the grants.** Windows grants
 //!   `ALL APPLICATION PACKAGES` read and execute on most of `%SystemRoot%`
 //!   and `Program Files`, and on any object whose DACL names it; those
@@ -150,8 +185,7 @@
 //!   `internetClient`, while a loopback connection timed out with and
 //!   without capabilities; a timeout is not proof of a deliberate denial.
 //!   Firewall-service state and enterprise policy are untested.
-//! - **Residue.** A renamed root leaves its ACEs behind. A killed runner
-//!   leaves its private directory and its temp ACE.
+//! - **Residue.** A renamed root leaves its ACEs behind.
 //! - **Grant propagation is eager.** The first grant on a root walks the
 //!   whole tree.
 //! - **A FAT volume has no DACLs**: a grant root on one fails.
@@ -192,8 +226,17 @@ pub const READ_EXECUTE: u32 = 0x0012_00A9;
 /// so a confined command cannot widen its own grant.
 pub const WORKSPACE_WRITE_MASK: u32 = READ_EXECUTE | GRANT_MASK;
 
-/// The prefix of each run's private temporary directory under `--temp`.
-pub const PRIVATE_TEMP_PREFIX: &str = "bake-ac-";
+/// What the `read-only` deny ACE takes from the package SID on every object
+/// under the run's profile root: `FILE_WRITE_DATA` (add file),
+/// `FILE_APPEND_DATA` (add subdirectory), `FILE_WRITE_EA`,
+/// `FILE_DELETE_CHILD`, `FILE_WRITE_ATTRIBUTES`, `DELETE`, `WRITE_DAC`, and
+/// `WRITE_OWNER`. Reading, listing, and traversal stay allowed.
+pub const PROFILE_DENY_MASK: u32 =
+    0x0002 | 0x0004 | 0x0010 | 0x0040 | 0x0100 | 0x0001_0000 | 0x0004_0000 | 0x0008_0000;
+
+/// The most objects one `read-only` deny pass covers under a profile root;
+/// a larger tree refuses the run. A fresh profile holds a few dozen.
+pub const MAX_PROFILE_OBJECTS: usize = 4096;
 
 /// The most read roots one run may grant.
 pub const MAX_READ_ROOTS: usize = 64;
@@ -285,12 +328,12 @@ pub enum GrantError {
         /// The root inside it.
         inner: PathBuf,
     },
-    /// A read root equal to, inside, or containing the workspace or the temp
-    /// root, whose ACEs the runner owns.
+    /// A read root equal to, inside, or containing the workspace, whose ACEs
+    /// the runner owns.
     Overlaps {
         /// The read root.
         root: PathBuf,
-        /// What it overlaps: `workspace` or `temp root`.
+        /// What it overlaps: `workspace`.
         what: &'static str,
         /// That directory.
         other: PathBuf,
@@ -442,7 +485,7 @@ impl HostRoots {
 }
 
 /// The read roots and network capabilities a run grants beyond the
-/// workspace and its private temp directory. Empty by default: no extra
+/// workspace and the run's own profile storage. Empty by default: no extra
 /// reads and no network.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AppContainerGrants {
@@ -483,17 +526,12 @@ impl AppContainerGrants {
 
     /// The path-only checks, which do no I/O: at most [`MAX_READ_ROOTS`]
     /// read roots, each absolute, valid Unicode, not a volume root, given
-    /// once, not nested in another, outside and not containing `workspace`
-    /// and `temp_root`, not equal to or containing a broad host location,
+    /// once, not nested in another, outside and not containing `workspace`,
+    /// not equal to or containing a broad host location,
     /// and not overlapping a system location in either direction; network
     /// grants given once and without [`NetworkGrant::Loopback`].
     /// Comparisons ignore ASCII case on Windows.
-    pub fn validate_shape(
-        &self,
-        workspace: &Path,
-        temp_root: &Path,
-        host: &HostRoots,
-    ) -> Result<(), GrantError> {
+    pub fn validate_shape(&self, workspace: &Path, host: &HostRoots) -> Result<(), GrantError> {
         if self.read_roots.len() > MAX_READ_ROOTS {
             return Err(GrantError::TooManyReadRoots(self.read_roots.len()));
         }
@@ -520,14 +558,12 @@ impl AppContainerGrants {
                     }
                 }
             }
-            for (what, other) in [("workspace", workspace), ("temp root", temp_root)] {
-                if under(root, other) || under(other, root) {
-                    return Err(GrantError::Overlaps {
-                        root: root.clone(),
-                        what,
-                        other: other.to_path_buf(),
-                    });
-                }
+            if under(root, workspace) || under(workspace, root) {
+                return Err(GrantError::Overlaps {
+                    root: root.clone(),
+                    what: "workspace",
+                    other: workspace.to_path_buf(),
+                });
             }
             if let Some(system) = host
                 .system
@@ -632,10 +668,134 @@ fn hex_digest(domain: &str, value: &str) -> String {
         .collect()
 }
 
-/// The prefix of each run's random AppContainer moniker, from which its
-/// package SID is derived; 32 hex digits follow, within the API's
-/// 64-character limit. No profile of that name is created.
+/// The prefix of each run's random AppContainer profile name. Without a
+/// [`ProfileTag`] 32 random hex digits follow; with one, the tag, a dot,
+/// and the 32 digits, within `CreateAppContainerProfile`'s 64-character
+/// limit ([`run_moniker`]).
 pub const RUN_MONIKER_PREFIX: &str = "bake.run.";
+
+/// An observation namespace for run profile names: 16 lowercase hex digits
+/// a caller mints at random and passes with `--profile-tag`, so it can
+/// tell its own runs' profiles from any other process's. It names a
+/// profile; it never selects one. Creation stays exclusive, a random part
+/// still follows the tag, and an existing name is still refused, so no tag
+/// lets a run adopt or delete a profile it did not create. Bake itself
+/// never sets one; the enforcement tests do, to attribute and reclaim the
+/// profiles of their own runs, failed starts and killed runners included.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ProfileTag(String);
+
+impl ProfileTag {
+    /// The number of hex digits a tag has.
+    pub const LEN: usize = 16;
+
+    /// `text` as a tag: exactly [`ProfileTag::LEN`] lowercase hex digits.
+    pub fn parse(text: &str) -> Option<Self> {
+        (text.len() == Self::LEN
+            && text
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)))
+        .then(|| Self(text.to_owned()))
+    }
+
+    /// The tag's text.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// The prefix every profile name of a run with this tag starts with:
+    /// `bake.run.<tag>.`.
+    pub fn moniker_prefix(&self) -> String {
+        format!("{RUN_MONIKER_PREFIX}{}.", self.0)
+    }
+}
+
+impl fmt::Display for ProfileTag {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// A run's profile name from its 32 random hex digits: `bake.run.<random>`,
+/// or `bake.run.<tag>.<random>` under `tag`.
+pub fn run_moniker(tag: Option<&ProfileTag>, random: &str) -> String {
+    match tag {
+        Some(tag) => format!("{}{random}", tag.moniker_prefix()),
+        None => format!("{RUN_MONIKER_PREFIX}{random}"),
+    }
+}
+
+/// The profile root for the `LOCALAPPDATA` folder
+/// `GetAppContainerFolderPath` reports for profile `moniker`:
+/// `<...>\Packages\<moniker>` when the folder is that root's `AC`
+/// directory or the root itself, compared ignoring ASCII case. Any other
+/// layout is `None`, and the runner refuses it rather than guess which tree
+/// it owns.
+pub fn profile_root_for(folder: &Path, moniker: &str) -> Option<PathBuf> {
+    let name_is = |path: &Path, expected: &str| {
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.eq_ignore_ascii_case(expected))
+    };
+    let root = if name_is(folder, "AC") {
+        folder.parent()?
+    } else {
+        folder
+    };
+    (name_is(root, moniker)
+        && root
+            .parent()
+            .is_some_and(|parent| name_is(parent, "Packages")))
+    .then(|| root.to_path_buf())
+}
+
+/// Refuses a workspace or read root equal to or containing the run's
+/// profile root: its standing capability ACEs would be inherited into the
+/// profile, where any other run holding those capabilities could reach
+/// this run's storage.
+pub fn check_profile_outside_grants(
+    profile_root: &Path,
+    workspace: &Path,
+    read_roots: &[PathBuf],
+) -> Result<(), String> {
+    for (what, root) in std::iter::once(("workspace", workspace))
+        .chain(read_roots.iter().map(|root| ("read root", root.as_path())))
+    {
+        if under(profile_root, root) {
+            return Err(format!(
+                "the {what} {} contains the run's AppContainer profile {}; choose a narrower directory",
+                root.display(),
+                profile_root.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// What a `CreateAppContainerProfile` status means for ownership.
+#[cfg_attr(not(any(windows, test)), allow(dead_code))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProfileCreation {
+    /// Created by this call: the run owns it and must delete it.
+    Created,
+    /// The name already exists: someone else's, never adopted or deleted.
+    AlreadyExists,
+    /// Any other failure: nothing is owned.
+    Failed,
+}
+
+/// `HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS)`.
+#[cfg_attr(not(any(windows, test)), allow(dead_code))]
+const HRESULT_ALREADY_EXISTS: i32 = 0x8007_00B7_u32 as i32;
+
+#[cfg_attr(not(any(windows, test)), allow(dead_code))]
+fn classify_profile_creation(status: i32) -> ProfileCreation {
+    match status {
+        HRESULT_ALREADY_EXISTS => ProfileCreation::AlreadyExists,
+        status if status >= 0 => ProfileCreation::Created,
+        _ => ProfileCreation::Failed,
+    }
+}
 
 /// The capability name whose SID carries a workspace's read grant.
 pub fn workspace_read_capability_name(workspace: &str) -> String {
@@ -662,10 +822,18 @@ pub fn read_capability_name(root: &str) -> String {
 pub fn runner_profile_args(
     mode: RunnerMode,
     workspace: &Path,
-    temp_root: &Path,
     grants: &AppContainerGrants,
+    tag: Option<&ProfileTag>,
 ) -> Vec<OsString> {
-    let mut args = windows_acl::runner_profile_args(mode, workspace, temp_root);
+    let mut args = vec![
+        "--workspace".into(),
+        workspace.as_os_str().to_owned(),
+        "--mode".into(),
+        mode.as_str().into(),
+    ];
+    if let Some(tag) = tag {
+        args.extend(["--profile-tag".into(), tag.as_str().into()]);
+    }
     args.extend(grants.args());
     args
 }
@@ -674,17 +842,17 @@ pub fn runner_profile_args(
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Cli {
     workspace: PathBuf,
-    temp: PathBuf,
     mode: RunnerMode,
     grants: AppContainerGrants,
+    tag: Option<ProfileTag>,
     command: Vec<OsString>,
 }
 
 /// The run, or the detail of its usage error.
 fn parse(args: Vec<OsString>) -> Result<Cli, String> {
     let mut workspace = None;
-    let mut temp = None;
     let mut mode = None;
+    let mut tag = None;
     let mut grants = AppContainerGrants::new();
     let mut rest = args.into_iter();
     let mut command = None;
@@ -698,8 +866,8 @@ fn parse(args: Vec<OsString>) -> Result<Cli, String> {
         };
         let slot = match flag.to_str() {
             Some("--workspace") => &mut workspace,
-            Some("--temp") => &mut temp,
             Some("--mode") => &mut mode,
+            Some("--profile-tag") => &mut tag,
             Some("--read") => {
                 grants = grants.with_read_root(value);
                 continue;
@@ -719,7 +887,14 @@ fn parse(args: Vec<OsString>) -> Result<Cli, String> {
         }
     }
     let workspace = workspace.ok_or("missing --workspace")?;
-    let temp = temp.ok_or("missing --temp")?;
+    let tag = match tag {
+        None => None,
+        Some(text) => Some(
+            text.to_str()
+                .and_then(ProfileTag::parse)
+                .ok_or_else(|| format!("invalid profile tag: {}", text.to_string_lossy()))?,
+        ),
+    };
     let mode = match mode.as_ref().and_then(|mode| mode.to_str()) {
         Some("read-only") => RunnerMode::ReadOnly,
         Some("workspace-write") => RunnerMode::WorkspaceWrite,
@@ -743,24 +918,21 @@ fn parse(args: Vec<OsString>) -> Result<Cli, String> {
     }
     Ok(Cli {
         workspace: workspace.into(),
-        temp: temp.into(),
         mode,
         grants,
+        tag,
         command,
     })
 }
 
-/// Every check before the first grant: the arguments, both directories,
-/// the temp root outside the workspace, and the grants' shape and disk
-/// state against `host`.
+/// Every check before the first change: the arguments, the workspace, and
+/// the grants' shape and disk state against `host`.
 fn checked(args: Vec<OsString>, host: &HostRoots) -> Result<Cli, String> {
     let cli = parse(args)?;
     check_directory("--workspace", &cli.workspace)?;
     check_not_reparse_point(&cli.workspace)?;
-    check_directory("--temp", &cli.temp)?;
-    windows_acl::check_temp_root_outside_workspace(&cli.workspace, &cli.temp)?;
     cli.grants
-        .validate_shape(&cli.workspace, &cli.temp, host)
+        .validate_shape(&cli.workspace, host)
         .and_then(|()| cli.grants.check_on_disk())
         .map_err(|error| error.to_string())?;
     if cli.workspace.to_str().is_none() {

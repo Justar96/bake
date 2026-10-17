@@ -15,14 +15,17 @@ use std::ptr::{null, null_mut};
 
 use windows_sys::Win32::Foundation::{ERROR_SUCCESS, HANDLE, LocalFree};
 use windows_sys::Win32::Security::Authorization::{
-    ConvertSidToStringSidW, GetNamedSecurityInfoW, SE_FILE_OBJECT,
+    ConvertSidToStringSidW, DENY_ACCESS, EXPLICIT_ACCESS_W, GetNamedSecurityInfoW,
+    NO_MULTIPLE_TRUSTEE, SE_FILE_OBJECT, TRUSTEE_IS_SID, TRUSTEE_IS_UNKNOWN, TRUSTEE_W,
 };
 use windows_sys::Win32::Security::Isolation::{
-    DeriveAppContainerSidFromAppContainerName, GetAppContainerFolderPath,
+    CreateAppContainerProfile, DeleteAppContainerProfile, GetAppContainerFolderPath,
 };
 use windows_sys::Win32::Security::{
-    DeriveCapabilitySidsFromName, FreeSid, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
-    SECURITY_CAPABILITIES, SID_AND_ATTRIBUTES, TOKEN_OWNER, TOKEN_USER, TokenOwner, TokenUser,
+    ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, DeriveCapabilitySidsFromName, FreeSid, GetAce,
+    NO_INHERITANCE, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SECURITY_CAPABILITIES,
+    SID_AND_ATTRIBUTES, SUB_CONTAINERS_AND_OBJECTS_INHERIT, TOKEN_OWNER, TOKEN_USER, TokenOwner,
+    TokenUser,
 };
 use windows_sys::Win32::System::Com::CoTaskMemFree;
 use windows_sys::Win32::System::Console::SetConsoleCtrlHandler;
@@ -38,13 +41,15 @@ use bake_process::windows_job::Job;
 use super::super::windows_acl::build_command_line;
 use super::super::windows_acl::sys::{
     Attributes, Local, Result, Sid, current_token, environment_block, grant_exact, last_error,
-    owned_handle, revoke_write, same_sid, standard_handles, terminate_and_drain, token_information,
-    wait_for_exit, wide, win32_error,
+    merge_and_apply, owned_handle, read_dacl, same_sid, standard_handles, terminate_and_drain,
+    token_information, wait_for_exit, wide, win32_error,
 };
 use super::{
-    Cli, PRIVATE_TEMP_PREFIX, READ_EXECUTE, RUN_MONIKER_PREFIX, RUNNER_FAILURE_EXIT,
-    RUNNER_SIGNATURE, RunnerMode, WORKSPACE_WRITE_MASK, read_capability_name,
-    workspace_read_capability_name, write_capability_name,
+    Cli, MAX_PROFILE_OBJECTS, PROFILE_DENY_MASK, ProfileCreation, READ_EXECUTE,
+    RUNNER_FAILURE_EXIT, RUNNER_SIGNATURE, RunnerMode, WORKSPACE_WRITE_MASK,
+    check_not_reparse_point, check_profile_outside_grants, classify_profile_creation,
+    profile_root_for, read_capability_name, run_moniker, workspace_read_capability_name,
+    write_capability_name,
 };
 
 /// `SE_GROUP_ENABLED`: a capability the access check consults.
@@ -78,72 +83,6 @@ fn random_hex() -> Result<String> {
     ring::rand::SecureRandom::fill(&rng, &mut bytes)
         .map_err(|_| "the OS random source failed".to_owned())?;
     Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
-}
-
-/// The package SID `DeriveAppContainerSidFromAppContainerName` derives for
-/// `moniker`. No profile is created or looked up.
-fn derived_package_sid(moniker: &str) -> Result<Sid> {
-    let units = wide(OsStr::new(moniker))?;
-    let mut sid: PSID = null_mut();
-    // SAFETY: a NUL-terminated name and a valid out pointer.
-    let status = unsafe { DeriveAppContainerSidFromAppContainerName(units.as_ptr(), &mut sid) };
-    if status < 0 || sid.is_null() {
-        return Err(format!(
-            "DeriveAppContainerSidFromAppContainerName failed ({moniker}): HRESULT {status:#010x}"
-        ));
-    }
-    let copy = Sid::copy_of(sid, "package SID");
-    // SAFETY: documented as freed with `FreeSid`, and freed once.
-    unsafe { FreeSid(sid) };
-    copy
-}
-
-/// Refuses a package SID for which profile storage already exists: Windows
-/// reroutes `TEMP`, `TMP`, and `LOCALAPPDATA` into a profile's folder, which
-/// the package can write, so a run must never adopt one. Only an explicit
-/// not-found error or a path confirmed absent passes; other lookup errors
-/// refuse the run.
-fn refuse_existing_profile_storage(package: &Sid) -> Result<()> {
-    let text = sid_text(package.as_psid());
-    let units = wide(OsStr::new(&text))?;
-    let mut path: *mut u16 = null_mut();
-    // SAFETY: a NUL-terminated SID string and a valid out pointer; the
-    // returned string is freed with `CoTaskMemFree` as documented.
-    let status = unsafe { GetAppContainerFolderPath(units.as_ptr(), &mut path) };
-    if status < 0 {
-        // HRESULT_FROM_WIN32: file, path, or object not found.
-        if matches!(status as u32, 0x8007_0002 | 0x8007_0003 | 0x8007_0490) {
-            return Ok(());
-        }
-        return Err(format!(
-            "GetAppContainerFolderPath failed for {text}: HRESULT {status:#010x}"
-        ));
-    }
-    if path.is_null() {
-        return Err("GetAppContainerFolderPath returned no path".to_owned());
-    }
-    let mut length = 0;
-    // SAFETY: a NUL-terminated string returned by the call.
-    while unsafe { *path.add(length) } != 0 {
-        length += 1;
-    }
-    // SAFETY: `length` units precede the NUL.
-    let folder = OsString::from_wide(unsafe { std::slice::from_raw_parts(path, length) });
-    // SAFETY: allocated by the call, freed once.
-    unsafe { CoTaskMemFree(path.cast()) };
-    let exists = Path::new(&folder).try_exists().map_err(|error| {
-        format!(
-            "cannot inspect profile storage {}: {error}",
-            Path::new(&folder).display()
-        )
-    })?;
-    if exists {
-        return Err(format!(
-            "profile storage {} already exists for AppContainer {text}; refusing to run in it",
-            Path::new(&folder).display()
-        ));
-    }
-    Ok(())
 }
 
 /// Frees a `DeriveCapabilitySidsFromName` array: each SID, then the array.
@@ -256,55 +195,282 @@ fn utf8(path: &Path) -> Result<&str> {
         .ok_or_else(|| format!("{} is not valid Unicode", path.display()))
 }
 
-/// The run's private temp directory and its capability.
-struct PrivateTemp {
-    path: PathBuf,
-    sid: Sid,
+/// A NUL-terminated wide string returned by a Win32 call and freed with
+/// `CoTaskMemFree`, copied out and freed once.
+fn take_co_task_string(text: *mut u16) -> OsString {
+    let mut length = 0;
+    // SAFETY: a NUL-terminated string returned by the call.
+    while unsafe { *text.add(length) } != 0 {
+        length += 1;
+    }
+    // SAFETY: `length` units precede the NUL.
+    let out = OsString::from_wide(unsafe { std::slice::from_raw_parts(text, length) });
+    // SAFETY: allocated by the call, freed once.
+    unsafe { CoTaskMemFree(text.cast()) };
+    out
 }
 
-impl PrivateTemp {
-    fn create(root: &Path) -> Result<Self> {
-        let name = random_hex()?;
-        // The capability first: a failure leaves no directory behind.
-        let sid = capability_sid(&format!("bake.temp.{name}"))?;
-        let path = root.join(format!("{PRIVATE_TEMP_PREFIX}{name}"));
-        std::fs::create_dir(&path).map_err(|error| {
-            format!(
-                "cannot create the private temp directory {}: {error}",
-                path.display()
+/// The run's own AppContainer profile. It exists only after a
+/// `CreateAppContainerProfile` this run made succeeded, and only it grants
+/// the authority to delete that profile; [`OwnedProfile::delete`] is the one
+/// way it ends besides being left in place on purpose.
+struct OwnedProfile {
+    moniker: String,
+    sid: Sid,
+    /// `Packages\<moniker>`, once resolved and checked.
+    root: Option<PathBuf>,
+}
+
+impl OwnedProfile {
+    /// Creates profile `moniker` exclusively. An existing profile of that
+    /// name, or any other failure, is an error and owns nothing.
+    fn create(moniker: &str) -> Result<Self> {
+        let name = wide(OsStr::new(moniker))?;
+        let display = wide(OsStr::new("Bake sandbox run"))?;
+        let mut sid: PSID = null_mut();
+        // SAFETY: NUL-terminated strings, no capabilities, a valid out
+        // pointer.
+        let status = unsafe {
+            CreateAppContainerProfile(
+                name.as_ptr(),
+                display.as_ptr(),
+                display.as_ptr(),
+                null(),
+                0,
+                &mut sid,
             )
-        })?;
-        Ok(Self { path, sid })
+        };
+        match classify_profile_creation(status) {
+            ProfileCreation::Created => {}
+            ProfileCreation::AlreadyExists => {
+                return Err(format!(
+                    "AppContainer profile {moniker} already exists; refusing to adopt or delete it"
+                ));
+            }
+            ProfileCreation::Failed => {
+                return Err(format!(
+                    "CreateAppContainerProfile failed ({moniker}): HRESULT {status:#010x}"
+                ));
+            }
+        }
+        // From here the profile is this run's: it is either handed back as an
+        // owner, whose cleanup deletes it, or deleted here.
+        let copied = if sid.is_null() {
+            Err("CreateAppContainerProfile returned no SID".to_owned())
+        } else {
+            let copy = Sid::copy_of(sid, "package SID");
+            // SAFETY: documented as freed with `FreeSid`, and freed once.
+            unsafe { FreeSid(sid) };
+            copy
+        };
+        match copied {
+            Ok(sid) => Ok(Self {
+                moniker: moniker.to_owned(),
+                sid,
+                root: None,
+            }),
+            Err(error) => {
+                // No SID means no run; delete what was created right away.
+                let delete = delete_profile(moniker);
+                Err(match delete {
+                    Ok(()) => error,
+                    Err(delete) => format!("{error}; then {delete}"),
+                })
+            }
+        }
     }
 
-    /// Revokes the temp grant and removes the directory, which holds no
-    /// links the removal could follow. Returns every failure.
-    fn remove(self) -> Vec<String> {
+    /// Resolves and checks the profile root from `GetAppContainerFolderPath`
+    /// and records it for deletion's check.
+    fn resolve_root(&mut self) -> Result<PathBuf> {
+        let text = sid_text(self.sid.as_psid());
+        let units = wide(OsStr::new(&text))?;
+        let mut path: *mut u16 = null_mut();
+        // SAFETY: a NUL-terminated SID string and a valid out pointer; the
+        // returned string is freed by `take_co_task_string`.
+        let status = unsafe { GetAppContainerFolderPath(units.as_ptr(), &mut path) };
+        let folder = (!path.is_null()).then(|| PathBuf::from(take_co_task_string(path)));
+        let Some(folder) = folder.filter(|_| status >= 0) else {
+            return Err(format!(
+                "GetAppContainerFolderPath failed for {text}: HRESULT {status:#010x}"
+            ));
+        };
+        let root = profile_root_for(&folder, &self.moniker).ok_or_else(|| {
+            format!(
+                "the profile folder {} is not under Packages\\{}; refusing to use it",
+                folder.display(),
+                self.moniker
+            )
+        })?;
+        // Recorded first, so deletion checks this root whatever fails next.
+        self.root = Some(root.clone());
+        check_not_reparse_point(&root)?;
+        if !root.is_dir() {
+            return Err(format!(
+                "the profile root {} is not a directory",
+                root.display()
+            ));
+        }
+        Ok(root)
+    }
+
+    /// Deletes the profile and checks that its root is gone. Returns every
+    /// failure.
+    fn delete(self) -> Vec<String> {
         let mut failures = Vec::new();
-        if let Err(error) = revoke_write(&self.path, &self.sid) {
+        if let Err(error) = delete_profile(&self.moniker) {
             failures.push(error);
         }
-        if let Err(error) = std::fs::remove_dir_all(&self.path) {
-            failures.push(format!("cannot remove {}: {error}", self.path.display()));
+        if let Some(root) = &self.root {
+            match root.try_exists() {
+                Ok(false) => {}
+                Ok(true) => failures.push(format!(
+                    "the profile storage {} remains after DeleteAppContainerProfile",
+                    root.display()
+                )),
+                Err(error) => failures.push(format!(
+                    "cannot inspect the profile storage {}: {error}",
+                    root.display()
+                )),
+            }
         }
         failures
     }
 }
 
+fn delete_profile(moniker: &str) -> Result<()> {
+    let name = wide(OsStr::new(moniker))?;
+    // SAFETY: a NUL-terminated name of a profile this run created.
+    let status = unsafe { DeleteAppContainerProfile(name.as_ptr()) };
+    if status < 0 {
+        return Err(format!(
+            "DeleteAppContainerProfile failed ({moniker}): HRESULT {status:#010x}"
+        ));
+    }
+    Ok(())
+}
+
+/// `ACCESS_DENIED_ACE_TYPE`.
+const ACCESS_DENIED_ACE_TYPE: u8 = 1;
+/// `INHERITED_ACE`.
+const INHERITED_ACE: u8 = 0x10;
+
+/// Whether `dacl` already holds this runner's explicit deny ACE for `sid`
+/// with every right of [`PROFILE_DENY_MASK`].
+fn has_profile_deny(dacl: *mut ACL, sid: &Sid) -> Result<bool> {
+    if dacl.is_null() {
+        return Ok(false);
+    }
+    // SAFETY: `dacl` is a valid ACL owned by a live descriptor.
+    let count = unsafe { (*dacl).AceCount };
+    for index in 0..u32::from(count) {
+        let mut ace: *mut c_void = null_mut();
+        // SAFETY: `index` is below the ACL's ACE count.
+        if unsafe { GetAce(dacl, index, &mut ace) } == 0 || ace.is_null() {
+            return Err(last_error("GetAce", index));
+        }
+        // SAFETY: every ACE starts with an ACE_HEADER.
+        let header = unsafe { *ace.cast::<ACE_HEADER>() };
+        // A deny ACE has the allow ACE's layout.
+        if header.AceType != ACCESS_DENIED_ACE_TYPE
+            || header.AceFlags & INHERITED_ACE != 0
+            || usize::from(header.AceSize) < size_of::<ACCESS_ALLOWED_ACE>()
+        {
+            continue;
+        }
+        let body = ace.cast::<ACCESS_ALLOWED_ACE>();
+        // SAFETY: a deny ACE of at least this size holds a mask and an
+        // inline SID at `SidStart`.
+        let (mask, ace_sid) = unsafe {
+            (
+                (*body).Mask,
+                std::ptr::addr_of_mut!((*body).SidStart).cast::<c_void>(),
+            )
+        };
+        if mask & PROFILE_DENY_MASK == PROFILE_DENY_MASK && same_sid(ace_sid, sid) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Adds the explicit deny ACE for `package` to `path` unless it is already
+/// there; inheritable (OI|CI) on a directory. Returns whether it wrote.
+/// Profile paths are this run's alone, so no cross-run lock is taken.
+fn deny_profile_object(path: &Path, package: &Sid, directory: bool) -> Result<bool> {
+    let (_descriptor, dacl) = read_dacl(path)?;
+    if has_profile_deny(dacl, package)? {
+        return Ok(false);
+    }
+    let entry = EXPLICIT_ACCESS_W {
+        grfAccessPermissions: PROFILE_DENY_MASK,
+        grfAccessMode: DENY_ACCESS,
+        grfInheritance: if directory {
+            SUB_CONTAINERS_AND_OBJECTS_INHERIT
+        } else {
+            NO_INHERITANCE
+        },
+        Trustee: TRUSTEE_W {
+            pMultipleTrustee: null_mut(),
+            MultipleTrusteeOperation: NO_MULTIPLE_TRUSTEE,
+            TrusteeForm: TRUSTEE_IS_SID,
+            TrusteeType: TRUSTEE_IS_UNKNOWN,
+            ptstrName: package.as_psid().cast(),
+        },
+    };
+    merge_and_apply(path, &entry, dacl, "profile deny")?;
+    Ok(true)
+}
+
+/// The `read-only` deny pass: every object under `root`, the root
+/// included, gets the package's explicit deny ACE. A reparse point, an
+/// unreadable entry, or more than [`MAX_PROFILE_OBJECTS`] objects fails the
+/// pass, and the run with it. Returns how many objects it wrote.
+fn deny_profile_tree(root: &Path, package: &Sid) -> Result<usize> {
+    let mut pending = vec![root.to_path_buf()];
+    let (mut seen, mut written) = (0usize, 0usize);
+    while let Some(path) = pending.pop() {
+        seen += 1;
+        if seen > MAX_PROFILE_OBJECTS {
+            return Err(format!(
+                "the profile {} holds more than {MAX_PROFILE_OBJECTS} objects",
+                root.display()
+            ));
+        }
+        check_not_reparse_point(&path)?;
+        let meta = std::fs::symlink_metadata(&path)
+            .map_err(|error| format!("cannot inspect {}: {error}", path.display()))?;
+        let directory = meta.is_dir();
+        if deny_profile_object(&path, package, directory)? {
+            written += 1;
+        }
+        if directory {
+            let listing = std::fs::read_dir(&path)
+                .map_err(|error| format!("cannot list {}: {error}", path.display()))?;
+            for entry in listing {
+                let entry =
+                    entry.map_err(|error| format!("cannot list {}: {error}", path.display()))?;
+                pending.push(entry.path());
+            }
+        }
+    }
+    Ok(written)
+}
+
 pub(super) fn run(cli: &Cli) -> i32 {
-    let mut temp = None;
+    let mut profile = None;
     let mut settled = true;
-    let outcome = run_inner(cli, &mut temp, &mut settled);
-    match temp {
-        Some(temp) if settled => {
-            for failure in temp.remove() {
+    let outcome = run_inner(cli, &mut profile, &mut settled);
+    match profile {
+        Some(profile) if settled => {
+            for failure in profile.delete() {
                 eprintln!("{RUNNER_SIGNATURE}: cleanup: {failure}");
             }
         }
-        // A process that may still run must not lose its directory or grant.
-        Some(temp) => eprintln!(
-            "{RUNNER_SIGNATURE}: cleanup: {} and its temp grant are left in place: the confined tree's exit was not confirmed",
-            temp.path.display()
+        // A process that may still run must not lose its storage.
+        Some(profile) => eprintln!(
+            "{RUNNER_SIGNATURE}: cleanup: AppContainer profile {} is left in place: the confined tree's exit was not confirmed",
+            profile.moniker
         ),
         None => {}
     }
@@ -314,21 +480,23 @@ pub(super) fn run(cli: &Cli) -> i32 {
     }
 }
 
-fn run_inner(cli: &Cli, temp: &mut Option<PrivateTemp>, settled: &mut bool) -> Result<u32> {
+fn run_inner(cli: &Cli, profile: &mut Option<OwnedProfile>, settled: &mut bool) -> Result<u32> {
     // SAFETY: plain call with no handler routine.
     if unsafe { SetConsoleCtrlHandler(None, 1) } == 0 {
         return Err(last_error("SetConsoleCtrlHandler", "ignore Ctrl+C"));
     }
     let owners = accepted_owners()?;
     let workspace = utf8(&cli.workspace)?;
-    // Every owner check before the first grant, so a refused root leaves
-    // every DACL untouched.
+    // Every owner check before the first change, so a refused root leaves
+    // every DACL untouched and no profile behind.
     check_owner(&cli.workspace, &owners)?;
     for root in cli.grants.read_roots() {
         check_owner(root, &owners)?;
     }
-    let package = derived_package_sid(&format!("{RUN_MONIKER_PREFIX}{}", random_hex()?))?;
-    refuse_existing_profile_storage(&package)?;
+    let moniker = run_moniker(cli.tag.as_ref(), &random_hex()?);
+    let owned = profile.insert(OwnedProfile::create(&moniker)?);
+    let root = owned.resolve_root()?;
+    check_profile_outside_grants(&root, &cli.workspace, cli.grants.read_roots())?;
     let read = capability_sid(&workspace_read_capability_name(workspace))?;
     grant_exact(&cli.workspace, &read, READ_EXECUTE)?;
     let mut capabilities: Vec<Sid> = vec![read];
@@ -337,12 +505,13 @@ fn run_inner(cli: &Cli, temp: &mut Option<PrivateTemp>, settled: &mut bool) -> R
         grant_exact(root, &sid, READ_EXECUTE)?;
         capabilities.push(sid);
     }
-    if cli.mode == RunnerMode::WorkspaceWrite {
+    let read_only = cli.mode == RunnerMode::ReadOnly;
+    if read_only {
+        deny_profile_tree(&root, &owned.sid)?;
+    } else {
         let write = capability_sid(&write_capability_name(workspace))?;
         grant_exact(&cli.workspace, &write, WORKSPACE_WRITE_MASK)?;
         capabilities.push(write);
-        let private = temp.insert(PrivateTemp::create(&cli.temp)?);
-        grant_exact(&private.path, &private.sid, WORKSPACE_WRITE_MASK)?;
     }
     for grant in cli.grants.network() {
         let sid = grant
@@ -350,21 +519,37 @@ fn run_inner(cli: &Cli, temp: &mut Option<PrivateTemp>, settled: &mut bool) -> R
             .ok_or_else(|| format!("network grant {grant} has no capability"))?;
         capabilities.push(Sid::parse(sid)?);
     }
-    let private = temp.as_ref();
     let mut attributes: Vec<SID_AND_ATTRIBUTES> = capabilities
         .iter()
-        .chain(private.map(|p| &p.sid))
         .map(|sid| SID_AND_ATTRIBUTES {
             Sid: sid.as_psid(),
             Attributes: GROUP_ENABLED,
         })
         .collect();
-    let environment = environment_block(private.map(|p| p.path.as_path()))?;
+    let temp = root.join("AC").join("Temp");
+    let environment = environment_block(Some(&temp))?;
+    let package = &owned.sid;
+    // Objects process creation added under the profile get the deny ACE
+    // before the command's first instruction.
+    let before_resume = || {
+        if read_only {
+            deny_profile_tree(&root, package).map(drop)
+        } else {
+            Ok(())
+        }
+    };
     let job = Job::new().map_err(|error| {
         format!("cannot create the kill-on-close Job and its completion port: {error}")
     })?;
-    let outcome = spawn(&package, &mut attributes, &job, &cli.command, &environment)
-        .and_then(|process| wait_for_exit(&job, &process));
+    let outcome = spawn(
+        package,
+        &mut attributes,
+        &job,
+        &cli.command,
+        &environment,
+        &before_resume,
+    )
+    .and_then(|process| wait_for_exit(&job, &process));
     let drained = terminate_and_drain(&job);
     *settled = drained.is_ok();
     match (outcome, drained) {
@@ -375,14 +560,15 @@ fn run_inner(cli: &Cli, temp: &mut Option<PrivateTemp>, settled: &mut bool) -> R
 }
 
 /// Starts `argv` as the AppContainer `package` with `capabilities`,
-/// suspended and born inside `job`, then resumes it. A failure after
-/// creation terminates the suspended child.
+/// suspended and born inside `job`, runs `before_resume`, then resumes it.
+/// A failure after creation terminates the suspended child.
 fn spawn(
     package: &Sid,
     capabilities: &mut [SID_AND_ATTRIBUTES],
     job: &Job,
     argv: &[OsString],
     environment: &[u16],
+    before_resume: &dyn Fn() -> Result<()>,
 ) -> Result<OwnedHandle> {
     let units: Vec<Vec<u16>> = argv.iter().map(|arg| arg.encode_wide().collect()).collect();
     if units.iter().any(|arg| arg.contains(&0)) {
@@ -475,9 +661,18 @@ fn spawn(
     }
     let process = owned_handle(info.hProcess);
     let thread = owned_handle(info.hThread);
-    // SAFETY: a live, suspended thread handle.
-    if unsafe { ResumeThread(thread.as_raw_handle()) } == u32::MAX {
-        let detail = last_error("ResumeThread", format_args!("pid {}", info.dwProcessId));
+    let resumed = before_resume().and_then(|()| {
+        // SAFETY: a live, suspended thread handle.
+        if unsafe { ResumeThread(thread.as_raw_handle()) } == u32::MAX {
+            Err(last_error(
+                "ResumeThread",
+                format_args!("pid {}", info.dwProcessId),
+            ))
+        } else {
+            Ok(())
+        }
+    });
+    if let Err(detail) = resumed {
         // SAFETY: a live process handle; the Job's drain also ends it.
         unsafe {
             TerminateProcess(process.as_raw_handle(), RUNNER_FAILURE_EXIT as u32);

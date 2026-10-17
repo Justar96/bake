@@ -28,7 +28,7 @@ fn host() -> HostRoots {
 }
 
 fn shape(grants: &AppContainerGrants) -> Result<(), GrantError> {
-    grants.validate_shape(&at(&["work", "repo"]), &at(&["tmp"]), &host())
+    grants.validate_shape(&at(&["work", "repo"]), &host())
 }
 
 #[test]
@@ -50,7 +50,7 @@ fn every_unsafe_root_is_refused_before_any_grant() {
         Err(GrantError::NotAbsolute("relative".into()))
     );
     assert_eq!(one(at(&[])), Err(GrantError::VolumeRoot(at(&[]))));
-    // The workspace and temp root: equal, inside, and containing.
+    // The workspace: equal, inside, and containing.
     for (root, what, other) in [
         (at(&["work", "repo"]), "workspace", at(&["work", "repo"])),
         (
@@ -59,7 +59,6 @@ fn every_unsafe_root_is_refused_before_any_grant() {
             at(&["work", "repo"]),
         ),
         (at(&["work"]), "workspace", at(&["work", "repo"])),
-        (at(&["tmp", "x"]), "temp root", at(&["tmp"])),
     ] {
         assert_eq!(
             one(root.clone()),
@@ -218,32 +217,109 @@ fn the_cli_round_trips_the_provider_arguments() {
     let grants = AppContainerGrants::new()
         .with_read_root(at(&["tools", "a"]))
         .with_network(NetworkGrant::InternetClient);
+    let tag = ProfileTag::parse("0123456789abcdef").expect("a tag");
     let mut argv = runner_profile_args(
         RunnerMode::WorkspaceWrite,
         &at(&["work", "repo"]),
-        &at(&["tmp"]),
         &grants,
+        Some(&tag),
     );
     argv.extend(args(&["--", "cmd", "/c", "exit 0"]));
     assert_eq!(
         parse(argv),
         Ok(Cli {
             workspace: at(&["work", "repo"]),
-            temp: at(&["tmp"]),
             mode: RunnerMode::WorkspaceWrite,
-            grants,
+            grants: grants.clone(),
+            tag: Some(tag),
             command: args(&["cmd", "/c", "exit 0"]),
         })
     );
+    // Untagged, as Bake runs it.
+    let mut argv = runner_profile_args(RunnerMode::ReadOnly, &at(&["work"]), &grants, None);
+    argv.extend(args(&["--", "x"]));
+    assert_eq!(parse(argv).map(|cli| cli.tag), Ok(None));
+}
+
+#[test]
+fn profile_tags_only_name_a_namespace() {
+    for bad in [
+        "",
+        "0123456789abcde",
+        "0123456789abcdef0",
+        "0123456789ABCDEF",
+        "0123456789abcdeg",
+        "0123456789abcd.f",
+        "../../../../xxxx",
+    ] {
+        assert_eq!(ProfileTag::parse(bad), None, "{bad:?}");
+        let error = parse(args(&[
+            "--workspace",
+            "w",
+            "--mode",
+            "read-only",
+            "--profile-tag",
+            bad,
+            "--",
+            "c",
+        ]))
+        .expect_err("a bad tag");
+        assert_eq!(error, format!("invalid profile tag: {bad}"));
+    }
+    let random = "0123456789abcdef0123456789abcdef";
+    assert_eq!(run_moniker(None, random), format!("bake.run.{random}"));
+    let tag = ProfileTag::parse("fedcba9876543210").expect("a tag");
+    let tagged = run_moniker(Some(&tag), random);
+    assert_eq!(tagged, format!("bake.run.fedcba9876543210.{random}"));
+    assert!(tagged.starts_with(&tag.moniker_prefix()));
+    // Within CreateAppContainerProfile's limit and its name pattern.
+    assert!(tagged.len() <= 64, "{tagged}");
+    assert!(
+        tagged
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'.'),
+        "{tagged}"
+    );
+    // Another tag's prefix never matches this tag's names.
+    let other = ProfileTag::parse("fedcba987654321f").expect("a tag");
+    assert!(!tagged.starts_with(&other.moniker_prefix()));
+    let error = parse(args(&[
+        "--workspace",
+        "w",
+        "--mode",
+        "read-only",
+        "--profile-tag",
+        "0123456789abcdef",
+        "--profile-tag",
+        "0123456789abcdef",
+        "--",
+        "c",
+    ]))
+    .expect_err("a repeated tag");
+    assert_eq!(error, "duplicate argument: --profile-tag");
 }
 
 #[test]
 fn cli_errors_name_the_argument() {
     for (list, error) in [
-        (&["--workspace", "w"][..], "missing --temp"),
+        (&["--mode", "read-only"][..], "missing --workspace"),
         (
-            &["--workspace", "w", "--temp", "t", "--mode", "x", "--", "c"][..],
+            &["--workspace", "w", "--mode", "x", "--", "c"][..],
             "unknown mode: x",
+        ),
+        // The restricted-token runner's `--temp` is not this runner's.
+        (
+            &[
+                "--workspace",
+                "w",
+                "--temp",
+                "t",
+                "--mode",
+                "read-only",
+                "--",
+                "c",
+            ][..],
+            "unknown argument: --temp",
         ),
         (
             &["--network", "everything", "--", "c"][..],
@@ -255,15 +331,7 @@ fn cli_errors_name_the_argument() {
             "duplicate argument: --workspace",
         ),
         (
-            &[
-                "--workspace",
-                "w",
-                "--temp",
-                "t",
-                "--mode",
-                "read-only",
-                "--",
-            ][..],
+            &["--workspace", "w", "--mode", "read-only", "--"][..],
             "missing command after --",
         ),
         (&["--bogus", "x"][..], "unknown argument: --bogus"),
@@ -271,8 +339,6 @@ fn cli_errors_name_the_argument() {
             &[
                 "--workspace",
                 "w",
-                "--temp",
-                "t",
                 "--mode",
                 "read-only",
                 "--",
@@ -313,7 +379,6 @@ impl Drop for Dir {
 #[test]
 fn the_runner_refuses_bad_roots_before_running() {
     let workspace = Dir::new("ws");
-    let temp = Dir::new("temp");
     let read = Dir::new("read");
     let file = read.0.join("file.txt");
     std::fs::write(&file, "x").expect("seed");
@@ -321,8 +386,8 @@ fn the_runner_refuses_bad_roots_before_running() {
         let mut list = runner_profile_args(
             RunnerMode::ReadOnly,
             &workspace.0,
-            &temp.0,
             &AppContainerGrants::new(),
+            None,
         );
         list.extend(extra.iter().cloned());
         list.extend(args(&["--", "cmd"]));
@@ -343,22 +408,6 @@ fn the_runner_refuses_bad_roots_before_running() {
         error.contains("loopback network access is unsupported"),
         "{error}"
     );
-    // A temp root inside the workspace is refused in both modes: the
-    // standing workspace read ACE would reach every private directory.
-    let inner = workspace.0.join("t");
-    std::fs::create_dir(&inner).expect("inner temp");
-    let mut list = runner_profile_args(
-        RunnerMode::ReadOnly,
-        &workspace.0,
-        &inner,
-        &AppContainerGrants::new(),
-    );
-    list.extend(args(&["--", "cmd"]));
-    let error = checked(list, &HostRoots::default()).expect_err("temp inside workspace");
-    assert!(
-        error.contains("temp root must be outside the workspace"),
-        "{error}"
-    );
     // The good case passes every check.
     let ok = run(&["--read".into(), read.0.clone().into_os_string()]).expect("valid");
     assert_eq!(ok.grants.read_roots(), std::slice::from_ref(&read.0));
@@ -376,4 +425,108 @@ fn a_linked_read_root_is_refused() {
         .check_on_disk()
         .expect_err("a link must be refused");
     assert!(matches!(error, GrantError::NotADirectory { .. }), "{error}");
+}
+
+#[test]
+fn the_profile_root_is_the_packages_entry_of_its_own_moniker() {
+    let moniker = "bake.run.0123456789abcdef0123456789abcdef";
+    let root = at(&["Users", "agent", "AppData", "Local", "Packages", moniker]);
+    // GetAppContainerFolderPath reports the profile's LOCALAPPDATA, its `AC`
+    // folder; the root itself is accepted too.
+    assert_eq!(
+        profile_root_for(&root.join("AC"), moniker),
+        Some(root.clone())
+    );
+    assert_eq!(
+        profile_root_for(&root.join("ac"), moniker),
+        Some(root.clone())
+    );
+    assert_eq!(profile_root_for(&root, moniker), Some(root.clone()));
+    let upper = at(&[
+        "Users",
+        "agent",
+        "AppData",
+        "Local",
+        "PACKAGES",
+        &moniker.to_ascii_uppercase(),
+    ]);
+    assert_eq!(profile_root_for(&upper, moniker), Some(upper.clone()));
+    // Anything else is refused rather than guessed at.
+    for folder in [
+        root.join("AC").join("Temp"),
+        at(&[
+            "Users",
+            "agent",
+            "AppData",
+            "Local",
+            "Packages",
+            "bake.run.other",
+            "AC",
+        ]),
+        at(&["Users", "agent", "AppData", "Local", moniker, "AC"]),
+        at(&[moniker]),
+        at(&[]),
+    ] {
+        assert_eq!(
+            profile_root_for(&folder, moniker),
+            None,
+            "{}",
+            folder.display()
+        );
+    }
+}
+
+#[test]
+fn a_grant_root_may_not_contain_the_profile() {
+    let packages = at(&["Users", "agent", "AppData", "Local", "Packages"]);
+    let root = packages.join("bake.run.0123");
+    let elsewhere = at(&["work", "repo"]);
+    assert_eq!(
+        check_profile_outside_grants(&root, &elsewhere, &[at(&["tools"])]),
+        Ok(())
+    );
+    // A sibling profile's tree is not this one's.
+    assert_eq!(
+        check_profile_outside_grants(&root, &packages.join("bake.run.01"), &[]),
+        Ok(())
+    );
+    for workspace in [at(&["Users", "agent"]), packages.clone(), root.clone()] {
+        let error = check_profile_outside_grants(&root, &workspace, &[])
+            .expect_err("a workspace holding the profile");
+        assert!(error.contains("the workspace"), "{error}");
+    }
+    let error = check_profile_outside_grants(&root, &elsewhere, &[at(&["tools"]), packages])
+        .expect_err("a read root holding the profile");
+    assert!(error.contains("the read root"), "{error}");
+}
+
+#[test]
+fn only_a_successful_creation_owns_the_profile() {
+    assert_eq!(classify_profile_creation(0), ProfileCreation::Created);
+    assert_eq!(classify_profile_creation(1), ProfileCreation::Created);
+    assert_eq!(
+        classify_profile_creation(0x8007_00B7_u32 as i32),
+        ProfileCreation::AlreadyExists
+    );
+    for status in [0x8007_0005_u32, 0x8007_0057, 0x8000_4005] {
+        assert_eq!(
+            classify_profile_creation(status as i32),
+            ProfileCreation::Failed,
+            "{status:#010x}"
+        );
+    }
+}
+
+#[test]
+fn the_profile_deny_mask_takes_every_mutation_and_no_read() {
+    // icacls `WD,AD,WEA,DC,WA,D,WDAC,WO`.
+    assert_eq!(PROFILE_DENY_MASK, 0x000D_0156);
+    // Nothing a read or traversal needs: list, read data, read EA, execute
+    // or traverse, read attributes, READ_CONTROL, SYNCHRONIZE.
+    assert_eq!(PROFILE_DENY_MASK & READ_EXECUTE, 0);
+    // Every write right the workspace grant gives, and the DACL and owner.
+    assert_eq!(
+        PROFILE_DENY_MASK,
+        (WORKSPACE_WRITE_MASK & !READ_EXECUTE) | 0x0004_0000 | 0x0008_0000
+    );
 }

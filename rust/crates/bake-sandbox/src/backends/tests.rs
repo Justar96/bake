@@ -282,7 +282,6 @@ fn a_sole_appcontainer_rung_wraps_its_grants_unprobed() {
     let provider = LocalProvider::with_chain(vec![Runner::WindowsAppContainer])
         .with_windows_appcontainer_grants(grants);
     let workspace = BesideExe::new("ac-sole");
-    let temp = crate::paths::canonical_path(&std::env::temp_dir());
     for mode in [SandboxMode::ReadOnly, SandboxMode::WorkspaceWrite] {
         let policy = SandboxPolicy::new(mode, &workspace.0);
         let Some(Ok(command)) = poll_once(provider.confine(&os(&["cmd", "/c", "x"]), &policy))
@@ -297,8 +296,6 @@ fn a_sole_appcontainer_rung_wraps_its_grants_unprobed() {
         expected.extend([
             "--workspace".into(),
             workspace.0.clone().into_os_string(),
-            "--temp".into(),
-            temp.clone().into_os_string(),
             "--mode".into(),
             mode.to_string().into(),
             "--read".into(),
@@ -340,10 +337,14 @@ fn the_appcontainer_rung_refuses_unsafe_policies_and_grants() {
         );
     };
     let plain = LocalProvider::with_chain(vec![Runner::WindowsAppContainer]);
-    // A workspace holding the temp root, under both modes: the standing
-    // workspace read ACE would reach every private directory.
+    // No temp root is involved: a workspace holding the ambient temporary
+    // directory wraps under both modes.
     for policy in [ro(), ww()] {
-        refused(&plain, &policy, "temp root must be outside the workspace");
+        assert!(
+            matches!(poll_once(plain.confine(&os(&["x"]), &policy)), Some(Ok(_))),
+            "{}",
+            policy.workspace_root.display()
+        );
     }
     let workspace = BesideExe::new("ac-policy");
     let extra = BesideExe::new("ac-extra");

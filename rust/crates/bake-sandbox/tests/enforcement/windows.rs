@@ -108,12 +108,6 @@ pub fn probe_main(args: Vec<OsString>) -> ! {
                 0
             })
         }
-        ["write-temp-under", directory] => {
-            let path = PathBuf::from(std::env::var_os("TEMP").unwrap_or_default())
-                .join(directory)
-                .join("probe.txt");
-            std::fs::write(&path, "t").map(|()| 0)
-        }
         ["exit", code] => Ok(code.parse().expect("exit code")),
         ["echo", out, err] => {
             println!("{out}");
@@ -179,6 +173,7 @@ pub fn probe_main(args: Vec<OsString>) -> ! {
             std::thread::park();
         },
         ["mechanism", rest @ ..] => mechanisms::probe(rest),
+        ["appcontainer", rest @ ..] => appcontainer::probe(rest),
         other => panic!("unknown probe operation {other:?}"),
     };
     let code = match result {
