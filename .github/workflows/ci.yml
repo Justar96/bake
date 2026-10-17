@@ -120,8 +120,9 @@ jobs:
         os: ${{ fromJSON(needs.scope.outputs.rust) }}
     name: rust (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    # A cargo-about cache miss adds its build to the Cargo checks.
-    timeout-minutes: 30
+    # Cold Windows Wasmtime checks took 21.5 minutes; setup and the archive
+    # check's existing nine-minute bound also need time within this job.
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 45 || 30 }}
     steps:
       - uses: actions/checkout@v4
       # Defender scans every file Cargo creates, which makes small-file I/O
