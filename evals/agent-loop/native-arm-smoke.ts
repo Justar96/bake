@@ -143,9 +143,10 @@ async function smokeNativeArm(): Promise<void> {
   })
   try {
     const home = join(temp, 'home')
-    mkdirSync(join(home, '.bake'), { recursive: true })
-    writeFileSync(join(home, '.bake/settings.yaml'), settings(server.port!))
-    writeFileSync(join(home, '.bake/.credentials.yaml'), `version: 1\nrefs:\n  CLIPROXYAPI_API_KEY: ${KEY}\n`, { mode: 0o600 })
+    const configHome = join(temp, 'eval-config')
+    mkdirSync(configHome)
+    writeFileSync(join(configHome, 'settings.yaml'), settings(server.port!))
+    writeFileSync(join(configHome, '.credentials.yaml'), `version: 1\nrefs:\n  CLIPROXYAPI_API_KEY: ${KEY}\n`, { mode: 0o600 })
     // The evaluator's own instructions and skills, which bake-rs would read from ~/.agents if a sample shared this home.
     mkdirSync(join(home, '.agents/skills/leak'), { recursive: true })
     writeFileSync(join(home, '.agents/AGENTS.md'), `${LEAK} instructions\n`)
@@ -159,7 +160,7 @@ async function smokeNativeArm(): Promise<void> {
       const env = {
         PATH: process.env.PATH ?? '', HOME: home, TMPDIR: samplesDir,
         EVAL_ARMS: `base=native:${binary},candidate=native:${binary}`, EVAL_MODELS: MODEL, EVAL_CASES: cases.join(','),
-        EVAL_TRIALS: '1', EVAL_OUTPUT: out,
+        EVAL_TRIALS: '1', EVAL_OUTPUT: out, EVAL_CONFIG_HOME: configHome,
       }
       const child = spawn(process.execPath, [RUN], { cwd: temp, env, stdio: ['ignore', 'pipe', 'pipe'] })
       let stdout = ''
