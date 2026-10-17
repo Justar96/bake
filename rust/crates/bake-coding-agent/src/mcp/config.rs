@@ -168,19 +168,78 @@ pub struct McpConfig {
 }
 
 /// Reads `path`: a missing file is an empty configuration; a file that
-/// cannot be read, is over [`MAX_CONFIG_BYTES`], or is not the expected
-/// shape is an error and no server.
+/// cannot be read, is a symbolic link or not a regular file (a FIFO is
+/// refused without waiting for a writer), is over [`MAX_CONFIG_BYTES`], or is
+/// not the expected shape is an error and no server.
 ///
 /// The file's `env` values may pass variables the scrub drops (see the
-/// module documentation), so `path` must be a file only the user controls,
-/// such as `$BAKE_HOME/mcp.json`, never one a repository supplies.
+/// module documentation), so `path` must be a file only the user controls.
+/// `bake-rs` reads `$BAKE_HOME/mcp.json` through
+/// [`load_home_mcp_config`](super::home::load_home_mcp_config), which also
+/// checks who can change it; this function checks only what it opens.
 pub fn load_mcp_config(path: &Path) -> McpConfig {
-    let shown = path.display();
-    let file = match fs::File::open(path) {
+    match open_regular_file(path) {
+        Ok(None) => McpConfig::default(),
+        Ok(Some(file)) => read_config(file, path),
+        Err(error) => failed(format!("{}: {error}", path.display())),
+    }
+}
+
+/// Opens `path` for reading, `None` when it does not exist. The open never
+/// follows a link at the last component and never waits: on Unix with
+/// `O_NOFOLLOW | O_NONBLOCK | O_NOCTTY`, so a FIFO opens at once and is then
+/// refused, and on Windows with `FILE_FLAG_OPEN_REPARSE_POINT`. The opened
+/// handle must be a regular file; every later check reads that handle.
+pub(crate) fn open_regular_file(path: &Path) -> Result<Option<fs::File>, String> {
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_NOCTTY);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        /// `FILE_FLAG_OPEN_REPARSE_POINT`: open a link itself.
+        const OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        options.custom_flags(OPEN_REPARSE_POINT);
+    }
+    let file = match options.open(path) {
         Ok(file) => file,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return McpConfig::default(),
-        Err(error) => return failed(format!("{shown}: {error}")),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        #[cfg(unix)]
+        Err(error) if error.raw_os_error() == Some(libc::ELOOP) => {
+            return Err(LINK_REFUSED.to_owned());
+        }
+        Err(error) => return Err(error.to_string()),
     };
+    let metadata = file.metadata().map_err(|error| error.to_string())?;
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        /// `FILE_ATTRIBUTE_REPARSE_POINT`.
+        const REPARSE_POINT: u32 = 0x400;
+        if metadata.file_attributes() & REPARSE_POINT != 0 {
+            return Err(LINK_REFUSED.to_owned());
+        }
+    }
+    if !metadata.is_file() {
+        return Err("is not a regular file; bake-rs reads only a regular file".to_owned());
+    }
+    if metadata.len() > MAX_CONFIG_BYTES {
+        return Err(format!("larger than {MAX_CONFIG_BYTES} bytes"));
+    }
+    Ok(Some(file))
+}
+
+pub(crate) const LINK_REFUSED: &str =
+    "is a symbolic link; bake-rs reads only a regular file, so replace the link with the file";
+
+/// Reads and parses an opened configuration file, at most
+/// [`MAX_CONFIG_BYTES`].
+pub(crate) fn read_config(file: fs::File, path: &Path) -> McpConfig {
+    let shown = path.display();
     let mut text = String::new();
     match file.take(MAX_CONFIG_BYTES + 1).read_to_string(&mut text) {
         Ok(read) if read as u64 > MAX_CONFIG_BYTES => {
@@ -191,7 +250,7 @@ pub fn load_mcp_config(path: &Path) -> McpConfig {
     }
 }
 
-fn failed(error: String) -> McpConfig {
+pub(crate) fn failed(error: String) -> McpConfig {
     McpConfig {
         servers: Vec::new(),
         errors: vec![error],

@@ -39,7 +39,8 @@ use bake_ai::{ApiRegistry, AssistantMessage, StopReason, UserContentBlock};
 use bake_coding_agent::agent_session::{AgentSession, AgentSessionOptions};
 use bake_coding_agent::auth_storage::AuthStorage;
 use bake_coding_agent::mcp::{
-    McpOptions, McpServerEntry, McpServerState, McpServers, McpTimings, load_mcp_config,
+    McpOptions, McpServerEntry, McpServerState, McpServers, McpTimings, McpToolFilter,
+    load_mcp_config,
 };
 use bake_coding_agent::model_registry::ModelRegistry;
 use bake_coding_agent::model_registry::config::ModelConfig;
@@ -569,6 +570,7 @@ fn options(
             terminate_grace: Duration::from_millis(500),
             kill_wait: Duration::from_secs(2),
         },
+        tool_filter: McpToolFilter::default(),
     }
 }
 

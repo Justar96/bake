@@ -74,6 +74,7 @@ Options:
   -np, --no-prompt-templates
                             Do not discover prompt templates
   -nc, --no-context-files   Do not load AGENTS.md context files
+      --no-mcp              Start no MCP server from the Bake home's mcp.json
       --list-models [search]
                             List available models (with optional fuzzy search)
       --permission <preset> Permission preset: workspace-write or
@@ -103,8 +104,10 @@ Ctrl+C twice quits. Slash commands such as /model are not available yet;
 /skill:name and prompt templates work.
 
 Models come from models.json and keys from auth.json in the Bake home
-(BAKE_HOME, then DSH_HOME, then ~/.bake), which also holds settings.json and
-the saved sessions. Instructions come from ~/.agents/AGENTS.md and the
+(BAKE_HOME, then DSH_HOME, then ~/.bake), which also holds settings.json, the
+saved sessions, and mcp.json, the stdio MCP servers each session starts under
+its sandbox mode; bake-rs refuses an mcp.json that other users, the working
+directory, or a git repository could change. Instructions come from ~/.agents/AGENTS.md and the
 AGENTS.md files from the filesystem root down to the working directory.
 Skills come from ~/.agents/skills and every .agents/skills from the working
 directory up to its git repository root.
@@ -113,7 +116,8 @@ The preview shows sample content only and does not connect to a model.
 Ctrl+C twice quits it.
 
 Run 'bake-rs docs' for the documentation: the Bake home, settings, models,
-permissions, sessions, context files, skills, and the command line.
+permissions, sessions, context files, skills, MCP servers, and the command
+line.
 ";
 
 #[derive(Debug, PartialEq, Eq)]
@@ -246,26 +250,72 @@ fn run_self_check() -> ExitCode {
     }
 }
 
-/// `SIGTERM` and `SIGHUP` stop print mode with Pi's exit codes, 143 and 129.
+/// The stop requests of print mode: `SIGTERM` and `SIGHUP` with Pi's exit
+/// codes, 143 and 129, and `SIGINT` (Ctrl+C) with 130, the status a shell
+/// gives a process it ends. Each shuts the session down, and with it every
+/// MCP server and process tree it owns, before the process exits; a second
+/// signal during that shutdown is ignored, since the shutdown is already
+/// bounded by its owners.
+///
+/// The handlers are installed when this is called, inside the runtime and
+/// before the session or any MCP server starts, so a signal that comes
+/// during setup is held until setup next waits (for piped input, or for
+/// the servers' startup), or until the prompt runs, and then shuts the
+/// session down, rather than ending the process with its servers left
+/// running. A signal that cannot be registered is left at its default.
 #[cfg(unix)]
 fn interrupt() -> Interrupt {
-    use tokio::signal::unix::{SignalKind, signal};
-    Box::pin(async {
-        let (Ok(mut term), Ok(mut hangup)) = (
-            signal(SignalKind::terminate()),
-            signal(SignalKind::hangup()),
-        ) else {
-            return std::future::pending().await;
+    use tokio::signal::unix::{Signal, SignalKind, signal};
+    /// Resolves when `stream` delivers, never when it was not registered.
+    async fn delivered(stream: Option<&mut Signal>) {
+        let delivered = match stream {
+            Some(stream) => stream.recv().await.is_some(),
+            None => false,
         };
+        if !delivered {
+            std::future::pending::<()>().await;
+        }
+    }
+    let mut term = signal(SignalKind::terminate()).ok();
+    let mut hangup = signal(SignalKind::hangup()).ok();
+    let mut int = signal(SignalKind::interrupt()).ok();
+    Box::pin(async move {
         tokio::select! {
-            _ = term.recv() => 143,
-            _ = hangup.recv() => 129,
+            () = delivered(term.as_mut()) => 143,
+            () = delivered(hangup.as_mut()) => 129,
+            () = delivered(int.as_mut()) => 130,
         }
     })
 }
 
-/// Pi registers only `SIGTERM` on Windows, which has no such signal.
-#[cfg(not(unix))]
+/// Ctrl+C and Ctrl+Break stop print mode with 130 and shut the session
+/// down, as `SIGINT` does on Unix; Windows has no `SIGTERM` or `SIGHUP`.
+#[cfg(windows)]
+fn interrupt() -> Interrupt {
+    use tokio::signal::windows::{ctrl_break, ctrl_c};
+    let (c, brk) = (ctrl_c().ok(), ctrl_break().ok());
+    Box::pin(async move {
+        match (c, brk) {
+            (Some(mut c), Some(mut brk)) => {
+                tokio::select! {
+                    _ = c.recv() => 130,
+                    _ = brk.recv() => 130,
+                }
+            }
+            (Some(mut c), None) => {
+                c.recv().await;
+                130
+            }
+            (None, Some(mut brk)) => {
+                brk.recv().await;
+                130
+            }
+            (None, None) => std::future::pending().await,
+        }
+    })
+}
+
+#[cfg(not(any(unix, windows)))]
 fn interrupt() -> Interrupt {
     cli::no_interrupt()
 }

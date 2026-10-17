@@ -7,6 +7,10 @@
 //! `packages/mcp/mcp-client` ([`names`]), the D24 sandbox, and the session's
 //! [`WorkGate`].
 //!
+//! `bake-rs` reads its servers from `$BAKE_HOME/mcp.json` once the file
+//! passes [`home`]'s owner rules, and starts them for every session it
+//! builds unless `--no-mcp` is given ([`crate::cli`]).
+//!
 //! [`AgentSession::start_mcp`](crate::agent_session::AgentSession::start_mcp)
 //! starts each enabled server of an [`McpOptions`] as a task the session's
 //! gate owns. The task, in order:
@@ -64,10 +68,11 @@
 //! Not implemented: Streamable HTTP servers, OAuth, reconnecting a closed
 //! server (its tools are withdrawn instead), resources and their tools,
 //! prompts, server instructions and Pi's `mcp_servers` prompt section, code
-//! mode and tool search exposures, `--tools` filtering of MCP tools, progress
+//! mode and tool search exposures, progress
 //! updates, the `/mcp` command, and the server log file.
 
 pub mod config;
+pub mod home;
 pub mod names;
 mod server;
 pub(crate) mod tools;
@@ -84,6 +89,7 @@ pub use config::{
     MCP_CONFIG_FILE, McpConfig, McpExposure, McpServerEntry, McpServerSettings, McpStdioConfig,
     McpTransportConfig, load_mcp_config, parse_mcp_config,
 };
+pub use home::load_home_mcp_config;
 pub use names::{MCP_TOOL_PREFIX, public_tool_name};
 pub use tools::{MAX_DECLARATION_BYTES, MAX_TOOLS_PER_SERVER, MCP_OUTPUT_MAX_BYTES};
 
@@ -117,6 +123,41 @@ impl Default for McpTimings {
     }
 }
 
+/// The user's tool restrictions, applied to every MCP tool when a prompt
+/// declares it, so a server's later listings are restricted too: Pi
+/// v1.3.0's `_isAllowedTool` and `_isActivatable` without tool search
+/// ([`crate::tools::index::dynamic_tool_restrictions`]). A tool left out is
+/// neither declared nor callable; it stays published, so the server and its
+/// generations are unchanged. The default restricts nothing.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct McpToolFilter {
+    allow: Option<Vec<String>>,
+    exclude: Vec<String>,
+}
+
+impl McpToolFilter {
+    /// Tools matching `allow` (names and `*` patterns), when given, and
+    /// matching no `exclude` entry.
+    pub fn new(allow: Option<Vec<String>>, exclude: Vec<String>) -> Self {
+        Self { allow, exclude }
+    }
+
+    /// Whether the public tool name `name` may be declared.
+    pub fn allows(&self, name: &str) -> bool {
+        use crate::tools::index::tool_name_matcher;
+        !tool_name_matcher(&self.exclude)(name)
+            && self
+                .allow
+                .as_deref()
+                .is_none_or(|allow| tool_name_matcher(allow)(name))
+    }
+
+    /// Whether no tool can be declared at all: an empty allowlist.
+    pub fn allows_none(&self) -> bool {
+        self.allow.as_ref().is_some_and(Vec::is_empty)
+    }
+}
+
 /// What a session needs to run MCP servers.
 #[derive(Clone)]
 pub struct McpOptions {
@@ -131,6 +172,8 @@ pub struct McpOptions {
     pub sandbox: Arc<dyn SandboxProvider>,
     /// Waits and shutdown bounds.
     pub timings: McpTimings,
+    /// Which published tools each prompt may declare.
+    pub tool_filter: McpToolFilter,
 }
 
 impl std::fmt::Debug for McpOptions {
@@ -140,6 +183,7 @@ impl std::fmt::Debug for McpOptions {
             .field("standing", &self.standing)
             .field("sandbox", &self.sandbox.name())
             .field("timings", &self.timings)
+            .field("tool_filter", &self.tool_filter)
             .finish()
     }
 }
@@ -220,6 +264,8 @@ struct Shared {
     /// Built-in tool names no MCP tool may take.
     reserved: Vec<String>,
     timings: McpTimings,
+    /// Which published tools a prompt declares.
+    filter: McpToolFilter,
     /// Set by the first prompt's wait.
     waited: AtomicBool,
     /// Ends that wait early: the session's abort.
@@ -246,6 +292,7 @@ impl McpServers {
         servers: &[McpServerEntry],
         reserved: Vec<String>,
         timings: McpTimings,
+        filter: McpToolFilter,
     ) -> Self {
         let slots = servers
             .iter()
@@ -265,6 +312,7 @@ impl McpServers {
                 changes: watch::Sender::new(0),
                 reserved,
                 timings,
+                filter,
                 waited: AtomicBool::new(false),
                 interrupt: Notify::new(),
             }),
@@ -293,7 +341,8 @@ impl McpServers {
             .collect()
     }
 
-    /// The public names of the tools published now, in server order.
+    /// The public names of the tools published now, in server order,
+    /// whether or not the [`McpToolFilter`] lets a prompt declare them.
     pub fn tool_names(&self) -> Vec<String> {
         self.slots()
             .iter()
@@ -306,13 +355,20 @@ impl McpServers {
         self.shared.changes.subscribe()
     }
 
-    /// The tools published now, in server order: what the next prompt
-    /// declares.
+    /// The tools published now that the [`McpToolFilter`] allows, in
+    /// server order: what the next prompt declares.
     pub(crate) fn tools(&self) -> Vec<Arc<AgentTool>> {
         self.slots()
             .iter()
             .flat_map(|slot| slot.tools.iter().cloned())
+            .filter(|tool| self.shared.filter.allows(&tool.name))
             .collect()
+    }
+
+    /// The public names of the tools published now that the filter allows:
+    /// those the next prompt declares.
+    pub fn declared_tool_names(&self) -> Vec<String> {
+        self.tools().iter().map(|tool| tool.name.clone()).collect()
     }
 
     pub(crate) fn entry(&self, index: usize) -> Option<McpServerEntry> {
@@ -457,8 +513,9 @@ pub(crate) fn start(
         standing,
         sandbox,
         timings,
+        tool_filter,
     } = options;
-    let servers = McpServers::new(&entries, reserved, timings);
+    let servers = McpServers::new(&entries, reserved, timings, tool_filter);
     let mut refused = None;
     for (index, entry) in entries.iter().enumerate() {
         if !entry.settings.enabled {
@@ -522,6 +579,7 @@ mod tests {
             &entries(&["a", "a__b"]),
             vec!["read".into()],
             McpTimings::default(),
+            McpToolFilter::default(),
         );
         servers
             .publish(0, vec![tool("mcp__a__b__c"), tool("mcp__a__x")], connected)
@@ -562,6 +620,7 @@ mod tests {
             )),
             sandbox: Arc::new(bake_sandbox::provider::UnavailableProvider::new(None)),
             timings,
+            tool_filter: McpToolFilter::default(),
         }
     }
 
@@ -611,7 +670,12 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn the_startup_wait_runs_once_and_ends_at_its_bound() {
-        let servers = McpServers::new(&entries(&["a"]), Vec::new(), McpTimings::default());
+        let servers = McpServers::new(
+            &entries(&["a"]),
+            Vec::new(),
+            McpTimings::default(),
+            McpToolFilter::default(),
+        );
         let started = tokio::time::Instant::now();
         servers.wait_for_startup(|| false).await;
         assert_eq!(started.elapsed(), McpTimings::default().startup_wait);
@@ -624,7 +688,12 @@ mod tests {
     async fn the_startup_wait_ends_when_no_server_is_connecting() {
         let mut entries = entries(&["a", "off"]);
         entries[1].settings.enabled = false;
-        let servers = McpServers::new(&entries, Vec::new(), McpTimings::default());
+        let servers = McpServers::new(
+            &entries,
+            Vec::new(),
+            McpTimings::default(),
+            McpToolFilter::default(),
+        );
         assert_eq!(servers.statuses()[1].state, McpServerState::Disabled);
         let waiter = {
             let servers = servers.clone();
@@ -637,5 +706,46 @@ mod tests {
             .await
             .expect("woken by the change")
             .unwrap();
+    }
+
+    // Pi's `_isAllowedTool` and `_isActivatable` without tool search: the
+    // exclusions always apply, an allowlist must match, and a filtered
+    // tool stays published but is not declared, for every generation.
+    #[test]
+    fn the_filter_restricts_every_generation_it_declares() {
+        let filter = McpToolFilter::new(
+            Some(vec!["read".into(), "mcp__a__k*".into()]),
+            vec!["mcp__a__kill".into()],
+        );
+        assert!(filter.allows("mcp__a__keep") && !filter.allows("mcp__a__kill"));
+        assert!(!filter.allows("mcp__a__other") && !filter.allows_none());
+        assert!(McpToolFilter::new(Some(Vec::new()), Vec::new()).allows_none());
+        assert!(McpToolFilter::default().allows("mcp__a__anything"));
+        let servers = McpServers::new(&entries(&["a"]), Vec::new(), McpTimings::default(), filter);
+        servers
+            .publish(
+                0,
+                vec![
+                    tool("mcp__a__keep"),
+                    tool("mcp__a__kill"),
+                    tool("mcp__a__other"),
+                ],
+                connected,
+            )
+            .unwrap();
+        assert_eq!(
+            servers.tool_names(),
+            ["mcp__a__keep", "mcp__a__kill", "mcp__a__other"]
+        );
+        assert_eq!(servers.declared_tool_names(), ["mcp__a__keep"]);
+        // A later listing is restricted the same way.
+        servers
+            .publish(
+                0,
+                vec![tool("mcp__a__kite"), tool("mcp__a__new")],
+                connected,
+            )
+            .unwrap();
+        assert_eq!(servers.declared_tool_names(), ["mcp__a__kite"]);
     }
 }

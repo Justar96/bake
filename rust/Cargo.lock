@@ -97,9 +97,11 @@ dependencies = [
  "bake-coding-agent",
  "bake-sandbox",
  "bake-tui",
+ "libc",
  "ring",
  "serde_json",
  "tokio",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
