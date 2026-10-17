@@ -227,6 +227,18 @@ impl ProcessTree {
         }
     }
 
+    /// One bounded step of the live pump ([`crate::pump`]).
+    #[cfg(windows)]
+    pub(crate) fn pump_step(&self) -> Result<crate::pump::Step, ()> {
+        self.account.pump(&self.job)
+    }
+
+    /// The job account's distinct members and those still held or unknown.
+    #[cfg(all(test, windows))]
+    pub(crate) fn account_snapshot(&self) -> (u64, usize) {
+        self.account.snapshot()
+    }
+
     /// How many processes other than the leader are in the tree; an error
     /// when that cannot be established.
     fn members(&self) -> Result<usize, &'static str> {
@@ -626,6 +638,19 @@ impl TrackedTree {
         self.tree.kill();
     }
 
+    /// A reference to the tree that does not keep it, or its job, alive:
+    /// what the live pump holds between steps.
+    #[cfg(windows)]
+    pub(crate) fn downgrade(&self) -> std::sync::Weak<ProcessTree> {
+        Arc::downgrade(&self.tree)
+    }
+
+    /// The tree itself, for the crate's own tests.
+    #[cfg(all(test, windows))]
+    pub(crate) fn tree(&self) -> &ProcessTree {
+        &self.tree
+    }
+
     /// [`ProcessTree::terminate`].
     pub(crate) fn terminate(&self) {
         self.tree.terminate();
@@ -712,6 +737,8 @@ mod windows {
     /// long life is drained over several polls, never in one unbounded one.
     const BATCH: usize = 64;
     const PER_POLL: usize = 64 * BATCH;
+    /// Messages one live pump step takes before it yields.
+    const PER_STEP: usize = 4 * BATCH;
 
     /// A completion port for one job: not inheritable, never shared, so
     /// only the job posts to it.
@@ -779,9 +806,9 @@ mod windows {
         pub(super) fn settle(&self, job: &OwnedHandle) -> Verdict {
             let mut ledger = self.ledger.lock().unwrap_or_else(PoisonError::into_inner);
             let mut host = System { job };
-            match self.drain(&mut ledger, &mut host) {
-                Ok(true) => {}
-                Ok(false) => return Verdict::Pending("messages are still queued"),
+            match self.drain(&mut ledger, &mut host, PER_POLL) {
+                Ok((_, true)) => {}
+                Ok((_, false)) => return Verdict::Pending("messages are still queued"),
                 Err(()) => return Verdict::Pending("the completion port could not be read"),
             }
             ledger.retry(&mut host);
@@ -790,9 +817,9 @@ mod windows {
             };
             // Messages for associations up to `before` may still arrive;
             // a short account is pending, never settled.
-            match self.drain(&mut ledger, &mut host) {
-                Ok(true) => {}
-                Ok(false) => return Verdict::Pending("messages are still queued"),
+            match self.drain(&mut ledger, &mut host, PER_POLL) {
+                Ok((_, true)) => {}
+                Ok((_, false)) => return Verdict::Pending("messages are still queued"),
                 Err(()) => return Verdict::Pending("the completion port could not be read"),
             }
             let waiting = ledger.check(&mut host);
@@ -802,15 +829,40 @@ mod windows {
             ledger.verdict(before, after, active, waiting)
         }
 
-        /// Records the queued new-process messages, at most [`PER_POLL`];
-        /// `Ok(true)` once the queue was seen empty.
+        /// One step of the live pump ([`crate::pump`]): takes at most
+        /// [`PER_STEP`] queued messages into the account, retries unknown
+        /// members, and closes the handles of members now signalled. Reads
+        /// no verdict. `Ok(Step)` says how much it took and whether the
+        /// queue was seen empty; a port that cannot be read is `Err`, which
+        /// changes nothing: settling still drains and fails closed.
+        pub(super) fn pump(&self, job: &OwnedHandle) -> Result<crate::pump::Step, ()> {
+            let mut ledger = self.ledger.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut host = System { job };
+            let (taken, empty) = self.drain(&mut ledger, &mut host, PER_STEP)?;
+            ledger.retry(&mut host);
+            // An unreadable handle stays held; settling reports it.
+            let _ = ledger.check(&mut host);
+            Ok(crate::pump::Step { taken, empty })
+        }
+
+        /// The account's distinct members and those still open.
+        #[cfg(test)]
+        pub(super) fn snapshot(&self) -> (u64, usize) {
+            let ledger = self.ledger.lock().unwrap_or_else(PoisonError::into_inner);
+            (ledger.counted(), ledger.open_members())
+        }
+
+        /// Records the queued new-process messages, at most `budget`
+        /// rounded up to a whole batch; returns how many messages were
+        /// taken and whether the queue was seen empty.
         fn drain(
             &self,
             ledger: &mut Ledger<OwnedHandle>,
             host: &mut System<'_>,
-        ) -> Result<bool, ()> {
+            budget: usize,
+        ) -> Result<(usize, bool), ()> {
             let mut taken = 0;
-            while taken < PER_POLL {
+            while taken < budget {
                 let mut entries = [OVERLAPPED_ENTRY::default(); BATCH];
                 let mut removed = 0u32;
                 // SAFETY: `entries` holds `BATCH` entries; a zero timeout
@@ -828,7 +880,7 @@ mod windows {
                 if ok == 0 {
                     return if io::Error::last_os_error().raw_os_error() == Some(WAIT_TIMEOUT as i32)
                     {
-                        Ok(true)
+                        Ok((taken, true))
                     } else {
                         Err(())
                     };
@@ -849,10 +901,10 @@ mod windows {
                 }
                 taken += removed;
                 if removed < BATCH {
-                    return Ok(true);
+                    return Ok((taken, true));
                 }
             }
-            Ok(false)
+            Ok((taken, false))
         }
     }
 
@@ -904,14 +956,15 @@ mod windows {
                 dwHighDateTime: 0,
             }; 4];
             let [created, exited, kernel, user] = &mut times;
+            // A failed query leaves a member held, without a creation time;
+            // the failure never reads as an exit.
             // SAFETY: a live handle with query access and valid out pointers.
-            if unsafe { GetProcessTimes(handle.as_raw_handle(), created, exited, kernel, user) }
-                == 0
-            {
-                return Opened::Unknown;
-            }
-            let created =
-                (u64::from(times[0].dwHighDateTime) << 32) | u64::from(times[0].dwLowDateTime);
+            let timed =
+                unsafe { GetProcessTimes(handle.as_raw_handle(), created, exited, kernel, user) }
+                    != 0;
+            let created = timed.then(|| {
+                (u64::from(times[0].dwHighDateTime) << 32) | u64::from(times[0].dwLowDateTime)
+            });
             Opened::Member { created, handle }
         }
 

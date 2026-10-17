@@ -28,6 +28,11 @@
 //!    that does not report within the bound is counted apart, as
 //!    incomplete: it reported nothing false, but did not show the tree
 //!    settled.
+//! 4. **Production path, churn while the owner is idle.** The same parent
+//!    starts all its children while the owner only reads its output, as a
+//!    long-lived MCP server's owner does between requests; the live job
+//!    pump is the only thing taking the job's messages then. The tree is
+//!    then killed, and the same immediate check applies.
 //!
 //! Containment: a parent spawns its child only after it has read the exact
 //! line `go` and confirmed, through the job's name, that it is in the job;
@@ -38,9 +43,11 @@
 //! pid that was not confirmed is never signalled. A cleanup that does not
 //! observe its processes and pipe end is a failure.
 //!
-//! Runs: 50 observations, 20 production-path cases, and 10 churn cases by
-//! default; `BAKE_PROCESS_JOB_PROBE_RUNS`, `BAKE_PROCESS_SETTLEMENT_RUNS`,
-//! and `BAKE_PROCESS_CHURN_RUNS` change them, capped at 500, 200, and 100.
+//! Runs: 50 observations, 20 production-path cases, 10 churn cases, and 5
+//! idle churn cases by default; `BAKE_PROCESS_JOB_PROBE_RUNS`,
+//! `BAKE_PROCESS_SETTLEMENT_RUNS`, `BAKE_PROCESS_CHURN_RUNS`, and
+//! `BAKE_PROCESS_IDLE_CHURN_RUNS` change them, capped at 500, 200, 100, and
+//! 50.
 //! Exit status 1 means a fixture or cleanup failure, a production-path
 //! failure, or an incomplete settle; each is reported apart.
 
@@ -107,6 +114,7 @@ mod windows {
         let probe_runs = runs("BAKE_PROCESS_JOB_PROBE_RUNS", 50, 500);
         let settle_runs = runs("BAKE_PROCESS_SETTLEMENT_RUNS", 20, 200);
         let churn_runs = runs("BAKE_PROCESS_CHURN_RUNS", 10, 100);
+        let idle_runs = runs("BAKE_PROCESS_IDLE_CHURN_RUNS", 5, 50);
         let version = Command::new("cmd")
             .args(["/c", "ver"])
             .stdin(Stdio::null())
@@ -154,14 +162,23 @@ mod windows {
         println!("\nproduction path under churn: {churn_runs} cases");
         let mut churn = Tally::default();
         for case in 0..churn_runs {
-            let outcome = runtime.block_on(churn_case());
+            let outcome = runtime.block_on(churn_case(false));
             churn.add(&outcome.verdict);
             println!("churn {case}: {outcome}");
         }
-        drop(runtime);
         churn.print("production path under churn", churn_runs);
 
-        if summary.fixture_failures > 0 || !single.clean() || !churn.clean() {
+        println!("\nproduction path, churn while the owner is idle: {idle_runs} cases");
+        let mut idle = Tally::default();
+        for case in 0..idle_runs {
+            let outcome = runtime.block_on(churn_case(true));
+            idle.add(&outcome.verdict);
+            println!("idle churn {case}: {outcome}");
+        }
+        drop(runtime);
+        idle.print("production path, churn while the owner is idle", idle_runs);
+
+        if summary.fixture_failures > 0 || !single.clean() || !churn.clean() || !idle.clean() {
             println!("\nresult: FAILED");
             std::process::exit(1);
         }
@@ -1012,12 +1029,20 @@ mod windows {
             }
             held.push(child);
         }
+        {
+            let mut out = std::io::stdout().lock();
+            let _ = writeln!(out, "done").and_then(|()| out.flush());
+        }
         let _ = read_exact_line("never");
         drop(held);
         0
     }
 
-    async fn churn_case() -> Outcome {
+    /// `idle`: the owner only reads the parent's output until the parent
+    /// has started all its children, so the tree's whole churn happens
+    /// while the owner neither waits for nor settles it; then it is killed.
+    /// Otherwise it is killed while the parent is still starting children.
+    async fn churn_case(idle: bool) -> Outcome {
         let mut notes = Vec::new();
         let program = match std::env::current_exe() {
             Ok(program) => program,
@@ -1049,7 +1074,8 @@ mod windows {
         let mut retained: Vec<(u32, OwnedHandle)> = Vec::new();
         let mut settled = false;
         let mut stdout = process.take_stdout();
-        let verdict = churn_body(&mut process, &mut retained, &mut settled, &mut stdout).await;
+        let verdict =
+            churn_body(&mut process, &mut retained, &mut settled, &mut stdout, idle).await;
         // Cleanup, on every path, as in `settle_case`.
         if !settled {
             process.kill();
@@ -1093,18 +1119,26 @@ mod windows {
         retained: &mut Vec<(u32, OwnedHandle)>,
         settled: &mut bool,
         stdout: &mut Option<bake_process::ProcessStdout>,
+        idle: bool,
     ) -> Verdict {
         let Some(pipe) = stdout.as_mut() else {
             return Verdict::Fixture("no stdout".into());
         };
         let mut reader = tokio::io::BufReader::new(pipe);
-        while retained.len() < RETAINED {
+        let mut reported = 0usize;
+        loop {
+            if retained.len() >= RETAINED && !idle {
+                break;
+            }
             let mut line = String::new();
             match tokio::time::timeout(BOUND, (&mut reader).take(LINE_LIMIT).read_line(&mut line))
                 .await
             {
                 Ok(Ok(n)) if n > 0 => {}
                 _ => return Verdict::Fixture("the parent stopped reporting children".into()),
+            }
+            if line.trim() == "done" {
+                break;
             }
             let Some(pid) = line
                 .trim()
@@ -1113,6 +1147,13 @@ mod windows {
             else {
                 return Verdict::Fixture(format!("unexpected parent output {line:?}"));
             };
+            reported += 1;
+            if reported > CHURN {
+                return Verdict::Fixture("the parent reported more children than it starts".into());
+            }
+            if retained.len() >= RETAINED {
+                continue;
+            }
             let Some(handle) = open(pid) else {
                 return Verdict::Fixture(format!("OpenProcess({pid}): {}", last_error()));
             };
@@ -1128,8 +1169,12 @@ mod windows {
             }
             retained.push((pid, handle));
         }
-        // Killed while it is still starting children, with exiting ones
-        // among them, as an MCP shutdown or a tool abort does.
+        if retained.len() < RETAINED {
+            return Verdict::Fixture(format!("only {} children retained", retained.len()));
+        }
+        // Killed while it is still starting children (or, idle, after its
+        // whole churn), with exiting ones among them, as an MCP shutdown
+        // or a tool abort does.
         process.kill();
         let report = match tokio::time::timeout(BOUND, process.finish()).await {
             Ok(Ok(report)) => report,

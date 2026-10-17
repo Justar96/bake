@@ -40,7 +40,15 @@
 //! Pure bookkeeping over a [`Host`], so the rules are tested on every
 //! platform; the Windows host is in `tree.rs`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+
+/// The most distinct pids one account keeps. A pid is one record however
+/// often it is reused, so this bounds the account by the system's pid
+/// space, not by how many processes a long-lived tree starts; Windows pids
+/// are multiples of 4 and reused, so a real tree stays far below it. One
+/// more distinct pid is not dropped: it makes the account a contradiction,
+/// which never settles.
+pub(crate) const MAX_RECORDS: usize = 1 << 20;
 
 /// What opening a reported pid found.
 #[derive(Debug)]
@@ -51,11 +59,16 @@ pub(crate) enum Opened<H> {
     /// The pid names a process outside the job: the reported one released
     /// it, so it ended (see the module docs).
     OtherProcess,
-    /// A process in the job, with its creation time, held by `handle`; a
-    /// held handle keeps its pid from being reused.
-    Member { created: u64, handle: H },
-    /// Neither open nor membership nor creation time could be read (access
-    /// denied, a failed query): unknown, never ended.
+    /// A process in the job, held by `handle`; a held handle keeps its pid
+    /// from being reused. `created` is its creation time, `None` when that
+    /// query failed (a process in rundown, or one whose security refuses
+    /// it, may refuse a query its handle was opened for): it is still a
+    /// member to await by handle, never one that ended, but a later process
+    /// with its pid cannot be told apart from it.
+    Member { created: Option<u64>, handle: H },
+    /// The pid could not be opened for a reason other than no such process
+    /// (access denied), or its membership could not be read: unknown, never
+    /// ended.
     Unknown,
 }
 
@@ -70,10 +83,10 @@ pub(crate) trait Host {
 #[derive(Debug)]
 enum Record<H> {
     /// A counted member not yet seen signalled.
-    Live { created: u64, handle: H },
+    Live { created: Option<u64>, handle: H },
     /// A counted member seen signalled; its handle is closed, so its pid
-    /// may be reused, which the creation time tells apart.
-    Ended { created: u64 },
+    /// may be reused, which a known creation time tells apart.
+    Ended { created: Option<u64> },
     /// A counted pid that could not be opened or named another process.
     Vanished,
     /// Reported, but unknown so far: counts nothing until resolved.
@@ -97,6 +110,9 @@ pub(crate) struct Ledger<H> {
     /// One record per reported pid: bounded by distinct pids, not by how
     /// many processes the job ever had.
     records: HashMap<u32, Record<H>>,
+    /// The pids whose record is `Live` or `Unresolved`: what a check or a
+    /// retry visits, so neither walks the ended records of a long life.
+    open: HashSet<u32>,
     counted: u64,
     contradiction: Option<&'static str>,
 }
@@ -105,6 +121,7 @@ impl<H> Default for Ledger<H> {
     fn default() -> Self {
         Self {
             records: HashMap::new(),
+            open: HashSet::new(),
             counted: 0,
             contradiction: None,
         }
@@ -118,6 +135,12 @@ impl<H> Ledger<H> {
         self.counted
     }
 
+    /// How many members are held by handle or unresolved.
+    #[cfg_attr(not(test), allow(dead_code, reason = "read by the tests"))]
+    pub(crate) fn open_members(&self) -> usize {
+        self.open.len()
+    }
+
     /// Marks the account untrustworthy for good.
     pub(crate) fn contradict(&mut self, why: &'static str) {
         self.contradiction.get_or_insert(why);
@@ -128,6 +151,10 @@ impl<H> Ledger<H> {
         if pid == 0 {
             // No process is created with pid 0: not a message to trust.
             self.contradict("a new-process message named pid 0");
+            return;
+        }
+        if !self.records.contains_key(&pid) && self.records.len() >= MAX_RECORDS {
+            self.contradict("more distinct pids than the account keeps");
             return;
         }
         let opened = host.open(pid);
@@ -144,10 +171,15 @@ impl<H> Ledger<H> {
             (None | Some(Record::Unresolved), Opened::Unknown) => Record::Unresolved,
             // A held handle pins the pid: it can only name the same member.
             (Some(Record::Live { created, handle }), Opened::Member { created: now, .. }) => {
-                if now != created {
+                if let (Some(created), Some(now)) = (created, now)
+                    && created != now
+                {
                     self.contradict("a held member's pid named another member");
                 }
-                Record::Live { created, handle }
+                Record::Live {
+                    created: created.or(now),
+                    handle,
+                }
             }
             (Some(live @ Record::Live { .. }), Opened::NoSuchProcess | Opened::OtherProcess) => {
                 self.contradict("a held member's pid was released");
@@ -160,19 +192,19 @@ impl<H> Ledger<H> {
                     created: now,
                     handle,
                 },
-            ) => {
-                if now == created {
-                    // The same, ended member named again.
-                    Record::Ended { created }
-                } else {
-                    // A different member reusing the pid.
+            ) => match (created, now) {
+                // A different member reusing the pid.
+                (Some(ended), Some(now)) if ended != now => {
                     self.counted += 1;
                     Record::Live {
-                        created: now,
+                        created: Some(now),
                         handle,
                     }
                 }
-            }
+                // The same, ended member named again, or one that cannot
+                // be told from it: counted nothing.
+                _ => Record::Ended { created },
+            },
             (Some(Record::Vanished), Opened::Member { created, handle }) => {
                 // The vanished one released the pid before this member
                 // existed (see the module docs), so this is another one.
@@ -183,16 +215,21 @@ impl<H> Ledger<H> {
             // report: counted nothing, so the account can only fall short.
             (Some(seen @ (Record::Ended { .. } | Record::Vanished)), _) => seen,
         };
+        if matches!(next, Record::Live { .. } | Record::Unresolved) {
+            self.open.insert(pid);
+        } else {
+            self.open.remove(&pid);
+        }
         self.records.insert(pid, next);
     }
 
     /// Opens again every reported pid still unknown.
     pub(crate) fn retry(&mut self, host: &mut impl Host<Handle = H>) {
         let unresolved: Vec<u32> = self
-            .records
+            .open
             .iter()
-            .filter(|(_, record)| matches!(record, Record::Unresolved))
-            .map(|(pid, _)| *pid)
+            .filter(|pid| matches!(self.records.get(pid), Some(Record::Unresolved)))
+            .copied()
             .collect();
         for pid in unresolved {
             self.reported(pid, host);
@@ -205,18 +242,23 @@ impl<H> Ledger<H> {
     pub(crate) fn check(&mut self, host: &mut impl Host<Handle = H>) -> Result<usize, ()> {
         let mut waiting = 0;
         let mut failed = false;
-        for record in self.records.values_mut() {
-            match record {
-                Record::Live { created, handle } => match host.signalled(handle) {
-                    Some(true) => {
-                        *record = Record::Ended { created: *created };
-                    }
+        let mut ended = Vec::new();
+        for pid in &self.open {
+            match self.records.get_mut(pid) {
+                Some(Record::Live { created, handle }) => match host.signalled(handle) {
+                    Some(true) => ended.push((*pid, *created)),
                     Some(false) => waiting += 1,
                     None => failed = true,
                 },
-                Record::Unresolved => waiting += 1,
-                Record::Ended { .. } | Record::Vanished => {}
+                Some(Record::Unresolved) => waiting += 1,
+                // The index names only open records.
+                _ => failed = true,
             }
+        }
+        for (pid, created) in ended {
+            // Replacing the record closes the handle.
+            self.records.insert(pid, Record::Ended { created });
+            self.open.remove(&pid);
         }
         if failed { Err(()) } else { Ok(waiting) }
     }
@@ -273,6 +315,8 @@ mod tests {
         denied: Vec<u32>,
         /// Creation times whose signalled state cannot be read.
         unreadable: Vec<u64>,
+        /// Processes (by creation time) whose creation time query fails.
+        untimed: Vec<u64>,
     }
 
     impl Host for Table {
@@ -287,7 +331,7 @@ mod tests {
                 None => Opened::NoSuchProcess,
                 Some((false, ..)) => Opened::OtherProcess,
                 Some((true, created, _)) => Opened::Member {
-                    created: *created,
+                    created: (!self.untimed.contains(created)).then_some(*created),
                     handle: *created,
                 },
             }
@@ -374,6 +418,74 @@ mod tests {
         );
         table.processes.get_mut(&4).expect("4").2 = true;
         assert_eq!(settle(&mut ledger, &mut table, 1, 0), Verdict::Settled);
+    }
+
+    // A long life's ended members are kept as records (for duplicates), but
+    // not visited, and their handles are closed as soon as they are seen
+    // signalled.
+    #[test]
+    fn ended_members_are_pruned_from_the_open_set() {
+        let mut table = Table::default();
+        let mut ledger = Ledger::default();
+        for pid in 1..=100u32 {
+            table
+                .processes
+                .insert(pid * 4, (true, u64::from(pid), true));
+            ledger.reported(pid * 4, &mut table);
+        }
+        table.processes.insert(404, (true, 101, false));
+        ledger.reported(404, &mut table);
+        assert_eq!(ledger.open_members(), 101);
+        assert_eq!(ledger.check(&mut table), Ok(1));
+        assert_eq!(ledger.open_members(), 1);
+        assert_eq!(ledger.counted(), 101);
+    }
+
+    // Past the record cap a new pid is refused, never dropped silently: the
+    // account can no longer settle.
+    #[test]
+    fn a_pid_past_the_cap_is_a_contradiction() {
+        let mut table = Table::default();
+        let mut ledger = Ledger::<u64>::default();
+        for pid in 1..=u32::try_from(MAX_RECORDS).expect("cap fits") {
+            ledger.records.insert(pid, Record::Vanished);
+        }
+        ledger.counted = MAX_RECORDS as u64;
+        // A pid already kept is still handled.
+        ledger.reported(4, &mut table);
+        assert!(ledger.contradiction.is_none());
+        ledger.reported(u32::MAX, &mut table);
+        assert!(matches!(
+            ledger.verdict(ledger.counted as u32, ledger.counted as u32, 0, Ok(0)),
+            Verdict::Contradiction(_)
+        ));
+    }
+
+    // A member whose creation time cannot be read (as a sandboxed or
+    // rundown process may refuse a query) is still held and awaited, never
+    // read as ended; once it has ended, a later process with its pid cannot
+    // be told from it, so that one counts nothing.
+    #[test]
+    fn a_member_without_a_creation_time_is_awaited_not_ended() {
+        let mut table = Table::default();
+        table.processes.insert(4, (true, 1, false));
+        table.untimed.push(1);
+        let mut ledger = Ledger::default();
+        ledger.reported(4, &mut table);
+        assert_eq!(ledger.counted(), 1);
+        assert_eq!(
+            settle(&mut ledger, &mut table, 1, 0),
+            Verdict::Pending("a named member has not ended")
+        );
+        table.processes.get_mut(&4).expect("4").2 = true;
+        assert_eq!(settle(&mut ledger, &mut table, 1, 0), Verdict::Settled);
+        table.processes.insert(4, (true, 2, false));
+        ledger.reported(4, &mut table);
+        assert_eq!(ledger.counted(), 1);
+        assert_eq!(
+            settle(&mut ledger, &mut table, 2, 0),
+            Verdict::Pending("fewer members named than the job associated")
+        );
     }
 
     #[test]

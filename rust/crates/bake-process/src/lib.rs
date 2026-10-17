@@ -33,7 +33,14 @@
 //!   Windows the tree's end is an account of the job's new-process messages
 //!   against its lifetime count (`job_ledger`), since the job's active count
 //!   reaches 0 before its terminated members' handles are signalled; an
-//!   account that falls short never settles.
+//!   account that falls short never settles. The account is kept from the
+//!   spawn on by an owned pump task (`pump`), started in the same poll as
+//!   the owner and holding only a weak reference to the tree. It drains the
+//!   job's messages in bounded steps and closes ended members' handles, so
+//!   the kernel queue holds about what arrives between steps while the pump
+//!   gets CPU as fast as the tree starts processes; starved, it grows until
+//!   the pump catches up (see `pump`). A settled owner stops and awaits it
+//!   before its claim goes; a drop without a claim aborts it.
 //! - **Drop.** Dropping an unsettled process kills its tree at once. With a
 //!   claim, the process and its claim move to a task on the runtime it was
 //!   spawned on, which settles it, so the claim's owner waits for that
@@ -68,6 +75,8 @@ pub use crate::tree::{TreeState, kill_tracked_detached_children};
 mod command_line;
 #[cfg(any(windows, test))]
 mod job_ledger;
+#[cfg(windows)]
+mod pump;
 mod tree;
 
 #[cfg(all(test, target_os = "linux"))]
@@ -189,6 +198,10 @@ pub struct OwnedProcess {
     /// Set on the copy a drop moves to its settling task, whose own drop
     /// must not hand it off again.
     handed_off: bool,
+    /// The tree's live job pump (`pump`), started with the owner and
+    /// stopped and awaited before the claim is released.
+    #[cfg(windows)]
+    pump: Option<pump::Pump>,
 }
 
 impl std::fmt::Debug for OwnedProcess {
@@ -213,10 +226,15 @@ impl OwnedProcess {
         let runtime = Handle::try_current()
             .map_err(|_| io::Error::other("an owned process needs a Tokio runtime"))?;
         let spawned = spawn_leader(spec).await?;
+        // From here to the return nothing awaits: the owner, and on Windows
+        // its pump, exist in the same poll as the process.
+        let tree = TrackedTree::new(spawned.tree);
+        #[cfg(windows)]
+        let pump = Some(pump::Pump::start(tree.downgrade(), &runtime));
         Ok(Self {
             pid: spawned.pid,
             leader: Some(spawned.leader),
-            tree: Some(TrackedTree::new(spawned.tree)),
+            tree: Some(tree),
             stdin: spawned.stdin,
             stdout: spawned.stdout,
             stderr: spawned.stderr,
@@ -225,7 +243,18 @@ impl OwnedProcess {
             claim,
             runtime,
             handed_off: false,
+            #[cfg(windows)]
+            pump,
         })
+    }
+
+    /// Stops the live pump and awaits it; cancel safe.
+    #[cfg(windows)]
+    async fn stop_pump(&mut self) {
+        if let Some(pump) = &mut self.pump {
+            pump.stop().await;
+        }
+        self.pump = None;
     }
 
     /// The leader's process id, as spawned. While the process is unsettled
@@ -347,6 +376,10 @@ impl OwnedProcess {
             }
             TreeState::LeftRunning
         };
+        // The tree's end is decided; the pump has nothing left to keep
+        // bounded. Awaited before the claim goes.
+        #[cfg(windows)]
+        self.stop_pump().await;
         if let Some(tree) = self.tree.take() {
             tree.disarm();
         }
@@ -444,6 +477,10 @@ impl Drop for OwnedProcess {
         self.check_identity();
         if self.identity_lost() {
             // Nothing is signalled or awaited: the identity is gone.
+            #[cfg(windows)]
+            if let Some(mut pump) = self.pump.take() {
+                pump.abort();
+            }
             self.leader = None;
             self.claim = None;
             return;
@@ -470,6 +507,8 @@ impl Drop for OwnedProcess {
                     claim: Some(claim),
                     runtime: self.runtime.clone(),
                     handed_off: true,
+                    #[cfg(windows)]
+                    pump: self.pump.take(),
                 };
                 // The claim inside keeps its owner waiting until the settle
                 // ends. If the runtime has shut down, the task is dropped at
@@ -479,6 +518,11 @@ impl Drop for OwnedProcess {
                 }));
             }
             None => {
+                // Kill only: the pump is stopped, not awaited.
+                #[cfg(windows)]
+                if let Some(mut pump) = self.pump.take() {
+                    pump.abort();
+                }
                 if let Some(tree) = self.tree.take() {
                     tree.disarm();
                 }
@@ -702,5 +746,199 @@ mod tests {
             matches!(eof, Ok(Ok(0))),
             "the leader outlived its dropped owner: {eof:?}"
         );
+    }
+}
+
+// The live job pump's ownership, on real jobs. Each case would fail if the
+// pump were not started with the owner, did not drain and prune while the
+// owner is idle, or were not stopped and awaited where the owner says.
+#[cfg(all(test, windows))]
+mod pump_tests {
+    use super::*;
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    const BOUND: Duration = Duration::from_secs(20);
+
+    /// `cmd.exe` running `script` (`/d`: no AutoRun; `/c`: then exit).
+    fn cmd(script: &str) -> ProcessSpec {
+        ProcessSpec {
+            program: "cmd.exe".into(),
+            args: vec!["/d".into(), "/q".into(), "/c".into(), script.into()],
+            cwd: None,
+            env: None,
+            stdin: false,
+        }
+    }
+
+    /// A leader that keeps starting short-lived children (`ping -n 1`).
+    const CHURN: &str = "for /L %i in (1,1,100000) do @ping -n 1 127.0.0.1 >nul";
+    /// A leader that lives about 30 s.
+    const LONG: &str = "ping -n 30 127.0.0.1 >nul";
+
+    async fn spawn(spec: &ProcessSpec, claim: Option<Claim>) -> OwnedProcess {
+        tokio::time::timeout(BOUND, OwnedProcess::spawn(spec, claim))
+            .await
+            .expect("spawn within the bound")
+            .expect("spawn")
+    }
+
+    fn control(process: &OwnedProcess) -> Arc<pump::Control> {
+        process.pump.as_ref().expect("a pump").control()
+    }
+
+    /// Waits, bounded, until only `holder` keeps `control`: the pump task
+    /// has ended and its owner's handle is gone.
+    async fn task_ended(control: &Arc<pump::Control>, holders: usize) {
+        let deadline = Instant::now() + BOUND;
+        while Arc::strong_count(control) > holders {
+            assert!(Instant::now() < deadline, "the pump task did not end");
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
+
+    // While the owner does nothing (no wait, no finish), the pump takes the
+    // job's messages from the real port into the account and closes the
+    // handles of children that ended. Without the pump the account stays
+    // empty until a settle; without pruning, the held handles grow with
+    // every child.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_pump_drains_and_prunes_while_the_owner_is_idle() {
+        let mut process = spawn(&cmd(CHURN), None).await;
+        let control = control(&process);
+        let deadline = Instant::now() + BOUND;
+        loop {
+            let (counted, open) = process
+                .tree
+                .as_ref()
+                .expect("tree")
+                .tree()
+                .account_snapshot();
+            // The leader, its console host, and a child or two in flight.
+            if counted >= 40 && open <= 8 {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "idle owner: {counted} members counted, {open} still held"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        process.kill();
+        let settled = tokio::time::timeout(BOUND, process.finish())
+            .await
+            .expect("settled within the bound")
+            .expect("settled");
+        assert_eq!(settled.tree, TreeState::Gone);
+        assert!(process.pump.is_none());
+        assert_eq!(
+            Arc::strong_count(&control),
+            1,
+            "finish left the pump running"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_natural_exit_stops_and_awaits_the_pump() {
+        let mut process = spawn(&cmd("exit 0"), None).await;
+        let control = control(&process);
+        tokio::time::timeout(BOUND, process.wait_exit())
+            .await
+            .expect("exit within the bound")
+            .expect("exit");
+        let settled = tokio::time::timeout(BOUND, process.finish())
+            .await
+            .expect("settled within the bound")
+            .expect("settled");
+        assert_eq!(settled.tree, TreeState::LeftRunning);
+        assert_eq!(
+            Arc::strong_count(&control),
+            1,
+            "detach left the pump running"
+        );
+    }
+
+    // A finish dropped part way keeps the pump owned; the next finish stops
+    // and awaits it. The pump task is held at its stop by a test barrier, so
+    // the first finish cannot complete wherever it is when it is dropped:
+    // that poll is pending by construction, not by timing.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_cancelled_finish_keeps_the_pump_until_resumed() {
+        let mut process = spawn(&cmd(LONG), None).await;
+        let control = control(&process);
+        let barrier = control.hold_stop();
+        process.kill();
+        let first = tokio::select! {
+            biased;
+            settled = process.finish() => Some(settled.map(|settled| settled.tree)),
+            () = std::future::ready(()) => None,
+        };
+        assert!(
+            first.is_none(),
+            "a finish completed while its pump was held: {first:?}"
+        );
+        assert!(process.pump.is_some(), "a cancelled finish lost the pump");
+        assert!(
+            process.leader.is_some(),
+            "a cancelled finish settled the process"
+        );
+        barrier.add_permits(1);
+        let settled = tokio::time::timeout(BOUND, process.finish())
+            .await
+            .expect("settled within the bound")
+            .expect("settled");
+        assert_eq!(settled.tree, TreeState::Gone);
+        assert!(process.pump.is_none());
+        assert_eq!(
+            Arc::strong_count(&control),
+            1,
+            "the resumed finish left the pump running"
+        );
+    }
+
+    /// A claim that reports, when released, whether the pump task had
+    /// already ended.
+    struct Claimed {
+        control: Arc<pump::Control>,
+        released: Option<tokio::sync::oneshot::Sender<usize>>,
+    }
+
+    impl Drop for Claimed {
+        fn drop(&mut self) {
+            if let Some(released) = self.released.take() {
+                let _ = released.send(Arc::strong_count(&self.control));
+            }
+        }
+    }
+
+    // A dropped owner with a claim hands the pump to its settling task,
+    // which stops and awaits it before the claim is released.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_dropped_claim_is_released_only_after_the_pump_ended() {
+        let (released, receive) = tokio::sync::oneshot::channel();
+        let process = spawn(&cmd(LONG), None).await;
+        let control = control(&process);
+        let mut process = process;
+        process.claim = Some(Box::new(Claimed {
+            control: Arc::clone(&control),
+            released: Some(released),
+        }));
+        drop(process);
+        let holders = tokio::time::timeout(BOUND, receive)
+            .await
+            .expect("the claim was released within the bound")
+            .expect("the claim reported");
+        // The claim's own reference and this test's.
+        assert_eq!(holders, 2, "the claim was released while the pump ran");
+    }
+
+    // Without a claim a drop only kills: the pump is aborted, not awaited,
+    // and its task still ends.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_dropped_owner_without_a_claim_aborts_the_pump() {
+        let process = spawn(&cmd(LONG), None).await;
+        let control = control(&process);
+        drop(process);
+        task_ended(&control, 1).await;
     }
 }
