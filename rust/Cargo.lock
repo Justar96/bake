@@ -97,6 +97,7 @@ dependencies = [
  "bake-coding-agent",
  "bake-sandbox",
  "bake-tui",
+ "ring",
  "serde_json",
  "tokio",
 ]

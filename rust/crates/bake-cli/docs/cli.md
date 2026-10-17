@@ -63,7 +63,7 @@ Commands the `bash` tool runs receive the session's details: `BAKE_SESSION_ID`, 
 |---|---|
 | 0 | The turn finished, or the interactive session was quit |
 | 1 | An error: a bad option, a startup failure, no usable model, or, in text mode, a model error (JSON mode reports it as an event) |
-| 2 | An argument bake-rs cannot parse: one that is not UTF-8, or a bad argument to `preview` or `docs` |
+| 2 | An argument bake-rs cannot parse: one that is not UTF-8, or a bad argument to `preview`, `docs`, or `--self-check` |
 | 129, 130, 143 | Stopped by `SIGHUP` or a closed terminal, `SIGINT` (interactive only), or `SIGTERM`; the session is closed first |
 
 Startup errors and warnings go to standard error, most as `Error: ` and `Warning: ` lines; `No models available` and `No session found matching` print without the prefix, as in Pi. A model error in text mode prints as its message.
@@ -73,3 +73,4 @@ Startup errors and warnings go to standard error, most as `Error: ` and `Warning
 - `bake-rs docs [topic]` prints this documentation. It needs no terminal, model, or Bake home.
 - `bake-rs preview [--inline]` opens a sample of the terminal interface with sample content and scripted turns. It needs an interactive terminal and connects to no model; Ctrl+C twice quits.
 - `bake-rs --version` prints the version.
+- `bake-rs --self-check`, given alone, checks that this executable runs on this host and carries its documentation, and prints one line of JSON naming its version, its platform (such as `linux-x64`), and the SHA-256 of each documentation topic. It reads no Bake home, credentials, or network, needs no terminal, Node, or Bun, and does not test a model, provider, or sandbox. It exits 1 on a platform Bake does not release for, and 2 when given another argument.

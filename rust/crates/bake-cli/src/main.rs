@@ -5,9 +5,12 @@
 //! headless turn through [`bake_coding_agent::cli`], a port of Pi's print
 //! mode. Both set the session up through [`cli::start`]. `bake-rs preview`
 //! opens the sample terminal preview, and `bake-rs docs` prints the user
-//! documentation ([`docs`]). Help, version, and docs need no Bake home.
+//! documentation ([`docs`]). `bake-rs --self-check` reports that the
+//! executable loads and carries its documentation ([`self_check`]). Help,
+//! version, docs, and the self-check need no Bake home.
 
 mod docs;
+mod self_check;
 
 use std::ffi::OsString;
 use std::io::{self, IsTerminal, Write};
@@ -33,6 +36,9 @@ Usage:
                               or print one answer with -p
   bake-rs preview [--inline]  Open the sample preview in an interactive terminal
   bake-rs docs [topic]        List the documentation topics, or print one
+  bake-rs --self-check        Check that this executable runs on this host,
+                              and print a JSON record of its version and
+                              platform
 
 Options:
   -p, --print               Send the prompts, print the final answer, and exit
@@ -116,6 +122,8 @@ enum Command {
     Preview(ScreenMode),
     /// `bake-rs docs`, with a topic or without one.
     Docs(Option<String>),
+    /// `bake-rs --self-check`, alone.
+    SelfCheck,
     Agent(Vec<String>),
 }
 
@@ -141,6 +149,10 @@ fn parse(args: &[OsString]) -> Result<Command, String> {
         ["docs"] => Ok(Command::Docs(None)),
         ["docs", topic] => Ok(Command::Docs(Some((*topic).to_owned()))),
         ["docs", _, extra, ..] => Err(format!("unexpected argument '{extra}' for 'docs'")),
+        ["--self-check"] => Ok(Command::SelfCheck),
+        ["--self-check", extra, ..] => {
+            Err(format!("unexpected argument '{extra}' for '--self-check'"))
+        }
         _ => Ok(Command::Agent(args)),
     }
 }
@@ -166,6 +178,7 @@ fn main() -> ExitCode {
         Ok(Command::Help) => print(HELP),
         Ok(Command::Preview(mode)) => preview(mode),
         Ok(Command::Docs(topic)) => show_docs(topic.as_deref()),
+        Ok(Command::SelfCheck) => run_self_check(),
         // Without arguments, a terminal opens a session; a pipe gets help.
         Ok(Command::Agent(args))
             if args.is_empty() && !(io::stdin().is_terminal() && io::stdout().is_terminal()) =>
@@ -215,6 +228,21 @@ fn show_docs(topic: Option<&str>) -> ExitCode {
                 ExitCode::from(2)
             }
         },
+    }
+}
+
+/// `bake-rs --self-check`: the record on standard output and status 0, or
+/// the reason on standard error and status 1. A closed standard output is
+/// status 1, not a panic, so a reader never mistakes a cut record for a pass.
+fn run_self_check() -> ExitCode {
+    match self_check::record(VERSION, self_check::host_platform(), docs::TOPICS) {
+        Ok(line) => print(&line),
+        Err(reason) => {
+            let _ = io::stderr()
+                .lock()
+                .write_all(format!("bake-rs: self-check failed: {reason}\n").as_bytes());
+            ExitCode::FAILURE
+        }
     }
 }
 
@@ -474,6 +502,20 @@ mod tests {
     #[test]
     fn the_sandbox_provider_is_built_once() {
         assert!(Arc::ptr_eq(&sandbox_provider(), &sandbox_provider()));
+    }
+
+    #[test]
+    fn the_self_check_takes_no_other_argument() {
+        assert_eq!(parse_strs(&["--self-check"]), Ok(Command::SelfCheck));
+        assert_eq!(
+            parse_strs(&["--self-check", "--json"]),
+            Err("unexpected argument '--json' for '--self-check'".into())
+        );
+        // Anywhere but first, it is an agent option, which Pi's parser refuses.
+        assert_eq!(
+            parse_strs(&["-p", "--self-check"]),
+            Ok(Command::Agent(vec!["-p".into(), "--self-check".into()]))
+        );
     }
 
     #[test]
