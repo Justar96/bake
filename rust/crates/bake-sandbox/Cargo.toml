@@ -25,8 +25,10 @@ windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Securit
 
 [target.'cfg(windows)'.dev-dependencies]
 # The enforcement tests' raw deletion, open, token, and SDDL probes and
-# their process and Job guards.
-windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_Threading"] }
+# their process and Job guards; `Win32_Security_Isolation` is the mechanism
+# probe's AppContainer profile and `Win32_System_Console` its candidates'
+# output redirection.
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Isolation", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_JobObjects", "Win32_System_Threading"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["process", "time", "sync", "io-util", "rt", "rt-multi-thread", "macros"] }

@@ -81,8 +81,9 @@
 //! accesses, and the kernel does not count `DELETE` or `FILE_DELETE_CHILD`
 //! as write accesses for files. The second, restricted access check is
 //! skipped for them, so the user's own ACEs decide alone. Measured on
-//! Windows (`deletion_diagnosis` in `tests/enforcement/windows.rs`, private
-//! roots whose DACL grants the user `FA`), a confined process:
+//! Windows (`deletion_escapes_the_write_restricted_token` in
+//! `tests/enforcement/windows.rs`, private roots whose DACL grants the user
+//! `FA`), a confined process:
 //!
 //! - is granted `DELETE` on a file and `FILE_DELETE_CHILD` on its directory
 //!   while `FILE_WRITE_DATA`, `FILE_WRITE_ATTRIBUTES`, `WRITE_DAC`, and
@@ -104,8 +105,12 @@
 //! [`Enforcement::Partial`](crate::Enforcement::Partial), and deletion is
 //! one more effect it leaves unconfined. Selecting a Windows backend by
 //! default needs a different confinement design (for example a low
-//! integrity level, whose no-write-up policy also covers `DELETE`, or an
-//! AppContainer), which is a roadmap decision.
+//! integrity level or an AppContainer), which is a roadmap decision.
+//! Whether a low level's no-write-up policy denies `DELETE` and the
+//! parent's `FILE_DELETE_CHILD` is not settled: Microsoft defines that
+//! policy over the generic-write mapping, which omits both. The mechanism
+//! probe in `tests/enforcement/windows_mechanisms.rs` measures both
+//! candidates against this token.
 //!
 //! # Known limits
 //!
