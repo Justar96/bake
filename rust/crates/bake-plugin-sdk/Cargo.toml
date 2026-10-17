@@ -1,0 +1,13 @@
+[package]
+name = "bake-plugin-sdk"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Guest-side bindings for Bake plugins: the bake:plugin@0.1.0 WIT contract for Rust components built for wasm32-wasip2"
+
+[dependencies]
+# Guest bindings generated from `wit/plugin.wit`. Only the guest uses this
+# crate; Bake's host generates its own bindings with Wasmtime.
+wit-bindgen.workspace = true

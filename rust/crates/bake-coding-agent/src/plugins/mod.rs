@@ -55,6 +55,7 @@
 
 mod protected_paths;
 pub(crate) mod veto;
+pub mod wasm;
 
 use std::collections::BTreeSet;
 use std::fmt;

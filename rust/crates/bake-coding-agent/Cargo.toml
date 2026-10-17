@@ -28,13 +28,22 @@ image.workspace = true
 icu_normalizer.workspace = true
 base64.workspace = true
 ignore.workspace = true
+# The Wasm plugin host (`plugins::wasm`): Wasmtime runs plugin components in
+# Bake's helper process; `wasmparser` checks them before compiling.
+wasmtime.workspace = true
+wasmtime-wasi.workspace = true
+wasmparser.workspace = true
+# The helper's metered WASI random generators implement the trait
+# `wasmtime-wasi` takes; the version its `rand` uses.
+rand_core.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-# `json_store`'s DACL copy.
-windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security"] }
+# Wasm helpers use overlapped named pipes.
+tokio = { workspace = true, features = ["net"] }
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_Memory", "Win32_System_Pipes", "Win32_System_ProcessStatus", "Win32_System_Threading"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "time", "macros", "net", "io-util", "test-util"] }

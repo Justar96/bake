@@ -6,11 +6,13 @@
 //! mode. Both set the session up through [`cli::start`]. `bake-rs preview`
 //! opens the sample terminal preview, and `bake-rs docs` prints the user
 //! documentation ([`docs`]). `bake-rs --self-check` reports that the
-//! executable loads and carries its documentation ([`self_check`]). Help,
-//! version, docs, and the self-check need no Bake home.
+//! executable loads and carries its documentation ([`self_check`]);
+//! `bake-rs plugin check` starts one Wasm plugin package in its helper
+//! ([`plugin_check`]). These commands need no Bake home.
 
 mod docs;
 mod self_check;
+mod plugin_check;
 
 use std::ffi::OsString;
 use std::io::{self, IsTerminal, Write};
@@ -39,6 +41,9 @@ Usage:
   bake-rs --self-check        Check that this executable runs on this host,
                               and print a JSON record of its version and
                               platform
+  bake-rs plugin check <dir> [<tool> <args-json>]
+                              Start a Wasm plugin package in its helper, and
+                              optionally ask it about one tool call
 
 Options:
   -p, --print               Send the prompts, print the final answer, and exit
@@ -128,6 +133,8 @@ enum Command {
     Docs(Option<String>),
     /// `bake-rs --self-check`, alone.
     SelfCheck,
+    /// `bake-rs plugin check`: a package directory and an optional call.
+    PluginCheck(PathBuf, Option<plugin_check::Call>),
     Agent(Vec<String>),
 }
 
@@ -157,6 +164,18 @@ fn parse(args: &[OsString]) -> Result<Command, String> {
         ["--self-check", extra, ..] => {
             Err(format!("unexpected argument '{extra}' for '--self-check'"))
         }
+        ["plugin", "check", dir] => Ok(Command::PluginCheck(PathBuf::from(dir), None)),
+        ["plugin", "check", dir, tool, args] => Ok(Command::PluginCheck(
+            PathBuf::from(dir),
+            Some(plugin_check::parse_call(tool, args)?),
+        )),
+        ["plugin", "check", _, _] => {
+            Err("'plugin check' takes a tool and its arguments together".to_owned())
+        }
+        ["plugin", "check", _, _, _, extra, ..] => {
+            Err(format!("unexpected argument '{extra}' for 'plugin check'"))
+        }
+        ["plugin", "check"] => Err("'plugin check' needs a package directory".to_owned()),
         _ => Ok(Command::Agent(args)),
     }
 }
@@ -178,11 +197,20 @@ fn main() -> ExitCode {
     {
         bake_sandbox::backends::windows_acl::helper_main(args.into_iter().skip(1));
     }
+    // The Wasm plugin helper sets its own memory limit first; it never
+    // returns.
+    if args
+        .first()
+        .is_some_and(|arg| arg == bake_coding_agent::plugins::wasm::HELPER_ARG)
+    {
+        bake_coding_agent::plugins::wasm::helper_main(args.into_iter().skip(1));
+    }
     match parse(&args) {
         Ok(Command::Help) => print(HELP),
         Ok(Command::Preview(mode)) => preview(mode),
         Ok(Command::Docs(topic)) => show_docs(topic.as_deref()),
         Ok(Command::SelfCheck) => run_self_check(),
+        Ok(Command::PluginCheck(dir, call)) => plugin_check::run(&dir, call.as_ref()),
         // Without arguments, a terminal opens a session; a pipe gets help.
         Ok(Command::Agent(args))
             if args.is_empty() && !(io::stdin().is_terminal() && io::stdout().is_terminal()) =>
@@ -517,6 +545,37 @@ mod tests {
 
     fn parse_strs(args: &[&str]) -> Result<Command, String> {
         parse(&args.iter().map(OsString::from).collect::<Vec<_>>())
+    }
+
+    #[test]
+    fn plugin_check_takes_a_directory_and_an_optional_call() {
+        assert_eq!(
+            parse_strs(&["plugin", "check", "pkg"]),
+            Ok(Command::PluginCheck(PathBuf::from("pkg"), None))
+        );
+        assert_eq!(
+            parse_strs(&["plugin", "check", "pkg", "write", r#"{"path":".env"}"#]),
+            Ok(Command::PluginCheck(
+                PathBuf::from("pkg"),
+                Some(plugin_check::parse_call("write", r#"{"path":".env"}"#).unwrap())
+            ))
+        );
+        for args in [
+            &["plugin", "check"][..],
+            &["plugin", "check", "pkg", "write"],
+            &["plugin", "check", "pkg", "write", "[]"],
+            &["plugin", "check", "pkg", "write", "{}", "extra"],
+        ] {
+            assert!(parse_strs(args).is_err(), "{args:?}");
+        }
+        // Anything else that starts with "plugin" is still a prompt.
+        assert_eq!(
+            parse_strs(&["plugin", "ideas"]),
+            Ok(Command::Agent(vec![
+                "plugin".to_owned(),
+                "ideas".to_owned()
+            ]))
+        );
     }
 
     #[test]
