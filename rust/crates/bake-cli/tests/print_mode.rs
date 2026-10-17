@@ -34,6 +34,9 @@ const READ_CALL_SSE: &str = include_str!("fixtures/openai-responses-read-call.ss
 /// How long one `bake-rs` run may take before the test fails.
 const RUN_TIMEOUT: Duration = Duration::from_secs(60);
 
+#[path = "print_mode/background_accounting.rs"]
+mod background_accounting;
+
 /// A canned reply.
 #[derive(Clone)]
 struct Reply {

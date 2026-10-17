@@ -101,6 +101,9 @@ async fn fixture_with_session(
 #[path = "crash_tests.rs"]
 mod crash;
 
+#[path = "print_tests.rs"]
+mod print;
+
 fn summaries(faux: &FauxProvider) {
     faux.set_responses(vec![
         faux_assistant_message("## Goal\nPreserve the task").into(),

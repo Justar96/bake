@@ -4,6 +4,8 @@ Notable changes to Bake. `/changelog` in the terminal prints the section for the
 
 ## [Unreleased]
 
+- Rust print mode drains its final background summary before closing event output, preserving terminal attempt accounting. A failed required debit write exits with status 1; unreported provider usage remains unknown.
+
 - A cancelled Rust summary waits for its reserved model-call debit to finish and checks cancellation again before dispatching the provider request.
 
 - Rust sessions can opt into `taskDocuments` for versioned plans, todos, and goals, and `backgroundCompaction` for one speculative summary whose source snapshot is checked before commit. Both default to off. Dropping a prompt waiter leaves its admitted execution running; abort still cancels and awaits it.
