@@ -45,6 +45,16 @@ fn skill_file(name: &str, description: &str) -> String {
     format!("---\nname: {name}\ndescription: {description}\n---\n")
 }
 
+/// A temporary directory that is its own repository root, so the ancestor
+/// `.agents/skills` walk stops inside it. Windows keeps its temporary
+/// directory under the user's profile, whose real `~/.agents/skills` the
+/// walk would otherwise read.
+fn bounded_temp(name: &str) -> TempDir {
+    let temp = TempDir::new(name);
+    std::fs::create_dir_all(temp.join(".git")).expect(".git");
+    temp
+}
+
 fn defaults(cwd: &Path, user_home: Option<&Path>) -> LoadSkillsOptions {
     LoadSkillsOptions {
         cwd: cwd.to_string_lossy().into_owned(),
@@ -267,7 +277,7 @@ fn hidden_skills_stay_out_of_the_prompt() {
 
 #[test]
 fn loads_explicit_paths() {
-    let temp = TempDir::new("skills-explicit");
+    let temp = bounded_temp("skills-explicit");
     let cwd = temp.join("cwd");
     std::fs::create_dir_all(&cwd).expect("cwd");
     let options = |paths: &[String]| LoadSkillsOptions {
@@ -300,7 +310,7 @@ fn loads_explicit_paths() {
 
 #[test]
 fn the_first_skill_of_a_name_wins() {
-    let temp = TempDir::new("skills-collision");
+    let temp = bounded_temp("skills-collision");
     let cwd = temp.join("cwd");
     std::fs::create_dir_all(&cwd).expect("cwd");
     let first = collision_fixtures().join("first");
@@ -374,7 +384,7 @@ fn scans_to_the_filesystem_root_outside_a_repository() {
 
 #[test]
 fn agents_roots_skip_root_markdown_and_keep_nested_markdown() {
-    let temp = TempDir::new("skills-agents-markdown");
+    let temp = bounded_temp("skills-agents-markdown");
     let skills = temp.join(".agents/skills");
     let root_file = skills.join("root-file.md");
     let nested_skill = skills.join("nested-skill/SKILL.md");
@@ -410,7 +420,7 @@ fn agents_roots_skip_root_markdown_and_keep_nested_markdown() {
 
 #[test]
 fn the_users_agents_skills_load_once_as_user_skills() {
-    let temp = TempDir::new("skills-user");
+    let temp = bounded_temp("skills-user");
     let home = temp.join("home");
     let cwd = home.join("scratch").join("nested");
     std::fs::create_dir_all(&cwd).expect("cwd");
@@ -472,7 +482,7 @@ fn a_file_reached_through_a_link_loads_once() {
 #[cfg(unix)]
 #[test]
 fn link_cycles_end() {
-    let temp = TempDir::new("skills-link-cycle");
+    let temp = bounded_temp("skills-link-cycle");
     let skills = temp.join(".agents/skills");
     write(&skills.join("a/b/SKILL.md"), &skill_file("b", "b"));
     std::fs::create_dir_all(skills.join("loop")).expect("loop");
@@ -491,7 +501,7 @@ fn link_cycles_end() {
 
 #[test]
 fn ignore_files_apply_below_their_directory() {
-    let temp = TempDir::new("skills-ignore");
+    let temp = bounded_temp("skills-ignore");
     let skills = temp.join(".agents/skills");
     write(&skills.join(".gitignore"), "venv\n__pycache__\n");
     write(
@@ -533,7 +543,7 @@ fn ignore_files_apply_below_their_directory() {
 fn a_parent_ignore_file_does_not_hide_a_root() {
     // "should not apply parent .gitignore to .pi auto-discovery", for
     // `.agents`.
-    let temp = TempDir::new("skills-parent-ignore");
+    let temp = bounded_temp("skills-parent-ignore");
     write(&temp.join(".gitignore"), ".agents\n");
     let skill = temp.join(".agents/skills/auto-skill/SKILL.md");
     write(&skill, &skill_file("auto-skill", "Auto"));
