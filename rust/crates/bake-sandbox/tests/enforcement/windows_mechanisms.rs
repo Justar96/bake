@@ -81,6 +81,19 @@ pub fn probe(ops: &[&str]) -> std::io::Result<i32> {
                 println!("grandchild {}", child.id());
                 0
             }),
+        // The same parked descendant, then this process parks too, after a
+        // handshake naming both: a confined tree for a runner to lose.
+        ["orphan-and-park"] => {
+            use std::io::Write;
+            let child = std::process::Command::new(std::env::current_exe()?)
+                .args([PROBE_ARG, "park"])
+                .spawn()?;
+            println!("grandchild {} child {}", child.id(), std::process::id());
+            std::io::stdout().flush()?;
+            loop {
+                std::thread::park();
+            }
+        }
         // A descendant that asks to leave the Job. Should Windows allow it,
         // the descendant is killed and reaped before this reports, so no
         // process outlives the run either way.
@@ -156,7 +169,7 @@ pub fn tests() -> Vec<harness::Test> {
 
 /// `FILE_GENERIC_READ | FILE_GENERIC_EXECUTE` (0x1200A9), `icacls`'s `RX`:
 /// what the AppContainer's package SID needs to read and run its binary.
-const READ_EXECUTE: u32 = 0x0012_00A9;
+pub(super) const READ_EXECUTE: u32 = 0x0012_00A9;
 
 /// The package SID's grant on its own workspace: [`READ_EXECUTE`] plus the
 /// runner's write grant (0x1301FF), still without `WRITE_DAC` and
@@ -496,7 +509,7 @@ impl Roots {
 
 /// Seeds `name` under `root` with a DACL that grants this user everything
 /// but `DELETE`, so only the parent's `FILE_DELETE_CHILD` can delete it.
-fn seed_without_delete(root: &Scratch, name: &str, user: &str) -> PathBuf {
+pub(super) fn seed_without_delete(root: &Scratch, name: &str, user: &str) -> PathBuf {
     use windows_sys::Win32::Security::Authorization::{
         ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
     };
@@ -1213,7 +1226,7 @@ impl Drop for Profile {
 // ---------------------------------------------------------------------------
 // The low-integrity candidate token.
 
-mod token {
+pub(super) mod token {
     use std::ffi::{OsStr, c_void};
     use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
     use std::ptr::{null, null_mut};
@@ -1240,10 +1253,10 @@ mod token {
     const FILE_ALL_ACCESS: u32 = 0x001F_01FF;
 
     /// A SID from its string form, freed on drop.
-    pub(super) struct Sid(Local);
+    pub(in super::super) struct Sid(Local);
 
     impl Sid {
-        pub(super) fn parse(text: &str) -> std::io::Result<Self> {
+        pub(in super::super) fn parse(text: &str) -> std::io::Result<Self> {
             use windows_sys::Win32::Security::Authorization::ConvertStringSidToSidW;
             let units = wide(OsStr::new(text));
             let mut sid = null_mut();
@@ -1255,7 +1268,7 @@ mod token {
             Ok(Self(Local(sid)))
         }
 
-        pub(super) fn as_ptr(&self) -> *mut c_void {
+        pub(in super::super) fn as_ptr(&self) -> *mut c_void {
             self.0.0
         }
     }
@@ -1390,7 +1403,7 @@ mod token {
 // ---------------------------------------------------------------------------
 // Fixture ACLs through Win32, with binary SIDs.
 
-mod acl {
+pub(super) mod acl {
     use std::ffi::c_void;
     use std::path::Path;
     use std::ptr::{null, null_mut};

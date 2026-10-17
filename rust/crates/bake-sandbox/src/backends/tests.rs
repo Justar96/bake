@@ -273,6 +273,122 @@ fn the_windows_acl_rung_refuses_what_it_cannot_grant_distinctly() {
     );
 }
 
+#[test]
+fn a_sole_appcontainer_rung_wraps_its_grants_unprobed() {
+    let read = BesideExe::new("ac-read");
+    let grants = windows_appcontainer::AppContainerGrants::new()
+        .with_read_root(read.0.clone())
+        .with_network(windows_appcontainer::NetworkGrant::InternetClient);
+    let provider = LocalProvider::with_chain(vec![Runner::WindowsAppContainer])
+        .with_windows_appcontainer_grants(grants);
+    let workspace = BesideExe::new("ac-sole");
+    let temp = crate::paths::canonical_path(&std::env::temp_dir());
+    for mode in [SandboxMode::ReadOnly, SandboxMode::WorkspaceWrite] {
+        let policy = SandboxPolicy::new(mode, &workspace.0);
+        let Some(Ok(command)) = poll_once(provider.confine(&os(&["cmd", "/c", "x"]), &policy))
+        else {
+            panic!("a sole candidate needs no probe");
+        };
+        assert_eq!(
+            Some(command.program.clone()),
+            std::env::current_exe().map(OsString::from).ok()
+        );
+        let mut expected = vec![OsString::from(windows_appcontainer::HELPER_ARG)];
+        expected.extend([
+            "--workspace".into(),
+            workspace.0.clone().into_os_string(),
+            "--temp".into(),
+            temp.clone().into_os_string(),
+            "--mode".into(),
+            mode.to_string().into(),
+            "--read".into(),
+            read.0.clone().into_os_string(),
+            "--network".into(),
+            "internet-client".into(),
+            "--".into(),
+        ]);
+        expected.extend(os(&["cmd", "/c", "x"]));
+        assert_eq!(command.args, expected);
+        assert_eq!(command.enforcement, Enforcement::Partial);
+        assert_eq!(
+            command.runner_failure_rules,
+            [RunnerFailureRule {
+                allowed_exit_codes: vec![127],
+                fatal_signatures: vec!["windows-appcontainer-run: ".into()],
+                informational_lines: Vec::new(),
+            }]
+        );
+        assert_eq!(
+            command.denial_signatures,
+            Runner::WindowsAcl.denial_signatures()
+        );
+    }
+}
+
+#[test]
+fn the_appcontainer_rung_refuses_unsafe_policies_and_grants() {
+    let refused = |provider: &LocalProvider, policy: &SandboxPolicy, expected: &str| {
+        let Some(Err(error)) = poll_once(provider.confine(&os(&["x"]), policy)) else {
+            panic!("{expected}: must be refused");
+        };
+        assert!(
+            error
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains(expected)),
+            "{expected}: {error}"
+        );
+    };
+    let plain = LocalProvider::with_chain(vec![Runner::WindowsAppContainer]);
+    // A workspace holding the temp root, under both modes: the standing
+    // package ACE would reach every private directory.
+    for policy in [ro(), ww()] {
+        refused(&plain, &policy, "temp root must be outside the workspace");
+    }
+    let workspace = BesideExe::new("ac-policy");
+    let extra = BesideExe::new("ac-extra");
+    let policy = SandboxPolicy::new(SandboxMode::WorkspaceWrite, &workspace.0)
+        .with_extra_writable_roots([extra.0.clone()]);
+    refused(&plain, &policy, "extra writable roots");
+    let exe = std::env::current_exe().expect("exe");
+    let around_exe = crate::paths::canonical_path(exe.parent().expect("deps dir"));
+    let policy = SandboxPolicy::new(SandboxMode::ReadOnly, &around_exe);
+    refused(&plain, &policy, "Windows AppContainer runner");
+    let policy = SandboxPolicy::new(SandboxMode::ReadOnly, &workspace.0);
+    for (grants, expected) in [
+        (
+            windows_appcontainer::AppContainerGrants::new()
+                .with_network(windows_appcontainer::NetworkGrant::Loopback),
+            "loopback network access is unsupported",
+        ),
+        (
+            windows_appcontainer::AppContainerGrants::new().with_read_root(workspace.0.clone()),
+            "overlaps the workspace",
+        ),
+        (
+            windows_appcontainer::AppContainerGrants::new().with_read_root(extra.0.join("missing")),
+            "is unusable",
+        ),
+    ] {
+        let provider = LocalProvider::with_chain(vec![Runner::WindowsAppContainer])
+            .with_windows_appcontainer_grants(grants);
+        refused(&provider, &policy, expected);
+    }
+}
+
+#[test]
+fn a_multi_candidate_chain_never_probes_the_appcontainer_rung() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let provider = LocalProvider::with_chain(vec![
+        Runner::WindowsAppContainer,
+        Runner::WindowsAppContainer,
+    ]);
+    assert_eq!(runtime.block_on(provider.selected()), None);
+}
+
 #[cfg(unix)]
 mod fake_runners {
     use super::*;

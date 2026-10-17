@@ -1,15 +1,18 @@
 //! The local OS backends, ported from `LocalSandboxProvider` in
 //! `packages/sandbox/sandbox-local/src/index.ts`: Linux bubblewrap then
-//! Landlock, and macOS Seatbelt. The Windows restricted-token runner exists
-//! for explicit chains only: it does not confine deletion, so the Windows
-//! default chain is empty (see [`windows_acl`]). Windows and every other
-//! platform refuse by default.
+//! Landlock, and macOS Seatbelt. The Windows restricted-token runner and the
+//! unqualified AppContainer runner exist for explicit chains only: the
+//! first does not confine deletion (see [`windows_acl`]), and the second has
+//! no native qualification yet (see [`windows_appcontainer`]), so the
+//! Windows default chain is empty. Windows and every other platform refuse
+//! by default.
 //!
 //! | Module | Contents |
 //! |---|---|
 //! | [`profiles`] | the bubblewrap, Landlock, and Seatbelt profile builders |
 //! | [`landlock`] | the Landlock helper `bake-rs` re-executes itself as |
 //! | [`windows_acl`] | the Windows restricted-token runner `bake-rs` re-executes itself as |
+//! | [`windows_appcontainer`] | the unqualified Windows AppContainer runner and its grant policy |
 //!
 //! Selection is by platform first and probes second: a chain with one
 //! candidate selects it unprobed, and its own refusal at run time is the
@@ -50,6 +53,7 @@
 pub mod landlock;
 pub mod profiles;
 pub mod windows_acl;
+pub mod windows_appcontainer;
 
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
@@ -79,6 +83,9 @@ pub enum Runner {
     Seatbelt,
     /// The Windows restricted-token runner (`windows-acl`).
     WindowsAcl,
+    /// The unqualified Windows AppContainer runner
+    /// (`windows-appcontainer`).
+    WindowsAppContainer,
 }
 
 impl Runner {
@@ -89,6 +96,7 @@ impl Runner {
             Runner::Landlock => "landlock",
             Runner::Seatbelt => "seatbelt",
             Runner::WindowsAcl => "windows-acl",
+            Runner::WindowsAppContainer => "windows-appcontainer",
         }
     }
 
@@ -99,6 +107,7 @@ impl Runner {
             Runner::Landlock => "Landlock helper",
             Runner::Seatbelt => "sandbox-exec",
             Runner::WindowsAcl => "Windows ACL runner",
+            Runner::WindowsAppContainer => "Windows AppContainer runner",
         }
     }
 
@@ -106,10 +115,13 @@ impl Runner {
     /// (`STATIC_ENFORCEMENT`). Landlock is listed for totality: the Linux
     /// chain reaches it only through its probe, whose report decides. The
     /// Windows runner is partial: deletion, Everyone's grants, and hard links
-    /// escape it (see [`windows_acl`]), and no default chain holds it.
+    /// escape it (see [`windows_acl`]), and no default chain holds it. The
+    /// AppContainer runner is partial until a native qualification shows
+    /// otherwise; hard links, at least, escape it (see
+    /// [`windows_appcontainer`]).
     pub fn static_enforcement(self) -> Enforcement {
         match self {
-            Runner::WindowsAcl => Enforcement::Partial,
+            Runner::WindowsAcl | Runner::WindowsAppContainer => Enforcement::Partial,
             _ => Enforcement::Full,
         }
     }
@@ -122,6 +134,7 @@ impl Runner {
             Runner::Landlock => &["permission denied"],
             Runner::Seatbelt => &["operation not permitted"],
             Runner::WindowsAcl => &windows_acl::DENIAL_SIGNATURES,
+            Runner::WindowsAppContainer => &windows_appcontainer::DENIAL_SIGNATURES,
         };
         signatures
             .iter()
@@ -150,6 +163,11 @@ impl Runner {
             Runner::WindowsAcl => RunnerFailureRule {
                 allowed_exit_codes: vec![windows_acl::RUNNER_FAILURE_EXIT],
                 fatal_signatures: vec![format!("{}: ", windows_acl::RUNNER_SIGNATURE)],
+                ..RunnerFailureRule::default()
+            },
+            Runner::WindowsAppContainer => RunnerFailureRule {
+                allowed_exit_codes: vec![windows_appcontainer::RUNNER_FAILURE_EXIT],
+                fatal_signatures: vec![format!("{}: ", windows_appcontainer::RUNNER_SIGNATURE)],
                 ..RunnerFailureRule::default()
             },
         };
@@ -208,6 +226,10 @@ pub struct LocalProvider {
     seatbelt: Invocation,
     /// `None` when the current executable could not be resolved.
     windows_acl: Option<Invocation>,
+    /// `None` when the current executable could not be resolved.
+    windows_appcontainer: Option<Invocation>,
+    /// The AppContainer runner's read and network grants.
+    appcontainer_grants: windows_appcontainer::AppContainerGrants,
     probe_timeout: Duration,
     verdict: OnceCell<Verdict>,
 }
@@ -243,8 +265,11 @@ impl LocalProvider {
         let landlock = exe
             .clone()
             .map(|exe| Invocation::new(exe, [OsString::from(landlock::HELPER_ARG)]));
-        let windows_acl =
-            exe.map(|exe| Invocation::new(exe, [OsString::from(windows_acl::HELPER_ARG)]));
+        let windows_acl = exe
+            .clone()
+            .map(|exe| Invocation::new(exe, [OsString::from(windows_acl::HELPER_ARG)]));
+        let windows_appcontainer =
+            exe.map(|exe| Invocation::new(exe, [OsString::from(windows_appcontainer::HELPER_ARG)]));
         let path = std::env::var_os("PATH");
         Self {
             chain,
@@ -253,6 +278,8 @@ impl LocalProvider {
             landlock,
             seatbelt: Invocation::new(SEATBELT_EXEC, []),
             windows_acl,
+            windows_appcontainer,
+            appcontainer_grants: windows_appcontainer::AppContainerGrants::new(),
             probe_timeout: DEFAULT_PROBE_TIMEOUT,
             verdict: OnceCell::new(),
         }
@@ -304,6 +331,29 @@ impl LocalProvider {
         args: impl IntoIterator<Item = OsString>,
     ) -> Self {
         self.windows_acl = Some(Invocation::new(program, args));
+        self
+    }
+
+    /// Runs the Windows AppContainer runner as `program` with `args` before
+    /// its profile; a Bake binary needs `[windows_appcontainer::HELPER_ARG]`.
+    pub fn with_windows_appcontainer_runner(
+        mut self,
+        program: impl Into<OsString>,
+        args: impl IntoIterator<Item = OsString>,
+    ) -> Self {
+        self.windows_appcontainer = Some(Invocation::new(program, args));
+        self
+    }
+
+    /// Gives every AppContainer wrap `grants`: read roots and network
+    /// capabilities beyond the workspace and its private temp directory.
+    /// They are validated on each wrap, and again by the runner, and a wrap
+    /// whose grants fail is refused. The default grants nothing.
+    pub fn with_windows_appcontainer_grants(
+        mut self,
+        grants: windows_appcontainer::AppContainerGrants,
+    ) -> Self {
+        self.appcontainer_grants = grants;
         self
     }
 
@@ -402,6 +452,11 @@ impl LocalProvider {
                 let (code, _) = run_probe(runner, &args, self.probe_timeout, false).await?;
                 (code == Some(0)).then_some(Enforcement::Partial)
             }
+            // Never probed: a real launch would create a standing profile
+            // and workspace ACE for the probe's own directory. The rung is
+            // selectable only as a sole candidate, whose launch failure is
+            // the fail-closed end.
+            Runner::WindowsAppContainer => None,
         }
     }
 
@@ -448,6 +503,19 @@ impl LocalProvider {
                 (
                     runner,
                     windows_acl_profile(policy).map_err(|detail| refuse(Some(detail)))?,
+                )
+            }
+            Runner::WindowsAppContainer => {
+                let Some(runner) = self.windows_appcontainer.as_ref() else {
+                    return Err(refuse(Some(
+                        "the Windows AppContainer runner (the current executable) could not be resolved"
+                            .to_owned(),
+                    )));
+                };
+                (
+                    runner,
+                    windows_appcontainer_profile(policy, &self.appcontainer_grants)
+                        .map_err(|detail| refuse(Some(detail)))?,
                 )
             }
             Runner::Seatbelt => match profiles::seatbelt_profile_args(policy) {
@@ -513,6 +581,46 @@ fn windows_acl_profile(policy: &SandboxPolicy) -> Result<Vec<OsString>, String> 
     }
     Ok(windows_acl::runner_profile_args(
         mode, &workspace, &temp_root,
+    ))
+}
+
+/// The AppContainer runner's profile for `policy` and `grants`. As for the
+/// restricted-token runner, extra writable roots are refused and the ambient
+/// temporary directory is never granted; the temp root must lie outside the
+/// workspace under both modes, because even a read-only run leaves the
+/// package's standing read ACE on the workspace, which every later private
+/// directory would inherit. The grants pass their path and disk checks
+/// against this host's locations before the wrap is returned.
+fn windows_appcontainer_profile(
+    policy: &SandboxPolicy,
+    grants: &windows_appcontainer::AppContainerGrants,
+) -> Result<Vec<OsString>, String> {
+    let mode = match policy.mode {
+        SandboxMode::ReadOnly => windows_acl::RunnerMode::ReadOnly,
+        SandboxMode::WorkspaceWrite => windows_acl::RunnerMode::WorkspaceWrite,
+        SandboxMode::DangerFullAccess => {
+            return Err("danger-full-access is not a confined mode".to_owned());
+        }
+    };
+    if !policy.extra_writable_roots.is_empty() {
+        return Err(
+            "the Windows AppContainer runner grants only the workspace and a private temporary directory; extra writable roots are not supported"
+                .to_owned(),
+        );
+    }
+    let temp_root = canonical_path(&std::env::temp_dir());
+    let workspace = crate::paths::normalize_lexically(&policy.workspace_root);
+    windows_acl::check_temp_root_outside_workspace(&workspace, &temp_root)?;
+    grants
+        .validate_shape(
+            &workspace,
+            &temp_root,
+            &windows_appcontainer::HostRoots::from_env(),
+        )
+        .and_then(|()| grants.check_on_disk())
+        .map_err(|error| error.to_string())?;
+    Ok(windows_appcontainer::runner_profile_args(
+        mode, &workspace, &temp_root, grants,
     ))
 }
 

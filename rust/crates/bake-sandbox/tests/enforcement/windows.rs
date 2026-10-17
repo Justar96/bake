@@ -50,6 +50,9 @@ use super::{Run, Scratch, harness, run_argv, runtime};
 #[path = "windows_mechanisms.rs"]
 mod mechanisms;
 
+#[path = "windows_appcontainer.rs"]
+mod appcontainer;
+
 /// The hidden first argument that turns this binary into the probe.
 pub const PROBE_ARG: &str = "__bake-test-probe";
 
@@ -278,6 +281,7 @@ pub fn tests() -> Vec<harness::Test> {
             harness::Test::new(format!("windows-acl::{name}"), scenario)
         })
         .chain(mechanisms::tests())
+        .chain(appcontainer::tests())
         .collect()
 }
 
@@ -540,8 +544,8 @@ impl Drop for Owned {
 }
 
 /// Whether the process behind `handle` (opened with
-/// `PROCESS_QUERY_LIMITED_INFORMATION`) runs this test binary.
-fn is_this_binary(handle: std::os::windows::io::RawHandle) -> bool {
+/// `PROCESS_QUERY_LIMITED_INFORMATION`) runs the executable at `image`.
+fn is_image(handle: std::os::windows::io::RawHandle, image: &Path) -> bool {
     use windows_sys::Win32::System::Threading::QueryFullProcessImageNameW;
     let mut name = vec![0u16; 32_768];
     let mut size = name.len() as u32;
@@ -553,9 +557,8 @@ fn is_this_binary(handle: std::os::windows::io::RawHandle) -> bool {
         "QueryFullProcessImageNameW: {}",
         std::io::Error::last_os_error()
     );
-    let image = PathBuf::from(String::from_utf16_lossy(&name[..size as usize]));
-    bake_sandbox::canonical_path(&image)
-        == bake_sandbox::canonical_path(&std::env::current_exe().expect("exe"))
+    let running = PathBuf::from(String::from_utf16_lossy(&name[..size as usize]));
+    bake_sandbox::canonical_path(&running) == bake_sandbox::canonical_path(image)
 }
 
 /// A descendant this test learned of from a handshake, held by handle so
@@ -566,6 +569,11 @@ struct OwnedPid(std::os::windows::io::OwnedHandle, u32);
 impl OwnedPid {
     /// Opens `pid`, which must still be this test binary.
     fn open(pid: u32) -> Self {
+        Self::open_image(pid, &std::env::current_exe().expect("exe"))
+    }
+
+    /// Opens `pid`, which must still run the executable at `image`.
+    fn open_image(pid: u32, image: &Path) -> Self {
         use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
         use windows_sys::Win32::System::Threading::{
             OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
@@ -586,8 +594,9 @@ impl OwnedPid {
         // SAFETY: a fresh handle owned here.
         let handle = unsafe { OwnedHandle::from_raw_handle(raw) };
         assert!(
-            is_this_binary(handle.as_raw_handle()),
-            "pid {pid} is not this test binary"
+            is_image(handle.as_raw_handle(), image),
+            "pid {pid} is not {}",
+            image.display()
         );
         Self(handle, pid)
     }
