@@ -28,6 +28,11 @@ libc.workspace = true
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Console", "Win32_System_IO", "Win32_System_Threading"] }
 
+[target.'cfg(windows)'.dev-dependencies]
+# The full-output-pipe regression owns its console helper's whole process tree.
+bake-process.workspace = true
+windows-sys = { workspace = true, features = ["Win32_Security", "Win32_System_JobObjects", "Win32_System_Pipes"] }
+
 # The shipped binary as the consumer of `mcp.json`: the test binary
 # re-executes itself as the stdio MCP server, so its standard output must
 # carry only protocol messages, which libtest's harness would break.
