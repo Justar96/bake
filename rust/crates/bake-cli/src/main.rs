@@ -15,6 +15,7 @@
 mod docs;
 mod plugin_check;
 mod plugin_manage;
+mod print_output;
 mod self_check;
 
 use std::ffi::OsString;
@@ -60,6 +61,9 @@ Options:
       --inline              Keep an interactive session in the terminal's
                             scrollback instead of the full screen
       --mode <mode>         Output: text (the final answer) or json (every event)
+      --max-model-calls <n> Print-mode request limit shared by all prompts,
+                            retries, and summaries; 0 starts no model request
+      --run-timeout-ms <n>  Print-mode deadline, starting before the first prompt
       --provider <name>     Provider of --model
       --model <pattern>     Model id, pattern, or provider/id, optionally :<thinking>
       --models <patterns>   Scope available models (comma-separated patterns or globs)
@@ -413,9 +417,29 @@ fn agent(args: &[String]) -> ExitCode {
     };
     let code = match mode {
         Some(mode) => runtime.block_on(async move {
-            // Signal streams register with the runtime, so they start inside it.
-            let environment = environment(stdin_is_terminal, stderr, interrupt(), None);
-            cli::run(environment, *parsed, mode).await
+            let output = match print_output::Output::start() {
+                Ok(output) => output,
+                Err(error) => {
+                    eprintln!("Error: could not start print output: {error}");
+                    return 1;
+                }
+            };
+            let (signals, interrupt) = match print_output::Signals::start(&output, interrupt) {
+                Ok(signals) => signals,
+                Err(error) => {
+                    eprintln!("Error: could not listen for stop requests: {error}");
+                    return 1;
+                }
+            };
+            let mut environment = environment(stdin_is_terminal, output.stderr(), interrupt, None);
+            environment.stdout = output.stdout();
+            let mut code = cli::run(environment, *parsed, mode).await;
+            if output.finish().await.is_err() {
+                code = 1;
+            }
+            // Output cancellation may let a prompt settle before the forwarded
+            // interrupt wins cli::run's select; the observed signal owns status.
+            signals.finish().unwrap_or(code)
         }),
         None => interactive(&runtime, *parsed, stderr),
     };

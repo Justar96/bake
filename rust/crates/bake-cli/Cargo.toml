@@ -34,17 +34,23 @@ wasm-encoder = { version = "=0.258.3", default-features = false }
 wit-component = { version = "=0.258.3", default-features = false }
 wit-parser = { version = "=0.258.3", default-features = false }
 
-[target.'cfg(unix)'.dev-dependencies]
-libc.workspace = true
-
 # The raw protocol tests compile the host's private helper launcher
 # (`bake-coding-agent`'s `plugins/wasm/process.rs`) from its source, so they
 # take its Windows dependencies: named pipes, a random pipe name, and the
 # Job, file, and process APIs.
 [target.'cfg(windows)'.dev-dependencies]
+bake-process.workspace = true
 getrandom.workspace = true
 tokio = { workspace = true, features = ["net"] }
-windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_Threading"] }
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_Pipes"] }
+
+# Interruptible print-mode pipe writes and the subprocess tests' probes.
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Console", "Win32_System_IO", "Win32_System_Threading"] }
+
 
 # The shipped binary consumes mcp.json; its test re-executes as a stdio server.
 [[test]]

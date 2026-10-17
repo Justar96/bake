@@ -87,9 +87,14 @@ pub struct Settings {
     /// `defaultTools` resolved as Pi's `getDefaultTools` resolves it:
     /// `None` when unset, and string entries only.
     pub default_tools: Option<Vec<String>>,
+    /// `taskDocuments`: enables the versioned task document tool and context.
+    pub task_documents: bool,
     /// `compaction` as stored, checked when read (see
     /// [`Self::compaction_settings`]).
     pub compaction: Option<Value>,
+    /// `backgroundCompaction`: opt-in speculative summaries before the
+    /// ordinary foreground compaction threshold. Defaults to false.
+    pub background_compaction: bool,
     /// `branchSummary.reserveTokens`.
     pub branch_summary_reserve_tokens: u64,
     /// `retry`.
@@ -199,7 +204,9 @@ impl Default for Settings {
             block_images: false,
             images_auto_resize: None,
             default_tools: None,
+            task_documents: false,
             compaction: None,
+            background_compaction: false,
             branch_summary_reserve_tokens: DEFAULT_BRANCH_SUMMARY_RESERVE_TOKENS,
             retry: RetrySettings::default(),
             permission: None,
@@ -379,7 +386,10 @@ impl Settings {
                     .unwrap_or_default();
                 crate::tools::index::resolve_default_tools(&entries)
             }),
+            task_documents: object.get("taskDocuments").and_then(Value::as_bool) == Some(true),
             compaction: object.get("compaction").cloned(),
+            background_compaction: object.get("backgroundCompaction").and_then(Value::as_bool)
+                == Some(true),
             branch_summary_reserve_tokens: object
                 .get("branchSummary")
                 .and_then(|summary| summary.get("reserveTokens"))

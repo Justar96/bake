@@ -96,6 +96,56 @@ async fn run(tool: &AgentTool, params: Value) -> Result<AgentToolResult, String>
     .await
 }
 
+/// Bake's `SENSITIVE_ENV_PATTERN` contract from
+/// `packages/subprocess/subprocess/src/index.ts`, through the real bash tool.
+/// The re-executed fixture owns its environment; parallel tests inherit none
+/// of these synthetic values.
+#[tokio::test]
+async fn bash_drops_ambient_credentials_and_keeps_ordinary_variables() {
+    if !have_bash("bash_drops_ambient_credentials_and_keeps_ordinary_variables") {
+        return;
+    }
+    let mut child = tokio::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "bash_environment_host", "--nocapture"])
+        .env("BAKE_BASH_ENV_FIXTURE", "1")
+        .env("BAKE_BASH_PROBE_KEY", "synthetic-key")
+        .env("BAKE_BASH_PROBE_PASSWORD", "synthetic-password")
+        .env("BAKE_BASH_PROBE_secret", "synthetic-secret")
+        .env("BAKE_BASH_PROBE_myToken", "synthetic-token")
+        .env("BAKE_BASH_PROBE_NORMAL", "ordinary")
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let status = match tokio::time::timeout(Duration::from_secs(30), child.wait()).await {
+        Ok(status) => status.unwrap(),
+        Err(_) => {
+            child.kill().await.unwrap();
+            panic!("bash environment fixture did not finish within 30 seconds");
+        }
+    };
+    assert!(status.success(), "bash environment fixture exited {status}");
+}
+
+#[tokio::test]
+async fn bash_environment_host() {
+    if std::env::var_os("BAKE_BASH_ENV_FIXTURE").is_none() {
+        return;
+    }
+    let dir = TempDir::new();
+    let tool = create_bash_tool(&dir.0, dir.options());
+    let result = run(
+        &tool,
+        json!({
+            "command": "printf '%s|%s|%s|%s|%s' \"${BAKE_BASH_PROBE_KEY-}\" \"${BAKE_BASH_PROBE_PASSWORD-}\" \"${BAKE_BASH_PROBE_secret-}\" \"${BAKE_BASH_PROBE_myToken-}\" \"${BAKE_BASH_PROBE_NORMAL-}\"",
+            "timeout": 10,
+        }),
+    )
+    .await
+    .unwrap();
+    assert!(!result.is_error, "{}", text(&result));
+    assert_eq!(text(&result), "||||ordinary");
+}
+
 // ---------------------------------------------------------------------------
 // Scripted operations from the golden file.
 
@@ -864,9 +914,10 @@ async fn local_operations_take_the_given_environment() {
     let sink = Arc::clone(&chunks);
     let mut env: Vec<(OsString, OsString)> = std::env::vars_os().collect();
     env.push(("TEST_LOCAL_BASH_OPS".into(), "from-local-ops".into()));
+    env.push(("TEST_LOCAL_BASH_TOKEN".into(), "explicit-credential".into()));
     let exit = create_local_bash_operations(None)
         .exec(
-            "echo $TEST_LOCAL_BASH_OPS".to_owned(),
+            "printf '%s|%s' \"$TEST_LOCAL_BASH_OPS\" \"$TEST_LOCAL_BASH_TOKEN\"".to_owned(),
             dir.0.clone(),
             BashExecOptions {
                 on_data: Arc::new(move |data| sink.lock().unwrap().extend_from_slice(data)),
@@ -880,7 +931,7 @@ async fn local_operations_take_the_given_environment() {
     assert_eq!(exit, Some(0));
     assert_eq!(
         String::from_utf8_lossy(&chunks.lock().unwrap()).trim(),
-        "from-local-ops"
+        "from-local-ops|explicit-credential"
     );
 }
 

@@ -197,30 +197,6 @@ async fn spawn_errors_are_distinct_from_exit_one() {
     assert!(result.error.is_none());
 }
 
-#[test]
-fn credential_names_follow_the_typescript_pattern() {
-    // packages/subprocess/subprocess/src/index.ts SENSITIVE_ENV_PATTERN;
-    // names from tests/service.spec.ts, plus mixed case and substring cases.
-    let names = [
-        "PATH",
-        "HOME",
-        "LANG",
-        "NORMAL",
-        "SCRUB_PROBE_PASSWORD",
-        "API_KEY",
-        "client_secret",
-        "myToken",
-        "MONKEY",
-        "key",
-        "password",
-        "secret",
-        "token",
-    ];
-    let env = names.map(|name| (OsString::from(name), OsString::from("synthetic")));
-    let kept: Vec<_> = scrub_environment(env).map(|(name, _)| name).collect();
-    assert_eq!(kept, ["PATH", "HOME", "LANG", "NORMAL"].map(OsString::from));
-}
-
 struct Running {
     call: tokio::task::JoinHandle<ExecResult>,
     controller: AbortController,

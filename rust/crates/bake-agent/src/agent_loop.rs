@@ -48,6 +48,7 @@ use crate::types::{
     PrepareRequestContext, StreamFn, ToolExecutionMode,
 };
 use crate::validation::validate_tool_arguments;
+use crate::{ModelCallKind, RunControl, RunOutcome};
 
 /// Why a loop could not start or stopped without `agent_end`; Pi throws
 /// these.
@@ -61,6 +62,8 @@ pub enum AgentLoopError {
     NoStreamFn,
     /// The stream function failed instead of returning a stream.
     Stream(String),
+    /// A caller-owned execution limit or cancellation refused this request.
+    Stopped(RunOutcome),
 }
 
 impl fmt::Display for AgentLoopError {
@@ -72,6 +75,7 @@ impl fmt::Display for AgentLoopError {
             }
             Self::NoStreamFn => f.write_str(crate::stream_fn::NO_DEFAULT_STREAM_FN),
             Self::Stream(message) => f.write_str(message),
+            Self::Stopped(outcome) => outcome.fmt(f),
         }
     }
 }
@@ -208,6 +212,20 @@ pub async fn run_agent_loop(
     signal: Option<AbortSignal>,
     stream_fn: Option<StreamFn>,
 ) -> Result<Vec<AgentMessage>, AgentLoopError> {
+    run_agent_loop_with_outcome(prompts, context, config, sink, signal, stream_fn, None)
+        .await
+        .map(|(messages, _)| messages)
+}
+
+pub(crate) async fn run_agent_loop_with_outcome(
+    prompts: Vec<AgentMessage>,
+    context: AgentContext,
+    config: AgentLoopConfig,
+    sink: AgentEventSink,
+    signal: Option<AbortSignal>,
+    stream_fn: Option<StreamFn>,
+    control: Option<RunControl>,
+) -> Result<(Vec<AgentMessage>, RunOutcome), AgentLoopError> {
     let stream_fn = resolve_stream_fn(stream_fn)?;
     let initial = declare_tool_changes(&context, prompts);
     let mut new_messages = initial.clone();
@@ -227,16 +245,17 @@ pub async fn run_agent_loop(
         emit(&sink, AgentEvent::MessageEnd { message }).await;
     }
 
-    run_loop(
+    let outcome = run_loop(
         current,
         &mut new_messages,
         &config,
         signal,
         &sink,
         &stream_fn,
+        control.as_ref(),
     )
     .await?;
-    Ok(new_messages)
+    Ok((new_messages, outcome))
 }
 
 /// Pi's `runAgentLoopContinue`: continues from `context` on the caller's
@@ -248,6 +267,19 @@ pub async fn run_agent_loop_continue(
     signal: Option<AbortSignal>,
     stream_fn: Option<StreamFn>,
 ) -> Result<Vec<AgentMessage>, AgentLoopError> {
+    run_agent_loop_continue_with_outcome(context, config, sink, signal, stream_fn, None)
+        .await
+        .map(|(messages, _)| messages)
+}
+
+pub(crate) async fn run_agent_loop_continue_with_outcome(
+    context: AgentContext,
+    config: AgentLoopConfig,
+    sink: AgentEventSink,
+    signal: Option<AbortSignal>,
+    stream_fn: Option<StreamFn>,
+    control: Option<RunControl>,
+) -> Result<(Vec<AgentMessage>, RunOutcome), AgentLoopError> {
     check_continuable(&context)?;
     let stream_fn = resolve_stream_fn(stream_fn)?;
     let mut new_messages = Vec::new();
@@ -255,16 +287,17 @@ pub async fn run_agent_loop_continue(
     emit(&sink, AgentEvent::AgentStart).await;
     emit(&sink, AgentEvent::TurnStart).await;
 
-    run_loop(
+    let outcome = run_loop(
         context,
         &mut new_messages,
         &config,
         signal,
         &sink,
         &stream_fn,
+        control.as_ref(),
     )
     .await?;
-    Ok(new_messages)
+    Ok((new_messages, outcome))
 }
 
 async fn poll_messages(source: Option<&crate::types::GetMessages>) -> Vec<AgentMessage> {
@@ -278,6 +311,32 @@ fn thinking_level(reasoning: Option<ThinkingLevel>) -> ModelThinkingLevel {
     reasoning.map_or(ModelThinkingLevel::Off, ModelThinkingLevel::from)
 }
 
+async fn append_messages(
+    current: &mut AgentContext,
+    new_messages: &mut Vec<AgentMessage>,
+    pending: Vec<AgentMessage>,
+    sink: &AgentEventSink,
+) {
+    for message in declare_tool_changes(current, pending) {
+        emit(
+            sink,
+            AgentEvent::MessageStart {
+                message: message.clone(),
+            },
+        )
+        .await;
+        emit(
+            sink,
+            AgentEvent::MessageEnd {
+                message: message.clone(),
+            },
+        )
+        .await;
+        current.messages.push(message.clone());
+        new_messages.push(message);
+    }
+}
+
 /// Pi's `runLoop`, shared by both entry points.
 async fn run_loop(
     initial_context: AgentContext,
@@ -286,7 +345,8 @@ async fn run_loop(
     signal: Option<AbortSignal>,
     sink: &AgentEventSink,
     stream_fn: &StreamFn,
-) -> Result<(), AgentLoopError> {
+    control: Option<&RunControl>,
+) -> Result<RunOutcome, AgentLoopError> {
     let mut current = initial_context;
     let mut model = config.model.clone();
     let mut reasoning = config.stream_options.reasoning;
@@ -299,6 +359,16 @@ async fn run_loop(
         let mut has_more_tool_calls = true;
 
         while has_more_tool_calls || !pending.is_empty() {
+            if let Some(outcome) = control.and_then(RunControl::stopped) {
+                emit(
+                    sink,
+                    AgentEvent::AgentEnd {
+                        messages: new_messages.clone(),
+                    },
+                )
+                .await;
+                return Ok(outcome);
+            }
             let mut prepared = Vec::new();
             if let Some((message, tool_results)) = &last_completed {
                 if let Some(prepare) = &config.prepare_next_turn {
@@ -332,24 +402,7 @@ async fn run_loop(
             }
 
             prepared.append(&mut pending);
-            for message in declare_tool_changes(&current, prepared) {
-                emit(
-                    sink,
-                    AgentEvent::MessageStart {
-                        message: message.clone(),
-                    },
-                )
-                .await;
-                emit(
-                    sink,
-                    AgentEvent::MessageEnd {
-                        message: message.clone(),
-                    },
-                )
-                .await;
-                current.messages.push(message.clone());
-                new_messages.push(message);
-            }
+            append_messages(&mut current, new_messages, prepared, sink).await;
 
             if let Some(prepare) = &config.prepare_request {
                 let update = prepare(
@@ -364,6 +417,10 @@ async fn run_loop(
                 if let Some(update) = update {
                     if let Some(context) = update.context {
                         current = context;
+                        // A replacement may change the executable tools or
+                        // discard their transcript declarations. Persist the
+                        // reconciled loadout before this request uses it.
+                        append_messages(&mut current, new_messages, Vec::new(), sink).await;
                     }
                     if let Some(next) = update.model {
                         model = next;
@@ -374,19 +431,46 @@ async fn run_loop(
                 }
             }
 
-            let message = stream_assistant_response(
+            let response = stream_assistant_response(
                 &mut current,
                 config,
                 &model,
                 reasoning,
-                signal.as_ref(),
+                RunSignals {
+                    signal: signal.as_ref(),
+                    control,
+                },
                 sink,
                 stream_fn,
             )
-            .await?;
+            .await;
+            let message = match response {
+                Ok(message) => message,
+                Err(AgentLoopError::Stopped(outcome)) => {
+                    emit(
+                        sink,
+                        AgentEvent::AgentEnd {
+                            messages: new_messages.clone(),
+                        },
+                    )
+                    .await;
+                    return Ok(outcome);
+                }
+                Err(error) => return Err(error),
+            };
             new_messages.push(message.clone().into());
 
             if matches!(message.stop_reason, StopReason::Error | StopReason::Aborted) {
+                let outcome = if message.stop_reason == StopReason::Aborted {
+                    RunOutcome::Cancelled
+                } else {
+                    RunOutcome::Failed {
+                        message: message
+                            .error_message
+                            .clone()
+                            .unwrap_or_else(|| "Model request failed".into()),
+                    }
+                };
                 if let Some(finish) = &config.finish_turn {
                     finish(
                         AgentTurnContext {
@@ -414,7 +498,7 @@ async fn run_loop(
                     },
                 )
                 .await;
-                return Ok(());
+                return Ok(outcome);
             }
 
             let tool_calls: Vec<ToolCall> = message.tool_calls().cloned().collect();
@@ -477,7 +561,7 @@ async fn run_loop(
                     },
                 )
                 .await;
-                return Ok(());
+                return Ok(RunOutcome::FinishedTurn);
             }
 
             explicit_continuation = decision == Some(AgentTurnDecision::Continue);
@@ -512,7 +596,7 @@ async fn run_loop(
         },
     )
     .await;
-    Ok(())
+    Ok(RunOutcome::FinishedTurn)
 }
 
 /// Pi's `declareToolChanges`: announces tool loadout changes to the model.
@@ -619,6 +703,11 @@ fn event_partial(event: &AssistantMessageEvent) -> Option<&AssistantMessage> {
     }
 }
 
+struct RunSignals<'a> {
+    signal: Option<&'a AbortSignal>,
+    control: Option<&'a RunControl>,
+}
+
 /// Pi's `streamAssistantResponse`: the one place agent messages become LLM
 /// messages.
 async fn stream_assistant_response(
@@ -626,10 +715,11 @@ async fn stream_assistant_response(
     config: &AgentLoopConfig,
     model: &bake_ai::Model,
     reasoning: Option<ThinkingLevel>,
-    signal: Option<&AbortSignal>,
+    signals: RunSignals<'_>,
     sink: &AgentEventSink,
     stream_fn: &StreamFn,
 ) -> Result<AssistantMessage, AgentLoopError> {
+    let RunSignals { signal, control } = signals;
     let llm_messages = match &config.transform_context {
         Some(transform) => {
             let transformed = transform(context.messages.clone(), signal.cloned()).await;
@@ -655,6 +745,12 @@ async fn stream_assistant_response(
         .or_else(|| options.base.api_key.clone().filter(|key| !key.is_empty()));
     options.base.signal = signal.cloned();
 
+    if let Some(control) = control {
+        control
+            .admit_model_call(ModelCallKind::Agent, model)
+            .await
+            .map_err(AgentLoopError::Stopped)?;
+    }
     let response = stream_fn(model, &llm_context, options).map_err(AgentLoopError::Stream)?;
     let level = thinking_level(reasoning);
     let mut added_partial = false;
@@ -699,6 +795,12 @@ async fn stream_assistant_response(
             failed
         }
     };
+    if control.is_some() {
+        // Closing the consumer also releases providers waiting for departure.
+        let producer = response.producer_watch();
+        drop(response);
+        producer.ended().await;
+    }
     // Record the requested level, whichever stream function answered.
     final_message.thinking_level = Some(level);
     context.messages.push(final_message.clone().into());

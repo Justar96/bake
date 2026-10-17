@@ -18,7 +18,7 @@
 //! throwing listener likewise ends the run.
 //!
 //! The session's [`WorkGate`] owns the work that runs outside the task
-//! awaiting it: session writes and other blocking work, model requests,
+//! awaiting it: the full prompt driver, session writes and other blocking work, model requests,
 //! model, thinking-level, and settings changes, idle compaction, and
 //! background work ([`AgentSession::spawn_background`]) and background
 //! jobs ([`AgentSession::jobs`]). Two lifetimes meet here. A turn's work
@@ -67,16 +67,20 @@
 //! models, virtual models and their failed-response routing, the
 //! `entry_appended` event, and tool-loadout changes between turns.
 
+mod background_compaction;
 mod job_journal;
 pub mod job_notices;
 mod navigation;
 mod plugin_veto;
+mod prompt_execution;
 mod recovery;
+pub(crate) mod task_documents;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 
+pub use background_compaction::BackgroundCompactionStatus;
 pub use navigation::{
     ForkPoint, ForkedSession, NAVIGATION_CANCELLED, NAVIGATION_WHILE_BUSY,
     NAVIGATION_WHILE_STREAMING, TreeNavigation,
@@ -88,8 +92,8 @@ pub use recovery::{
 
 use bake_agent::{
     AfterToolCallResult, Agent, AgentError, AgentEvent, AgentInitialState,
-    AgentMessage as LiveMessage, AgentOptions, AgentTool, PromptInput, QueueMode, Subscription,
-    ToolExecutionMode, hook,
+    AgentMessage as LiveMessage, AgentOptions, AgentTool, PromptInput, QueueMode, RunControl,
+    RunOutcome, Subscription, ToolExecutionMode, hook,
 };
 use bake_ai::transcript::get_current_system_message;
 use bake_ai::{
@@ -382,6 +386,8 @@ pub enum SessionEvent<'a> {
     },
     /// A prompt finished, Pi's `agent_settled`.
     AgentSettled {
+        /// The final execution outcome, after required writes and cleanup.
+        outcome: &'a RunOutcome,
         /// Whether it was aborted.
         aborted: bool,
     },
@@ -407,6 +413,21 @@ pub enum SessionEvent<'a> {
         will_retry: bool,
         /// Why it failed, unless aborted.
         error_message: Option<String>,
+    },
+    /// The owner-observed lifecycle of an opt-in background summary.
+    BackgroundCompaction {
+        /// Whether it started, was discarded, or was durably installed.
+        status: BackgroundCompactionStatus,
+        /// The leaf whose context the summary captured.
+        source_leaf_id: &'a str,
+        /// A completed candidate, whether committed or discarded.
+        result: Option<&'a CompactionResult>,
+        /// Why a candidate was discarded.
+        reason: Option<&'a str>,
+        /// Time since the background task started.
+        elapsed_ms: u64,
+        /// Every admitted attempt, including retries and partial failures.
+        attempts: &'a [crate::compaction::SummaryAttempt],
     },
     /// Pi's `auto_retry_start`.
     AutoRetryStart {
@@ -615,7 +636,9 @@ impl Listeners {
             .map(|(_, listener)| Arc::clone(listener))
             .collect();
         for listener in listeners {
-            listener(event);
+            // Subscribers observe state; a panic must not prevent another
+            // observer or the session's owner from completing its work.
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| listener(event)));
         }
     }
 }
@@ -683,6 +706,7 @@ pub struct AgentSession {
     apis: Arc<ApiRegistry>,
     agent: Arc<Agent>,
     core: Arc<Core>,
+    executions: prompt_execution::SharedExecutions,
     work: WorkGate,
     /// The session's background jobs, owned by `work`.
     jobs: JobRegistry,
@@ -718,7 +742,7 @@ pub struct AgentSession {
     /// message, so no later prompt is accepted.
     write_failure: Arc<Mutex<Option<String>>>,
     /// The MCP servers [`Self::start_mcp`] started, once it has.
-    mcp: OnceLock<McpServers>,
+    mcp: Arc<OnceLock<McpServers>>,
     /// The plugin dispatcher, when any plugin is registered.
     plugins: Option<Arc<VetoDispatcher>>,
 }
@@ -1339,7 +1363,13 @@ impl AgentSession {
         } = options;
         let plugins = VetoDispatcher::new(plugins).map(Arc::new);
         system_prompt.docs_command = docs_command.clone();
-        let tools: Vec<Arc<AgentTool>> = tools.into_iter().map(run_in_order).collect();
+        let task_documents_enabled = settings.task_documents;
+        if task_documents_enabled && tools.iter().any(|tool| tool.name == task_documents::NAME) {
+            return Err(
+                "The task_document tool name is reserved when taskDocuments is enabled.".into(),
+            );
+        }
+        let mut tools: Vec<Arc<AgentTool>> = tools.into_iter().map(run_in_order).collect();
         // Pi's `_toolPromptGuidelines`.
         for prompt in &tool_prompts {
             let guidelines = normalize_prompt_guidelines(&prompt.guidelines);
@@ -1419,6 +1449,8 @@ impl AgentSession {
             agent: OnceLock::new(),
             has_model: AtomicBool::new(selection.model.is_some()),
             abort_requested: AtomicBool::new(false),
+            run_control: Mutex::new(None),
+            background_compaction: background_compaction::BackgroundCompaction::default(),
             state: Mutex::new(RunState::default()),
             activity: tokio::sync::watch::Sender::new(Activity::default()),
             gap: Arc::default(),
@@ -1427,6 +1459,9 @@ impl AgentSession {
             #[cfg(test)]
             session_io: tokio::sync::watch::Sender::new(0),
         });
+        if task_documents_enabled {
+            tools.push(task_documents::tool(Arc::clone(&core)));
+        }
         let after_tool_core = Arc::clone(&core);
         let persist_error = Arc::new(Mutex::new(None));
         let before_tool_call = plugins.as_ref().map(|plugins| {
@@ -1485,6 +1520,8 @@ impl AgentSession {
                 })
             })),
             before_tool_call,
+            prepare_request: task_documents_enabled
+                .then(|| task_documents::request_hook(Arc::clone(&core))),
             stream_fn: Some(stream_fn),
             prepare_next_turn_with_context: Some(next_turn_hook(
                 Arc::clone(&core),
@@ -1538,6 +1575,7 @@ impl AgentSession {
             apis,
             agent,
             core,
+            executions: Arc::default(),
             work,
             jobs,
             pending_notices,
@@ -1560,15 +1598,15 @@ impl AgentSession {
             model_fallback_message: selection.fallback_message,
             queue: Arc::default(),
             write_failure: gap,
-            mcp: OnceLock::new(),
+            mcp: Arc::default(),
             plugins,
         };
         created.connect();
         Ok(created)
     }
 
-    /// Subscribes the session to its agent: listeners first, then
-    /// persistence, as Pi's `_handleAgentEvent` orders them.
+    /// Commits finished messages before publishing them to observers.
+    /// Persistence participates in execution: its failure stops the run.
     fn connect(&self) {
         let core = Arc::clone(&self.core);
         let persist_error = Arc::clone(&self.persist_error);
@@ -1578,7 +1616,7 @@ impl AgentSession {
         let pending_notices = Arc::clone(&self.pending_notices);
         // Weak: the agent owns this listener.
         let agent = Arc::downgrade(&self.agent);
-        let subscription = self.agent.subscribe(move |event, _signal| {
+        let subscription = self.agent.subscribe_critical(move |event, _signal| {
             let core = Arc::clone(&core);
             let persist_error = Arc::clone(&persist_error);
             let queue = Arc::clone(&queue);
@@ -1598,16 +1636,6 @@ impl AgentSession {
                     if delivered {
                         queue.announce(&core);
                     }
-                }
-                match event {
-                    AgentEvent::AgentEnd { messages } => {
-                        let will_retry = core.will_retry_after_agent_end(messages);
-                        core.emit(&SessionEvent::AgentEnd {
-                            messages,
-                            will_retry,
-                        });
-                    }
-                    event => core.emit(&SessionEvent::Agent(event)),
                 }
                 match event {
                     AgentEvent::MessageEnd { message } => {
@@ -1642,6 +1670,7 @@ impl AgentSession {
                             if let Some(agent) = agent.upgrade() {
                                 agent.abort();
                             }
+                            return;
                         }
                         track_message(&core, message, entry_id.unwrap_or_default());
                     }
@@ -1651,6 +1680,16 @@ impl AgentSession {
                     }
                     _ => {}
                 }
+                match event {
+                    AgentEvent::AgentEnd { messages } => {
+                        let will_retry = core.will_retry_after_agent_end(messages);
+                        core.emit(&SessionEvent::AgentEnd {
+                            messages,
+                            will_retry,
+                        });
+                    }
+                    event => core.emit(&SessionEvent::Agent(event)),
+                }
             })
         });
         *self
@@ -1659,8 +1698,10 @@ impl AgentSession {
             .unwrap_or_else(PoisonError::into_inner) = Some(subscription);
     }
 
-    /// Subscribes to session events. Listeners run synchronously inside
-    /// the agent's event dispatch; keep them short.
+    /// Subscribes to session events. Finished messages are persisted before
+    /// observers run. Listeners run synchronously inside the agent's event
+    /// dispatch; keep them short. A listener panic is isolated from later
+    /// observers and execution; the process panic hook reports it.
     pub fn subscribe(
         &self,
         listener: impl Fn(&SessionEvent<'_>) + Send + Sync + 'static,
@@ -2130,362 +2171,155 @@ impl AgentSession {
         self.agent.follow_up_mode()
     }
 
-    /// The system message patching the sections the transcript replays,
-    /// Pi's `_preparePromptAndToolLoadout`; it also activates the tools.
-    fn prepare_prompt_and_tools(&self) -> Result<Option<SystemMessage>, String> {
-        let mut active: Vec<Arc<AgentTool>> = self
-            .active_tool_names
-            .iter()
-            .filter_map(|name| self.tools.iter().find(|tool| &tool.name == name))
-            .cloned()
-            .collect();
-        // The MCP tools published now, one generation per server; the run
-        // keeps these for its whole length.
-        if let Some(mcp) = self.mcp.get() {
-            active.extend(mcp.tools());
-        }
-        self.agent.set_tools(active);
-        let mut options = self.prompt_options.clone();
-        options.selected_tools = self.active_tool_names.clone();
-        options.hidden_tools = Vec::new();
-        let sections = build_system_prompt_sections(&options).map_err(|error| error.to_string())?;
-        let systems: Vec<Message> = self
-            .agent
-            .messages()
-            .iter()
-            .filter_map(|message| message.as_system().cloned().map(Message::System))
-            .collect();
-        let previous = get_current_system_message(&systems)
-            .and_then(|system| system.sections)
-            .unwrap_or_default();
-        Ok(
-            diff_system_prompt_sections(&previous, &sections).map(|sections| SystemMessage {
-                content: SystemContent::Text(String::new()),
-                sections: Some(sections),
-                tools_added: None,
-                tools_removed: None,
-                timestamp: bake_ai::now_ms(),
-            }),
-        )
-    }
-
     /// Pi's `prompt` for text and images: checks the model and its auth,
     /// compacts first when the last response calls for it, prepends the
     /// system-prompt patch, runs the agent with its retries and
     /// compactions until the session is idle, and reports the first
     /// failure.
     pub async fn prompt(&self, text: &str, images: Vec<ImageContent>) -> Result<(), String> {
-        // Claimed at once: two concurrent prompts must not both start.
+        match self
+            .prompt_with_control(text, images, RunControl::default())
+            .await?
+        {
+            RunOutcome::FinishedTurn | RunOutcome::Cancelled => Ok(()),
+            outcome => Err(outcome.to_string()),
+        }
+    }
+
+    /// Runs preparation, retries, summaries and queued turns under one
+    /// caller-owned allowance. Cancellation awaits the active work. A claimed
+    /// run publishes its final outcome only after required persistence.
+    /// Dropping the waiter leaves the admitted execution running, including
+    /// its preparation, retries, queued turns, and required writes.
+    pub async fn prompt_with_control(
+        &self,
+        text: &str,
+        images: Vec<ImageContent>,
+        control: RunControl,
+    ) -> Result<RunOutcome, String> {
+        self.execute_prompt(
+            prompt_execution::Input::Prompt {
+                text: text.to_owned(),
+                images,
+            },
+            control,
+        )
+        .await
+        .map(|(outcome, _)| outcome)
+    }
+
+    /// Delivers idle completion notices under a fresh interval. Returns
+    /// whether a notice turn ran; its owner survives a dropped waiter.
+    pub async fn deliver_job_notices(&self) -> Result<bool, String> {
+        let (outcome, delivered) = self
+            .deliver_job_notices_controlled(RunControl::default())
+            .await?;
+        match outcome {
+            RunOutcome::FinishedTurn | RunOutcome::Cancelled => Ok(delivered),
+            other => Err(other.to_string()),
+        }
+    }
+
+    /// Delivers idle completion notices using the caller's original budget
+    /// and deadline. No pending notice is a finished turn without a request.
+    pub async fn deliver_job_notices_with_control(
+        &self,
+        control: RunControl,
+    ) -> Result<RunOutcome, String> {
+        self.deliver_job_notices_controlled(control)
+            .await
+            .map(|(outcome, _)| outcome)
+    }
+
+    pub(crate) async fn deliver_job_notices_controlled(
+        &self,
+        control: RunControl,
+    ) -> Result<(RunOutcome, bool), String> {
+        self.execute_prompt(prompt_execution::Input::Notices, control)
+            .await
+    }
+
+    async fn execute_prompt(
+        &self,
+        input: prompt_execution::Input,
+        control: RunControl,
+    ) -> Result<(RunOutcome, bool), String> {
+        let delivery_only = matches!(&input, prompt_execution::Input::Notices);
+        if let Some(reason) = self.closed_reason() {
+            if delivery_only {
+                return Ok((RunOutcome::FinishedTurn, false));
+            }
+            return Err(reason);
+        }
         let mut refusal = None;
+        let mut execution = None;
         let agent_streaming = self.agent.is_streaming();
         self.core.activity.send_if_modified(|activity| {
-            if activity.manual_compaction {
-                refusal = Some("Cannot submit a prompt while compaction is in progress. Wait for compaction to finish and retry.");
+            if activity.context_commits != 0 {
+                refusal = Some("Cannot submit a prompt while the session context is being updated. Wait for it to finish and retry.".to_owned());
+                false
+            } else if activity.manual_compaction {
+                refusal = Some("Cannot submit a prompt while compaction is in progress. Wait for compaction to finish and retry.".to_owned());
                 false
             } else if activity.navigation {
-                refusal = Some("Cannot submit a prompt while the session tree is being navigated. Wait for it to finish and retry.");
+                refusal = Some("Cannot submit a prompt while the session tree is being navigated. Wait for it to finish and retry.".to_owned());
                 false
             } else if activity.run || agent_streaming {
-                // Pi queues with a `streamingBehavior`; queueing is not
-                // ported.
-                refusal = Some("Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message.");
+                refusal = Some("Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message.".to_owned());
                 false
             } else {
+                let claimed = self.executions.lock().unwrap_or_else(PoisonError::into_inner).claim(control.clone(), self.jobs.clone(), Arc::clone(&self.pending_notices), delivery_only);
+                match claimed {
+                    Ok(claimed) => execution = Some(claimed),
+                    Err(error) => {
+                        refusal = Some(error);
+                        return false;
+                    }
+                }
+                self.core.abort_requested.store(false, Ordering::SeqCst);
+                *self.core.run_control.lock().unwrap_or_else(PoisonError::into_inner) = Some(control.clone());
                 activity.run = true;
                 true
             }
         });
         if let Some(refusal) = refusal {
-            return Err(refusal.to_owned());
+            if delivery_only {
+                return Ok((RunOutcome::FinishedTurn, false));
+            }
+            return Err(refusal);
         }
-        let run = RunGuard {
-            core: &self.core,
-            jobs: &self.jobs,
-            pending: &self.pending_notices,
-            agent: &self.agent,
-            runtime: &self.runtime,
+        let (execution, completion) =
+            execution.ok_or_else(|| "The session did not admit its prompt.".to_owned())?;
+        let driver = prompt_execution::PromptExecution::new(self);
+        let owned_execution = Arc::clone(&execution);
+        let owned_completion = completion.clone();
+        let task = {
+            // Admission may be called from another executor; the session's
+            // runtime owns the driver just as it owns shutdown.
+            let _runtime = self.runtime.enter();
+            self.work
+                .spawn(move |scope| driver.run(owned_execution, owned_completion, scope, input))
         };
-        // Reset at the claim, not at the run as in Pi, so an abort during
-        // the compaction before the prompt also ends the prompt.
-        self.core.abort_requested.store(false, Ordering::SeqCst);
-        let docs_command = &self.docs_command;
-        if let Some(reason) = self.closed_reason() {
-            return Err(reason);
-        }
-        let Some(model) = self.model() else {
-            return Err(format_no_model_selected_message(docs_command));
-        };
-        let registry = self.registry.snapshot();
-        if !registry.has_configured_auth(&model.provider)
-            && registry.check_auth(&model.provider).is_none()
-        {
-            return Err(format_no_api_key_found_message(
-                &model.provider,
-                docs_command,
-            ));
-        }
-        // Compact before sending when the last response calls for it,
-        // aborted ones included; the new prompt is sent either way.
-        let last = self
-            .agent
-            .messages()
-            .iter()
-            .rev()
-            .find_map(|message| message.as_assistant().cloned());
-        if let Some(last) = last {
-            self.core
-                .check_compaction(&last, None, false, Vec::new())
-                .await?;
-        }
-        let (text, images) = self.prepare_user_input(text, images, Some(model)).await?;
-        // Preparation may outlast a shutdown or a failed write.
-        if let Some(reason) = self.closed_reason() {
-            return Err(reason);
-        }
-        // The first prompt waits for MCP servers still connecting, so their
-        // tools are declared in its first request, as Pi's
-        // `waitForDirectServers` does.
-        if let Some(mcp) = self.mcp.get() {
-            mcp.wait_for_startup(|| self.core.aborted() || self.closed_reason().is_some())
-                .await;
-            if let Some(reason) = self.closed_reason() {
-                return Err(reason);
+        match task {
+            Ok(task) => drop(task),
+            Err(refused) => {
+                let error = refused_message(refused);
+                prompt_execution::reject_execution(
+                    &self.core,
+                    &self.executions,
+                    &execution,
+                    &completion,
+                    error.clone(),
+                );
+                return Err(error);
             }
         }
-        let mut content = vec![UserContentBlock::Text(TextContent::new(text))];
-        content.extend(images.into_iter().map(UserContentBlock::Image));
-        let mut messages: Vec<LiveMessage> = Vec::with_capacity(2);
-        if let Some(update) = self.prepare_prompt_and_tools()? {
-            messages.push(update.into());
-        }
-        // A user prompt refills the notices' wake budget and carries the
-        // notices that waited for it, and those of jobs settled since,
-        // before its own text.
-        self.jobs.reset_wakes();
-        messages.extend(
-            self.pending_job_notices()
-                .into_iter()
-                .map(job_notices::live),
-        );
-        messages.extend(
-            self.jobs
-                .claim_unreported()
-                .iter()
-                .map(|job| job_notices::live(job_notices::completion_notice(job))),
-        );
-        messages.push(
-            UserMessage {
-                content: UserContent::Blocks(content),
-                timestamp: bake_ai::now_ms(),
-            }
-            .into(),
-        );
-        self.run_agent_prompt(messages, run).await
-    }
-
-    /// Pending notices remain recoverable until the listener acknowledges
-    /// their durable message, even if preparation or delivery is aborted.
-    fn pending_job_notices(&self) -> Vec<CustomMessage> {
-        self.pending_notices
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
-    }
-
-    /// Delivers the notices of jobs that settled while the session was
-    /// idle, `tool-jobs`' `wakeup` delivery: while the wake budget lasts
-    /// ([`JobRegistry::spend_wake`]) they open a turn, as Pi's
-    /// `sendCustomMessage` with `triggerTurn` does, and the call returns
-    /// once that turn settles; past it they wait for the next prompt.
-    /// Returns whether a turn ran. Does nothing while a run, compaction,
-    /// or navigation is in progress (the run delivers them itself), or
-    /// once the session is shut down. A driver calls this when it is idle
-    /// and [`JobRegistry::subscribe`] reports a change.
-    pub async fn deliver_job_notices(&self) -> Result<bool, String> {
-        let agent_streaming = self.agent.is_streaming();
-        let claimed = self.core.activity.send_if_modified(|activity| {
-            if activity.manual_compaction || activity.navigation || activity.run || agent_streaming
-            {
-                false
-            } else {
-                activity.run = true;
-                true
-            }
-        });
-        if !claimed {
-            return Ok(false);
-        }
-        let run = RunGuard {
-            core: &self.core,
-            jobs: &self.jobs,
-            pending: &self.pending_notices,
-            agent: &self.agent,
-            runtime: &self.runtime,
-        };
-        if self.closed_reason().is_some() {
-            return Ok(false);
-        }
-        let notices: Vec<CustomMessage> = self
-            .jobs
-            .claim_unreported()
-            .iter()
-            .map(job_notices::completion_notice)
-            .collect();
-        if notices.is_empty() {
-            return Ok(false);
-        }
-        if self.model().is_none() || !self.jobs.spend_wake() {
-            self.pending_notices
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .extend(notices);
-            return Ok(false);
-        }
-        self.core.abort_requested.store(false, Ordering::SeqCst);
-        let mut messages: Vec<LiveMessage> = Vec::with_capacity(notices.len() + 1);
-        if let Some(update) = self.prepare_prompt_and_tools()? {
-            messages.push(update.into());
-        }
-        messages.extend(
-            self.pending_job_notices()
-                .into_iter()
-                .map(job_notices::live),
-        );
-        messages.extend(notices.into_iter().map(job_notices::live));
-        self.run_agent_prompt(messages, run).await.map(|()| true)
-    }
-
-    /// Pi's `_runAgentPrompt`: the run, then retries, overflow recovery,
-    /// and queued messages until the session settles.
-    async fn run_agent_prompt(
-        &self,
-        messages: Vec<LiveMessage>,
-        run: RunGuard<'_>,
-    ) -> Result<(), String> {
-        let core = &self.core;
-        {
-            let mut state = core.state();
-            state.last_assistant = None;
-            state.last_tool_results.clear();
-            state.turn_tool_results.clear();
-        }
-        let mut result = if core.aborted() {
-            Ok(())
-        } else {
-            self.agent
-                .prompt(PromptInput::Messages(messages))
-                .await
-                .map_err(|error: AgentError| error.to_string())
-        };
-        while result.is_ok() && !core.aborted() {
-            match self.handle_post_agent_run().await {
-                Ok(true) => {
-                    if core.aborted() {
-                        break;
-                    }
-                    result = self.agent.continue_run().await.map_err(|e| e.to_string());
-                    continue;
-                }
-                Ok(false) => {}
-                Err(error) => {
-                    result = Err(error);
-                    break;
-                }
-            }
-            if core.aborted() {
-                break;
-            }
-            if self.agent.has_queued_messages() {
-                result = self.agent.continue_run().await.map_err(|e| e.to_string());
-                continue;
-            }
-            // A notice batch is admitted directly, so an abort cannot
-            // leave it queued after its delivery reservation is released.
-            let notices: Vec<LiveMessage> = self
-                .jobs
-                .claim_unreported()
-                .iter()
-                .map(|job| job_notices::live(job_notices::completion_notice(job)))
-                .collect();
-            if notices.is_empty() {
-                break;
-            }
-            result = self
-                .agent
-                .prompt(PromptInput::Messages(notices))
-                .await
-                .map_err(|error| error.to_string());
-        }
-        if core.aborted() {
-            core.finish_cancelled_retry();
-        }
-        let aborted = core.aborted();
-        // Listeners of `agent_settled` may prompt again.
-        drop(run);
-        core.emit(&SessionEvent::AgentSettled { aborted });
-        result?;
-        let persisted = self
-            .persist_error
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take();
-        // A prompt starts only without a gap, so one now opened during this
-        // run, even when the change that failed has not reported it yet.
-        let gap = || lock_gap(&self.core.gap).clone();
-        match persisted.or_else(gap) {
-            Some(error) => Err(error),
-            None => Ok(()),
-        }
-    }
-
-    /// Pi's `_handlePostAgentRun`: whether to continue the agent.
-    async fn handle_post_agent_run(&self) -> Result<bool, String> {
-        let core = &self.core;
-        let (last, tool_results) = {
-            let mut state = core.state();
-            (
-                state.last_assistant.take(),
-                std::mem::take(&mut state.last_tool_results),
-            )
-        };
-        if core.aborted() {
-            core.finish_cancelled_retry();
-            return Ok(false);
-        }
-        let Some((message, entry_id)) = last else {
-            return Ok(self.agent.has_queued_messages());
-        };
-        if core.is_retryable_error(&message)
-            && core.prepare_retry(&message, entry_id.clone()).await?
-        {
-            if core.aborted() {
-                core.finish_cancelled_retry();
-            }
-            return Ok(!core.aborted());
-        }
-        if core.aborted() {
-            core.finish_cancelled_retry();
-            return Ok(false);
-        }
-        if message.stop_reason == bake_ai::StopReason::Error {
-            let attempt = std::mem::take(&mut core.state().retry_attempt);
-            if attempt > 0 {
-                core.emit(&SessionEvent::AutoRetryEnd {
-                    success: false,
-                    attempt,
-                    final_error: message.error_message.clone(),
-                });
-            }
-        }
-        if core
-            .check_compaction(&message, entry_id, true, tool_results)
-            .await?
-        {
-            return Ok(!core.aborted());
-        }
-        // The loop drains both queues before `agent_end`; messages queued
-        // by `agent_end` listeners need a fresh run.
-        Ok(!core.aborted() && self.agent.has_queued_messages())
+        drop(completion);
+        let outcome = execution.wait().await?;
+        Ok((
+            outcome,
+            execution.notice_turn_started.load(Ordering::SeqCst),
+        ))
     }
 
     /// Pi's `steer`: expands a `/skill:` command and prompt templates and
@@ -2525,17 +2359,7 @@ impl AgentSession {
     /// Why the session takes no more prompts: it is shut down, or a write
     /// to its file failed, so the file would miss a message.
     fn closed_reason(&self) -> Option<String> {
-        // Listeners close first thing in shutdown, before the work gate.
-        if self.listeners.closed.load(Ordering::SeqCst) || self.work.is_closing() {
-            return Some("The session is shut down.".into());
-        }
-        self.write_failure
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .as_ref()
-            .map(|error| {
-                format!("The session file could not be written ({error}), so the session takes no more prompts.")
-            })
+        prompt_execution::closed_reason(&self.work, &self.listeners, &self.write_failure)
     }
 
     /// Pi's `_queueUserInput`, `_queueSteer`, and `_queueFollowUp`. The
@@ -2583,48 +2407,23 @@ impl AgentSession {
         Ok(())
     }
 
-    /// The preparation every user prompt gets, Pi's `_expandSkillCommand`,
-    /// `expandPromptTemplate`, and `_normalizePromptImages`: the expanded
-    /// text, with any image hints appended, and the images resized for
-    /// `model`'s limits.
+    /// Expands prompt commands and normalizes images under the session gate.
     async fn prepare_user_input(
         &self,
         text: &str,
         images: Vec<ImageContent>,
         model: Option<Model>,
     ) -> Result<(String, Vec<ImageContent>), String> {
-        let shut_down = || "The session is shut down.".to_owned();
-        let mut text = if text.starts_with("/skill:") {
-            let skills = self.prompt_options.skills.clone();
-            let command = text.to_owned();
-            // The gate owns the work, so shutdown waits for it even when
-            // this future is dropped.
-            self.work
-                .spawn_blocking(move || expand_skill_command(&command, &skills))
-                .map_err(|_| shut_down())?
-                .await
-                .unwrap_or_else(|_| text.to_owned())
-        } else {
-            text.to_owned()
-        };
-        text = expand_prompt_template(&text, &self.prompt_templates);
-        if images.is_empty() {
-            return Ok((text, images));
-        }
-        let auto_resize = read_settings(&self.settings).image_auto_resize();
-        let resize_options = model
-            .and_then(|model| ImageResizeOptions::from_input_limits(model.input_limits.as_ref()))
-            .unwrap_or_default();
-        let (normalized, hints) = self
-            .work
-            .spawn_blocking(move || normalize_prompt_images(&images, auto_resize, resize_options))
-            .map_err(|_| shut_down())?
-            .await
-            .map_err(|error| format!("Image processing task failed: {error}"))?;
-        if !hints.is_empty() {
-            text = format!("{text}\n\n{}", hints.join("\n"));
-        }
-        Ok((text, normalized))
+        prompt_execution::prepare_user_input(
+            &self.work,
+            &self.prompt_options,
+            &self.prompt_templates,
+            &self.settings,
+            text,
+            images,
+            model,
+        )
+        .await
     }
 
     /// Pi's `prompt` check before a request: a model is selected and its
@@ -2777,19 +2576,27 @@ impl AgentSession {
             .unwrap_or_default()
     }
 
-    /// Pi's `abort`: signals the run, cancels a retry wait and a
-    /// compaction, and waits until the session is idle.
+    /// Pi's `abort`: signals the current execution and waits for its
+    /// preparation, Agent work, recovery, and required writes. The caller of
+    /// `prompt` need not keep polling its waiter for cancellation to finish.
     pub async fn abort(&self) {
-        if self.core.activity.borrow().run {
-            self.core.abort_requested.store(true, Ordering::SeqCst);
+        let mut execution = None;
+        self.core.activity.send_if_modified(|_| {
+            execution = self
+                .executions
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .current
+                .clone();
+            prompt_execution::abort_operations(&self.core, &self.agent, self.mcp.get());
+            false
+        });
+        if let Some(execution) = execution {
+            let _ = execution.wait().await;
+        } else {
+            self.agent.wait_for_idle().await;
+            self.core.wait_for_idle().await;
         }
-        self.core.abort_retry_and_compaction();
-        if let Some(mcp) = self.mcp.get() {
-            mcp.interrupt_startup_wait();
-        }
-        self.agent.abort();
-        self.agent.wait_for_idle().await;
-        self.core.wait_for_idle().await;
     }
 
     /// Starts the MCP servers of `options` ([`crate::mcp`]), each as a task
@@ -2912,6 +2719,10 @@ impl AgentSession {
         // synchronous `dispose` clears its listeners before any of that
         // work's continuations run.
         self.listeners.close();
+        let control = self.core.control();
+        if let Some(control) = &control {
+            control.cancel();
+        }
         self.core.abort_requested.store(true, Ordering::SeqCst);
         self.core.abort_retry_and_compaction();
         if let Some(mcp) = self.mcp.get() {
@@ -2930,6 +2741,9 @@ impl AgentSession {
         let (finished, done) = tokio::sync::watch::channel(false);
         let teardown = async move {
             agent.shutdown().await;
+            if let Some(control) = control {
+                control.drain_admissions().await;
+            }
             // The run's task is gone, so a tool call it was running has
             // dropped its process, whose settling task holds a permit of
             // this gate: the drain waits for it.
@@ -2952,56 +2766,6 @@ impl AgentSession {
         // the session's runtime whatever thread or executor called.
         drop(self.runtime.spawn(teardown));
         done
-    }
-}
-
-/// Clears the session's run flag however the prompt ends, including when
-/// its future is dropped.
-struct RunGuard<'a> {
-    core: &'a Arc<Core>,
-    jobs: &'a JobRegistry,
-    pending: &'a Arc<Mutex<Vec<CustomMessage>>>,
-    agent: &'a Arc<Agent>,
-    runtime: &'a tokio::runtime::Handle,
-}
-
-impl Drop for RunGuard<'_> {
-    fn drop(&mut self) {
-        let core = Arc::clone(self.core);
-        let jobs = self.jobs.clone();
-        let pending = Arc::clone(self.pending);
-        let release = move || {
-            let pending: Vec<String> = pending
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .iter()
-                .filter_map(|notice| {
-                    job_notices::notice_id(notice.details.as_ref()).map(str::to_owned)
-                })
-                .collect();
-            // The run claim excludes a newer turn until every old lease
-            // has been returned. Registry wakes cannot race that turn.
-            core.activity.send_modify(|activity| {
-                jobs.release_deliveries(&pending);
-                activity.run = false;
-            });
-        };
-        if self.agent.is_streaming()
-            && let Some(permit) = self.core.work.enter()
-        {
-            let agent = Arc::clone(self.agent);
-            // Dropping the caller's prompt future does not stop Agent's
-            // task. Admit cleanup while open and keep its run claim until
-            // every persistence listener has finished. A closing gate
-            // already owns that drain through Agent::shutdown.
-            drop(self.runtime.spawn(async move {
-                let _permit = permit;
-                agent.wait_for_idle().await;
-                release();
-            }));
-        } else {
-            release();
-        }
     }
 }
 

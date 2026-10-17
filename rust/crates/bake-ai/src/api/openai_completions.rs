@@ -19,7 +19,8 @@ use crate::api::simple_options::{
 };
 use crate::api::transform_messages::transform_messages;
 use crate::api::{
-    count, error_message, non_empty_str, sanitize_id_chars, spawn_stream, truncate_units, truthy,
+    count, error_message, non_empty_str, sanitize_id_chars, spawn_http_stream, spawn_stream,
+    truncate_units, truthy,
 };
 use crate::http::{
     HttpRequest, SdkErrorShape, header_layer, join_url, merge_headers, send, user_agent,
@@ -1699,7 +1700,7 @@ pub fn stream(
 ) -> AssistantMessageEventStream {
     let model = model.clone();
     let context = context.clone();
-    spawn_stream(&model.clone(), move |sender| {
+    spawn_http_stream(&model.clone(), move |sender| {
         run(sender, model, context, options)
     })
 }

@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   checkCommandFor, checkpointCodes, compactionBudget, CONTEXT_WINDOWS, EXPLORE_ANSWER, EXTENDED_CASES, fixture, LONG_SESSION_BUDGET,
-  maxRequestsFor, noteNames, PI_RESERVE_TOKENS, piCompactionFor, piContextWindowFor, prompts, REQUEST_FLOORS, requestFloorFor, SKILL_SCENARIOS, slowCheckLine, STANDARD_CASES, SUMMARY_TOOL_RESULT_CHARS, usesSkills, validate,
+  maxRequestsFor, noteNames, PI_COMPACTION, PI_CONTEXT_WINDOWS, PI_RESERVE_TOKENS, piCompactionFor, piContextWindowFor, prompts, REQUEST_FLOORS, requestFloorFor, SKILL_SCENARIOS, slowCheckLine, STANDARD_CASES, SUMMARY_TOOL_RESULT_CHARS, usesSkills, validate,
   type Fixture, type Outcome,
 } from './scenarios.ts'
 
@@ -340,6 +340,26 @@ describe('long_session', () => {
 })
 
 describe('protected fixtures', () => {
+  test('background compaction has a positive early band and protected twenty-note output', () => {
+    const built = build('background_compaction')
+    const window = PI_CONTEXT_WINDOWS.background_compaction!
+    const { reserveTokens, keepRecentTokens } = PI_COMPACTION.background_compaction!
+    expect({ early: window - 2 * reserveTokens, foreground: window - reserveTokens, keepRecentTokens })
+      .toEqual({ early: 7232, foreground: 23_616, keepRecentTokens: 2560 })
+    const names = noteNames(20)
+    expect(readdirSync(join(built.workspace, 'notes')).length).toBe(20)
+    expect(prompts.background_compaction).toContain(names[0]!)
+    expect(maxRequestsFor('background_compaction')).toBe(46)
+    expect(requestFloorFor('background_compaction')).toBe(22)
+    roundFix(built.workspace)
+    writeFileSync(join(built.workspace, 'codes.txt'), checkpointCodes(10).join('\n'))
+    expect(validate('background_compaction', built, outcome()).validated).toBe(false)
+    writeFileSync(join(built.workspace, 'codes.txt'), checkpointCodes(20).join('\n'))
+    expect(validate('background_compaction', built, outcome()).validated).toBe(true)
+    patch(built.workspace, names[19]!, 'Checkpoint code:', 'Checkpoint code (changed):')
+    expect(validate('background_compaction', built, outcome())).toMatchObject({ validated: false, fixturesUnchanged: false })
+  })
+
   test('shell_then_edit fails when the stamp script is changed', () => {
     const built = build('shell_then_edit')
     expect(node(built.workspace, 'scripts/stamp.cjs').exitCode).toBe(0)

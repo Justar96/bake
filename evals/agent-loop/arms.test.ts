@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
-import { builtExecutable, nativeCommand, nativeStaleWriter, parseArms, strayContextFiles } from './arms.ts'
+import { builtExecutable, mergeSettings, nativeCommand, nativeSettings, nativeStaleWriter, parseArms, strayContextFiles } from './arms.ts'
 
 const root = mkdtempSync(join(tmpdir(), 'bake-eval-arms-'))
 afterAll(() => rmSync(root, { recursive: true, force: true }))
@@ -20,6 +20,29 @@ function script(path: string, text: string): string {
 }
 
 describe('native arms', () => {
+  test('native settings retain opt-ins and substitute the route while keeping fixed controls', () => {
+    expect(nativeSettings('{"backgroundCompaction":true,"images":{"autoResize":false},"marker":"$PROVIDER/$MODEL"}', 'eval', 'm',
+      { reserveTokens: 16_384, keepRecentTokens: 2560 })).toEqual({
+      backgroundCompaction: true, images: { autoResize: false }, marker: 'eval/m',
+      retry: { enabled: false }, compaction: { enabled: true, reserveTokens: 16_384, keepRecentTokens: 2560 },
+    })
+    expect(mergeSettings({ nested: { keep: 1, replace: [1, 2] } }, { nested: { replace: [3] } }))
+      .toEqual({ nested: { keep: 1, replace: [3] } })
+  })
+
+  test('native settings reject nonobjects and changes to evaluator-owned controls', () => {
+    for (const text of ['null', '[]', 'true', '"text"']) expect(() => nativeSettings(text, 'eval', 'm')).toThrow(/JSON object/)
+    for (const key of ['defaultProvider', 'defaultModel', 'defaultThinkingLevel', 'enabledModels', 'modelThinkingLevels',
+      'cliproxyapi', 'llm-pi-ai', 'agent-default-model', 'permission', 'retry', 'sessionDir']) {
+      expect(() => nativeSettings(JSON.stringify({ [key]: {} }), 'eval', 'm')).toThrow(/evaluator-controlled/)
+    }
+    for (const compaction of [null, false, { enabled: false }, { reserveTokens: 1 }, { keepRecentTokens: 1 }, { modelOverrides: {} }]) {
+      expect(() => nativeSettings(JSON.stringify({ compaction }), 'eval', 'm', { reserveTokens: 16_384, keepRecentTokens: 2560 }))
+        .toThrow(/scenario compaction policy/)
+    }
+    expect(nativeSettings('{"compaction":{"enabled":false}}', 'eval', 'm')).toEqual({ compaction: { enabled: false }, retry: { enabled: false } })
+  })
+
   test('launch print mode with JSON events, no session, the full-access preset, and the prompt after --', () => {
     expect(nativeCommand('/bin/bake-rs', 'cliproxyapi', 'gpt-x', 'medium', '-starts with a dash'))
       .toEqual(['/bin/bake-rs', '-p', '--mode', 'json', '--no-session', '--permission', 'danger-full-access',
@@ -43,10 +66,11 @@ describe('native arms', () => {
     writeFileSync(join(checkout, 'rust/Cargo.toml'), '[workspace]\n')
     const text = '#!/bin/sh\necho "bake-rs 9.9.9-test"\n'
     const bin = script(join(checkout, 'rust/target/release/bake-rs'), text)
-    expect(parseArms(`cand=native:${bin}`, 'headless', {}).cand).toEqual({
+    const settings = '{"backgroundCompaction":true,"images":{"autoResize":false}}'
+    expect(parseArms(`cand=native:${bin}`, 'headless', { EVAL_SETTINGS_CAND: settings }).cand).toEqual({
       kind: 'native', root: realpathSync(join(checkout, 'rust/target/release')), bin: realpathSync(bin), version: 'bake-rs 9.9.9-test',
       binarySha256: sha256(text), revision: { prebuilt: true, commit: null, dirty: null },
-      extra: [], settings: '{}', llmDeepseek: false, composition: [],
+      extra: [], settings, llmDeepseek: false, composition: [],
     })
   })
 

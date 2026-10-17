@@ -486,6 +486,81 @@ async fn every_listener_sees_queue_updates_in_order() {
     session.shutdown().await;
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn message_end_observers_see_the_committed_assistant() {
+    let dir = TempDir::new("observer-commit");
+    let cwd = dir.path().to_string_lossy().into_owned();
+    let h = harness();
+    h.faux
+        .set_responses(vec![faux_assistant_message("committed answer").into()]);
+    let manager = new_file_session(&dir);
+    let file = manager.session_file().expect("file path").to_path_buf();
+    let session = AgentSession::create(options(&h, manager, &cwd))
+        .await
+        .expect("session");
+    let observations = Arc::new(Mutex::new(Vec::new()));
+    let observed = Arc::clone(&observations);
+    session.subscribe(move |event| {
+        if let SessionEvent::Agent(AgentEvent::MessageEnd { message }) = event
+            && let Some(assistant) = message.as_assistant()
+        {
+            let written = std::fs::read_to_string(&file)
+                .map_err(|error| error.to_string())
+                .map(|text| {
+                    text.lines().any(|line| {
+                        serde_json::from_str::<serde_json::Value>(line)
+                            .ok()
+                            .and_then(|entry| entry.get("message").cloned())
+                            .and_then(|value| serde_json::from_value::<Message>(value).ok())
+                            .is_some_and(|stored| stored == Message::Assistant(assistant.clone()))
+                    })
+                });
+            observed.lock().expect("observations").push(written);
+        }
+    });
+    let result = session.prompt("answer", Vec::new()).await;
+    session.shutdown().await;
+    result.expect("prompt");
+    assert_eq!(*observations.lock().expect("observations"), [Ok(true)]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_panicking_session_observer_does_not_starve_persistence_or_observers() {
+    let dir = TempDir::new("observer-panic");
+    let cwd = dir.path().to_string_lossy().into_owned();
+    let h = harness();
+    h.faux
+        .set_responses(vec![faux_assistant_message("done").into()]);
+    let session = AgentSession::create(options(&h, new_file_session(&dir), &cwd))
+        .await
+        .expect("session");
+    session.subscribe(|event| {
+        if matches!(event, SessionEvent::Agent(AgentEvent::MessageEnd { .. })) {
+            panic!("broken presentation subscriber");
+        }
+    });
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let log = Arc::clone(&seen);
+    session.subscribe(move |event| {
+        if let SessionEvent::Agent(AgentEvent::MessageEnd { message }) = event {
+            log.lock()
+                .expect("observations")
+                .push(message.role().to_owned());
+        }
+    });
+    let result = session.prompt("answer", Vec::new()).await;
+    session.shutdown().await;
+    result.expect("prompt");
+    assert_eq!(h.faux.call_count(), 1);
+    assert_eq!(
+        *seen.lock().expect("observations"),
+        ["system", "user", "assistant"]
+    );
+    let reopened = SessionManager::open(&session.session_file().expect("file"), None, None)
+        .expect("persisted session");
+    assert_eq!(reopened.build_session_context().messages.len(), 3);
+}
+
 // Pi: "should persist message_end events in order with slow extension
 // handlers", with a slow session listener in place of the extension.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -690,15 +765,20 @@ async fn prompts_need_a_model_with_auth() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn abort_and_shutdown_end_the_run() {
     let h = harness();
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let reached = Arc::clone(&entered);
     // The response waits for the abort, which the faux stream honors.
     h.faux
         .set_responses(vec![FauxResponseStep::Factory(Arc::new(
-            |_, options, _, _| {
+            move |_, options, _, _| {
                 let signal = options.base.signal.clone();
+                let reached = Arc::clone(&reached);
                 Box::pin(async move {
-                    while !signal.as_ref().is_some_and(bake_ai::AbortSignal::aborted) {
-                        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-                    }
+                    reached.notify_one();
+                    signal
+                        .expect("provider cancellation signal")
+                        .cancelled()
+                        .await;
                     Ok(faux_assistant_message("never shown"))
                 })
             },
@@ -713,7 +793,7 @@ async fn abort_and_shutdown_end_the_run() {
     let settled = Arc::new(Mutex::new(Vec::new()));
     let log = Arc::clone(&settled);
     let _subscription = session.subscribe(move |event| {
-        if let SessionEvent::AgentSettled { aborted } = event {
+        if let SessionEvent::AgentSettled { aborted, .. } = event {
             log.lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .push(*aborted);
@@ -723,9 +803,9 @@ async fn abort_and_shutdown_end_the_run() {
         let session = Arc::clone(&session);
         tokio::spawn(async move { session.prompt("hang", Vec::new()).await })
     };
-    while !session.agent().is_streaming() {
-        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-    }
+    tokio::time::timeout(std::time::Duration::from_secs(5), entered.notified())
+        .await
+        .expect("provider request started");
     tokio::time::timeout(std::time::Duration::from_secs(5), session.abort())
         .await
         .expect("abort settles");
@@ -806,6 +886,8 @@ async fn a_failed_write_aborts_the_run() {
         .into(),
         faux_assistant_message("never requested").into(),
     ]);
+    let control = RunControl::default();
+    let cancel = control.clone();
     let manager = new_file_session(&dir);
     let file = manager.session_file().expect("file path").to_path_buf();
     let runs = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -821,6 +903,7 @@ async fn a_failed_write_aborts_the_run() {
         move |_, _, _, _| {
             counter.fetch_add(1, Ordering::SeqCst);
             let file = file.clone();
+            let cancel = cancel.clone();
             let tool_errors = Arc::clone(&tool_errors);
             Box::pin(async move {
                 let outcome = std::fs::remove_file(&file)
@@ -835,6 +918,7 @@ async fn a_failed_write_aborts_the_run() {
                         .unwrap_or_else(PoisonError::into_inner)
                         .push(error);
                 }
+                cancel.cancel();
                 Ok(AgentToolResult::default())
             })
         },
@@ -846,9 +930,31 @@ async fn a_failed_write_aborts_the_run() {
     })
     .await
     .expect("session");
-    let result = session.prompt("run", Vec::new()).await;
-    assert!(result.is_err(), "{result:?}");
+    let completed_results = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let observed = Arc::clone(&completed_results);
+    session.subscribe(move |event| {
+        if let SessionEvent::Agent(AgentEvent::MessageEnd { message }) = event
+            && message.as_tool_result().is_some()
+        {
+            observed.fetch_add(1, Ordering::SeqCst);
+        }
+    });
+    let settled = Arc::new(Mutex::new(None));
+    let observed = Arc::clone(&settled);
+    let _settled = session.subscribe(move |event| {
+        if let SessionEvent::AgentSettled { outcome, .. } = event {
+            *observed.lock().unwrap() = Some((*outcome).clone());
+        }
+    });
+    let result = session
+        .prompt_with_control("run", Vec::new(), control.clone())
+        .await
+        .unwrap();
+    assert!(matches!(result, RunOutcome::Failed { .. }), "{result:?}");
+    assert_eq!(control.stopped(), Some(result.clone()));
+    assert_eq!(*settled.lock().unwrap(), Some(result));
     assert_eq!(runs.load(Ordering::SeqCst), 1);
+    assert_eq!(completed_results.load(Ordering::SeqCst), 0);
     let tool_errors = blocked
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
@@ -859,14 +965,14 @@ async fn a_failed_write_aborts_the_run() {
         "the tool blocks the file"
     );
     assert_eq!(h.faux.call_count(), 1, "the run stops after the failure");
-    // The run ends as aborted after the tool result, and nothing more is
-    // written: the blocked path and its writer lock are all the session
-    // directory holds.
-    let last = session
-        .messages()
-        .last()
-        .and_then(|m| m.as_assistant().cloned());
-    assert_eq!(last.map(|m| m.stop_reason), Some(StopReason::Aborted));
+    // Cancellation creates no synthetic model response. The write failure
+    // determines settlement, and nothing after the missing result is written.
+    assert!(
+        session
+            .messages()
+            .last()
+            .is_some_and(|message| message.as_tool_result().is_some())
+    );
     let mut written: Vec<String> = std::fs::read_dir(dir.join("sessions"))
         .expect("sessions dir")
         .map(|entry| {

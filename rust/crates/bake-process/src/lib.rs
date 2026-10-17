@@ -79,6 +79,7 @@ use crate::tree::{ProcessTree, TrackedTree};
 pub use crate::tree::{TreeState, kill_tracked_detached_children};
 
 pub mod command_line;
+pub mod environment;
 #[cfg(any(windows, test))]
 mod job_ledger;
 #[cfg(windows)]

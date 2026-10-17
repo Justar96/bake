@@ -15,6 +15,10 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
+#[cfg(windows)]
+#[path = "print_mode/windows.rs"]
+mod windows;
+
 // The command the messages name, from the source the binary uses.
 #[allow(dead_code)]
 #[path = "../src/docs.rs"]
@@ -305,9 +309,7 @@ impl Workspace {
         self.root.join("project")
     }
 
-    /// Runs `bake-rs` in the project, failing the test if it takes longer
-    /// than [`RUN_TIMEOUT`] rather than hanging it.
-    fn run(&self, args: &[&str], stdin: Option<&str>) -> Output {
+    fn command(&self, args: &[&str], piped_stdin: bool) -> Command {
         let mut command = Command::new(env!("CARGO_BIN_EXE_bake-rs"));
         command
             .args(args)
@@ -317,7 +319,7 @@ impl Workspace {
             .env_remove("CLIPROXYAPI_API_KEY")
             .env("HOME", self.root.join("user"))
             .env("USERPROFILE", self.root.join("user"))
-            .stdin(if stdin.is_some() {
+            .stdin(if piped_stdin {
                 Stdio::piped()
             } else {
                 Stdio::null()
@@ -331,7 +333,16 @@ impl Workspace {
                 command.env_remove(key);
             }
         }
-        let mut child = command.spawn().expect("bake-rs starts");
+        command
+    }
+
+    /// Runs `bake-rs` in the project, failing the test if it takes longer
+    /// than [`RUN_TIMEOUT`] rather than hanging it.
+    fn run(&self, args: &[&str], stdin: Option<&str>) -> Output {
+        let mut child = self
+            .command(args, stdin.is_some())
+            .spawn()
+            .expect("bake-rs starts");
         let input = child.stdin.take();
         let text = stdin.unwrap_or_default().to_owned();
         let writer = std::thread::spawn(move || {
@@ -689,6 +700,178 @@ fn json_mode_writes_the_header_and_every_event() {
 }
 
 #[test]
+fn json_mode_drains_large_unicode_records_in_order() {
+    let delta = "é🦀".repeat(12 * 1024);
+    let mut reply = Reply::sse();
+    reply.body = reply.body.replace("Hello from", &delta);
+    let server = Server::start(reply);
+    let workspace = Workspace::new("large-json", server.port);
+    let out = workspace.run(&["--mode", "json", "--no-session", "Say hi"], None);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    assert!(out.stderr.is_empty());
+    let events: Vec<Value> = std::str::from_utf8(&out.stdout)
+        .expect("complete UTF-8")
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("complete JSON line"))
+        .collect();
+    let final_message = events
+        .iter()
+        .find(|event| event["type"] == "message_end" && event["message"]["role"] == "assistant")
+        .expect("completed assistant message");
+    assert_eq!(
+        final_message["message"]["content"][0]["text"],
+        format!("{delta} the loop.")
+    );
+    assert_eq!(events.last().expect("settled")["type"], "agent_settled");
+}
+
+#[test]
+fn a_closed_json_output_pipe_reports_failure_after_session_shutdown() {
+    let server = Server::start(Reply::sse());
+    let workspace = Workspace::new("closed-json", server.port);
+    let (reader, writer) = std::io::pipe().expect("output pipe");
+    drop(reader);
+    let mut child = OwnedChild(
+        workspace
+            .command(&["--mode", "json", "Say hi"], false)
+            .stdout(writer)
+            .spawn()
+            .expect("bake-rs starts"),
+    );
+    let deadline = Instant::now() + RUN_TIMEOUT;
+    let status = loop {
+        if let Some(status) = child.0.try_wait().expect("status") {
+            break status;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "closed output prevented session completion"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    assert_eq!(status.code(), Some(1));
+    let entries = lines(&workspace.session_files()[0]);
+    assert!(
+        entries
+            .iter()
+            .any(|entry| entry["message"]["role"] == "assistant")
+    );
+}
+
+struct OwnedChild(std::process::Child);
+
+impl Drop for OwnedChild {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_full_json_output_pipe_can_be_cancelled_without_a_reader() {
+    use std::os::fd::AsRawFd;
+
+    let mut reply = Reply::sse();
+    reply.body = reply.body.replace("Hello from", &"x".repeat(64 * 1024));
+    let server = Server::start(reply);
+    let workspace = Workspace::new("blocked-json", server.port);
+    let (mut reader, writer) = std::io::pipe().expect("output pipe");
+    // One page makes the full-pipe state observable without relying on the
+    // host's default capacity. Keep a writer to verify flag restoration.
+    assert_eq!(
+        unsafe { libc::fcntl(writer.as_raw_fd(), libc::F_SETPIPE_SZ, 4096) },
+        4096
+    );
+    let probe = writer.try_clone().expect("pipe probe");
+    let original_flags = unsafe { libc::fcntl(probe.as_raw_fd(), libc::F_GETFL) };
+    let mut child = OwnedChild(
+        workspace
+            .command(
+                &[
+                    "--mode",
+                    "json",
+                    "--no-tools",
+                    "--system-prompt",
+                    "Reply briefly.",
+                    "Say hi",
+                ],
+                false,
+            )
+            // A blocked producer must not occupy the only signal executor.
+            .env("TOKIO_WORKER_THREADS", "1")
+            .stdout(writer)
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("bake-rs starts"),
+    );
+    let deadline = Instant::now() + RUN_TIMEOUT;
+    assert_ne!(
+        unsafe { libc::fcntl(reader.as_raw_fd(), libc::F_SETFL, libc::O_NONBLOCK) },
+        -1
+    );
+    // Drain only startup and the beginning of the large provider delta. Once
+    // its marker arrives, tens of KiB still need the pipe and no reader helps.
+    loop {
+        let mut prefix = [0; 4096];
+        match reader.read(&mut prefix) {
+            Ok(count) if prefix[..count].windows(32).any(|bytes| bytes == [b'x'; 32]) => break,
+            Ok(0) => panic!("stdout closed before the provider delta"),
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+            Err(error) => panic!("read startup: {error}"),
+        }
+        assert!(
+            Instant::now() < deadline,
+            "no large provider delta reached stdout"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(!server.requests().is_empty());
+    loop {
+        let mut available: libc::c_int = 0;
+        assert_eq!(
+            unsafe { libc::ioctl(reader.as_raw_fd(), libc::FIONREAD, &mut available) },
+            0
+        );
+        if available == 4096 {
+            break;
+        }
+        assert!(
+            child.0.try_wait().expect("status").is_none(),
+            "exited before filling stdout"
+        );
+        assert!(
+            Instant::now() < deadline,
+            "stdout did not fill after a provider request"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(unsafe { libc::kill(child.0.id() as i32, libc::SIGTERM) }, 0);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let status = loop {
+        if let Some(status) = child.0.try_wait().expect("status") {
+            break status;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "SIGTERM did not stop the process while stdout stayed unread"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    assert_eq!(status.code(), Some(143));
+    assert_eq!(
+        unsafe { libc::fcntl(probe.as_raw_fd(), libc::F_GETFL) },
+        original_flags
+    );
+    let files = workspace.session_files();
+    assert_eq!(files.len(), 1);
+    let session = bake_coding_agent::session::SessionManager::open(&files[0], None, None)
+        .expect("the stopped session can be reopened");
+    drop(session);
+}
+
+#[test]
 fn provider_errors_exit_one_with_the_message() {
     let server = Server::start(Reply {
         status: 401,
@@ -702,6 +885,90 @@ fn provider_errors_exit_one_with_the_message() {
     assert_eq!(
         text(&out.stderr),
         "loop API error (401): {\"message\":\"bad key\"}\n"
+    );
+}
+
+#[test]
+fn a_model_call_allowance_is_shared_across_print_prompts() {
+    let server = Server::start(Reply::sse());
+    let workspace = Workspace::new("shared-print-budget", server.port);
+    let out = workspace.run(
+        &[
+            "--mode",
+            "json",
+            "--max-model-calls",
+            "1",
+            "first",
+            "second",
+        ],
+        None,
+    );
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out.stderr));
+    assert_eq!(server.requests().len(), 1);
+    let events: Vec<Value> = text(&out.stdout)
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let outcomes: Vec<_> = events
+        .iter()
+        .filter(|event| event["type"] == "agent_settled")
+        .map(|event| event["outcome"].clone())
+        .collect();
+    assert_eq!(
+        outcomes,
+        [
+            serde_json::json!({"kind":"finished_turn"}),
+            serde_json::json!({"kind":"budget_exhausted","limit":"model_calls"})
+        ]
+    );
+    let files = workspace.session_files();
+    assert_eq!(files.len(), 1);
+    let session = bake_coding_agent::session::SessionManager::open(&files[0], None, None)
+        .expect("settled session is unlocked");
+    assert!(
+        session
+            .entries()
+            .iter()
+            .any(|entry| entry.message_role() == Some("assistant"))
+    );
+}
+
+#[test]
+fn zero_print_budgets_admit_no_model_request() {
+    for flag in ["--max-model-calls", "--run-timeout-ms"] {
+        let server = Server::start(Reply::sse());
+        let workspace = Workspace::new("zero-print-budget", server.port);
+        let out = workspace.run(&["--mode", "json", flag, "0", "first", "second"], None);
+        assert_eq!(out.status.code(), Some(1), "{}", text(&out.stderr));
+        assert!(server.requests().is_empty());
+        let events: Vec<Value> = text(&out.stdout)
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert!(events.iter().any(|event| event["type"] == "agent_settled"
+            && event["outcome"]["kind"] == "budget_exhausted"));
+    }
+}
+
+#[test]
+fn json_provider_failures_exit_one_and_report_the_failed_outcome() {
+    let server = Server::start(Reply {
+        status: 401,
+        content_type: "application/json",
+        body: r#"{"error":{"message":"bad key"}}"#.into(),
+    });
+    let workspace = Workspace::new("json-provider-failure", server.port);
+    let out = workspace.run(&["--mode", "json", "first", "second"], None);
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(server.requests().len(), 1);
+    let events: Vec<Value> = text(&out.stdout)
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert!(
+        events
+            .iter()
+            .any(|event| event["type"] == "agent_settled" && event["outcome"]["kind"] == "failed")
     );
 }
 

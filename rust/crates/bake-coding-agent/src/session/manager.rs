@@ -10,9 +10,10 @@
 //! without changing history. [`SessionManager::build_session_context`]
 //! resolves the messages on the path from the root to the leaf.
 //!
-//! A persisted session's file is created only once the session holds a user
-//! or assistant message, so opening and closing without a conversation
-//! leaves no file; from then on each entry is appended as it is added.
+//! A persisted session's file is normally created once it holds a user or
+//! assistant message; explicit durable groups can create it earlier. Forks
+//! retain that durability for task documents and verification evidence.
+//! From file creation onward, each entry is appended as it is added.
 //! Entries that belong together are appended as one group
 //! ([`SessionManager::append_group`], Bake's, in the `group` module).
 //!
@@ -1163,8 +1164,9 @@ impl SessionManager {
     /// Replace this session with a new one holding only the path from the
     /// root to `leaf_id`, labels on that path carried over as new label
     /// entries at its end. A persisted session moves to a new file, written
-    /// now when the path holds a conversation, and its path is returned; an
-    /// in-memory session returns `None`.
+    /// now when the path holds a conversation or previously flushed task
+    /// documents or verification evidence, and its path is returned. Other
+    /// custom entries retain lazy creation. An in-memory session returns `None`.
     pub fn create_branched_session(
         &mut self,
         leaf_id: &str,
@@ -1273,8 +1275,24 @@ impl SessionManager {
         self.session_file = Some(new_file.clone());
         self.writer = None;
         self.build_index();
-        // As in a first append: write now only when there is a conversation.
-        if self.has_conversation() {
+        // Task acknowledgements survive a fork even before the first prompt.
+        // Only selected, already flushed task ancestry changes Pi's lazy rule.
+        let durable_tasks = self.flushed
+            && self
+                .file_entries
+                .iter()
+                .filter_map(FileEntry::as_entry)
+                .any(|entry| {
+                    entry.entry_type() == "custom"
+                        && matches!(
+                            entry.get("customType").and_then(Value::as_str),
+                            Some(
+                                crate::task_documents::DOCUMENT_TYPE
+                                    | crate::task_documents::verification::EVIDENCE_TYPE
+                            )
+                        )
+                });
+        if self.has_conversation() || durable_tasks {
             self.rewrite_file()?;
             self.flushed = true;
         } else {
@@ -1645,6 +1663,10 @@ impl SessionManager {
         list_all_from_sessions_dir(sessions_root, progress, cancel)
     }
 }
+
+#[cfg(test)]
+#[path = "manager/task_branch_tests.rs"]
+mod task_branch_tests;
 
 #[cfg(test)]
 mod tests {

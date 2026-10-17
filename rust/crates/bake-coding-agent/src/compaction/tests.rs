@@ -8,7 +8,7 @@
 //! refusal fallback for models without allowed fallback targets", because
 //! `bake-ai` models and options carry no refusal fallbacks to leave unset.
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use bake_ai::providers::faux::{faux_assistant_blocks, faux_model, faux_text, faux_tool_call};
 use bake_ai::{
@@ -20,6 +20,9 @@ use serde_json::json;
 use super::*;
 use crate::session::build_session_context;
 use crate::session::json::JsonObject;
+
+#[path = "attempt_tests.rs"]
+mod attempt;
 
 struct Entries {
     counter: usize,
@@ -1012,4 +1015,68 @@ async fn transient_summary_errors_retry_under_the_policy() {
         events[2],
         RetryEvent::Finished { success: true, .. }
     ));
+}
+
+#[tokio::test]
+async fn run_control_denies_second_split_summary_without_fabricating_a_response() {
+    let mock = Mock::new();
+    let control = bake_agent::RunControl::new(bake_agent::RunLimits {
+        max_model_calls: Some(1),
+        ..Default::default()
+    });
+    let options = SummarizationOptions {
+        run_control: Some(control.clone()),
+        ..key()
+    };
+    let result = compact(
+        &split_preparation(None, 2000, true),
+        &test_model(false, 8192),
+        None,
+        &mock.stream_fn(),
+        &options,
+    )
+    .await;
+    assert!(result.unwrap_err().contains("model-call allowance"));
+    assert_eq!(control.model_calls(), 1);
+    assert_eq!(
+        control.stopped(),
+        Some(bake_agent::RunOutcome::BudgetExhausted {
+            limit: bake_agent::BudgetLimit::ModelCalls
+        })
+    );
+}
+
+#[tokio::test]
+async fn run_control_charges_each_summary_retry() {
+    let mock = Mock::new();
+    let mut overloaded = summary_response();
+    overloaded.stop_reason = StopReason::Error;
+    overloaded.error_message = Some("overloaded_error".into());
+    mock.once(overloaded);
+    let control = bake_agent::RunControl::new(bake_agent::RunLimits {
+        max_model_calls: Some(1),
+        ..Default::default()
+    });
+    let options = SummarizationOptions {
+        run_control: Some(control.clone()),
+        retry: Some(RetryPolicy {
+            enabled: true,
+            max_retries: 2,
+            base_delay_ms: 0,
+            max_agent_delay_ms: None,
+        }),
+        ..key()
+    };
+    let result = generate_summary(
+        &summarize_this(),
+        &test_model(false, 8192),
+        2000,
+        None,
+        None,
+        &mock.stream_fn(),
+        &options,
+    )
+    .await;
+    assert!(result.unwrap_err().contains("model-call allowance"));
+    assert_eq!(control.model_calls(), 1);
 }

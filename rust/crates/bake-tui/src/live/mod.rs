@@ -33,6 +33,11 @@
 //! withdraws a waiting request, and closes the broker, so any later request
 //! is `unavailable`.
 //!
+//! MCP registry changes are observed even while the session is idle.
+//! Startup, refresh, and connection failures publish diagnostic rows with
+//! the server's name; server error bodies and stderr stay out of the view.
+//! Replacing the session replaces this subscription along with its tools.
+//!
 //! The port owns the session from [`LivePort::start`], but runs nothing
 //! until [`LivePort::begin`], so no prompt starts before the terminal is
 //! set up. Stopping or dropping it closes the request channel, as does a
@@ -41,6 +46,7 @@
 //! [`LivePort::stop`] returns. No update is sent after that.
 
 pub mod commands;
+mod mcp;
 pub mod projection;
 pub mod tree;
 
@@ -49,6 +55,7 @@ use std::io;
 use std::sync::mpsc as std_mpsc;
 use std::sync::{Arc, Mutex, PoisonError};
 
+use bake_agent::{RunControl, RunOutcome};
 use bake_ai::{AbortController, ImageContent, StopReason};
 use bake_coding_agent::agent_session::AgentSession;
 use bake_coding_agent::permissions::{self, ApprovalBroker, ApprovalPrompt};
@@ -65,6 +72,7 @@ use tokio::task::JoinHandle;
 
 use crate::port::Request;
 use bake_coding_agent::cli::SessionFactory;
+use mcp::McpNotices;
 use projection::Projector;
 
 /// Pi v1.2.0's built-in slash commands (`core/slash-commands.ts`) that
@@ -155,6 +163,8 @@ type Send = Arc<dyn Fn(RuntimeUpdate) -> bool + std::marker::Send + Sync>;
 /// The live port. Requests go to the driver task; updates come out through
 /// the `send` given to [`LivePort::start`].
 pub struct LivePort {
+    #[cfg(test)]
+    test_session: std::sync::Weak<AgentSession>,
     approvals: Option<ApprovalBroker>,
     requests: Option<mpsc::UnboundedSender<Request>>,
     begin: Option<oneshot::Sender<()>>,
@@ -181,6 +191,8 @@ impl LivePort {
             commit_gate,
         } = live;
         let session = Arc::new(session);
+        #[cfg(test)]
+        let test_session = Arc::downgrade(&session);
         // The session in use, which `/new` and `/resume` replace; what a
         // panicking driver's handler shuts down.
         let current = Arc::new(Mutex::new(Arc::clone(&session)));
@@ -212,6 +224,7 @@ impl LivePort {
         let (finished, done) = std_mpsc::channel();
         let driver = Driver {
             session: Arc::clone(&session),
+            mcp: session.mcp_servers().map(McpNotices::new),
             projector,
             send,
             gone,
@@ -271,6 +284,8 @@ impl LivePort {
             let _ = finished.send(result);
         });
         Self {
+            #[cfg(test)]
+            test_session,
             approvals,
             requests: Some(requests),
             begin: Some(begin),
@@ -391,7 +406,7 @@ struct Queued {
 
 /// The prompt that is running.
 struct Running {
-    task: JoinHandle<Result<(), String>>,
+    task: JoinHandle<Result<RunOutcome, String>>,
     id: Option<u64>,
     text: String,
     cancelled: bool,
@@ -417,15 +432,17 @@ struct CommandRun {
 
 /// What the driver does next.
 enum Next {
-    Settled(Result<Result<(), String>, tokio::task::JoinError>),
+    Settled(Result<Result<RunOutcome, String>, tokio::task::JoinError>),
     /// A background job may have settled while the session was idle.
     Jobs,
     Commanded(Result<commands::Outcome, tokio::task::JoinError>),
+    McpChanged,
     Request(Option<Request>),
 }
 
 struct Driver {
     session: Arc<AgentSession>,
+    mcp: Option<McpNotices>,
     projector: Arc<Mutex<Projector>>,
     send: Send,
     gone: Arc<Gone>,
@@ -490,6 +507,7 @@ impl Driver {
     async fn run(mut self, mut inbox: mpsc::UnboundedReceiver<Request>) {
         let mut running: Option<Running> = None;
         self.status();
+        self.publish_mcp();
         if let Some(home) = self.home.clone() {
             let abort = AbortController::new();
             let session = Arc::clone(&self.session);
@@ -536,10 +554,17 @@ impl Driver {
                     }
                     std::future::pending::<()>().await;
                 };
+                let mcp_changed = async {
+                    match &mut self.mcp {
+                        Some(mcp) => mcp.changed().await,
+                        None => std::future::pending().await,
+                    }
+                };
                 tokio::select! {
                     joined = settle => Next::Settled(joined),
                     () = settled_job => Next::Jobs,
                     done = commanded => Next::Commanded(done),
+                    () = mcp_changed => Next::McpChanged,
                     request = inbox.recv() => Next::Request(request),
                     () = self.gone.notify.notified() => Next::Request(None),
                 }
@@ -557,6 +582,7 @@ impl Driver {
                 // Checked at the top of the loop.
                 Next::Jobs => {}
                 Next::Commanded(done) => self.commanded(done, running.as_ref()).await,
+                Next::McpChanged => self.publish_mcp(),
                 Next::Request(None) => break,
                 Next::Request(Some(request)) => self.request(request, &mut running).await,
             }
@@ -599,6 +625,15 @@ impl Driver {
         (self.send)(update);
     }
 
+    fn publish_mcp(&mut self) {
+        if let Some(mcp) = &mut self.mcp {
+            let rows = mcp.take_rows();
+            if !rows.is_empty() {
+                self.send(RuntimeUpdate::Commit(rows));
+            }
+        }
+    }
+
     fn refuse(&self, id: Option<u64>, text: String, reason: String) {
         self.send(match id {
             Some(id) => RuntimeUpdate::Refused { id, reason },
@@ -619,7 +654,11 @@ impl Driver {
         let session = Arc::clone(&self.session);
         let Queued { id, text, images } = prompt;
         let sent = text.clone();
-        let task = tokio::spawn(async move { session.prompt(&sent, images).await });
+        let task = tokio::spawn(async move {
+            session
+                .prompt_with_control(&sent, images, RunControl::default())
+                .await
+        });
         Running {
             task,
             id,
@@ -656,7 +695,11 @@ impl Driver {
             seed: format!("{}-{}", self.session.session_id(), self.turns),
         });
         let session = Arc::clone(&self.session);
-        let task = tokio::spawn(async move { session.deliver_job_notices().await.map(drop) });
+        let task = tokio::spawn(async move {
+            session
+                .deliver_job_notices_with_control(RunControl::default())
+                .await
+        });
         Some(Running {
             task,
             id: None,
@@ -813,40 +856,44 @@ impl Driver {
     async fn settled(
         &mut self,
         run: Running,
-        joined: Result<Result<(), String>, tokio::task::JoinError>,
+        joined: Result<Result<RunOutcome, String>, tokio::task::JoinError>,
     ) {
         // The run's abort ends before anything else starts.
         for abort in self.aborts.drain(..) {
             let _ = abort.await;
         }
-        let (admitted, last_stop, mut updates) = {
+        let (admitted, displayed_error, mut updates) = {
             let mut projector = self
                 .projector
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner);
             (
                 projector.admitted(),
-                projector.last_stop(),
+                projector.last_error().map(str::to_owned),
                 projector.finish(),
             )
         };
-        let failure = match joined {
-            Ok(Ok(())) => None,
-            Ok(Err(message)) => Some(message),
-            Err(error) => Some(format!("The agent task failed: {error}")),
-        };
-        let outcome = if run.cancelled || last_stop == Some(StopReason::Aborted) {
-            Outcome::Interrupted
-        } else if failure.is_some() || last_stop == Some(StopReason::Error) {
-            Outcome::Failed
-        } else {
-            Outcome::Completed
+        let (outcome, failure) = match joined {
+            Ok(Ok(RunOutcome::FinishedTurn)) => (Outcome::Completed, None),
+            Ok(Ok(RunOutcome::Cancelled)) => (Outcome::Interrupted, None),
+            Ok(Ok(outcome @ RunOutcome::BudgetExhausted { .. })) => {
+                (Outcome::Failed, Some(outcome.to_string()))
+            }
+            Ok(Ok(RunOutcome::Failed { message })) | Ok(Err(message)) => {
+                (Outcome::Failed, Some(message))
+            }
+            Err(error) => (
+                Outcome::Failed,
+                Some(format!("The agent task failed: {error}")),
+            ),
         };
         for update in updates.drain(..) {
             self.send(update);
         }
         if admitted {
-            if let Some(message) = failure {
+            if let Some(message) =
+                failure.filter(|message| Some(message) != displayed_error.as_ref())
+            {
                 self.send(RuntimeUpdate::Commit(vec![Row::Error(message)]));
             }
         } else if run.notice {
@@ -1082,11 +1129,13 @@ impl Driver {
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = Projector::default();
         self.session = Arc::clone(&session);
+        self.mcp = session.mcp_servers().map(McpNotices::new);
         *self.current.lock().unwrap_or_else(PoisonError::into_inner) = Arc::clone(&session);
         self.subscription = Some(subscribe(&session, &self.projector, &self.send));
         self.turns = 0;
         let notes = replacement_notes(note, &session, warnings);
         self.send(RuntimeUpdate::Replaced(opening_rows(&notes, &session)));
+        self.publish_mcp();
         self.publish_pending();
     }
 

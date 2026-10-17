@@ -16,6 +16,7 @@ use std::io::Write;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
+use bake_agent::{RunControl, RunOutcome};
 use bake_ai::{AssistantContentBlock, ImageContent, StopReason};
 
 use crate::agent_session::AgentSession;
@@ -36,6 +37,9 @@ pub type SharedWriter = Arc<Mutex<dyn Write + Send>>;
 /// Pi's `PrintModeOptions`.
 #[derive(Debug, Clone)]
 pub struct PrintModeOptions {
+    /// One shared admission budget across every prompt in this invocation,
+    /// including retries, continuations, and compaction summaries.
+    pub control: RunControl,
     /// The output mode.
     pub mode: PrintOutput,
     /// The first prompt, with stdin prepended.
@@ -98,6 +102,9 @@ async fn run(
         None
     };
     let result = prompts(session, options.clone(), stderr).await;
+    // Paid summary attempts and job terminal writes settle during shutdown;
+    // keep their event listener attached until the owned work has drained.
+    session.shutdown().await;
     if let Some(subscription) = subscription {
         subscription.unsubscribe();
     }
@@ -133,12 +140,18 @@ async fn prompts(
     stderr: &SharedWriter,
 ) -> Result<(), String> {
     if let Some(initial) = options.initial_message.filter(|text| !text.is_empty()) {
-        session.prompt(&initial, options.initial_images).await?;
+        let outcome = session
+            .prompt_with_control(&initial, options.initial_images, options.control.clone())
+            .await?;
+        require_finished(outcome)?;
     }
     for message in options.messages {
-        session.prompt(&message, Vec::new()).await?;
+        let outcome = session
+            .prompt_with_control(&message, Vec::new(), options.control.clone())
+            .await?;
+        require_finished(outcome)?;
     }
-    let left = settle_jobs(session, options.job_wait).await?;
+    let left = settle_jobs(session, options.job_wait, options.control).await?;
     if left > 0 {
         write_out(
             stderr,
@@ -157,7 +170,11 @@ async fn prompts(
 /// were still running at the limit; the session's shutdown stops them.
 /// A notice turn still running at the limit is aborted and awaited,
 /// including its cleanup, before this returns.
-async fn settle_jobs(session: &AgentSession, limit: Duration) -> Result<usize, String> {
+async fn settle_jobs(
+    session: &AgentSession,
+    limit: Duration,
+    control: RunControl,
+) -> Result<usize, String> {
     let deadline = tokio::time::Instant::now() + limit;
     let jobs = session.jobs().clone();
     // Subscribed before the first check, so no settlement is missed.
@@ -169,6 +186,9 @@ async fn settle_jobs(session: &AgentSession, limit: Duration) -> Result<usize, S
             .count()
     };
     loop {
+        if let Some(outcome) = control.stopped() {
+            return Err(outcome.to_string());
+        }
         // Counted before the delivery, so a job that settles after the
         // delivery's claim is still waited for and delivered next time.
         let live = live_count();
@@ -176,7 +196,7 @@ async fn settle_jobs(session: &AgentSession, limit: Duration) -> Result<usize, S
         if tokio::time::Instant::now() >= deadline {
             return Ok(live);
         }
-        let delivery = session.deliver_job_notices();
+        let delivery = session.deliver_job_notices_controlled(control.clone());
         tokio::pin!(delivery);
         let mut delivery_polled = false;
         let delivered = {
@@ -187,21 +207,30 @@ async fn settle_jobs(session: &AgentSession, limit: Duration) -> Result<usize, S
             tokio::select! {
                 biased;
                 () = tokio::time::sleep_until(deadline) => None,
+                _ = control.wait_stopped() => None,
                 result = poll_delivery => Some(result?),
             }
         };
         let Some(delivered) = delivered else {
+            let shared_stop = control.stopped();
             // If the deadline won before delivery's first poll, there is
             // no admitted turn to drain and polling it would start one.
             if delivery_polled {
                 // Keep polling while abort waits for the delivery's run
                 // guard and owned request to settle.
                 let ((), result) = tokio::join!(session.abort(), &mut delivery);
-                result?;
+                let (outcome, _) = result?;
+                if matches!(outcome, RunOutcome::Failed { .. }) {
+                    return Err(outcome.to_string());
+                }
+            }
+            if let Some(outcome) = shared_stop {
+                return Err(outcome.to_string());
             }
             return Ok(live_count());
         };
-        if delivered {
+        require_finished(delivered.0)?;
+        if delivered.1 {
             continue;
         }
         // Every settled job's notice was delivered, or waits for a prompt
@@ -214,6 +243,14 @@ async fn settle_jobs(session: &AgentSession, limit: Duration) -> Result<usize, S
                 return Ok(0);
             },
             () = tokio::time::sleep_until(deadline) => return Ok(live_count()),
+            outcome = control.wait_stopped() => return Err(outcome.to_string()),
         }
+    }
+}
+
+fn require_finished(outcome: RunOutcome) -> Result<(), String> {
+    match outcome {
+        RunOutcome::FinishedTurn => Ok(()),
+        other => Err(other.to_string()),
     }
 }
