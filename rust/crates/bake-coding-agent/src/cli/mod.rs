@@ -802,6 +802,9 @@ async fn build_session(args: &Args, build: Build) -> Result<AgentSession, String
     // each call starts; both read what the session publishes now, so a
     // model change reaches the next call.
     let published = crate::agent_session::SessionSelection::default();
+    // The session's owner of its work, given to the tools that spawn
+    // processes so that shutdown waits for every tree they start.
+    let work = crate::owned_work::WorkGate::default();
     let bash_context: crate::tools::bash::BashToolContextFn = {
         let selection = published.clone();
         let session_cwd = PathBuf::from(&session_cwd);
@@ -832,10 +835,12 @@ async fn build_session(args: &Args, build: Build) -> Result<AgentSession, String
             Path::new(&session_cwd),
             crate::tools::bash::BashToolOptions {
                 context: Some(bash_context),
+                owner: Some(work.clone()),
                 ..Default::default()
             },
             &tool_permissions,
         )?),
+        owner: Some(work.clone()),
     };
     let definitions = sandbox_file_tools(
         create_all_tool_definitions(Path::new(&session_cwd), &tools_options),
@@ -910,6 +915,7 @@ async fn build_session(args: &Args, build: Build) -> Result<AgentSession, String
         system_prompt,
         docs_command,
         plugins: crate::plugins::PluginRegistry::default(),
+        work: Some(work),
     })
     .await?;
     session.set_prompt_templates(prompt_templates);

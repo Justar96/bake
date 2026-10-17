@@ -26,9 +26,13 @@ ignore.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
+# SIGCHLD wakes an owned process's exit wait (`child_process`).
+tokio = { workspace = true, features = ["signal"] }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Pipes", "Win32_System_Threading"] }
+# An owned process's pipes are overlapped named pipes (`child_process`).
+tokio = { workspace = true, features = ["net"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "time", "macros", "net", "io-util", "test-util"] }

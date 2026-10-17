@@ -50,8 +50,18 @@ fn parameters() -> Value {
     })
 }
 
-/// Pi's `createFindToolDefinition`.
+/// Pi's `createFindToolDefinition`. Its `fd` processes have no
+/// owner: a dropped call's tree is killed but not awaited.
 pub fn create_find_tool_definition(cwd: &Path) -> ToolDefinition {
+    owned_find_tool_definition(cwd, None)
+}
+
+/// [`create_find_tool_definition`] whose `fd` processes `owner` owns
+/// ([`crate::child_process`]): its close waits for each call's tree.
+pub(crate) fn owned_find_tool_definition(
+    cwd: &Path,
+    owner: Option<crate::owned_work::WorkGate>,
+) -> ToolDefinition {
     let cwd = cwd.to_path_buf();
     let tool = AgentTool::new(
         "find",
@@ -62,7 +72,7 @@ pub fn create_find_tool_definition(cwd: &Path) -> ToolDefinition {
             DEFAULT_MAX_BYTES / 1024
         ),
         parameters(),
-        move |_id, args, signal, _update| boxed(execute(cwd.clone(), args, signal)),
+        move |_id, args, signal, _update| boxed(execute(cwd.clone(), owner.clone(), args, signal)),
     );
     ToolDefinition {
         tool,
@@ -222,6 +232,7 @@ impl FindCollector {
 
 async fn execute(
     cwd: PathBuf,
+    owner: Option<crate::owned_work::WorkGate>,
     args: Value,
     signal: Option<AbortSignal>,
 ) -> Result<AgentToolResult, String> {
@@ -243,7 +254,7 @@ async fn execute(
             .map_err(|error| format!("Failed to run fd: {error}"))?
     };
     let mut collector = FindCollector::new(search_path, limit);
-    let ended = process::run_lines(&fd, &fd_args, signal.as_ref(), |line| {
+    let ended = process::run_lines(&fd, &fd_args, owner.as_ref(), signal.as_ref(), |line| {
         collector.line(&line);
         std::future::ready(Flow::Continue)
     })

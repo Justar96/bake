@@ -138,6 +138,11 @@ jobs:
         with:
           bun-version-file: package.json
       - run: bun install --frozen-lockfile
+      # The process-owner tests run a real PID-1 child in an unprivileged
+      # namespace; Ubuntu's AppArmor default otherwise denies its uid map.
+      - name: Enable Linux process namespaces
+        if: runner.os == 'Linux'
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Install the pinned Rust toolchain
         working-directory: rust
         run: rustup toolchain install --no-self-update

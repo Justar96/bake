@@ -198,6 +198,14 @@ pub struct AgentSessionOptions {
     /// a tool they list ([`crate::plugins`]); empty, the default, installs
     /// no hook.
     pub plugins: PluginRegistry,
+    /// The gate that owns the session's work ([`WorkGate`]); `None` makes a
+    /// private one. Give the same gate to the tools that spawn processes
+    /// ([`crate::tools::bash::BashToolOptions::owner`],
+    /// [`crate::tools::index::ToolsOptions::owner`]) so that
+    /// [`AgentSession::shutdown`] refuses their later spawns and waits for
+    /// every process tree they started, a dropped call's included. One gate
+    /// per session: closing it is the session's shutdown.
+    pub work: Option<WorkGate>,
 }
 
 /// Tools whose calls change files or run commands. The prompt's round-trip
@@ -1287,6 +1295,7 @@ impl AgentSession {
             mut system_prompt,
             docs_command,
             plugins,
+            work,
         } = options;
         let plugins = VetoDispatcher::new(plugins).map(Arc::new);
         system_prompt.docs_command = docs_command.clone();
@@ -1306,7 +1315,7 @@ impl AgentSession {
         let runtime = tokio::runtime::Handle::try_current()
             .map_err(|_| "An agent session must be created inside a Tokio runtime.".to_owned())?;
         let session: SharedSession = Arc::new(Mutex::new(session));
-        let work = WorkGate::default();
+        let work = work.unwrap_or_default();
         let (context, has_thinking_entry) = with_session(&work, &session, |session| {
             let context = session.build_session_context();
             let has_thinking_entry = session
@@ -2602,12 +2611,17 @@ impl AgentSession {
     /// first poll's part, and the session file is released when the
     /// session is dropped.
     ///
-    /// Not awaited, because the session does not own them: the process
-    /// trees of a cancelled tool call, which are killed when the call's
-    /// future is dropped, without waiting for them to exit
-    /// ([`crate::tools::bash`]), and the provider task `bake-ai` spawns
-    /// for each model request's stream. The gate awaits the request task
-    /// that forwards that stream, not the provider's task behind it.
+    /// The drain also covers the processes of tools given this session's
+    /// gate ([`AgentSessionOptions::work`]): each holds a permit from its
+    /// spawn until its tree is settled, and the run's task, stopped first,
+    /// drops a running call, which kills the call's tree and moves the
+    /// process to a task that settles it under the same permit. Shutdown
+    /// therefore returns only once every such tree is gone, with no time
+    /// limit; a process that cannot die (uninterruptible sleep) holds it.
+    /// Processes of other sessions, or of tools given no owner, are not
+    /// waited for, and a descendant that left its tree is not owned
+    /// ([`crate::child_process`]). A model request's task awaits the
+    /// provider task behind its stream, so draining the gate awaits both.
     pub async fn shutdown(&self) {
         let mut done = self.shutdown.get_or_init(|| self.begin_shutdown()).clone();
         // An error means the teardown task ended without finishing: it
@@ -2633,6 +2647,9 @@ impl AgentSession {
         let (finished, done) = tokio::sync::watch::channel(false);
         let teardown = async move {
             agent.shutdown().await;
+            // The run's task is gone, so a tool call it was running has
+            // dropped its process, whose settling task holds a permit of
+            // this gate: the drain waits for it.
             drained.await;
             listeners.quiesce().await;
             if let Some(subscription) = subscription

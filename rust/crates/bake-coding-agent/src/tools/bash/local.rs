@@ -4,9 +4,11 @@
 //!
 //! One future owns the shell, its pipes, its optional standard-input write,
 //! the timeout, and the abort: nothing is spawned beside it. Abort and
-//! timeout kill the process tree, then wait as Pi does for the shell to exit
-//! and its pipes to settle. Dropping the future before it settles kills the
-//! tree; Tokio reaps the killed shell. After the shell exits, Pi keeps
+//! timeout kill the process tree, then wait for the shell to exit, its pipes
+//! to settle, and its whole tree to be gone ([`crate::child_process`]).
+//! Dropping the future before it settles kills the tree and hands the shell
+//! to its owner, the [`WorkGate`] given by
+//! [`LocalShellOperations::with_owner`], whose close then waits for it. After the shell exits, Pi keeps
 //! reading while output arrives and stops once both pipes close or stay
 //! quiet for 100 ms, so a background descendant that holds a pipe open
 //! neither hangs the call nor loses output it is still writing
@@ -21,19 +23,18 @@ use std::ffi::OsString;
 use std::future::Future;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process::{ExitStatus, Stdio};
+use std::process::ExitStatus;
 use std::sync::Arc;
 use std::time::Duration;
 
 use bake_agent::BoxFuture;
 use bake_ai::AbortSignal;
-use tokio::process::Command;
 use tokio::time::Instant;
 
 use super::shell::{CommandTransport, ShellConfig, get_shell_config, get_shell_env};
-use super::tree::configure;
 use super::{BashExecError, BashExecOptions, BashOperations};
-use crate::child_process::{aborted, sleep_until, wait_for_process};
+use crate::child_process::{OwnedProcess, ProcessSpec, aborted, sleep_until, wait_for_process};
+use crate::owned_work::WorkGate;
 use crate::session::json::js_number_to_string;
 
 /// Pi's `EXIT_STDIO_GRACE_MS`.
@@ -50,6 +51,7 @@ pub struct LocalShellOperations {
     shell_name: String,
     resolve: ResolveShell,
     bin_dir: Option<PathBuf>,
+    owner: Option<WorkGate>,
 }
 
 impl std::fmt::Debug for LocalShellOperations {
@@ -72,6 +74,7 @@ impl LocalShellOperations {
             shell_name: shell_name.into(),
             resolve: Arc::new(resolve),
             bin_dir: None,
+            owner: None,
         }
     }
 
@@ -80,6 +83,17 @@ impl LocalShellOperations {
     #[must_use]
     pub fn with_bin_dir(mut self, bin_dir: Option<PathBuf>) -> Self {
         self.bin_dir = bin_dir;
+        self
+    }
+
+    /// The owner of every shell this spawns: its close refuses later
+    /// commands and waits for each running or dropped command's whole
+    /// tree. Pass the session's gate ([`crate::agent_session::AgentSessionOptions::work`]).
+    /// `None`, the default, leaves a dropped command killed but not
+    /// awaited.
+    #[must_use]
+    pub fn with_owner(mut self, owner: Option<WorkGate>) -> Self {
+        self.owner = owner;
         self
     }
 }
@@ -296,28 +310,22 @@ impl LocalShellOperations {
             stdin: stdin_bytes,
             on_stderr,
         } = prepared;
-        let mut process = Command::new(&program);
-        process.args(&args);
-        let env: Vec<(OsString, OsString)> =
+        let mut env: Vec<(OsString, OsString)> =
             env.unwrap_or_else(|| get_shell_env(self.bin_dir.as_deref()));
-        process
-            .current_dir(&cwd)
-            .env_clear()
-            .envs(env)
-            .envs(extra_env)
-            .stdin(if stdin_bytes.is_some() {
-                Stdio::piped()
-            } else {
-                Stdio::null()
-            })
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true);
-        configure(&mut process);
-        let child = process.spawn().map_err(|error| PreparedExecError {
-            error: BashExecError::Failed(spawn_error(Path::new(&program), &error)),
-            spawn_error: Some(error.kind()),
-        })?;
+        env.extend(extra_env);
+        let spec = ProcessSpec {
+            program: program.clone(),
+            args,
+            cwd: Some(cwd.clone()),
+            env: Some(env),
+            stdin: stdin_bytes.is_some(),
+        };
+        let child = OwnedProcess::spawn(&spec, self.owner.as_ref())
+            .await
+            .map_err(|error| PreparedExecError {
+                error: BashExecError::Failed(spawn_error(Path::new(&program), &error)),
+                spawn_error: Some(error.kind()),
+            })?;
         let exit = wait_for_process(
             child,
             stdin_bytes,

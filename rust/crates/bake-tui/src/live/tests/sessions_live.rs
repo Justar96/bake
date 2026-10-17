@@ -217,6 +217,7 @@ fn settings_harness(
             system_prompt: SystemPromptOptions::new(world.project()),
             docs_command: "bake-rs docs".into(),
             plugins: bake_coding_agent::plugins::PluginRegistry::default(),
+            work: None,
         }))
         .expect("agent session");
     let factory = SessionFactory::new(
@@ -841,6 +842,7 @@ fn a_session_from_another_directory_is_not_opened() {
             system_prompt: SystemPromptOptions::new(world.project()),
             docs_command: "bake-rs docs".into(),
             plugins: bake_coding_agent::plugins::PluginRegistry::default(),
+            work: None,
         })
         .await
         .expect("session")
