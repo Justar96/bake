@@ -756,7 +756,8 @@ await scenario('sample activity is text that advances on its own, then compacts,
   preview.send('\x1b')
   // The compaction ends. The bar keeps the turn's outcome on its left and the
   // status, no model and then the directory, right-aligned on the same row.
-  await preview.wait('sample stopped', () => /^ {2}✓ Completed {2}\d+s +no model {2}\S+$/mu.test(preview.screen)
+  // ConPTY can preserve display padding after the directory.
+  await preview.wait('sample stopped', () => preview.screen.split('\n').some(line => /^ {2}✓ Completed {2}\d+s +no model {2}\S+$/u.test(line.trimEnd()))
     && !preview.screen.includes('Compacting'))
   await preview.quit()
 })
