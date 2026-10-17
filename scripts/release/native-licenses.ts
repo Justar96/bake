@@ -31,6 +31,16 @@
  * license string, and hash its files. NOTICE, COPYRIGHT, and COPYING files at a
  * crate's root are reproduced verbatim as well.
  *
+ * Some crates are published without the license file their repository keeps
+ * at its root. For those alone, `rust/licenses/upstream.toml` names a reviewed
+ * copy vendored under `rust/licenses/`: its SHA-256, the repository, the full
+ * commit, the path, and its raw URL at that commit, and each crate that
+ * inherits it by `name@version`, crates.io checksum, and `path_in_vcs`. Such a
+ * text is used only where cargo-about found none, and only when the lock's
+ * checksum, the package's `.cargo_vcs_info.json` commit and path, the declared
+ * license string, and the file's hash all match; an entry no compiled crate
+ * needs fails. Nothing is downloaded.
+ *
  * `Cargo.lock` is the authority: every Cargo call is `--locked`, and checking
  * is offline. `--write` first runs `cargo fetch --locked`, the only step that
  * may use the network, then writes the bundle to `.artifacts/native/licenses`
@@ -115,6 +125,8 @@ export interface BundleInputs {
   readonly hostTree: string
   /** cargo-about's `--format json` output, unparsed. */
   readonly about: string
+  /** `rust/licenses/upstream.toml`, or `null` when there is none. */
+  readonly upstream: string | null
 }
 
 /** Parse `cargo tree --prefix none -f {p}` output; duplicates and the `(*)` marks are dropped. */
@@ -193,6 +205,8 @@ interface Text {
   /** `<crate> <version>, <path inside its package>` of the file it was read from. */
   readonly source: string
   readonly users: Set<string>
+  /** Where a text no published package carries was taken from. */
+  readonly upstream?: Readonly<Record<'repository' | 'commit' | 'path' | 'url' | 'file', string>>
 }
 
 interface Notice { readonly file: string; readonly sha256: string; readonly body: string }
@@ -275,6 +289,70 @@ function findText(dir: string, preferred: string, text: string, exact: boolean):
     return undefined
   }
   return walk(dir)
+}
+
+/** One reviewed upstream file, vendored under `rust/licenses/`, and the published crates that omit it. */
+interface UpstreamText {
+  readonly file: string
+  readonly sha256: string
+  readonly license: string
+  readonly repository: string
+  readonly commit: string
+  readonly path: string
+  readonly url: string
+  readonly crates: readonly { readonly crate: string; readonly checksum: string; readonly pathInVcs: string }[]
+}
+
+const UPSTREAM_KEYS = ['commit', 'crates', 'file', 'license', 'path', 'repository', 'sha256', 'url']
+const UPSTREAM_CRATE_KEYS = ['checksum', 'crate', 'path-in-vcs']
+
+/**
+ * Read `rust/licenses/upstream.toml`: each `[[text]]` pins a vendored file to
+ * a repository commit and to the exact crates that inherit it.
+ */
+function readUpstream(text: string | null): Map<string, UpstreamText> {
+  const byCrate = new Map<string, UpstreamText>()
+  if (text === null) return byCrate
+  let parsed: Record<string, unknown>
+  try {
+    parsed = record(Bun.TOML.parse(text), 'upstream.toml')
+  } catch (error) {
+    if (error instanceof LicenseBundleError) throw error
+    throw new LicenseBundleError(`upstream.toml does not parse: ${(error as Error).message}`)
+  }
+  const problems: string[] = []
+  if (Object.keys(parsed).some(key => key !== 'text') || !Array.isArray(parsed.text)) throw new LicenseBundleError('upstream.toml holds only a [[text]] list')
+  for (const [index, value] of parsed.text.entries()) {
+    const entry = record(value, `upstream.toml text ${index}`)
+    const strings = UPSTREAM_KEYS.filter(key => key !== 'crates').every(key => typeof entry[key] === 'string')
+    const extra = Object.keys(entry).filter(key => !UPSTREAM_KEYS.includes(key))
+    const file = entry.file as string
+    if (!strings || extra.length > 0 || !Array.isArray(entry.crates) || entry.crates.length === 0
+      || !/^[0-9a-f]{64}$/u.test(entry.sha256 as string) || !/^[0-9a-f]{40}$/u.test(entry.commit as string)
+      || !/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+$/u.test(entry.repository as string)
+      || entry.url !== `${(entry.repository as string).replace('https://github.com/', 'https://raw.githubusercontent.com/')}/${entry.commit as string}/${entry.path as string}`
+      || isAbsolute(file) || file.split(/[\\/]/u).includes('..')) {
+      problems.push(`upstream.toml text ${index} needs file, sha256, license, a github.com repository, a full commit, path, the raw URL of that path at that commit, and crates, and nothing else`)
+      continue
+    }
+    const crates: UpstreamText['crates'][number][] = []
+    for (const item of entry.crates) {
+      const krate = record(item, `upstream.toml text ${index} crate`)
+      if (Object.keys(krate).some(key => !UPSTREAM_CRATE_KEYS.includes(key)) || typeof krate.crate !== 'string' || !/^[^@\s]+@[^@\s]+$/u.test(krate.crate)
+        || typeof krate.checksum !== 'string' || !/^[0-9a-f]{64}$/u.test(krate.checksum) || typeof krate['path-in-vcs'] !== 'string') {
+        problems.push(`upstream.toml text ${index} crates need crate (name@version), its crates.io checksum, and path-in-vcs`)
+        continue
+      }
+      crates.push({ crate: krate.crate, checksum: krate.checksum, pathInVcs: krate['path-in-vcs'] })
+    }
+    const upstream: UpstreamText = { ...(entry as Omit<UpstreamText, 'crates'>), crates }
+    for (const { crate } of crates) {
+      if (byCrate.has(crate)) problems.push(`upstream.toml names ${crate} twice`)
+      byCrate.set(crate, upstream)
+    }
+  }
+  if (problems.length > 0) throw new LicenseBundleError(problems.join('\n'))
+  return byCrate
 }
 
 interface Clarification { readonly license: string; readonly files: readonly { readonly path: string; readonly checksum: string }[] }
@@ -363,6 +441,8 @@ function readAbout(text: string): { crates: Set<string>; licenses: AboutLicense[
  */
 export function buildBundle(inputs: BundleInputs): Bundle {
   const config = readConfig(inputs.config)
+  const upstream = readUpstream(inputs.upstream)
+  const supplied = new Set<string>()
   const about = readAbout(inputs.about)
   const problems: string[] = []
 
@@ -434,8 +514,21 @@ export function buildBundle(inputs: BundleInputs): Bundle {
     const users = license.users.filter(user => third.has(user))
     if (users.length === 0) continue
     if (license.sourcePath === null) {
-      for (const user of users) missing.add(user)
-      problems.push(`${users.join(', ')}: no ${license.id} license text was found in the source package; cargo-about would substitute the generic text, losing the crate's copyright. Add a reviewed, hashed clarification naming the crate's own file`)
+      const uncovered = users.filter(user => !upstream.has(user))
+      for (const user of uncovered) missing.add(user)
+      if (uncovered.length > 0) problems.push(`${uncovered.join(', ')}: no ${license.id} license text was found in the source package; cargo-about would substitute the generic text, losing the crate's copyright. Add a reviewed, hashed clarification naming the crate's own file, or, when the published crate omits it, a reviewed upstream text in rust/licenses/upstream.toml`)
+      for (const user of users.filter(item => upstream.has(item))) {
+        supplied.add(user)
+        const text = supplyUpstream(third.get(user) as ThirdParty, upstream.get(user) as UpstreamText, inputs, problems)
+        if (text === undefined) {
+          missing.add(user)
+          continue
+        }
+        const existing = texts.get(text.id) ?? text
+        texts.set(text.id, existing)
+        existing.users.add(user)
+        ;(third.get(user) as ThirdParty).texts.set(text.id, `${text.upstream?.path as string} (upstream)`)
+      }
       continue
     }
     // cargo-about reports a harvested file by absolute path inside one of the
@@ -484,6 +577,12 @@ export function buildBundle(inputs: BundleInputs): Bundle {
   }
 
   for (const entry of third.values()) if (entry.texts.size === 0 && about.crates.has(entry.pkg.key) && !missing.has(entry.pkg.key)) problems.push(`${entry.pkg.key}: cargo-about attached no license text`)
+  for (const crate of upstream.keys()) {
+    if (supplied.has(crate)) continue
+    problems.push(third.has(crate)
+      ? `upstream.toml supplies ${crate}, whose own package now holds its license text; remove the entry`
+      : `upstream.toml supplies ${crate}, which no release platform compiles; remove the stale entry`)
+  }
 
   // cargo-about applies a clarification to every version of the crate it
   // names whose files match its checksums, so every compiled version must
@@ -593,7 +692,10 @@ export function buildBundle(inputs: BundleInputs): Bundle {
       notices: entry.notices.map(notice => ({ file: notice.file, sha256: notice.sha256 })),
     })),
     excluded,
-    texts: textList.map(text => ({ id: text.id, license: text.license, sha256: text.sha256, source: text.source })),
+    texts: textList.map(({ id, license, sha256: digest, source, upstream: origin }) => {
+      const base = { id, license, sha256: digest, source }
+      return origin === undefined ? base : { ...base, upstream: origin }
+    }),
   }
   files[INVENTORY_FILE] = `${JSON.stringify(inventory, null, 2)}\n`
   return {
@@ -606,6 +708,66 @@ export function buildBundle(inputs: BundleInputs): Bundle {
       excluded,
     },
   }
+}
+
+/**
+ * The reviewed upstream text for a crate whose published package omits it,
+ * once the crate is shown to be the locked crates.io package built from that
+ * commit and path, declaring that license, and the vendored file matches its
+ * hash.
+ */
+function supplyUpstream(entry: ThirdParty, text: UpstreamText, inputs: BundleInputs, problems: string[]): Text | undefined {
+  const { key, license, dir } = entry.pkg
+  const pin = text.crates.find(item => item.crate === key) as UpstreamText['crates'][number]
+  const before = problems.length
+  const locked = lockChecksums(inputs.cargoLock).get(key)
+  if (locked !== pin.checksum) problems.push(`upstream.toml pins ${key} at checksum ${pin.checksum}, but Cargo.lock has ${locked ?? 'none'}`)
+  let vcs: { git?: { sha1?: unknown }; path_in_vcs?: unknown } = {}
+  try {
+    vcs = JSON.parse(readFileSync(join(dir, '.cargo_vcs_info.json'), 'utf8')) as typeof vcs
+  } catch {
+    problems.push(`${key} has no readable .cargo_vcs_info.json to tie it to ${text.repository} at ${text.commit}`)
+  }
+  if (vcs.git?.sha1 !== text.commit || vcs.path_in_vcs !== pin.pathInVcs) {
+    problems.push(`${key} was published from ${String(vcs.git?.sha1)} at ${JSON.stringify(vcs.path_in_vcs)}, not ${text.commit} at ${JSON.stringify(pin.pathInVcs)} as upstream.toml says`)
+  }
+  if (license !== text.license) problems.push(`upstream.toml gives ${key} ${JSON.stringify(text.license)}, but it declares ${JSON.stringify(license)}`)
+  const path = join(inputs.root, 'rust', 'licenses', text.file)
+  let body: string | undefined
+  try {
+    const bytes = readFileSync(path)
+    if (sha256(bytes) === text.sha256) body = decode(bytes, `rust/licenses/${text.file}`)
+    else problems.push(`rust/licenses/${text.file} has sha256 ${sha256(bytes)}, not the reviewed ${text.sha256}`)
+  } catch (error) {
+    problems.push(error instanceof LicenseBundleError ? error.message : `rust/licenses/${text.file} is missing`)
+  }
+  if (problems.length > before || body === undefined) return undefined
+  const id = `${text.license.replaceAll(' ', '_')}-${text.sha256.slice(0, 12)}`
+  return {
+    id,
+    license: text.license,
+    sha256: sha256(body),
+    body,
+    source: `${text.repository} at ${text.commit}, ${text.path} (the published crates omit it)`,
+    users: new Set<string>(),
+    upstream: { repository: text.repository, commit: text.commit, path: text.path, url: text.url, file: `rust/licenses/${text.file}` },
+  }
+}
+
+const lockCache = new WeakMap<Uint8Array, Map<string, string>>()
+
+/** The crates.io checksum of each locked package, by `name@version`. */
+function lockChecksums(lock: Uint8Array): Map<string, string> {
+  const cached = lockCache.get(lock)
+  if (cached !== undefined) return cached
+  const parsed = record(Bun.TOML.parse(new TextDecoder().decode(lock)), 'Cargo.lock')
+  const checksums = new Map<string, string>()
+  for (const item of Array.isArray(parsed.package) ? parsed.package : []) {
+    const pkg = record(item, 'Cargo.lock package')
+    if (typeof pkg.name === 'string' && typeof pkg.version === 'string' && typeof pkg.checksum === 'string') checksums.set(`${pkg.name}@${pkg.version}`, pkg.checksum)
+  }
+  lockCache.set(lock, checksums)
+  return checksums
 }
 
 /** Order versions numerically where they are numeric, so 0.10 follows 0.9. */
@@ -735,6 +897,7 @@ export function collect(root: string, runner: Runner = run, cargoAbout = process
     root,
     cargoLock: readFileSync(join(rust, 'Cargo.lock')),
     config: readFileSync(join(rust, 'about.toml'), 'utf8'),
+    upstream: existsSync(join(rust, 'licenses', 'upstream.toml')) ? readFileSync(join(rust, 'licenses', 'upstream.toml'), 'utf8') : null,
     toolchain: { channel, cargo },
     cargoAbout: CARGO_ABOUT_VERSION,
     metadata,
