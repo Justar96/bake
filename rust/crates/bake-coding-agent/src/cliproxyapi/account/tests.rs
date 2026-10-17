@@ -791,26 +791,68 @@ fn account_child_process() {
 fn independent_processes_keep_each_route_with_its_own_key() {
     const CHILDREN: u16 = 4;
     let home = yaml_home("account-processes");
-    let children: Vec<_> = (0..CHILDREN)
-        .map(|index| {
+    struct Children(Vec<std::process::Child>);
+    impl Drop for Children {
+        fn drop(&mut self) {
+            for child in &mut self.0 {
+                let _ = child.kill();
+            }
+            for child in &mut self.0 {
+                let _ = child.wait();
+            }
+        }
+    }
+    // Keep each child's libtest failure output, and settle every sibling
+    // before asserting so a failing child cannot leave writers behind.
+    let mut children = Children(Vec::new());
+    for index in 0..CHILDREN {
+        let output =
+            std::fs::File::create(home.join(&format!("child-{index}.log"))).expect("child output");
+        children.0.push(
             Command::new(std::env::current_exe().expect("test binary"))
                 .args([
                     "--exact",
                     "cliproxyapi::account::tests::account_child_process",
                     "--ignored",
+                    "--nocapture",
                     "--test-threads=1",
                 ])
                 .env(CHILD_HOME, home.path())
                 .env(CHILD_INDEX, index.to_string())
-                .stdout(Stdio::null())
-                .stderr(Stdio::inherit())
+                .stdin(Stdio::null())
+                .stdout(output.try_clone().expect("clone child output"))
+                .stderr(output)
                 .spawn()
-                .expect("spawn")
+                .expect("spawn"),
+        );
+    }
+    let started = std::time::Instant::now();
+    let mut outcomes = vec![None; usize::from(CHILDREN)];
+    loop {
+        for (child, outcome) in children.0.iter_mut().zip(&mut outcomes) {
+            if outcome.is_none() {
+                *outcome = child.try_wait().expect("wait");
+            }
+        }
+        if outcomes.iter().all(Option::is_some)
+            || started.elapsed() >= std::time::Duration::from_secs(60)
+        {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    drop(children);
+    let failures: Vec<_> = outcomes
+        .iter()
+        .enumerate()
+        .filter(|(_, outcome)| !outcome.is_some_and(|status| status.success()))
+        .map(|(index, outcome)| {
+            let output = std::fs::read_to_string(home.join(&format!("child-{index}.log")))
+                .expect("read child output");
+            format!("child {index}: {outcome:?} (None means the 60 s bound expired)\n{output}")
         })
         .collect();
-    for mut child in children {
-        assert!(child.wait().expect("wait").success());
-    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
     match startup_pair(home.path(), &no_env) {
         None => {}
         Some((url, key)) => {
