@@ -668,7 +668,14 @@ export function buildBundle(inputs: BundleInputs): Bundle {
   const inventory = {
     schema: SCHEMA,
     generator: { tool: `cargo-about ${inputs.cargoAbout}`, cargo: inputs.toolchain.cargo, toolchain: inputs.toolchain.channel },
-    inputs: { cargoLock: { path: 'rust/Cargo.lock', sha256: header.cargoLock }, config: { path: 'rust/about.toml', sha256: header.config } },
+    inputs: {
+      cargoLock: { path: 'rust/Cargo.lock', sha256: header.cargoLock },
+      config: { path: 'rust/about.toml', sha256: header.config },
+      ...(inputs.upstream === null ? {} : { upstream: { path: 'rust/licenses/upstream.toml', sha256: sha256(inputs.upstream) } }),
+      ...Object.fromEntries(textList.flatMap(text => text.upstream === undefined ? [] : [
+        [text.upstream.file, { path: text.upstream.file, sha256: text.sha256 }],
+      ])),
+    },
     selection: { package: ROOT_PACKAGE, runtime: 'cargo tree --target <triple> -e normal,no-proc-macro', build: 'crates below build-dependency and proc-macro edges of the linked crates in cargo tree --target all -e normal,build --no-dedupe, for every build host', excluded: 'dev-dependencies' },
     platforms: targetFiles,
     workspace: members_.map(({ pkg, platforms }) => {

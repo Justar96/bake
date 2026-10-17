@@ -314,7 +314,9 @@ describe('upstream texts', () => {
     expect(text).toContain(`Source: https://github.com/bytecodealliance/wasmtime at ${COMMIT}, LICENSE (the published crates omit it)`)
     expect(text).not.toContain('<copyright holders>')
     type Texts = { texts: { license: string; upstream?: { commit: string; file: string } }[] }
-    const record = JSON.parse(files[INVENTORY_FILE] as string) as Texts
+    const record = JSON.parse(files[INVENTORY_FILE] as string) as Texts & { inputs: Record<string, { path: string; sha256: string }> }
+    expect(record.inputs.upstream).toEqual({ path: 'rust/licenses/upstream.toml', sha256: hash(entry()) })
+    expect(record.inputs['rust/licenses/upstream/wasmtime-v49.0.3/LICENSE']).toEqual({ path: 'rust/licenses/upstream/wasmtime-v49.0.3/LICENSE', sha256: hash(UPSTREAM) })
     expect(record.texts[0]).toMatchObject({ license: 'Apache-2.0 WITH LLVM-exception', upstream: { commit: COMMIT, file: 'rust/licenses/upstream/wasmtime-v49.0.3/LICENSE' } })
   })
 
