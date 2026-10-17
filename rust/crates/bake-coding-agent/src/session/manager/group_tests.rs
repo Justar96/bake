@@ -96,6 +96,83 @@ fn model_switch() -> Vec<GroupEntry> {
     ]
 }
 
+fn custom_group() -> Vec<GroupEntry> {
+    vec![
+        GroupEntry::Custom {
+            custom_type: "bake.test.document.v1".into(),
+            data: Some(json!({"revision": 1})),
+        },
+        GroupEntry::CustomMessage {
+            custom_type: "bake.test.document.context.v1".into(),
+            content: bake_ai::UserContent::Text("Exact document revision one".into()),
+            display: false,
+            details: Some(json!({"revision": 1})),
+        },
+    ]
+}
+
+#[test]
+fn an_explicit_durable_group_survives_before_any_conversation() {
+    let dir = TempDir::new("durable-custom-before-conversation");
+    let mut manager = file_session(&dir);
+    let file = manager.session_file().expect("file").to_path_buf();
+    let ids = manager
+        .append_durable_group(custom_group())
+        .expect("durable group");
+    let projected = manager.build_session_context();
+    assert_eq!(projected.messages.len(), 1);
+    drop(manager);
+    let reopened = SessionManager::open(&file, None, None).expect("reopen");
+    assert_eq!(
+        reopened
+            .entries()
+            .iter()
+            .map(|entry| entry.id())
+            .collect::<Vec<_>>(),
+        ids
+    );
+    assert_eq!(reopened.build_session_context(), projected);
+}
+
+#[test]
+fn ordinary_custom_groups_remain_lazy() {
+    let dir = TempDir::new("lazy-custom-group");
+    let mut manager = file_session(&dir);
+    let file = manager.session_file().expect("file").to_path_buf();
+    manager.append_group(custom_group()).expect("lazy group");
+    assert!(!file.exists());
+    manager
+        .append_durable_group(custom_group())
+        .expect("flush pending entries");
+    assert_eq!(entries_of(&file).len(), 4);
+}
+
+#[test]
+fn initial_durable_custom_groups_keep_only_the_synced_prefix_on_failure() {
+    for line in 0..2 {
+        for kind in [FaultKind::Refuse, FaultKind::Tear(17), FaultKind::FailSync] {
+            let dir = TempDir::new("durable-custom-prefix");
+            let mut manager = file_session(&dir);
+            let file = manager.session_file().expect("file").to_path_buf();
+            manager.arm_group_fault(Fault { line, kind });
+            let error = manager
+                .append_durable_group(custom_group())
+                .expect_err("injected write failure");
+            let SessionError::GroupWrite(failure) = error else {
+                panic!("{error:?}")
+            };
+            assert_eq!(failure.written.len(), line);
+            assert_eq!(manager.entries().len(), line);
+            let seen = entries_of(&file);
+            assert_eq!(
+                seen.len(),
+                line + usize::from(failure.failed == FailedLine::Unsynced)
+            );
+            assert_eq!(manager.entries(), seen[..line].iter().collect::<Vec<_>>());
+        }
+    }
+}
+
 fn lines(bytes: &[u8]) -> Vec<&[u8]> {
     bytes
         .split_inclusive(|byte| *byte == b'\n')

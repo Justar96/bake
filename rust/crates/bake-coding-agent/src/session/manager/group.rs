@@ -13,6 +13,9 @@ use std::fmt;
 use std::io;
 use std::path::PathBuf;
 
+use bake_ai::UserContent;
+use serde_json::Value;
+
 use super::{SessionManager, lines_of};
 use crate::session::SessionError;
 use crate::session::durable::{self, FailedLine, LinesFailure};
@@ -24,6 +27,24 @@ use crate::session::json::JsonObject;
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum GroupEntry {
+    /// Extension state outside model context.
+    Custom {
+        /// The extension's entry type.
+        custom_type: String,
+        /// The extension's versioned payload.
+        data: Option<Value>,
+    },
+    /// Extension content included in model context as a user message.
+    CustomMessage {
+        /// The extension's message type.
+        custom_type: String,
+        /// The exact content a reconstructed request sees.
+        content: UserContent,
+        /// Whether the terminal displays this message.
+        display: bool,
+        /// Extension metadata outside model context.
+        details: Option<Value>,
+    },
     /// [`SessionManager::append_model_change`].
     ModelChange {
         /// The provider.
@@ -163,6 +184,25 @@ impl SessionManager {
         &mut self,
         entries: impl IntoIterator<Item = GroupEntry>,
     ) -> Result<Vec<String>, SessionError> {
+        self.append_group_inner(entries, false)
+    }
+
+    /// Append a group whose acknowledgement requires durability, including
+    /// before the first conversation message. Used for task documents and
+    /// execution journals. In-memory sessions still write nothing. The
+    /// prefix and failure contract is the same as [`Self::append_group`].
+    pub fn append_durable_group(
+        &mut self,
+        entries: impl IntoIterator<Item = GroupEntry>,
+    ) -> Result<Vec<String>, SessionError> {
+        self.append_group_inner(entries, true)
+    }
+
+    fn append_group_inner(
+        &mut self,
+        entries: impl IntoIterator<Item = GroupEntry>,
+        force_create: bool,
+    ) -> Result<Vec<String>, SessionError> {
         let start = self.file_entries.len();
         let start_ids = self.by_id.len();
         let leaf = self.leaf_id.clone();
@@ -182,7 +222,7 @@ impl SessionManager {
         if ids.is_empty() {
             return Ok(ids);
         }
-        match self.persist_group(start) {
+        match self.persist_group(start, force_create) {
             Ok(()) => Ok(ids),
             Err(PersistFailure::Before(error)) => {
                 self.keep_group_prefix(start, start_ids, leaf, &ids, 0);
@@ -207,6 +247,34 @@ impl SessionManager {
     /// The entry `entry` stands for, as a child of the leaf, checked.
     fn group_entry(&self, entry: GroupEntry) -> Result<(String, JsonObject), SessionError> {
         match entry {
+            GroupEntry::Custom { custom_type, data } => {
+                let id = self.next_id();
+                let mut raw = self.base("custom", &id);
+                raw.insert("customType".into(), custom_type.into());
+                if let Some(data) = data {
+                    raw.insert("data".into(), data);
+                }
+                Ok((id, raw))
+            }
+            GroupEntry::CustomMessage {
+                custom_type,
+                content,
+                display,
+                details,
+            } => {
+                let id = self.next_id();
+                let mut raw = self.base("custom_message", &id);
+                raw.insert("customType".into(), custom_type.into());
+                raw.insert(
+                    "content".into(),
+                    serde_json::to_value(content).unwrap_or(Value::Null),
+                );
+                raw.insert("display".into(), display.into());
+                if let Some(details) = details {
+                    raw.insert("details".into(), details);
+                }
+                Ok((id, raw))
+            }
             GroupEntry::ModelChange { provider, model_id } => {
                 Ok(self.model_change(&provider, &model_id))
             }
@@ -240,11 +308,11 @@ impl SessionManager {
     }
 
     /// Write the entries from file index `start`, the group, in order.
-    fn persist_group(&mut self, start: usize) -> Result<(), PersistFailure> {
+    fn persist_group(&mut self, start: usize, force_create: bool) -> Result<(), PersistFailure> {
         let Some(path) = self.session_file.clone().filter(|_| self.persist) else {
             return Ok(());
         };
-        if !self.flushed && !self.has_conversation() {
+        if !self.flushed && !force_create && !self.has_conversation() {
             return Ok(());
         }
         self.hold_writer(&path).map_err(PersistFailure::Before)?;

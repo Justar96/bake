@@ -272,9 +272,7 @@ async fn unreported_jobs_on_the_branch_are_lost_once_and_their_ids_reserved() {
         UserContent::Text(text) => text.clone(),
     };
     assert!(
-        text.starts_with(
-            "background job bash-1 (bash: npm test) did not survive the end of the earlier process"
-        ),
+        text.starts_with("background job bash-1 (bash: npm test) belongs to an earlier process"),
         "{text}"
     );
     assert_eq!(notices[0].details.as_ref().unwrap()["status"], "lost");
@@ -303,4 +301,104 @@ async fn malformed_and_foreign_records_are_skipped() {
     let jobs = JobRegistry::new(WorkGate::default(), JobLimits::default());
     assert_eq!(ids(&recover(&file, &jobs)), [json!("bash-2")]);
     jobs.close().await;
+}
+
+fn fact(file: &mut SessionManager, data: Value) -> String {
+    file.append_custom_entry(JOURNAL_TYPE, Some(data)).unwrap()
+}
+
+#[tokio::test]
+async fn terminal_facts_survive_branching_but_observations_belong_to_their_branch() {
+    let mut file = session();
+    let fork = fact(
+        &mut file,
+        json!({
+            "version": 1, "phase": "started", "jobId": "bash-1",
+            "kind": "bash", "label": "one effect", "status": "running"
+        }),
+    );
+    fact(
+        &mut file,
+        json!({
+            "version": 1, "phase": "terminal", "jobId": "bash-1",
+            "kind": "bash", "label": "one effect", "status": "completed",
+            "detail": "exit code: 0"
+        }),
+    );
+    // The immutable first outcome wins over a contradictory later entry.
+    fact(
+        &mut file,
+        json!({
+            "version": 1, "phase": "terminal", "jobId": "bash-1",
+            "kind": "bash", "label": "one effect", "status": "failed"
+        }),
+    );
+    reported(&mut file, "bash-1");
+    let jobs = JobRegistry::new(WorkGate::default(), JobLimits::default());
+    assert!(recover(&file, &jobs).is_empty());
+    jobs.close().await;
+    file.branch(&fork).unwrap();
+    let jobs = JobRegistry::new(WorkGate::default(), JobLimits::default());
+    let recovered = recover(&file, &jobs);
+    jobs.close().await;
+    assert_eq!(ids(&recovered), [json!("bash-1")]);
+    assert_eq!(
+        recovered[0].details.as_ref().unwrap()["status"],
+        "completed"
+    );
+    let text = bake_ai::utils::text::user_content_text(&recovered[0].content, "");
+    assert!(text.contains("exit code: 0"));
+    assert!(text.contains("unavailable"));
+}
+
+#[tokio::test]
+async fn malformed_facts_and_notices_do_not_acknowledge_or_invent_an_outcome() {
+    let mut file = session();
+    for ordinal in 1..=5 {
+        let id = format!("bash-{ordinal}");
+        fact(
+            &mut file,
+            json!({
+                "version": 1, "phase": "started", "jobId": id,
+                "kind": "bash", "label": "job", "status": "running"
+            }),
+        );
+        let mut broken = json!({
+            "version": 1, "phase": "terminal", "jobId": id,
+            "kind": "bash", "label": "job", "status": "completed"
+        });
+        match ordinal {
+            1 => broken["version"] = json!(2),
+            2 => broken["kind"] = json!("deploy"),
+            3 => broken["status"] = json!("running"),
+            4 => broken["label"] = json!(null),
+            _ => broken["jobId"] = json!("bash-05"),
+        }
+        fact(&mut file, broken);
+        file.append_custom_message_entry(
+            NOTICE_TYPE,
+            UserContent::Text("untrusted text claims completion".into()),
+            true,
+            Some(json!({ "jobId": id, "status": "running" })),
+        )
+        .unwrap();
+    }
+    // A valid orphan terminal fact reserves its id even without a start.
+    fact(
+        &mut file,
+        json!({
+            "version": 1, "phase": "terminal", "jobId": "bash-9",
+            "kind": "bash", "label": "orphan", "status": "failed"
+        }),
+    );
+    let jobs = JobRegistry::new(WorkGate::default(), JobLimits::default());
+    let recovered = recover(&file, &jobs);
+    assert!(jobs.id("bash-9").is_ok());
+    jobs.close().await;
+    assert_eq!(recovered.len(), 5);
+    assert!(
+        recovered
+            .iter()
+            .all(|notice| notice.details.as_ref().unwrap()["status"] == "lost")
+    );
 }

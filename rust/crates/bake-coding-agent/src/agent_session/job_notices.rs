@@ -11,24 +11,24 @@
 //! inside a run at the next step, else by a turn it opens, within the
 //! registry's wake budget.
 //!
-//! Recovery is Bake's own, for the scope 11 rule that a job is lost with
-//! its process and reported to the agent once. A `bash` result whose
-//! details hold [`BACKGROUND_JOB_DETAIL`] records that a job started; a
-//! notice entry or terminal job-tool result records that it was reported.
-//! Tool results acknowledge a job on the branch that received them.
-//! On resume every recorded id is reserved, so an id is never issued
-//! twice in one session file. A job started on the current branch without
-//! a notice in the file or a terminal observation on that branch gets a
-//! lost notice, delivered with the next prompt. A notice
-//! claimed but not yet written when the process ended is reported as lost
-//! instead; no notice is written twice.
+//! Recovery projects immutable `bake.job.state` custom entries: a durable
+//! start precedes execution and a durable terminal fact precedes live
+//! publication. Older `bash` results with [`BACKGROUND_JOB_DETAIL`] also
+//! record starts. Terminal facts apply across branches because execution
+//! cannot be undone; a notice or successful terminal job-tool result
+//! acknowledges delivery only on the branch that received it.
+//! On resume every valid recorded id is reserved. An unobserved start on
+//! the selected branch gets its recorded terminal outcome, or an unknown
+//! outcome when no terminal fact survived. Recovery never adopts or
+//! restarts a process, and no output bytes are retained by this journal.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use bake_ai::{TextContent, UserContent, UserContentBlock};
 use serde_json::{Value, json};
 
-use crate::jobs::{JobRegistry, JobSnapshot};
+use super::job_journal::JOURNAL_TYPE;
+use crate::jobs::{JobRegistry, JobSnapshot, parse_job_id};
 use crate::session::SessionManager;
 use crate::session::messages::CustomMessage;
 use crate::tools::bash::BACKGROUND_JOB_DETAIL;
@@ -54,7 +54,7 @@ pub fn completion_notice(snapshot: &JobSnapshot) -> CustomMessage {
 /// not report.
 pub fn lost_notice(id: &str, kind: &str, label: &str) -> CustomMessage {
     let text = format!(
-        "background job {id} ({kind}: {label}) did not survive the end of the earlier process that ran it [status: killed, lost with its process]. Its output is gone; start it again if you still need it."
+        "background job {id} ({kind}: {label}) belongs to an earlier process and has no recorded final outcome [status: lost]. Its output is unavailable. Check whether its effects completed before starting it again."
     );
     notice(id, text, "lost")
 }
@@ -82,11 +82,28 @@ struct Started {
     on_branch: bool,
 }
 
-/// Reserves every job id `session` records in `jobs` and returns a lost
-/// notice for each job started on the current branch without a notice in
-/// the file or a terminal tool observation on that branch, in start
-/// order. Ids of a kind the registry cannot hold, or malformed details,
-/// are skipped.
+fn recovered_completion(
+    id: &str,
+    job: &Started,
+    status: &str,
+    detail: Option<&str>,
+) -> CustomMessage {
+    let detail = detail
+        .map(|detail| format!(", {detail}"))
+        .unwrap_or_default();
+    notice(
+        id,
+        format!(
+            "background job {id} ({}: {}) finished in its earlier process [status: {status}{detail}]. Its output was not retained across processes and is unavailable.",
+            job.kind, job.label
+        ),
+        status,
+    )
+}
+
+/// Reserves every valid recorded id and returns an outcome notice for
+/// each start on the selected branch without a durable observation there,
+/// in start order. A missing terminal fact means an unknown outcome.
 pub fn recover(session: &SessionManager, jobs: &JobRegistry) -> Vec<CustomMessage> {
     let branch: BTreeSet<&str> = session
         .branch_entries(None)
@@ -97,6 +114,7 @@ pub fn recover(session: &SessionManager, jobs: &JobRegistry) -> Vec<CustomMessag
     let mut order: Vec<String> = Vec::new();
     let mut reported: BTreeSet<String> = BTreeSet::new();
     let mut recorded: BTreeSet<String> = BTreeSet::new();
+    let mut terminal: BTreeMap<String, (String, Option<String>)> = BTreeMap::new();
     for entry in session.entries() {
         match entry.entry_type() {
             "message" => {
@@ -146,13 +164,63 @@ pub fn recover(session: &SessionManager, jobs: &JobRegistry) -> Vec<CustomMessag
                 if entry.get("customType").and_then(Value::as_str) != Some(NOTICE_TYPE) {
                     continue;
                 }
-                if let Some(id) = entry
-                    .get("details")
-                    .and_then(|details| details.get("jobId"))
-                    .and_then(Value::as_str)
-                {
-                    reported.insert(id.to_owned());
+                if let Some(id) = notice_id(entry.get("details")) {
                     recorded.insert(id.to_owned());
+                    if branch.contains(entry.id()) {
+                        reported.insert(id.to_owned());
+                    }
+                }
+            }
+            "custom" if entry.get("customType").and_then(Value::as_str) == Some(JOURNAL_TYPE) => {
+                let Some(data) = entry.get("data") else {
+                    continue;
+                };
+                if data.get("version").and_then(Value::as_u64) != Some(1) {
+                    continue;
+                }
+                let Some(id) = data.get("jobId").and_then(Value::as_str) else {
+                    continue;
+                };
+                let Some((kind, _)) = parse(id) else {
+                    continue;
+                };
+                if data.get("kind").and_then(Value::as_str) != Some(kind) {
+                    continue;
+                }
+                let Some(label) = data.get("label").and_then(Value::as_str) else {
+                    continue;
+                };
+                match data.get("phase").and_then(Value::as_str) {
+                    Some("started") => {
+                        recorded.insert(id.to_owned());
+                        let on_branch = branch.contains(entry.id());
+                        let known = started.entry(id.to_owned()).or_insert_with(|| {
+                            order.push(id.to_owned());
+                            Started {
+                                kind: kind.into(),
+                                label: label.into(),
+                                on_branch,
+                            }
+                        });
+                        known.on_branch |= on_branch;
+                    }
+                    Some("terminal") => {
+                        let Some(status @ ("completed" | "killed" | "failed")) =
+                            data.get("status").and_then(Value::as_str)
+                        else {
+                            continue;
+                        };
+                        recorded.insert(id.to_owned());
+                        terminal.entry(id.to_owned()).or_insert_with(|| {
+                            (
+                                status.into(),
+                                data.get("detail")
+                                    .and_then(Value::as_str)
+                                    .map(str::to_owned),
+                            )
+                        });
+                    }
+                    _ => {}
                 }
             }
             _ => {}
@@ -173,10 +241,40 @@ pub fn recover(session: &SessionManager, jobs: &JobRegistry) -> Vec<CustomMessag
         .filter(|id| !reported.contains(*id) && parse(id).is_some())
         .filter_map(|id| {
             let job = &started[id];
-            job.on_branch
-                .then(|| lost_notice(id, &job.kind, &job.label))
+            job.on_branch.then(|| match terminal.get(id) {
+                Some((status, detail)) => recovered_completion(id, job, status, detail.as_deref()),
+                None => lost_notice(id, &job.kind, &job.label),
+            })
         })
         .collect()
+}
+
+pub(super) fn observation_id(message: &bake_agent::AgentMessage) -> Option<&str> {
+    if let Some(result) = message.as_tool_result() {
+        if result.is_error || !matches!(result.tool_name.as_str(), "job_output" | "job_kill") {
+            return None;
+        }
+        return terminal_id(result.details.as_ref()?.get(JOB_OBSERVATION_DETAIL)?);
+    }
+    let bake_agent::AgentMessage::Custom(custom) = message else {
+        return None;
+    };
+    let message = custom.as_any().downcast_ref::<CustomMessage>()?;
+    if message.custom_type != NOTICE_TYPE {
+        return None;
+    }
+    notice_id(message.details.as_ref())
+}
+
+pub(super) fn notice_id(details: Option<&Value>) -> Option<&str> {
+    let details = details?;
+    let id = details.get("jobId")?.as_str()?;
+    parse_job_id(id)?;
+    matches!(
+        details.get("status")?.as_str()?,
+        "completed" | "killed" | "failed" | "lost"
+    )
+    .then_some(id)
 }
 
 /// Only a successful job-addressing tool can acknowledge a terminal
@@ -189,9 +287,12 @@ fn terminal_observation(message: &Value) -> Option<&str> {
     {
         return None;
     }
-    let observation = message.get("details")?.get(JOB_OBSERVATION_DETAIL)?;
+    terminal_id(message.get("details")?.get(JOB_OBSERVATION_DETAIL)?)
+}
+
+fn terminal_id(observation: &Value) -> Option<&str> {
     let id = observation.get("id")?.as_str()?;
-    parse(id)?;
+    parse_job_id(id)?;
     matches!(
         observation.get("status")?.as_str()?,
         "completed" | "failed" | "killed"
@@ -199,18 +300,11 @@ fn terminal_observation(message: &Value) -> Option<&str> {
     .then_some(id)
 }
 
-/// `bash-<n>`: the only kind a session records today, as the registry's
-/// static kind name, and its ordinal.
+/// The shipped producer kinds as static registry names. New producer
+/// kinds must extend this mapping so their earlier identities stay reserved.
 fn parse(id: &str) -> Option<(&'static str, u64)> {
-    let (kind, number) = id.rsplit_once('-')?;
-    if kind != "bash"
-        || number.is_empty()
-        || number.starts_with('0')
-        || !number.bytes().all(|byte| byte.is_ascii_digit())
-    {
-        return None;
-    }
-    Some(("bash", number.parse().ok()?))
+    let (kind, ordinal) = parse_job_id(id)?;
+    (kind == "bash").then_some(("bash", ordinal))
 }
 
 #[cfg(test)]

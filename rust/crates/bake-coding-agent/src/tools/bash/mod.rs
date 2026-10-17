@@ -201,7 +201,7 @@ pub struct BashToolOptions {
     /// The session's background jobs. With them the tool takes
     /// `run_in_background`, which starts the command as a `bash` job
     /// through the same `operations`, so a sandbox confines it alike, and
-    /// returns its id at once. `None` keeps Pi's tool.
+    /// returns its id after the session records its start. `None` keeps Pi's tool.
     pub jobs: Option<JobRegistry>,
 }
 
@@ -573,7 +573,7 @@ impl Shared {
         };
         let spawn = self.spawn_context(command);
         if params.get("run_in_background").and_then(Value::as_bool) == Some(true) {
-            return self.start_background(label, spawn, signal.as_ref());
+            return self.start_background(label, spawn, signal.as_ref()).await;
         }
         let output = OutputAccumulator::new(OutputAccumulatorOptions {
             temp_directory: self
@@ -738,7 +738,7 @@ impl Shared {
     /// that streams its output into the job, with no timeout, and the call
     /// returns its id. A stop of the job aborts the command, which kills
     /// its tree; the job ends once `exec` has settled it.
-    fn start_background(
+    async fn start_background(
         &self,
         label: String,
         spawn: BashSpawnContext,
@@ -760,9 +760,10 @@ impl Shared {
         let id = jobs
             .start(spec, move |context| run_job(context, operations, spawn))
             .map_err(|error| error.to_string())?;
+        jobs.wait_admitted(id).await?;
         let label = jobs.get(id).map(|job| job.label).unwrap_or_default();
-        // The details name the job in the session file, so a resumed
-        // session reserves its id and reports it lost
+        // The result links the tool call to the job whose start is
+        // already durable in an attached session
         // ([`crate::agent_session::job_notices`]).
         Ok(AgentToolResult {
             content: text_result(format!("started background job {id}")),

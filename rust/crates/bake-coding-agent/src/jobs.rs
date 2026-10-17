@@ -30,16 +30,21 @@
 //!   [`JobRegistry::claim_unreported`], and teardown each claim it. A wait
 //!   pending when the job settles holds the claim for its waiters, and if
 //!   every one of them is dropped before returning, the claim is released
-//!   again and [`JobEvents`] reports a change. Nothing here delivers a
-//!   notice or writes the session log; those are separate steps.
+//!   again and [`JobEvents`] reports a change. An attached session reserves
+//!   delivery until its message is durable, and returns abandoned
+//!   reservations only after that run's persistence listeners are idle.
+//! - **Session jobs have a journal.** The session attaches its lifecycle
+//!   recorder before admission. The driver awaits a durable start before
+//!   calling the producer and a durable terminal fact before publication.
+//!   A failed write prevents further session delivery; a failed start
+//!   never calls the producer. A standalone registry has no recorder.
 //!
 //! Admission is atomic under the registry's lock: the shutdown check,
 //! validation, the active limit (`running`, `stopping`, and `completing`
 //! jobs), the id, and the driver's spawn happen together, or none does and
 //! no id is used. The producer itself is called on the driver task, never
-//! under a lock, and no other code of a caller runs under one: the registry
-//! has no callbacks, and [`JobEvents`] wakes a subscriber, which then
-//! claims what it reports.
+//! under a lock. The lifecycle recorder also runs outside that lock.
+//! [`JobEvents`] wakes a subscriber, which then claims what it reports.
 //!
 //! Ids are `<kind>-<n>`, numbered per kind, and carry the registry they
 //! came from: another session's [`JobId`] is refused as
@@ -78,17 +83,17 @@
 //! terminal only after the job's resources settle, where the TypeScript
 //! trusted the producer's `done`; cancellation that cannot throw, so no
 //! record is force-failed; and bounded retention of terminal records.
-//! Not here yet: the model's job tools, a producer (background `bash`),
-//! completion notices, and persisted job state.
+//! The session's model tools and background `bash` share this registry.
+//! Its journal preserves lifecycle facts, not processes or output bytes.
 
 pub mod process;
 
 use std::fmt;
 use std::future::Future;
 use std::io;
-use std::pin::pin;
+use std::pin::{Pin, pin};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::Duration;
 
 use bake_ai::AbortSignal;
@@ -327,7 +332,8 @@ pub struct JobSnapshot {
     /// When it became terminal, epoch milliseconds.
     pub finished_at: Option<i64>,
     /// Whether its terminal state has been claimed for reporting, or a
-    /// stop or teardown has said no report is wanted.
+    /// stop or teardown has said no report is wanted. For a session job,
+    /// a reserved delivery also counts; this is not a durability receipt.
     pub reported: bool,
 }
 
@@ -459,7 +465,14 @@ struct Inner {
     /// Notified each time a job becomes terminal.
     settled: Notify,
     events: watch::Sender<Events>,
+    recorder: OnceLock<JobRecorder>,
 }
+
+/// A session's durable lifecycle writer. The driver awaits it before
+/// invoking the producer and before publishing a terminal outcome.
+pub(crate) type JobRecorder = Arc<
+    dyn Fn(JobSnapshot) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> + Send + Sync,
+>;
 
 #[derive(Debug, Clone, Copy, Default)]
 struct Events {
@@ -489,6 +502,8 @@ enum Claim {
     Unclaimed,
     /// Held for the waits pending when the job settled.
     Waiters,
+    /// Reserved by a session delivery, until its message is durable.
+    Delivery,
     Claimed,
 }
 
@@ -505,6 +520,7 @@ struct Record {
     started_at: i64,
     finished_at: Option<i64>,
     claim: Claim,
+    admission: Option<Result<(), String>>,
     waiters: usize,
     /// The job's own gate: its producer and everything it started.
     gate: WorkGate,
@@ -565,6 +581,21 @@ fn valid_kind(kind: &str) -> bool {
         && bytes
             .iter()
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || *byte == b'_')
+}
+
+/// Validates an external identity before a registry or recovery projection
+/// decides whether its kind and ordinal are known.
+pub(crate) fn parse_job_id(text: &str) -> Option<(&str, u64)> {
+    let (kind, number) = text.rsplit_once('-')?;
+    if !valid_kind(kind)
+        || number.is_empty()
+        || number.len() > 20
+        || !number.bytes().all(|byte| byte.is_ascii_digit())
+        || number.starts_with('0')
+    {
+        return None;
+    }
+    Some((kind, number.parse().ok()?))
 }
 
 impl State {
@@ -636,6 +667,45 @@ impl State {
 }
 
 impl Inner {
+    fn delivery_claim(&self) -> Claim {
+        if self.recorder.get().is_some() {
+            Claim::Delivery
+        } else {
+            Claim::Claimed
+        }
+    }
+
+    async fn record(&self, snapshot: JobSnapshot) -> Result<(), String> {
+        match self.recorder.get() {
+            Some(recorder) => recorder(snapshot).await,
+            None => Ok(()),
+        }
+    }
+
+    fn admitted(&self, id: JobId, admission: Result<(), String>) {
+        let wake = {
+            let mut state = self.state();
+            let Ok(record) = state.find(self.id, id) else {
+                return;
+            };
+            record.admission = Some(admission);
+            Arc::clone(&record.wake)
+        };
+        wake.notify_waiters();
+    }
+
+    fn journal_failed(&self, id: JobId, error: String) {
+        // The session's write gap prevents further delivery. Keep the
+        // registry drainable without announcing an undurable outcome.
+        if let Ok(record) = self.state().find(self.id, id) {
+            record.claim = Claim::Claimed;
+        }
+        self.settle(
+            id,
+            JobOutcome::failed(format!("the job journal failed: {error}")),
+        );
+    }
+
     fn state(&self) -> MutexGuard<'_, State> {
         lock(&self.state)
     }
@@ -732,7 +802,81 @@ impl JobRegistry {
                 state: Mutex::default(),
                 settled: Notify::new(),
                 events: watch::Sender::new(Events::default()),
+                recorder: OnceLock::new(),
             }),
+        }
+    }
+
+    /// Attached before a session can admit jobs. Keeping the recorder
+    /// immutable prevents an admitted driver from changing its writer.
+    pub(crate) fn attach_recorder(&self, recorder: JobRecorder) -> Result<(), String> {
+        let state = self.inner.state();
+        if !state.records.is_empty() || state.closed {
+            return Err(
+                "The session's job registry must be empty and open before its journal is attached."
+                    .into(),
+            );
+        }
+        self.inner
+            .recorder
+            .set(recorder)
+            .map_err(|_| "The job journal is already attached.".into())
+    }
+
+    pub(crate) async fn wait_admitted(&self, id: JobId) -> Result<(), String> {
+        let wake = Arc::clone(
+            &self
+                .inner
+                .state()
+                .find(self.inner.id, id)
+                .map_err(|e| e.to_string())?
+                .wake,
+        );
+        loop {
+            let mut changed = pin!(wake.notified());
+            changed.as_mut().enable();
+            if let Some(result) = self
+                .inner
+                .state()
+                .find(self.inner.id, id)
+                .map_err(|e| e.to_string())?
+                .admission
+                .clone()
+            {
+                return result;
+            }
+            changed.await;
+        }
+    }
+
+    pub(crate) fn acknowledge(&self, text: &str) {
+        if let Ok(id) = self.id(text)
+            && let Ok(record) = self.inner.state().find(self.inner.id, id)
+            && record.status.is_terminal()
+        {
+            record.claim = Claim::Claimed;
+        }
+    }
+
+    /// A delivery dropped before its durable message gives its claim
+    /// back. Notices intentionally waiting for a prompt keep theirs.
+    pub(crate) fn release_deliveries(&self, pending: &[String]) {
+        let released = {
+            let mut state = self.inner.state();
+            if state.closed {
+                return;
+            }
+            let mut released = false;
+            for record in &mut state.records {
+                if record.claim == Claim::Delivery && !pending.contains(&record.id.to_string()) {
+                    record.claim = Claim::Unclaimed;
+                    released = true;
+                }
+            }
+            released
+        };
+        if released {
+            self.inner.announce();
         }
     }
 
@@ -811,8 +955,8 @@ impl JobRegistry {
             let output = stream.clone().map(|buffer| JobOutput { buffer });
             move |scope| drive(inner, id, gate, output, scope, producer)
         };
-        // The driver's first poll takes this lock only after the producer
-        // returns, so it always finds the record.
+        // The driver's first poll takes this lock before recording its
+        // start, so it cannot run before its record is installed.
         drop(inner.gate.spawn(driver).map_err(|refused| match refused {
             Refused::Closed => StartError::Closed,
             refused => StartError::Refused(refused),
@@ -831,6 +975,7 @@ impl JobRegistry {
             started_at: bake_ai::now_ms(),
             finished_at: None,
             claim: Claim::Unclaimed,
+            admission: None,
             waiters: 0,
             gate,
             wake: Arc::new(Notify::new()),
@@ -855,15 +1000,7 @@ impl JobRegistry {
     /// The id `<kind>-<n>` names in this registry, issued or reserved.
     pub fn id(&self, text: &str) -> Result<JobId, JobError> {
         let unknown = || JobError::Unknown(cut(text.to_owned(), 64));
-        let (kind, number) = text.rsplit_once('-').ok_or_else(unknown)?;
-        if number.is_empty()
-            || number.len() > 20
-            || !number.bytes().all(|byte| byte.is_ascii_digit())
-            || number.starts_with('0')
-        {
-            return Err(unknown());
-        }
-        let ordinal: u64 = number.parse().map_err(|_| unknown())?;
+        let (kind, ordinal) = parse_job_id(text).ok_or_else(unknown)?;
         let state = self.inner.state();
         let ids = state.kind(kind).ok_or_else(unknown)?;
         if ordinal > ids.last {
@@ -908,8 +1045,8 @@ impl JobRegistry {
             ),
             None => (String::new(), 0),
         };
-        if terminal {
-            record.claim = Claim::Claimed;
+        if terminal && record.claim != Claim::Claimed {
+            record.claim = self.inner.delivery_claim();
         }
         Ok(JobRead {
             text,
@@ -926,10 +1063,13 @@ impl JobRegistry {
         let gate = {
             let mut state = self.inner.state();
             let record = state.find(self.inner.id, id)?;
-            record.claim = Claim::Claimed;
             if record.status.is_terminal() {
+                if record.claim != Claim::Claimed {
+                    record.claim = self.inner.delivery_claim();
+                }
                 return Ok(KillResult::AlreadyFinished);
             }
+            record.claim = Claim::Claimed;
             if record.status != JobStatus::Running {
                 return Ok(KillResult::AlreadyStopping);
             }
@@ -965,7 +1105,9 @@ impl JobRegistry {
             let mut state = self.inner.state();
             let record = state.find(self.inner.id, id)?;
             if record.status.is_terminal() {
-                record.claim = Claim::Claimed;
+                if record.claim != Claim::Claimed {
+                    record.claim = self.inner.delivery_claim();
+                }
                 return Ok(record.snapshot());
             }
             record.waiters += 1;
@@ -1004,7 +1146,7 @@ impl JobRegistry {
         let record = state.find(self.inner.id, id)?;
         let claimed = record.status.is_terminal() && record.claim == Claim::Unclaimed;
         if claimed {
-            record.claim = Claim::Claimed;
+            record.claim = self.inner.delivery_claim();
         }
         Ok(claimed)
     }
@@ -1021,7 +1163,7 @@ impl JobRegistry {
             .iter_mut()
             .filter(|record| record.status.is_terminal() && record.claim == Claim::Unclaimed)
             .map(|record| {
-                record.claim = Claim::Claimed;
+                record.claim = self.inner.delivery_claim();
                 record.snapshot()
             })
             .collect()
@@ -1132,7 +1274,9 @@ impl Waiter {
         self.registered = false;
         record.waiters = record.waiters.saturating_sub(1);
         if terminal {
-            record.claim = Claim::Claimed;
+            if record.claim != Claim::Claimed {
+                record.claim = self.inner.delivery_claim();
+            }
             return Ok(Some(record.snapshot()));
         }
         Ok((!cancelled).then(|| record.snapshot()))
@@ -1359,6 +1503,23 @@ async fn drive<F, Fut>(
     F: FnOnce(JobContext) -> Fut + Send + 'static,
     Fut: Future<Output = JobOutcome> + Send + 'static,
 {
+    let started = inner
+        .state()
+        .find(inner.id, id)
+        .map(|record| record.snapshot());
+    let admission = match started {
+        Ok(snapshot) => inner.record(snapshot).await,
+        Err(error) => Err(error.to_string()),
+    };
+    inner.admitted(id, admission.clone());
+    if let Err(error) = admission {
+        gate.close().await;
+        inner.journal_failed(id, error);
+        return;
+    }
+    if scope.signal().aborted() {
+        inner.request_stop(id, StopCause::Shutdown);
+    }
     let context_gate = gate.clone();
     let produced = gate.spawn(move |task_scope| {
         producer(JobContext {
@@ -1387,6 +1548,22 @@ async fn drive<F, Fut>(
     };
     inner.producer_returned(id);
     gate.close().await;
+    let terminal = inner.state().find(inner.id, id).map(|record| {
+        let mut snapshot = record.snapshot();
+        snapshot.status = outcome.status.into();
+        snapshot.detail = outcome
+            .detail
+            .clone()
+            .map(|detail| cut(detail, MAX_TEXT_BYTES));
+        snapshot.finished_at = Some(bake_ai::now_ms());
+        snapshot
+    });
+    if let Ok(snapshot) = terminal
+        && let Err(error) = inner.record(snapshot).await
+    {
+        inner.journal_failed(id, error);
+        return;
+    }
     inner.settle(id, outcome);
 }
 
