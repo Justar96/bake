@@ -24,10 +24,10 @@ pub mod branch_summarization;
 pub mod utils;
 
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::Arc;
 
 use bake_agent::StreamFn;
-use bake_ai::utils::retry::{RetryEvent, RetryPolicy, retry_assistant_call};
+use bake_ai::utils::retry::{RetryEvent, RetryPolicy, try_retry_assistant_call};
 use bake_ai::utils::text::assistant_text;
 use bake_ai::{
     AbortSignal, AssistantContentBlock, AssistantMessage, CacheRetention, Context, Message, Model,
@@ -587,6 +587,8 @@ pub type RetryObserver = Arc<dyn Fn(RetryEvent) + Send + Sync>;
 /// arguments.
 #[derive(Clone, Default)]
 pub struct SummarizationOptions {
+    /// Shared foreground allowance, including each summary and retry.
+    pub run_control: Option<bake_agent::RunControl>,
     /// An explicit API key; the stream function resolves one otherwise.
     pub api_key: Option<String>,
     /// Request headers.
@@ -644,12 +646,6 @@ fn summary_max_tokens(model: &Model, fraction: f64, reserve_tokens: u64) -> u64 
     }
 }
 
-fn stopped(model: &Model) -> AssistantMessage {
-    let mut message = AssistantMessage::pending(model);
-    message.stop_reason = StopReason::Aborted;
-    message
-}
-
 /// Pi's `completeSummarization`: one summarization request with retry of
 /// transient errors. The request never writes the prompt cache and is
 /// routed by the caller's session id or a fresh one.
@@ -661,49 +657,75 @@ pub async fn complete_summarization(
     retry: Option<RetryPolicy>,
     on_retry: Option<&RetryObserver>,
 ) -> Result<AssistantMessage, String> {
+    complete_summarization_with_control(model, context, options, stream_fn, retry, on_retry, None)
+        .await
+}
+
+/// Summarizes under the same logical-call allowance as the owning run.
+pub async fn complete_summarization_with_control(
+    model: &Model,
+    context: &TranscriptContext,
+    options: SimpleStreamOptions,
+    stream_fn: &StreamFn,
+    retry: Option<RetryPolicy>,
+    on_retry: Option<&RetryObserver>,
+    control: Option<&bake_agent::RunControl>,
+) -> Result<AssistantMessage, String> {
     let mut request = options;
     request.base.cache_retention = Some(CacheRetention::None);
     if request.base.session_id.is_none() {
         request.base.session_id = Some(crate::session::id::uuid_v7());
     }
-    let signal = request.base.signal.clone();
-    // A stream function that throws in Pi ends the call; here the failure
-    // stops the retry loop with a stand-in and is returned afterwards.
-    let thrown: Mutex<Option<String>> = Mutex::new(None);
-    let fail = |error: String| {
-        *thrown.lock().unwrap_or_else(PoisonError::into_inner) = Some(error);
-        stopped(model)
-    };
+    let external = request.base.signal.clone();
+    let controller = bake_ai::AbortController::new();
+    if external.as_ref().is_some_and(AbortSignal::aborted)
+        || control.is_some_and(|control| control.stopped().is_some())
+    {
+        controller.abort();
+    }
+    let signal = controller.signal();
+    request.base.signal = Some(signal.clone());
     let produce = || {
-        let started = stream_fn(model, context, request.clone());
-        let fail = &fail;
+        let request = request.clone();
         async move {
-            match started {
-                Ok(stream) => match stream.result().await {
-                    Some(message) => message,
-                    None => fail("Summarization stream ended without a result".to_owned()),
-                },
-                Err(error) => fail(error),
+            if let Some(control) = control {
+                control
+                    .admit_model_call(bake_agent::ModelCallKind::Summary, model)
+                    .await
+                    .map_err(|outcome| outcome.to_string())?;
             }
+            let stream = stream_fn(model, context, request)?;
+            let result = stream.result().await;
+            if control.is_some() {
+                let producer = stream.producer_watch();
+                drop(stream);
+                producer.ended().await;
+            }
+            result.ok_or_else(|| "Summarization stream ended without a result".to_owned())
         }
     };
-    let response = retry_assistant_call(produce, retry, signal.as_ref(), |event| {
-        // Pi's throw skips `onRetryFinished`.
-        let threw = thrown
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .is_some();
-        if threw && matches!(event, RetryEvent::Finished { .. }) {
-            return;
-        }
+    let request = try_retry_assistant_call(produce, retry, Some(&signal), |event| {
         if let Some(on_retry) = on_retry {
             on_retry(event);
         }
-    })
-    .await;
-    match thrown.lock().unwrap_or_else(PoisonError::into_inner).take() {
-        Some(error) => Err(error),
-        None => Ok(response),
+    });
+    tokio::pin!(request);
+    let stop = async {
+        match control {
+            Some(control) => {
+                control.wait_stopped().await;
+            }
+            None => std::future::pending::<()>().await,
+        }
+    };
+    let result = tokio::select! {
+        result = &mut request => result,
+        _ = stop => { controller.abort(); request.await }
+        _ = async { match external.as_ref() { Some(signal) => signal.cancelled().await, None => std::future::pending::<()>().await } } => { controller.abort(); request.await }
+    };
+    match control.and_then(bake_agent::RunControl::stopped) {
+        Some(outcome) => Err(outcome.to_string()),
+        None => result,
     }
 }
 
@@ -771,13 +793,14 @@ pub async fn generate_summary_with_usage(
         ));
     }
     prompt.push_str(&base_prompt);
-    let response = complete_summarization(
+    let response = complete_summarization_with_control(
         model,
         &build_summarization_context(prompt),
         create_summarization_options(model, max_tokens, options),
         stream_fn,
         options.retry,
         options.on_retry.as_ref(),
+        options.run_control.as_ref(),
     )
     .await?;
     if let Some(failure) = get_summarization_failure(&response, "Summarization") {
@@ -1134,13 +1157,14 @@ async fn generate_turn_prefix_summary(
     let prompt = format!(
         "# Conversation\n{conversation}\n\n# Instructions\n{TURN_PREFIX_SUMMARIZATION_PROMPT}"
     );
-    let response = complete_summarization(
+    let response = complete_summarization_with_control(
         model,
         &build_summarization_context(prompt),
         create_summarization_options(model, max_tokens, options),
         stream_fn,
         options.retry,
         options.on_retry.as_ref(),
+        options.run_control.as_ref(),
     )
     .await?;
     if let Some(failure) = get_summarization_failure(&response, "Turn prefix summarization") {

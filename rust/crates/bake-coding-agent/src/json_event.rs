@@ -119,9 +119,13 @@ pub fn agent_event_json(event: &AgentEvent) -> Value {
 pub fn session_event_json(event: &SessionEvent<'_>) -> Value {
     match event {
         SessionEvent::Agent(event) => agent_event_json(event),
-        SessionEvent::AgentSettled { aborted } => {
+        SessionEvent::AgentSettled { aborted, outcome } => {
             let mut out = object("agent_settled");
             out.insert("aborted".into(), (*aborted).into());
+            out.insert(
+                "outcome".into(),
+                serde_json::to_value(outcome).unwrap_or(Value::Null),
+            );
             Value::Object(out)
         }
         SessionEvent::ThinkingLevelChanged(level) => {
@@ -317,8 +321,12 @@ mod tests {
             r#"{"type":"tool_execution_start","toolCallId":"c","toolName":"t","args":{"a":1}}"#
         );
         assert_eq!(
-            session_event_json(&SessionEvent::AgentSettled { aborted: false }).to_string(),
-            r#"{"type":"agent_settled","aborted":false}"#
+            session_event_json(&SessionEvent::AgentSettled {
+                aborted: false,
+                outcome: &bake_agent::RunOutcome::FinishedTurn
+            })
+            .to_string(),
+            r#"{"type":"agent_settled","aborted":false,"outcome":{"kind":"finished_turn"}}"#
         );
     }
 

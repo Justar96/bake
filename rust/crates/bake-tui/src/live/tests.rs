@@ -447,6 +447,55 @@ fn a_cancel_during_a_tool_returns_waiting_prompts_to_the_draft_and_interrupts_th
 }
 
 #[test]
+fn cancellation_after_a_tool_is_interrupted_without_an_aborted_assistant_message() {
+    let gate = Arc::new(Notify::new());
+    let h = harness(vec![gate_tool(&gate)], Vec::new());
+    let session = h.port().test_session.upgrade().expect("live session");
+    let weak = Arc::downgrade(&session);
+    let subscription = session.subscribe(move |event| {
+        if matches!(
+            event,
+            bake_coding_agent::agent_session::SessionEvent::Agent(
+                bake_agent::AgentEvent::ToolExecutionEnd { .. }
+            )
+        ) {
+            weak.upgrade().expect("live session").agent().abort();
+        }
+    });
+    h.faux.set_responses(vec![
+        faux_assistant_blocks(
+            vec![faux_tool_call("gate", json!({}), Some("call-1"))],
+            StopReason::ToolUse,
+        )
+        .into(),
+    ]);
+    h.submit(Submission::FollowUp("run the tool".into()));
+    h.until(|update| update == &RuntimeUpdate::Phase("running gate".into()));
+    gate.notify_one();
+    let updates = h.until_turn_end();
+    assert_eq!(
+        updates.last(),
+        Some(&RuntimeUpdate::TurnEnded(Outcome::Interrupted))
+    );
+    assert!(committed(&updates).iter().any(|row| matches!(
+        row,
+        Row::Call {
+            state: CallState::Done,
+            ..
+        }
+    )));
+    assert_eq!(h.faux.call_count(), 1);
+    assert!(session.messages().iter().all(|message| {
+        message
+            .as_assistant()
+            .is_none_or(|assistant| assistant.stop_reason != StopReason::Aborted)
+    }));
+    subscription.unsubscribe();
+    drop(session);
+    h.stop();
+}
+
+#[test]
 fn a_cancel_while_the_response_streams_interrupts_it() {
     let h = harness(Vec::new(), Vec::new());
     let gate = Arc::new(Notify::new());
@@ -564,10 +613,14 @@ fn a_prompt_the_session_refuses_returns_to_the_draft_with_its_error() {
         updates.last(),
         Some(&RuntimeUpdate::TurnEnded(Outcome::Failed))
     );
-    assert!(
+    assert_eq!(
         committed(&updates)
             .iter()
-            .any(|row| matches!(row, Row::Error(message) if message.contains("provider exploded"))),
+            .filter(
+                |row| matches!(row, Row::Error(message) if message.contains("provider exploded"))
+            )
+            .count(),
+        1,
         "{updates:#?}"
     );
     assert!(

@@ -314,7 +314,15 @@ pub fn plan(
         {
             Mode::Text
         }
-        None => return Action::Interactive(Box::new(parsed)),
+        None => {
+            if parsed.max_model_calls.is_some() || parsed.run_timeout_ms.is_some() {
+                return Action::Exit(error(
+                    stderr,
+                    "--max-model-calls and --run-timeout-ms require print mode (--print or --mode)",
+                ));
+            }
+            return Action::Interactive(Box::new(parsed));
+        }
     };
     Action::Print(Box::new(parsed), mode)
 }
@@ -584,6 +592,8 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
     if let Some(search_pattern) = args.list_models.clone() {
         return run_list_models(environment, search_pattern.as_deref()).await;
     }
+    let max_model_calls = args.max_model_calls;
+    let run_timeout_ms = args.run_timeout_ms;
     let started = match start(environment, args).await {
         Ok(started) => started,
         Err(code) => return code,
@@ -613,7 +623,26 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
             warn(&stderr, &problem);
         }
     }
+    let deadline = match run_timeout_ms {
+        Some(milliseconds) => match tokio::time::Instant::now()
+            .checked_add(std::time::Duration::from_millis(milliseconds))
+        {
+            Some(deadline) => Some(deadline),
+            None => {
+                session.shutdown().await;
+                return error(
+                    &stderr,
+                    "--run-timeout-ms exceeds this platform's clock range",
+                );
+            }
+        },
+        None => None,
+    };
     let options = PrintModeOptions {
+        control: bake_agent::RunControl::new(bake_agent::RunLimits {
+            deadline,
+            max_model_calls,
+        }),
         mode: match mode {
             Mode::Text => PrintOutput::Text,
             Mode::Json => PrintOutput::Json,

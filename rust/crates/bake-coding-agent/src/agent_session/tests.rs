@@ -787,7 +787,7 @@ async fn abort_and_shutdown_end_the_run() {
     let settled = Arc::new(Mutex::new(Vec::new()));
     let log = Arc::clone(&settled);
     let _subscription = session.subscribe(move |event| {
-        if let SessionEvent::AgentSettled { aborted } = event {
+        if let SessionEvent::AgentSettled { aborted, .. } = event {
             log.lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .push(*aborted);
@@ -880,6 +880,8 @@ async fn a_failed_write_aborts_the_run() {
         .into(),
         faux_assistant_message("never requested").into(),
     ]);
+    let control = RunControl::default();
+    let cancel = control.clone();
     let manager = new_file_session(&dir);
     let file = manager.session_file().expect("file path").to_path_buf();
     let runs = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -895,6 +897,7 @@ async fn a_failed_write_aborts_the_run() {
         move |_, _, _, _| {
             counter.fetch_add(1, Ordering::SeqCst);
             let file = file.clone();
+            let cancel = cancel.clone();
             let tool_errors = Arc::clone(&tool_errors);
             Box::pin(async move {
                 let outcome = std::fs::remove_file(&file)
@@ -909,6 +912,7 @@ async fn a_failed_write_aborts_the_run() {
                         .unwrap_or_else(PoisonError::into_inner)
                         .push(error);
                 }
+                cancel.cancel();
                 Ok(AgentToolResult::default())
             })
         },
@@ -929,8 +933,20 @@ async fn a_failed_write_aborts_the_run() {
             observed.fetch_add(1, Ordering::SeqCst);
         }
     });
-    let result = session.prompt("run", Vec::new()).await;
-    assert!(result.is_err(), "{result:?}");
+    let settled = Arc::new(Mutex::new(None));
+    let observed = Arc::clone(&settled);
+    let _settled = session.subscribe(move |event| {
+        if let SessionEvent::AgentSettled { outcome, .. } = event {
+            *observed.lock().unwrap() = Some((*outcome).clone());
+        }
+    });
+    let result = session
+        .prompt_with_control("run", Vec::new(), control.clone())
+        .await
+        .unwrap();
+    assert!(matches!(result, RunOutcome::Failed { .. }), "{result:?}");
+    assert_eq!(control.stopped(), Some(result.clone()));
+    assert_eq!(*settled.lock().unwrap(), Some(result));
     assert_eq!(runs.load(Ordering::SeqCst), 1);
     assert_eq!(completed_results.load(Ordering::SeqCst), 0);
     let tool_errors = blocked
@@ -943,14 +959,14 @@ async fn a_failed_write_aborts_the_run() {
         "the tool blocks the file"
     );
     assert_eq!(h.faux.call_count(), 1, "the run stops after the failure");
-    // The run ends as aborted after the tool result, and nothing more is
-    // written: the blocked path and its writer lock are all the session
-    // directory holds.
-    let last = session
-        .messages()
-        .last()
-        .and_then(|m| m.as_assistant().cloned());
-    assert_eq!(last.map(|m| m.stop_reason), Some(StopReason::Aborted));
+    // Cancellation creates no synthetic model response. The write failure
+    // determines settlement, and nothing after the missing result is written.
+    assert!(
+        session
+            .messages()
+            .last()
+            .is_some_and(|message| message.as_tool_result().is_some())
+    );
     let mut written: Vec<String> = std::fs::read_dir(dir.join("sessions"))
         .expect("sessions dir")
         .map(|entry| {

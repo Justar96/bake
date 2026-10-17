@@ -46,6 +46,9 @@ Options:
       --inline              Keep an interactive session in the terminal's
                             scrollback instead of the full screen
       --mode <mode>         Output: text (the final answer) or json (every event)
+      --max-model-calls <n> Print-mode request limit shared by all prompts,
+                            retries, and summaries; 0 starts no model request
+      --run-timeout-ms <n>  Print-mode deadline, starting before the first prompt
       --provider <name>     Provider of --model
       --model <pattern>     Model id, pattern, or provider/id, optionally :<thinking>
       --models <patterns>   Scope available models (comma-separated patterns or globs)

@@ -15,6 +15,7 @@
 use std::io::Write;
 use std::sync::{Arc, Mutex, PoisonError};
 
+use bake_agent::{RunControl, RunOutcome};
 use bake_ai::{AssistantContentBlock, ImageContent, StopReason};
 
 use crate::agent_session::AgentSession;
@@ -35,6 +36,9 @@ pub type SharedWriter = Arc<Mutex<dyn Write + Send>>;
 /// Pi's `PrintModeOptions`.
 #[derive(Debug, Clone)]
 pub struct PrintModeOptions {
+    /// One shared admission budget across every prompt in this invocation,
+    /// including retries, continuations, and compaction summaries.
+    pub control: RunControl,
     /// The output mode.
     pub mode: PrintOutput,
     /// The first prompt, with stdin prepended.
@@ -122,10 +126,23 @@ async fn run(
 
 async fn prompts(session: &AgentSession, options: PrintModeOptions) -> Result<(), String> {
     if let Some(initial) = options.initial_message.filter(|text| !text.is_empty()) {
-        session.prompt(&initial, options.initial_images).await?;
+        let outcome = session
+            .prompt_with_control(&initial, options.initial_images, options.control.clone())
+            .await?;
+        require_finished(outcome)?;
     }
     for message in options.messages {
-        session.prompt(&message, Vec::new()).await?;
+        let outcome = session
+            .prompt_with_control(&message, Vec::new(), options.control.clone())
+            .await?;
+        require_finished(outcome)?;
     }
     Ok(())
+}
+
+fn require_finished(outcome: RunOutcome) -> Result<(), String> {
+    match outcome {
+        RunOutcome::FinishedTurn => Ok(()),
+        other => Err(other.to_string()),
+    }
 }

@@ -176,11 +176,40 @@ pub async fn retry_assistant_call<F, Fut>(
     mut produce: F,
     policy: Option<RetryPolicy>,
     signal: Option<&AbortSignal>,
-    mut on_event: impl FnMut(RetryEvent),
+    on_event: impl FnMut(RetryEvent),
 ) -> AssistantMessage
 where
     F: FnMut() -> Fut,
     Fut: Future<Output = AssistantMessage>,
+{
+    let result = try_retry_assistant_call(
+        || {
+            let call = produce();
+            async move { Ok::<_, std::convert::Infallible>(call.await) }
+        },
+        policy,
+        signal,
+        on_event,
+    )
+    .await;
+    match result {
+        Ok(message) => message,
+        Err(impossible) => match impossible {},
+    }
+}
+
+/// Retries provider responses while returning caller-side admission and
+/// dispatch errors directly. An `Err` is never retried or converted into a
+/// model message, and does not emit a completed-retry notification.
+pub async fn try_retry_assistant_call<F, Fut, E>(
+    mut produce: F,
+    policy: Option<RetryPolicy>,
+    signal: Option<&AbortSignal>,
+    mut on_event: impl FnMut(RetryEvent),
+) -> Result<AssistantMessage, E>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<AssistantMessage, E>>,
 {
     let max_attempts = policy
         .filter(|policy| policy.enabled)
@@ -188,7 +217,7 @@ where
     let mut attempt = 0u32;
     let mut last_retry: Option<(u32, String)> = None;
     loop {
-        let response = produce().await;
+        let response = produce().await?;
         if response.stop_reason == StopReason::Aborted {
             if let Some((attempt, _)) = &last_retry {
                 on_event(RetryEvent::Finished {
@@ -197,7 +226,7 @@ where
                     final_error: None,
                 });
             }
-            return response;
+            return Ok(response);
         }
         if response.stop_reason != StopReason::Error {
             if let Some((attempt, _)) = &last_retry {
@@ -207,7 +236,7 @@ where
                     final_error: None,
                 });
             }
-            return response;
+            return Ok(response);
         }
         let Some(policy) =
             policy.filter(|_| attempt < max_attempts && is_retryable_assistant_error(&response))
@@ -219,7 +248,7 @@ where
                     final_error: response.error_message.clone(),
                 });
             }
-            return response;
+            return Ok(response);
         };
         attempt += 1;
         let error_message = response
@@ -249,7 +278,7 @@ where
             let mut aborted = response;
             aborted.error_message = None;
             aborted.stop_reason = StopReason::Aborted;
-            return aborted;
+            return Ok(aborted);
         }
         on_event(RetryEvent::AttemptStart);
     }

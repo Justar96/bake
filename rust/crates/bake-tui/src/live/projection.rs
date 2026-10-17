@@ -48,6 +48,7 @@ pub struct Projector {
     waiting: Vec<String>,
     /// The last response's stop reason, for the turn's outcome.
     last_stop: Option<StopReason>,
+    last_error: Option<String>,
 }
 
 impl Projector {
@@ -57,6 +58,7 @@ impl Projector {
         self.admitted = false;
         self.prompt_id = id;
         self.last_stop = None;
+        self.last_error = None;
         self.phase = None;
     }
 
@@ -68,6 +70,10 @@ impl Projector {
     /// How the last response of the prompt stopped.
     pub fn last_stop(&self) -> Option<StopReason> {
         self.last_stop
+    }
+
+    pub(super) fn last_error(&self) -> Option<&str> {
+        self.last_error.as_deref()
     }
 
     /// Sets the frontend's waiting prompts and returns the pending panel
@@ -179,6 +185,13 @@ impl Projector {
             AgentEvent::MessageEnd { message } => match message.as_assistant() {
                 Some(assistant) => {
                     self.last_stop = Some(assistant.stop_reason);
+                    self.last_error = (assistant.stop_reason == StopReason::Error).then(|| {
+                        assistant
+                            .error_message
+                            .clone()
+                            .filter(|message| !message.is_empty())
+                            .unwrap_or_else(|| "Error".into())
+                    });
                     self.project(assistant, true);
                     vec![self.live()]
                 }

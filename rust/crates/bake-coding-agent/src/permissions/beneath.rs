@@ -126,6 +126,22 @@ impl MutationTarget for BeneathTarget {
     }
 }
 
+/// Open a resolved artifact through the same link-refusing walk as mutations.
+/// A substituted FIFO must return immediately, before its file type is checked.
+pub(crate) fn open_regular_read(root: &Path, target: &Path) -> io::Result<File> {
+    let target = BeneathTarget::new(root, target, String::new())
+        .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
+    let (parents, name) = target.split();
+    let file = imp::open(&target.root, parents, &name, imp::Access::ReadRegular)?;
+    if !file.metadata()?.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "artifact must be a regular file",
+        ));
+    }
+    Ok(file)
+}
+
 #[cfg(unix)]
 mod imp {
     //! The per-component walk, and on Linux `openat2`.
@@ -142,6 +158,7 @@ mod imp {
     #[derive(Clone, Copy)]
     pub(super) enum Access {
         Read,
+        ReadRegular,
         Create,
     }
 
@@ -149,6 +166,7 @@ mod imp {
         fn flags(self) -> libc::c_int {
             match self {
                 Self::Read => libc::O_RDONLY,
+                Self::ReadRegular => libc::O_RDONLY | libc::O_NONBLOCK | libc::O_NOCTTY,
                 Self::Create => libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC,
             }
         }
@@ -290,7 +308,7 @@ mod imp {
             relative.push(name);
             let mode = match access {
                 Access::Create => 0o666,
-                Access::Read => 0,
+                Access::Read | Access::ReadRegular => 0,
             };
             match openat2_unless_disabled(
                 root_path,
@@ -398,6 +416,7 @@ mod imp {
     #[derive(Clone, Copy)]
     pub(super) enum Access {
         Read,
+        ReadRegular,
         Create,
     }
 
@@ -448,7 +467,7 @@ mod imp {
         let mut options = OpenOptions::new();
         options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
         match access {
-            Access::Read => options.read(true),
+            Access::Read | Access::ReadRegular => options.read(true),
             // Truncated below, once the handle is known not to be a link.
             Access::Create => options.write(true).create(true),
         };
@@ -475,6 +494,7 @@ mod imp {
     #[derive(Clone, Copy)]
     pub(super) enum Access {
         Read,
+        ReadRegular,
         Create,
     }
 

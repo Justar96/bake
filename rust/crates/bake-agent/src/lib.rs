@@ -21,6 +21,7 @@
 pub mod agent;
 pub mod agent_loop;
 pub mod hook;
+pub mod run_control;
 pub mod stream_fn;
 pub mod types;
 pub mod validation;
@@ -29,6 +30,10 @@ pub use agent::{Agent, AgentError, AgentInitialState, AgentOptions, PromptInput,
 pub use agent_loop::{
     AgentLoopError, AgentLoopStream, RunToolCallOptions, agent_loop, agent_loop_continue,
     run_agent_loop, run_agent_loop_continue, run_tool_call,
+};
+pub use run_control::{
+    AdmissionObserver, BudgetLimit, ModelCallAdmission, ModelCallKind, RunControl, RunLimits,
+    RunOutcome,
 };
 pub use stream_fn::{default_stream_fn, registry_stream_fn, set_default_stream_fn};
 pub use types::*;
