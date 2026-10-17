@@ -1,0 +1,421 @@
+{
+  "schema": "bake/rust-migration/qualification-attempt",
+  "version": 1,
+  "id": "2026-10-17-unanswered-native-hosts",
+  "scope": "02",
+  "status": "partial",
+  "recordedOn": "2026-10-17",
+  "summary": "The unchanged provider-visible unanswered-call projection passes its 13 tests inside native gates on Linux, Intel macOS, and Windows at rebased candidate 1e94aba7e2. Windows tested a synthetic merge with the exact candidate tree. Earlier rule-defect controls remain evidence on their original candidate. Raw-path unfinished work, child/inbox projections, arm64 hosts, and remaining session integration still prevent scope-02 completion.",
+  "supersedes": [
+    "2026-10-17-unanswered-tool-calls"
+  ],
+  "provenance": {
+    "base": "ebd4542114ccb816508d4bac7ba48a4470d52865",
+    "candidate": "1e94aba7e2ed8f970391f22c8815724a75145031",
+    "oracle": {
+      "notApplicable": "Pi v1.3.0 (71023aec1546d6d677a65669c5665c0927ce0dd0), packages/ai/src/api/transform-messages.ts, supplies the orphaned-call rule. Tests use hand-derived cases and agreement with the existing bake-ai port, not a TypeScript runtime arm."
+    }
+  },
+  "support": [
+    {
+      "id": "d32-pi-session-format",
+      "reference": "docs/roadmap/rust-0.4/scope-00/support.md"
+    },
+    {
+      "id": "durable-unfinished-work",
+      "reference": "docs/roadmap/rust-0.4/durable-execution.md"
+    }
+  ],
+  "fixtures": {
+    "files": [
+      {
+        "path": "rust/crates/bake-coding-agent/tests/session/main.rs",
+        "role": "fixture-definition-source",
+        "sha256": "380d685c91f800def6842767bf9350d2671283e29587604515ba5245fdbec161"
+      },
+      {
+        "path": "rust/crates/bake-coding-agent/tests/session/robustness.rs",
+        "role": "fixture-definition-source",
+        "sha256": "d4257d00f8121e11e7cc50515d0a6d6f9215abc7a7e990202ddb6477c176d5cd"
+      },
+      {
+        "path": "rust/crates/bake-coding-agent/tests/session/unanswered.rs",
+        "role": "fixture-definition-source",
+        "sha256": "071bb32ed8c0f7f3a0ee7c01c08c4ff35acb19404f3c34287a5dac61331a4747"
+      }
+    ],
+    "digest": "4397d8b020991126f33cba40fbcacb065c138a11a10d8bbb5827ec57675d5378"
+  },
+  "artifacts": [
+    {
+      "id": "linux-rust-log",
+      "description": "Local rust gate log; hash covers the raw file, including the standalone sandbox harness.",
+      "sha256": "b30a830c79944b563a5112f54b2227145c0a35342013e078849507806b11d5a6",
+      "command": "linux-native"
+    },
+    {
+      "id": "mac-rust-log",
+      "description": "Intel macOS rust gate log copied after the run from the unchanged candidate checkout.",
+      "sha256": "91dfc40babdfb4e8351b80b07b240d401db53a8b6caf9e94351aa83fe84d9e49",
+      "command": "mac-native"
+    },
+    {
+      "id": "mac-pty-log",
+      "description": "Intel macOS native PTY log; two Linux /proc scenarios skip internally.",
+      "sha256": "3299da278110450807fbda1f29d8f17bdd3f76098182b3d04da92eb5a709712b",
+      "command": "mac-native"
+    },
+    {
+      "id": "windows-rust-log",
+      "description": "rust.log inside CI artifact rust-log-windows-latest from run 39016434245; hash covers this file, not the artifact ZIP.",
+      "sha256": "63cbf339dcd9c3d62341dade6faae3698d722fcc83f9b4544f66506a1001d0b1",
+      "command": "windows-native"
+    }
+  ],
+  "commands": [
+    {
+      "id": "linux-native",
+      "argv": [
+        "bun",
+        "run",
+        "preflight",
+        "--only",
+        "native"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x86_64",
+        "runner": "Local Fedora Linux 7.2.10-200.fc44.x86_64; tool versions read after the gate on 2026-10-17"
+      },
+      "tools": {
+        "rustc": "1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.2",
+        "node": "v26.10.0",
+        "git": "2.56.0"
+      },
+      "testedCommit": "1e94aba7e2ed8f970391f22c8815724a75145031",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/foundation-rebase-native.log",
+        "sha256": "17e440687fb5066c8a03a844f7e3c366c6451b211fe6f7e62fb69226e9966ffa"
+      }
+    },
+    {
+      "id": "mac-native",
+      "argv": [
+        "bun",
+        "run",
+        "preflight",
+        "--only",
+        "native"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "macos",
+        "arch": "x86_64",
+        "runner": "Intel x86_64 macOS 26.7.1, isolated bake-rust-foundation-ci checkout; tool versions and unchanged head/tree read after the gate"
+      },
+      "tools": {
+        "rustc": "1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.2",
+        "node": "v26.9.0",
+        "git": "2.55.0"
+      },
+      "testedCommit": "1e94aba7e2ed8f970391f22c8815724a75145031",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/foundation-rebase-mac.log",
+        "sha256": "cbab0488a429c7801d1e433e49c63254e2853b995c28d05f2bc8fdd6f68a4c7b"
+      }
+    },
+    {
+      "id": "windows-native",
+      "argv": [
+        "bun",
+        "run",
+        "preflight",
+        "--only",
+        "native"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "windows",
+        "arch": "x86_64",
+        "runner": "GitHub windows-latest, image windows-2025-vs2026; native x86_64 MSVC toolchain"
+      },
+      "tools": {
+        "rustc": "1.99.0, b940084d7eb6a299eb4bfeb8e34901bc051e7ac4 (rustup install and rust-cache observation)",
+        "cargo": {
+          "missing": "No separate Cargo version banner was captured in the job log."
+        },
+        "bun": {
+          "missing": "No separate Bun version command was recorded for this evidence extraction."
+        },
+        "node": {
+          "missing": "No separate Node version command was recorded for this evidence extraction."
+        },
+        "git": "2.56.0.windows.2"
+      },
+      "testedCommit": "0f06650120dfe5f21aab25fe9357db447ef1c31e",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 2,
+        "failed": 0,
+        "skipped": 1,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": "https://github.com/Justar96/bake/actions/runs/39016434245/job/117349437338",
+        "sha256": "c4378722fbd234e6af1f0488948760b8e40bda2ea8d52803de27f119441af1f3"
+      }
+    },
+    {
+      "id": "control-aborted-rule",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "bake-coding-agent",
+        "--test",
+        "session",
+        "unanswered"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x86_64",
+        "runner": "Local Fedora; Linux 7.2.10-200.fc44.x86_64"
+      },
+      "tools": {
+        "rustc": "1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.2",
+        "node": "v26.10.0",
+        "git": "2.56.0"
+      },
+      "testedCommit": {
+        "missing": "Candidate 32394c11f53b7c2863cec843031a127b7a9578ba with deliberate uncommitted mutation of session/unanswered.rs; mutated SHA-256 70508a543ed658e201bb8a0aadb4d65e56b304afa1b007ccc6603d766b73d5c5. The original bytes were restored in finally and hash-checked."
+      },
+      "expectedExit": 101,
+      "actualExit": 101,
+      "counts": {
+        "passed": 10,
+        "failed": 3,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/foundation-control-aborted-rule.log",
+        "sha256": "380d7baec868575678649ae6177fbcdc30e047e00d46cab777766741414b3952"
+      }
+    },
+    {
+      "id": "control-user-close",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "bake-coding-agent",
+        "--test",
+        "session",
+        "unanswered"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x86_64",
+        "runner": "Local Fedora; Linux 7.2.10-200.fc44.x86_64"
+      },
+      "tools": {
+        "rustc": "1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.2",
+        "node": "v26.10.0",
+        "git": "2.56.0"
+      },
+      "testedCommit": {
+        "missing": "Candidate 32394c11f53b7c2863cec843031a127b7a9578ba with deliberate uncommitted mutation of session/unanswered.rs; mutated SHA-256 bfeec13071eb2ac5c999043de8bba89447583f2fe2e8ff6c2cef90c513700d76. The original bytes were restored in finally and hash-checked."
+      },
+      "expectedExit": 101,
+      "actualExit": 101,
+      "counts": {
+        "passed": 9,
+        "failed": 4,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/foundation-control-user-close.log",
+        "sha256": "98e17625abe409c89534e32e6872db01361561c3efa4bf51a0c12540bb3dc120"
+      }
+    },
+    {
+      "id": "restored-tests",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "bake-coding-agent",
+        "--test",
+        "session",
+        "unanswered"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x86_64",
+        "runner": "Local Fedora; Linux 7.2.10-200.fc44.x86_64"
+      },
+      "tools": {
+        "rustc": "1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.2",
+        "node": "v26.10.0",
+        "git": "2.56.0"
+      },
+      "testedCommit": "32394c11f53b7c2863cec843031a127b7a9578ba",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 13,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/foundation-controls-restored.log",
+        "sha256": "46674a63e08350f06a10f98a6d349d64c0c898fcb7cc774d93c481a33bbb8395"
+      }
+    }
+  ],
+  "results": [
+    {
+      "id": "projection-three-hosts",
+      "behavior": "All 13 unanswered:: cases pass on each host, including every-byte truncations, all leaves at line boundaries, compaction, context edits, message boundaries, malformed messages, duplicate ids, and comparison with transform_messages. The function and all three fixture-definition files are byte-identical to original candidate 32394c11f5. This predicts synthetic provider results; it neither reconstructs raw path history nor proves that an external effect occurred.",
+      "owner": "rust/crates/bake-coding-agent/src/session/unanswered.rs",
+      "report": "https://github.com/Justar96/bake/actions/runs/39016434245/job/117349437338",
+      "commands": [
+        "linux-native",
+        "mac-native",
+        "windows-native"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "native-host-gates",
+      "behavior": "Linux and Intel macOS each pass all three native gates; Windows passes Rust checks and native eval fixtures while skipping the unimplemented ConPTY gate. Cargo test totals, including the standalone sandbox harness, are 1578 passed on Linux, 1552 on Intel macOS, and 1476 on Windows, with zero failures and three ignored on each. These are test-case counts, distinct from the command gate counts. The Mac PTY gate internally skips two Linux /proc cases. No Apple Silicon or Windows terminal execution is claimed.",
+      "owner": "scripts/preflight.ts",
+      "report": ".preflight/rust-orchestration/foundation-rebase-ci/evidence-summary.json",
+      "commands": [
+        "linux-native",
+        "mac-native",
+        "windows-native"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "candidate-tree",
+      "behavior": "Linux and Intel macOS tested commit 1e94aba7e2ed8f970391f22c8815724a75145031. Windows checkout 0f06650120dfe5f21aab25fe9357db447ef1c31e merged that head into ebd4542114ccb816508d4bac7ba48a4470d52865. GitHub git-commit metadata reports its tree as b10755b6c045a461e323bbbbeb85f5aa17c03e68, equal to the candidate and the Mac checkout. This is a whole-tree equality, not only a source-file comparison.",
+      "owner": ".github/workflows/ci.yml",
+      "report": ".preflight/rust-orchestration/foundation-rebase-ci/windows-source.json",
+      "commands": [
+        "linux-native",
+        "mac-native",
+        "windows-native"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "earlier-rule-controls",
+      "behavior": "The two original source mutations still provide the negative-control evidence: omitting the aborted-message exclusion or the user-message closure fails the owning tests on original candidate 32394c11f5, followed by 13 passing restored tests. These controls were not rerun during the host follow-up. The candidate function and fixture files have the same bytes and hashes; original command provenance is retained below.",
+      "owner": "rust/crates/bake-coding-agent/src/session/unanswered.rs",
+      "report": "docs/roadmap/rust-0.4/ledger/scope-02/2026-10-17-unanswered-tool-calls.json",
+      "commands": [
+        "control-aborted-rule",
+        "control-user-close",
+        "restored-tests"
+      ],
+      "outcome": "pass"
+    }
+  ],
+  "negativeControls": [
+    {
+      "id": "aborted-rule",
+      "defect": "Removed the return that drops tool calls in errored and aborted assistant messages. Mutation hash is in its command provenance.",
+      "assertion": "The focused target exits 101: 10 pass and 3 fail, including the every-byte agreement case.",
+      "observed": "rejected",
+      "commands": [
+        "control-aborted-rule"
+      ]
+    },
+    {
+      "id": "user-close",
+      "defect": "Replaced Message::User(_) => self.close() with a no-op. Mutation hash is in its command provenance.",
+      "assertion": "The focused target exits 101: 9 pass and 4 fail, including the every-byte agreement case.",
+      "observed": "rejected",
+      "commands": [
+        "control-user-close"
+      ]
+    }
+  ],
+  "missingEvidence": [
+    {
+      "what": "Durable unfinished-work history",
+      "reason": "This projection reads provider-visible context. Calls hidden by compaction, context edits, or dropped messages need a separate raw-path projection; it still cannot establish external effects. Open children and pending inbox depend on scope 11.",
+      "owner": "rust/crates/bake-coding-agent/src/session"
+    },
+    {
+      "what": "Arm64 hosts and native terminal coverage",
+      "reason": "This follow-up covers x86_64 only. Intel macOS does not qualify Apple Silicon. Windows ConPTY is unimplemented and skipped; two Mac PTY cases need Linux /proc. These gaps do not contradict the executed pure projection cases, but remain release qualification work.",
+      "owner": ".github/workflows/ci.yml"
+    },
+    {
+      "what": "Remaining storage crash matrix",
+      "reason": "Group append and selected writer-kill boundaries now have their own scope-03 record, 2026-10-17-session-group-append. A kill inside the append system call, real ENOSPC/EIO, power loss, and the remaining crash matrix are not established by this projection follow-up.",
+      "owner": "rust/crates/bake-coding-agent/src/session"
+    },
+    {
+      "what": "Remaining Pi session integration cases",
+      "reason": "This attempt does not re-audit or port every AgentSession and CLI session case named in the earlier record.",
+      "owner": "rust/crates/bake-coding-agent"
+    }
+  ],
+  "evalRecords": {
+    "notApplicable": "Pure inspection API with no product caller or model-visible behavior change."
+  },
+  "performanceRecords": {
+    "notApplicable": "No performance claim; test durations are not product benchmarks."
+  },
+  "rollback": {
+    "observed": "The helper is pure and writes nothing. Tests own private temporary sessions. Both control mutations were restored byte-identically to SHA-256 676b76f39a3251a66c48151d215b5690d6ac42580866cc5715482d41b83ee5a1; git status was clean and the 13 restored tests passed.",
+    "commands": [
+      "control-aborted-rule",
+      "control-user-close",
+      "restored-tests"
+    ]
+  },
+  "review": {
+    "missing": "The host evidence is assembled for review. No complete scope-02 acceptance is claimed."
+  }
+}
