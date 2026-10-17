@@ -359,9 +359,14 @@ async fn reap_behind_the_owner(server: &Observed) {
     server.kill();
     exited(server, "the server").await;
     assert!(
+        server.is_zombie(),
+        "the server must remain waitable until reaped"
+    );
+    assert!(
         server.reap_if_own_exited_child(),
         "the exited server could not be reaped"
     );
+    assert!(server.is_reaped(), "the server was not observed reaped");
 }
 
 /// `observed`, a member of a tree a completed shutdown reported empty, must

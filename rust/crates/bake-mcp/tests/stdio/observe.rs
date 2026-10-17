@@ -338,7 +338,8 @@ mod sys {
             libc::proc_pidinfo(
                 raw,
                 libc::PROC_PIDTBSDINFO,
-                0,
+                // Nonzero includes zombies; zero hides them as ESRCH.
+                1,
                 std::ptr::addr_of_mut!(info).cast(),
                 size,
             )
