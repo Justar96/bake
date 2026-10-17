@@ -16,6 +16,7 @@
 //! | `sleep` | Logs `before`, sleeps an hour through WASI, logs `after` |
 //! | `error` | Answers with an error |
 //! | `panic` | Panics, which traps |
+//! | any other name | Blocks with `args.block` when it is a string, else answers `none`: a manifest that lists any tool, an `mcp__` one included, can veto it |
 
 // Only a Wasm build exports the plugin; elsewhere the crate is checked and
 // unit-tested but nothing calls it.
@@ -91,7 +92,10 @@ impl Plugin for Hostile {
             }
             "error" => Err("hostile error".to_owned()),
             "panic" => panic!("hostile panic"),
-            _ => Ok(Decision::None),
+            _ => match args.get("block").and_then(Value::as_str) {
+                Some(reason) => block(reason.to_owned()),
+                None => Ok(Decision::None),
+            },
         }
     }
 }
