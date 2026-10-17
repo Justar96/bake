@@ -1,0 +1,1466 @@
+[
+  {
+    "label": "deepseek-flash.background_compaction.1.base",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 21,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 1,
+    "nativeReadBatches": {
+      "batches": 20,
+      "multiCallBatches": 0,
+      "calls": 20,
+      "maxCalls": 1
+    },
+    "usage": {
+      "inputTokens": 38907,
+      "outputTokens": 4445,
+      "cacheReadTokens": 246272,
+      "cacheWriteTokens": 0,
+      "totalTokens": 289624
+    },
+    "requests": 26,
+    "elapsedMs": 34673,
+    "invalid": null
+  },
+  {
+    "label": "deepseek-flash.background_compaction.0.candidate",
+    "success": true,
+    "usageComplete": false,
+    "background": {
+      "started": 2,
+      "committed": 1,
+      "discarded": 1,
+      "attempts": 2,
+      "dispatched": 2,
+      "missingUsage": 1,
+      "elapsedMs": 13923
+    },
+    "discardReasons": [
+      "foreground compaction"
+    ],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 22,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 20,
+      "multiCallBatches": 1,
+      "calls": 22,
+      "maxCalls": 3
+    },
+    "usage": {
+      "inputTokens": 46286,
+      "outputTokens": 5993,
+      "cacheReadTokens": 231680,
+      "cacheWriteTokens": 0,
+      "totalTokens": 283959
+    },
+    "requests": 26,
+    "elapsedMs": 32215,
+    "invalid": null
+  },
+  {
+    "label": "deepseek-flash.background_compaction.2.candidate",
+    "success": false,
+    "usageComplete": false,
+    "background": {
+      "started": 4,
+      "committed": 3,
+      "discarded": 1,
+      "attempts": 4,
+      "dispatched": 4,
+      "missingUsage": 1,
+      "elapsedMs": 24322
+    },
+    "discardReasons": [
+      "print completed"
+    ],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 24,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 17,
+      "multiCallBatches": 1,
+      "calls": 19,
+      "maxCalls": 3
+    },
+    "usage": {
+      "inputTokens": 64874,
+      "outputTokens": 8084,
+      "cacheReadTokens": 281344,
+      "cacheWriteTokens": 0,
+      "totalTokens": 354302
+    },
+    "requests": 32,
+    "elapsedMs": 33044,
+    "invalid": null
+  },
+  {
+    "label": "deepseek-flash.background_compaction.1.candidate",
+    "success": true,
+    "usageComplete": false,
+    "background": {
+      "started": 4,
+      "committed": 3,
+      "discarded": 1,
+      "attempts": 4,
+      "dispatched": 4,
+      "missingUsage": 1,
+      "elapsedMs": 19115
+    },
+    "discardReasons": [
+      "print completed"
+    ],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 22,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 20,
+      "multiCallBatches": 0,
+      "calls": 20,
+      "maxCalls": 1
+    },
+    "usage": {
+      "inputTokens": 60362,
+      "outputTokens": 6900,
+      "cacheReadTokens": 232832,
+      "cacheWriteTokens": 0,
+      "totalTokens": 300094
+    },
+    "requests": 29,
+    "elapsedMs": 26792,
+    "invalid": null
+  },
+  {
+    "label": "deepseek-flash.background_compaction.2.base",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 22,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 20,
+      "multiCallBatches": 0,
+      "calls": 20,
+      "maxCalls": 1
+    },
+    "usage": {
+      "inputTokens": 37214,
+      "outputTokens": 4082,
+      "cacheReadTokens": 231552,
+      "cacheWriteTokens": 0,
+      "totalTokens": 272848
+    },
+    "requests": 25,
+    "elapsedMs": 31545,
+    "invalid": null
+  },
+  {
+    "label": "deepseek-flash.background_compaction.0.base",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 23,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 1,
+    "nativeReadBatches": {
+      "batches": 21,
+      "multiCallBatches": 0,
+      "calls": 21,
+      "maxCalls": 1
+    },
+    "usage": {
+      "inputTokens": 38378,
+      "outputTokens": 4381,
+      "cacheReadTokens": 233984,
+      "cacheWriteTokens": 0,
+      "totalTokens": 276743
+    },
+    "requests": 25,
+    "elapsedMs": 32369,
+    "invalid": null
+  },
+  {
+    "label": "gemini-3.8-flash-high.background_compaction.0.candidate",
+    "success": false,
+    "usageComplete": false,
+    "background": {
+      "started": 2,
+      "committed": 1,
+      "discarded": 0,
+      "attempts": 1,
+      "dispatched": 1,
+      "missingUsage": 0,
+      "elapsedMs": 4386
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 3,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 2,
+      "multiCallBatches": 1,
+      "calls": 3,
+      "maxCalls": 2
+    },
+    "usage": {
+      "inputTokens": 79627,
+      "outputTokens": 4282,
+      "cacheReadTokens": 49047,
+      "cacheWriteTokens": 0,
+      "totalTokens": 132956
+    },
+    "requests": 16,
+    "elapsedMs": 540066,
+    "invalid": null
+  },
+  {
+    "label": "gemini-3.8-flash-high.background_compaction.1.candidate",
+    "success": true,
+    "usageComplete": false,
+    "background": {
+      "started": 4,
+      "committed": 3,
+      "discarded": 1,
+      "attempts": 4,
+      "dispatched": 4,
+      "missingUsage": 1,
+      "elapsedMs": 23950
+    },
+    "discardReasons": [
+      "foreground compaction"
+    ],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 5,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 2,
+    "nativeReadBatches": {
+      "batches": 3,
+      "multiCallBatches": 1,
+      "calls": 5,
+      "maxCalls": 3
+    },
+    "usage": {
+      "inputTokens": 240090,
+      "outputTokens": 15192,
+      "cacheReadTokens": 4048,
+      "cacheWriteTokens": 0,
+      "totalTokens": 259330
+    },
+    "requests": 30,
+    "elapsedMs": 59822,
+    "invalid": null
+  },
+  {
+    "label": "gemini-3.8-flash-high.background_compaction.2.candidate",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 5,
+      "committed": 5,
+      "discarded": 0,
+      "attempts": 5,
+      "dispatched": 5,
+      "missingUsage": 0,
+      "elapsedMs": 30971
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 24,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 2,
+    "nativeReadBatches": {
+      "batches": 22,
+      "multiCallBatches": 1,
+      "calls": 24,
+      "maxCalls": 3
+    },
+    "usage": {
+      "inputTokens": 252305,
+      "outputTokens": 15075,
+      "cacheReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "totalTokens": 267380
+    },
+    "requests": 31,
+    "elapsedMs": 52604,
+    "invalid": null
+  },
+  {
+    "label": "gemini-3.8-flash-high.background_compaction.1.base",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 8,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 6,
+      "multiCallBatches": 1,
+      "calls": 8,
+      "maxCalls": 3
+    },
+    "usage": {
+      "inputTokens": 190029,
+      "outputTokens": 11935,
+      "cacheReadTokens": 24452,
+      "cacheWriteTokens": 0,
+      "totalTokens": 226416
+    },
+    "requests": 18,
+    "elapsedMs": 477782,
+    "invalid": "evaluator_oracle_exposure: inspected external checkpoint answer generator"
+  },
+  {
+    "label": "gemini-3.8-flash-high.background_compaction.2.base",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 3,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 3,
+      "maxCalls": 3
+    },
+    "usage": {
+      "inputTokens": 192441,
+      "outputTokens": 9876,
+      "cacheReadTokens": 74200,
+      "cacheWriteTokens": 0,
+      "totalTokens": 276517
+    },
+    "requests": 22,
+    "elapsedMs": 59320,
+    "invalid": "evaluator_oracle_exposure: inspected external checkpoint answer generator"
+  },
+  {
+    "label": "gemini-3.8-flash-high.background_compaction.0.base",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 24,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 2,
+    "nativeReadBatches": {
+      "batches": 22,
+      "multiCallBatches": 1,
+      "calls": 24,
+      "maxCalls": 3
+    },
+    "usage": {
+      "inputTokens": 222707,
+      "outputTokens": 8072,
+      "cacheReadTokens": 69508,
+      "cacheWriteTokens": 0,
+      "totalTokens": 300287
+    },
+    "requests": 26,
+    "elapsedMs": 58656,
+    "invalid": null
+  },
+  {
+    "label": "deepseek-v4-pro.background_compaction.2.candidate",
+    "success": true,
+    "usageComplete": false,
+    "background": {
+      "started": 3,
+      "committed": 2,
+      "discarded": 1,
+      "attempts": 3,
+      "dispatched": 3,
+      "missingUsage": 1,
+      "elapsedMs": 27661
+    },
+    "discardReasons": [
+      "print completed"
+    ],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 24,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 2,
+    "nativeReadBatches": {
+      "batches": 20,
+      "multiCallBatches": 2,
+      "calls": 23,
+      "maxCalls": 3
+    },
+    "usage": {
+      "inputTokens": 55463,
+      "outputTokens": 4994,
+      "cacheReadTokens": 263680,
+      "cacheWriteTokens": 0,
+      "totalTokens": 324137
+    },
+    "requests": 27,
+    "elapsedMs": 38464,
+    "invalid": null
+  },
+  {
+    "label": "deepseek-v4-pro.background_compaction.1.base",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 23,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 1,
+    "nativeReadBatches": {
+      "batches": 22,
+      "multiCallBatches": 1,
+      "calls": 23,
+      "maxCalls": 2
+    },
+    "usage": {
+      "inputTokens": 38240,
+      "outputTokens": 4846,
+      "cacheReadTokens": 242304,
+      "cacheWriteTokens": 0,
+      "totalTokens": 285390
+    },
+    "requests": 26,
+    "elapsedMs": 50013,
+    "invalid": null
+  },
+  {
+    "label": "deepseek-v4-pro.background_compaction.2.base",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 22,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 20,
+      "multiCallBatches": 1,
+      "calls": 21,
+      "maxCalls": 2
+    },
+    "usage": {
+      "inputTokens": 38463,
+      "outputTokens": 5684,
+      "cacheReadTokens": 237312,
+      "cacheWriteTokens": 0,
+      "totalTokens": 281459
+    },
+    "requests": 25,
+    "elapsedMs": 59007,
+    "invalid": null
+  },
+  {
+    "label": "deepseek-v4-pro.background_compaction.1.candidate",
+    "success": true,
+    "usageComplete": false,
+    "background": {
+      "started": 2,
+      "committed": 1,
+      "discarded": 1,
+      "attempts": 2,
+      "dispatched": 2,
+      "missingUsage": 1,
+      "elapsedMs": 19424
+    },
+    "discardReasons": [
+      "foreground compaction"
+    ],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 22,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 19,
+      "multiCallBatches": 0,
+      "calls": 19,
+      "maxCalls": 1
+    },
+    "usage": {
+      "inputTokens": 56227,
+      "outputTokens": 9411,
+      "cacheReadTokens": 245120,
+      "cacheWriteTokens": 0,
+      "totalTokens": 310758
+    },
+    "requests": 27,
+    "elapsedMs": 59654,
+    "invalid": null
+  },
+  {
+    "label": "deepseek-v4-pro.background_compaction.0.base",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 21,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 19,
+      "multiCallBatches": 0,
+      "calls": 19,
+      "maxCalls": 1
+    },
+    "usage": {
+      "inputTokens": 38651,
+      "outputTokens": 4846,
+      "cacheReadTokens": 233600,
+      "cacheWriteTokens": 0,
+      "totalTokens": 277097
+    },
+    "requests": 25,
+    "elapsedMs": 49125,
+    "invalid": null
+  },
+  {
+    "label": "deepseek-v4-pro.background_compaction.0.candidate",
+    "success": true,
+    "usageComplete": false,
+    "background": {
+      "started": 2,
+      "committed": 1,
+      "discarded": 1,
+      "attempts": 2,
+      "dispatched": 2,
+      "missingUsage": 1,
+      "elapsedMs": 19705
+    },
+    "discardReasons": [
+      "foreground compaction"
+    ],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 21,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 19,
+      "multiCallBatches": 0,
+      "calls": 19,
+      "maxCalls": 1
+    },
+    "usage": {
+      "inputTokens": 56114,
+      "outputTokens": 6430,
+      "cacheReadTokens": 244480,
+      "cacheWriteTokens": 0,
+      "totalTokens": 307024
+    },
+    "requests": 27,
+    "elapsedMs": 48355,
+    "invalid": null
+  },
+  {
+    "label": "claude-opus-5-5.background_compaction.1.base",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 13,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 11,
+      "multiCallBatches": 1,
+      "calls": 12,
+      "maxCalls": 2
+    },
+    "usage": {
+      "inputTokens": 32,
+      "outputTokens": 3612,
+      "cacheReadTokens": 153534,
+      "cacheWriteTokens": 35913,
+      "totalTokens": 193091
+    },
+    "requests": 16,
+    "elapsedMs": 54923,
+    "invalid": null
+  },
+  {
+    "label": "claude-opus-5-5.background_compaction.0.base",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 13,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 11,
+      "multiCallBatches": 1,
+      "calls": 12,
+      "maxCalls": 2
+    },
+    "usage": {
+      "inputTokens": 32,
+      "outputTokens": 3789,
+      "cacheReadTokens": 152529,
+      "cacheWriteTokens": 35453,
+      "totalTokens": 191803
+    },
+    "requests": 16,
+    "elapsedMs": 90360,
+    "invalid": null
+  },
+  {
+    "label": "claude-opus-5-5.background_compaction.0.candidate",
+    "success": true,
+    "usageComplete": false,
+    "background": {
+      "started": 3,
+      "committed": 2,
+      "discarded": 1,
+      "attempts": 3,
+      "dispatched": 3,
+      "missingUsage": 0,
+      "elapsedMs": 35022
+    },
+    "discardReasons": [
+      "foreground compaction"
+    ],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 21,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 13,
+      "multiCallBatches": 1,
+      "calls": 14,
+      "maxCalls": 2
+    },
+    "usage": {
+      "inputTokens": 42,
+      "outputTokens": 7590,
+      "cacheReadTokens": 175020,
+      "cacheWriteTokens": 76064,
+      "totalTokens": 258716
+    },
+    "requests": 21,
+    "elapsedMs": 68838,
+    "invalid": null
+  },
+  {
+    "label": "claude-opus-5-5.background_compaction.2.base",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 21,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 19,
+      "multiCallBatches": 1,
+      "calls": 20,
+      "maxCalls": 2
+    },
+    "usage": {
+      "inputTokens": 48,
+      "outputTokens": 3741,
+      "cacheReadTokens": 264824,
+      "cacheWriteTokens": 48536,
+      "totalTokens": 317149
+    },
+    "requests": 24,
+    "elapsedMs": 82164,
+    "invalid": null
+  },
+  {
+    "label": "claude-opus-5-5.background_compaction.1.candidate",
+    "success": true,
+    "usageComplete": false,
+    "background": {
+      "started": 4,
+      "committed": 3,
+      "discarded": 1,
+      "attempts": 4,
+      "dispatched": 4,
+      "missingUsage": 0,
+      "elapsedMs": 56223
+    },
+    "discardReasons": [
+      "foreground compaction"
+    ],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 21,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 17,
+      "multiCallBatches": 1,
+      "calls": 18,
+      "maxCalls": 2
+    },
+    "usage": {
+      "inputTokens": 52,
+      "outputTokens": 10178,
+      "cacheReadTokens": 223578,
+      "cacheWriteTokens": 88311,
+      "totalTokens": 322119
+    },
+    "requests": 26,
+    "elapsedMs": 104331,
+    "invalid": null
+  },
+  {
+    "label": "claude-opus-5-5.background_compaction.2.candidate",
+    "success": true,
+    "usageComplete": false,
+    "background": {
+      "started": 5,
+      "committed": 4,
+      "discarded": 1,
+      "attempts": 5,
+      "dispatched": 5,
+      "missingUsage": 0,
+      "elapsedMs": 78109
+    },
+    "discardReasons": [
+      "print completed"
+    ],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 39,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 21,
+      "multiCallBatches": 3,
+      "calls": 38,
+      "maxCalls": 13
+    },
+    "usage": {
+      "inputTokens": 58,
+      "outputTokens": 11516,
+      "cacheReadTokens": 260207,
+      "cacheWriteTokens": 102351,
+      "totalTokens": 374132
+    },
+    "requests": 29,
+    "elapsedMs": 119743,
+    "invalid": null
+  },
+  {
+    "label": "gpt-6.1-sol.background_compaction.1.base",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 21,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 21,
+      "multiCallBatches": 0,
+      "calls": 21,
+      "maxCalls": 1
+    },
+    "usage": {
+      "inputTokens": 32377,
+      "outputTokens": 1944,
+      "cacheReadTokens": 246784,
+      "cacheWriteTokens": 0,
+      "totalTokens": 281105
+    },
+    "requests": 27,
+    "elapsedMs": 82863,
+    "invalid": null
+  },
+  {
+    "label": "gpt-6.1-sol.background_compaction.0.candidate",
+    "success": true,
+    "usageComplete": false,
+    "background": {
+      "started": 3,
+      "committed": 2,
+      "discarded": 1,
+      "attempts": 3,
+      "dispatched": 3,
+      "missingUsage": 1,
+      "elapsedMs": 47270
+    },
+    "discardReasons": [
+      "print completed"
+    ],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 21,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 21,
+      "multiCallBatches": 0,
+      "calls": 21,
+      "maxCalls": 1
+    },
+    "usage": {
+      "inputTokens": 64531,
+      "outputTokens": 2261,
+      "cacheReadTokens": 232960,
+      "cacheWriteTokens": 0,
+      "totalTokens": 299752
+    },
+    "requests": 28,
+    "elapsedMs": 63017,
+    "invalid": null
+  },
+  {
+    "label": "gpt-6.1-sol.background_compaction.2.candidate",
+    "success": false,
+    "usageComplete": false,
+    "background": {
+      "started": 3,
+      "committed": 3,
+      "discarded": 0,
+      "attempts": 3,
+      "dispatched": 3,
+      "missingUsage": 0,
+      "elapsedMs": 82940
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 21,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 21,
+      "multiCallBatches": 0,
+      "calls": 21,
+      "maxCalls": 1
+    },
+    "usage": {
+      "inputTokens": 59975,
+      "outputTokens": 3365,
+      "cacheReadTokens": 200832,
+      "cacheWriteTokens": 0,
+      "totalTokens": 264172
+    },
+    "requests": 26,
+    "elapsedMs": 99941,
+    "invalid": null
+  },
+  {
+    "label": "gpt-6.1-sol.background_compaction.0.base",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 21,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 21,
+      "multiCallBatches": 0,
+      "calls": 21,
+      "maxCalls": 1
+    },
+    "usage": {
+      "inputTokens": 39337,
+      "outputTokens": 1820,
+      "cacheReadTokens": 239232,
+      "cacheWriteTokens": 0,
+      "totalTokens": 280389
+    },
+    "requests": 27,
+    "elapsedMs": 88470,
+    "invalid": null
+  },
+  {
+    "label": "gpt-6.1-sol.background_compaction.2.base",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 21,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 21,
+      "multiCallBatches": 0,
+      "calls": 21,
+      "maxCalls": 1
+    },
+    "usage": {
+      "inputTokens": 33216,
+      "outputTokens": 1817,
+      "cacheReadTokens": 238976,
+      "cacheWriteTokens": 0,
+      "totalTokens": 274009
+    },
+    "requests": 26,
+    "elapsedMs": 84442,
+    "invalid": null
+  },
+  {
+    "label": "gpt-6.1-sol.background_compaction.1.candidate",
+    "success": false,
+    "usageComplete": false,
+    "background": {
+      "started": 3,
+      "committed": 3,
+      "discarded": 0,
+      "attempts": 3,
+      "dispatched": 3,
+      "missingUsage": 0,
+      "elapsedMs": 78974
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 21,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 21,
+      "multiCallBatches": 0,
+      "calls": 21,
+      "maxCalls": 1
+    },
+    "usage": {
+      "inputTokens": 62708,
+      "outputTokens": 3128,
+      "cacheReadTokens": 182784,
+      "cacheWriteTokens": 0,
+      "totalTokens": 248620
+    },
+    "requests": 25,
+    "elapsedMs": 94098,
+    "invalid": null
+  },
+  {
+    "label": "claude-sonnet-5-5.background_compaction.1.base",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 2,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 2,
+      "maxCalls": 2
+    },
+    "usage": {
+      "inputTokens": 44,
+      "outputTokens": 2827,
+      "cacheReadTokens": 135350,
+      "cacheWriteTokens": 6211,
+      "totalTokens": 144432
+    },
+    "requests": 22,
+    "elapsedMs": 47286,
+    "invalid": null
+  },
+  {
+    "label": "claude-sonnet-5-5.background_compaction.2.base",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 21,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 19,
+      "multiCallBatches": 1,
+      "calls": 20,
+      "maxCalls": 2
+    },
+    "usage": {
+      "inputTokens": 46,
+      "outputTokens": 3145,
+      "cacheReadTokens": 256147,
+      "cacheWriteTokens": 48129,
+      "totalTokens": 307467
+    },
+    "requests": 23,
+    "elapsedMs": 47708,
+    "invalid": null
+  },
+  {
+    "label": "claude-sonnet-5-5.background_compaction.0.base",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 2,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 2,
+      "maxCalls": 2
+    },
+    "usage": {
+      "inputTokens": 10,
+      "outputTokens": 1229,
+      "cacheReadTokens": 21558,
+      "cacheWriteTokens": 4709,
+      "totalTokens": 27506
+    },
+    "requests": 5,
+    "elapsedMs": 15140,
+    "invalid": null
+  },
+  {
+    "label": "claude-sonnet-5-5.background_compaction.2.candidate",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 4,
+      "committed": 4,
+      "discarded": 0,
+      "attempts": 4,
+      "dispatched": 4,
+      "missingUsage": 0,
+      "elapsedMs": 42727
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 21,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 19,
+      "multiCallBatches": 1,
+      "calls": 20,
+      "maxCalls": 2
+    },
+    "usage": {
+      "inputTokens": 52,
+      "outputTokens": 9483,
+      "cacheReadTokens": 239426,
+      "cacheWriteTokens": 81437,
+      "totalTokens": 330398
+    },
+    "requests": 26,
+    "elapsedMs": 58173,
+    "invalid": null
+  },
+  {
+    "label": "claude-sonnet-5-5.background_compaction.0.candidate",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 2,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 2,
+      "maxCalls": 2
+    },
+    "usage": {
+      "inputTokens": 10,
+      "outputTokens": 1296,
+      "cacheReadTokens": 21524,
+      "cacheWriteTokens": 4825,
+      "totalTokens": 27655
+    },
+    "requests": 5,
+    "elapsedMs": 15888,
+    "invalid": null
+  },
+  {
+    "label": "claude-sonnet-5-5.background_compaction.1.candidate",
+    "success": true,
+    "usageComplete": false,
+    "background": {
+      "started": 4,
+      "committed": 3,
+      "discarded": 1,
+      "attempts": 4,
+      "dispatched": 4,
+      "missingUsage": 0,
+      "elapsedMs": 39634
+    },
+    "discardReasons": [
+      "print completed"
+    ],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 21,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 19,
+      "multiCallBatches": 1,
+      "calls": 20,
+      "maxCalls": 2
+    },
+    "usage": {
+      "inputTokens": 52,
+      "outputTokens": 6785,
+      "cacheReadTokens": 255027,
+      "cacheWriteTokens": 89066,
+      "totalTokens": 350930
+    },
+    "requests": 26,
+    "elapsedMs": 53436,
+    "invalid": null
+  }
+]
