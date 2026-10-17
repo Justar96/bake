@@ -246,3 +246,37 @@ export function jsonModeCompactions(events: readonly { type?: string; result?: u
     errors: ends.filter(event => typeof event.errorMessage === 'string').length,
   }
 }
+
+/** Native summary usage, including paid attempts whose candidate was discarded. */
+export function nativeSummaryUsage(events: readonly any[]): (Record<string, number> | undefined)[] {
+  const usage: unknown[] = []
+  for (const event of events) {
+    if (event.type === 'compaction_end' && event.result != null) usage.push(event.result.usage)
+    if (event.type === 'background_compaction' && ['committed', 'discarded'].includes(event.status)) {
+      for (const attempt of event.attempts ?? []) if (attempt.dispatched === true) usage.push(attempt.usage)
+    }
+  }
+  return usage.map(raw => {
+    if (typeof raw !== 'object' || raw === null) return undefined
+    const value = raw as Record<string, unknown>
+    if (!['input', 'output', 'cacheRead', 'cacheWrite', 'totalTokens'].every(key => typeof value[key] === 'number' && Number.isFinite(value[key]) && (value[key] as number) >= 0)) return undefined
+    return { inputTokens: value.input as number, outputTokens: value.output as number,
+      cacheReadTokens: value.cacheRead as number, cacheWriteTokens: value.cacheWrite as number, totalTokens: value.totalTokens as number }
+  })
+}
+
+/** Candidate lifecycle and attempts, separate from foreground compaction and shell background jobs. */
+export function backgroundCompactions(events: readonly any[]) {
+  const candidates = events.filter(event => event.type === 'background_compaction')
+  const terminal = candidates.filter(event => ['committed', 'discarded'].includes(event.status))
+  const attempts = terminal.flatMap(event => event.attempts ?? [])
+  return {
+    started: candidates.filter(event => event.status === 'started').length,
+    committed: terminal.filter(event => event.status === 'committed').length,
+    discarded: terminal.filter(event => event.status === 'discarded').length,
+    attempts: attempts.length,
+    dispatched: attempts.filter(attempt => attempt.dispatched === true).length,
+    missingUsage: attempts.filter(attempt => attempt.dispatched === true && attempt.usage == null).length,
+    elapsedMs: terminal.reduce((sum, event) => sum + (event.elapsedMs ?? 0), 0),
+  }
+}

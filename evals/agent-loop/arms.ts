@@ -11,7 +11,8 @@ import { usesAgentInstructions } from './scenarios.ts'
  * A built Bake checkout, an installed pi CLI, or a native `bake-rs` binary. A
  * pi root is its package directory; a native root is the checkout whose Rust
  * workspace built the binary, or a prebuilt binary's directory.
- * Bake overlays and settings apply to neither.
+ * Bake overlays apply only to the TypeScript arm. Native settings use
+ * settings.json; pi does not accept per-arm settings.
  */
 export interface Arm {
   kind: 'bake' | 'pi' | 'native'
@@ -122,15 +123,58 @@ export function parseArms(spec: string, roster: Roster, env: NodeJS.ProcessEnv):
     const [name, root] = entry.split('=')
     if (!name || !root) throw new Error(`EVAL_ARMS entry "${entry}" is not name=checkout`)
     if (root === 'pi' || root.startsWith('pi:')) return [name, piArm(root)]
-    if (root === 'native' || root.startsWith('native:')) return [name, nativeArm(root)]
-    if (!existsSync(join(root, 'apps/cli/lib/bin.js'))) throw new Error(`arm ${name}: ${root} has no built apps/cli/lib/bin.js; run bun run build there`)
     const settings = env[`EVAL_SETTINGS_${name.toUpperCase()}`] ?? '{}'
-    JSON.parse(settings)
+    parseSettings(settings)
+    if (root === 'native' || root.startsWith('native:')) return [name, { ...nativeArm(root), settings }]
+    if (!existsSync(join(root, 'apps/cli/lib/bin.js'))) throw new Error(`arm ${name}: ${root} has no built apps/cli/lib/bin.js; run bun run build there`)
     return [name, {
       kind: 'bake', root: resolve(root), extra: JSON.parse(env[`EVAL_EXTRA_${name.toUpperCase()}`] ?? '[]'), settings, llmDeepseek: shipsLlmDeepseek(root),
       composition: [systemPromptOverlay(root), ...rosterOverlay(root, roster)],
     }]
   }))
+}
+
+const plainObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
+
+function parseSettings(text: string): Record<string, unknown> {
+  const value: unknown = JSON.parse(text)
+  if (!plainObject(value)) throw new Error('EVAL_SETTINGS must be a JSON object')
+  return value
+}
+
+/** Merge nested objects; arrays and scalar values replace the preceding value. */
+export function mergeSettings(base: Record<string, unknown>, extra: Record<string, unknown>): Record<string, unknown> {
+  const result = { ...base }
+  for (const [key, value] of Object.entries(extra)) {
+    const prior = result[key]
+    Object.defineProperty(result, key, { value: plainObject(prior) && plainObject(value) ? mergeSettings(prior, value) : value, enumerable: true, configurable: true, writable: true })
+  }
+  return result
+}
+
+/**
+ * Native settings.json for a sample. Per-arm settings cannot change the
+ * evaluator's route, retry policy, permission preset, or forced compaction
+ * policy; conflicting keys throw before any sample process starts.
+ */
+export function nativeSettings(text: string, provider: string, model: string,
+  compaction?: { reserveTokens: number; keepRecentTokens: number }): Record<string, unknown> {
+  const extra = parseSettings(text.replaceAll('$PROVIDER', provider).replaceAll('$MODEL', model))
+  for (const key of ['defaultProvider', 'defaultModel', 'defaultThinkingLevel', 'enabledModels', 'modelThinkingLevels',
+    'cliproxyapi', 'llm-pi-ai', 'agent-default-model', 'permission', 'retry', 'sessionDir']) {
+    if (Object.hasOwn(extra, key)) throw new Error(`native EVAL_SETTINGS cannot set evaluator-controlled ${key}`)
+  }
+  const fixed: Record<string, unknown> = { retry: { enabled: false } }
+  if (compaction !== undefined) {
+    const policy: Record<string, unknown> = { enabled: true, ...compaction }
+    if (Object.hasOwn(extra, 'compaction')) {
+      if (!plainObject(extra.compaction) || Object.entries(extra.compaction).some(([key, value]) => policy[key] !== value)) {
+        throw new Error('native EVAL_SETTINGS cannot change the scenario compaction policy')
+      }
+    }
+    fixed.compaction = policy
+  }
+  return mergeSettings(extra, fixed)
 }
 
 /** Cordis rows for one Bake sample, retaining the arm's whole-row configuration. */

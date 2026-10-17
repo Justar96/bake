@@ -23,7 +23,8 @@
  * EVAL_GATEWAY optional JSON file of { baseUrl, apiKey } that replaces the
  *              cliproxyapi upstream and key for every arm, such as pi's
  *              ~/.pi/agent/cliproxyapi.json; DeepSeek routes are unaffected
- * EVAL_SETTINGS_<ARM>  optional JSON object deep-merged into one arm's settings.yaml;
+ * EVAL_SETTINGS_<ARM>  optional JSON object for one arm's settings.yaml (Bake)
+ *              or settings.json (native, excluding evaluator-owned controls);
  *              the strings $PROVIDER and $MODEL become the route under test
  */
 import { spawn } from 'node:child_process'
@@ -34,13 +35,13 @@ import { createHash } from 'node:crypto'
 import YAML from 'yaml'
 import { reconcile } from './accounting.ts'
 import { compositionCheck, ROSTERS, systemPromptOf, type Roster } from './composition.ts'
-import { bakeCommand, bakeOverlay, nativeCommand, nativeStaleWriter, parseArms, strayContextFiles, type Arm } from './arms.ts'
+import { bakeCommand, bakeOverlay, mergeSettings, nativeCommand, nativeSettings, nativeStaleWriter, parseArms, strayContextFiles, type Arm } from './arms.ts'
 import {
-  backgroundStarts, compactions, editCheckSplits, excessRequests, jsonModeCompactions, normalizeBake, normalizePi, orientationCalls, ranCheck,
+  backgroundCompactions, backgroundStarts, compactions, editCheckSplits, excessRequests, jsonModeCompactions, nativeSummaryUsage, normalizeBake, normalizePi, orientationCalls, ranCheck,
   requestsOverFloor, routingDecisions, runawayAbort, shellEdits, skillLoads, verifiedBeforeFinal,
 } from './metrics.ts'
 import {
-  CASE_SETS, capMsFor, checkCommandFor, CONTEXT_WINDOWS, fixture, maxRequestsFor, piCompactionFor, piContextWindowFor, prompts, REQUEST_FLOORS, requestCaps,
+  CASE_SETS, capMsFor, checkCommandFor, CONTEXT_WINDOWS, fixture, maxRequestsFor, PI_COMPACTION, PI_CONTEXT_WINDOWS, prompts, REQUEST_FLOORS, requestCaps,
   requestFloorFor, SKILL_SCENARIOS, STANDARD_CASES, usesAgentInstructions, usesSkills, validate, wallClockCaps,
 } from './scenarios.ts'
 import { DEEPSEEK_ANTHROPIC_BASE_URL, deepseekProfile } from '../../packages/llm/llm-pi-ai/tests/deepseek-profile.ts'
@@ -48,17 +49,6 @@ import { parseCredentialsDocument } from '../../packages/credentials/credentials
 
 const out = resolve(process.env.EVAL_OUTPUT ?? join('.preflight/evals/agent-loop', new Date().toISOString().replace(/[:.]/g, '-')))
 mkdirSync(out, { recursive: true })
-/** Deep-merges an arm's settings into the route's, so one route key can change without replacing the route; arrays replace. */
-function merge(base: Record<string, unknown>, extra: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = { ...base }
-  for (const [key, value] of Object.entries(extra)) {
-    const prior = out[key]
-    const plain = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
-    out[key] = plain(prior) && plain(value) ? merge(prior, value) : value
-  }
-  return out
-}
-
 const roster = (process.env.EVAL_ROSTER ?? 'headless') as Roster
 if (!ROSTERS.includes(roster)) throw new Error(`EVAL_ROSTER must be one of ${ROSTERS.join(', ')}`)
 const ARMS = parseArms(process.env.EVAL_ARMS ?? '', roster, process.env)
@@ -74,6 +64,9 @@ const models = [...new Set((process.env.EVAL_MODELS ?? 'standard,extended').spli
 const cases = [...new Set((process.env.EVAL_CASES ?? STANDARD_CASES.join(',')).split(',').filter(Boolean)
   .flatMap(entry => CASE_SETS[entry] ?? [entry]))]
 for (const scenario of cases) if (prompts[scenario] === undefined) throw new Error(`EVAL_CASES names unknown scenario ${scenario}`)
+if (cases.includes('background_compaction') && Object.values(ARMS).some(arm => arm.kind !== 'native')) {
+  throw new Error('background_compaction requires native arms with the same scenario window and reserve')
+}
 const trials = Number(process.env.EVAL_TRIALS ?? 3)
 const configHome = resolve(process.env.EVAL_CONFIG_HOME ?? join(process.env.HOME!, '.bake'))
 const settings = YAML.parse(readFileSync(join(configHome, 'settings.yaml'), 'utf8'))
@@ -271,12 +264,13 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
   const label = `${model}.${scenario}.${trial}.${variant}`
   const savedPath = join(out, `${label}.json`)
   if (existsSync(savedPath)) { const saved = JSON.parse(readFileSync(savedPath, 'utf8')); summaries.push(saved); return saved }
+  const contextWindow = CONTEXT_WINDOWS[scenario]
+  const armWindow = jsonMode ? PI_CONTEXT_WINDOWS[scenario] : contextWindow
+  const nativeConfig = nativeRoute === undefined ? null : nativeSettings(arm.settings, nativeRoute.provider, model,
+    PI_COMPACTION[scenario])
   const root = mkdtempSync(join(tmpdir(), 'bake-token-eval-'))
   const built = fixture(root, scenario)
   const { workspace, file } = built
-  const contextWindow = CONTEXT_WINDOWS[scenario]
-  // The window this arm's route gets: pi and bake-rs take pi's window for a forced one (piContextWindowFor).
-  const armWindow = contextWindow === undefined || !jsonMode ? contextWindow : piContextWindowFor(contextWindow)
   // The rendered system prompt of the agent's first request: the composition this sample measured.
   let systemPrompt: string | null = null
   const home = join(root, 'home'); mkdirSync(home, { mode: 0o700 })
@@ -409,9 +403,7 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
         writeFileSync(join(home, 'models.json'), JSON.stringify(files.models), { mode: 0o600 })
       }
       // As for pi: agent-level retry off, and a forced window becomes pi's window and compaction settings for it.
-      writeFileSync(join(home, 'settings.json'), JSON.stringify({
-        retry: { enabled: false }, ...contextWindow === undefined ? {} : { compaction: piCompactionFor(contextWindow) },
-      }), { mode: 0o600 })
+      writeFileSync(join(home, 'settings.json'), JSON.stringify(nativeConfig), { mode: 0o600 })
       if (nativeRoute.keyName !== undefined) env.EVAL_API_KEY = credential(nativeRoute.keyName)
       // bake-rs reads instructions and skills from ~/.agents, so each sample gets an empty user home of its own.
       const userHome = join(root, 'user'); mkdirSync(userHome, { mode: 0o700 })
@@ -425,15 +417,15 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
       const agentDir = join(root, 'pi-agent'); mkdirSync(agentDir, { mode: 0o700 })
       writeFileSync(join(agentDir, 'models.json'), JSON.stringify({ providers: { eval: {
         baseUrl: `${server.url.origin}/upstream`, api: piRoute.api, apiKey: '$EVAL_API_KEY',
-        models: [contextWindow === undefined ? piRoute.model : { ...piRoute.model, contextWindow: armWindow }],
+        models: [armWindow === undefined ? piRoute.model : { ...piRoute.model, contextWindow: armWindow }],
       } } }), { mode: 0o600 })
       // Bake arms run with retries off; pi's agent-level retry would hide failed requests from the pair.
       // A forced window becomes pi's window, Bake's threshold plus pi's reserve, with compaction settings for it.
       writeFileSync(join(agentDir, 'settings.json'), JSON.stringify({
-        quietStartup: true, retry: { enabled: false }, ...contextWindow === undefined ? {} : { compaction: piCompactionFor(contextWindow) },
+        quietStartup: true, retry: { enabled: false }, ...PI_COMPACTION[scenario] === undefined ? {} : { compaction: PI_COMPACTION[scenario] },
       }))
       writeFileSync(hookPath, `import { readFileSync, writeFileSync } from 'node:fs';\nimport { resolve } from 'node:path';\nexport default function (pi) {\n let changed = false;\n pi.on('tool_result', (event) => {\n if (event.toolName !== 'read' || event.isError || !(${target('event.input?.path')})) return;\n ${writeOnce}\n });\n}\n`)
-      contextWindowApplied = contextWindow !== undefined
+      contextWindowApplied = armWindow !== undefined
       Object.assign(env, { PI_CODING_AGENT_DIR: agentDir, PI_OFFLINE: '1', EVAL_API_KEY: credential(piRoute.keyName) })
       command = [arm.bin!, '--mode', 'json', '--no-session', '--no-extensions', '--no-skills', '--no-prompt-templates', '--no-themes',
         ...usesAgentInstructions(scenario) ? [] : ['--no-context-files'],
@@ -444,7 +436,7 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
       const routeSettings = route.settings(`${server.url.origin}/upstream`, arm.llmDeepseek)
       if (contextWindow !== undefined) contextWindowApplied = withContextWindow(routeSettings, route.provider, contextWindow)
       writeFileSync(join(home, 'settings.yaml'), YAML.stringify({
-        ...merge(routeSettings, JSON.parse(arm.settings.replaceAll('$PROVIDER', route.provider).replaceAll('$MODEL', model))),
+        ...mergeSettings(routeSettings, JSON.parse(arm.settings.replaceAll('$PROVIDER', route.provider).replaceAll('$MODEL', model))),
         permission: { defaultPreset: 'danger-full-access' },
       }), { mode: 0o600 })
       copyFileSync(credentialFile, join(home, '.credentials.yaml'))
@@ -485,9 +477,13 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
     const byTool: Record<string, number> = {}
     for (const call of calls) byTool[call.tool] = (byTool[call.tool] ?? 0) + 1
     const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0 }
-    let usageComplete = steps.length > 0 && steps.every(step => step.usage !== undefined)
-    for (const step of steps) if (step.usage !== undefined) for (const key of Object.keys(usage)) usage[key as keyof typeof usage] += step.usage[key] ?? 0
+    const summaryUsage = nativeRoute === undefined ? [] : nativeSummaryUsage(events)
+    const allUsage = [...steps.map(step => step.usage), ...summaryUsage]
+    let usageComplete = steps.length > 0 && allUsage.every(usage => usage !== undefined)
+    for (const item of allUsage) if (item !== undefined) for (const key of Object.keys(usage)) usage[key as keyof typeof usage] += item[key] ?? 0
     if (wire.some(request => request.status !== 200 || request.usage.length === 0)) usageComplete = false
+    const accounting = reconcile(api, wire, usage)
+    if (nativeRoute !== undefined && !accounting.matches) usageComplete = false
     const { validated, source, testsUnchanged, testExit, fixturesUnchanged } = validate(scenario, built, {
       code, final, toolCalls: calls.length, subagentCalls: byTool.subagent ?? 0, injectionPath,
     })
@@ -527,7 +523,9 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
       skillLoads: usesSkills(scenario) ? skillLoads(calls) : null,
       skillNeeded: SKILL_SCENARIOS[scenario] ?? null,
       contextWindow: contextWindowApplied ? armWindow : null,
+      nativeSettings: nativeConfig,
       compactions: nativeRoute !== undefined ? jsonModeCompactions(events) : piRoute === undefined ? compactions(logged) : null,
+      backgroundCompactions: nativeRoute === undefined ? null : backgroundCompactions(events),
       runawayAbort: runawayAbort([
         stderr, final,
         ...events.filter(event => event.type === 'unparsed').map(event => event.text),
@@ -544,7 +542,7 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
           perStep,
         }
       })(),
-      usageComplete, usage, accounting: reconcile(api, wire, usage), stepUsage: steps.map(step => step.usage ?? null),
+      usageComplete, usage, accounting, stepUsage: steps.map(step => step.usage ?? null), summaryUsage,
       logicalInputTokens: usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens,
       logicalTotalTokens: usage.totalTokens,
       newInputTokens: usage.inputTokens + usage.cacheWriteTokens,
@@ -590,14 +588,14 @@ writeFileSync(join(out, 'design.json'), JSON.stringify({
   routes: Object.fromEntries(routes.map(route => [route.model, { provider: route.provider, api: route.api, effort: route.effort }])),
   effort: 'medium where the model offers it; DeepSeek runs at high, its default, having no medium', maxOutputTokens: 8192, capMs: wallClockCaps().default, capMsByScenario: wallClockCaps(), maxRequests: requestCaps(), requestFloors: REQUEST_FLOORS, contextWindows: CONTEXT_WINDOWS, maxLogicalTokens,
   // What pi and bake-rs get for each forced window: Bake's threshold plus pi's default reserve, and Bake's retained tail.
-  piContextWindows: Object.fromEntries(Object.entries(CONTEXT_WINDOWS).map(([scenario, contextWindow]) => [scenario, piContextWindowFor(contextWindow)])),
-  piCompaction: Object.fromEntries(Object.entries(CONTEXT_WINDOWS).map(([scenario, contextWindow]) => [scenario, piCompactionFor(contextWindow)])),
+  piContextWindows: PI_CONTEXT_WINDOWS,
+  piCompaction: PI_COMPACTION,
   retryPolicy: { mode: 'normal', maxRetries: 0 },
   gateway: override === undefined ? null : new URL(override.baseUrl).origin,
   composition: 'Built headless CLI with each revision\'s own headless system-prompt config (harness opener off, working-directory suffix) and its standard-preset persona prefix; host tools retained.'
     + (roster === 'tui' ? ' Roster tui: the standard preset\'s tool-fs, tool-fs-search, and tool-result-pruner configs and the terminal spill-policy inline cap; ask_user_question stays out, having no one to answer it headless.' : ' Roster headless: the headless bundle\'s own tool configs.')
     + ' Session title and ambient AGENTS disabled equally; instructions_file keeps agent-instructions for its own AGENTS.md.'
-    + (armNames.some(name => ARMS[name]!.kind === 'native') ? ' A native arm runs bake-rs -p --mode json with its own system prompt and Pi\'s default tools (read, bash, edit, write), no session file, the danger-full-access preset, and agent-level retry off; a cliproxyapi model comes through the 0.3 settings.yaml and .credentials.yaml it imports read-only, and a DeepSeek model through models.json over Chat Completions. It skips scenarios that need a Bake-only tool, and its stale writer acts on its event stream. Where a scenario forces a context window, it gets pi\'s window for it (piContextWindows), Bake\'s threshold plus pi\'s default reserve, and pi\'s compaction settings (piCompaction).' : '')
+    + (armNames.some(name => ARMS[name]!.kind === 'native') ? ' A native arm runs bake-rs -p --mode json with its own system prompt and default tools (read, bash, edit, write) unless its recorded settings override them, no session file, the danger-full-access preset, and agent-level retry off; a cliproxyapi model comes through the 0.3 settings.yaml and .credentials.yaml it imports read-only, and a DeepSeek model through models.json over Chat Completions. It skips scenarios that need a Bake-only tool, and its stale writer acts on its event stream. Its recorded EVAL_SETTINGS object configures settings.json except evaluator-controlled route, retry, permission, and scenario policy. Forced windows and compaction settings are recorded in piContextWindows and piCompaction.' : '')
     + (armNames.some(name => ARMS[name]!.kind === 'pi') ? ' A pi arm runs pi --mode json with its own system prompt and default tools, no session, extensions, prompt templates, or context files, no skills but a skill scenario\'s own, agent-level retry off, and pi\'s own wire for each model; it skips scenarios that need a Bake-only tool. Where a scenario forces a context window, pi gets its window for it (piContextWindows), Bake\'s threshold plus pi\'s default reserve, and compaction settings that keep Bake\'s retained tail (piCompaction).' : ''),
   cache: 'Fresh process/home/workspace/session per sample; provider cache is observed, not assumed cold. Pair order alternates by trial and scenario.',
   endpoint: 'Agent exits; external Node test passes without test modification; injected external comment is preserved.',

@@ -1,7 +1,7 @@
 /** Loop-shape metrics over synthetic Bake and pi event streams. */
 import { describe, expect, test } from 'bun:test'
 import {
-  backgroundStarts, type Call, compactions, editCheckSplits, excessRequests, isBareGlob, jsonModeCompactions, normalizeBake, normalizePi, orientationCalls, ranCheck,
+  backgroundCompactions, backgroundStarts, type Call, compactions, editCheckSplits, excessRequests, isBareGlob, jsonModeCompactions, nativeSummaryUsage, normalizeBake, normalizePi, orientationCalls, ranCheck,
   readsFile, requestsOverFloor, runawayAbort, shellEdits, skillLoads, verifiedBeforeFinal,
 } from './metrics.ts'
 
@@ -28,6 +28,21 @@ function bakeStream(steps: [string, Record<string, unknown>][][], final = 'done'
 }
 
 describe('normalization', () => {
+  test('counts native summary costs once, including discarded attempts and missing usage', () => {
+    const usage = { input: 7, output: 2, cacheRead: 3, cacheWrite: 0, totalTokens: 12 }
+    const events = [
+      { type: 'compaction_end', result: { usage } },
+      { type: 'background_compaction', status: 'started', elapsedMs: 0, attempts: [] },
+      { type: 'background_compaction', status: 'committed', elapsedMs: 5, result: { usage }, attempts: [{ dispatched: true, usage }] },
+      { type: 'background_compaction', status: 'discarded', elapsedMs: 8, attempts: [{ dispatched: true, usage }, { dispatched: true, usage: null }, { dispatched: false, usage: null }] },
+    ]
+    expect(nativeSummaryUsage(events)).toEqual([
+      ...Array.from({ length: 3 }, () => ({ inputTokens: 7, outputTokens: 2, cacheReadTokens: 3, cacheWriteTokens: 0, totalTokens: 12 })),
+      undefined,
+    ])
+    expect(backgroundCompactions(events)).toEqual({ started: 1, committed: 1, discarded: 1, attempts: 4, dispatched: 3, missingUsage: 1, elapsedMs: 13 })
+  })
+
   test('assigns each Bake call the step that made it', () => {
     const normalized = normalizeBake(bakeStream([[['read', { file_path: 'a' }], ['read', { file_path: 'b' }]], [['edit', {}]], []]))
     expect(normalized.calls.map(c => [c.tool, c.step])).toEqual([['read', 0], ['read', 0], ['edit', 1]])

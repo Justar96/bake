@@ -24,11 +24,11 @@
  * retries are off.
  */
 import { deepStrictEqual } from 'node:assert'
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { prompts } from './scenarios.ts'
+import { checkpointCodes, noteNames, prompts } from './scenarios.ts'
 
 const root = resolve(import.meta.dir, '../..')
 const binary = join(root, 'rust/target/debug', `bake-rs${process.platform === 'win32' ? '.exe' : ''}`)
@@ -50,10 +50,10 @@ type Json = any
  * the check; `never` reads `test.cjs` instead, so no injection happens;
  * `raced` sends the read, edit, and check in one response.
  */
-type Mode = 'normal' | 'never' | 'raced'
+type Mode = 'normal' | 'never' | 'raced' | 'background'
 
 /** One Responses SSE stream: `response.created`, the items, and `response.completed` with usage. */
-function stream(id: string, n: number, items: Json[]): string {
+function stream(id: string, n: number, items: Json[], reported?: { input: number; cached: number; output: number }): string {
   const events: Json[] = [{ type: 'response.created', response: { id, status: 'in_progress' } }]
   items.forEach((item, index) => {
     if (item.type === 'function_call') {
@@ -65,10 +65,10 @@ function stream(id: string, n: number, items: Json[]): string {
     }
     events.push({ type: 'response.output_item.done', output_index: index, item })
   })
-  const input = USAGE.input * n
-  const output = USAGE.output * n
+  const input = reported?.input ?? USAGE.input * n
+  const output = reported?.output ?? USAGE.output * n
   events.push({ type: 'response.completed', response: { id, status: 'completed', usage: {
-    input_tokens: input, output_tokens: output, total_tokens: input + output, input_tokens_details: { cached_tokens: USAGE.cached * n },
+    input_tokens: input, output_tokens: output, total_tokens: input + output, input_tokens_details: { cached_tokens: reported?.cached ?? USAGE.cached * n },
   } } })
   return events.map(event => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join('')
 }
@@ -123,6 +123,8 @@ async function smokeNativeArm(): Promise<void> {
   const samplesDir = join(temp, 'tmp')
   let mode: Mode = 'normal'
   const received: { path: string; authorization: string | null; model: unknown; leaked: boolean }[] = []
+  const foregroundTurns = new Map<string, number>()
+  const configuration: { settings: Json; tools: string[] }[] = []
   /** Whether each `stale_edit` edit the server sent found the injected comment already in place. */
   const injectedBeforeEdit: boolean[] = []
   const server = Bun.serve({ port: 0, hostname: '127.0.0.1',
@@ -130,6 +132,26 @@ async function smokeNativeArm(): Promise<void> {
       const body = await request.json() as Json
       received.push({ path: new URL(request.url).pathname, authorization: request.headers.get('authorization'), model: body.model,
         leaked: JSON.stringify(body).includes(LEAK) })
+      const samples = readdirSync(samplesDir).filter(name => name.startsWith('bake-token-eval-'))
+      if (samples.length !== 1) throw new Error(`expected one sample root, found ${samples.length}`)
+      const sampleRoot = join(samplesDir, samples[0]!)
+      configuration.push({ settings: JSON.parse(readFileSync(join(sampleRoot, 'home/settings.json'), 'utf8')),
+        tools: (body.tools ?? []).map((tool: Json) => tool.name) })
+      if (mode === 'background') {
+        const summary = !Array.isArray(body.tools) || body.tools.length === 0
+        const n = foregroundTurns.get(sampleRoot) ?? 0
+        let items: Json[]
+        if (summary) {
+          items = [{ ...FINAL, id: `msg_summary_${n}`, content: [{ type: 'output_text', text: 'The user requested the ledger chain, codes.txt, and the roundMoney fix. Continue reading the next note and preserve all checkpoint codes.', annotations: [] }] }]
+        } else {
+          foregroundTurns.set(sampleRoot, n + 1)
+          items = n < 20 ? [call(`note_${n}`, 'read', { path: noteNames(20)[n] }), ...n === 0 ? [READ] : []]
+            : n === 20 ? [call('codes', 'write', { path: 'codes.txt', content: checkpointCodes(20).join('\n') + '\n' }), EDIT, CHECK]
+              : [FINAL]
+        }
+        const usage = { input: Math.ceil(JSON.stringify(body).length / 4), cached: 0, output: 10 }
+        return new Response(stream(`resp_${summary ? 'summary' : 'step'}_${n}`, n + 1, items, usage), { headers: { 'content-type': 'text/event-stream' } })
+      }
       const { text, sendsEdit } = reply(body, mode)
       if (sendsEdit && JSON.stringify(body.input).includes(JSON.stringify(prompts.stale_edit).slice(1, 40))) {
         // Samples run one at a time, so the evaluator's sample root holds exactly one workspace.
@@ -161,6 +183,8 @@ async function smokeNativeArm(): Promise<void> {
         PATH: process.env.PATH ?? '', HOME: home, TMPDIR: samplesDir,
         EVAL_ARMS: `base=native:${binary},candidate=native:${binary}`, EVAL_MODELS: MODEL, EVAL_CASES: cases.join(','),
         EVAL_TRIALS: '1', EVAL_OUTPUT: out, EVAL_CONFIG_HOME: configHome,
+        EVAL_SETTINGS_BASE: JSON.stringify(next === 'background' ? { backgroundCompaction: false } : { images: { autoResize: false } }),
+        EVAL_SETTINGS_CANDIDATE: JSON.stringify(next === 'background' ? { backgroundCompaction: true } : { defaultTools: ['read', 'edit', 'bash'] }),
       }
       const child = spawn(process.execPath, [RUN], { cwd: temp, env, stdio: ['ignore', 'pipe', 'pipe'] })
       let stdout = ''
@@ -205,7 +229,10 @@ async function smokeNativeArm(): Promise<void> {
         || revision.binarySha256?.length !== 64 || !/^bake-rs /.test(revision.version)) {
         throw new Error(`design.json revision for ${arm}: ${JSON.stringify(revision)}`)
       }
+      deepStrictEqual(JSON.parse(design.arms[arm].settings), arm === 'base' ? { images: { autoResize: false } } : { defaultTools: ['read', 'edit', 'bash'] })
     }
+    if (configuration.some(({ settings, tools }) => settings.retry?.enabled !== false
+      || tools.includes('write') === Array.isArray(settings.defaultTools))) throw new Error('native settings did not reach the provider tool loadout')
     deepStrictEqual(received.map(request => [request.path, request.authorization, request.model]),
       Array.from({ length: 2 * 2 * 3 }, () => ['/v1/responses', `Bearer ${KEY}`, MODEL]), 'requests the server received')
     if (received.some(request => request.leaked)) throw new Error('a sample read the evaluator\'s own ~/.agents')
@@ -235,6 +262,38 @@ async function smokeNativeArm(): Promise<void> {
         })
       }
     }
+
+    const background = await evaluate('background', ['background_compaction'])
+    for (const arm of ['base', 'candidate']) {
+      const { label, sample } = sampleOf(background, 'background_compaction', arm)
+      deepStrictEqual(sample.nativeSettings, { backgroundCompaction: arm === 'candidate', retry: { enabled: false },
+        compaction: { enabled: true, reserveTokens: 16_384, keepRecentTokens: 2560 } })
+      if (!sample.success || sample.contextWindow !== 40_000 || !sample.fixturesUnchanged || !sample.accounting.matches
+        || !sample.usageComplete || sample.requests > 46 || sample.summaryUsage.length === 0) {
+        throw new Error(`${label}: invalid background scenario observations ${JSON.stringify(sample)}`)
+      }
+      const observed = sample.backgroundCompactions
+      if (arm === 'base' ? observed.started !== 0
+        : observed.started < 1 || observed.started !== observed.committed + observed.discarded || observed.dispatched < 1) {
+        throw new Error(`${label}: expected background lifecycle ${JSON.stringify(observed)}`)
+      }
+      console.log(`pass native background compaction ${arm}: ${JSON.stringify(observed)}`)
+    }
+    const recordDir = join(temp, 'record')
+    const recorded = spawnSync(process.execPath, [join(import.meta.dir, 'record.ts'), '--raw', join(temp, 'out-background'),
+      '--out', recordDir, '--arm', 'base=smoke-base,candidate=smoke-candidate', '--candidate', 'candidate', '--base', 'base'],
+    { cwd: temp, encoding: 'utf8', timeout: 30_000 })
+    if (recorded.error !== undefined || recorded.signal !== null || recorded.status !== 0) throw new Error(`native record failed: ${recorded.stderr}`)
+    const recordedSamples = readFileSync(join(recordDir, 'samples.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line))
+    for (const sample of recordedSamples) {
+      const raw = sampleOf(background, 'background_compaction', sample.arm).sample
+      deepStrictEqual(sample.nativeSettings, raw.nativeSettings)
+      deepStrictEqual(sample.backgroundCompactions, raw.backgroundCompactions)
+      deepStrictEqual(sample.totalTokens, raw.usage.totalTokens)
+    }
+    const recordDesign = JSON.parse(readFileSync(join(recordDir, 'summary.json'), 'utf8'))
+    deepStrictEqual(recordDesign.settings.armSettings, { base: '{"backgroundCompaction":false}', candidate: '{"backgroundCompaction":true}' })
+    console.log('pass native compaction settings and costs retained by record.ts')
 
     // Control: with no injection the edit finds no comment, and the evaluator must fail the sample as the agent's.
     injectedBeforeEdit.length = 0
@@ -268,7 +327,7 @@ async function smokeNativeArm(): Promise<void> {
     }
     console.log('pass native arm stray context file refused')
     console.log(JSON.stringify({ schema: 'bake/native-arm-smoke', version: 2, platform: process.platform, arch: process.arch,
-      samples: 8, requests: received.length, passed: true }))
+      samples: 10, requests: received.length, passed: true }))
   } finally {
     await server.stop(true)
     rmSync(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
