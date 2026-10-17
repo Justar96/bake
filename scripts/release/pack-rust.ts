@@ -412,7 +412,10 @@ export async function packRust(options: PackOptions): Promise<PackResult> {
     // System tar, as pack.ts uses: it records the staged modes. Only the
     // payload's top-level names are given, so nothing else in the stage can enter.
     const top = [...new Set(files.map(file => file.path.split('/')[0] as string))].sort()
-    await run(['tar', '-czf', partial, '-C', stage, ...top], scratch)
+    // macOS copyfile metadata otherwise adds AppleDouble files and carries
+    // source ACLs/attributes beyond the payload's explicit file modes.
+    const metadata = process.platform === 'darwin' ? ['--no-mac-metadata', '--no-xattrs', '--no-acls', '--no-fflags'] : []
+    await run(['tar', ...metadata, '-czf', partial, '-C', stage, ...top], scratch)
     const listing = await verifyArchive(partial, files)
 
     const unpacked = join(scratch, 'unpacked')

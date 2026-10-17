@@ -8,7 +8,8 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
 import {
-  chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync,
+  chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync,
+  symlinkSync, writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -179,7 +180,7 @@ describe.skipIf(process.platform === 'win32' || !releaseHost)('packing', () => {
   test('archives exactly the payload with its modes, and the archive unpacks and runs', async () => {
     const { options, destination } = fixture()
     const result = await packRust(options)
-    expect(result.archive).toBe(destination)
+    expect(result.archive).toBe(realpathSync.native(destination))
     expect(result.record.target).toBe(target)
     expect([...result.listing].sort()).toEqual([
       '0644 LICENSE', '0644 THIRD_PARTY_NOTICES.md', '0755 bin/', '0755 bin/bake-rs',
@@ -200,6 +201,20 @@ describe.skipIf(process.platform === 'win32' || !releaseHost)('packing', () => {
     await packRust(options)
     expect(readFileSync(destination, 'utf8')).not.toBe(EARLIER)
     expect(readdirSync(options.outputDir)).toEqual([archiveName(VERSION, target)])
+  })
+
+  test.skipIf(process.platform !== 'darwin')('source metadata adds no AppleDouble files or extended attributes to the package', async () => {
+    const { options } = fixture()
+    const attribute = 'com.bake.package-fixture'
+    const source = join(options.root, 'LICENSE')
+    expect(Bun.spawnSync(['/usr/bin/xattr', '-w', attribute, 'fixture', source]).exitCode).toBe(0)
+    const result = await packRust(options)
+    expect(result.listing.some(entry => entry.includes('._'))).toBe(false)
+    const unpacked = scratch()
+    expect(Bun.spawnSync(['tar', '-xzf', result.archive, '-C', unpacked]).exitCode).toBe(0)
+    const attributes = Bun.spawnSync(['/usr/bin/xattr', join(unpacked, 'LICENSE')], { stdout: 'pipe', stderr: 'pipe' })
+    expect(attributes.exitCode).toBe(0)
+    expect(attributes.stdout.toString().split('\n')).not.toContain(attribute)
   })
 
   test.each([
@@ -354,7 +369,9 @@ describe('the output directory', () => {
 /** Tar `tree`'s top-level names into a gzipped archive under `root`. */
 function tar(root: string, tree: string, names: string[]): string {
   const archive = join(root, 'test.tar.gz')
-  expect(Bun.spawnSync(['tar', '-czf', archive, '-C', tree, ...names]).exitCode).toBe(0)
+  // These cases vary payload entries and modes, independently of macOS metadata.
+  const metadata = process.platform === 'darwin' ? ['--no-mac-metadata', '--no-xattrs', '--no-acls', '--no-fflags'] : []
+  expect(Bun.spawnSync(['tar', ...metadata, '-czf', archive, '-C', tree, ...names]).exitCode).toBe(0)
   return archive
 }
 

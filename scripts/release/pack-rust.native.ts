@@ -8,7 +8,7 @@
  * sandbox, install, or update runs. Run with `bun run test:rust:package`.
  */
 import { afterEach, expect, test } from 'bun:test'
-import { lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { archiveName, docsDigests, hostTarget, isRustTarget, parseSelfCheck } from './pack-rust.ts'
@@ -57,7 +57,7 @@ test.skipIf(!isRustTarget(hostTarget()))('the packed bake-rs unpacks and runs wi
   const code = await pack.exited
   expect(pack.signalCode).toBeNull()
   if (code !== 0) throw new Error(`release:pack:rust exited ${code}:\n${stderr}`)
-  const archive = join(out, archiveName(version, target))
+  const archive = join(realpathSync.native(out), archiveName(version, target))
   expect(stdout.trimEnd().split('\n').at(-1)).toBe(archive)
   expect(readdirSync(out)).toEqual([archiveName(version, target)])
 
