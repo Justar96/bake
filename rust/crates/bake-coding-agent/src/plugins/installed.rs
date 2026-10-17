@@ -361,12 +361,18 @@ impl PluginHome {
         Ok((plugins, root))
     }
 
-    /// Applies `change` to the parsed configuration under the store's lock,
-    /// writing it when `change` returns `Ok(true)`. Blocks.
+    /// Checks an existing configuration's trust before updating it under
+    /// the store's lock. A private replacement must not endorse records
+    /// read from a file others could change. Writes only for `Ok(true)`.
+    /// A committed write whose directory flush fails still reports the
+    /// error: the new contents are visible but their durability is unknown.
+    /// Blocks.
     fn update<T>(
         &self,
         change: impl FnOnce(&mut ConfigFile) -> Result<(bool, T), PluginHomeError>,
     ) -> Result<T, PluginHomeError> {
+        #[cfg(unix)]
+        self.read_config()?;
         let mut outcome = None;
         let updated = self.store().update(|object| {
             let parsed =
@@ -381,10 +387,7 @@ impl PluginHome {
             write
         });
         match (updated, outcome) {
-            // An unsynced directory flush still committed the change, and
-            // later reads see it.
             (Ok(_), Some(outcome)) => outcome,
-            (Err(failure), Some(outcome)) if failure.is_committed() => outcome,
             // Refused before `change` ran (the file is not a regular JSON
             // object), or the write failed.
             (Err(failure), _) => Err(error(failure.to_string())),

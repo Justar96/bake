@@ -531,3 +531,35 @@ fn a_macos_acl_that_allows_writes_is_refused() {
     chmod(&["-N"]);
     assert!(home.load(&setup(), None).is_ok());
 }
+
+// Management must not turn a configuration others can edit into a trusted
+// private file while preserving records that the owner did not approve.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn management_does_not_make_an_untrusted_configuration_private() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = TempDir::new("plugin-untrusted-update");
+    let home = PluginHome::new(&dir.join("home"));
+    let installed = home.install(&guard()).unwrap();
+    home.enable(&installed.sha256).unwrap();
+    let path = home.config_path();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o620)).unwrap();
+    let before = std::fs::read(&path).unwrap();
+    assert!(home.enable(&installed.sha256).is_err());
+    assert!(home.disable("guard").is_err());
+    let record = FailureRecord {
+        home: home.clone(),
+        id: "guard".into(),
+        sha256: installed.sha256,
+    };
+    assert!(
+        record
+            .record(&Failure::new(FailureKind::Trap, "fixture failure"))
+            .is_err()
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    assert_eq!(
+        std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        0o620
+    );
+}
