@@ -134,6 +134,7 @@ impl WasmManifest {
 #[derive(Debug, Clone)]
 pub struct WasmPackage {
     manifest: WasmManifest,
+    manifest_bytes: Arc<[u8]>,
     component: Arc<[u8]>,
 }
 
@@ -141,21 +142,26 @@ impl WasmPackage {
     /// Checks `manifest` (the bytes of `plugin.json`) and `component` (the
     /// bytes of the component binary).
     pub fn new(manifest: &[u8], component: Vec<u8>) -> Result<Self, PackageError> {
-        Self::new_parsed(WasmManifest::parse(manifest)?, component)
+        Self::new_parsed(WasmManifest::parse(manifest)?, manifest.to_vec(), component)
     }
 
     /// Reads the package directory `dir`: its `plugin.json` and its
-    /// component, `plugin.wasm`. Each read stops one byte past its limit,
-    /// and anything but a regular file is refused without reading it.
-    /// This blocks its thread on file IO.
+    /// component, `plugin.wasm`, each opened once without following a
+    /// symbolic link (or, on Windows, a reparse point) and read once. Each
+    /// read stops one byte past its limit, and anything but a regular file
+    /// is refused without reading it. This blocks its thread on file IO.
     pub fn read_dir(dir: &Path) -> Result<Self, PackageError> {
-        let manifest = read_bounded(dir, "plugin.json", MAX_MANIFEST_BYTES)?;
-        let manifest = WasmManifest::parse(&manifest)?;
+        let manifest_bytes = read_bounded(dir, "plugin.json", MAX_MANIFEST_BYTES)?;
+        let manifest = WasmManifest::parse(&manifest_bytes)?;
         let component = read_bounded(dir, "plugin.wasm", MAX_COMPONENT_BYTES)?;
-        Self::new_parsed(manifest, component)
+        Self::new_parsed(manifest, manifest_bytes, component)
     }
 
-    fn new_parsed(manifest: WasmManifest, component: Vec<u8>) -> Result<Self, PackageError> {
+    fn new_parsed(
+        manifest: WasmManifest,
+        manifest_bytes: Vec<u8>,
+        component: Vec<u8>,
+    ) -> Result<Self, PackageError> {
         if component.len() > MAX_COMPONENT_BYTES {
             return Err(PackageError::ComponentTooLarge(component.len()));
         }
@@ -164,8 +170,14 @@ impl WasmPackage {
         }
         Ok(Self {
             manifest,
+            manifest_bytes: manifest_bytes.into(),
             component: component.into(),
         })
+    }
+
+    /// The bytes of `plugin.json` exactly as read.
+    pub fn manifest_bytes(&self) -> &[u8] {
+        &self.manifest_bytes
     }
 
     /// The manifest.
@@ -179,31 +191,76 @@ impl WasmPackage {
     }
 }
 
-/// Reads `dir/file`, at most `limit + 1` bytes, so an oversized file is
-/// reported by size without being read whole.
+/// Reads `dir/file` with [`read_regular`], as a package file.
 fn read_bounded(dir: &Path, file: &'static str, limit: usize) -> Result<Vec<u8>, PackageError> {
-    let failed = |error: std::io::Error| PackageError::Read {
+    read_regular(&dir.join(file), limit).map_err(|error| PackageError::Read {
         file,
         message: error.to_string(),
-    };
+    })
+}
+
+/// Why [`read_regular`] read nothing.
+#[derive(Debug)]
+pub(crate) enum ReadError {
+    /// Nothing is at the path.
+    NotFound,
+    /// The path is a symbolic link, a directory, a device, or a FIFO.
+    NotRegular,
+    /// Another error.
+    Io(std::io::Error),
+}
+
+impl std::fmt::Display for ReadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotFound => f.write_str("it does not exist"),
+            Self::NotRegular => f.write_str("not a regular file"),
+            Self::Io(error) => write!(f, "{error}"),
+        }
+    }
+}
+
+/// Reads `path`, at most `limit + 1` bytes, so an oversized file is
+/// reported by size without being read whole. The open does not follow a
+/// symbolic link at the final component (Unix `O_NOFOLLOW`, Windows
+/// `FILE_FLAG_OPEN_REPARSE_POINT`), and the opened handle must be a
+/// regular file, so what is checked is what is read, once. Blocks.
+pub(crate) fn read_regular(path: &Path, limit: usize) -> Result<Vec<u8>, ReadError> {
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
     // A FIFO would block the open itself; the type check below then
     // refuses it.
     #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::custom_flags(&mut options, libc::O_NONBLOCK);
-    let handle = options.open(dir.join(file)).map_err(failed)?;
-    if !handle.metadata().map_err(failed)?.is_file() {
-        return Err(PackageError::Read {
-            file,
-            message: "not a regular file".to_owned(),
-        });
+    std::os::unix::fs::OpenOptionsExt::custom_flags(
+        &mut options,
+        libc::O_NONBLOCK | libc::O_NOFOLLOW,
+    );
+    #[cfg(windows)]
+    std::os::windows::fs::OpenOptionsExt::custom_flags(
+        &mut options,
+        windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT,
+    );
+    let handle = match options.open(path) {
+        Ok(handle) => handle,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Err(ReadError::NotFound);
+        }
+        // `O_NOFOLLOW` refuses a symbolic link with `ELOOP`.
+        #[cfg(unix)]
+        Err(error) if error.raw_os_error() == Some(libc::ELOOP) => {
+            return Err(ReadError::NotRegular);
+        }
+        Err(error) => return Err(ReadError::Io(error)),
+    };
+    let metadata = handle.metadata().map_err(ReadError::Io)?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(ReadError::NotRegular);
     }
     let mut bytes = Vec::new();
     handle
         .take(limit as u64 + 1)
         .read_to_end(&mut bytes)
-        .map_err(failed)?;
+        .map_err(ReadError::Io)?;
     Ok(bytes)
 }
 
@@ -359,6 +416,29 @@ mod tests {
             WasmPackage::read_dir(dir.path()).unwrap_err(),
             PackageError::ManifestTooLarge(MAX_MANIFEST_BYTES + 1)
         );
+    }
+
+    /// A symbolic link is refused rather than followed, even to a valid
+    /// file, so a source cannot be swapped behind its name.
+    #[cfg(unix)]
+    #[test]
+    fn a_symbolic_link_is_refused() {
+        let dir = crate::test_support::TempDir::new("wasm-symlink");
+        let manifest = br#"{"api":"0.1.0","id":"g","version":"1","vetoTools":["write"]}"#;
+        std::fs::write(dir.join("real.json"), manifest).unwrap();
+        std::os::unix::fs::symlink(dir.join("real.json"), dir.join("plugin.json")).unwrap();
+        std::fs::write(dir.join("plugin.wasm"), COMPONENT_HEADER).unwrap();
+        assert_eq!(
+            WasmPackage::read_dir(dir.path()).unwrap_err(),
+            PackageError::Read {
+                file: "plugin.json",
+                message: "not a regular file".to_owned()
+            }
+        );
+        std::fs::remove_file(dir.join("plugin.json")).unwrap();
+        std::fs::write(dir.join("plugin.json"), manifest).unwrap();
+        let package = WasmPackage::read_dir(dir.path()).unwrap();
+        assert_eq!(package.manifest_bytes(), manifest);
     }
 
     /// A FIFO is refused without blocking on its open.

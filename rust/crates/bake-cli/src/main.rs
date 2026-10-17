@@ -8,10 +8,13 @@
 //! documentation ([`docs`]). `bake-rs --self-check` reports that the
 //! executable loads and carries its documentation ([`self_check`]);
 //! `bake-rs plugin check` starts one Wasm plugin package in its helper
-//! ([`plugin_check`]). These commands need no Bake home.
+//! ([`plugin_check`]). These commands need no Bake home; `bake-rs plugin
+//! install`, `enable`, `disable`, and `list` manage the Wasm plugins the
+//! Bake home enables for sessions ([`plugin_manage`]).
 
 mod docs;
 mod plugin_check;
+mod plugin_manage;
 mod self_check;
 
 use std::ffi::OsString;
@@ -44,6 +47,13 @@ Usage:
   bake-rs plugin check <dir> [<tool> <args-json>]
                               Start a Wasm plugin package in its helper, and
                               optionally ask it about one tool call
+  bake-rs plugin install <dir>
+                              Check a Wasm plugin package and copy it into the
+                              Bake home's plugin store, named by its hash
+  bake-rs plugin enable <sha256>
+                              Enable an installed package for new sessions
+  bake-rs plugin disable <id> Disable a plugin, clearing a recorded failure
+  bake-rs plugin list         List the enabled plugins and their state
 
 Options:
   -p, --print               Send the prompts, print the final answer, and exit
@@ -121,8 +131,8 @@ The preview shows sample content only and does not connect to a model.
 Ctrl+C twice quits it.
 
 Run 'bake-rs docs' for the documentation: the Bake home, settings, models,
-permissions, sessions, context files, skills, MCP servers, and the command
-line.
+permissions, sessions, plugins, context files, skills, MCP servers, and the
+command line.
 ";
 
 #[derive(Debug, PartialEq, Eq)]
@@ -135,6 +145,8 @@ enum Command {
     SelfCheck,
     /// `bake-rs plugin check`: a package directory and an optional call.
     PluginCheck(PathBuf, Option<plugin_check::Call>),
+    /// `bake-rs plugin install | enable | disable | list`.
+    PluginManage(plugin_manage::Manage),
     Agent(Vec<String>),
 }
 
@@ -176,6 +188,27 @@ fn parse(args: &[OsString]) -> Result<Command, String> {
             Err(format!("unexpected argument '{extra}' for 'plugin check'"))
         }
         ["plugin", "check"] => Err("'plugin check' needs a package directory".to_owned()),
+        ["plugin", "install", dir] => Ok(Command::PluginManage(plugin_manage::Manage::Install(
+            PathBuf::from(dir),
+        ))),
+        ["plugin", "enable", hash] => Ok(Command::PluginManage(plugin_manage::Manage::Enable(
+            (*hash).to_owned(),
+        ))),
+        ["plugin", "disable", id] => Ok(Command::PluginManage(plugin_manage::Manage::Disable(
+            (*id).to_owned(),
+        ))),
+        ["plugin", "list"] => Ok(Command::PluginManage(plugin_manage::Manage::List)),
+        [
+            "plugin",
+            command @ ("install" | "enable" | "disable"),
+            rest @ ..,
+        ] => Err(format!(
+            "'plugin {command}' takes one argument, not {}",
+            rest.len()
+        )),
+        ["plugin", "list", extra, ..] => {
+            Err(format!("unexpected argument '{extra}' for 'plugin list'"))
+        }
         _ => Ok(Command::Agent(args)),
     }
 }
@@ -211,6 +244,7 @@ fn main() -> ExitCode {
         Ok(Command::Docs(topic)) => show_docs(topic.as_deref()),
         Ok(Command::SelfCheck) => run_self_check(),
         Ok(Command::PluginCheck(dir, call)) => plugin_check::run(&dir, call.as_ref()),
+        Ok(Command::PluginManage(command)) => plugin_manage::run(&command),
         // Without arguments, a terminal opens a session; a pipe gets help.
         Ok(Command::Agent(args))
             if args.is_empty() && !(io::stdin().is_terminal() && io::stdout().is_terminal()) =>
@@ -409,6 +443,12 @@ fn environment(
         imported_default_preset: imported.default_preset,
         sandbox_provider: sandbox_provider(),
         approver: approvals.map(|broker| Arc::new(broker) as Arc<dyn Approver>),
+        // This executable is the plugin helper; one compile queue serves
+        // every session of the process (`/new` and `/resume` included).
+        plugins: bake_coding_agent::plugins::wasm::WasmSetup {
+            command: bake_coding_agent::plugins::wasm::HelperCommand::current_exe().ok(),
+            ..Default::default()
+        },
         warnings: imported.warnings,
         interrupt,
     }
@@ -565,6 +605,29 @@ mod tests {
             &["plugin", "check", "pkg", "write"],
             &["plugin", "check", "pkg", "write", "[]"],
             &["plugin", "check", "pkg", "write", "{}", "extra"],
+        ] {
+            assert!(parse_strs(args).is_err(), "{args:?}");
+        }
+        assert_eq!(
+            parse_strs(&["plugin", "install", "pkg"]),
+            Ok(Command::PluginManage(plugin_manage::Manage::Install(
+                PathBuf::from("pkg")
+            )))
+        );
+        assert_eq!(
+            parse_strs(&["plugin", "disable", "guard"]),
+            Ok(Command::PluginManage(plugin_manage::Manage::Disable(
+                "guard".to_owned()
+            )))
+        );
+        assert_eq!(
+            parse_strs(&["plugin", "list"]),
+            Ok(Command::PluginManage(plugin_manage::Manage::List))
+        );
+        for args in [
+            &["plugin", "install"][..],
+            &["plugin", "enable", "a", "b"],
+            &["plugin", "list", "x"],
         ] {
             assert!(parse_strs(args).is_err(), "{args:?}");
         }

@@ -49,12 +49,14 @@
 //! v1.2.0's `navigateTree` and runtime `fork` (in
 //! `agent_session/navigation.rs`).
 //!
-//! Trusted compiled-in plugins ([`crate::plugins`], given as
-//! [`AgentSessionOptions::plugins`]) veto tool calls through the agent's
+//! Plugins ([`crate::plugins`], given as [`AgentSessionOptions::plugins`]):
+//! trusted compiled-in ones and the Wasm plugins a Bake home enables
+//! ([`crate::plugins::installed`]) veto tool calls through the agent's
 //! `before_tool_call` hook, as Pi v1.3.0's `_beforeToolCall` runs
 //! `tool_call` handlers (in `agent_session/plugin_veto.rs`); each block is
-//! written as a `custom` entry before the denial result. With no plugins no
-//! hook is installed.
+//! written as a `custom` entry before the denial result. The session's
+//! [`WorkGate`] owns every Wasm helper: shutdown returns only after each
+//! has been reaped. With no plugins no hook is installed.
 //!
 //! Not ported (deferred): Pi's extensions and their other events (including
 //! `session_before_compact`, `session_compact`, and
@@ -195,9 +197,10 @@ pub struct AgentSessionOptions {
     /// which the prompt's `docs` section and the no-model and no-key
     /// messages name.
     pub docs_command: String,
-    /// The trusted plugins whose tool-call vetoes run before each call to
-    /// a tool they list ([`crate::plugins`]); empty, the default, installs
-    /// no hook.
+    /// The plugins whose tool-call vetoes run before each call to a tool
+    /// they list ([`crate::plugins`]): trusted ones, and the Wasm plugins
+    /// [`crate::plugins::installed::PluginHome::load`] registers; empty, the
+    /// default, installs no hook.
     pub plugins: PluginRegistry,
     /// The gate that owns the session's work ([`WorkGate`]); `None` makes a
     /// private one. Give the same gate to the tools that spawn processes
@@ -699,6 +702,8 @@ pub struct AgentSession {
     write_failure: Arc<Mutex<Option<String>>>,
     /// The MCP servers [`Self::start_mcp`] started, once it has.
     mcp: OnceLock<McpServers>,
+    /// The plugin dispatcher, when any plugin is registered.
+    plugins: Option<Arc<VetoDispatcher>>,
 }
 
 impl std::fmt::Debug for AgentSession {
@@ -1385,8 +1390,12 @@ impl AgentSession {
         });
         let after_tool_core = Arc::clone(&core);
         let persist_error = Arc::new(Mutex::new(None));
-        let before_tool_call = plugins.map(|plugins| {
-            plugin_veto::plugin_veto_hook(Arc::clone(&core), Arc::clone(&persist_error), plugins)
+        let before_tool_call = plugins.as_ref().map(|plugins| {
+            plugin_veto::plugin_veto_hook(
+                Arc::clone(&core),
+                Arc::clone(&persist_error),
+                Arc::clone(plugins),
+            )
         });
         let agent = Agent::new(AgentOptions {
             initial_state: AgentInitialState {
@@ -1478,6 +1487,11 @@ impl AgentSession {
             .into_iter()
             .filter(|name| tools.iter().any(|tool| &tool.name == name))
             .collect();
+        // Last, after every fallible step: the keeper of the Wasm plugins'
+        // helpers is owned work of the gate from here on.
+        if let Some(plugins) = &plugins {
+            plugins.attach(&work).map_err(refused_message)?;
+        }
         let gap = Arc::clone(&core.gap);
         let created = Self {
             apis,
@@ -1504,6 +1518,7 @@ impl AgentSession {
             queue: Arc::default(),
             write_failure: gap,
             mcp: OnceLock::new(),
+            plugins,
         };
         created.connect();
         Ok(created)
@@ -2575,6 +2590,16 @@ impl AgentSession {
     /// Pi's `autoRetryEnabled`.
     pub fn auto_retry_enabled(&self) -> bool {
         read_settings(&self.settings).retry.enabled
+    }
+
+    /// The helpers this session's Wasm plugins have started and not yet
+    /// seen stop, in dispatch order; empty without Wasm plugins. After
+    /// [`Self::shutdown`] returns, every one of them has been reaped.
+    pub fn plugin_helpers(&self) -> Vec<crate::plugins::wasm::HelperInfo> {
+        self.plugins
+            .as_ref()
+            .map(|plugins| plugins.helpers())
+            .unwrap_or_default()
     }
 
     /// Pi's `abort`: signals the run, cancels a retry wait and a

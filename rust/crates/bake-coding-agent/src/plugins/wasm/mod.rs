@@ -40,17 +40,19 @@
 //!   teardown); it bounds every wait and checks every reply, and it bounds
 //!   a call's id, argument depth, and argument length before sending.
 //!
-//! Nothing registers a Wasm plugin in a session yet: configuration, the
-//! session adapter, and restart policy are open work. The only product
-//! consumer is the `bake-rs plugin check` diagnostic.
+//! A session runs the Wasm plugins its Bake home enables
+//! ([`crate::plugins::installed`]) through a per-plugin adapter
+//! (`session.rs`) that owns each helper generation it starts; the
+//! `bake-rs plugin check` diagnostic runs one host directly.
 
 mod engine;
 mod helper;
 mod host;
-mod manifest;
+pub(crate) mod manifest;
 mod os_limit;
 mod process;
 mod protocol;
+pub(crate) mod session;
 mod validate;
 
 pub use helper::helper_main;
@@ -60,6 +62,7 @@ pub use host::{
 };
 pub use manifest::{PackageError, WasmManifest, WasmPackage};
 pub use protocol::{LimitMechanism, LoadFailure, LogLevel, LogLine, MemoryLimit, TrapKind};
+pub use session::{HelperInfo, WasmSetup};
 
 /// The hidden first argument that turns a Bake executable into the plugin
 /// helper.

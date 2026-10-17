@@ -22,6 +22,8 @@ tokio = { workspace = true, features = ["rt", "rt-multi-thread", "signal", "macr
 ring.workspace = true
 
 [dev-dependencies]
+# The Wasm plugin session tests build their own tools.
+bake-agent.workspace = true
 # The Wasm plugin host tests: async drivers, and components built from
 # core-module text with the WIT tooling Wasmtime's bindings already use.
 # `test-util` lets the compile-deadline test hold the host's clock until the

@@ -1393,3 +1393,112 @@ fn print_mode_expands_prompt_templates_and_lists_models() {
     let sent = transcript(&requests[0]);
     assert_eq!(sent[1], "user: Review src/lib.rs with: strict mode fast");
 }
+
+/// The owner's plugin flow through the shipped binary: `plugin install`
+/// checks the guard package in a helper and copies it into the home's
+/// store, `plugin enable` pins it, and `bake-rs -p` then blocks the
+/// model's write to `.env`: the request after it carries the guard's
+/// denial, the decision precedes the denial in the session file, and
+/// `.env` is unchanged. `plugin disable` turns it off for the next run. A
+/// `plugins.json` that cannot be read, or that others can write, stops
+/// startup before any request.
+/// Only Linux and macOS check who can change it, so only they enable one.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn print_mode_runs_the_plugins_the_home_enables() {
+    let server = Server::start_sequence(vec![
+        Reply::tool_call("write", &json!({ "path": ".env", "content": "pwned" })),
+        Reply::sse(),
+        Reply::tool_call("write", &json!({ "path": ".env", "content": "pwned" })),
+        Reply::sse(),
+    ]);
+    let workspace = Workspace::new("plugins", server.port);
+    let env = workspace.project().join(".env");
+    std::fs::write(&env, "SECRET=1\n").expect("seed");
+    let guard = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/guard");
+
+    let installed = workspace.run(&["plugin", "install", guard.to_str().expect("utf-8")], None);
+    assert_eq!(
+        installed.status.code(),
+        Some(0),
+        "{}",
+        text(&installed.stderr)
+    );
+    let out = text(&installed.stdout);
+    let hash = out
+        .lines()
+        .find_map(|line| line.strip_prefix("installed guard 0.1.0 as sha256:"))
+        .unwrap_or_else(|| panic!("{out}"))
+        .to_owned();
+    assert!(out.contains(&format!("enable it with: bake-rs plugin enable {hash}")));
+    let listed = workspace.run(&["plugin", "list"], None);
+    assert!(text(&listed.stdout).starts_with("No plugin is enabled"));
+    let enabled = workspace.run(&["plugin", "enable", &hash], None);
+    assert_eq!(enabled.status.code(), Some(0), "{}", text(&enabled.stderr));
+    let listed = workspace.run(&["plugin", "list"], None);
+    assert_eq!(
+        text(&listed.stdout),
+        format!("guard 0.1.0 sha256:{hash} vetoes edit, write: ready\n")
+    );
+
+    let out = workspace.run(
+        &["-p", "--permission", "danger-full-access", "Write it"],
+        None,
+    );
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    assert_eq!(std::fs::read_to_string(&env).unwrap(), "SECRET=1\n");
+    let requests = server.requests();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(sent_tool_output(&requests[1]), "Path \".env\" is protected");
+    let entries = lines(&workspace.session_files()[0]);
+    let decision = entries
+        .iter()
+        .position(|entry| entry["customType"] == "bake.plugin.decision")
+        .expect("decision");
+    let result = entries
+        .iter()
+        .position(|entry| entry["message"]["role"] == "toolResult")
+        .expect("result");
+    assert!(decision < result);
+    assert_eq!(entries[decision]["data"]["sha256"], hash.as_str());
+
+    let disabled = workspace.run(&["plugin", "disable", "guard"], None);
+    assert_eq!(
+        disabled.status.code(),
+        Some(0),
+        "{}",
+        text(&disabled.stderr)
+    );
+    let out = workspace.run(&["-p", "--permission", "danger-full-access", "Again"], None);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    assert_eq!(std::fs::read_to_string(&env).unwrap(), "pwned");
+
+    std::fs::write(workspace.home().join("plugins/plugins.json"), "{").expect("corrupt");
+    let before = server.requests().len();
+    let out = workspace.run(&["-p", "Hello"], None);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        text(&out.stderr).contains("plugins.json is invalid"),
+        "{}",
+        text(&out.stderr)
+    );
+    assert_eq!(
+        server.requests().len(),
+        before,
+        "no request after a refused startup"
+    );
+
+    // A configuration others can write is refused the same way.
+    use std::os::unix::fs::PermissionsExt;
+    let config = workspace.home().join("plugins/plugins.json");
+    std::fs::write(&config, r#"{"plugins":{}}"#).expect("empty");
+    std::fs::set_permissions(&config, std::fs::Permissions::from_mode(0o666)).expect("chmod");
+    let out = workspace.run(&["-p", "Hello"], None);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        text(&out.stderr).contains("plugins.json is not trusted"),
+        "{}",
+        text(&out.stderr)
+    );
+    assert_eq!(server.requests().len(), before);
+}

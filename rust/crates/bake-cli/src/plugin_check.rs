@@ -2,8 +2,8 @@
 //! starts one Wasm plugin package in its helper process with the default
 //! plugin limits, prints what the helper established, optionally asks the
 //! plugin about one tool call, and shuts the helper down. It loads nothing
-//! into any session and reads no Bake home; no session registers a Wasm
-//! plugin yet.
+//! into any session and reads no Bake home. `plugin install` runs the same
+//! check ([`check_package`]) before it stores a package.
 //!
 //! The contract, which the process tests check against the built binary:
 //!
@@ -57,7 +57,7 @@ pub fn parse_call(tool: &str, args: &str) -> Result<Call, String> {
 }
 
 /// How the check ended.
-enum Failure {
+pub enum Failure {
     /// Ctrl+C.
     Interrupted,
     /// Anything else, with its (escaped) message.
@@ -66,7 +66,12 @@ enum Failure {
 
 /// Runs the check: 0 on a clean run, 130 after Ctrl+C, 1 otherwise.
 pub fn run(dir: &Path, call: Option<&Call>) -> ExitCode {
-    let result = check(dir, call);
+    exit(check(dir, call))
+}
+
+/// The exit status for `result`, reporting a failure on standard error:
+/// 0, 130 after Ctrl+C, or 1 with an `Error:` line.
+pub fn exit(result: Result<(), Failure>) -> ExitCode {
     let (code, message) = match result {
         Ok(()) => return ExitCode::SUCCESS,
         Err(Failure::Interrupted) => (130, "interrupted".to_owned()),
@@ -81,7 +86,7 @@ pub fn run(dir: &Path, call: Option<&Call>) -> ExitCode {
 
 /// Writes one line to standard output at once; a closed output is a
 /// failure.
-fn line(text: &str) -> Result<(), Failure> {
+pub fn line(text: &str) -> Result<(), Failure> {
     if crate::write_stdout(&format!("{text}\n")) {
         Ok(())
     } else {
@@ -91,6 +96,12 @@ fn line(text: &str) -> Result<(), Failure> {
 
 fn check(dir: &Path, call: Option<&Call>) -> Result<(), Failure> {
     let package = WasmPackage::read_dir(dir).map_err(|error| fail(&error.to_string()))?;
+    check_package(package, call)
+}
+
+/// Starts `package` in a helper, as `plugin check` does, optionally asks it
+/// about `call`, and requires a clean shutdown.
+pub fn check_package(package: WasmPackage, call: Option<&Call>) -> Result<(), Failure> {
     let plugin = package.manifest().plugin();
     line(&format!(
         "plugin {} {} (bake:plugin@{}), vetoes {}",
@@ -242,7 +253,7 @@ async fn ask(host: &WasmPluginHost, call: &Call, signal: &AbortSignal) -> Result
 
 /// A failure whose text, which may quote the plugin or the helper, is
 /// escaped for the terminal.
-fn fail(message: &str) -> Failure {
+pub fn fail(message: &str) -> Failure {
     Failure::Error(escape(message))
 }
 
@@ -269,7 +280,7 @@ fn describe(exit: &ExitReport) -> String {
 }
 
 /// Text with control characters escaped, so it cannot drive the terminal.
-fn escape(text: &str) -> String {
+pub fn escape(text: &str) -> String {
     text.chars()
         .flat_map(|c| {
             if c.is_control() {

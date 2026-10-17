@@ -14,7 +14,8 @@ bake-sandbox.workspace = true
 bake-process.workspace = true
 # MCP servers a session owns: the client and the stdio server owner.
 bake-mcp.workspace = true
-# SHA-256 for MCP tool names (`mcp::names`).
+# SHA-256 for MCP tool names (`mcp::names`) and for the content hashes of
+# installed Wasm plugin packages (`plugins::installed`).
 ring.workspace = true
 tokio = { workspace = true, features = ["rt", "sync", "time", "macros", "process", "io-util"] }
 serde.workspace = true
