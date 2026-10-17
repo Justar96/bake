@@ -28,10 +28,12 @@ The Rust agent's third-party license bundle is generated separately from the Typ
 
 ```sh
 bun run gen-native-licenses     # cargo fetch --locked, then write .artifacts/native/licenses
-bun run verify-native-licenses  # regenerate offline and compare; writes nothing
+bun run verify-native-licenses  # regenerate offline and compare; leave the bundle unchanged
 ```
 
 Both commands take `--out <dir>`, resolved through any links: inside the repository it must be under `.artifacts/native/`, and `distribution/`, `.artifacts/bake-release/`, and a link to a missing path are refused. `--write` replaces only an empty directory or an earlier bundle with nothing else in it. It stages the new bundle beside the output and removes the earlier one only after the new one is in place. If installation fails, it restores the earlier bundle; if restoration also fails, the error names the directory where the earlier files are kept.
+
+Collection uses cargo-about's output-file option so PowerShell does not alter or reject captured license text. The private temporary output is removed after either success or failure; checking never changes the bundle directory.
 
 The output is `inventory.json` and `<platform>/THIRD-PARTY-LICENSES.txt` for the five native release platforms. Each file lists the locked crates with their declared licenses and roles, reproduces their license texts with source paths, and includes Bake's crate NOTICE files and third-party NOTICE, COPYRIGHT, and COPYING files. Dev-dependencies are excluded. Output is byte-identical for the same inputs and carries no machine paths.
 

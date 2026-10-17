@@ -8,6 +8,7 @@ import {
   buildBundle,
   type BundleInputs,
   checkArtifacts,
+  collect,
   INVENTORY_FILE,
   LicenseBundleError,
   main,
@@ -506,7 +507,12 @@ describe('the command', () => {
         if (triple === 'all') return inputs.hostTree
         return inputs.trees.find(entry => PLATFORMS.find(platform => platform.id === entry.id)?.triple === triple)?.linked ?? ''
       }
-      if (args[0] === 'about') return inputs.about
+      if (args[0] === 'about') {
+        const output = args[args.indexOf('--output-file') + 1]
+        if (args.indexOf('--output-file') < 0 || output === undefined) throw new Error('cargo-about requires --output-file under PowerShell')
+        writeFileSync(output, inputs.about)
+        return 'diagnostics are not license JSON'
+      }
       throw new Error(`unexpected ${command} ${args.join(' ')}`)
     }
     return { run, calls }
@@ -554,5 +560,29 @@ describe('the command', () => {
     }
     expect(errors[0]).toContain('is "cargo-about 0.8.4"; the bundle is generated with cargo-about 0.9.2')
     expect(errors[1]).toContain('not the pinned Rust 1.99.0')
+  })
+
+  test('collects the output file and removes its private directory after success or failure', () => {
+    const { root, inputs } = fixture([crates.memchr])
+    const normal = runner(inputs)
+    let output: string | undefined
+    const capture: Runner = (command, args, cwd) => {
+      if (args[0] === 'about') output = args[args.indexOf('--output-file') + 1]
+      return normal.run(command, args, cwd)
+    }
+    expect(collect(root, capture).about).toBe(inputs.about)
+    expect(output).toBeDefined()
+    expect(existsSync(dirname(output!))).toBe(false)
+
+    const interrupted: Runner = (command, args, cwd) => {
+      if (args[0] === 'about') {
+        output = args[args.indexOf('--output-file') + 1]
+        normal.run(command, args, cwd)
+        throw new Error('collector failed after writing')
+      }
+      return normal.run(command, args, cwd)
+    }
+    expect(() => collect(root, interrupted)).toThrow('collector failed after writing')
+    expect(existsSync(dirname(output!))).toBe(false)
   })
 })
