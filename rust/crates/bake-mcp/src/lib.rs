@@ -42,9 +42,8 @@
 //! content conversion, the model tool adapter, configuration, and reconnects
 //! belong to the integration in `bake-coding-agent`.
 #![warn(missing_docs)]
-// `unsafe` is denied everywhere but `stdio`'s server module, whose
-// syscalls carry their contracts.
-#![deny(unsafe_code)]
+// The process syscalls live in `bake-process`.
+#![forbid(unsafe_code)]
 
 pub mod client;
 pub mod http;

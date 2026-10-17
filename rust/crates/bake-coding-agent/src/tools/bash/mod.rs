@@ -5,7 +5,7 @@
 //! | this module | Pi `src/core/tools/bash.ts` (`createShellToolDefinition`, `createBashTool`), `BASH_UPDATE_THROTTLE_MS` from `src/core/tools/renderers/bash.ts` |
 //! | [`local`] | Pi `src/core/tools/bash.ts` (`createLocalShellOperations`), `src/utils/child-process.ts` (`waitForChildProcess`) |
 //! | [`shell`] | Pi `src/utils/shell.ts` (`getShellConfig`, `getShellEnv`) |
-//! | `tree` | Pi `src/utils/shell.ts` (`killProcessTree`, detached-child tracking) |
+//! | `bake-process` (a crate of its own, shared with MCP stdio servers) | Pi `src/utils/shell.ts` (`killProcessTree`, detached-child tracking) |
 //!
 //! The model-visible text (name, description, schemas, results, exit-code,
 //! timeout, abort, and truncation notices) is Pi's byte for byte;
@@ -49,17 +49,16 @@ use crate::tools::truncate::{DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, TruncatedBy, 
 
 pub mod local;
 pub mod shell;
-pub(crate) mod tree;
 
 #[cfg(test)]
 mod tests;
 
+pub use bake_process::kill_tracked_detached_children;
 pub use local::{
     LocalShellOperations, PreparedExecError, PreparedSpawn, ShellInvocation,
     create_local_bash_operations,
 };
 pub use shell::{CommandTransport, ShellConfig, get_shell_config, get_shell_env};
-pub use tree::kill_tracked_detached_children;
 
 /// Pi's `bashToolSystemPromptContribution.snippet`.
 pub const BASH_TOOL_PROMPT_SNIPPET: &str = "Execute bash commands (ls, grep, find, etc.)";

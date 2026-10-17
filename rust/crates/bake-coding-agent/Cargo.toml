@@ -11,6 +11,7 @@ description = "Pi's coding-agent services for Bake's Rust agent: sessions, the f
 bake-agent.workspace = true
 bake-ai.workspace = true
 bake-sandbox.workspace = true
+bake-process.workspace = true
 tokio = { workspace = true, features = ["rt", "sync", "time", "macros", "process", "io-util"] }
 serde.workspace = true
 serde_json.workspace = true
@@ -26,15 +27,16 @@ ignore.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
-# SIGCHLD wakes an owned process's exit wait (`child_process`).
-tokio = { workspace = true, features = ["signal"] }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Pipes", "Win32_System_Threading"] }
-# An owned process's pipes are overlapped named pipes (`child_process`).
-tokio = { workspace = true, features = ["net"] }
+# `json_store`'s DACL copy.
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "time", "macros", "net", "io-util", "test-util"] }
 loom = { version = "=0.7.2", default-features = false }
 bake-sandbox = { workspace = true, features = ["testing"] }
+
+[target.'cfg(windows)'.dev-dependencies]
+# `tests/process_windows.rs`' process probes.
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading"] }

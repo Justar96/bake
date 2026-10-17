@@ -5,7 +5,7 @@
 //! One future owns the shell, its pipes, its optional standard-input write,
 //! the timeout, and the abort: nothing is spawned beside it. Abort and
 //! timeout kill the process tree, then wait for the shell to exit, its pipes
-//! to settle, and its whole tree to be gone ([`crate::child_process`]).
+//! to settle, and its whole tree to be gone ([`bake_process`]).
 //! Dropping the future before it settles kills the tree and hands the shell
 //! to its owner, the [`WorkGate`] given by
 //! [`LocalShellOperations::with_owner`], whose close then waits for it. After the shell exits, Pi keeps
@@ -33,7 +33,7 @@ use tokio::time::Instant;
 
 use super::shell::{CommandTransport, ShellConfig, get_shell_config, get_shell_env};
 use super::{BashExecError, BashExecOptions, BashOperations};
-use crate::child_process::{OwnedProcess, ProcessSpec, aborted, sleep_until, wait_for_process};
+use crate::child_process::{self, ProcessSpec, aborted, sleep_until, wait_for_process};
 use crate::owned_work::WorkGate;
 use crate::session::json::js_number_to_string;
 
@@ -320,7 +320,7 @@ impl LocalShellOperations {
             env: Some(env),
             stdin: stdin_bytes.is_some(),
         };
-        let child = OwnedProcess::spawn(&spec, self.owner.as_ref())
+        let child = child_process::spawn(&spec, self.owner.as_ref())
             .await
             .map_err(|error| PreparedExecError {
                 error: BashExecError::Failed(spawn_error(Path::new(&program), &error)),

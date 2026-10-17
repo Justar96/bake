@@ -5,7 +5,7 @@
 //! ask for a job list on stable Rust, so this narrow path replaces them for
 //! owned processes. The attribute-list use follows Bake's
 //! `bake-sandbox` Windows runner (`backends/windows_acl/sys.rs`), and the
-//! command line is its `build_command_line`.
+//! command line is its quoting ([`crate::command_line`]).
 //!
 //! If the job, its kill-on-close limit, a pipe, or the process cannot be
 //! created, nothing runs and the error is returned.
@@ -66,6 +66,10 @@ impl Leader {
         false
     }
 
+    /// Nothing to check: the handle held here keeps the identity.
+    #[allow(clippy::unused_self, reason = "the Unix leader can lose its identity")]
+    pub(super) fn check_identity(&mut self) {}
+
     /// Asks the system to end the leader. The result is not read as a
     /// fact about the process: whether it exited is only ever learned from
     /// [`Self::wait_exit`].
@@ -122,6 +126,8 @@ impl Drop for Leader {
 pub(super) struct Spawned {
     pub(super) leader: Leader,
     pub(super) job: OwnedHandle,
+    /// The job's completion port, associated before the leader existed.
+    pub(super) port: OwnedHandle,
     pub(super) stdin: Option<ProcessStdin>,
     pub(super) stdout: Option<ProcessStdout>,
     pub(super) stderr: Option<ProcessStderr>,
@@ -373,7 +379,7 @@ pub(super) async fn spawn(spec: &ProcessSpec) -> io::Result<Spawned> {
             "nul byte found in provided data",
         ));
     }
-    let mut command_line = bake_sandbox::backends::windows_acl::build_command_line(&argv);
+    let mut command_line = crate::command_line::build_command_line(&argv);
     command_line.push(0);
     let application = wide(application.as_os_str())?;
     let cwd = spec
@@ -395,7 +401,12 @@ pub(super) async fn spawn(spec: &ProcessSpec) -> io::Result<Spawned> {
     }
     // SAFETY: a fresh handle owned here.
     let job = unsafe { OwnedHandle::from_raw_handle(job) };
-    crate::tools::bash::tree::set_kill_on_close(&job, true)?;
+    crate::tree::set_kill_on_close(&job, true)?;
+    // Associated while the job has never had a process, so every
+    // association, the leader's first, reports to it: a settled kill names
+    // its members from these messages (`crate::job_ledger`).
+    let port = crate::tree::completion_port()?;
+    crate::tree::associate_port(&job, &port)?;
 
     let (stdout_read, stdout_write) = pipe(Direction::FromChild).await?;
     let (stderr_read, stderr_write) = pipe(Direction::FromChild).await?;
@@ -493,6 +504,7 @@ pub(super) async fn spawn(spec: &ProcessSpec) -> io::Result<Spawned> {
     Ok(Spawned {
         leader,
         job,
+        port,
         stdin: stdin_parent,
         stdout: Some(stdout_read),
         stderr: Some(stderr_read),

@@ -1,4 +1,4 @@
-//! Bake: an owned process tree on Windows (`child_process::windows`). The
+//! Bake: an owned process tree on Windows (`bake-process`). The
 //! command is born in a kill-on-close job; a normal exit clears that limit
 //! before the job's handle closes, so an intentionally started background
 //! process keeps running, as Pi leaves it; before that detach, the death of

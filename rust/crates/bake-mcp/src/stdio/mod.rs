@@ -15,12 +15,11 @@
 //!   ([`Connecting::shutdown`] or [`McpClient::shutdown`]), which closes the
 //!   server's standard input as the specification's stdio shutdown begins,
 //!   then [`StdioProcess::shutdown`], which waits for the server to exit,
-//!   escalates to `SIGTERM` and `SIGKILL`, signals what is left of its tree
-//!   (Unix) or waits for its Job to empty (Windows), reaps it, and drains
-//!   its standard error. The process owner keeps every
-//!   handle (the child, its tree, the reader task) until that cleanup has
-//!   finished: a cancelled or incomplete shutdown leaves them owned, and the
-//!   next call resumes.
+//!   escalates to `SIGTERM` and `SIGKILL`, kills what is left of its tree and
+//!   waits until no process is observed in it, reaps the server, and drains
+//!   its standard error. The process owner keeps every handle (the child,
+//!   its tree, the reader task) until that cleanup has finished: a cancelled
+//!   or incomplete shutdown leaves them owned, and the next call resumes.
 //!
 //! # Caller obligations
 //!
@@ -41,37 +40,39 @@
 //!
 //! # Platforms
 //!
-//! Process groups and Jobs are cleanup ownership, not D24 containment.
+//! The process and its tree are owned by `bake-process`'s `OwnedProcess`,
+//! the owner Bake's coding tools use, under its kill policy: a server's
+//! descendants never outlive a completed shutdown, even when the server
+//! exits by itself. Process groups and Jobs are cleanup ownership, not D24
+//! containment.
 //!
-//! On Unix the server leads a new process group (set before `exec`). Its
-//! exit is observed without reaping it (`waitid` with `WNOWAIT`, woken by
-//! `SIGCHLD`), the group is killed while the leader is still unreaped, and
-//! only then is the leader reaped. While it is unreaped its pid, and so the
-//! group id, cannot be reused, so no signal can reach an unrelated group; no
-//! group signal is sent after the reap, or once the leader is found reaped by
+//! On Unix the server leads a new session and process group (`setsid` before
+//! `exec`). Its exit is observed without reaping it (`waitid` with
+//! `WNOWAIT`), the group is killed and then awaited until none of its members
+//! is left (Linux `/proc`, macOS `proc_listpids`; a membership that cannot be
+//! read counts as present) while the leader is still unreaped, and only then
+//! is the leader reaped. While it is unreaped its pid, and so the group id,
+//! cannot be reused, so no signal can reach an unrelated group; no group
+//! signal is sent after the reap, or once the leader is found reaped by
 //! someone else (the host must not `waitpid(-1)` children it does not own).
-//! On Unix this is signal-only cleanup: the final `SIGKILL` is sent, but the
-//! group's other members are not awaited, so a completed shutdown does not
-//! prove they have exited. Awaiting group membership before the leader is
-//! reaped (Linux `/proc`, macOS `proc_listpids`) is an open integration and
-//! release gap; [`TreeEnd::Killed`] reports this case.
 //!
 //! On Windows the server is created inside a new kill-on-close Job
-//! (`PROC_THREAD_ATTRIBUTE_JOB_LIST`), inheriting only its pipe ends
-//! (`PROC_THREAD_ATTRIBUTE_HANDLE_LIST`), so it runs nothing outside the
-//! Job. Windows has no graceful termination signal: after the grace for
-//! standard input the Job is terminated. While the child's pipe ends are
-//! inheritable, between their creation and `CreateProcessW`, another thread
-//! that creates a process inheriting every inheritable handle (as `std`'s
-//! `Command` does) can inherit them too. The Windows path is compiled for
-//! the GNU target and linted, not yet run in this repository's tests.
+//! (`PROC_THREAD_ATTRIBUTE_JOB_LIST`), inheriting only its standard handles
+//! (`PROC_THREAD_ATTRIBUTE_HANDLE_LIST`), over overlapped named pipes
+//! connected before creation. A bare program name is looked up on the
+//! command's own `PATH`, never in the current directory, and batch files are
+//! refused. Windows has no graceful termination signal: after the grace for
+//! standard input the Job is terminated, and it is awaited until every
+//! process the Job reported as added is observed ended by handle and their
+//! number matches the Job's lifetime count (`bake-process`'s Job account);
+//! an account that falls short never settles, so the shutdown stays
+//! incomplete.
 //!
 //! A descendant that leaves the group (`setsid`, `setpgid`) or the Job
 //! escapes cleanup; [`StdioProcess::shutdown`] bounds its wait for such a
 //! descendant's standard error instead of waiting for it.
 
 mod environment;
-mod server;
 mod stderr;
 
 use std::ffi::OsString;
@@ -83,12 +84,12 @@ use std::process::ExitStatus;
 use std::sync::Arc;
 use std::time::Duration;
 
+use bake_process::{OwnedProcess, ProcessSpec};
 use tokio::sync::{Mutex, watch};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
 pub use self::environment::{is_scrubbed_name, scrubbed_parent_environment};
-use self::server::Server;
 pub use self::stderr::StderrSnapshot;
 use self::stderr::StderrState;
 use crate::client::{ClientOptions, ConnectError, Connecting, McpClient, OptionsError};
@@ -99,8 +100,9 @@ use crate::transport::{LineReader, LineWriter};
 /// The program runs directly, never through a shell, so arguments are not
 /// interpolated. The environment starts empty: nothing from this process is
 /// inherited unless added, usually from [`scrubbed_parent_environment`].
-/// With an empty `PATH`, a bare program name is resolved as the platform's
-/// process creation does without one; pass a path to be sure.
+/// A bare program name is resolved as the platform's process creation
+/// does (on Windows, on the command's own `PATH` only); pass a path to be
+/// sure.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StdioCommand {
     program: OsString,
@@ -238,8 +240,8 @@ pub enum SpawnError {
     /// No Tokio runtime is running on this thread; nothing was started.
     NoRuntime,
     /// The process could not be created (a missing program, a refused
-    /// working directory, an invalid environment, an OS limit), or on Unix
-    /// the `SIGCHLD` listener could not be registered. Nothing is running.
+    /// working directory, an invalid environment, an OS limit, or on Windows
+    /// a batch file). Nothing is running.
     Spawn(io::Error),
     /// The process was started, but the client over its pipes was not. The
     /// returned owner holds the process, its tree, and its standard error
@@ -314,16 +316,14 @@ pub enum Stop {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum TreeEnd {
-    /// Windows: the Job was observed with no active process.
+    /// The tree was killed after the server exited and was observed with no
+    /// process left in it before the server was reaped: no member of its
+    /// process group (Unix), or every process its Job ever associated named
+    /// and its handle observed signalled (Windows). A
+    /// descendant that left the group or the Job is not in the tree.
     Empty,
-    /// Unix: `SIGKILL` was sent to the group while its leader was still
-    /// unreaped, so it reached only this tree. That is a request, not an
-    /// observed end: this owner does not yet await the group's other members
-    /// (an open integration and release gap), so some may still be exiting.
-    /// A member that left the group was not signalled at all.
-    Killed,
     /// Unix: the leader was reaped by someone else, so its group was not
-    /// signalled (the id may name unrelated processes).
+    /// signalled or awaited (the id may name unrelated processes).
     NotSignalled,
 }
 
@@ -340,7 +340,7 @@ pub struct ProcessReport {
     /// The furthest step the shutdown took.
     pub stop: Stop,
     /// What is known about the rest of the tree, reported apart from the
-    /// leader's status: a kill request is not every descendant's exit.
+    /// leader's status.
     pub tree: TreeEnd,
     /// Whether standard error ended (every holder closed it) within
     /// [`StdioOptions::stderr_drain`]. `false` means a descendant outside the
@@ -353,24 +353,29 @@ pub struct ProcessReport {
 
 /// A shutdown that has not finished: the server was killed but has not
 /// exited within [`StdioOptions::kill_wait`] (an uninterruptible process),
-/// or, on Windows, it exited but its Job still had active processes after
-/// another `kill_wait`. The owner still holds the process, its tree, and
-/// the standard error reader; call [`StdioProcess::shutdown`] again to keep
-/// waiting.
+/// or it exited but its tree still had processes after another `kill_wait`.
+/// The owner still holds the process, unreaped, its tree, and the standard
+/// error reader; call [`StdioProcess::shutdown`] again to keep waiting.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ShutdownIncomplete {
     /// The furthest step taken.
     pub stop: Stop,
-    /// Whether the server itself has exited and been reaped; the rest of
-    /// its tree is what is still awaited.
-    pub reaped: bool,
+    /// Whether the server itself has exited; if so, the rest of its tree is
+    /// what is still awaited, and the server is reaped only after it.
+    pub exited: bool,
     /// The standard error read so far.
     pub stderr: StderrSnapshot,
 }
 
 impl fmt::Display for ShutdownIncomplete {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("the MCP server was killed but has not exited yet; shut it down again")
+        if self.exited {
+            f.write_str(
+                "the MCP server exited but its process tree has not ended yet; shut it down again",
+            )
+        } else {
+            f.write_str("the MCP server was killed but has not exited yet; shut it down again")
+        }
     }
 }
 
@@ -398,25 +403,30 @@ pub struct StdioProcess {
 /// call resumes from `stop` and awaits what is left.
 #[derive(Debug)]
 struct Inner {
-    server: Server,
+    /// `None` once settled, or once its identity was lost (dropping it then
+    /// signals nothing).
+    process: Option<OwnedProcess>,
     /// `None` only once the reader has been awaited to its end.
     stderr_task: Option<JoinHandle<()>>,
     /// The furthest escalation step taken so far.
     stop: Stop,
-    /// Set once the leader is reaped (or found reaped elsewhere).
-    status: Option<Option<ExitStatus>>,
+    /// Set once the leader is reaped (or found reaped elsewhere), with what
+    /// is known of its tree.
+    ended: Option<(Option<ExitStatus>, TreeEnd)>,
     /// Set only once everything above is done.
     report: Option<ProcessReport>,
 }
 
 /// Spawn `command` as a stdio MCP server and start a client over its pipes.
 ///
-/// Must be called inside a Tokio runtime. The options are validated before
+/// Must be awaited inside a Tokio runtime. The options are validated before
 /// anything is spawned. On success, the returned [`Connecting`] owns the
 /// protocol task (initialize it, and keep it to shut it down if
 /// initialization is cancelled), and the [`StdioProcess`] owns the process.
 /// Errors before the process exists leave nothing running; a failure after
-/// it exists is [`SpawnError::Started`], which hands back its owner.
+/// it exists is [`SpawnError::Started`], which hands back its owner. The
+/// future may suspend only before the process is created (Windows connects
+/// its pipes), so dropping it leaves nothing running.
 ///
 /// The caller must have admitted and, where its mode requires, confined
 /// `command` (see the [module documentation](self)).
@@ -428,39 +438,53 @@ struct Inner {
 /// Writing to an exited server raises `SIGPIPE` on Unix, which Rust programs
 /// ignore by default; a host that restores its default disposition is killed
 /// by it.
-pub fn spawn_stdio(
+pub async fn spawn_stdio(
     command: StdioCommand,
     options: StdioOptions,
 ) -> Result<(StdioProcess, Connecting), SpawnError> {
     options.validate().map_err(SpawnError::InvalidOptions)?;
     let runtime = tokio::runtime::Handle::try_current().map_err(|_| SpawnError::NoRuntime)?;
-    // `Command::spawn` and the `SIGCHLD` listener register with this
-    // thread's runtime.
-    let _enter = runtime.enter();
-    let (server, pipes) = server::spawn(&command).map_err(SpawnError::Spawn)?;
+    let StdioCommand {
+        program,
+        args,
+        current_dir,
+        env,
+    } = command;
+    let spec = ProcessSpec {
+        program,
+        args,
+        cwd: current_dir,
+        env: Some(env),
+        stdin: true,
+    };
+    // No claim: nothing outside this owner waits for the process, so a
+    // dropped owner only kills (see `StdioProcess`).
+    let mut process = OwnedProcess::spawn(&spec, None)
+        .await
+        .map_err(SpawnError::Spawn)?;
+    let (stdin, stdout) = (process.take_stdin(), process.take_stdout());
     let state = StderrState::new(options.max_stderr_bytes.get());
-    let stderr_task = pipes
-        .stderr
+    let stderr_task = process
+        .take_stderr()
         .map(|stderr| runtime.spawn(stderr::read(stderr, state.clone())));
     let missing = if stderr_task.is_none() {
-        // Marked ended so the owner's drain does not wait for it.
         Some("standard error")
     } else {
         None
     };
     let process = StdioProcess {
-        pid: server.pid(),
+        pid: process.pid(),
         stderr: state,
         options: options.clone(),
         inner: Mutex::new(Inner {
-            server,
+            process: Some(process),
             stderr_task,
             stop: Stop::Exited,
-            status: None,
+            ended: None,
             report: None,
         }),
     };
-    let (Some(stdin), Some(stdout), None) = (pipes.stdin, pipes.stdout, missing) else {
+    let (Some(stdin), Some(stdout), None) = (stdin, stdout, missing) else {
         return Err(SpawnError::Started {
             process: Box::new(process),
             error: Box::new(StartError::MissingPipe(
@@ -497,8 +521,9 @@ impl StdioProcess {
         self.stderr.subscribe()
     }
 
-    /// Stop the server and wait until it is reaped and its standard error
-    /// reader has ended.
+    /// Stop the server, wait until it and every process left in its tree
+    /// are gone, reap it, and wait until its standard error reader has
+    /// ended.
     ///
     /// Call it after the client's shutdown, which closes the server's
     /// standard input. The steps, each bounded by [`StdioOptions`]: wait
@@ -506,63 +531,31 @@ impl StdioProcess {
     /// its group and wait `terminate_grace`; then kill the tree and wait
     /// `kill_wait` for it to exit. Once it has exited, and before it is
     /// reaped, the tree is killed again (Pi sends `SIGTERM` there; Bake sends
-    /// `SIGKILL`). On Windows the Job is then awaited until empty; on Unix the
-    /// kill is sent but the group's members are not awaited, so `Ok` does not
-    /// prove Unix tree quiescence ([`ProcessReport::tree`] says which). No
-    /// group signal is ever sent after the leader is reaped. Finally standard error is
-    /// given `stderr_drain` to end, then its reader is stopped and awaited.
+    /// `SIGKILL`) and awaited for up to another `kill_wait` until no process
+    /// is observed in it: a sent kill is not taken for the tree's end, and a
+    /// membership that cannot be read is not taken for an empty tree. No
+    /// group signal is ever sent after the leader is reaped. Finally standard
+    /// error is given `stderr_drain` to end, then its reader is stopped and
+    /// awaited.
     ///
     /// `Err(ShutdownIncomplete)` means the server was killed and has not
-    /// exited within `kill_wait`: everything is still owned, and the next
-    /// call keeps waiting. A shutdown future dropped part way also keeps
-    /// everything, and the next call resumes where it stopped. Once a call
-    /// returns `Ok`, every later call returns the same report at once; calls
-    /// from several tasks run one at a time.
+    /// exited, or has exited with its tree not yet empty, within `kill_wait`:
+    /// everything is still owned, and the next call keeps waiting. A
+    /// shutdown future dropped part way also keeps everything, and the next
+    /// call resumes where it stopped. Once a call returns `Ok`, every later
+    /// call returns the same report at once; calls from several tasks run
+    /// one at a time.
     pub async fn shutdown(&self) -> Result<ProcessReport, ShutdownIncomplete> {
         let mut inner = self.inner.lock().await;
         if let Some(report) = &inner.report {
             return Ok(report.clone());
         }
+        if inner.ended.is_none() {
+            let ended = self.stop(&mut inner).await?;
+            inner.ended = Some(ended);
+        }
+        let (status, tree) = inner.ended.unwrap_or((None, TreeEnd::NotSignalled));
         let options = &self.options;
-        if inner.status.is_none() {
-            let mut exited = false;
-            if inner.stop == Stop::Exited {
-                exited = exit_within(&mut inner.server, options.stdin_close_grace).await;
-            }
-            if !exited && cfg!(unix) && inner.stop <= Stop::Terminated {
-                inner.server.terminate();
-                inner.stop = Stop::Terminated;
-                exited = exit_within(&mut inner.server, options.terminate_grace).await;
-            }
-            if !exited {
-                inner.server.kill_tree();
-                inner.stop = Stop::Killed;
-                exited = exit_within(&mut inner.server, options.kill_wait).await;
-            }
-            if !exited {
-                return Err(ShutdownIncomplete {
-                    stop: inner.stop,
-                    reaped: false,
-                    stderr: self.stderr.snapshot(),
-                });
-            }
-            // Kills what is left of the tree while the leader's identity is
-            // still held, then reaps; no await in between.
-            let status = inner.server.reap();
-            inner.status = Some(status);
-        }
-        // Windows: wait until the Job has no process (a terminate request is
-        // not every process's exit). Unix: returns at once.
-        if tokio::time::timeout(options.kill_wait, inner.server.tree_ended())
-            .await
-            .is_err()
-        {
-            return Err(ShutdownIncomplete {
-                stop: inner.stop,
-                reaped: true,
-                stderr: self.stderr.snapshot(),
-            });
-        }
         let mut stderr_ended = self.stderr.snapshot().ended;
         if let Some(task) = inner.stderr_task.as_mut() {
             // Awaited in place: the handle leaves `inner` only once the task
@@ -578,20 +571,80 @@ impl StdioProcess {
             stderr_ended = self.stderr.snapshot().ended;
         }
         let report = ProcessReport {
-            status: inner.status.flatten(),
+            status,
             stop: inner.stop,
-            tree: inner.server.tree(),
+            tree,
             stderr_ended,
             stderr: self.stderr.snapshot(),
         };
         inner.report = Some(report.clone());
         Ok(report)
     }
+
+    /// Escalates until the server exits, then kills its tree, awaits it,
+    /// and reaps the server. Resumable: an error or a dropped future keeps
+    /// the process owned, and every step is safe to repeat.
+    async fn stop(
+        &self,
+        inner: &mut Inner,
+    ) -> Result<(Option<ExitStatus>, TreeEnd), ShutdownIncomplete> {
+        let options = &self.options;
+        let incomplete = |stop, exited| ShutdownIncomplete {
+            stop,
+            exited,
+            stderr: self.stderr.snapshot(),
+        };
+        let Some(process) = inner.process.as_mut() else {
+            return Ok((None, TreeEnd::NotSignalled));
+        };
+        let mut exit = if process.has_exited() {
+            Exit::Exited
+        } else {
+            Exit::Running
+        };
+        if exit == Exit::Running && inner.stop == Stop::Exited {
+            exit = exit_within(process, options.stdin_close_grace).await;
+        }
+        if exit == Exit::Running && cfg!(unix) && inner.stop <= Stop::Terminated {
+            process.terminate();
+            inner.stop = Stop::Terminated;
+            exit = exit_within(process, options.terminate_grace).await;
+        }
+        if exit == Exit::Running {
+            process.kill();
+            inner.stop = Stop::Killed;
+            exit = exit_within(process, options.kill_wait).await;
+        }
+        match exit {
+            Exit::Running => return Err(incomplete(inner.stop, false)),
+            Exit::Lost => {
+                // Dropping it signals nothing: its identity is gone.
+                inner.process = None;
+                return Ok((None, TreeEnd::NotSignalled));
+            }
+            Exit::Exited => {}
+        }
+        // The kill policy, whether or not the server exited by itself: what
+        // is left of the tree is killed while the leader is unreaped, and
+        // the leader is reaped only once the tree is observed empty.
+        process.kill();
+        match tokio::time::timeout(options.kill_wait, process.finish()).await {
+            Ok(Ok(settled)) => {
+                inner.process = None;
+                Ok((Some(settled.status), TreeEnd::Empty))
+            }
+            Ok(Err(_)) if process.identity_lost() => {
+                inner.process = None;
+                Ok((None, TreeEnd::NotSignalled))
+            }
+            Ok(Err(_)) | Err(_) => Err(incomplete(inner.stop, process.has_exited())),
+        }
+    }
 }
 
 impl Drop for StdioProcess {
     fn drop(&mut self) {
-        // The server's own drop kills its tree only while the leader's
+        // The process's own drop kills its tree only while the leader's
         // identity is held; the reader is aborted, not awaited.
         if let Some(task) = self.inner.get_mut().stderr_task.take() {
             task.abort();
@@ -599,15 +652,35 @@ impl Drop for StdioProcess {
     }
 }
 
+/// What an exit wait saw.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Exit {
+    /// The leader has exited; it stays unreaped.
+    Exited,
+    /// Not seen to exit within the limit, or the wait failed.
+    Running,
+    /// Something else reaped the leader.
+    Lost,
+}
+
 /// Whether the server exits within `limit`; it stays unreaped. A zero limit
 /// checks once, without waiting for the timer's next tick.
-async fn exit_within(server: &mut Server, limit: Duration) -> bool {
+async fn exit_within(process: &mut OwnedProcess, limit: Duration) -> Exit {
+    let wait = async {
+        match process.wait_exit().await {
+            Ok(()) => Exit::Exited,
+            Err(_) if process.identity_lost() => Exit::Lost,
+            Err(_) => Exit::Running,
+        }
+    };
     if limit.is_zero() {
         return tokio::select! {
             biased;
-            () = server.exited() => true,
-            () = std::future::ready(()) => false,
+            exit = wait => exit,
+            () = std::future::ready(()) => Exit::Running,
         };
     }
-    tokio::time::timeout(limit, server.exited()).await.is_ok()
+    tokio::time::timeout(limit, wait)
+        .await
+        .unwrap_or(Exit::Running)
 }
