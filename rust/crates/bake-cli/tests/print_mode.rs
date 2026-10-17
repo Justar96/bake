@@ -15,6 +15,10 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
+#[cfg(windows)]
+#[path = "print_mode/windows.rs"]
+mod windows;
+
 // The command the messages name, from the source the binary uses.
 #[allow(dead_code)]
 #[path = "../src/docs.rs"]

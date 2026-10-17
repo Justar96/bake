@@ -95,6 +95,7 @@ version = "0.4.0-dev"
 dependencies = [
  "bake-ai",
  "bake-coding-agent",
+ "bake-process",
  "bake-sandbox",
  "bake-tui",
  "libc",
