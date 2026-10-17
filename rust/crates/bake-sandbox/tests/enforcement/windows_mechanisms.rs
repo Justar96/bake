@@ -27,7 +27,9 @@
 //! Windows build has run this; Linux compiles none of it. What the test does
 //! assert beyond consistency is its own hygiene: every candidate process,
 //! descendants included, is born in a Job this test owns and is reaped
-//! before its roots, labels, ACEs, and profile are removed, a descendant
+//! before its roots, labels, ACEs, and profile are removed, every capability
+//! and package grant and low label is read back from the root's descriptor
+//! as exactly the ACE intended, a descendant
 //! started with `CREATE_BREAKAWAY_FROM_JOB` is refused, and the fixture's
 //! parent-route deletion works unconfined (the control that makes the
 //! confined result meaningful).
@@ -44,7 +46,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::ptr::{null, null_mut};
 
-use bake_sandbox::backends::windows_acl::workspace_write_sid;
+use bake_sandbox::backends::windows_acl::{GRANT_MASK, workspace_write_sid};
 
 use super::{
     BOUND, DENIED, PROBE_ARG, Scratch, TestJob, confined, exe, harness, signaled_within, text,
@@ -152,9 +154,20 @@ pub fn tests() -> Vec<harness::Test> {
         .collect()
 }
 
-/// `GENERIC_WRITE`'s file rights, `DELETE`, `FILE_DELETE_CHILD`, and
-/// `SYNCHRONIZE`: the runner's `GRANT_MASK` (0x110156) in `icacls` terms.
-const GRANT_RIGHTS: &str = "WD,AD,WEA,WA,D,DC,S";
+/// `FILE_GENERIC_READ | FILE_GENERIC_EXECUTE` (0x1200A9), `icacls`'s `RX`:
+/// what the AppContainer's package SID needs to read and run its binary.
+const READ_EXECUTE: u32 = 0x0012_00A9;
+
+/// The package SID's grant on its own workspace: [`READ_EXECUTE`] plus the
+/// runner's write grant (0x1301FF), still without `WRITE_DAC` and
+/// `WRITE_OWNER`.
+const CONTAINER_WORKSPACE: u32 = READ_EXECUTE | GRANT_MASK;
+
+// The runner's write grant, `GENERIC_WRITE`'s file rights, `DELETE`,
+// `FILE_DELETE_CHILD`, and `SYNCHRONIZE` (`icacls` `WD,AD,WEA,WA,D,DC,S`),
+// and the container's workspace grant, pinned numerically.
+const _: () = assert!(GRANT_MASK == 0x0011_0156);
+const _: () = assert!(CONTAINER_WORKSPACE == 0x0013_01FF);
 
 /// `FILE_ALL_ACCESS` without `DELETE`: a file that can be deleted only
 /// through its parent's `FILE_DELETE_CHILD` (\[MS-FSA\] 2.1.5.1.2.1).
@@ -355,13 +368,93 @@ fn icacls(path: &Path, args: &[&str]) {
 
 /// An inheritable low label with the default no-write-up policy. The scratch
 /// root grants this user full access, `WRITE_OWNER` included, which setting
-/// a label at or below this process's level needs.
+/// a label at or below this process's level needs. The label is read back:
+/// exactly one `OI|CI` no-write-up label ACE for `S-1-16-4096`.
 fn label_low(root: &Scratch) {
     icacls(&root.0, &["/setintegritylevel", "(OI)(CI)L"]);
+    let label = acl::Descriptor::read(&root.0)
+        .unwrap_or_else(|error| panic!("read back {}: {error}", root.0.display()))
+        .label;
+    let expected = acl::Ace {
+        kind: acl::MANDATORY_LABEL,
+        flags: acl::OI_CI,
+        mask: acl::NO_WRITE_UP,
+        sid: "S-1-16-4096".to_owned(),
+    };
+    assert_eq!(
+        label,
+        vec![expected],
+        "the low label on {}",
+        root.0.display()
+    );
 }
 
-fn grant(root: &Scratch, sid: &str, rights: &str) {
-    icacls(&root.0, &["/grant", &format!("*{sid}:(OI)(CI)({rights})")]);
+/// Grants `sid` exactly `mask` on `root`, inherited by files and directories
+/// (`OI|CI`), and checks it by reading the descriptor back.
+///
+/// The ACE is merged with `SetEntriesInAclW` from a binary SID trustee and
+/// applied with `SetNamedSecurityInfoW` and `DACL_SECURITY_INFORMATION`
+/// alone, as the runner's `grant_write` does, so the owner and integrity
+/// label are not written. The binary SID trustee avoids account-name
+/// resolution for synthetic capability SIDs. The read-back panics
+/// unless the DACL afterwards is the DACL before, every ACE kept (on a
+/// [`user_scratch`] root, the full-access ACE that lets the scratch guard
+/// clean up), plus exactly one explicit allow ACE for `sid` with `mask` and
+/// `OI|CI`, and the label is unchanged.
+fn grant(candidate: Candidate, root: &Scratch, sid: &str, mask: u32) {
+    let trustee = token::Sid::parse(sid).unwrap_or_else(|error| panic!("SID {sid}: {error}"));
+    let canonical = win32::sid_text(trustee.as_ptr());
+    let read = |when: &str| {
+        acl::Descriptor::read(&root.0)
+            .unwrap_or_else(|error| panic!("read {} {when}: {error}", root.0.display()))
+    };
+    let before = read("before the grant");
+    assert!(
+        before.dacl.iter().all(|ace| ace.sid != canonical),
+        "{} already names {canonical}: {:?}",
+        root.0.display(),
+        before.dacl
+    );
+    acl::grant(&root.0, &trustee, mask)
+        .unwrap_or_else(|error| panic!("grant {canonical} on {}: {error}", root.0.display()));
+    let after = read("after the grant");
+    let mut added = after.dacl.clone();
+    for ace in &before.dacl {
+        let index = added
+            .iter()
+            .position(|kept| kept == ace)
+            .unwrap_or_else(|| {
+                panic!(
+                    "the grant on {} dropped {ace:?}: after {:?}",
+                    root.0.display(),
+                    after.dacl
+                )
+            });
+        added.swap_remove(index);
+    }
+    let expected = acl::Ace {
+        kind: acl::ACCESS_ALLOWED,
+        flags: acl::OI_CI,
+        mask,
+        sid: canonical.clone(),
+    };
+    assert_eq!(
+        added,
+        vec![expected],
+        "the grant on {} must add exactly one ACE",
+        root.0.display()
+    );
+    assert_eq!(
+        after.label,
+        before.label,
+        "the grant on {} must keep its label",
+        root.0.display()
+    );
+    eprintln!(
+        "mechanism-probe: candidate={} fixture=grant root={} sid={canonical} mask={mask:#x} flags=OI|CI",
+        candidate.name(),
+        root.0.display()
+    );
 }
 
 /// Every root a candidate's effects touch. Files are seeded after labels
@@ -383,16 +476,18 @@ impl Roots {
         };
         label_low(&roots.foreign);
         grant(
+            candidate,
             &roots.foreign,
             &workspace_write_sid(&text(&roots.foreign.0)),
-            GRANT_RIGHTS,
+            GRANT_MASK,
         );
         if candidate == Candidate::LowIntegrity {
             label_low(&roots.workspace);
             grant(
+                candidate,
                 &roots.workspace,
                 &workspace_write_sid(&text(&roots.workspace.0)),
-                GRANT_RIGHTS,
+                GRANT_MASK,
             );
         }
         roots
@@ -654,14 +749,20 @@ fn app_container() {
     let profile = Profile::create();
     let roots = Roots::new(Candidate::AppContainer);
     grant(
+        Candidate::AppContainer,
         &roots.workspace,
         &profile.sid_text,
-        &format!("RX,{GRANT_RIGHTS}"),
+        CONTAINER_WORKSPACE,
     );
     // The container cannot read Cargo's target directory, so it runs a copy
     // of this binary from a root that grants it read and execute.
     let bin = Scratch::outside("mech-bin");
-    grant(&bin, &profile.sid_text, "RX");
+    grant(
+        Candidate::AppContainer,
+        &bin,
+        &profile.sid_text,
+        READ_EXECUTE,
+    );
     let copy = bin.join("probe.exe");
     std::fs::copy(std::env::current_exe().expect("exe"), &copy).expect("copy the test binary");
     let probe = Probe {
@@ -1139,10 +1240,10 @@ mod token {
     const FILE_ALL_ACCESS: u32 = 0x001F_01FF;
 
     /// A SID from its string form, freed on drop.
-    struct Sid(Local);
+    pub(super) struct Sid(Local);
 
     impl Sid {
-        fn parse(text: &str) -> std::io::Result<Self> {
+        pub(super) fn parse(text: &str) -> std::io::Result<Self> {
             use windows_sys::Win32::Security::Authorization::ConvertStringSidToSidW;
             let units = wide(OsStr::new(text));
             let mut sid = null_mut();
@@ -1154,7 +1255,7 @@ mod token {
             Ok(Self(Local(sid)))
         }
 
-        fn as_ptr(&self) -> *mut c_void {
+        pub(super) fn as_ptr(&self) -> *mut c_void {
             self.0.0
         }
     }
@@ -1283,6 +1384,190 @@ mod token {
             },
             "SetTokenInformation(TokenDefaultDacl)",
         )
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Fixture ACLs through Win32, with binary SIDs.
+
+mod acl {
+    use std::ffi::c_void;
+    use std::path::Path;
+    use std::ptr::{null, null_mut};
+
+    use windows_sys::Win32::Security::Authorization::{
+        EXPLICIT_ACCESS_W, GRANT_ACCESS, GetNamedSecurityInfoW, NO_MULTIPLE_TRUSTEE,
+        SE_FILE_OBJECT, SetEntriesInAclW, SetNamedSecurityInfoW, TRUSTEE_IS_SID,
+        TRUSTEE_IS_UNKNOWN, TRUSTEE_W,
+    };
+    use windows_sys::Win32::Security::{
+        ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, DACL_SECURITY_INFORMATION, GetAce,
+        LABEL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, SUB_CONTAINERS_AND_OBJECTS_INHERIT,
+    };
+
+    use super::{Local, check, token::Sid, wide, win32};
+
+    /// `ACCESS_ALLOWED_ACE_TYPE`.
+    pub const ACCESS_ALLOWED: u8 = 0x0;
+    /// `ACCESS_DENIED_ACE_TYPE`, laid out as an allow ACE.
+    const ACCESS_DENIED: u8 = 0x1;
+    /// `SYSTEM_MANDATORY_LABEL_ACE_TYPE`, laid out as an allow ACE.
+    pub const MANDATORY_LABEL: u8 = 0x11;
+    /// `OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE`, and nothing else: not
+    /// inherited, not inherit-only, propagated.
+    pub const OI_CI: u8 = 0x3;
+    /// `SYSTEM_MANDATORY_LABEL_NO_WRITE_UP`.
+    pub const NO_WRITE_UP: u32 = 0x1;
+    const _: () = assert!(SUB_CONTAINERS_AND_OBJECTS_INHERIT == OI_CI as u32);
+
+    /// One ACE as read back: type, flags, mask, and SID as text (empty for
+    /// a type whose SID is not at `SidStart`).
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct Ace {
+        pub kind: u8,
+        pub flags: u8,
+        pub mask: u32,
+        pub sid: String,
+    }
+
+    /// A root's DACL and mandatory label ACEs, in stored order.
+    pub struct Descriptor {
+        pub dacl: Vec<Ace>,
+        pub label: Vec<Ace>,
+    }
+
+    impl Descriptor {
+        pub fn read(path: &Path) -> std::io::Result<Self> {
+            let (_descriptor, dacl, sacl) =
+                named_security(path, DACL_SECURITY_INFORMATION | LABEL_SECURITY_INFORMATION)?;
+            Ok(Self {
+                dacl: aces(dacl)?,
+                label: aces(sacl)?,
+            })
+        }
+    }
+
+    /// `path`'s descriptor with the requested parts, and its DACL and SACL
+    /// pointers, which point into the descriptor (null when absent).
+    fn named_security(path: &Path, parts: u32) -> std::io::Result<(Local, *mut ACL, *mut ACL)> {
+        let units = wide(path.as_os_str());
+        let (mut dacl, mut sacl): (*mut ACL, *mut ACL) = (null_mut(), null_mut());
+        let mut descriptor: PSECURITY_DESCRIPTOR = null_mut();
+        // SAFETY: NUL-terminated name and valid out pointers; the ACLs point
+        // into the descriptor, which `Local` frees.
+        let status = unsafe {
+            GetNamedSecurityInfoW(
+                units.as_ptr(),
+                SE_FILE_OBJECT,
+                parts,
+                null_mut(),
+                null_mut(),
+                &mut dacl,
+                &mut sacl,
+                &mut descriptor,
+            )
+        };
+        let descriptor = Local(descriptor);
+        if status != 0 {
+            return Err(win32_error("GetNamedSecurityInfoW", status));
+        }
+        Ok((descriptor, dacl, sacl))
+    }
+
+    fn win32_error(api: &str, status: u32) -> std::io::Error {
+        let error = std::io::Error::from_raw_os_error(status as i32);
+        std::io::Error::new(error.kind(), format!("{api}: {error}"))
+    }
+
+    /// Every ACE of `list`, which must point into a live descriptor.
+    fn aces(list: *mut ACL) -> std::io::Result<Vec<Ace>> {
+        if list.is_null() {
+            return Ok(Vec::new());
+        }
+        // SAFETY: a valid ACL in a live descriptor.
+        let count = unsafe { (*list).AceCount };
+        (0..u32::from(count))
+            .map(|index| {
+                let mut ace: *mut c_void = null_mut();
+                // SAFETY: `index` is below the ACL's ACE count.
+                check(unsafe { GetAce(list, index, &mut ace) }, "GetAce")?;
+                // SAFETY: every ACE starts with an ACE_HEADER.
+                let header = unsafe { *ace.cast::<ACE_HEADER>() };
+                let simple = matches!(
+                    header.AceType,
+                    ACCESS_ALLOWED | ACCESS_DENIED | MANDATORY_LABEL
+                );
+                if usize::from(header.AceSize) < size_of::<ACCESS_ALLOWED_ACE>() {
+                    return Err(std::io::Error::other(format!(
+                        "ACE {index} is {} bytes",
+                        header.AceSize
+                    )));
+                }
+                let body = ace.cast::<ACCESS_ALLOWED_ACE>();
+                // SAFETY: every ACE of at least this size has its mask after
+                // the header; the simple types hold their SID at `SidStart`.
+                let (mask, sid) = unsafe {
+                    (
+                        (*body).Mask,
+                        if simple {
+                            win32::sid_text(std::ptr::addr_of_mut!((*body).SidStart).cast())
+                        } else {
+                            String::new()
+                        },
+                    )
+                };
+                Ok(Ace {
+                    kind: header.AceType,
+                    flags: header.AceFlags,
+                    mask,
+                    sid,
+                })
+            })
+            .collect()
+    }
+
+    /// Merges an `OI|CI` allow ACE for `sid` with `mask` into `path`'s DACL
+    /// and writes back only the DACL, so the owner and label stay as they
+    /// are. The runner's `grant_write` makes the same two calls.
+    pub fn grant(path: &Path, sid: &Sid, mask: u32) -> std::io::Result<()> {
+        let (_descriptor, dacl, _) = named_security(path, DACL_SECURITY_INFORMATION)?;
+        let entry = EXPLICIT_ACCESS_W {
+            grfAccessPermissions: mask,
+            grfAccessMode: GRANT_ACCESS,
+            grfInheritance: SUB_CONTAINERS_AND_OBJECTS_INHERIT,
+            Trustee: TRUSTEE_W {
+                pMultipleTrustee: null_mut(),
+                MultipleTrusteeOperation: NO_MULTIPLE_TRUSTEE,
+                TrusteeForm: TRUSTEE_IS_SID,
+                TrusteeType: TRUSTEE_IS_UNKNOWN,
+                ptstrName: sid.as_ptr().cast(),
+            },
+        };
+        let mut merged: *mut ACL = null_mut();
+        // SAFETY: one valid entry whose SID outlives the call; `dacl` is null
+        // or a valid ACL in the live descriptor.
+        let status = unsafe { SetEntriesInAclW(1, &entry, dacl, &mut merged) };
+        let merged = Local(merged.cast());
+        if status != 0 || merged.0.is_null() {
+            return Err(win32_error("SetEntriesInAclW", status));
+        }
+        let units = wide(path.as_os_str());
+        // SAFETY: NUL-terminated name and a valid ACL; only the DACL is set.
+        let status = unsafe {
+            SetNamedSecurityInfoW(
+                units.as_ptr(),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                null_mut(),
+                null_mut(),
+                merged.0.cast(),
+                null(),
+            )
+        };
+        if status != 0 {
+            return Err(win32_error("SetNamedSecurityInfoW", status));
+        }
+        Ok(())
     }
 }
 
