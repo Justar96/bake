@@ -19,17 +19,20 @@ ring.workspace = true
 libc.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-# The Windows runner's Job and the account its end is settled on
+# The Windows runners' Job and the account its end is settled on
 # (`bake_process::windows_job`), shared with the process owner.
 bake-process.workspace = true
-# The Windows runner's restricted token, DACL grants, and process creation.
-windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Console", "Win32_System_Threading"] }
+# The Windows runners' restricted token, each run's AppContainer profile
+# (create, folder lookup freed with `CoTaskMemFree`, delete), capability
+# SIDs, DACL grants and denials, and process creation.
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Security_Isolation", "Win32_System_Com", "Win32_System_Console", "Win32_System_Threading"] }
 
 [target.'cfg(windows)'.dev-dependencies]
 # The enforcement tests' raw deletion, open, token, and SDDL probes and
 # their process and Job guards; `Win32_Security_Isolation` is the mechanism
-# probe's AppContainer profile and `Win32_System_Console` its candidates'
-# output redirection.
+# probe's AppContainer profile and the runner cases' profile deletion and
+# package SID, and `Win32_System_Console` the candidates' output
+# redirection.
 windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Isolation", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_JobObjects", "Win32_System_Pipes", "Win32_System_Threading"] }
 
 [dev-dependencies]

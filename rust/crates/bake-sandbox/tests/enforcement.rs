@@ -45,6 +45,12 @@ fn main() -> ExitCode {
     {
         bake_sandbox::backends::windows_acl::helper_main(args.into_iter().skip(1));
     }
+    if args
+        .first()
+        .is_some_and(|arg| arg == bake_sandbox::backends::windows_appcontainer::HELPER_ARG)
+    {
+        bake_sandbox::backends::windows_appcontainer::helper_main(args.into_iter().skip(1));
+    }
     #[cfg(windows)]
     if args.first().is_some_and(|arg| arg == windows::PROBE_ARG) {
         windows::probe_main(args.into_iter().skip(1).collect());
@@ -172,7 +178,7 @@ fn required(runner: Runner) -> bool {
             Runner::Landlock => cfg!(target_os = "linux"),
             Runner::Seatbelt => cfg!(target_os = "macos"),
             // The Windows scenarios never skip.
-            Runner::Bwrap | Runner::WindowsAcl => false,
+            Runner::Bwrap | Runner::WindowsAcl | Runner::WindowsAppContainer => false,
         }
 }
 
@@ -205,6 +211,7 @@ fn pinned(runner: Runner) -> LocalProvider {
             LocalProvider::with_chain(vec![Runner::Seatbelt, Runner::Bwrap]).with_bwrap(ABSENT, [])
         }
         Runner::WindowsAcl => LocalProvider::with_chain(vec![Runner::WindowsAcl]),
+        Runner::WindowsAppContainer => LocalProvider::with_chain(vec![Runner::WindowsAppContainer]),
     }
 }
 
@@ -441,7 +448,9 @@ fn selects_and_reports_its_dialect(backend: &Backend) {
             assert_eq!(command.enforcement, Enforcement::Full);
             assert_eq!(command.denial_signatures, ["operation not permitted"]);
         }
-        Runner::WindowsAcl => unreachable!("the Windows runner has its own scenarios"),
+        Runner::WindowsAcl | Runner::WindowsAppContainer => {
+            unreachable!("the Windows runners have their own scenarios")
+        }
     }
 }
 
@@ -616,7 +625,9 @@ fn runner_failures_are_classified(backend: &Backend) {
         Runner::Bwrap => "bwrap: ",
         Runner::Landlock => "landlock-run: ",
         Runner::Seatbelt => "sandbox-exec: ",
-        Runner::WindowsAcl => unreachable!("the Windows runner has its own scenarios"),
+        Runner::WindowsAcl | Runner::WindowsAppContainer => {
+            unreachable!("the Windows runners have their own scenarios")
+        }
     };
     let line = run.runner_failure();
     assert!(

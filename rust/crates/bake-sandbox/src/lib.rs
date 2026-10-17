@@ -13,7 +13,7 @@
 //! | [`escalation`] | the model-visible escalation vocabulary: targets, argument checks, markers, outcomes |
 //! | [`diagnostics`] | runner-failure and denial classification from a confined run's stderr |
 //! | [`provider`] | [`SandboxProvider`], [`ConfinedCommand`], and the fail-closed [`UnavailableProvider`] |
-//! | [`backends`] | the Linux bubblewrap and Landlock and macOS Seatbelt [`LocalProvider`], and [`default_provider`] |
+//! | [`backends`] | the Linux bubblewrap and Landlock and macOS Seatbelt [`LocalProvider`], [`default_provider`], and the explicit-chain Windows runners |
 //!
 //! # Contract
 //!

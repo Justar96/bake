@@ -238,6 +238,14 @@ fn main() -> ExitCode {
     {
         bake_coding_agent::plugins::wasm::helper_main(args.into_iter().skip(1));
     }
+    // So does the unqualified AppContainer runner, which no default chain
+    // selects.
+    if args
+        .first()
+        .is_some_and(|arg| arg == bake_sandbox::backends::windows_appcontainer::HELPER_ARG)
+    {
+        bake_sandbox::backends::windows_appcontainer::helper_main(args.into_iter().skip(1));
+    }
     match parse(&args) {
         Ok(Command::Help) => print(HELP),
         Ok(Command::Preview(mode)) => preview(mode),
