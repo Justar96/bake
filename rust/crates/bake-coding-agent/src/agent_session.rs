@@ -96,8 +96,8 @@ use bake_ai::{
 };
 
 use crate::compaction::CompactionResult;
-use crate::mcp::{McpOptions, McpServers};
 use crate::jobs::{JobLimits, JobRegistry};
+use crate::mcp::{McpOptions, McpServers};
 use crate::model_registry::resolver::{DEFAULT_THINKING_LEVEL, find_initial_model};
 use crate::model_registry::{ModelRegistry, ModelRuntime};
 use crate::owned_work::{OwnedTask, Refused, TaskScope, WorkGate, WorkPermit};

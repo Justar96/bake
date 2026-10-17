@@ -158,7 +158,15 @@ async fn ids_are_numbered_per_kind_and_parsed_strictly() {
     assert_eq!((b.id.kind(), b.id.ordinal()), ("bash", 2));
     assert_eq!(registry.id("bash-2"), Ok(b.id));
     for text in [
-        "bash-3", "bash-0", "bash-02", "bash-+1", "bash-", "bash", "-1", "other-1", "bash-1x",
+        "bash-3",
+        "bash-0",
+        "bash-02",
+        "bash-+1",
+        "bash-",
+        "bash",
+        "-1",
+        "other-1",
+        "bash-1x",
         "bash-99999999999999999999999",
     ] {
         assert!(
@@ -197,7 +205,11 @@ async fn invalid_specs_are_refused_before_the_producer_runs() {
     };
     let too_long: &'static str = "a234567890123456789012345678901234";
     for kind in ["", "Bash", "a-b", "1a", "a b", too_long] {
-        assert_eq!(attempt(kind, "label"), Err(StartError::InvalidKind), "{kind:?}");
+        assert_eq!(
+            attempt(kind, "label"),
+            Err(StartError::InvalidKind),
+            "{kind:?}"
+        );
     }
     for label in ["", "  \n"] {
         assert_eq!(attempt("bash", label), Err(StartError::InvalidLabel));
@@ -242,7 +254,10 @@ async fn the_limit_counts_running_stopping_and_completing_jobs() {
             async { JobOutcome::completed("") }
         })
     };
-    assert_eq!(refused(&registry), Err(StartError::LimitReached { limit: 2 }));
+    assert_eq!(
+        refused(&registry),
+        Err(StartError::LimitReached { limit: 2 })
+    );
     assert_eq!(
         StartError::LimitReached { limit: 2 }.to_string(),
         "background job limit reached for this session (limit: 2); stop an unneeded job or wait for one to finish, then retry"
@@ -251,7 +266,10 @@ async fn the_limit_counts_running_stopping_and_completing_jobs() {
     let signal = bounded("the start", held.started).await.expect("started");
     assert_eq!(registry.kill(held.id, None), Ok(KillResult::Requested));
     assert!(signal.aborted());
-    assert_eq!(refused(&registry), Err(StartError::LimitReached { limit: 2 }));
+    assert_eq!(
+        refused(&registry),
+        Err(StartError::LimitReached { limit: 2 })
+    );
     held.release
         .send(JobOutcome::killed("signal: SIGTERM"))
         .expect("held");
@@ -259,7 +277,10 @@ async fn the_limit_counts_running_stopping_and_completing_jobs() {
 
     reaches(&registry, resource.id, JobStatus::Completing).await;
     let other = start_held(&registry, "other");
-    assert_eq!(refused(&registry), Err(StartError::LimitReached { limit: 2 }));
+    assert_eq!(
+        refused(&registry),
+        Err(StartError::LimitReached { limit: 2 })
+    );
     tokio::task::yield_now().await;
     assert!(!ran.load(Ordering::SeqCst), "a refused producer ran");
     bounded("the resource's cancel", resource.cancelled)
@@ -318,7 +339,12 @@ async fn admission_racing_from_many_threads_admits_exactly_the_limit() {
             .all(|error| *error == StartError::LimitReached { limit: 3 })
     );
     bounded("the close", registry.close()).await;
-    assert!(registry.list().iter().all(|job| job.status == JobStatus::Killed));
+    assert!(
+        registry
+            .list()
+            .iter()
+            .all(|job| job.status == JobStatus::Killed)
+    );
 }
 
 // jobs.spec.ts: "stream kinds read a consuming delta; terminal reads mark
@@ -330,14 +356,17 @@ async fn a_stream_read_consumes_and_a_final_read_repeats() {
     let (more_tx, more) = oneshot::channel::<()>();
     let (wrote_tx, wrote) = oneshot::channel::<()>();
     let stream = registry
-        .start(spec("bash", OutputMode::Stream), move |context| async move {
-            let output = context.output().expect("a stream job").clone();
-            output.append(b"one\n");
-            let _ = wrote_tx.send(());
-            let _ = more.await;
-            output.append(b"two\n");
-            JobOutcome::completed("exit code: 0").with_output("ignored for a stream")
-        })
+        .start(
+            spec("bash", OutputMode::Stream),
+            move |context| async move {
+                let output = context.output().expect("a stream job").clone();
+                output.append(b"one\n");
+                let _ = wrote_tx.send(());
+                let _ = more.await;
+                output.append(b"two\n");
+                JobOutcome::completed("exit code: 0").with_output("ignored for a stream")
+            },
+        )
         .expect("admitted");
     bounded("the first write", wrote).await.expect("wrote");
     let first = registry.read(stream).expect("read");
@@ -458,7 +487,10 @@ async fn a_kill_is_an_idempotent_request() {
     let stopping = registry.get(held.id).expect("kept");
     assert_eq!(stopping.status, JobStatus::Stopping);
     assert!(stopping.reported, "a kill claims the report");
-    let Some(StopCause::Kill { reason: Some(reason) }) = &stopping.stop else {
+    let Some(StopCause::Kill {
+        reason: Some(reason),
+    }) = &stopping.stop
+    else {
         panic!("no stop recorded");
     };
     assert_eq!(reason.len(), MAX_TEXT_BYTES);
@@ -474,7 +506,10 @@ async fn a_kill_is_an_idempotent_request() {
     let ended = settled(&registry, held.id).await;
     assert_eq!(ended.status, JobStatus::Killed);
     assert!(ended.finished_at.is_some_and(|end| end >= ended.started_at));
-    assert_eq!(registry.kill(held.id, None), Ok(KillResult::AlreadyFinished));
+    assert_eq!(
+        registry.kill(held.id, None),
+        Ok(KillResult::AlreadyFinished)
+    );
     bounded("the close", registry.close()).await;
 }
 
@@ -504,7 +539,10 @@ async fn completion_before_during_and_after_a_stop() {
         .send(JobOutcome::completed("exit code: 0"))
         .expect("held");
     settled(&registry, after.id).await;
-    assert_eq!(registry.kill(after.id, None), Ok(KillResult::AlreadyFinished));
+    assert_eq!(
+        registry.kill(after.id, None),
+        Ok(KillResult::AlreadyFinished)
+    );
     assert_eq!(registry.get(after.id).expect("kept").stop, None);
 
     // While completing: the outcome is decided; the drain continues.
@@ -755,8 +793,14 @@ async fn sessions_are_isolated() {
     assert_eq!(b.id("bash-1"), Ok(held_b.id));
     let foreign = Err(JobError::Foreign(held_b.id));
     assert_eq!(a.get(held_b.id), foreign);
-    assert_eq!(a.read(held_b.id).map(|_| ()), foreign.clone().map(|_: JobSnapshot| ()));
-    assert_eq!(a.kill(held_b.id, None), foreign.clone().map(|_| KillResult::Requested));
+    assert_eq!(
+        a.read(held_b.id).map(|_| ()),
+        foreign.clone().map(|_: JobSnapshot| ())
+    );
+    assert_eq!(
+        a.kill(held_b.id, None),
+        foreign.clone().map(|_| KillResult::Requested)
+    );
     assert_eq!(
         a.wait(held_b.id, Duration::from_millis(1), None).await,
         foreign
@@ -797,7 +841,10 @@ async fn retention_is_bounded_and_ids_are_never_reused() {
         ..JobLimits::default()
     });
     registry.reserve_ordinals("bash", 5).expect("reserved");
-    assert_eq!(registry.reserve_ordinals("Bad", 1), Err(StartError::InvalidKind));
+    assert_eq!(
+        registry.reserve_ordinals("Bad", 1),
+        Err(StartError::InvalidKind)
+    );
     let finish = |registry: &JobRegistry| {
         registry
             .start(spec("bash", OutputMode::Final), |_| async {
@@ -830,8 +877,14 @@ async fn retention_is_bounded_and_ids_are_never_reused() {
     );
 
     let earlier = registry.id("bash-3").expect("reserved");
-    assert_eq!(registry.get(earlier), Err(JobError::EarlierProcess(earlier)));
-    assert_eq!(registry.read(earlier).map(|_| ()), Err(JobError::EarlierProcess(earlier)));
+    assert_eq!(
+        registry.get(earlier),
+        Err(JobError::EarlierProcess(earlier))
+    );
+    assert_eq!(
+        registry.read(earlier).map(|_| ()),
+        Err(JobError::EarlierProcess(earlier))
+    );
     assert!(matches!(registry.id("bash-9"), Err(JobError::Unknown(_))));
     bounded("the close", registry.close()).await;
 }
@@ -885,7 +938,9 @@ async fn close_stops_claims_and_awaits_every_job() {
         .expect("admitted");
     settled(&registry, finished).await;
     assert!(bounded("the event", events.changed()).await);
-    let signal = bounded("the start", stubborn.started).await.expect("started");
+    let signal = bounded("the start", stubborn.started)
+        .await
+        .expect("started");
 
     let mut close = Box::pin(registry.close());
     assert!(registry.is_closed());
@@ -961,7 +1016,13 @@ async fn the_owning_gate_stops_and_awaits_its_jobs() {
         .await
         .expect("cancelled");
     assert!(poll_once(drained.as_mut()).is_pending());
-    assert!(!registry.get(resource.id).expect("kept").status.is_terminal());
+    assert!(
+        !registry
+            .get(resource.id)
+            .expect("kept")
+            .status
+            .is_terminal()
+    );
     resource.release.send(()).expect("held");
     bounded("the drain", drained).await;
     assert!(resource.cleaned.load(Ordering::SeqCst));

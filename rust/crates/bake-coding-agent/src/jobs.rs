@@ -611,8 +611,7 @@ impl State {
             if terminal <= max {
                 return;
             }
-            let evictable =
-                |record: &Record| record.status.is_terminal() && record.waiters == 0;
+            let evictable = |record: &Record| record.status.is_terminal() && record.waiters == 0;
             let index = self
                 .records
                 .iter()
@@ -683,7 +682,10 @@ impl Inner {
             record.status = outcome.status.into();
             record.detail = outcome.detail.map(|detail| cut(detail, MAX_TEXT_BYTES));
             if record.output == OutputMode::Final {
-                let (output, omitted) = tail(outcome.output.unwrap_or_default(), limits.final_output_bytes);
+                let (output, omitted) = tail(
+                    outcome.output.unwrap_or_default(),
+                    limits.final_output_bytes,
+                );
                 record.final_output = Some(output);
                 record.final_omitted = omitted;
             }
@@ -1342,7 +1344,9 @@ async fn drive<F, Fut>(
                     task.await
                 }
             };
-            joined.unwrap_or_else(|error| JobOutcome::failed(format!("the job's task failed: {error}")))
+            joined.unwrap_or_else(|error| {
+                JobOutcome::failed(format!("the job's task failed: {error}"))
+            })
         }
     };
     inner.producer_returned(id);

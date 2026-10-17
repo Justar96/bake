@@ -2035,6 +2035,7 @@ mod tests {
             approver: None,
             warnings: Vec::new(),
             interrupt: no_interrupt(),
+            plugins: WasmSetup::default(),
         };
         (environment, buffer)
     }
