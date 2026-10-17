@@ -20,7 +20,8 @@
 
 import { createHash, randomUUID } from 'node:crypto'
 import {
-  chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync,
+  chmodSync, constants, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync,
+  realpathSync, renameSync, rmSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
@@ -415,12 +416,16 @@ export async function packRust(options: PackOptions): Promise<PackResult> {
     // macOS copyfile metadata otherwise adds AppleDouble files and carries
     // source ACLs/attributes beyond the payload's explicit file modes.
     const metadata = process.platform === 'darwin' ? ['--no-mac-metadata', '--no-xattrs', '--no-acls', '--no-fflags'] : []
-    await run(['tar', ...metadata, '-czf', partial, '-C', stage, ...top], scratch)
-    const listing = await verifyArchive(partial, files)
+    // Windows tar can decode non-ASCII path arguments through its code page.
+    // Pass directories as cwd and only ASCII relative paths as arguments.
+    // A regular archive file also avoids bsdtar's padding of compressed stdout.
+    const archive = join(scratch, 'archive.tar.gz')
+    await run(['tar', ...metadata, '-czf', '../archive.tar.gz', ...top], stage)
+    const listing = await verifyArchive(archive, files)
 
     const unpacked = join(scratch, 'unpacked')
     mkdirSync(unpacked)
-    await run(['tar', '-xzf', partial, '-C', unpacked], scratch)
+    await run(['tar', '-xzf', '../archive.tar.gz'], unpacked)
     for (const file of files) {
       const path = join(unpacked, ...file.path.split('/'))
       if (!lstatSync(path).isFile() || sha256(readFileSync(path)) !== sha256(readFileSync(join(stage, file.path)))) throw new Error(`The unpacked ${file.path} differs from the staged file`)
@@ -428,6 +433,7 @@ export async function packRust(options: PackOptions): Promise<PackResult> {
     const unpackedRecord = await checkBinary(join(unpacked, ...binaryPath.split('/')), expected, timeoutMs)
     if (JSON.stringify(unpackedRecord) !== JSON.stringify(record)) throw new Error('The unpacked binary\'s self-check differs from the staged binary\'s')
 
+    copyFileSync(archive, partial, constants.COPYFILE_EXCL)
     renameSync(partial, destination)
     return { archive: destination, record, listing }
   } finally {

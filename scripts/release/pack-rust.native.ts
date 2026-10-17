@@ -8,7 +8,9 @@
  * sandbox, install, or update runs. Run with `bun run test:rust:package`.
  */
 import { afterEach, expect, test } from 'bun:test'
-import { lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import {
+  closeSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { archiveName, docsDigests, hostTarget, isRustTarget, parseSelfCheck } from './pack-rust.ts'
@@ -63,8 +65,13 @@ test.skipIf(!isRustTarget(hostTarget()))('the packed bake-rs unpacks and runs wi
 
   const unpacked = join(scratch('unpacked'), 'unpacked dir')
   mkdirSync(unpacked)
-  const untar = Bun.spawnSync(['tar', '-xzf', archive, '-C', unpacked], { stderr: 'pipe' })
-  expect(untar.exitCode).toBe(0)
+  const archiveInput = openSync(archive, 'r')
+  try {
+    const untar = Bun.spawnSync(['tar', '-xzf', '-'], { cwd: unpacked, stdin: archiveInput, stderr: 'pipe' })
+    expect(untar.exitCode).toBe(0)
+  } finally {
+    closeSync(archiveInput)
+  }
   const exe = target === 'win32-x64' ? 'bake-rs.exe' : 'bake-rs'
   expect(readdirSync(unpacked).sort()).toEqual(['LICENSE', 'THIRD_PARTY_NOTICES.md', 'bin', 'notices'])
   expect(readdirSync(join(unpacked, 'bin'))).toEqual([exe])
