@@ -5,11 +5,38 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "The Model Context Protocol client boundary ported from Pi's `mcp` package: initialization, tool listing and calls, cancellation, and awaited shutdown over an injected, bounded transport"
+description = "The Model Context Protocol client boundary ported from Pi's `mcp` package: initialization, tool listing and calls, cancellation, and awaited shutdown over an injected, bounded transport, and owned stdio server processes"
 
 [dependencies]
 serde_json.workspace = true
-tokio = { workspace = true, features = ["rt", "sync", "time", "macros", "io-util"] }
+tokio = { workspace = true, features = ["rt", "sync", "time", "macros", "io-util", "process", "signal"] }
+
+# `stdio`'s process tree: `waitid(WNOWAIT)` and `kill(-pgid)` on Unix (with
+# Tokio's `signal` for `SIGCHLD`); on Windows `CreateProcessW` with a Job and
+# handle list, the kill-on-close Job, and a thread-pool wait on the process.
+# All are already in the lock; MIT OR Apache-2.0.
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+# Overlapped named pipes for the server's standard streams.
+tokio = { workspace = true, features = ["net"] }
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_Pipes", "Win32_System_Threading"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "time", "macros", "io-util", "test-util"] }
+
+[target.'cfg(unix)'.dev-dependencies]
+# The stdio fixture's signal handling and the tests' process probes.
+libc.workspace = true
+
+[target.'cfg(windows)'.dev-dependencies]
+# The tests' process probes.
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Threading"] }
+
+# Real stdio servers: the test binary re-executes itself as the fixture
+# server, so its standard output must carry nothing but protocol messages,
+# which libtest's harness would break.
+[[test]]
+name = "stdio"
+harness = false

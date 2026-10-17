@@ -246,6 +246,37 @@ async fn a_dropped_connect_leaves_the_task_without_an_owner() {
 }
 
 #[tokio::test]
+async fn notifications_initialized_is_written_even_by_an_immediate_shutdown() {
+    // `initialize` returns once `notifications/initialized` is handed to the
+    // task; a shutdown right after must still write it (found by the stdio
+    // fixture, whose standard error showed it missing).
+    let Wire {
+        receiver,
+        sender,
+        mut server,
+        ..
+    } = wire(64 * 1024, 1 << 20);
+    let mut connecting = McpClient::start(receiver, sender, options()).unwrap();
+    let (initialized, ()) = bounded("initialize", async {
+        tokio::join!(connecting.initialize(), async {
+            let (id, _) = server.request("initialize").await;
+            server.reply(&id, init_result()).await;
+        })
+    })
+    .await;
+    let (client, _events) = initialized.unwrap();
+    assert_eq!(
+        bounded("shutdown", client.shutdown()).await,
+        CloseReason::Shutdown
+    );
+    assert_eq!(
+        server.recv().await,
+        serde_json::json!({"jsonrpc": "2.0", "method": "notifications/initialized"})
+    );
+    server.expect_eof().await;
+}
+
+#[tokio::test]
 async fn a_successful_initialize_hands_the_task_to_the_client() {
     let Wire {
         receiver,

@@ -1364,7 +1364,21 @@ impl<R: MessageReceiver, S: MessageSender> Driver<R, S> {
         self.close.send_replace(Some(reason.clone()));
         self.permits.close();
         self.commands.close();
-        while self.commands.try_recv().is_ok() {}
+        // The channel is closed and holds at most its capacity. A request
+        // still in it fails like the pending ones; a notification still in it
+        // (such as `notifications/initialized`, sent just before a shutdown)
+        // is flushed with the queue like any other.
+        while let Ok(command) = self.commands.try_recv() {
+            match command {
+                Command::Request { reply, .. } => {
+                    let _ = reply.send(Err(RequestError::Closed(reason.clone())));
+                }
+                Command::Notify { bytes } => self.queue.push_back(Outgoing {
+                    request: None,
+                    bytes,
+                }),
+            }
+        }
         for (_, entry) in self.pending.drain() {
             let _ = entry.reply.send(Err(RequestError::Closed(reason.clone())));
         }
