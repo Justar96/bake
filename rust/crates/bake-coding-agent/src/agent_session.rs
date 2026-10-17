@@ -20,13 +20,14 @@
 //! The session's [`WorkGate`] owns the work that runs outside the task
 //! awaiting it: session writes and other blocking work, model requests,
 //! model, thinking-level, and settings changes, idle compaction, and
-//! background work ([`AgentSession::spawn_background`]). Two lifetimes
-//! meet here. A turn's work ends with [`AgentSession::abort`], which
-//! signals the run, a retry wait, and a compaction, and leaves the gate's
-//! background tasks and changes running. The session's lifetime ends with
+//! background work ([`AgentSession::spawn_background`]) and background
+//! jobs ([`AgentSession::jobs`]). Two lifetimes meet here. A turn's work
+//! ends with [`AgentSession::abort`], which signals the run, a retry wait,
+//! and a compaction, and leaves the gate's background tasks, jobs, and
+//! changes running. The session's lifetime ends with
 //! [`AgentSession::shutdown`], which refuses new work at once, cancels
-//! both, and returns only after every owned task, its cleanup, and every
-//! listener call have finished.
+//! both, and returns only after every owned task, its cleanup, every job
+//! and the processes it started, and every listener call have finished.
 //!
 //! Compaction and auto-retry follow Pi (in `agent_session/recovery.rs`):
 //! after each run a retryable error is retried with backoff, and a context
@@ -93,6 +94,7 @@ use bake_ai::{
 };
 
 use crate::compaction::CompactionResult;
+use crate::jobs::{JobLimits, JobRegistry};
 use crate::model_registry::resolver::{DEFAULT_THINKING_LEVEL, find_initial_model};
 use crate::model_registry::{ModelRegistry, ModelRuntime};
 use crate::owned_work::{OwnedTask, Refused, TaskScope, WorkGate, WorkPermit};
@@ -668,6 +670,8 @@ pub struct AgentSession {
     agent: Arc<Agent>,
     core: Arc<Core>,
     work: WorkGate,
+    /// The session's background jobs, owned by `work`.
+    jobs: JobRegistry,
     session: SharedSession,
     registry: ModelRuntime,
     /// The live settings, shared with the core: the setters change them,
@@ -1476,11 +1480,13 @@ impl AgentSession {
             .filter(|name| tools.iter().any(|tool| &tool.name == name))
             .collect();
         let gap = Arc::clone(&core.gap);
+        let jobs = JobRegistry::new(work.clone(), JobLimits::default());
         let created = Self {
             apis,
             agent,
             core,
             work,
+            jobs,
             session,
             registry,
             settings,
@@ -2590,12 +2596,25 @@ impl AgentSession {
         self.work.spawn(work).map_err(refused_message)
     }
 
+    /// The session's background jobs ([`crate::jobs`]). Like
+    /// [`Self::spawn_background`] work, a job outlives [`Self::abort`] and
+    /// the turn that started it; [`Self::shutdown`] stops every job and
+    /// returns only once each is terminal, which is after the processes
+    /// and tasks it started are settled. Each session has its own registry,
+    /// so another session's jobs are refused. Jobs end with the process:
+    /// a resumed session starts with none.
+    pub fn jobs(&self) -> &JobRegistry {
+        &self.jobs
+    }
+
     /// Pi's `dispose`, awaited. At the first call's first poll, before it
     /// waits for anything, it removes every listener, refuses new prompts,
-    /// changes, and owned work, and aborts the run, a retry wait, a compaction, and
-    /// every background task ([`Self::spawn_background`]). The rest runs on
-    /// a task of its own: it waits for the run's task, the session's
-    /// writes, model requests, changes, and background tasks, and for any
+    /// changes, owned work, and jobs, and aborts the run, a retry wait, a
+    /// compaction, every background task ([`Self::spawn_background`]), and
+    /// every job ([`Self::jobs`], claiming each job's report, since a
+    /// session being torn down reads no notice). The rest runs on a task of
+    /// its own: it waits for the run's task, the session's writes, model
+    /// requests, changes, background tasks, and jobs, and for any
     /// listener call already running, then disconnects from the agent and
     /// closes the session file for writing, releasing its lock.
     ///
@@ -2639,6 +2658,9 @@ impl AgentSession {
         self.listeners.close();
         self.core.abort_requested.store(true, Ordering::SeqCst);
         self.core.abort_retry_and_compaction();
+        // The jobs' drivers are the gate's tasks, so the drain below waits
+        // for every job to become terminal; this future need not be kept.
+        drop(self.jobs.close());
         let drained = self.work.close();
         let agent = Arc::clone(&self.agent);
         let listeners = Arc::clone(&self.listeners);
