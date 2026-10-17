@@ -3,10 +3,12 @@
  * Build `bake-rs` with the pinned Cargo toolchain and archive it for this
  * host: a preview of the native 0.4 package layout, not a release.
  *
- * The archive holds the binary, the repository license and notices, and the
- * NOTICE of each Bake crate linked into the binary, and nothing else: no
- * Node, Bun, TypeScript product code, `node_modules`, or launcher. Bun runs
- * this build tool only. The staged binary's `--self-check` and `--version`
+ * The archive holds the binary, the repository license and notices, the
+ * NOTICE of each Bake crate linked into the binary, and this platform's
+ * third-party license text with the bundle inventory, generated for this run
+ * by `native-licenses.ts` from the locked graph, and nothing else: no Node,
+ * Bun, TypeScript product code, `node_modules`, or launcher. Bun runs this
+ * build tool only. The staged binary's `--self-check` and `--version`
  * must name the Cargo version and this host's platform, and its embedded
  * documentation must match the sources, before and after the archive is
  * unpacked; only then does the archive replace the destination, by rename,
@@ -21,11 +23,14 @@
 import { createHash, randomUUID } from 'node:crypto'
 import {
   chmodSync, constants, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync,
-  realpathSync, renameSync, rmSync,
+  realpathSync, renameSync, rmSync, writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { parseArgs } from 'node:util'
+import {
+  BUNDLE_FILE, buildBundle, CARGO_ABOUT_VERSION, collect, INVENTORY_FILE, PLATFORMS, SCHEMA as LICENSES_SCHEMA,
+} from './native-licenses.ts'
 import { tarEntries, SHARED_WRITE } from './permissions.ts'
 
 /** The five release platforms, as Node names them; `bake-rs --self-check` uses the same names. */
@@ -50,12 +55,27 @@ export interface Expected {
   readonly docs: Readonly<Record<string, string>>
 }
 
-/** One file of the archive: where it comes from, where it goes, and its mode. */
+/**
+ * One file of the archive: where it comes from, where it goes, and its mode.
+ * A file read from disk names its `source`; a generated one carries its
+ * `contents`, and `source` only describes it.
+ */
 export interface PayloadFile {
   readonly source: string
   /** `/`-separated path inside the archive. */
   readonly path: string
   readonly mode: number
+  readonly contents?: string
+}
+
+/** The archive's license files for one platform, taken from a checked bundle by {@link targetLicenses}. */
+export interface TargetLicenses {
+  /** `<platform>/THIRD-PARTY-LICENSES.txt` of the bundle. */
+  readonly text: string
+  /** The bundle's `inventory.json`, which covers all five platforms. */
+  readonly inventory: string
+  /** SHA-256 of each Bake crate NOTICE the text reproduces, by crate; the archived copies must match. */
+  readonly notices: Readonly<Record<string, string>>
 }
 
 export interface PackOptions {
@@ -67,6 +87,12 @@ export interface PackOptions {
   readonly docs: string
   /** NOTICE files by crate name, each archived as `notices/<crate>/NOTICE`. */
   readonly notices: Readonly<Record<string, string>>
+  /**
+   * The generated native license bundle, by path relative to its directory:
+   * `native-licenses.ts`'s `buildBundle(...).files`. {@link targetLicenses}
+   * must accept it for this build.
+   */
+  readonly licenses: Readonly<Record<string, string>>
   readonly version: string
   readonly target: string
   /** The directory the archive is written into, created when missing; {@link checkOutputDir} must accept it. */
@@ -286,8 +312,105 @@ export async function checkBinary(binary: string, expected: Expected, timeoutMs 
   return parseSelfCheck(check.stdout, expected)
 }
 
+/** The archive directory holding the license bundle's files, in the bundle's own layout. */
+export const LICENSES_DIR = 'licenses'
+
+function asTable(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined
+}
+
+/**
+ * Take `target`'s license text and the inventory from a generated bundle,
+ * once the bundle is shown to describe this build. Nothing here reads the
+ * dependency graph: the generator owns selection and license policy, and its
+ * inventory is the evidence checked.
+ * @throws naming the first problem: no `inventory.json` of this schema, another
+ * cargo-about than {@link CARGO_ABOUT_VERSION}, an input file such as
+ * `rust/Cargo.lock` whose hash under `root` has changed since generation, a
+ * platform text missing, extra, or not matching its inventory hash, a text whose
+ * heading names another platform, a `bake-cli` version other than `version`, or
+ * NOTICEs of other Bake crates than those in `notices`. The NOTICE contents
+ * are compared once staged, against the returned hashes.
+ */
+export function targetLicenses(
+  bundle: Readonly<Record<string, string>>,
+  expected: {
+    readonly target: RustTarget
+    readonly version: string
+    readonly root: string
+    readonly notices: Readonly<Record<string, string>>
+  },
+): TargetLicenses {
+  const { target, version, root, notices } = expected
+  function fail(why: string): never {
+    throw new Error(`The native license bundle ${why}; regenerate it from this checkout`)
+  }
+  const inventoryText = bundle[INVENTORY_FILE]
+  if (inventoryText === undefined) fail(`has no ${INVENTORY_FILE}`)
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(inventoryText)
+  } catch {
+    fail(`${INVENTORY_FILE} is not JSON`)
+  }
+  const inventory = asTable(parsed) ?? fail(`${INVENTORY_FILE} is not a JSON object`)
+  if (inventory.schema !== LICENSES_SCHEMA) fail(`${INVENTORY_FILE} is not a ${LICENSES_SCHEMA} inventory`)
+  const tool = asTable(inventory.generator)?.tool
+  if (tool !== `cargo-about ${CARGO_ABOUT_VERSION}`) fail(`was generated by ${JSON.stringify(tool)}, not cargo-about ${CARGO_ABOUT_VERSION}`)
+
+  // Every recorded input, whatever the generator records, must be unchanged.
+  const inputs = Object.values(asTable(inventory.inputs) ?? fail('records no inputs'))
+  if (!inputs.some(input => asTable(input)?.path === 'rust/Cargo.lock')) fail('does not record rust/Cargo.lock as an input')
+  for (const input of inputs) {
+    const { path, sha256: digest } = asTable(input) ?? {}
+    if (typeof path !== 'string' || typeof digest !== 'string' || isAbsolute(path) || !inside(root, resolve(root, path))) fail(`records an input ${JSON.stringify(input)} that is not a file of the repository`)
+    let actual: string
+    try {
+      actual = sha256(readFileSync(join(root, path)))
+    } catch {
+      actual = 'missing'
+    }
+    if (actual !== digest) fail(`was generated from ${path} at sha256 ${digest}, but this checkout has ${actual}`)
+  }
+
+  const platforms = Array.isArray(inventory.platforms) ? inventory.platforms.map(asTable) : fail('lists no platforms')
+  const files = new Set([INVENTORY_FILE])
+  for (const entry of platforms) {
+    if (entry === undefined || typeof entry.file !== 'string' || typeof entry.sha256 !== 'string') fail('lists a platform without a file and hash')
+    files.add(entry.file)
+    const text = bundle[entry.file]
+    if (text === undefined) fail(`lacks ${entry.file}`)
+    if (sha256(text) !== entry.sha256) fail(`has a ${entry.file} that differs from its inventory hash`)
+  }
+  const extra = Object.keys(bundle).filter(path => !files.has(path)).sort()
+  if (extra.length > 0) fail(`holds ${extra.join(', ')}, which its inventory does not list`)
+  const triple = PLATFORMS.find(platform => platform.id === target)?.triple
+  const own = platforms.find(entry => entry?.id === target)
+  if (own === undefined) fail(`has no ${target} text`)
+  if (own?.triple !== triple || own?.file !== `${target}/${BUNDLE_FILE}`) fail(`lists ${target} as ${JSON.stringify(own?.triple)} at ${JSON.stringify(own?.file)}, not ${triple} at ${target}/${BUNDLE_FILE}`)
+  const text = bundle[`${target}/${BUNDLE_FILE}`] as string
+  if (!text.startsWith(`Third-party licenses for bake-rs, ${target} (${triple})\n`)) fail(`has a ${target}/${BUNDLE_FILE} whose heading names another platform`)
+
+  const workspace = Array.isArray(inventory.workspace) ? inventory.workspace.map(asTable) : fail('lists no Bake crates')
+  const cli = workspace.find(entry => entry?.name === 'bake-cli')
+  if (cli?.version !== version) fail(`describes bake-cli ${JSON.stringify(cli?.version)}, not ${version}`)
+  // The text reproduces these NOTICE files; the archive also carries them under notices/.
+  const listed: Record<string, string> = {}
+  for (const entry of workspace) {
+    const notice = asTable(entry?.notice)
+    if (notice === undefined || !Array.isArray(entry?.platforms) || !entry.platforms.includes(target)) continue
+    if (typeof entry.name !== 'string' || typeof notice.sha256 !== 'string') fail('lists a Bake crate NOTICE without a crate name and hash')
+    listed[entry.name] = notice.sha256
+  }
+  for (const crate of new Set([...Object.keys(listed), ...Object.keys(notices)])) {
+    if (!(crate in listed)) fail(`does not reproduce the NOTICE of ${crate}, which bake-rs links`)
+    if (!(crate in notices)) fail(`reproduces a NOTICE of ${crate}, which the archive does not carry`)
+  }
+  return { text, inventory: inventoryText, notices: listed }
+}
+
 /** The archive's files for `options`, in a fixed order. */
-export function payload(options: Pick<PackOptions, 'binary' | 'root' | 'notices'>, target: RustTarget): PayloadFile[] {
+export function payload(options: Pick<PackOptions, 'binary' | 'root' | 'notices'>, target: RustTarget, licenses: TargetLicenses): PayloadFile[] {
   const files: PayloadFile[] = [
     { source: options.binary, path: target === 'win32-x64' ? 'bin/bake-rs.exe' : 'bin/bake-rs', mode: BINARY_MODE },
     { source: join(options.root, 'LICENSE'), path: 'LICENSE', mode: FILE_MODE },
@@ -297,6 +420,10 @@ export function payload(options: Pick<PackOptions, 'binary' | 'root' | 'notices'
     if (!/^[a-z][a-z0-9-]*$/u.test(crate)) throw new Error(`Crate name ${JSON.stringify(crate)} cannot name a notice directory`)
     files.push({ source: options.notices[crate] as string, path: `notices/${crate}/NOTICE`, mode: FILE_MODE })
   }
+  files.push(
+    { source: `license bundle ${INVENTORY_FILE}`, path: `${LICENSES_DIR}/${INVENTORY_FILE}`, mode: FILE_MODE, contents: licenses.inventory },
+    { source: `license bundle ${target}/${BUNDLE_FILE}`, path: `${LICENSES_DIR}/${target}/${BUNDLE_FILE}`, mode: FILE_MODE, contents: licenses.text },
+  )
   return files
 }
 
@@ -317,11 +444,17 @@ function stagePayload(files: readonly PayloadFile[], stage: string): void {
     chmodSync(join(stage, dir), DIRECTORY_MODE)
   }
   for (const file of files) {
+    const destination = join(stage, file.path)
+    if (file.contents !== undefined) {
+      if (file.contents === '') throw new Error(`The ${file.source} is empty`)
+      writeFileSync(destination, file.contents, { flag: 'wx' })
+      chmodSync(destination, file.mode)
+      continue
+    }
     // A link could carry a file from anywhere into the archive; lstat does not follow it.
     const stats = lstatSync(file.source)
     if (!stats.isFile()) throw new Error(`${file.source} is ${stats.isSymbolicLink() ? 'a symbolic link' : 'not a regular file'}; the archive takes regular files only`)
     if (stats.size === 0) throw new Error(`${file.source} is empty`)
-    const destination = join(stage, file.path)
     copyFileSync(file.source, destination)
     chmodSync(destination, file.mode)
   }
@@ -381,8 +514,9 @@ async function run(argv: readonly string[], cwd: string): Promise<void> {
  * after both checks pass, so an earlier archive of the same name survives
  * any failure.
  * @throws when the target is not this host's release platform, the version
- * is not a native version, a payload file is missing, empty, or a link, or
- * a check fails.
+ * is not a native version, {@link targetLicenses} refuses the license bundle,
+ * a payload file is missing, empty, or a link, or a check fails; each before
+ * the binary runs or the archive is moved into place.
  */
 export async function packRust(options: PackOptions): Promise<PackResult> {
   const { target, version } = options
@@ -391,7 +525,8 @@ export async function packRust(options: PackOptions): Promise<PackResult> {
   if (!isNativeVersion(version)) throw new Error(`${JSON.stringify(version)} is not a native release version`)
   const timeoutMs = options.timeoutMs ?? 30_000
   const expected: Expected = { version, target, docs: docsDigests(options.docs) }
-  const files = payload(options, target)
+  const licenses = targetLicenses(options.licenses, { target, version, root: options.root, notices: options.notices })
+  const files = payload(options, target, licenses)
   const binaryPath = files[0]?.path as string
 
   const name = archiveName(version, target)
@@ -408,6 +543,9 @@ export async function packRust(options: PackOptions): Promise<PackResult> {
     const stage = join(scratch, 'stage')
     mkdirSync(stage)
     stagePayload(files, stage)
+    for (const [crate, digest] of Object.entries(licenses.notices)) {
+      if (sha256(readFileSync(join(stage, 'notices', crate, 'NOTICE'))) !== digest) throw new Error(`The native license bundle reproduces a NOTICE of ${crate} other than ${options.notices[crate] as string}; regenerate it from this checkout`)
+    }
     const record = await checkBinary(join(stage, binaryPath), expected, timeoutMs)
 
     // System tar, as pack.ts uses: it records the staged modes. Only the
@@ -429,6 +567,7 @@ export async function packRust(options: PackOptions): Promise<PackResult> {
     for (const file of files) {
       const path = join(unpacked, ...file.path.split('/'))
       if (!lstatSync(path).isFile() || sha256(readFileSync(path)) !== sha256(readFileSync(join(stage, file.path)))) throw new Error(`The unpacked ${file.path} differs from the staged file`)
+      if (file.contents !== undefined && sha256(readFileSync(path)) !== sha256(file.contents)) throw new Error(`The unpacked ${file.path} differs from the checked ${file.source}`)
     }
     const unpackedRecord = await checkBinary(join(unpacked, ...binaryPath.split('/')), expected, timeoutMs)
     if (JSON.stringify(unpackedRecord) !== JSON.stringify(record)) throw new Error('The unpacked binary\'s self-check differs from the staged binary\'s')
@@ -558,11 +697,17 @@ async function main(): Promise<void> {
   const outputDir = resolve(values.out ?? join(root, '.artifacts/bake-rs-release', inputs.version))
   // Before building: packRust checks again, but a refused directory should cost no build.
   checkOutputDir(root, outputDir)
+  // Generated for this run, never read from an earlier --write, and before
+  // building, so a missing cargo-about or an uncovered license costs no build.
+  // The bundle reads every platform's crate sources, which the host build alone
+  // would not download; checking is offline after this fetch.
+  await run(['cargo', 'fetch', '--locked'], rust)
+  const licenses = buildBundle(collect(root)).files
   // From rust/, so rust-toolchain.toml selects the pinned toolchain.
   await run(['cargo', 'build', '--locked', '-p', 'bake-cli', '--bin', 'bake-rs', ...profile === 'release' ? ['--release'] : []], rust)
   const binary = join(inputs.targetDir, profile === 'release' ? 'release' : 'debug', process.platform === 'win32' ? 'bake-rs.exe' : 'bake-rs')
   const { docs, notices, version } = inputs
-  const result = await packRust({ binary, root, docs, notices, version, target: hostTarget(), outputDir })
+  const result = await packRust({ binary, root, docs, notices, licenses, version, target: hostTarget(), outputDir })
   console.log(result.listing.join('\n'))
   console.log(JSON.stringify(result.record))
   console.log(result.archive)

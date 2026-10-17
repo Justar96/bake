@@ -532,6 +532,8 @@ describe('the command', () => {
     expect(check.calls.some(call => call.startsWith('cargo fetch'))).toBe(false)
     expect(check.calls.filter(call => call.startsWith('cargo ') && call !== 'cargo --version').every(call => call.includes('--locked') && call.includes('--offline'))).toBe(true)
     expect(check.calls.find(call => call.includes('about generate'))).toContain('--frozen')
+    // A user's `term.unicode = false` would otherwise print ASCII trees the parser refuses.
+    expect(check.calls.filter(call => call.startsWith('cargo tree')).every(call => call.includes('--charset utf8'))).toBe(true)
 
     const write = runner(inputs)
     expect(quiet(() => main(['--write'], root, write.run))).toBe(0)

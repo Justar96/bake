@@ -75,7 +75,7 @@ Run the checks relevant to your change while you work, and `bun run preflight` b
 macOS is checked on a Mac over SSH, not in CI. `bun run preflight:mac` sends this checkout's committed and tracked uncommitted changes to the Mac, runs `bun run preflight --only native` there, follows its log, and exits with its status. Pass another command to run that instead, such as `bun run preflight:mac 'cd rust && cargo test --locked -p bake-tui'`, and use `bun run preflight:mac --log` to print the last run again.
 
 - The SSH host is `macpro`, an alias in `~/.ssh/config` with key login, or `BAKE_MAC_HOST`. Never commit the Mac's address.
-- The first run clones the repository into `~/bake-ci` on the Mac (`BAKE_MAC_DIR`). The Mac needs git, Bun, and rustup.
+- The first run clones the repository into `~/bake-ci` on the Mac (`BAKE_MAC_DIR`). The Mac needs git, Bun, and rustup, and the native package check needs cargo-about 0.9.2 on its PATH or `BAKE_CARGO_ABOUT=<path>` in the command.
 - The run is detached on the Mac, so a dropped connection does not stop it. Commands longer than a tool's time limit belong in a background job.
 - Report the Mac's architecture with its summary. The Mac in use is an Intel x86_64 machine, so Apple Silicon is checked only by the release builds.
 - When `macpro` cannot be reached, say so in the pull request instead of claiming macOS evidence.
