@@ -37,12 +37,14 @@
 
 pub mod agent_session;
 pub mod auth_storage;
+pub mod bug_report;
 mod child_process;
 pub mod cli;
 pub mod cliproxyapi;
 pub mod compaction;
 pub mod config_value;
 pub mod exec;
+pub mod export_html;
 pub mod home;
 pub mod hooks;
 pub mod jobs;
@@ -57,6 +59,7 @@ pub mod print_mode;
 pub mod prompt_templates;
 pub mod schedules;
 pub mod session;
+pub mod session_export;
 pub mod settings;
 pub mod skills;
 pub mod subagents;

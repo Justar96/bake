@@ -1,6 +1,7 @@
 //! The commands a live session runs: `/model`, `/thinking`, `/settings`,
 //! `/session`, `/name`, `/new`, `/resume`, `/tree`, `/fork`, `/clone`,
-//! `/compact`, `/login`, `/logout`, and `/refresh-models`.
+//! `/compact`, `/login`, `/logout`, `/refresh-models`, `/changelog`,
+//! `/share`, and `/bug`.
 //!
 //! `/model`, `/thinking`, and `/settings` follow Pi v1.2.0
 //! `packages/coding-agent/src/modes/interactive/interactive-mode.ts`
@@ -60,6 +61,12 @@
 //! session write does: nothing more is written and later prompts are
 //! refused.
 //!
+//! `/changelog` ([`changelog`]), `/share` ([`share`]), and `/bug`
+//! ([`bug`]) follow Pi v1.3.0. `/share` and `/bug` upload through the
+//! GitHub CLI ([`gh`]) only after a sheet that says what leaves the machine
+//! and where it goes, and only while the session is idle ([`IDLE`]), so
+//! they read a settled session.
+//!
 //! `/login`, `/logout`, and `/refresh-models` keep Bake's CLIProxyAPI
 //! contract: `apps/tui/packages/app/src/cliproxyapi.ts`
 //! (`configureCliProxyApi`, `refreshCliProxyModels`) and
@@ -77,6 +84,12 @@
 //! terminal is given back. A driver that panics hands the task, and the
 //! startup refresh, to the port's handler, which does the same.
 
+mod bug;
+pub mod changelog;
+mod gh;
+mod share;
+
+use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -123,6 +136,9 @@ pub const COMMANDS: &[&str] = &[
     "fork",
     "clone",
     "compact",
+    "changelog",
+    "share",
+    "bug",
 ];
 
 /// The commands that replace the running session ([`Done::Replace`]), move
@@ -130,6 +146,16 @@ pub const COMMANDS: &[&str] = &[
 /// Each starts only while the session is idle, and no prompt is admitted
 /// while one runs.
 pub const TRANSITIONS: &[&str] = &["new", "resume", "tree", "fork", "clone", "compact"];
+
+/// The commands that start only while the session is idle, as
+/// [`TRANSITIONS`] do, but leave prompts admitted while they run: they
+/// read the settled session and upload it.
+pub const IDLE: &[&str] = &["share", "bug"];
+
+/// The commands that open no dialog, so none is closed when they end:
+/// closing one hands the keyboard over afresh and drops the keys typed
+/// meanwhile.
+pub const NO_DIALOG: &[&str] = &[COMPACT, "changelog"];
 
 /// The command that runs as the session's work, as a turn does: the bar
 /// shows it, and Esc cancels it rather than a dialog.
@@ -171,6 +197,8 @@ pub struct Context {
     /// the bar as a turn, such as `/tree`'s branch summary; Esc there
     /// fires it. `None` while none runs.
     pub work: Arc<std::sync::Mutex<Option<AbortController>>>,
+    /// The GitHub CLI `/share` and `/bug` run: `gh`, found on `PATH`.
+    pub gh: OsString,
     /// The asker once made, which then holds `answers`.
     shared: Option<Asker>,
     #[cfg(test)]
@@ -220,10 +248,20 @@ impl Context {
             shown,
             factory: None,
             work: Arc::default(),
+            gh: OsString::from("gh"),
             shared: None,
             #[cfg(test)]
             commit_gate: None,
         }
+    }
+
+    /// Runs `program` as the GitHub CLI, for tests.
+    #[cfg(test)]
+    pub fn with_gh(mut self, program: Option<OsString>) -> Self {
+        if let Some(program) = program {
+            self.gh = program;
+        }
+        self
     }
 
     /// Lets `/new` and `/resume` build replacements with `factory`.
@@ -243,6 +281,8 @@ impl Context {
 pub enum Done {
     /// A note for the transcript.
     Note(String),
+    /// Rows for the transcript, as `/changelog`'s entries.
+    Rows(Vec<Row>),
     /// Nothing more, as when an information sheet closes.
     Quiet,
     /// A session to replace the running one with, built and not yet in
@@ -268,6 +308,7 @@ impl std::fmt::Debug for Done {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Note(note) => f.debug_tuple("Note").field(note).finish(),
+            Self::Rows(rows) => f.debug_tuple("Rows").field(rows).finish(),
             Self::Quiet => f.write_str("Quiet"),
             Self::Replace { note, .. } => f.debug_struct("Replace").field("note", note).finish(),
             Self::Navigated { note, .. } => {
@@ -390,7 +431,7 @@ pub fn refuse_argument(name: &str, argument: &str) -> Option<String> {
             "/{name} knows only CLIProxyAPI in bake-rs, not {argument}; your draft is kept."
         )),
         "refresh-models" | "settings" | "session" | "new" | "resume" | "tree" | "fork"
-        | "clone"
+        | "clone" | "changelog" | "share"
             if !argument.is_empty() =>
         {
             Some(format!("/{name} takes no argument; your draft is kept."))
@@ -419,12 +460,14 @@ pub async fn run(name: &str, argument: String, mut context: Context) -> Outcome 
         "fork" => fork(&mut context).await,
         "clone" => clone_session(&context).await,
         "compact" => compact(&context, &argument).await,
+        "changelog" => Ok(Done::Rows(changelog::rows(changelog::CHANGELOG))),
+        "share" => share::share(&mut context).await,
+        "bug" => bug::bug(&mut context, &argument).await,
         _ => Err(format!("/{name} is not a command.")),
     };
     context.shown.store(0, std::sync::atomic::Ordering::SeqCst);
-    // `/compact` opens no dialog, so there is none to close: closing one
-    // hands the keyboard over afresh and drops the keys typed meanwhile.
-    if name != COMPACT {
+    // These open no dialog, so there is none to close ([`NO_DIALOG`]).
+    if !NO_DIALOG.contains(&name) {
         (context.send)(RuntimeUpdate::Dialog(None));
     }
     outcome
@@ -1834,5 +1877,32 @@ mod tests {
         );
         assert_eq!(parse("/models"), None);
         assert_eq!(parse("model"), None);
+        assert_eq!(
+            parse("/bug the edit  failed "),
+            Some(("bug", "the edit  failed".into()))
+        );
+        assert_eq!(parse("/share"), Some(("share", String::new())));
+        assert_eq!(parse("/changelog"), Some(("changelog", String::new())));
+    }
+
+    // Pi v1.3.0 `slash-commands.ts`: `/share` and `/changelog` take no
+    // argument and `/bug` an optional description; `/share` and `/bug` wait
+    // for an idle session, and `/changelog` opens no dialog.
+    #[test]
+    fn share_bug_and_changelog_take_pi_s_arguments() {
+        assert!(refuse_argument("share", "now").is_some());
+        assert!(refuse_argument("changelog", "0.3").is_some());
+        assert_eq!(refuse_argument("bug", "it broke"), None);
+        assert_eq!(refuse_argument("bug", ""), None);
+        assert_eq!(IDLE, ["share", "bug"]);
+        assert!(NO_DIALOG.contains(&"changelog"));
+        for name in ["share", "bug", "changelog"] {
+            assert!(!TRANSITIONS.contains(&name));
+        }
+        let bug = bake_tui_view::completion::LIVE_CATALOG
+            .iter()
+            .find(|command| command.name == "bug")
+            .expect("listed");
+        assert!(!bake_tui_view::completion::requires_input(bug));
     }
 }

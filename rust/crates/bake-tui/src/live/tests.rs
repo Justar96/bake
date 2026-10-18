@@ -64,6 +64,18 @@ fn setup(
     prompts: Vec<(String, Vec<ImageContent>)>,
     key: Option<&str>,
 ) -> (tokio::runtime::Runtime, Arc<FauxProvider>, LiveSession) {
+    let manager = SessionManager::in_memory(Some("/tmp"), NewSessionOptions::default(), Vec::new())
+        .expect("session");
+    setup_with(manager, tools, prompts, key)
+}
+
+/// [`setup`] over `manager`.
+fn setup_with(
+    manager: SessionManager,
+    tools: Vec<Arc<AgentTool>>,
+    prompts: Vec<(String, Vec<ImageContent>)>,
+    key: Option<&str>,
+) -> (tokio::runtime::Runtime, Arc<FauxProvider>, LiveSession) {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
@@ -94,12 +106,7 @@ fn setup(
     let active: Vec<String> = tools.iter().map(|tool| tool.name.clone()).collect();
     let session = runtime
         .block_on(AgentSession::create(AgentSessionOptions {
-            session: SessionManager::in_memory(
-                Some("/tmp"),
-                NewSessionOptions::default(),
-                Vec::new(),
-            )
-            .expect("session"),
+            session: manager,
             model: registry.model("faux", "faux-1"),
             registry: registry.into(),
             settings_store: None,
@@ -126,6 +133,7 @@ fn setup(
         home: None,
         factory: None,
         commit_gate: None,
+        gh: None,
     };
     (runtime, faux, live)
 }
@@ -1086,3 +1094,4 @@ fn only_the_commands_own_cancellation_interrupts_its_work() {
 mod commands_live;
 mod mcp_live;
 mod sessions_live;
+mod share_live;

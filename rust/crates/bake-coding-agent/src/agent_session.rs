@@ -86,6 +86,7 @@ mod prompt_execution;
 mod recovery;
 mod run_journal;
 pub(crate) mod schedules;
+pub mod share;
 pub(crate) mod task_documents;
 
 use std::path::PathBuf;
@@ -2984,6 +2985,8 @@ mod plugin_tests;
 mod recovery_tests;
 #[cfg(test)]
 mod service_tests;
+#[cfg(test)]
+mod share_tests;
 #[cfg(test)]
 mod tests;
 

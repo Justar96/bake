@@ -83,10 +83,7 @@ const PI_COMMANDS: &[&str] = &[
     "scoped-models",
     "export",
     "import",
-    "share",
-    "bug",
     "copy",
-    "changelog",
     "hotkeys",
     "trust",
     "reload",
@@ -117,6 +114,9 @@ pub struct LiveSession {
     /// Holds `/login` at its commit, for tests of that boundary.
     #[cfg(test)]
     pub commit_gate: Option<commands::CommitGate>,
+    /// The GitHub CLI `/share` and `/bug` run instead of `gh`, for tests.
+    #[cfg(test)]
+    pub gh: Option<std::ffi::OsString>,
 }
 
 impl LiveSession {
@@ -189,6 +189,8 @@ impl LivePort {
             factory,
             #[cfg(test)]
             commit_gate,
+            #[cfg(test)]
+            gh,
         } = live;
         let session = Arc::new(session);
         #[cfg(test)]
@@ -245,6 +247,8 @@ impl LivePort {
             subscription: Some(subscription),
             #[cfg(test)]
             commit_gate,
+            #[cfg(test)]
+            gh,
             command: None,
             dialog_ids: Arc::default(),
             startup: None,
@@ -477,6 +481,8 @@ struct Driver {
     orphans: Orphans,
     #[cfg(test)]
     commit_gate: Option<commands::CommitGate>,
+    #[cfg(test)]
+    gh: Option<std::ffi::OsString>,
     /// The background shells last sent to the view.
     shells: Vec<bake_tui_view::jobs::BackgroundJob>,
 }
@@ -753,7 +759,7 @@ impl Driver {
                     if let Some(reason) = commands::refuse_argument(name, &argument) {
                         return self.refuse(id, text, reason);
                     }
-                    if commands::TRANSITIONS.contains(&name)
+                    if (commands::TRANSITIONS.contains(&name) || commands::IDLE.contains(&name))
                         && let Some(reason) = self.busy(running.as_ref())
                     {
                         return self.refuse(id, text, reason);
@@ -979,6 +985,8 @@ impl Driver {
         let work = Arc::clone(&context.work);
         #[cfg(test)]
         let context = context.with_commit_gate(self.commit_gate.clone());
+        #[cfg(test)]
+        let context = context.with_gh(self.gh.clone());
         // The bar shows `/compact` as the running work, so Esc reaches it
         // as a cancel and Enter as a prompt the barrier refuses.
         if name == commands::COMPACT {
@@ -1041,7 +1049,7 @@ impl Driver {
             // It opens no dialog, so no keyboard handoff starts and the
             // draft typed while it ran keeps taking keys.
             self.send(RuntimeUpdate::TurnEnded(work_outcome(&outcome)));
-        } else {
+        } else if !commands::NO_DIALOG.contains(&command.name) {
             // The command closed its dialog; a panicked one could not have.
             self.send(RuntimeUpdate::Dialog(None));
         }
@@ -1114,8 +1122,12 @@ impl Driver {
                 if let Some(id) = command.id {
                     self.send(RuntimeUpdate::Admitted(id));
                 }
-                if let commands::Done::Note(note) = done {
-                    self.send(RuntimeUpdate::Commit(vec![Row::Info(note)]));
+                match done {
+                    commands::Done::Note(note) => {
+                        self.send(RuntimeUpdate::Commit(vec![Row::Info(note)]));
+                    }
+                    commands::Done::Rows(rows) => self.send(RuntimeUpdate::Commit(rows)),
+                    _ => {}
                 }
             }
             Err(reason) => self.refuse(command.id, command.text, reason),

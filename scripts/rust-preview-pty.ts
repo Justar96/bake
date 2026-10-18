@@ -1186,7 +1186,8 @@ interface LiveWorld {
   readonly home: string
   readonly project: string
   readonly model: FakeModel
-  launch(args?: readonly string[], inline?: boolean): Preview
+  /** Starts bake-rs in the project; `env` adds to or replaces the session's environment, such as `PATH`. */
+  launch(args?: readonly string[], inline?: boolean, env?: Readonly<Record<string, string>>): Preview
   /** Runs `cleanup` once every launched session is closed, whatever the outcome; its failure fails the scenario. */
   defer(cleanup: () => Promise<void>): void
 }
@@ -1240,8 +1241,8 @@ async function live(body: (world: LiveWorld) => Promise<void>): Promise<void> {
   const world: LiveWorld = {
     root, home, project, model,
     defer: (cleanup) => { cleanups.push(cleanup) },
-    launch: (args = [], inline = false) => {
-      const preview = new Preview(project, inline, { args: inline ? ['--inline', ...args] : args, env: { BAKE_HOME: home, HOME: user, USERPROFILE: user } })
+    launch: (args = [], inline = false, env = {}) => {
+      const preview = new Preview(project, inline, { args: inline ? ['--inline', ...args] : args, env: { BAKE_HOME: home, HOME: user, USERPROFILE: user, ...env } })
       launched.push(preview)
       return preview
     },
@@ -2691,6 +2692,111 @@ if (windows) {
     assert.deepEqual(fixture.events(), [], 'a --no-tools session started the MCP server')
     assert.deepEqual(fixture.recorded(), [])
   })
+}
+
+// ---- /changelog, /share, and /bug ----
+
+/** A fake GitHub CLI on `PATH`: it records each call and copies what it is asked to upload, so nothing reaches the network. */
+interface FakeGh {
+  /** `PATH` with the fake first. */
+  readonly path: string
+  /** Each call's arguments, in order. */
+  calls(): string[]
+  /** A file the fake wrote, such as `uploaded.html` or `body.md`. */
+  recorded(name: string): string | undefined
+}
+
+async function fakeGh(world: LiveWorld): Promise<FakeGh> {
+  const dir = join(world.root, 'gh')
+  await mkdir(dir, { recursive: true })
+  const script = join(dir, 'gh')
+  await writeFile(script, [
+    '#!/bin/sh',
+    'dir=$(dirname "$0")',
+    'printf \'%s\\n\' "$*" >> "$dir/calls"',
+    'case "$1 $2" in',
+    '  "auth status") exit 0 ;;',
+    '  "gist create") cp "$4" "$dir/uploaded.html"; echo "https://gist.github.com/someone/abc123"; exit 0 ;;',
+    '  "issue create")',
+    '    shift 2',
+    '    while [ $# -gt 0 ]; do [ "$1" = "--body-file" ] && cp "$2" "$dir/body.md"; shift; done',
+    '    echo "https://github.com/Justar96/bake/issues/42"; exit 0 ;;',
+    'esac',
+    'exit 2',
+    '',
+  ].join('\n'))
+  await chmod(script, 0o755)
+  const recorded = (name: string): string | undefined => existsSync(join(dir, name)) ? readFileSync(join(dir, name), 'utf8') : undefined
+  return { path: `${dir}:${process.env.PATH ?? ''}`, calls: () => (recorded('calls') ?? '').split('\n').filter(Boolean), recorded }
+}
+
+if (windows) {
+  console.log('SKIP Rust PTY: changelog, share, and bug (the fake GitHub CLI is a POSIX shell script)')
+} else {
+  for (const inline of [false, true]) {
+    await liveScenario(`${inline ? 'inline ' : ''}changelog shows the entries, and share and bug upload through gh only after their sheets say yes`, async (world) => {
+      const gh = await fakeGh(world)
+      const session = world.launch([], inline, { PATH: gh.path })
+      await session.ready()
+      session.send('ECHO alpha\r')
+      await turnSettled(session, 'Echo: alpha.')
+      await composerReady(session)
+      const requests = world.model.requests.length
+
+      session.send('/changelog\r')
+      // The newest entry, 0.3.8, comes last, so its last words end the transcript.
+      await session.wait('changelog shown', () => session.screen.includes('Option-drag') && session.screen.includes('❯ Type a draft'))
+
+      // No is selected first: Enter declines and nothing is uploaded.
+      session.send('/share\r')
+      await sheetReady(session, 'Share this session as a secret GitHub gist?')
+      assert(session.screen.includes('anyone with its') && session.screen.includes('▸ No'), session.screen)
+      session.send('\r')
+      await session.wait('share declined', () => session.screen.includes('Share cancelled; your draft is back.') && session.screen.includes('❯ /share'))
+      assert.deepEqual(gh.calls(), ['auth status'])
+      assert.equal(gh.recorded('uploaded.html'), undefined, 'a declined share uploaded')
+      await composerReady(session)
+      session.send('\x15')
+      await session.wait('draft cleared', () => !session.screen.includes('❯ /share'))
+
+      session.send('/share\r')
+      await sheetReady(session, 'Share this session as a secret GitHub gist?')
+      session.send('\x1b[A')
+      await session.wait('yes selected', () => session.screen.includes('▸ Yes, create the gist'))
+      session.send('\r')
+      await session.wait('shared', () => session.screen.includes('Gist: https://gist.github.com/someone/abc123'))
+      await composerReady(session)
+      assert(gh.calls()[2]?.startsWith('gist create --public=false '), `${gh.calls()}`)
+      assert(gh.recorded('uploaded.html')?.includes('id="session-data"'), 'the shared page is not the HTML export')
+
+      // /bug: the description starts from the argument; nothing runs before the last choice.
+      session.send('/bug the answer was cut\r')
+      await sheetReady(session, 'Report a bug')
+      assert(session.screen.includes('public GitHub issue') && session.screen.includes('> the answer was cut'), session.screen)
+      session.send('\r')
+      await sheetReady(session, 'Include the session transcript?')
+      session.send('\x1b[B')
+      await session.wait('no transcript selected', () => /▸ No/u.test(session.screen))
+      session.send('\r')
+      await sheetReady(session, 'Bug report')
+      assert(session.screen.includes('Description: the answer was cut'), session.screen)
+      assert.equal(gh.calls().length, 3, 'gh ran before the last choice')
+      session.send('\r')
+      await session.wait('issue filed', () => session.screen.includes('Bug report filed: https://github.com/Justar96/bake/issues/42'))
+      await composerReady(session)
+      const body = gh.recorded('body.md') ?? ''
+      assert(body.startsWith('the answer was cut') && body.includes('report.json'), body)
+      assert(!body.includes('test-key') && !body.includes('ECHO alpha'), 'the public issue holds a key or the transcript')
+      assert.equal(world.model.requests.length, requests, 'a command sent a model request')
+      // Inline, the whole changelog goes into the scrollback and pushes the
+      // shell's rows past the test terminal's scrollback, so they are not checked here.
+      await session.quit()
+      const entries = (await sessionEntries(world.home)).flat()
+      const records = entries.filter(entry => entry.type === 'custom' && entry.customType === 'bake.bug-report')
+      assert.equal(records.length, 1, 'the filed report was not recorded once')
+      assert.deepEqual(await readdir(world.project), [], 'a command wrote into the project')
+    })
+  }
 }
 
 console.log(`Rust PTY: ${results.passed.length} passed, ${results.gapped.length} ended in a named gap, ${results.failed.length} failed`)

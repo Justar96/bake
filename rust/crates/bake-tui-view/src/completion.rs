@@ -84,6 +84,13 @@ pub const LIVE_CATALOG: &[Command] = &[
         Some("[instructions]"),
         "Manually compact the session context",
     ),
+    command("changelog", None, "Show changelog entries"),
+    command("share", None, "Share session as a secret GitHub gist"),
+    command(
+        "bug",
+        Some("[description]"),
+        "Report a bug to the Bake developers",
+    ),
 ];
 
 /// Commands listed ahead of the rest, in this order, as the oracle ranks them.

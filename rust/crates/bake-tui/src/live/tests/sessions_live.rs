@@ -244,6 +244,7 @@ fn settings_harness(
         home: None,
         factory: Some(factory),
         commit_gate: gate,
+        gh: None,
     };
     let held = Arc::new(());
     let callback_alive = Arc::downgrade(&held);

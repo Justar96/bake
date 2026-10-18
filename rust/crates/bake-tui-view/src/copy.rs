@@ -272,3 +272,63 @@ pub const APPROVAL_KEYS_ONLY: &str =
     "To answer, press Y then Enter, or N, each on its own once the request shows; Esc cancels";
 /// Why Enter did not allow the waiting approval.
 pub const APPROVAL_CHOOSE_FIRST: &str = "Press Y first, then Enter, to allow this call once";
+
+/// `/changelog`'s heading over the entries, Pi's `What's New`, and what it
+/// says when the changelog has no released entries.
+pub const CHANGELOG_TITLE: &str = "What's New";
+pub const CHANGELOG_EMPTY: &str = "No changelog entries found.";
+
+/// `/share`'s confirmation, which Pi's gist path does not have: its title,
+/// what the gist holds and who can read it, and its two choices. Nothing is
+/// uploaded unless the first is chosen.
+pub const SHARE_CONFIRM_TITLE: &str = "Share this session as a secret GitHub gist?";
+pub const SHARE_CONFIRM_NOTE: &str = "The gist holds this session as a web page: your messages, the model's answers, tool calls and their results (including file contents and command output read during the session), the system prompt, and the tool definitions. A secret gist is unlisted, but anyone with its link can read it.";
+pub const SHARE_CONFIRM_YES: &str = "Yes, create the gist";
+pub const SHARE_CONFIRM_NO: &str = "No";
+/// Pi's `/share` notes and errors.
+pub const SHARE_CANCELLED: &str = "Share cancelled";
+pub const SHARE_GH_NOT_LOGGED_IN: &str = "GitHub CLI is not logged in. Run 'gh auth login' first.";
+pub const SHARE_GH_MISSING: &str =
+    "GitHub CLI (gh) is not installed. Install it from https://cli.github.com/";
+pub const SHARE_EXPORT_FAILED: &str = "Failed to export session:";
+pub const SHARE_GIST_FAILED: &str = "Failed to create gist:";
+pub const SHARE_GIST_UNPARSED: &str = "Failed to parse gist ID from gh output";
+pub const SHARE_GIST: &str = "Gist:";
+pub const UNKNOWN_ERROR: &str = "Unknown error";
+
+/// `/bug`'s first sheet: its title, what the report holds and where it
+/// goes (`{repository}` names it), and the question its field answers.
+/// Pi's report goes privately to its developers; Bake's is a public issue.
+pub const BUG_TITLE: &str = "Report a bug";
+pub const BUG_DISCLAIMER: &str = "This report becomes a public GitHub issue on {repository}. It includes your bake-rs version, operating system, the current model and provider configuration (without API keys), settings.json with secrets redacted, and provider error diagnostics from this session.";
+pub const BUG_QUESTION: &str = "What went wrong? (optional)";
+/// The transcript question, Pi's, with where a transcript goes in Bake.
+pub const BUG_TRANSCRIPT_TITLE: &str = "Include the session transcript?";
+pub const BUG_TRANSCRIPT_NOTE: &str = "The transcript contains your messages, model output, tool calls and their results, including file contents and command output read during this session. It goes only into the zip archive on this machine, never into the public issue.";
+pub const BUG_TRANSCRIPT_YES: &str = "Yes, include the transcript";
+pub const BUG_TRANSCRIPT_NO: &str = "No";
+/// The last sheet before anything leaves the machine: its title, choices,
+/// and the summary over them.
+pub const BUG_DELIVERY_TITLE: &str = "Bug report";
+pub const BUG_CREATE_ISSUE: &str = "Create GitHub issue";
+pub const BUG_CREATE_ISSUE_WITHOUT_TRANSCRIPT: &str =
+    "Create GitHub issue (without the transcript)";
+pub const BUG_EXPORT_ZIP: &str = "Export as Zip";
+pub const BUG_CANCEL: &str = "Cancel";
+pub const BUG_ISSUE_LINK: &str = "Show a prefilled issue link";
+/// Pi's summary lines; `{repository}` names the repository.
+pub const BUG_DELIVERY_ISSUE_NOTE: &str = "Create GitHub issue files a public issue on {repository} with gh. Export writes a zip archive to the current directory instead.";
+/// The fallback sheet after a failed issue, Pi's `Upload failed`.
+pub const BUG_UPLOAD_FAILED_TITLE: &str = "Upload failed";
+pub const BUG_UPLOAD_FAILED_QUESTION: &str = "Export the report as a zip archive instead?";
+/// Pi's `/bug` notes and errors.
+pub const BUG_CANCELLED: &str = "Bug report cancelled";
+pub const BUG_BUILD_FAILED: &str = "Failed to build bug report:";
+pub const BUG_WRITE_FAILED: &str = "Failed to write bug report:";
+pub const BUG_ISSUE_CREATED: &str = "Bug report filed:";
+pub const BUG_EXPORTED: &str = "Bug report exported to:";
+pub const BUG_REPORT_ID: &str = "Report ID:";
+pub const BUG_ISSUE_UNPARSED: &str = "Failed to read the issue URL from gh output";
+pub const BUG_ISSUE_FAILED: &str = "Failed to create issue:";
+pub const BUG_LINK: &str = "Open this link to file the report yourself:";
+pub const BUG_NOT_RECORDED: &str = "The report was filed, but recording it in the session failed:";

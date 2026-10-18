@@ -260,6 +260,7 @@ dependencies = [
  "crossterm",
  "libc",
  "ratatui",
+ "regex",
  "serde_json",
  "signal-hook",
  "tokio",

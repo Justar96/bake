@@ -40,6 +40,18 @@ the kept entries with the summary below them), in src/live/commands.rs,
 src/live/mod.rs, and src/live/projection.rs (replay_compacted), with the case
 of test/interactive-mode-compaction.test.ts that renders retained entries in
 src/live/tests/compact_live.rs.
+From release v1.3.0, revision 71023aec1546d6d677a65669c5665c0927ce0dd0:
+the /changelog, /share, and /bug commands of src/core/slash-commands.ts and
+interactive-mode.ts (handleChangelogCommand, handleShareCommand,
+handleBugCommand), with parseChangelog and normalizeChangelogLinks of
+src/utils/changelog.ts and test/changelog.test.ts in
+src/live/commands/changelog.rs; shareSession and shareViaGist of
+src/modes/interactive/session-share.ts in src/live/commands/share.rs and
+src/live/commands/gh.rs; and reportBug, promptForOptions, upload, and
+exportZip of src/modes/interactive/bug-report.ts in
+src/live/commands/bug.rs; with the cases of test/session-share.test.ts and
+test/interactive-mode-bug-report-hint.test.ts in
+src/live/tests/share_live.rs.
 --------------------------------------------------------------------------------
 MIT License
 
