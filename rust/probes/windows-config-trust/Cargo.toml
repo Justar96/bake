@@ -1,0 +1,36 @@
+# Research probe, not product code: see README.md. Its own workspace, so the
+# rust/ workspace, its Cargo.lock, release packaging, and license bundle never
+# include it; rust/rust-toolchain.toml still pins the toolchain.
+[package]
+name = "bake-windows-config-trust-probe"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.99"
+publish = false
+license = "MIT"
+description = "Research probe for Windows owner and DACL trust of Bake configuration reads. Not product code."
+
+[workspace]
+
+[dependencies]
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "=0.61.2", default-features = false, features = [
+    "Wdk_Foundation",
+    "Wdk_Storage_FileSystem",
+    "Wdk_System_SystemServices",
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Security_Cryptography",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_Ioctl",
+    "Win32_System_SystemServices",
+    "Win32_System_Threading",
+    "Win32_System_WindowsProgramming",
+] }
+
+# Unwinding lets a panicking mechanism be caught so cleanup still runs.
+[profile.release]
+panic = "unwind"

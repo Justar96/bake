@@ -59,19 +59,23 @@ const SECURITY_MAX_SID_SIZE: usize = 68;
 const FILE_ALL_ACCESS: u32 = 0x001F_01FF;
 const ACCESS_ALLOWED_ACE_TYPE: u8 = 0;
 
-type Result<T> = std::result::Result<T, String>;
+pub(in crate::backends) type Result<T> = std::result::Result<T, String>;
 
-fn last_error(api: &str, context: impl std::fmt::Display) -> String {
+pub(in crate::backends) fn last_error(api: &str, context: impl std::fmt::Display) -> String {
     let error = std::io::Error::last_os_error();
     format!("{api} failed ({context}): {error}")
 }
 
-fn win32_error(api: &str, code: u32, context: impl std::fmt::Display) -> String {
+pub(in crate::backends) fn win32_error(
+    api: &str,
+    code: u32,
+    context: impl std::fmt::Display,
+) -> String {
     let error = std::io::Error::from_raw_os_error(code as i32);
     format!("{api} failed ({context}): {error}")
 }
 
-fn wide(text: &OsStr) -> Result<Vec<u16>> {
+pub(in crate::backends) fn wide(text: &OsStr) -> Result<Vec<u16>> {
     let mut units: Vec<u16> = text.encode_wide().collect();
     if units.contains(&0) {
         return Err(format!("{} contains a NUL character", text.display()));
@@ -81,7 +85,7 @@ fn wide(text: &OsStr) -> Result<Vec<u16>> {
 }
 
 /// A `LocalAlloc`ed block, freed on drop.
-struct Local(*mut c_void);
+pub(in crate::backends) struct Local(pub(in crate::backends) *mut c_void);
 
 impl Drop for Local {
     fn drop(&mut self) {
@@ -96,13 +100,13 @@ impl Drop for Local {
 }
 
 /// A SID: one `ConvertStringSidToSidW` allocated, or a copy owned here.
-enum Sid {
+pub(in crate::backends) enum Sid {
     Local(Local),
     Owned(Vec<u32>),
 }
 
 impl Sid {
-    fn parse(text: &str) -> Result<Self> {
+    pub(in crate::backends) fn parse(text: &str) -> Result<Self> {
         let units = wide(OsStr::new(text))?;
         let mut sid: PSID = null_mut();
         // SAFETY: `units` is NUL-terminated; `sid` receives a LocalAlloc'd SID.
@@ -113,7 +117,7 @@ impl Sid {
     }
 
     /// A copy of the SID at `sid`, which must stay valid for the call.
-    fn copy_of(sid: PSID, context: &str) -> Result<Self> {
+    pub(in crate::backends) fn copy_of(sid: PSID, context: &str) -> Result<Self> {
         // SAFETY: the caller passes a valid SID pointer.
         let length = unsafe { GetLengthSid(sid) };
         if length == 0 {
@@ -149,7 +153,7 @@ impl Sid {
         Ok(Sid::Owned(buffer))
     }
 
-    fn as_psid(&self) -> PSID {
+    pub(in crate::backends) fn as_psid(&self) -> PSID {
         match self {
             Sid::Local(local) => local.0,
             Sid::Owned(buffer) => buffer.as_ptr().cast_mut().cast(),
@@ -157,7 +161,7 @@ impl Sid {
     }
 }
 
-fn owned_handle(raw: HANDLE) -> OwnedHandle {
+pub(in crate::backends) fn owned_handle(raw: HANDLE) -> OwnedHandle {
     // SAFETY: callers pass a valid handle they exclusively own.
     unsafe { OwnedHandle::from_raw_handle(raw) }
 }
@@ -167,7 +171,11 @@ fn owned_handle(raw: HANDLE) -> OwnedHandle {
 
 /// An `EXPLICIT_ACCESS_W` naming `sid`, inheritable by containers and
 /// objects. The SID must outlive the entry's use.
-fn explicit_access(sid: &Sid, mode: i32, permissions: u32) -> EXPLICIT_ACCESS_W {
+pub(in crate::backends) fn explicit_access(
+    sid: &Sid,
+    mode: i32,
+    permissions: u32,
+) -> EXPLICIT_ACCESS_W {
     EXPLICIT_ACCESS_W {
         grfAccessPermissions: permissions,
         grfAccessMode: mode,
@@ -183,7 +191,7 @@ fn explicit_access(sid: &Sid, mode: i32, permissions: u32) -> EXPLICIT_ACCESS_W 
 }
 
 /// `path`'s DACL (null for a NULL DACL) and the descriptor that owns it.
-fn read_dacl(path: &Path) -> Result<(Local, *mut ACL)> {
+pub(in crate::backends) fn read_dacl(path: &Path) -> Result<(Local, *mut ACL)> {
     let units = wide(path.as_os_str())?;
     let mut dacl: *mut ACL = null_mut();
     let mut descriptor: PSECURITY_DESCRIPTOR = null_mut();
@@ -208,7 +216,7 @@ fn read_dacl(path: &Path) -> Result<(Local, *mut ACL)> {
 }
 
 /// Each allow ACE of `dacl`: its flags, mask, and SID pointer.
-fn allow_aces(dacl: *mut ACL) -> Result<Vec<(u8, u32, PSID)>> {
+pub(in crate::backends) fn allow_aces(dacl: *mut ACL) -> Result<Vec<(u8, u32, PSID)>> {
     let mut aces = Vec::new();
     if dacl.is_null() {
         return Ok(aces);
@@ -242,7 +250,7 @@ fn allow_aces(dacl: *mut ACL) -> Result<Vec<(u8, u32, PSID)>> {
     Ok(aces)
 }
 
-fn same_sid(left: PSID, right: &Sid) -> bool {
+pub(in crate::backends) fn same_sid(left: PSID, right: &Sid) -> bool {
     // SAFETY: both pointers are valid SIDs.
     unsafe { EqualSid(left, right.as_psid()) != 0 }
 }
@@ -251,7 +259,10 @@ fn same_sid(left: PSID, right: &Sid) -> bool {
 /// byte locked in `<temp>\bake-acl-locks\<sha256(lowercase path)[..16]>.lock`,
 /// opened without delete sharing so the file cannot be replaced under a
 /// holder.
-fn with_path_lock<T>(path: &Path, action: impl FnOnce() -> Result<T>) -> Result<T> {
+pub(in crate::backends) fn with_path_lock<T>(
+    path: &Path,
+    action: impl FnOnce() -> Result<T>,
+) -> Result<T> {
     let key = path
         .to_str()
         .ok_or_else(|| format!("{} is not valid Unicode", path.display()))?
@@ -288,7 +299,7 @@ fn with_path_lock<T>(path: &Path, action: impl FnOnce() -> Result<T>) -> Result<
 }
 
 /// Merges `entry` into `dacl` and applies the result to `path`.
-fn merge_and_apply(
+pub(in crate::backends) fn merge_and_apply(
     path: &Path,
     entry: &EXPLICIT_ACCESS_W,
     dacl: *mut ACL,
@@ -333,27 +344,41 @@ fn merge_and_apply(
 /// (explicit, OI|CI, [`GRANT_MASK`]) already stands there, in which case the
 /// full-tree propagation is skipped.
 fn grant_write(path: &Path, sid: &Sid) -> Result<()> {
+    grant_exact(path, sid, GRANT_MASK)
+}
+
+/// Adds an explicit, inheritable (OI|CI) allow ACE for `sid` with exactly
+/// `mask` to `path`'s DACL, merged into the DACL read under the per-path
+/// lock so concurrent grants and the user's own ACEs are kept. When that
+/// exact ACE already stands, nothing is written and the full-tree
+/// propagation is skipped. Only the DACL is written: owner, group, and
+/// label stay as they are.
+pub(in crate::backends) fn grant_exact(path: &Path, sid: &Sid, mask: u32) -> Result<()> {
     with_path_lock(path, || {
         let (_descriptor, dacl) = read_dacl(path)?;
-        let exact = allow_aces(dacl)?.into_iter().any(|(flags, mask, ace_sid)| {
-            u32::from(flags) == SUB_CONTAINERS_AND_OBJECTS_INHERIT
-                && mask == GRANT_MASK
-                && same_sid(ace_sid, sid)
-        });
+        let exact = allow_aces(dacl)?
+            .into_iter()
+            .any(|(flags, ace_mask, ace_sid)| {
+                u32::from(flags) == SUB_CONTAINERS_AND_OBJECTS_INHERIT
+                    && ace_mask == mask
+                    && same_sid(ace_sid, sid)
+            });
         if exact {
             return Ok(());
         }
         merge_and_apply(
             path,
-            &explicit_access(sid, GRANT_ACCESS, GRANT_MASK),
+            &explicit_access(sid, GRANT_ACCESS, mask),
             dacl,
             "grant",
         )
     })
 }
 
-/// `revokeWrite`: removes every ACE naming `sid` from `path`'s DACL.
-fn revoke_write(path: &Path, sid: &Sid) -> Result<()> {
+/// `revokeWrite`: removes every ACE naming `sid` from `path`'s DACL. The
+/// DACL is read again under the per-path lock, so ACEs other runs or the
+/// user added meanwhile are kept; no earlier snapshot is restored.
+pub(in crate::backends) fn revoke_write(path: &Path, sid: &Sid) -> Result<()> {
     with_path_lock(path, || {
         let (_descriptor, dacl) = read_dacl(path)?;
         if dacl.is_null() {
@@ -381,7 +406,11 @@ pub(super) fn allow_aces_naming(path: &Path, sid: &str) -> Result<usize> {
 // The restricted token (`token.ts`).
 
 /// A token information block, 8-byte aligned.
-fn token_information(token: &OwnedHandle, class: i32, label: &str) -> Result<Vec<u64>> {
+pub(in crate::backends) fn token_information(
+    token: &OwnedHandle,
+    class: i32,
+    label: &str,
+) -> Result<Vec<u64>> {
     let mut needed = 0u32;
     // SAFETY: a size query with no buffer; it fails with
     // ERROR_INSUFFICIENT_BUFFER and reports the size.
@@ -412,7 +441,7 @@ fn token_information(token: &OwnedHandle, class: i32, label: &str) -> Result<Vec
     Ok(buffer)
 }
 
-fn current_token() -> Result<OwnedHandle> {
+pub(in crate::backends) fn current_token() -> Result<OwnedHandle> {
     let mut token: HANDLE = null_mut();
     // SAFETY: the pseudo-handle needs no closing; `token` receives a handle.
     if unsafe {
@@ -541,7 +570,7 @@ fn restricted_token(
 /// reported is held by handle until signalled. An error means that proof is
 /// missing, not that a process survives; the caller then keeps the run's
 /// grants and directory.
-fn terminate_and_drain(job: &Job) -> Result<()> {
+pub(in crate::backends) fn terminate_and_drain(job: &Job) -> Result<()> {
     job.terminate_and_settle(DRAIN_BUDGET).map_err(|verdict| {
         format!(
             "the confined tree's exit was not confirmed within {} s of termination ({verdict})",
@@ -555,7 +584,7 @@ fn terminate_and_drain(job: &Job) -> Result<()> {
 
 /// The runner's standard handles, made inheritable: the only handles the
 /// command inherits. Missing handles stay null.
-fn standard_handles() -> Result<[HANDLE; 3]> {
+pub(in crate::backends) fn standard_handles() -> Result<[HANDLE; 3]> {
     let mut handles = [null_mut(); 3];
     for (slot, (selector, label)) in handles.iter_mut().zip([
         (STD_INPUT_HANDLE, "stdin"),
@@ -577,10 +606,10 @@ fn standard_handles() -> Result<[HANDLE; 3]> {
 }
 
 /// An initialized `PROC_THREAD_ATTRIBUTE_LIST`, deleted on drop.
-struct Attributes(Vec<u64>);
+pub(in crate::backends) struct Attributes(Vec<u64>);
 
 impl Attributes {
-    fn new(count: u32) -> Result<Self> {
+    pub(in crate::backends) fn new(count: u32) -> Result<Self> {
         let mut size = 0usize;
         // SAFETY: a size query; it fails and reports the size.
         unsafe {
@@ -600,13 +629,13 @@ impl Attributes {
         Ok(Self(buffer))
     }
 
-    fn pointer(&mut self) -> *mut c_void {
+    pub(in crate::backends) fn pointer(&mut self) -> *mut c_void {
         self.0.as_mut_ptr().cast()
     }
 
     /// Sets `attribute` to the `size` bytes at `value`, which must outlive
     /// the process creation.
-    fn set(
+    pub(in crate::backends) fn set(
         &mut self,
         attribute: u32,
         value: *const c_void,
@@ -641,7 +670,7 @@ impl Drop for Attributes {
 
 /// The environment block: this process's variables with `TMP` and `TEMP`
 /// replaced by `temp` when given, sorted case-insensitively.
-fn environment_block(temp: Option<&Path>) -> Result<Vec<u16>> {
+pub(in crate::backends) fn environment_block(temp: Option<&Path>) -> Result<Vec<u16>> {
     let mut variables: Vec<(OsString, OsString)> = std::env::vars_os()
         .filter(|(key, _)| {
             temp.is_none() || !(key.eq_ignore_ascii_case("TMP") || key.eq_ignore_ascii_case("TEMP"))
@@ -789,7 +818,7 @@ fn spawn(
 /// Waits for the command's exit while the Job's account is pumped, so its
 /// members are opened soon after they start and the port's queue does not
 /// grow with the command's life (`Job::wait_pumping`).
-fn wait_for_exit(job: &Job, process: &OwnedHandle) -> Result<u32> {
+pub(in crate::backends) fn wait_for_exit(job: &Job, process: &OwnedHandle) -> Result<u32> {
     job.wait_pumping(process.as_handle())
         .map_err(|error| format!("WaitForSingleObject failed (command): {error}"))?;
     let mut code = 0u32;

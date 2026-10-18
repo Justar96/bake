@@ -7,10 +7,13 @@ members = [
     "crates/bake-coding-agent",
     "crates/bake-conformance",
     "crates/bake-mcp",
+    "crates/bake-plugin-sdk",
     "crates/bake-process",
     "crates/bake-sandbox",
     "crates/bake-tui",
     "crates/bake-tui-view",
+    "plugins/guard",
+    "plugins/fixtures/hostile",
 ]
 
 [workspace.package]
@@ -81,6 +84,23 @@ ring = { version = "=0.17.14", default-features = false }
 # Pi's `ignore` package does. Unlicense OR MIT; its dependencies are MIT OR
 # Apache-2.0 or Unlicense OR MIT.
 ignore = { version = "=0.4.33", default-features = false }
+# Third-party plugins (`bake-coding-agent::plugins::wasm`): Wasmtime compiles
+# and runs WASI 0.2 components inside Bake's own helper process. Only the
+# features the helper uses: the Cranelift compiler, the component model, and
+# async calls (`wasmtime-wasi`'s `p2` requires `async`). No `wat` text parser,
+# disk cache, parallel compilation, pooling allocator, GC, threads, or
+# profiling. `wasmparser` is the version Wasmtime itself depends on, for the
+# validating parse and import check that run before compiling. Apache-2.0
+# WITH LLVM-exception.
+wasmtime = { version = "=49.0.3", default-features = false, features = ["runtime", "std", "cranelift", "component-model", "async"] }
+wasmtime-wasi = { version = "=49.0.3", default-features = false, features = ["p2"] }
+wasmparser = { version = "=0.258.3", default-features = false, features = ["std", "validate", "component-model", "features"] }
+# The helper's metered random generators (`rand_core`'s `TryRng`, the
+# version `wasmtime-wasi`'s `rand` uses). MIT OR Apache-2.0.
+rand_core = { version = "=0.10.1", default-features = false }
+# The guest SDK's bindings (`bake-plugin-sdk`), built for `wasm32-wasip2`.
+# Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT.
+wit-bindgen = { version = "=0.63.0", default-features = false, features = ["macros", "realloc", "std"] }
 
 # Image decoding, resizing, and encoding are hundreds of times slower
 # unoptimized; the read tool's image tests would take seconds per image.
@@ -100,3 +120,32 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.gif]
 opt-level = 3
+# Cranelift and the Wasm parser compile plugin components in the helper;
+# unoptimized, the Wasm host tests would spend minutes compiling guests.
+[profile.dev.package.cranelift-codegen]
+opt-level = 3
+[profile.dev.package.cranelift-frontend]
+opt-level = 3
+[profile.dev.package.cranelift-assembler-x64]
+opt-level = 3
+[profile.dev.package.regalloc2]
+opt-level = 3
+[profile.dev.package.wasmparser]
+opt-level = 3
+[profile.dev.package.wasmtime-environ]
+opt-level = 3
+[profile.dev.package.wasmtime-internal-cranelift]
+opt-level = 3
+[profile.dev.package.wasmtime]
+opt-level = 3
+
+# Plugin components under `plugins/`, built for `wasm32-wasip2` by
+# `plugins/build-fixtures.sh` (which also remaps source paths, so the
+# committed components rebuild byte for byte): small and aborting on panic.
+[profile.plugin]
+inherits = "release"
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

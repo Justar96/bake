@@ -1,0 +1,37 @@
+# Reviewed upstream license texts for crates.io packages published without
+# the license file their repository keeps (scripts/release/native-licenses.ts).
+# Each [[text]] pins a vendored file by SHA-256 to the repository commit the
+# crates were published from; each crate is pinned by name@version, its
+# Cargo.lock checksum, and the path_in_vcs of its .cargo_vcs_info.json.
+
+# Wasmtime v49.0.3 (tag v49.0.3 = commit f96eabaa). These crates set
+# license = "Apache-2.0 WITH LLVM-exception" and their directories hold no
+# LICENSE at that commit; the repository root LICENSE (git blob f9d81955) is
+# the same source text as the LICENSE shipped in wasmtime 49.0.3 and
+# cranelift-codegen 0.136.3. The source SHA-256 is
+# 268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5.
+# This copy removes its one trailing blank line; all other bytes are unchanged.
+[[text]]
+file = "upstream/wasmtime-v49.0.3/LICENSE"
+sha256 = "a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a"
+license = "Apache-2.0 WITH LLVM-exception"
+repository = "https://github.com/bytecodealliance/wasmtime"
+commit = "f96eabaa11a06086e4fb779ed1c1688481067ab9"
+path = "LICENSE"
+url = "https://raw.githubusercontent.com/bytecodealliance/wasmtime/f96eabaa11a06086e4fb779ed1c1688481067ab9/LICENSE"
+crates = [
+    { crate = "cranelift-assembler-x64-meta@0.136.3", checksum = "c065757905596bc06e82969ebd7b92d691b7fd710a7e9e8181ae0c30dab588d0", path-in-vcs = "cranelift/assembler-x64/meta" },
+    { crate = "cranelift-assembler-x64@0.136.3", checksum = "f6d504c8c7ba3f3accaf8e98b7096beb98e1a271404357744c7e9e730c6865ff", path-in-vcs = "cranelift/assembler-x64" },
+    { crate = "cranelift-bitset@0.136.3", checksum = "0ec2ba2d4f3d959ec4023a10266c3dcfb28381d1938d507a9a5e1abb78bbcc88", path-in-vcs = "cranelift/bitset" },
+    { crate = "cranelift-isle@0.136.3", checksum = "9ea6526ebf9064fff8ce3b1e26afad7027f9e6bb0e45d2b9200e4cbab8343345", path-in-vcs = "cranelift/isle/isle" },
+    { crate = "cranelift-srcgen@0.136.3", checksum = "fc173168f291ff3b95b5d0769d6a05b1eaef5e6d74c2600affab8396b4e7b420", path-in-vcs = "cranelift/srcgen" },
+    { crate = "pulley-interpreter@49.0.3", checksum = "def59f28ccaf2cb4f8dfaac83197fd7d56a4470a70e4f2589454c731370101c5", path-in-vcs = "pulley" },
+    { crate = "pulley-macros@49.0.3", checksum = "3a1834d3b3ef994f266a0c9ed29a8214f2c2faaa9b1c44babfa57566bb05af83", path-in-vcs = "pulley/macros" },
+    { crate = "wasmtime-internal-component-macro@49.0.3", checksum = "d95f531a0b809fd9fd158be6133c97bd2fc628ac47f5812aff3e3b5624eb02c2", path-in-vcs = "crates/component-macro" },
+    { crate = "wasmtime-internal-component-util@49.0.3", checksum = "e754a3ff5690c34eb4713bd7c65f60dd607ead4e39042cbf52ac8011de14455b", path-in-vcs = "crates/component-util" },
+    { crate = "wasmtime-internal-core@49.0.3", checksum = "ba00c5db77adb0749ee059068e5a417bfac3d8969f5a3479d9bd1ca8c1ba248d", path-in-vcs = "crates/core" },
+    { crate = "wasmtime-internal-jit-icache-coherence@49.0.3", checksum = "92cb1dd5da78f5b21d65e91063bdd8c2eb343c1f077a1dcbc29003d4a794abb0", path-in-vcs = "crates/jit-icache-coherence" },
+    { crate = "wasmtime-internal-versioned-export-macros@49.0.3", checksum = "20fa5616cd875ec78f5b92020fa47ced7c8bb923079185c8475751098b8c4a69", path-in-vcs = "crates/versioned-export-macros" },
+    { crate = "wasmtime-internal-wit-bindgen@49.0.3", checksum = "cad5e8cef56790d4741b62f7b6c971af53b2ad4c2d1603f8ffe86872763147aa", path-in-vcs = "crates/wit-bindgen" },
+    { crate = "wasmtime-wasi-io@49.0.3", checksum = "ebaf573aae85636595bdb976b6c76e9277e1f81db067aff6764cb256e0c17dff", path-in-vcs = "crates/wasi-io" },
+]

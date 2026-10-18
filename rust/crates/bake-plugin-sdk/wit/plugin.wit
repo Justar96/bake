@@ -1,0 +1,66 @@
+/// Bake's plugin contract, version 0.1.0: the tool-call veto.
+///
+/// A plugin is a WASI 0.2 component that imports `host` and exports
+/// `plugin`, and nothing else from this package. Bake links this exact
+/// version and refuses any other `bake:plugin` version before it compiles
+/// the component. Later contributions (result patches, context, input,
+/// plugin tools, commands, observers, state) are not part of this version:
+/// each will arrive as a new package version with its own bindings.
+package bake:plugin@0.1.0;
+
+/// What a plugin may ask of Bake during a call.
+interface host {
+  /// The severity of a diagnostics line.
+  enum log-level {
+    debug,
+    info,
+    warn,
+    error,
+  }
+
+  /// Records one diagnostics line for the current call. Bake keeps at most
+  /// 4 KiB of each line and 64 KiB per call, and drops and counts the rest.
+  /// Lines go to Bake's diagnostics only, never to the model, and are
+  /// discarded when the call is cancelled or fails.
+  log: func(level: log-level, message: string);
+}
+
+/// The tool-call veto, Pi's `tool_call` event without argument mutation.
+interface plugin {
+  /// A tool call as the plugin sees it, before the tool runs.
+  record tool-call {
+    /// The call id the model gave.
+    id: string,
+    /// The tool name; Bake asks only about the tools the manifest lists.
+    name: string,
+    /// The validated arguments, a JSON object.
+    args-json: string,
+  }
+
+  /// A refusal: the tool does not run and the model sees `reason`.
+  record block-info {
+    /// The denial text, at most 16 KiB; empty gives Pi's
+    /// "Tool execution was blocked".
+    reason: string,
+    /// Asks the agent to stop after the current batch of calls.
+    terminate: bool,
+  }
+
+  /// The plugin's answer. There is no allow: the call still passes Bake's
+  /// own permission checks after every plugin lets it through.
+  variant decision {
+    none,
+    block(block-info),
+  }
+
+  /// Called before each call to a tool the manifest lists. `error` fails
+  /// the plugin, which then blocks the calls it was asked about, as Pi
+  /// blocks a call when a handler throws.
+  on-tool-call: func(call: tool-call) -> result<decision, string>;
+}
+
+/// The world every 0.1.0 plugin targets.
+world guest {
+  import host;
+  export plugin;
+}

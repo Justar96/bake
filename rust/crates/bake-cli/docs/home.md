@@ -11,10 +11,11 @@ The Bake home is the directory that holds bake-rs's models, keys, settings, and 
 | `settings.json` | Default model, tools, sessions, compaction, retry, and permission presets (`bake-rs docs settings`) |
 | `sessions/` | Saved sessions, one directory per working directory (`bake-rs docs sessions`) |
 | `mcp.json` | MCP servers each session starts, unless `--no-mcp` is given (`bake-rs docs mcp`) |
+| `plugins/` | Installed Wasm plugin packages and `plugins.json`, which enables them (`bake-rs docs plugins`) |
 
 Instructions and skills for every project are not in the Bake home: they are in `~/.agents` in your home directory (`bake-rs docs context` and `bake-rs docs skills`).
 
-bake-rs never writes `models.json` or `mcp.json`. Interactive commands write `auth.json` (the CLIProxyAPI key) and `settings.json` (the CLIProxyAPI route, saved defaults, and `/settings` changes), each through a locked, atomic replacement that keeps other members (`bake-rs docs models`). It creates `sessions/`, the session files in it, and a `.lock` file beside each session it writes, which it leaves in place (`bake-rs docs sessions`).
+bake-rs never writes `models.json` or `mcp.json`. Interactive commands write `auth.json` (the CLIProxyAPI key) and `settings.json` (the CLIProxyAPI route, saved defaults, and `/settings` changes), each through a locked, atomic replacement that keeps other members (`bake-rs docs models`). It creates `sessions/`, the session files in it, and a `.lock` file beside each session it writes, which it leaves in place (`bake-rs docs sessions`). The `bake-rs plugin` commands write `plugins/`, and a session records a plugin's failure in `plugins/plugins.json` (`bake-rs docs plugins`).
 
 ## Settings from Bake 0.3
 

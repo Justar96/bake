@@ -1,8 +1,9 @@
-//! Trusted native plugins compiled into `bake-rs`: the ordered tool-call
-//! veto, the first slice of the proposed native plugin design under D6
-//! (`docs/roadmap/rust-0.4/native-plugins.md`, in review). Third-party Wasm
-//! plugins, the other contributions, plugin tools, and management are not
-//! here.
+//! Native plugins: the ordered tool-call veto of the proposed native plugin
+//! design under D6 (`docs/roadmap/rust-0.4/native-plugins.md`, in review),
+//! for trusted plugins compiled into `bake-rs` and for third-party Wasm
+//! plugins ([`wasm`]) that the Bake home installs and enables
+//! ([`installed`]). The other contributions, plugin tools, model-visible
+//! management tools, and restart policy are not here.
 //!
 //! A [`Plugin`] is Bake's own Rust code. Its [`PluginManifest`] names the
 //! tools whose calls it may veto, and an [`AgentSession`] built with a
@@ -27,16 +28,20 @@
 //! - A plugin that returns an error, panics, misses its deadline, or
 //!   returns an oversized reason is failed: that call is blocked, and every
 //!   later call to its listed tools is blocked without asking it, for the
-//!   life of the [`AgentSession`] that holds the registry. The failure is
-//!   kept in memory only: a session reopened from its file (resume,
-//!   `/resume`, a fork, or a new process) asks the plugin again. Restoring
-//!   it, for example from the [`DECISION_ENTRY_TYPE`] entries, is open work
-//!   that configuration must settle before it registers any plugin. This
-//!   slice has no disable, restart, or reload operation.
+//!   life of the [`AgentSession`] that holds the registry. A trusted
+//!   plugin's failure is kept in memory only: a session reopened from its
+//!   file asks it again. A configured Wasm plugin's failure is also
+//!   recorded in the Bake home before its denial is written, so every
+//!   later session blocks its tools until the owner disables it
+//!   ([`installed`]); a failure the home cannot record stops the run.
+//!   There is no automatic restart: a failed Wasm plugin's helper is shut
+//!   down at once. A call whose arguments a Wasm helper will not accept
+//!   (over its size or depth limit) is blocked without failing the plugin.
 //! - Cancelling a call fails no plugin. When the call's signal has aborted
 //!   before a plugin is asked, or aborts while one runs, its future is
-//!   dropped, nothing is decided or recorded, and the next call asks the
-//!   plugin again; the agent loop answers the cancelled call `Operation
+//!   dropped (a Wasm plugin's start or call is instead torn down in place,
+//!   its helper reaped), nothing is decided or recorded, and the next call
+//!   asks the plugin again, a Wasm plugin in a fresh helper; the agent loop answers the cancelled call `Operation
 //!   aborted`. Cancellation is checked before a plugin's earlier failure,
 //!   but does not clear it: a plugin that failed before the cancellation
 //!   stays failed and blocks the next call.
@@ -53,8 +58,10 @@
 //!
 //! [`AgentSession`]: crate::agent_session::AgentSession
 
+pub mod installed;
 mod protected_paths;
 pub(crate) mod veto;
+pub mod wasm;
 
 use std::collections::BTreeSet;
 use std::fmt;
@@ -292,7 +299,24 @@ pub struct PluginRegistry {
 pub(crate) struct Registered {
     pub order: i32,
     pub manifest: PluginManifest,
-    pub plugin: Arc<dyn Plugin>,
+    pub plugin: Contribution,
+    /// A configured Wasm plugin's package hash, which its decisions record.
+    pub sha256: Option<String>,
+    /// Where a configured plugin's failures are recorded.
+    pub record: Option<installed::FailureRecord>,
+}
+
+/// What answers for a registered plugin.
+#[derive(Clone)]
+pub(crate) enum Contribution {
+    /// Bake's own compiled-in code.
+    Trusted(Arc<dyn Plugin>),
+    /// A configured Wasm plugin, run in helpers this session owns.
+    Wasm(Arc<wasm::session::WasmVeto>),
+    /// A configured plugin that failed in an earlier session, or whose
+    /// package cannot be loaded: it blocks its listed tools from the first
+    /// call and is never asked.
+    Blocked(veto::Failure),
 }
 
 impl Default for PluginRegistry {
@@ -331,18 +355,25 @@ impl PluginRegistry {
     /// is refused.
     pub fn register(&mut self, plugin: Arc<dyn Plugin>, order: i32) -> Result<(), PluginError> {
         let manifest = plugin.manifest();
+        self.add(Registered {
+            order,
+            manifest,
+            plugin: Contribution::Trusted(plugin),
+            sha256: None,
+            record: None,
+        })
+    }
+
+    /// Adds `registered`, refusing a second plugin with the same id.
+    pub(crate) fn add(&mut self, registered: Registered) -> Result<(), PluginError> {
         if self
             .plugins
             .iter()
-            .any(|registered| registered.manifest.id == manifest.id)
+            .any(|existing| existing.manifest.id == registered.manifest.id)
         {
-            return Err(PluginError::Duplicate(manifest.id));
+            return Err(PluginError::Duplicate(registered.manifest.id));
         }
-        self.plugins.push(Registered {
-            order,
-            manifest,
-            plugin,
-        });
+        self.plugins.push(registered);
         Ok(())
     }
 

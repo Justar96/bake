@@ -26,11 +26,16 @@ windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Securit
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "time", "macros", "io-util"] }
+# `examples/conpty`'s line protocol: JSON lines with base64 bytes.
+base64.workspace = true
+serde_json.workspace = true
 
 [target.'cfg(windows)'.dev-dependencies]
 # `tests/windows_job_rundown.rs`: its own job, membership checks, and
-# process handles.
-windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading"] }
+# process handles. `examples/conpty`: the pseudoconsole, its control pipes,
+# console modes and control events, the job's member list, and thread
+# suspension.
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Diagnostics_ToolHelp", "Win32_System_IO", "Win32_System_JobObjects", "Win32_System_Pipes", "Win32_System_Threading"] }
 
 # The Windows job settlement observation and production-path case: the
 # binary re-executes itself as its helper processes, whose standard output
@@ -38,3 +43,11 @@ windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_
 [[test]]
 name = "windows_job_rundown"
 harness = false
+
+# The Windows pseudoconsole host the Rust PTY scenarios drive `bake-rs`
+# through (`scripts/rust-preview-pty.ts`). A test helper, never packed; its
+# protocol tests run under `cargo test` on every platform.
+[[example]]
+name = "conpty"
+path = "examples/conpty/main.rs"
+test = true

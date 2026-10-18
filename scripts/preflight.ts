@@ -283,9 +283,8 @@ export const STEPS: readonly Step[] = [
   },
   {
     name: 'rust-pty', phase: 'e2e', group: 'native', needsBuild: true, buildStep: 'rust',
-    summary: 'Rust preview input, resize, inspection, and terminal restoration',
-    command: () => process.platform === 'win32' ? { skip: 'native ConPTY scenarios are not implemented' }
-      : bun('run', 'test:rust:pty'),
+    summary: 'Rust preview and live sessions in a real PTY, or a ConPTY pseudoconsole on Windows: input, resize, and terminal restoration',
+    command: () => bun('run', 'test:rust:pty'),
   },
   {
     name: 'rust-package', phase: 'e2e', group: 'native', needsBuild: true, buildStep: 'rust',

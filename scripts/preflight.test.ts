@@ -52,7 +52,7 @@ describe('preflight', () => {
     expect(STEPS.find(step => step.name === 'rust')?.command?.(parseOptions([]), scope([])))
       .toEqual(['bun', 'run', 'check:rust'])
     expect(STEPS.find(step => step.name === 'rust-pty')?.command?.(parseOptions([]), scope([])))
-      .toEqual(process.platform === 'win32' ? { skip: 'native ConPTY scenarios are not implemented' } : ['bun', 'run', 'test:rust:pty'])
+      .toEqual(['bun', 'run', 'test:rust:pty'])
     expect(STEPS.find(step => step.name === 'rust-package')?.command?.(parseOptions([]), scope([])))
       .toEqual(['bun', 'run', 'test:rust:package'])
     expect(STEPS.find(step => step.name === 'rust-eval')?.command?.(parseOptions([]), scope([])))

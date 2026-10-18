@@ -20,13 +20,14 @@
 //! The session's [`WorkGate`] owns the work that runs outside the task
 //! awaiting it: session writes and other blocking work, model requests,
 //! model, thinking-level, and settings changes, idle compaction, and
-//! background work ([`AgentSession::spawn_background`]). Two lifetimes
-//! meet here. A turn's work ends with [`AgentSession::abort`], which
-//! signals the run, a retry wait, and a compaction, and leaves the gate's
-//! background tasks and changes running. The session's lifetime ends with
+//! background work ([`AgentSession::spawn_background`]) and background
+//! jobs ([`AgentSession::jobs`]). Two lifetimes meet here. A turn's work
+//! ends with [`AgentSession::abort`], which signals the run, a retry wait,
+//! and a compaction, and leaves the gate's background tasks, jobs, and
+//! changes running. The session's lifetime ends with
 //! [`AgentSession::shutdown`], which refuses new work at once, cancels
-//! both, and returns only after every owned task, its cleanup, and every
-//! listener call have finished.
+//! both, and returns only after every owned task, its cleanup, every job
+//! and the processes it started, and every listener call have finished.
 //!
 //! Compaction and auto-retry follow Pi (in `agent_session/recovery.rs`):
 //! after each run a retryable error is retried with backoff, and a context
@@ -49,12 +50,14 @@
 //! v1.2.0's `navigateTree` and runtime `fork` (in
 //! `agent_session/navigation.rs`).
 //!
-//! Trusted compiled-in plugins ([`crate::plugins`], given as
-//! [`AgentSessionOptions::plugins`]) veto tool calls through the agent's
+//! Plugins ([`crate::plugins`], given as [`AgentSessionOptions::plugins`]):
+//! trusted compiled-in ones and the Wasm plugins a Bake home enables
+//! ([`crate::plugins::installed`]) veto tool calls through the agent's
 //! `before_tool_call` hook, as Pi v1.3.0's `_beforeToolCall` runs
 //! `tool_call` handlers (in `agent_session/plugin_veto.rs`); each block is
-//! written as a `custom` entry before the denial result. With no plugins no
-//! hook is installed.
+//! written as a `custom` entry before the denial result. The session's
+//! [`WorkGate`] owns every Wasm helper: shutdown returns only after each
+//! has been reaped. With no plugins no hook is installed.
 //!
 //! Not ported (deferred): Pi's extensions and their other events (including
 //! `session_before_compact`, `session_compact`, and
@@ -93,6 +96,7 @@ use bake_ai::{
 };
 
 use crate::compaction::CompactionResult;
+use crate::jobs::{JobLimits, JobRegistry};
 use crate::mcp::{McpOptions, McpServers};
 use crate::model_registry::resolver::{DEFAULT_THINKING_LEVEL, find_initial_model};
 use crate::model_registry::{ModelRegistry, ModelRuntime};
@@ -195,9 +199,10 @@ pub struct AgentSessionOptions {
     /// which the prompt's `docs` section and the no-model and no-key
     /// messages name.
     pub docs_command: String,
-    /// The trusted plugins whose tool-call vetoes run before each call to
-    /// a tool they list ([`crate::plugins`]); empty, the default, installs
-    /// no hook.
+    /// The plugins whose tool-call vetoes run before each call to a tool
+    /// they list ([`crate::plugins`]): trusted ones, and the Wasm plugins
+    /// [`crate::plugins::installed::PluginHome::load`] registers; empty, the
+    /// default, installs no hook.
     pub plugins: PluginRegistry,
     /// The gate that owns the session's work ([`WorkGate`]); `None` makes a
     /// private one. Give the same gate to the tools that spawn processes
@@ -671,6 +676,8 @@ pub struct AgentSession {
     agent: Arc<Agent>,
     core: Arc<Core>,
     work: WorkGate,
+    /// The session's background jobs, owned by `work`.
+    jobs: JobRegistry,
     session: SharedSession,
     registry: ModelRuntime,
     /// The live settings, shared with the core: the setters change them,
@@ -701,6 +708,8 @@ pub struct AgentSession {
     write_failure: Arc<Mutex<Option<String>>>,
     /// The MCP servers [`Self::start_mcp`] started, once it has.
     mcp: OnceLock<McpServers>,
+    /// The plugin dispatcher, when any plugin is registered.
+    plugins: Option<Arc<VetoDispatcher>>,
 }
 
 impl std::fmt::Debug for AgentSession {
@@ -1387,8 +1396,12 @@ impl AgentSession {
         });
         let after_tool_core = Arc::clone(&core);
         let persist_error = Arc::new(Mutex::new(None));
-        let before_tool_call = plugins.map(|plugins| {
-            plugin_veto::plugin_veto_hook(Arc::clone(&core), Arc::clone(&persist_error), plugins)
+        let before_tool_call = plugins.as_ref().map(|plugins| {
+            plugin_veto::plugin_veto_hook(
+                Arc::clone(&core),
+                Arc::clone(&persist_error),
+                Arc::clone(plugins),
+            )
         });
         let agent = Agent::new(AgentOptions {
             initial_state: AgentInitialState {
@@ -1480,12 +1493,19 @@ impl AgentSession {
             .into_iter()
             .filter(|name| tools.iter().any(|tool| &tool.name == name))
             .collect();
+        // Last, after every fallible step: the keeper of the Wasm plugins'
+        // helpers is owned work of the gate from here on.
+        if let Some(plugins) = &plugins {
+            plugins.attach(&work).map_err(refused_message)?;
+        }
         let gap = Arc::clone(&core.gap);
+        let jobs = JobRegistry::new(work.clone(), JobLimits::default());
         let created = Self {
             apis,
             agent,
             core,
             work,
+            jobs,
             session,
             registry,
             settings,
@@ -1506,6 +1526,7 @@ impl AgentSession {
             queue: Arc::default(),
             write_failure: gap,
             mcp: OnceLock::new(),
+            plugins,
         };
         created.connect();
         Ok(created)
@@ -2582,6 +2603,16 @@ impl AgentSession {
         read_settings(&self.settings).retry.enabled
     }
 
+    /// The helpers this session's Wasm plugins have started and not yet
+    /// seen stop, in dispatch order; empty without Wasm plugins. After
+    /// [`Self::shutdown`] returns, every one of them has been reaped.
+    pub fn plugin_helpers(&self) -> Vec<crate::plugins::wasm::HelperInfo> {
+        self.plugins
+            .as_ref()
+            .map(|plugins| plugins.helpers())
+            .unwrap_or_default()
+    }
+
     /// Pi's `abort`: signals the run, cancels a retry wait and a
     /// compaction, and waits until the session is idle.
     pub async fn abort(&self) {
@@ -2657,12 +2688,25 @@ impl AgentSession {
         self.work.spawn(work).map_err(refused_message)
     }
 
+    /// The session's background jobs ([`crate::jobs`]). Like
+    /// [`Self::spawn_background`] work, a job outlives [`Self::abort`] and
+    /// the turn that started it; [`Self::shutdown`] stops every job and
+    /// returns only once each is terminal, which is after the processes
+    /// and tasks it started are settled. Each session has its own registry,
+    /// so another session's jobs are refused. Jobs end with the process:
+    /// a resumed session starts with none.
+    pub fn jobs(&self) -> &JobRegistry {
+        &self.jobs
+    }
+
     /// Pi's `dispose`, awaited. At the first call's first poll, before it
     /// waits for anything, it removes every listener, refuses new prompts,
-    /// changes, and owned work, and aborts the run, a retry wait, a compaction, and
-    /// every background task ([`Self::spawn_background`]). The rest runs on
-    /// a task of its own: it waits for the run's task, the session's
-    /// writes, model requests, changes, and background tasks, and for any
+    /// changes, owned work, and jobs, and aborts the run, a retry wait, a
+    /// compaction, every background task ([`Self::spawn_background`]), and
+    /// every job ([`Self::jobs`], claiming each job's report, since a
+    /// session being torn down reads no notice). The rest runs on a task of
+    /// its own: it waits for the run's task, the session's writes, model
+    /// requests, changes, background tasks, and jobs, and for any
     /// listener call already running, then disconnects from the agent and
     /// closes the session file for writing, releasing its lock.
     ///
@@ -2711,6 +2755,9 @@ impl AgentSession {
         }
         // Also cancels every MCP server's task, which stops its server
         // before its permit is released.
+        // The jobs' drivers are the gate's tasks, so the drain below waits
+        // for every job to become terminal; this future need not be kept.
+        drop(self.jobs.close());
         let drained = self.work.close();
         let agent = Arc::clone(&self.agent);
         let listeners = Arc::clone(&self.listeners);

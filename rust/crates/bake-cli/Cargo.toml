@@ -15,11 +15,34 @@ bake-ai.workspace = true
 bake-coding-agent.workspace = true
 bake-sandbox.workspace = true
 bake-tui.workspace = true
+serde_json.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "signal", "macros"] }
 # `--self-check`: its JSON record, and the SHA-256 of each embedded
 # documentation topic. Both are already in the binary through `bake-ai`.
-serde_json.workspace = true
 ring.workspace = true
+
+[dev-dependencies]
+# The Wasm plugin session tests build their own tools.
+bake-agent.workspace = true
+# The Wasm plugin host tests: async drivers, and components built from
+# core-module text with the WIT tooling Wasmtime's bindings already use.
+# `test-util` lets the compile-deadline test hold the host's clock until the
+# helper reports that it is compiling.
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "time", "process", "io-util", "sync", "test-util"] }
+wat = { version = "=1.258.3", default-features = false }
+wasm-encoder = { version = "=0.258.3", default-features = false }
+wit-component = { version = "=0.258.3", default-features = false }
+wit-parser = { version = "=0.258.3", default-features = false }
+
+# The raw protocol tests compile the host's private helper launcher
+# (`bake-coding-agent`'s `plugins/wasm/process.rs`) from its source, so they
+# take its Windows dependencies: named pipes, a random pipe name, and the
+# Job, file, and process APIs.
+[target.'cfg(windows)'.dev-dependencies]
+bake-process.workspace = true
+getrandom.workspace = true
+tokio = { workspace = true, features = ["net"] }
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_Pipes"] }
 
 # Interruptible print-mode pipe writes and the subprocess tests' probes.
 [target.'cfg(unix)'.dependencies]
@@ -28,14 +51,7 @@ libc.workspace = true
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Console", "Win32_System_IO", "Win32_System_Threading"] }
 
-[target.'cfg(windows)'.dev-dependencies]
-# The full-output-pipe regression owns its console helper's whole process tree.
-bake-process.workspace = true
-windows-sys = { workspace = true, features = ["Win32_Security", "Win32_System_JobObjects", "Win32_System_Pipes"] }
-
-# The shipped binary as the consumer of `mcp.json`: the test binary
-# re-executes itself as the stdio MCP server, so its standard output must
-# carry only protocol messages, which libtest's harness would break.
+# The shipped binary consumes mcp.json; its test re-executes as a stdio server.
 [[test]]
 name = "mcp"
 harness = false
