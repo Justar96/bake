@@ -120,7 +120,8 @@ jobs:
         os: ${{ fromJSON(needs.scope.outputs.rust) }}
     name: rust (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    # A cargo-about cache miss adds its build to the Cargo checks.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       # Defender scans every file Cargo creates, which makes small-file I/O
@@ -138,14 +139,48 @@ jobs:
         with:
           bun-version-file: package.json
       - run: bun install --frozen-lockfile
+      # The process-owner tests run a real PID-1 child in an unprivileged
+      # namespace; Ubuntu's AppArmor default otherwise denies its uid map.
+      - name: Enable Linux process namespaces
+        if: runner.os == 'Linux'
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Install the pinned Rust toolchain
         working-directory: rust
         run: rustup toolchain install --no-self-update
       # Reuse dependency builds across runs; the Windows job otherwise spends
-      # most of its 20 minutes compiling the workspace twice (clippy and test).
+      # most of its time budget compiling the workspace twice (clippy and test).
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust -> target
+      # The package check generates the archive's dependency license text with
+      # exactly cargo-about 0.9.2 and fails without it. It is built once per
+      # runner OS and architecture, locked, and the build is cached by version.
+      - name: Restore cargo-about 0.9.2
+        id: cargo-about
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/cargo-about-0.9.2
+          key: cargo-about-0.9.2-${{ runner.os }}-${{ runner.arch }}
+      - name: Install cargo-about 0.9.2
+        if: steps.cargo-about.outputs.cache-hit != 'true'
+        working-directory: rust
+        shell: bash
+        run: cargo install cargo-about --version =0.9.2 --locked --features cli --root "$RUNNER_TEMP/cargo-about-0.9.2"
+      - name: Select cargo-about 0.9.2
+        shell: bash
+        run: |
+          exe=$([[ $RUNNER_OS == Windows ]] && echo .exe || true)
+          echo "BAKE_CARGO_ABOUT=$RUNNER_TEMP/cargo-about-0.9.2/bin/cargo-about$exe" >> "$GITHUB_ENV"
+      # Collect Job rundown evidence before an MCP failure can stop Cargo's
+      # workspace tests. The probe preserves its immediate exit assertions.
+      - name: Check Windows Job rundown
+        if: runner.os == 'Windows'
+        working-directory: rust
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force ../.preflight | Out-Null
+          cargo test --locked -p bake-process --test windows_job_rundown 2>&1 | Tee-Object ../.preflight/windows-job-rundown.log
+          exit $LASTEXITCODE
       - run: bun run preflight --only native
       # Per-binary test durations, kept on success to watch the job's budget.
       - uses: actions/upload-artifact@v4

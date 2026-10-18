@@ -4,7 +4,7 @@
 
 Scope 00 fixes what the Rust migration must preserve and the TypeScript evidence it will compare against. It belongs to the [Bake 0.4 Rust migration roadmap](../README.md#00--support-decisions-and-baseline); the roadmap's [verification contract](../verification.md#evidence-required-for-every-scope) defines what closes it.
 
-**State: In progress; rechecked 2026-10-16, when the inventory check passed and the owner decisions under [what is missing](#what-is-implemented-and-what-is-missing) were still open.** The inventory and initial baseline tooling landed in [PR #51](https://github.com/Justar96/bake/pull/51). Nothing here qualifies a Rust behavior. The initial comparison sources are `v0.3.8` (`dcb26d756e`, whose tree equals `develop` commit `a1ec50245e`) and `origin/develop` at `ae5eb51ab6`. A [separate terminal record](terminal-2026-10-07/README.md) measures shutdown and latency distributions with the extended diagnostic. Since [D22](support.md#decision-register) and [D32](support.md#decision-register), the TypeScript baseline is a reference for the retained contracts and an optional 0.3 comparison, not a parity oracle, and exit criterion 1's dispositions are to keep a behavior, replace it with Pi's, or retire it by decision; the [foundation status](../verification.md#foundation-qualification-status) lists what remains open.
+**State: In progress; support decisions updated 2026-10-17.** The inventory and initial baseline tooling landed in [PR #51](https://github.com/Justar96/bake/pull/51). Nothing here qualifies a Rust behavior. The initial comparison sources are `v0.3.8` (`dcb26d756e`, whose tree equals `develop` commit `a1ec50245e`) and `origin/develop` at `ae5eb51ab6`. A [separate terminal record](terminal-2026-10-07/README.md) measures shutdown and latency distributions with the extended diagnostic. Since [D22](support.md#decision-register) and [D32](support.md#decision-register), the TypeScript baseline is a reference for the retained contracts and an optional 0.3 comparison, not a parity oracle, and exit criterion 1's dispositions are to keep a behavior, replace it with Pi's, or retire it by decision; the [foundation status](../verification.md#foundation-qualification-status) lists what remains open.
 
 ## Table of Contents
 
@@ -20,7 +20,7 @@ Review the core deliverables in the roadmap's PR order: support decisions first,
 
 | Deliverable | Location | State |
 |---|---|---|
-| Support and release decisions, acceptance matrix | [support.md](support.md) | Draft written; owner decisions open in [its decision register](support.md#decision-register) |
+| Support and release decisions, acceptance matrix | [support.md](support.md) | Owner decisions recorded in [the decision register](support.md#decision-register); acceptance evidence remains incomplete |
 | Machine-readable inventory of packages, profiles, tools, and tests with their owning scope | [inventory.json](inventory.json), generated and checked by [rust-migration-inventory.ts](../../../../scripts/rust-migration-inventory.ts) | Implemented, with tests for missing, stale, malformed, and unclassified entries |
 | Frozen TypeScript baseline record: commits, build provenance, focused oracle results, startup/RSS/shutdown and terminal workloads | [2026-10-07 evidence](baseline-2026-10-07/README.md), produced with [baseline tooling](../../../../scripts/rust-migration-baseline.ts) | Both pinned sources rebuilt, 85 focused tests passed per source, and 36 terminal samples completed; full qualification remains open |
 | Terminal direction and additional measurement endpoints | [Native terminal direction](../terminal.md), [shutdown evidence](terminal-2026-10-07/README.md) | Familiar layout and improved agent/composer criteria recorded; 18 additional TypeScript samples completed with shutdown timing and latency distributions |
@@ -28,7 +28,7 @@ Review the core deliverables in the roadmap's PR order: support decisions first,
 
 ## What is implemented and what is missing
 
-The inventory assigns owning scopes and dispositions to 167 packages, 821 TypeScript test files, 188 recorded scenarios, all 42 PTY scenarios, three shipped profiles, four presets, 18 tool packages, and six model surfaces. A listed test records an available oracle, not a passing result. The inventory's `gaps` list names missing coverage. Native crate tests belong to the [Cargo workspace](../../../../rust/README.md#checks).
+The inventory assigns owning scopes and dispositions to 167 packages, 815 TypeScript test files, 188 recorded scenarios, all 42 PTY scenarios, three shipped profiles, four presets, 18 tool packages, and six model surfaces. A listed test records an available oracle, not a passing result. The inventory's `gaps` list names missing coverage. Native crate tests belong to the [Cargo workspace](../../../../rust/README.md#checks).
 
 **Implemented:**
 
@@ -43,8 +43,7 @@ The inventory assigns owning scopes and dispositions to 167 packages, 821 TypeSc
 
 - Complete baseline qualification beyond the [initial measurements](baseline-2026-10-07/README.md#remaining-evidence) and [shutdown observations](terminal-2026-10-07/README.md#remaining-evidence): interleaved samples, noise characterization, process-tree memory, idle CPU, shutdown on the other targets, and frozen performance budgets.
 - Minimum OS, kernel, libc, and macOS deployment versions for each release target.
-- Owner answers to the decisions in [the decision register](support.md#decision-register), including the triage of unreleased `develop` work and the 0.3 support window.
-- A test run against the external Bake Desktop consumer, or a named qualification owner for it.
+- Native packaging and publication channels still need scope-16 design and evidence. The owner settled legacy-name retirement and the 0.3 support window in D10 and D13: only Rust Bake is shipped and maintained from 0.4.0. D32 settles the native home and fresh-install transition; D34 establishes the maintenance branch and supersedes the proposed TypeScript feature release. D7, D8, and D9 bound plugins, providers, and Desktop integration; no Desktop consumer test blocks this scope. See [the decision register](support.md#decision-register).
 
 ## Run the tooling
 

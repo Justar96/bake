@@ -5,9 +5,12 @@
 //! headless turn through [`bake_coding_agent::cli`], a port of Pi's print
 //! mode. Both set the session up through [`cli::start`]. `bake-rs preview`
 //! opens the sample terminal preview, and `bake-rs docs` prints the user
-//! documentation ([`docs`]). Help, version, and docs need no Bake home.
+//! documentation ([`docs`]). `bake-rs --self-check` reports that the
+//! executable loads and carries its documentation ([`self_check`]). Help,
+//! version, docs, and the self-check need no Bake home.
 
 mod docs;
+mod self_check;
 
 use std::ffi::OsString;
 use std::io::{self, IsTerminal, Write};
@@ -33,6 +36,9 @@ Usage:
                               or print one answer with -p
   bake-rs preview [--inline]  Open the sample preview in an interactive terminal
   bake-rs docs [topic]        List the documentation topics, or print one
+  bake-rs --self-check        Check that this executable runs on this host,
+                              and print a JSON record of its version and
+                              platform
 
 Options:
   -p, --print               Send the prompts, print the final answer, and exit
@@ -68,6 +74,7 @@ Options:
   -np, --no-prompt-templates
                             Do not discover prompt templates
   -nc, --no-context-files   Do not load AGENTS.md context files
+      --no-mcp              Start no MCP server from the Bake home's mcp.json
       --list-models [search]
                             List available models (with optional fuzzy search)
       --permission <preset> Permission preset: workspace-write or
@@ -97,8 +104,10 @@ Ctrl+C twice quits. Slash commands such as /model are not available yet;
 /skill:name and prompt templates work.
 
 Models come from models.json and keys from auth.json in the Bake home
-(BAKE_HOME, then DSH_HOME, then ~/.bake), which also holds settings.json and
-the saved sessions. Instructions come from ~/.agents/AGENTS.md and the
+(BAKE_HOME, then DSH_HOME, then ~/.bake), which also holds settings.json, the
+saved sessions, and mcp.json, the stdio MCP servers each session starts under
+its sandbox mode; bake-rs refuses an mcp.json that other users, the working
+directory, or a git repository could change. Instructions come from ~/.agents/AGENTS.md and the
 AGENTS.md files from the filesystem root down to the working directory.
 Skills come from ~/.agents/skills and every .agents/skills from the working
 directory up to its git repository root.
@@ -107,7 +116,8 @@ The preview shows sample content only and does not connect to a model.
 Ctrl+C twice quits it.
 
 Run 'bake-rs docs' for the documentation: the Bake home, settings, models,
-permissions, sessions, context files, skills, and the command line.
+permissions, sessions, context files, skills, MCP servers, and the command
+line.
 ";
 
 #[derive(Debug, PartialEq, Eq)]
@@ -116,6 +126,8 @@ enum Command {
     Preview(ScreenMode),
     /// `bake-rs docs`, with a topic or without one.
     Docs(Option<String>),
+    /// `bake-rs --self-check`, alone.
+    SelfCheck,
     Agent(Vec<String>),
 }
 
@@ -141,6 +153,10 @@ fn parse(args: &[OsString]) -> Result<Command, String> {
         ["docs"] => Ok(Command::Docs(None)),
         ["docs", topic] => Ok(Command::Docs(Some((*topic).to_owned()))),
         ["docs", _, extra, ..] => Err(format!("unexpected argument '{extra}' for 'docs'")),
+        ["--self-check"] => Ok(Command::SelfCheck),
+        ["--self-check", extra, ..] => {
+            Err(format!("unexpected argument '{extra}' for '--self-check'"))
+        }
         _ => Ok(Command::Agent(args)),
     }
 }
@@ -166,6 +182,7 @@ fn main() -> ExitCode {
         Ok(Command::Help) => print(HELP),
         Ok(Command::Preview(mode)) => preview(mode),
         Ok(Command::Docs(topic)) => show_docs(topic.as_deref()),
+        Ok(Command::SelfCheck) => run_self_check(),
         // Without arguments, a terminal opens a session; a pipe gets help.
         Ok(Command::Agent(args))
             if args.is_empty() && !(io::stdin().is_terminal() && io::stdout().is_terminal()) =>
@@ -218,26 +235,87 @@ fn show_docs(topic: Option<&str>) -> ExitCode {
     }
 }
 
-/// `SIGTERM` and `SIGHUP` stop print mode with Pi's exit codes, 143 and 129.
+/// `bake-rs --self-check`: the record on standard output and status 0, or
+/// the reason on standard error and status 1. A closed standard output is
+/// status 1, not a panic, so a reader never mistakes a cut record for a pass.
+fn run_self_check() -> ExitCode {
+    match self_check::record(VERSION, self_check::host_platform(), docs::TOPICS) {
+        Ok(line) => print(&line),
+        Err(reason) => {
+            let _ = io::stderr()
+                .lock()
+                .write_all(format!("bake-rs: self-check failed: {reason}\n").as_bytes());
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// The stop requests of print mode: `SIGTERM` and `SIGHUP` with Pi's exit
+/// codes, 143 and 129, and `SIGINT` (Ctrl+C) with 130, the status a shell
+/// gives a process it ends. Each shuts the session down, and with it every
+/// MCP server and process tree it owns, before the process exits; a second
+/// signal during that shutdown is ignored, since the shutdown is already
+/// bounded by its owners.
+///
+/// The handlers are installed when this is called, inside the runtime and
+/// before the session or any MCP server starts, so a signal that comes
+/// during setup is held until setup next waits (for piped input, or for
+/// the servers' startup), or until the prompt runs, and then shuts the
+/// session down, rather than ending the process with its servers left
+/// running. A signal that cannot be registered is left at its default.
 #[cfg(unix)]
 fn interrupt() -> Interrupt {
-    use tokio::signal::unix::{SignalKind, signal};
-    Box::pin(async {
-        let (Ok(mut term), Ok(mut hangup)) = (
-            signal(SignalKind::terminate()),
-            signal(SignalKind::hangup()),
-        ) else {
-            return std::future::pending().await;
+    use tokio::signal::unix::{Signal, SignalKind, signal};
+    /// Resolves when `stream` delivers, never when it was not registered.
+    async fn delivered(stream: Option<&mut Signal>) {
+        let delivered = match stream {
+            Some(stream) => stream.recv().await.is_some(),
+            None => false,
         };
+        if !delivered {
+            std::future::pending::<()>().await;
+        }
+    }
+    let mut term = signal(SignalKind::terminate()).ok();
+    let mut hangup = signal(SignalKind::hangup()).ok();
+    let mut int = signal(SignalKind::interrupt()).ok();
+    Box::pin(async move {
         tokio::select! {
-            _ = term.recv() => 143,
-            _ = hangup.recv() => 129,
+            () = delivered(term.as_mut()) => 143,
+            () = delivered(hangup.as_mut()) => 129,
+            () = delivered(int.as_mut()) => 130,
         }
     })
 }
 
-/// Pi registers only `SIGTERM` on Windows, which has no such signal.
-#[cfg(not(unix))]
+/// Ctrl+C and Ctrl+Break stop print mode with 130 and shut the session
+/// down, as `SIGINT` does on Unix; Windows has no `SIGTERM` or `SIGHUP`.
+#[cfg(windows)]
+fn interrupt() -> Interrupt {
+    use tokio::signal::windows::{ctrl_break, ctrl_c};
+    let (c, brk) = (ctrl_c().ok(), ctrl_break().ok());
+    Box::pin(async move {
+        match (c, brk) {
+            (Some(mut c), Some(mut brk)) => {
+                tokio::select! {
+                    _ = c.recv() => 130,
+                    _ = brk.recv() => 130,
+                }
+            }
+            (Some(mut c), None) => {
+                c.recv().await;
+                130
+            }
+            (None, Some(mut brk)) => {
+                brk.recv().await;
+                130
+            }
+            (None, None) => std::future::pending().await,
+        }
+    })
+}
+
+#[cfg(not(any(unix, windows)))]
 fn interrupt() -> Interrupt {
     cli::no_interrupt()
 }
@@ -474,6 +552,20 @@ mod tests {
     #[test]
     fn the_sandbox_provider_is_built_once() {
         assert!(Arc::ptr_eq(&sandbox_provider(), &sandbox_provider()));
+    }
+
+    #[test]
+    fn the_self_check_takes_no_other_argument() {
+        assert_eq!(parse_strs(&["--self-check"]), Ok(Command::SelfCheck));
+        assert_eq!(
+            parse_strs(&["--self-check", "--json"]),
+            Err("unexpected argument '--json' for '--self-check'".into())
+        );
+        // Anywhere but first, it is an agent option, which Pi's parser refuses.
+        assert_eq!(
+            parse_strs(&["-p", "--self-check"]),
+            Ok(Command::Agent(vec!["-p".into(), "--self-check".into()]))
+        );
     }
 
     #[test]

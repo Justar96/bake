@@ -69,8 +69,18 @@ fn parameters() -> Value {
     })
 }
 
-/// Pi's `createGrepToolDefinition`.
+/// Pi's `createGrepToolDefinition`. Its `rg` processes have no
+/// owner: a dropped call's tree is killed but not awaited.
 pub fn create_grep_tool_definition(cwd: &Path) -> ToolDefinition {
+    owned_grep_tool_definition(cwd, None)
+}
+
+/// [`create_grep_tool_definition`] whose `rg` processes `owner` owns
+/// ([`crate::child_process`]): its close waits for each call's tree.
+pub(crate) fn owned_grep_tool_definition(
+    cwd: &Path,
+    owner: Option<crate::owned_work::WorkGate>,
+) -> ToolDefinition {
     let cwd = cwd.to_path_buf();
     let tool = AgentTool::new(
         "grep",
@@ -81,7 +91,7 @@ pub fn create_grep_tool_definition(cwd: &Path) -> ToolDefinition {
             DEFAULT_MAX_BYTES / 1024
         ),
         parameters(),
-        move |_id, args, signal, _update| boxed(execute(cwd.clone(), args, signal)),
+        move |_id, args, signal, _update| boxed(execute(cwd.clone(), owner.clone(), args, signal)),
     );
     ToolDefinition {
         tool,
@@ -144,6 +154,7 @@ impl GrepRequest {
 
 async fn execute(
     cwd: PathBuf,
+    owner: Option<crate::owned_work::WorkGate>,
     args: Value,
     signal: Option<AbortSignal>,
 ) -> Result<AgentToolResult, String> {
@@ -175,20 +186,26 @@ async fn execute(
     let formatter = Arc::new(Mutex::new(GrepFormatter::new(request.clone())));
     let line_formatter = Arc::clone(&formatter);
     let line_signal = signal.clone();
-    let ended = process::run_lines(&rg, &request.args(), signal.as_ref(), move |line| {
-        let formatter = Arc::clone(&line_formatter);
-        let signal = line_signal.clone();
-        async move {
-            tokio::task::spawn_blocking(move || {
-                formatter
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .line(&line, signal.as_ref())
-            })
-            .await
-            .unwrap_or(Flow::Stop)
-        }
-    })
+    let ended = process::run_lines(
+        &rg,
+        &request.args(),
+        owner.as_ref(),
+        signal.as_ref(),
+        move |line| {
+            let formatter = Arc::clone(&line_formatter);
+            let signal = line_signal.clone();
+            async move {
+                tokio::task::spawn_blocking(move || {
+                    formatter
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .line(&line, signal.as_ref())
+                })
+                .await
+                .unwrap_or(Flow::Stop)
+            }
+        },
+    )
     .await
     .map_err(|error| format!("Failed to run ripgrep: {error}"))?;
     let formatter = std::mem::replace(

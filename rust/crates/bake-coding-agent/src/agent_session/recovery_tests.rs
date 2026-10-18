@@ -85,6 +85,8 @@ fn options(h: &Harness, session: SessionManager, settings: Settings) -> AgentSes
         tool_prompts: Vec::new(),
         system_prompt: SystemPromptOptions::new("/tmp"),
         docs_command: "bake-rs docs".into(),
+        plugins: crate::plugins::PluginRegistry::default(),
+        work: None,
     }
 }
 
@@ -1366,6 +1368,272 @@ async fn disabled_retry_and_compaction_leave_errors_alone() {
     assert_eq!(h.faux.call_count(), 1);
     assert!(retry_log(&events).is_empty());
     session.shutdown().await;
+}
+
+// ----------------------------------------------------------------------------
+// Recovery omissions as one group (durable-execution rule 4)
+// ----------------------------------------------------------------------------
+
+/// The entries a reader finds in `file`.
+fn read_entries(file: &std::path::Path) -> Vec<SessionEntry> {
+    crate::session::load_entries_from_file(file)
+        .expect("load")
+        .into_iter()
+        .filter_map(|entry| entry.as_entry().cloned())
+        .collect()
+}
+
+/// The LLM messages `messages` convert to.
+fn llm_of_stored(messages: &[StoredMessage]) -> Vec<Message> {
+    convert_to_llm(
+        &messages
+            .iter()
+            .map(StoredMessage::to_agent)
+            .collect::<Vec<_>>(),
+    )
+}
+
+/// A written session whose last turn called two tools and has both
+/// results, as an overflowing tool turn leaves it, and the ids of the
+/// attempt and its results.
+fn tool_turn(dir: &TempDir) -> (SessionManager, String, Vec<String>) {
+    let mut manager = file_session(dir);
+    let stored =
+        |value: Value| StoredMessage::from_json(value.as_object().expect("object").clone());
+    manager
+        .append_message(stored(
+            json!({"role": "user", "content": "go", "timestamp": 1}),
+        ))
+        .expect("user");
+    let attempt = manager
+        .append_message(stored(json!({"role": "assistant", "content": [
+            {"type": "toolCall", "id": "c1", "name": "read", "arguments": {}},
+            {"type": "toolCall", "id": "c2", "name": "read", "arguments": {}},
+        ], "api": "faux", "provider": "faux", "model": "faux-1",
+            "usage": serde_json::to_value(usage(10, 1)).expect("usage"),
+            "stopReason": "toolUse", "timestamp": 2})))
+        .expect("attempt");
+    let results = ["c1", "c2"]
+        .iter()
+        .map(|call| {
+            manager
+                .append_message(stored(json!({"role": "toolResult", "toolCallId": call,
+                    "toolName": "read", "content": [{"type": "text", "text": "x"}],
+                    "isError": false, "timestamp": 3})))
+                .expect("result")
+        })
+        .collect();
+    (manager, attempt, results)
+}
+
+// Pi `_omitRecoveryAttempt` with Bake's group: the attempt and its results
+// are omitted by one group, results first, and the transcript and the file
+// project exactly as Pi's edits, attempt first, project.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_recovery_omission_is_one_group_projecting_as_pi() {
+    let dir = TempDir::new("omission-group");
+    let h = harness(200_000);
+    let (manager, attempt, results) = tool_turn(&dir);
+    let file = manager.session_file().expect("file").to_path_buf();
+    // Pi's edits on a copy of the same entries.
+    let mut pi = SessionManager::in_memory(
+        Some("/tmp"),
+        NewSessionOptions::default(),
+        manager.file_entries().to_vec(),
+    )
+    .expect("copy");
+    for target in std::iter::once(&attempt).chain(&results) {
+        pi.append_context_edit(target, None).expect("Pi's edit");
+    }
+    let session = AgentSession::create(options(&h, manager, Settings::default()))
+        .await
+        .expect("session");
+    let before = read_entries(&file).len();
+    let mut targets = vec![(Some(attempt.clone()), true)];
+    targets.extend(results.iter().map(|id| (Some(id.clone()), true)));
+    session
+        .core
+        .omit_recovery_attempt(targets)
+        .await
+        .expect("omitted");
+    let read = read_entries(&file);
+    let targets: Vec<&str> = read[before..]
+        .iter()
+        .map(|entry| entry.get("targetId").and_then(Value::as_str).expect("edit"))
+        .collect();
+    assert_eq!(
+        targets,
+        [results[0].as_str(), results[1].as_str(), attempt.as_str()]
+    );
+    let expected = llm_of_stored(&pi.build_session_context().messages);
+    let from_file =
+        crate::session::build_session_context(&read, crate::session::LeafSelector::Last);
+    assert_eq!(llm_of_stored(&from_file.messages), expected);
+    assert_eq!(convert_to_llm(&session.messages()), expected);
+    assert_eq!(expected.len(), 1, "{expected:?}");
+    session.shutdown().await;
+}
+
+// Bake: an omission whose group fails after its first line records the
+// gap, shows in the transcript what the file holds (a valid request), and
+// writes nothing more.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_partly_written_omission_stops_and_shows_what_the_file_holds() {
+    use crate::session::{Fault, FaultKind};
+    let dir = TempDir::new("omission-partial");
+    let h = harness(200_000);
+    let (manager, attempt, results) = tool_turn(&dir);
+    let file = manager.session_file().expect("file").to_path_buf();
+    let session = AgentSession::create(options(&h, manager, Settings::default()))
+        .await
+        .expect("session");
+    let before = read_entries(&file).len();
+    lock(&session.session).arm_group_fault(Fault {
+        line: 1,
+        kind: FaultKind::Tear(9),
+    });
+    let mut targets = vec![(Some(attempt.clone()), true)];
+    targets.extend(results.iter().map(|id| (Some(id.clone()), true)));
+    let error = session
+        .core
+        .omit_recovery_attempt(targets)
+        .await
+        .expect_err("fails");
+    assert!(error.contains("1 of 3 grouped entries written"), "{error}");
+    let read = read_entries(&file);
+    assert_eq!(read.len(), before + 1);
+    assert_eq!(read[before].get("targetId"), Some(&json!(results[0])));
+    let from_file =
+        crate::session::build_session_context(&read, crate::session::LeafSelector::Last);
+    let shown = convert_to_llm(&session.messages());
+    assert_eq!(shown, llm_of_stored(&from_file.messages));
+    // The attempt's second call is answered by Pi's synthetic result.
+    let model = h.registry.model("faux", "faux-1").expect("model");
+    let request = bake_ai::api::transform_messages::transform_messages(&shown, &model, None);
+    let results_sent: Vec<(String, bool)> = request
+        .iter()
+        .filter_map(|message| match message {
+            Message::ToolResult(result) => Some((result.tool_call_id.clone(), result.is_error)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        results_sent,
+        [("c2".to_owned(), false), ("c1".to_owned(), true)]
+    );
+    let bytes = std::fs::read(&file).expect("read");
+    assert!(session.prompt("again", Vec::new()).await.is_err());
+    assert!(session.core.with_session(|_| ()).await.is_err());
+    session.shutdown().await;
+    assert_eq!(std::fs::read(&file).expect("read"), bytes);
+}
+
+// Bake: overflow recovery whose omission group fails after its first line
+// publishes only the known synced prefix to the transcript and halts
+// before the compaction's provider request. With a torn line the reader
+// agrees; with an unsynced line a reader sees one edit more, which the
+// transcript does not claim.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_failed_overflow_omission_publishes_its_prefix_and_requests_nothing() {
+    use crate::session::{Fault, FaultKind};
+    for (name, kind, readable) in [
+        ("torn", FaultKind::Tear(9), false),
+        ("unsynced", FaultKind::FailSync, true),
+    ] {
+        let dir = TempDir::new(&format!("omission-overflow-{name}"));
+        let h = harness(200_000);
+        let (manager, attempt, results) = tool_turn(&dir);
+        let file = manager.session_file().expect("file").to_path_buf();
+        let session = AgentSession::create(options(&h, manager, Settings::default()))
+            .await
+            .expect("session");
+        let (events, _subscription) = record(&session);
+        let before = read_entries(&file).len();
+        lock(&session.session).arm_group_fault(Fault { line: 1, kind });
+        let overflow = error_response("prompt is too long", bake_ai::now_ms());
+        let error = session
+            .core
+            .check_compaction(
+                &overflow,
+                Some(attempt.clone()),
+                true,
+                results.iter().cloned().map(Some).collect(),
+            )
+            .await
+            .expect_err("fails");
+        assert!(
+            error.contains("1 of 3 grouped entries written"),
+            "{name}: {error}"
+        );
+        // No compaction began, so no summary was requested.
+        assert_eq!(h.faux.call_count(), 0, "{name}");
+        assert!(
+            of_type(&events, &["compaction_start", "compaction_end"]).is_empty(),
+            "{name}"
+        );
+        // The transcript is the known synced prefix: the first result's
+        // edit only, as the manager holds it.
+        let known = lock(&session.session).build_session_context();
+        assert_eq!(
+            convert_to_llm(&session.messages()),
+            llm_of_stored(&known.messages),
+            "{name}"
+        );
+        let held = lock(&session.session).entries().len();
+        assert_eq!(held, before + 1, "{name}");
+        let read = read_entries(&file);
+        assert_eq!(read.len(), held + usize::from(readable), "{name}");
+        assert_eq!(read[before].get("targetId"), Some(&json!(results[0])));
+        let from_file =
+            crate::session::build_session_context(&read, crate::session::LeafSelector::Last);
+        assert_eq!(
+            llm_of_stored(&from_file.messages) == llm_of_stored(&known.messages),
+            !readable,
+            "{name}"
+        );
+        // Halted: no prompt, and nothing more written.
+        let bytes = std::fs::read(&file).expect("read");
+        assert!(session.prompt("again", Vec::new()).await.is_err());
+        assert_eq!(h.faux.call_count(), 0, "{name}");
+        session.shutdown().await;
+        assert_eq!(std::fs::read(&file).expect("read"), bytes);
+    }
+}
+
+// Bake: a retry whose omission cannot be written makes no further request:
+// the run ends with the failure and the session takes no more prompts.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_retry_whose_omission_fails_makes_no_request() {
+    use crate::session::{Fault, FaultKind};
+    let dir = TempDir::new("omission-retry-fails");
+    let h = harness(200_000);
+    h.faux.set_responses(vec![
+        faux_assistant_message("first").into(),
+        failure("overloaded_error"),
+        faux_assistant_message("never requested").into(),
+    ]);
+    let session = AgentSession::create(options(&h, file_session(&dir), retry_settings(3, 60_000)))
+        .await
+        .expect("session");
+    session.prompt("one", Vec::new()).await.expect("flush");
+    let file = session.session_file().expect("file");
+    lock(&session.session).arm_group_fault(Fault {
+        line: 0,
+        kind: FaultKind::Refuse,
+    });
+    let error = session.prompt("two", Vec::new()).await.expect_err("fails");
+    assert!(error.contains("0 of 1 grouped entries written"), "{error}");
+    assert_eq!(h.faux.call_count(), 2);
+    let bytes = std::fs::read(&file).expect("read");
+    assert!(
+        !read_entries(&file)
+            .iter()
+            .any(|entry| entry.entry_type() == "context_edit")
+    );
+    assert!(session.prompt("three", Vec::new()).await.is_err());
+    assert_eq!(h.faux.call_count(), 2);
+    session.shutdown().await;
+    assert_eq!(std::fs::read(&file).expect("read"), bytes);
 }
 
 #[path = "idle_compaction_tests.rs"]

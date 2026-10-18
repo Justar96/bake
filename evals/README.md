@@ -70,6 +70,7 @@ DeepSeek offers `low`, `high`, and `max` but no `medium`, so it runs at `high`, 
 | `EVAL_ROSTER` | `headless`, the default, runs the headless bundle's own tool configs; `tui` gives every Bake arm the terminal's, as described under [Composition](#composition) |
 | `EVAL_TRIALS` | trials per scenario, default 3 |
 | `EVAL_OUTPUT` | raw output directory |
+| `EVAL_CONFIG_HOME` | Directory containing the evaluator’s `settings.yaml` and `.credentials.yaml`; defaults to `~/.bake`. Use a private directory to qualify a route without editing personal settings. Sample homes remain isolated. |
 | `EVAL_GATEWAY` | a JSON file of `{ baseUrl, apiKey }`, such as pi's `~/.pi/agent/cliproxyapi.json`, that replaces the `cliproxyapi` upstream and key for every arm; the proxy swaps each arm's key for this one, so both arms reach one upstream with one account. DeepSeek routes are unaffected |
 | `EVAL_NATIVE_PERMISSION` | the preset every native arm runs under: `danger-full-access`, the default, as the Bake arms run, or `workspace-write`, the default preset, whose `bash` needs a usable sandbox backend on the host; `design.json` records it as `nativePermission` |
 | `EVAL_EXTRA_<ARM>` | a JSON array of extra overlay rows for one Bake arm, for an attribution arm such as `[{"id":"fs-observation-policy","config":{"editGuard":"version"}}]` |
@@ -183,7 +184,7 @@ The `--mode json` stream is pi's, so `normalizePi` reads it. Each assistant `mes
 | `routingDecisions`, `subagentCalls` | empty and 0; the `delegation` scenarios are skipped, since `bake-rs` has no `subagent` tool |
 | `duplicateRefusals`, `guardRefusals`, `editedLineEchoes`, `toolHelpCalls` | 0 by construction: they match Bake's tool texts and tools |
 | `multiEditCalls` | every `edit` call, since Pi's `edit` always takes an `edits` array, as for a pi arm |
-| `runaway` | always false: the whitespace-runaway guard belongs to `llm-pi-ai` |
+| `runaway` | true when Bake's native tool-argument whitespace guard stops an unfinished tool call; the failure remains in the record |
 | `toolErrors` | counts a command that exits non-zero, since Pi's `bash` reports it as an error; a Bake arm's `bash` returns the exit code in a completed result, so the same failing command counts only on the native arm |
 
 Check the arm without a key:

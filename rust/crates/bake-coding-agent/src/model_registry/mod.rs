@@ -47,8 +47,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use bake_agent::StreamFn;
 use bake_ai::{
-    AbortSignal, ApiRegistry, AssistantMessage, AssistantMessageEventStream, Model,
-    ProviderHeaders, SimpleStreamOptions, StopReason, TranscriptContext, assistant_message_channel,
+    AbortController, AbortSignal, ApiRegistry, AssistantMessage, AssistantMessageEventSender,
+    AssistantMessageEventStream, Model, ProviderHeaders, SimpleStreamOptions, StopReason,
+    TranscriptContext, assistant_message_channel,
 };
 use serde_json::Value;
 
@@ -1147,9 +1148,13 @@ impl ModelRegistry {
         self.stream_fn_owned(apis, None)
     }
 
-    /// [`Self::stream_fn`] whose request tasks each hold a permit of
-    /// `gate`, so closing the gate waits for them; once it is closed,
-    /// requests end at once as aborted.
+    /// [`Self::stream_fn`] whose request tasks `gate` owns: closing the
+    /// gate aborts them, as their own abort signal does, and waits for
+    /// them; once it is closing, requests end at once as aborted. A request
+    /// task authenticates and forwards the provider's stream; the task the
+    /// provider spawns to produce that stream is not the gate's, and is not
+    /// awaited once its consumer is gone. Without a gate, each request runs
+    /// on a task no one awaits.
     pub fn stream_fn_owned(
         self: &Arc<Self>,
         apis: Arc<ApiRegistry>,
@@ -1383,108 +1388,201 @@ struct LazyRequest {
 /// message. The request's abort signal kills a `!command` authentication
 /// runs, waits for its blocking thread, and ends the stream as aborted; a
 /// request aborted before authentication finishes never reaches the
-/// provider. While forwarding, it ends the task once the consumer is
-/// gone. `permit` is held until the task ends.
+/// provider.
+///
+/// The provider sees one signal of its own, which the request's signal,
+/// the owning gate's lifetime, and the consumer's departure each abort: a
+/// stream no one reads any more is stopped rather than left to run. The
+/// request task then awaits the provider's own task
+/// ([`bake_ai::EventStream::producer_ended`]) before it ends, on every path,
+/// so whoever awaits the request task also awaits the provider's cleanup.
+/// It then also drops its consumer of the provider's stream, so a provider
+/// that stops when its stream is closed stops too
+/// ([`bake_ai::ProducerWatch`]). A provider that ignores both holds the
+/// request task until it ends.
+///
+/// With a `permit`, the request runs as a task its gate owns: closing the
+/// gate aborts it as the request's own signal does, and waits for it and
+/// so for the provider's task. A gate that started closing after `permit`
+/// was taken ends the stream as aborted at once. Without a permit the
+/// request task is spawned and nobody awaits it.
 fn lazy_stream(request: LazyRequest, permit: Option<WorkPermit>) -> AssistantMessageEventStream {
+    let (sender, stream) = assistant_message_channel();
+    let Ok(handle) = tokio::runtime::Handle::try_current() else {
+        sender.finish(setup_error(
+            &request.model,
+            "bake-ai streams must run inside a Tokio runtime",
+        ));
+        return stream;
+    };
+    match permit {
+        None => {
+            handle.spawn(run_lazy_request(request, sender, None));
+        }
+        Some(permit) => {
+            // Taken by the task only when the gate admits it.
+            let mut parts = Some((request, sender));
+            let spawned = permit.spawn(|scope| {
+                let parts = parts.take();
+                let lifetime = scope.signal().clone();
+                async move {
+                    if let Some((request, sender)) = parts {
+                        run_lazy_request(request, sender, Some(lifetime)).await;
+                    }
+                }
+            });
+            match spawned {
+                // The gate owns the task; its output is the stream.
+                Ok(task) => drop(task),
+                Err(_) => {
+                    if let Some((request, sender)) = parts {
+                        sender.finish(aborted(&request.model));
+                    }
+                }
+            }
+        }
+    }
+    stream
+}
+
+/// Completes once either signal aborts; never when both are absent.
+async fn either_cancelled(first: Option<&AbortSignal>, second: Option<&AbortSignal>) {
+    let wait = |signal: Option<&AbortSignal>| {
+        let signal = signal.cloned();
+        async move {
+            match signal {
+                Some(signal) => signal.cancelled().await,
+                None => std::future::pending().await,
+            }
+        }
+    };
+    tokio::select! {
+        () = wait(first) => {}
+        () = wait(second) => {}
+    }
+}
+
+/// The body of [`lazy_stream`]'s task. `lifetime` is the owning gate's
+/// signal, if any.
+async fn run_lazy_request(
+    request: LazyRequest,
+    sender: AssistantMessageEventSender,
+    lifetime: Option<AbortSignal>,
+) {
     let LazyRequest {
         registry,
         apis,
         model,
         context,
-        options,
+        mut options,
     } = request;
-    let (sender, stream) = assistant_message_channel();
-    let Ok(handle) = tokio::runtime::Handle::try_current() else {
-        sender.finish(setup_error(
-            &model,
-            "bake-ai streams must run inside a Tokio runtime",
-        ));
-        return stream;
-    };
     let signal = options.base.signal.clone();
-    handle.spawn(async move {
-        let _permit = permit;
-        let cancelled = async {
-            match &signal {
-                Some(signal) => signal.cancelled().await,
-                None => std::future::pending().await,
-            }
-        };
-        // Set on abort, and if this task is dropped, so that a command
-        // the auth thread runs is killed either way.
-        struct CancelOnDrop(Arc<AtomicBool>);
-        impl Drop for CancelOnDrop {
-            fn drop(&mut self) {
-                self.0.store(true, Ordering::SeqCst);
-            }
+    // The provider observes one signal, which the request's signal, the
+    // owner's lifetime, or the consumer's departure aborts below.
+    let merged = AbortController::new();
+    let abort_requested = || {
+        signal.as_ref().is_some_and(AbortSignal::aborted)
+            || lifetime.as_ref().is_some_and(AbortSignal::aborted)
+    };
+    if abort_requested() {
+        merged.abort();
+    }
+    options.base.signal = Some(merged.signal());
+    // Set on abort, and if this task is dropped, so that a command
+    // the auth thread runs is killed either way.
+    struct CancelOnDrop(Arc<AtomicBool>);
+    impl Drop for CancelOnDrop {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
         }
-        let cancel = Arc::new(AtomicBool::new(false));
-        let _cancel_on_drop = CancelOnDrop(Arc::clone(&cancel));
-        let resolving = resolve_request(registry, &model, options, Arc::clone(&cancel));
-        tokio::pin!(resolving);
-        // Biased: when both are ready, the abort wins, so a request
-        // aborted before it starts never reaches the provider.
-        let resolved = tokio::select! {
-            biased;
-            () = cancelled => {
-                cancel.store(true, Ordering::SeqCst);
-                // The killed command returns promptly; the auth thread is
-                // owned work, so wait for it.
-                let _ = resolving.await;
-                sender.finish(aborted(&model));
-                return;
-            }
-            resolved = &mut resolving => resolved,
-        };
-        // An abort that landed while authentication finished: the select
-        // above saw the resolution first.
-        if signal.as_ref().is_some_and(AbortSignal::aborted) {
+    }
+    let cancel = Arc::new(AtomicBool::new(false));
+    let _cancel_on_drop = CancelOnDrop(Arc::clone(&cancel));
+    let resolving = resolve_request(registry, &model, options, Arc::clone(&cancel));
+    tokio::pin!(resolving);
+    // Biased: when both are ready, the abort wins, so a request
+    // aborted before it starts never reaches the provider.
+    let resolved = tokio::select! {
+        biased;
+        () = either_cancelled(signal.as_ref(), lifetime.as_ref()) => {
+            cancel.store(true, Ordering::SeqCst);
+            // The killed command returns promptly; the auth thread is
+            // owned work, so wait for it.
+            let _ = resolving.await;
             sender.finish(aborted(&model));
             return;
         }
-        let options = match resolved {
-            Ok(options) => options,
-            Err(error) => {
-                sender.finish(setup_error(&model, &error));
-                return;
-            }
-        };
-        let Some(provider) = apis.get(&model.api) else {
-            sender.finish(setup_error(
-                &model,
-                &format!("No API provider registered for api: {}", model.api),
-            ));
+        () = sender.closed() => {
+            // No one reads the answer: stop authenticating.
+            cancel.store(true, Ordering::SeqCst);
+            let _ = resolving.await;
             return;
-        };
-        let inner = provider.stream_simple(&model, &context, options);
-        let mut watching = signal.is_some();
-        loop {
-            let event = tokio::select! {
-                event = inner.next() => event,
-                () = async {
-                    match &signal {
-                        Some(signal) => signal.cancelled().await,
-                        None => std::future::pending().await,
-                    }
-                }, if watching => {
-                    // The provider ends an aborted stream itself; stop
-                    // early only when no one reads it any more.
-                    watching = false;
-                    if sender.is_closed() {
-                        return;
-                    }
-                    continue;
-                }
-            };
-            let Some(event) = event else { break };
-            if sender.is_closed() {
+        }
+        resolved = &mut resolving => resolved,
+    };
+    // An abort that landed while authentication finished: the select
+    // above saw the resolution first.
+    if abort_requested() {
+        sender.finish(aborted(&model));
+        return;
+    }
+    if sender.is_closed() {
+        return;
+    }
+    let options = match resolved {
+        Ok(options) => options,
+        Err(error) => {
+            sender.finish(setup_error(&model, &error));
+            return;
+        }
+    };
+    let Some(provider) = apis.get(&model.api) else {
+        sender.finish(setup_error(
+            &model,
+            &format!("No API provider registered for api: {}", model.api),
+        ));
+        return;
+    };
+    let inner = provider.stream_simple(&model, &context, options);
+    forward(&inner, &sender, &merged, signal.as_ref(), lifetime.as_ref()).await;
+    // Stopped, or already finished: either way the provider's task is ours
+    // to await before this task ends. The provider is told to stop twice
+    // over: its signal aborts, and dropping `inner`, its only consumer,
+    // closes its stream; the watch awaits it without being a consumer.
+    merged.abort();
+    let provider = inner.producer_watch();
+    drop(inner);
+    provider.ended().await;
+}
+
+/// Forwards `inner`'s events to `sender` and ends it with `inner`'s result.
+/// An abort aborts `merged`, and the provider then ends its stream itself;
+/// a consumer that leaves aborts `merged` and returns at once.
+async fn forward(
+    inner: &AssistantMessageEventStream,
+    sender: &AssistantMessageEventSender,
+    merged: &AbortController,
+    signal: Option<&AbortSignal>,
+    lifetime: Option<&AbortSignal>,
+) {
+    let mut watching = signal.is_some() || lifetime.is_some();
+    loop {
+        let event = tokio::select! {
+            event = inner.next() => event,
+            () = either_cancelled(signal, lifetime), if watching => {
+                merged.abort();
+                watching = false;
+                continue;
+            }
+            () = sender.closed() => {
+                merged.abort();
                 return;
             }
-            sender.push(event);
-        }
-        sender.end(inner.result().await);
-    });
-    stream
+        };
+        let Some(event) = event else { break };
+        sender.push(event);
+    }
+    sender.end(inner.result().await);
 }
 
 #[cfg(test)]

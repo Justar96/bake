@@ -26,7 +26,9 @@
 //! | [`settings`] | Pi `src/core/settings-manager.ts` (default model, thinking level, tools, images, compaction with per-model overrides, branch-summary reserve, and retry; the global-scope setters from v1.2.0) |
 //! | [`print_mode`], [`json_event`] | Pi `src/modes/print-mode.ts`, `src/modes/json-event.ts` |
 //! | [`cli`] | Pi `src/main.ts`, `src/cli/args.ts`, `src/cli/initial-message.ts`, `src/cli/file-processor.ts`, `src/cli/list-models.ts`, `packages/tui/src/fuzzy.ts` |
-//! | [`owned_work`] | Bake: the gate shutdown closes over owned work |
+//! | [`mcp`] | Pi v1.3.0 `src/extensions/mcp/{index,runtime,tools,config}.ts`, `src/core/mcp-servers.ts`; Bake's tool names (`packages/mcp/mcp-client`) and D24 admission |
+//! | [`owned_work`] | Bake: a session's owner of its tasks, blocking work, and background lifetime, which shutdown cancels and drains |
+//! | [`plugins`] | Bake's trusted compiled-in plugins and their ordered tool-call veto, after Pi v1.3.0 `src/core/extensions/runner.ts` (`emitToolCall`), `agent-session.ts` (`_beforeToolCall`), and `examples/extensions/protected-paths.ts` |
 //! | [`permissions`] | Bake: the D24 permission presets, approvals, policy engine, and sandboxed `bash`, `write`, and `edit` (see the module's table) |
 //! | [`cliproxyapi`] | Bake: `apps/tui/packages/app/src/cliproxyapi.ts`, the retained CLIProxyAPI route and its read-only D25 import |
 
@@ -41,9 +43,11 @@ pub mod exec;
 pub mod home;
 pub mod json_event;
 pub mod json_store;
+pub mod mcp;
 pub mod model_registry;
 pub mod owned_work;
 pub mod permissions;
+pub mod plugins;
 pub mod print_mode;
 pub mod prompt_templates;
 pub mod session;

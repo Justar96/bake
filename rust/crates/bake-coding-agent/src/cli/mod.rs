@@ -31,9 +31,28 @@
 //! models, without touching the running session (adapted from Pi v1.2.0
 //! `core/agent-session-runtime.ts`).
 //!
+//! Every session it builds, the first and each replacement, reads
+//! `$BAKE_HOME/mcp.json` when its resources load, through
+//! [`load_home_mcp_config`](crate::mcp::load_home_mcp_config)'s owner rules,
+//! and starts the file's servers once the session exists
+//! ([`AgentSession::start_mcp`]), under the session's standing permission
+//! and sandbox provider, unless `--no-mcp` is given (Pi v1.3.0's flag). A
+//! problem with the file or an entry is a startup warning; each server's own
+//! failure is reported by print mode once the first prompt's startup wait
+//! ends ([`run`]). The session owns its servers from their start, so every
+//! later setup failure, and every stop request ([`CliEnvironment::interrupt`]:
+//! the binary's `SIGINT`, `SIGTERM`, and `SIGHUP`) while setup waits for
+//! piped input or the servers' startup, or while a prompt runs, shuts it
+//! down, and with it the servers, before print mode returns. `--tools`,
+//! `--exclude-tools`, and `--no-tools` restrict MCP tools as they restrict
+//! built-in ones, whenever a server publishes them
+//! ([`crate::mcp::McpToolFilter`]); with `--no-tools` alone no server
+//! starts. A [`Replacement`] starts its servers only once the session it
+//! replaces is shut down ([`Replacement::start_servers`]).
+//!
 //! Not ported (deferred): RPC mode, `--resume`,
-//! theme and extension flags, extension and MCP tools, and the
-//! missing-session-cwd prompt.
+//! theme and extension flags, extension tools, and the missing-session-cwd
+//! prompt.
 
 pub mod args;
 pub mod file_processor;
@@ -576,10 +595,24 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
         messages,
         stdout,
         stderr,
-        interrupt,
+        mut interrupt,
         home: _,
         factory: _,
     } = started;
+    // The first prompt's startup wait, taken here so print mode can report
+    // what is not serving before the answer; the prompt then waits no more.
+    if let Some(servers) = session.mcp_servers() {
+        tokio::select! {
+            () = servers.wait_for_startup(|| false) => {}
+            code = &mut interrupt => {
+                session.shutdown().await;
+                return code;
+            }
+        }
+        for problem in mcp_problems(servers) {
+            warn(&stderr, &problem);
+        }
+    }
     let options = PrintModeOptions {
         mode: match mode {
             Mode::Text => PrintOutput::Text,
@@ -671,6 +704,8 @@ pub async fn start_interactive(environment: CliEnvironment, args: Args) -> Resul
 /// resource loader and `buildSessionOptions`, without extensions.
 struct Resources {
     context_files: Vec<crate::system_prompt::ContextFile>,
+    /// The `mcp.json` servers to start; empty under `--no-mcp`.
+    mcp_servers: Vec<crate::mcp::McpServerEntry>,
     skills: Vec<crate::skills::Skill>,
     prompt_templates: Vec<crate::prompt_templates::PromptTemplate>,
     permission: crate::permissions::SessionPermission,
@@ -705,6 +740,16 @@ fn load_resources(
         },
     )?;
     warnings.extend(permission.warnings.iter().cloned());
+    let mcp_servers = if args.no_mcp {
+        Vec::new()
+    } else {
+        load_mcp_servers(
+            home,
+            Path::new(session.cwd()),
+            user_home.as_deref(),
+            warnings,
+        )
+    };
     let context_files = if args.no_context_files {
         Vec::new()
     } else {
@@ -739,12 +784,93 @@ fn load_resources(
     let append_system_prompt = (!append_parts.is_empty()).then(|| append_parts.join("\n\n"));
     Ok(Resources {
         context_files,
+        mcp_servers,
         skills,
         prompt_templates,
         permission,
         custom_prompt,
         append_system_prompt,
     })
+}
+
+/// Reads the Bake home's `mcp.json` for a session in `cwd`
+/// ([`crate::mcp::load_home_mcp_config`]), adding a warning for the file's
+/// refusal or each refused entry. A `url` server is dropped with a warning:
+/// Streamable HTTP has no D24 egress admission yet. Blocking.
+fn load_mcp_servers(
+    home: &Path,
+    cwd: &Path,
+    user_home: Option<&Path>,
+    warnings: &mut Vec<String>,
+) -> Vec<crate::mcp::McpServerEntry> {
+    let config = crate::mcp::load_home_mcp_config(home, cwd, user_home);
+    warnings.extend(
+        config
+            .errors
+            .iter()
+            .map(|error| terminal_safe(&format!("MCP: {error}"))),
+    );
+    config
+        .servers
+        .into_iter()
+        .filter(|entry| match entry.transport {
+            crate::mcp::McpTransportConfig::Http { .. } => {
+                warnings.push(terminal_safe(&format!(
+                    "MCP server \"{}\" uses Streamable HTTP, which bake-rs does not start yet: no network admission exists for it",
+                    entry.name
+                )));
+                false
+            }
+            crate::mcp::McpTransportConfig::Stdio(_) => true,
+        })
+        .collect()
+}
+
+/// `text` as one line, with every control character, line breaks
+/// included, and every bidirectional format character shown as a `\u{…}`
+/// escape, so text a configuration file or a server supplies can neither
+/// reach the terminal as an escape sequence nor reorder or forge a line.
+pub(crate) fn terminal_safe(text: &str) -> String {
+    let mut safe = String::with_capacity(text.len());
+    for character in text.chars() {
+        // Control characters, and the format characters that reorder
+        // or hide text (bidirectional embeddings, overrides, isolates).
+        let hidden = matches!(character, '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}');
+        if character.is_control() || hidden {
+            safe.push_str(&format!("\\u{{{:x}}}", u32::from(character)));
+        } else {
+            safe.push(character);
+        }
+    }
+    safe
+}
+
+/// The first line of each MCP server that is not serving once the startup
+/// wait ends, or Pi's note that servers are still connecting.
+fn mcp_problems(servers: &crate::mcp::McpServers) -> Vec<String> {
+    use crate::mcp::McpServerState;
+    let mut problems = Vec::new();
+    let mut connecting = false;
+    for status in servers.statuses() {
+        let error = match status.state {
+            McpServerState::Refused { reason } => reason,
+            McpServerState::Failed { error } | McpServerState::Disconnected { error } => error,
+            McpServerState::Connecting => {
+                connecting = true;
+                continue;
+            }
+            _ => continue,
+        };
+        let line = error.lines().next().unwrap_or_default();
+        problems.push(terminal_safe(line));
+    }
+    if connecting {
+        problems.push(
+            "MCP servers are still connecting; their tools become available once connected."
+                .to_owned(),
+        );
+    }
+    problems
 }
 
 /// What [`build_session`] makes a session from.
@@ -764,7 +890,7 @@ struct Build {
 
 /// Pi's `_buildRuntime` tools, `createAgentSession` tool selection, and
 /// the system prompt, then the session itself.
-async fn build_session(args: &Args, build: Build) -> Result<AgentSession, String> {
+async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
     let Build {
         session,
         apis,
@@ -780,6 +906,7 @@ async fn build_session(args: &Args, build: Build) -> Result<AgentSession, String
     } = build;
     let Resources {
         context_files,
+        mcp_servers,
         skills,
         prompt_templates,
         permission,
@@ -789,10 +916,12 @@ async fn build_session(args: &Args, build: Build) -> Result<AgentSession, String
     let session_cwd = session.cwd().to_owned();
     let session_id = session.session_id().to_owned();
     let can_ask = approver.is_some();
+    // One standing permission for the tools and the MCP servers' admission.
+    let standing = Arc::new(permission.standing(Path::new(&session_cwd), Some(session_id.clone())));
     let tool_permissions = ToolPermissions::new(
-        Arc::new(permission.standing(Path::new(&session_cwd), Some(session_id.clone()))),
+        Arc::clone(&standing),
         approver.unwrap_or_else(|| Arc::new(NoApprover)),
-        sandbox_provider,
+        Arc::clone(&sandbox_provider),
     );
     // As the prompt states `never` without an answerer, the tools offer no
     // escalation that would fail.
@@ -809,6 +938,9 @@ async fn build_session(args: &Args, build: Build) -> Result<AgentSession, String
     // each call starts; both read what the session publishes now, so a
     // model change reaches the next call.
     let published = crate::agent_session::SessionSelection::default();
+    // The session's owner of its work, given to the tools that spawn
+    // processes so that shutdown waits for every tree they start.
+    let work = crate::owned_work::WorkGate::default();
     let bash_context: crate::tools::bash::BashToolContextFn = {
         let selection = published.clone();
         let session_cwd = PathBuf::from(&session_cwd);
@@ -839,10 +971,12 @@ async fn build_session(args: &Args, build: Build) -> Result<AgentSession, String
             Path::new(&session_cwd),
             crate::tools::bash::BashToolOptions {
                 context: Some(bash_context),
+                owner: Some(work.clone()),
                 ..Default::default()
             },
             &tool_permissions,
         )?),
+        owner: Some(work.clone()),
     };
     let definitions = sandbox_file_tools(
         create_all_tool_definitions(Path::new(&session_cwd), &tools_options),
@@ -853,18 +987,19 @@ async fn build_session(args: &Args, build: Build) -> Result<AgentSession, String
         .iter()
         .map(|definition| definition.name().to_owned())
         .collect();
-    let selection = select_tools(
-        &ToolSelectionOptions {
-            tools: args.tools.clone(),
-            exclude_tools: args.exclude_tools.clone(),
-            no_tools: if args.no_tools {
-                Some(NoTools::All)
-            } else if args.no_builtin_tools {
-                Some(NoTools::Builtin)
-            } else {
-                None
-            },
+    let selection_options = ToolSelectionOptions {
+        tools: args.tools.clone(),
+        exclude_tools: args.exclude_tools.clone(),
+        no_tools: if args.no_tools {
+            Some(NoTools::All)
+        } else if args.no_builtin_tools {
+            Some(NoTools::Builtin)
+        } else {
+            None
         },
+    };
+    let selection = select_tools(
+        &selection_options,
         settings.default_tools.as_deref(),
         &available,
     )?;
@@ -916,10 +1051,52 @@ async fn build_session(args: &Args, build: Build) -> Result<AgentSession, String
             .collect(),
         system_prompt,
         docs_command,
+        plugins: crate::plugins::PluginRegistry::default(),
+        work: Some(work),
     })
     .await?;
     session.set_prompt_templates(prompt_templates);
-    Ok(session)
+    // The same restrictions the built-in tools had, for MCP tools whenever
+    // they are published. With nothing declarable (`--no-tools` alone) no
+    // server is started: none of its tools could be declared or called.
+    let (allow, exclude) = crate::tools::index::dynamic_tool_restrictions(&selection_options);
+    let tool_filter = crate::mcp::McpToolFilter::new(allow, exclude);
+    let servers =
+        (!mcp_servers.is_empty() && !tool_filter.allows_none()).then(|| crate::mcp::McpOptions {
+            servers: mcp_servers,
+            standing,
+            sandbox: sandbox_provider,
+            timings: crate::mcp::McpTimings::default(),
+            tool_filter,
+        });
+    // Checked now, so starting them later can fail only if the session has
+    // been shut down.
+    if let Some(options) = &servers
+        && let Err(message) = crate::mcp::validate(options)
+    {
+        session.shutdown().await;
+        return Err(message);
+    }
+    Ok(Built { session, servers })
+}
+
+/// A session [`build_session`] built, and the MCP servers it is to start.
+struct Built {
+    session: AgentSession,
+    servers: Option<crate::mcp::McpOptions>,
+}
+
+/// Starts `servers` for `session` ([`AgentSession::start_mcp`]). From then
+/// on the session owns them: whoever holds it shuts it down, which stops
+/// them and waits until they are gone.
+fn start_servers(
+    session: &AgentSession,
+    servers: Option<crate::mcp::McpOptions>,
+) -> Result<(), String> {
+    match servers {
+        Some(options) => session.start_mcp(options).map(drop),
+        None => Ok(()),
+    }
 }
 
 /// Where a replacement session comes from: Pi's `newSession` and
@@ -943,10 +1120,31 @@ enum Staged {
 }
 
 /// A replacement session, built and not yet in use, and what its setup
-/// warned about.
+/// warned about. Its MCP servers are not started yet: as in Pi's
+/// `AgentSessionRuntime`, which tears the current session down
+/// (`session_shutdown` stops its servers) before it creates the next
+/// (`session_start` connects them), the caller shuts the running session
+/// down, awaited, and then calls [`Replacement::start_servers`], so the two
+/// sessions' servers never run at once. A replacement that is not used is
+/// shut down and has started none.
 pub struct Replacement {
     pub session: AgentSession,
     pub warnings: Vec<String>,
+    servers: Option<crate::mcp::McpOptions>,
+}
+
+impl Replacement {
+    /// Starts the replacement's MCP servers, once, after the session it
+    /// replaces has been shut down; later calls start nothing. Fails only
+    /// when the replacement was shut down first.
+    pub fn start_servers(&mut self) -> Result<(), String> {
+        start_servers(&self.session, self.servers.take())
+    }
+
+    /// Whether [`Self::start_servers`] has servers to start.
+    pub fn has_pending_servers(&self) -> bool {
+        self.servers.is_some()
+    }
 }
 
 /// Builds the sessions `/new`, `/resume`, and `/fork` replace the running
@@ -1091,7 +1289,7 @@ impl SessionFactory {
         .await
         .map_err(|error| format!("Session setup failed: {error}"))??;
         let (session, resources, settings, warnings) = loaded;
-        let session = build_session(
+        let Built { session, servers } = build_session(
             &self.args,
             Build {
                 session,
@@ -1108,7 +1306,11 @@ impl SessionFactory {
             },
         )
         .await?;
-        Ok(Replacement { session, warnings })
+        Ok(Replacement {
+            session,
+            warnings,
+            servers,
+        })
     }
 }
 
@@ -1170,7 +1372,7 @@ async fn start_with(
         sandbox_provider,
         approver,
         warnings: startup_warnings,
-        interrupt,
+        mut interrupt,
     } = environment;
     let mut args = args;
     let Some(home) = home else {
@@ -1374,7 +1576,7 @@ async fn start_with(
         return Err(1);
     }
 
-    let session = match build_session(
+    let built = match build_session(
         &args,
         Build {
             session,
@@ -1392,16 +1594,32 @@ async fn start_with(
     )
     .await
     {
-        Ok(session) => session,
+        Ok(built) => built,
         Err(message) => return Err(error(&stderr, &message)),
     };
+    let session = built.session;
+    // At once, before piped input is read: as in Pi, the servers connect
+    // while the rest of startup runs.
+    if let Err(message) = start_servers(&session, built.servers) {
+        session.shutdown().await;
+        return Err(error(&stderr, &message));
+    }
 
+    // The session, and any MCP server it started, is shut down whether the
+    // read fails or a stop request (print mode's SIGTERM or SIGHUP) comes
+    // while a writer holds the pipe open. The read itself cannot be
+    // cancelled; the binary does not wait for it at exit.
     let piped = if stdin_is_terminal {
         Ok(None)
     } else {
-        tokio::task::spawn_blocking(move || read_piped_stdin(stdin))
-            .await
-            .unwrap_or_else(|join| Err(join.to_string()))
+        let read = tokio::task::spawn_blocking(move || read_piped_stdin(stdin));
+        tokio::select! {
+            read = read => read.unwrap_or_else(|join| Err(join.to_string())),
+            code = &mut interrupt => {
+                session.shutdown().await;
+                return Err(code);
+            }
+        }
     };
     let piped = match piped {
         Ok(piped) => piped,
@@ -1734,5 +1952,273 @@ mod tests {
         assert!(is_session_path("a\\b"));
         assert!(is_session_path("x.jsonl"));
         assert!(!is_session_path("0193abc"));
+    }
+
+    #[test]
+    fn text_from_a_file_or_server_is_one_terminal_safe_line() {
+        assert_eq!(terminal_safe("plain \"name\" ok"), "plain \"name\" ok");
+        assert_eq!(
+            terminal_safe("a\u{1b}[31mb\nWarning: c\r\u{7}\u{9b}"),
+            "a\\u{1b}[31mb\\u{a}Warning: c\\u{d}\\u{7}\\u{9b}"
+        );
+        assert_eq!(terminal_safe("x\u{202e}y\u{2066}"), "x\\u{202e}y\\u{2066}");
+    }
+
+    /// A directory tree for one setup: `home` (the Bake home), `work` (the
+    /// working directory), and `user` (the user's home), private on Unix.
+    fn setup_dirs(name: &str) -> crate::test_support::TempDir {
+        let dir = crate::test_support::TempDir::new(name);
+        for sub in ["home", "work", "user"] {
+            std::fs::create_dir_all(dir.join(sub)).expect("setup directory");
+        }
+        #[cfg(unix)]
+        for sub in ["", "home", "work", "user"] {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(dir.path().join(sub), std::fs::Permissions::from_mode(0o755))
+                .expect("chmod");
+        }
+        dir
+    }
+
+    /// Writes `text` at `path`, writable by its owner only, whatever the
+    /// umask.
+    fn write_owned(path: &Path, text: &str) {
+        std::fs::write(path, text).expect("write");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o644)).expect("chmod");
+        }
+    }
+
+    fn setup_environment(dir: &Path) -> (CliEnvironment, Arc<Mutex<Vec<u8>>>) {
+        let (stderr, buffer) = sink();
+        let environment = CliEnvironment {
+            cwd: dir.join("work"),
+            home: Some(dir.join("home")),
+            user_home: Some(dir.join("user")),
+            docs_command: "bake-rs docs".into(),
+            stdin_is_terminal: true,
+            stdin: Box::new(std::io::empty()),
+            stdout: sink().0,
+            stderr,
+            extra_providers: Vec::new(),
+            imported_default_model: None,
+            imported_default_preset: None,
+            sandbox_provider: Arc::new(bake_sandbox::provider::UnavailableProvider::new(None)),
+            approver: None,
+            warnings: Vec::new(),
+            interrupt: no_interrupt(),
+        };
+        (environment, buffer)
+    }
+
+    // Interactive setup and every replacement session share print mode's
+    // consumer: each reads the home's `mcp.json` and starts its servers,
+    // and `--no-mcp` starts none. The server's program does not exist, so
+    // nothing runs; under `danger-full-access` its admission needs no
+    // backend.
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn interactive_and_replacement_sessions_start_the_homes_servers() {
+        use crate::mcp::McpServerState;
+        let dir = setup_dirs("cli-mcp-consumer");
+        let missing = dir.join("no-such-program");
+        let config = serde_json::json!({ "mcpServers": {
+            "absent": { "command": missing.to_string_lossy() },
+            "off": { "command": "x", "enabled": false },
+            "remote": { "url": "https://example.com/mcp" },
+            "bad\u{1b}name": { "command": "x" },
+        } });
+        write_owned(&dir.join("home").join("mcp.json"), &config.to_string());
+        let args = |extra: &[&str]| {
+            let mut args = vec!["--sandbox", "danger-full-access", "--no-session"];
+            args.extend_from_slice(extra);
+            parse_args(&strings(&args))
+        };
+
+        let (environment, stderr) = setup_environment(dir.path());
+        let Ok(started) = start_interactive(environment, args(&[])).await else {
+            panic!("setup failed: {}", text(&stderr));
+        };
+        let warnings = text(&stderr);
+        assert!(warnings.contains("Warning: MCP: "), "{warnings}");
+        assert!(
+            warnings.contains("invalid server name \"bad\\u{1b}name\""),
+            "{warnings}"
+        );
+        assert!(!warnings.contains('\u{1b}'), "{warnings}");
+        assert!(
+            warnings.contains("Warning: MCP server \"remote\" uses Streamable HTTP"),
+            "{warnings}"
+        );
+        let wait = |servers: crate::mcp::McpServers| async move {
+            servers.wait_for_startup(|| false).await;
+            servers.statuses()
+        };
+        let servers = started
+            .session
+            .mcp_servers()
+            .expect("servers started")
+            .clone();
+        let statuses = wait(servers).await;
+        let names: Vec<_> = statuses.iter().map(|status| status.name.as_str()).collect();
+        assert_eq!(names, ["absent", "off"]);
+        assert!(
+            matches!(&statuses[0].state, McpServerState::Failed { error } if error.contains("failed to start")),
+            "{statuses:?}"
+        );
+        assert_eq!(statuses[1].state, McpServerState::Disabled);
+
+        // A replacement starts no server while the session it replaces
+        // runs; the caller starts them once that session is shut down.
+        let mut replacement = started
+            .factory
+            .replace(&started.session, SessionTarget::New)
+            .await
+            .expect("replacement");
+        assert!(replacement.session.mcp_servers().is_none());
+        assert!(replacement.has_pending_servers());
+        assert!(
+            replacement
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("Streamable HTTP")),
+            "{:?}",
+            replacement.warnings
+        );
+        started.session.shutdown().await;
+        let old = started
+            .session
+            .mcp_servers()
+            .expect("old servers")
+            .statuses();
+        assert!(
+            old.iter().all(|status| matches!(
+                status.state,
+                McpServerState::Failed { .. } | McpServerState::Disabled | McpServerState::Closed
+            )),
+            "{old:?}"
+        );
+        replacement.start_servers().expect("start");
+        assert!(!replacement.has_pending_servers());
+        let servers = replacement
+            .session
+            .mcp_servers()
+            .expect("replacement servers")
+            .clone();
+        assert_eq!(wait(servers).await.len(), 2);
+        // Once only.
+        replacement.start_servers().expect("nothing left to start");
+        replacement.session.shutdown().await;
+
+        // A replacement shut down unused never starts its servers.
+        let (environment, stderr) = setup_environment(dir.path());
+        let Ok(started) = start_interactive(environment, args(&[])).await else {
+            panic!("setup failed: {}", text(&stderr));
+        };
+        let mut unused = started
+            .factory
+            .replace(&started.session, SessionTarget::New)
+            .await
+            .expect("replacement");
+        unused.session.shutdown().await;
+        assert!(unused.start_servers().is_err());
+        assert!(unused.session.mcp_servers().is_none());
+        started.session.shutdown().await;
+
+        let (environment, stderr) = setup_environment(dir.path());
+        let Ok(started) = start_interactive(environment, args(&["--no-mcp"])).await else {
+            panic!("setup failed: {}", text(&stderr));
+        };
+        assert!(started.session.mcp_servers().is_none());
+        assert_eq!(text(&stderr), "");
+        let replacement = started
+            .factory
+            .replace(&started.session, SessionTarget::New)
+            .await
+            .expect("replacement");
+        assert!(replacement.session.mcp_servers().is_none());
+        replacement.session.shutdown().await;
+        started.session.shutdown().await;
+
+        // `--no-tools` alone leaves nothing an MCP tool could be declared
+        // as, so no server starts; with `--tools` naming one, they do.
+        for (extra, starts) in [
+            (&["-nt"][..], false),
+            (&["-nt", "-t", "mcp__absent__x"][..], true),
+        ] {
+            let (environment, stderr) = setup_environment(dir.path());
+            let Ok(started) = start_interactive(environment, args(extra)).await else {
+                panic!("setup failed: {}", text(&stderr));
+            };
+            assert_eq!(started.session.mcp_servers().is_some(), starts, "{extra:?}");
+            started.session.shutdown().await;
+        }
+    }
+
+    // A file the session's own tools could change is refused whole, before
+    // any server starts.
+    // Where who may change `mcp.json` cannot be shown yet, the shared
+    // consumer refuses it unread and starts nothing.
+    #[cfg(not(unix))]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_unchecked_platform_starts_no_server() {
+        let dir = setup_dirs("cli-mcp-unchecked");
+        write_owned(
+            &dir.join("home").join("mcp.json"),
+            r#"{"mcpServers":{"a":{"command":"x"}}}"#,
+        );
+        let (environment, stderr) = setup_environment(dir.path());
+        let args = parse_args(&strings(&[
+            "--sandbox",
+            "danger-full-access",
+            "--no-session",
+        ]));
+        let Ok(started) = start_interactive(environment, args).await else {
+            panic!("setup failed: {}", text(&stderr));
+        };
+        assert!(started.session.mcp_servers().is_none());
+        assert!(
+            text(&stderr).contains(crate::mcp::home::UNCHECKED_PLATFORM),
+            "{}",
+            text(&stderr)
+        );
+        started.session.shutdown().await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_home_in_the_working_directory_starts_no_server() {
+        let dir = setup_dirs("cli-mcp-workspace-home");
+        let (mut environment, stderr) = setup_environment(dir.path());
+        let home = dir.join("work").join(".bake");
+        std::fs::create_dir_all(&home).expect("home");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o700)).expect("chmod");
+        }
+        write_owned(
+            &home.join("mcp.json"),
+            r#"{"mcpServers":{"a":{"command":"x"}}}"#,
+        );
+        environment.home = Some(home);
+        let args = parse_args(&strings(&[
+            "--sandbox",
+            "danger-full-access",
+            "--no-session",
+        ]));
+        let Ok(started) = start_interactive(environment, args).await else {
+            panic!("setup failed: {}", text(&stderr));
+        };
+        assert!(started.session.mcp_servers().is_none());
+        let warnings = text(&stderr);
+        assert!(
+            warnings.contains("inside the session's working directory")
+                && warnings.contains("No MCP server was started from it"),
+            "{warnings}"
+        );
+        started.session.shutdown().await;
     }
 }

@@ -12,7 +12,9 @@
 # ~/.ssh/config with key login). BAKE_MAC_DIR is the Mac's work directory,
 # relative to its home (default `bake-ci`); the first run clones the
 # repository there. The Mac needs git, Bun, and rustup; Cargo installs the
-# pinned toolchain on first use.
+# pinned toolchain on first use. The native package check also needs
+# cargo-about 0.9.2 on the Mac's PATH, or `BAKE_CARGO_ABOUT=<path>` in the
+# command; this script forwards no environment.
 #
 # The command runs detached on the Mac, so a dropped connection or Ctrl+C here
 # does not stop it; this script follows its log and exits with its status.

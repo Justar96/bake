@@ -13,6 +13,8 @@
 //! A persisted session's file is created only once the session holds a user
 //! or assistant message, so opening and closing without a conversation
 //! leaves no file; from then on each entry is appended as it is added.
+//! Entries that belong together are appended as one group
+//! ([`SessionManager::append_group`], Bake's, in the `group` module).
 //!
 //! A persisted manager holds its file's writer lock while it may write the
 //! file ([`crate::session`], "Durability and concurrency").
@@ -49,6 +51,10 @@ use crate::session::list::{
 use crate::session::messages::AgentMessage;
 use crate::session::paths::{normalize_path_buf, resolve_path, resolve_path_string};
 use crate::session::time::{js_date_ms, now_iso};
+
+mod group;
+
+pub use group::{GroupEntry, GroupWriteError};
 
 /// Pi's `NewSessionOptions`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -140,6 +146,8 @@ pub struct SessionManager {
     writer: Option<WriterLock>,
     /// Set by [`SessionManager::close_writer`]: no lock is taken again.
     writer_closed: bool,
+    /// Faults the crate's tests inject into group appends.
+    faults: durable::Faults,
 }
 
 fn home() -> Result<PathBuf, SessionError> {
@@ -327,6 +335,7 @@ impl SessionManager {
             leaf_id: None,
             writer,
             writer_closed: false,
+            faults: durable::Faults::default(),
         };
         if persist && !manager.session_dir.as_os_str().is_empty() && !manager.session_dir.exists() {
             fs::create_dir_all(&manager.session_dir)
@@ -641,11 +650,17 @@ impl SessionManager {
         object
     }
 
-    fn append_entry(&mut self, id: String, raw: JsonObject) -> Result<String, SessionError> {
+    /// Add an entry in memory as a child of the leaf and move the leaf to
+    /// it; nothing is written.
+    fn push_entry(&mut self, id: String, raw: JsonObject) {
         self.file_entries
             .push(FileEntry::Entry(SessionEntry::from_parts(id.clone(), raw)));
         self.by_id.insert(id.clone(), self.file_entries.len() - 1);
-        self.leaf_id = Some(id.clone());
+        self.leaf_id = Some(id);
+    }
+
+    fn append_entry(&mut self, id: String, raw: JsonObject) -> Result<String, SessionError> {
+        self.push_entry(id.clone(), raw);
         self.persist_last()?;
         Ok(id)
     }
@@ -681,10 +696,15 @@ impl SessionManager {
         &mut self,
         thinking_level: &str,
     ) -> Result<String, SessionError> {
+        let (id, raw) = self.thinking_level_change(thinking_level);
+        self.append_entry(id, raw)
+    }
+
+    fn thinking_level_change(&self, thinking_level: &str) -> (String, JsonObject) {
         let id = self.next_id();
         let mut raw = self.base("thinking_level_change", &id);
         raw.insert("thinkingLevel".into(), thinking_level.into());
-        self.append_entry(id, raw)
+        (id, raw)
     }
 
     /// Append a model change. Returns the entry id.
@@ -693,11 +713,16 @@ impl SessionManager {
         provider: &str,
         model_id: &str,
     ) -> Result<String, SessionError> {
+        let (id, raw) = self.model_change(provider, model_id);
+        self.append_entry(id, raw)
+    }
+
+    fn model_change(&self, provider: &str, model_id: &str) -> (String, JsonObject) {
         let id = self.next_id();
         let mut raw = self.base("model_change", &id);
         raw.insert("provider".into(), provider.into());
         raw.insert("modelId".into(), model_id.into());
-        self.append_entry(id, raw)
+        (id, raw)
     }
 
     /// Append usage outside model context, such as cache warming. An empty
@@ -851,6 +876,16 @@ impl SessionManager {
         target_id: &str,
         replacement: Option<EditContent>,
     ) -> Result<String, SessionError> {
+        let (id, raw) = self.context_edit(target_id, replacement)?;
+        self.append_entry(id, raw)
+    }
+
+    /// The entry [`Self::append_context_edit`] appends, checked.
+    fn context_edit(
+        &self,
+        target_id: &str,
+        replacement: Option<EditContent>,
+    ) -> Result<(String, JsonObject), SessionError> {
         let Some(target) = self.entry(target_id) else {
             return Err(SessionError::EntryNotFound(target_id.to_owned()));
         };
@@ -888,7 +923,7 @@ impl SessionManager {
         let mut raw = self.base("context_edit", &id);
         raw.insert("targetId".into(), target_id.into());
         raw.insert("replacement".into(), replacement.unwrap_or(Value::Null));
-        self.append_entry(id, raw)
+        Ok((id, raw))
     }
 
     /// The leaf id; `None` before the first entry or after
@@ -1270,6 +1305,7 @@ impl SessionManager {
             leaf_id: self.leaf_id.clone(),
             writer: None,
             writer_closed: false,
+            faults: durable::Faults::default(),
         };
         match leaf_id {
             Some(leaf_id) => {

@@ -31,7 +31,7 @@
     "port-contract": "The native implementation must reproduce this observable contract.",
     "reuse-oracle": "Kept as a TypeScript or frozen oracle that native work is compared against.",
     "replace-tooling": "TypeScript-workspace tooling that native work replaces or extends instead of porting.",
-    "explicit-exclusion": "Deliberately not ported; the reason states what remains read-only."
+    "explicit-exclusion": "Deliberately not ported to 0.4.0, whether retired or deferred by decision; the reason states what remains read-only or frozen."
   },
   "lanes": [
     {
@@ -113,8 +113,7 @@
       "reason": "Profile composition, layered configuration, and service lifetimes."
     },
     "packages/boot/plugin-manager": {
-      "reason": "npm/Cordis plugin installation for profiles.",
-      "pending": "Custom JavaScript/Cordis profiles and their migration are excluded by D5; decide migration of shipped capabilities, native replacements, or retirement for Cordis tooling under D7."
+      "reason": "npm/Cordis plugin installation and toggling for profiles. Retired by D7: 0.4 ships no port, wrapper, or compatibility layer of this Cordis/JavaScript-specific implementation, and the frozen TypeScript package and its tests stay until the TypeScript agent is removed (D34). Its useful inspection and management roles move to Rust-native capabilities that scope 12 designs with the D6 plugin API; those are required, not excluded."
     },
     "packages/boot/updater": {
       "reason": "Signed manifest and update/rollback; old updaters expect a Node entry point."
@@ -123,8 +122,7 @@
       "reason": "Shipped profile bundles whose composition decides which services and tools are active."
     },
     "packages/bundle/desktop": {
-      "reason": "Bake Desktop profile bundle launched with `dsh --profile desktop` over stdio or an Electron port.",
-      "pending": "Desktop launch: native child spawning or a tested Electron port-to-stdio adapter."
+      "reason": "Bake Desktop profile bundle launched with `dsh --profile desktop` over stdio or an Electron port. Deferred beyond 0.4.0 by D9: no native Desktop entry, protocol, or Electron launch adapter, and no Desktop consumer test gates 0.4.0; the frozen TypeScript bundle and its tests stay."
     },
     "packages/client": {
       "reason": "Gateway, connection, host, and type-runtime transports; preserve required wire behavior for retained consumers only.",
@@ -143,8 +141,7 @@
       "reason": "Credential precedence, managed secret storage, and provider authorization."
     },
     "packages/extensions": {
-      "reason": "Cordis host runner and inspection tools that execute JavaScript plugin operations.",
-      "pending": "Custom JavaScript/Cordis profiles and their migration are excluded by D5; decide migration of shipped capabilities, native replacements, or retirement for Cordis tooling under D7."
+      "reason": "Cordis host runner and Cordis inspection tools that execute JavaScript plugin operations. Retired by D7: 0.4 ships no port, wrapper, or compatibility layer of this Cordis/JavaScript-specific implementation, and the frozen TypeScript package and its tests stay until the TypeScript agent is removed (D34). Its useful inspection and management roles move to Rust-native capabilities that scope 12 designs with the D6 plugin API; those are required, not excluded."
     },
     "packages/feedback": {
       "reason": "Local feedback and explicit-feedback export rules."
@@ -175,7 +172,7 @@
       "reason": "Background jobs, their completion notices, and job tools."
     },
     "packages/llm": {
-      "reason": "Provider-neutral streaming, retry, token metering, and pi-ai provider routes."
+      "reason": "Provider-neutral streaming, retry, and token metering, and the CLIProxyAPI route over the three wire protocols it selects per model: openai-responses, openai-completions, and anthropic-messages (D8). Direct provider routes, catalog API families beyond those three, and direct API-key and OAuth logins are deferred beyond 0.4.0."
     },
     "packages/mcp": {
       "reason": "MCP client, server-qualified dynamic tools, and resources."
@@ -239,8 +236,7 @@
       "reason": "Agent web search and fetch tools (not the removed web application)."
     },
     "preset:cordis": {
-      "reason": "Creation preset with Cordis inspection and persistent plugin management.",
-      "pending": "Custom JavaScript/Cordis profiles and their migration are excluded by D5; decide migration of shipped capabilities, native replacements, or retirement for Cordis tooling under D7."
+      "reason": "Creation preset with Cordis inspection and persistent plugin management. Retired by D7: 0.4 ships no port, wrapper, or compatibility layer of this Cordis/JavaScript-specific implementation, and the frozen TypeScript package and its tests stay until the TypeScript agent is removed (D34). Its useful inspection and management roles move to Rust-native capabilities that scope 12 designs with the D6 plugin API; those are required, not excluded."
     },
     "preset:minimal": {
       "reason": "Single persistent-shell preset."
@@ -252,8 +248,7 @@
       "reason": "Default coding preset with editing, shell, search, skills, goals, and subagents."
     },
     "profile:desktop": {
-      "reason": "Bake Desktop profile driven over stdio or an Electron parent port.",
-      "pending": "Desktop launch: native child spawning or a tested Electron port-to-stdio adapter."
+      "reason": "Bake Desktop profile driven over stdio or an Electron parent port. Deferred beyond 0.4.0 by D9: no native Desktop entry, protocol, or Electron launch adapter, and no Desktop consumer test gates 0.4.0; the frozen TypeScript bundle and its tests stay."
     },
     "profile:headless": {
       "reason": "One-task command-line profile with JSON stream output."
@@ -313,8 +308,7 @@
       "reason": "MCP resource listing and reading tools."
     },
     "tool:bake-plugin-manager": {
-      "reason": "plugin_manager installs and toggles JavaScript profile plugins.",
-      "pending": "Custom JavaScript/Cordis profiles and their migration are excluded by D5; decide migration of shipped capabilities, native replacements, or retirement for Cordis tooling under D7."
+      "reason": "plugin_manager installs and toggles JavaScript profile plugins. Retired by D7: 0.4 ships no port, wrapper, or compatibility layer of this Cordis/JavaScript-specific implementation, and the frozen TypeScript package and its tests stay until the TypeScript agent is removed (D34). Its useful inspection and management roles move to Rust-native capabilities that scope 12 designs with the D6 plugin API; those are required, not excluded."
     },
     "tool:bake-schedule": {
       "reason": "Schedule create/list/delete tools and recurrence."
@@ -329,8 +323,7 @@
       "reason": "Persistent bash session shared across calls."
     },
     "tool:bake-tool-cordis": {
-      "reason": "Cordis inspection over a generated JavaScript API catalog that cannot be presented as a Rust API unchanged.",
-      "pending": "Custom JavaScript/Cordis profiles and their migration are excluded by D5; decide migration of shipped capabilities, native replacements, or retirement for Cordis tooling under D7."
+      "reason": "cordis_inspect_list and cordis_inspect_query over a generated JavaScript API catalog that 0.4 never presents to the model. Retired by D7: 0.4 ships no port, wrapper, or compatibility layer of this Cordis/JavaScript-specific implementation, and the frozen TypeScript package and its tests stay until the TypeScript agent is removed (D34). Its useful inspection and management roles move to Rust-native capabilities that scope 12 designs with the D6 plugin API; those are required, not excluded."
     },
     "tool:bake-tool-fs": {
       "reason": "read/write/edit/read_image schemas, results, and stale-edit guards."
@@ -384,10 +377,10 @@
     {"path":"packages/boot/app-boot","name":"bake-app-boot","scopes":["05"],"disposition":"port-contract","basis":"packages/boot"},
     {"path":"packages/boot/cmdline","name":"bake-cmdline","scopes":["13"],"disposition":"port-contract","basis":"packages/boot"},
     {"path":"packages/boot/hmr","name":"bake-hmr","scopes":["05"],"disposition":"port-contract","basis":"packages/boot"},
-    {"path":"packages/boot/plugin-manager","name":"bake-plugin-manager","scopes":["12"],"disposition":"port-contract","basis":"packages/boot/plugin-manager"},
+    {"path":"packages/boot/plugin-manager","name":"bake-plugin-manager","scopes":["12"],"disposition":"explicit-exclusion","basis":"packages/boot/plugin-manager"},
     {"path":"packages/boot/updater","name":"bake-updater","scopes":["16"],"disposition":"port-contract","basis":"packages/boot/updater"},
     {"path":"packages/bundle/base","name":"bake-base","scopes":["09","13"],"disposition":"port-contract","basis":"packages/bundle"},
-    {"path":"packages/bundle/desktop","name":"bake-desktop","scopes":["13"],"disposition":"port-contract","basis":"packages/bundle/desktop"},
+    {"path":"packages/bundle/desktop","name":"bake-desktop","scopes":["13"],"disposition":"explicit-exclusion","basis":"packages/bundle/desktop"},
     {"path":"packages/bundle/headless","name":"bake-headless","scopes":["09","13"],"disposition":"port-contract","basis":"packages/bundle"},
     {"path":"packages/client/connection","name":"bake-client-connection","scopes":["13"],"disposition":"port-contract","basis":"packages/client"},
     {"path":"packages/compaction/command-compact","name":"bake-command-compact","scopes":["10"],"disposition":"port-contract","basis":"packages/compaction"},
@@ -410,8 +403,8 @@
     {"path":"packages/credentials/authorization","name":"bake-authorization","scopes":["05","07"],"disposition":"port-contract","basis":"packages/credentials"},
     {"path":"packages/credentials/credentials","name":"bake-credentials","scopes":["05","07"],"disposition":"port-contract","basis":"packages/credentials"},
     {"path":"packages/credentials/credentials-local","name":"bake-credentials-local","scopes":["05","07"],"disposition":"port-contract","basis":"packages/credentials"},
-    {"path":"packages/extensions/cordis-host-runner","name":"bake-cordis-host-runner","scopes":["12"],"disposition":"port-contract","basis":"packages/extensions"},
-    {"path":"packages/extensions/tool-cordis","name":"bake-tool-cordis","scopes":["12"],"disposition":"port-contract","basis":"packages/extensions"},
+    {"path":"packages/extensions/cordis-host-runner","name":"bake-cordis-host-runner","scopes":["12"],"disposition":"explicit-exclusion","basis":"packages/extensions"},
+    {"path":"packages/extensions/tool-cordis","name":"bake-tool-cordis","scopes":["12"],"disposition":"explicit-exclusion","basis":"packages/extensions"},
     {"path":"packages/feedback/command-feedback","name":"bake-command-feedback","scopes":["13","17"],"disposition":"port-contract","basis":"packages/feedback"},
     {"path":"packages/fs/fs","name":"bake-fs","scopes":["04","08"],"disposition":"port-contract","basis":"packages/fs"},
     {"path":"packages/fs/fs-local","name":"bake-fs-local","scopes":["04","08"],"disposition":"port-contract","basis":"packages/fs"},
@@ -726,12 +719,12 @@
     {"path":"packages/boot/hmr/tests/profile.spec.ts","lane":"vitest-runtime","owner":"packages/boot/hmr","scopes":["05"],"disposition":"reuse-oracle","basis":"packages/boot"},
     {"path":"packages/boot/hmr/tests/reconciliation.spec.ts","lane":"vitest-runtime","owner":"packages/boot/hmr","scopes":["05"],"disposition":"reuse-oracle","basis":"packages/boot"},
     {"path":"packages/boot/hmr/tests/watch-config.spec.ts","lane":"vitest-runtime","owner":"packages/boot/hmr","scopes":["05"],"disposition":"reuse-oracle","basis":"packages/boot"},
-    {"path":"packages/boot/plugin-manager/tests/build-approval.spec.ts","lane":"vitest-runtime","owner":"packages/boot/plugin-manager","scopes":["12"],"disposition":"reuse-oracle","basis":"packages/boot/plugin-manager"},
-    {"path":"packages/boot/plugin-manager/tests/install-spec.spec.ts","lane":"vitest-runtime","owner":"packages/boot/plugin-manager","scopes":["12"],"disposition":"reuse-oracle","basis":"packages/boot/plugin-manager"},
-    {"path":"packages/boot/plugin-manager/tests/manager.spec.ts","lane":"vitest-runtime","owner":"packages/boot/plugin-manager","scopes":["12"],"disposition":"reuse-oracle","basis":"packages/boot/plugin-manager"},
-    {"path":"packages/boot/plugin-manager/tests/operations.spec.ts","lane":"vitest-runtime","owner":"packages/boot/plugin-manager","scopes":["12"],"disposition":"reuse-oracle","basis":"packages/boot/plugin-manager"},
-    {"path":"packages/boot/plugin-manager/tests/patch.spec.ts","lane":"vitest-runtime","owner":"packages/boot/plugin-manager","scopes":["12"],"disposition":"reuse-oracle","basis":"packages/boot/plugin-manager"},
-    {"path":"packages/boot/plugin-manager/tests/tools.spec.ts","lane":"vitest-runtime","owner":"packages/boot/plugin-manager","scopes":["12"],"disposition":"reuse-oracle","basis":"packages/boot/plugin-manager"},
+    {"path":"packages/boot/plugin-manager/tests/build-approval.spec.ts","lane":"vitest-runtime","owner":"packages/boot/plugin-manager","scopes":["12"],"disposition":"explicit-exclusion","basis":"packages/boot/plugin-manager"},
+    {"path":"packages/boot/plugin-manager/tests/install-spec.spec.ts","lane":"vitest-runtime","owner":"packages/boot/plugin-manager","scopes":["12"],"disposition":"explicit-exclusion","basis":"packages/boot/plugin-manager"},
+    {"path":"packages/boot/plugin-manager/tests/manager.spec.ts","lane":"vitest-runtime","owner":"packages/boot/plugin-manager","scopes":["12"],"disposition":"explicit-exclusion","basis":"packages/boot/plugin-manager"},
+    {"path":"packages/boot/plugin-manager/tests/operations.spec.ts","lane":"vitest-runtime","owner":"packages/boot/plugin-manager","scopes":["12"],"disposition":"explicit-exclusion","basis":"packages/boot/plugin-manager"},
+    {"path":"packages/boot/plugin-manager/tests/patch.spec.ts","lane":"vitest-runtime","owner":"packages/boot/plugin-manager","scopes":["12"],"disposition":"explicit-exclusion","basis":"packages/boot/plugin-manager"},
+    {"path":"packages/boot/plugin-manager/tests/tools.spec.ts","lane":"vitest-runtime","owner":"packages/boot/plugin-manager","scopes":["12"],"disposition":"explicit-exclusion","basis":"packages/boot/plugin-manager"},
     {"path":"packages/boot/updater/tests/check.spec.ts","lane":"vitest-runtime","owner":"packages/boot/updater","scopes":["16"],"disposition":"reuse-oracle","basis":"packages/boot/updater"},
     {"path":"packages/boot/updater/tests/install.spec.ts","lane":"vitest-runtime","owner":"packages/boot/updater","scopes":["16"],"disposition":"reuse-oracle","basis":"packages/boot/updater"},
     {"path":"packages/boot/updater/tests/manifest.spec.ts","lane":"vitest-runtime","owner":"packages/boot/updater","scopes":["16"],"disposition":"reuse-oracle","basis":"packages/boot/updater"},
@@ -739,10 +732,10 @@
     {"path":"packages/boot/updater/tests/update.spec.ts","lane":"vitest-runtime","owner":"packages/boot/updater","scopes":["16"],"disposition":"reuse-oracle","basis":"packages/boot/updater"},
     {"path":"packages/boot/updater/tests/verify.spec.ts","lane":"vitest-runtime","owner":"packages/boot/updater","scopes":["16"],"disposition":"reuse-oracle","basis":"packages/boot/updater"},
     {"path":"packages/bundle/base/tests/base.spec.ts","lane":"vitest-runtime","owner":"packages/bundle/base","scopes":["09","13"],"disposition":"reuse-oracle","basis":"packages/bundle"},
-    {"path":"packages/bundle/desktop/tests/desktop-bridge.spec.ts","lane":"vitest-runtime","owner":"packages/bundle/desktop","scopes":["13"],"disposition":"reuse-oracle","basis":"packages/bundle/desktop"},
-    {"path":"packages/bundle/desktop/tests/permission.spec.ts","lane":"vitest-runtime","owner":"packages/bundle/desktop","scopes":["13"],"disposition":"reuse-oracle","basis":"packages/bundle/desktop"},
-    {"path":"packages/bundle/desktop/tests/spans.spec.ts","lane":"vitest-runtime","owner":"packages/bundle/desktop","scopes":["13"],"disposition":"reuse-oracle","basis":"packages/bundle/desktop"},
-    {"path":"packages/bundle/desktop/tests/transport.spec.ts","lane":"vitest-runtime","owner":"packages/bundle/desktop","scopes":["13"],"disposition":"reuse-oracle","basis":"packages/bundle/desktop"},
+    {"path":"packages/bundle/desktop/tests/desktop-bridge.spec.ts","lane":"vitest-runtime","owner":"packages/bundle/desktop","scopes":["13"],"disposition":"explicit-exclusion","basis":"packages/bundle/desktop"},
+    {"path":"packages/bundle/desktop/tests/permission.spec.ts","lane":"vitest-runtime","owner":"packages/bundle/desktop","scopes":["13"],"disposition":"explicit-exclusion","basis":"packages/bundle/desktop"},
+    {"path":"packages/bundle/desktop/tests/spans.spec.ts","lane":"vitest-runtime","owner":"packages/bundle/desktop","scopes":["13"],"disposition":"explicit-exclusion","basis":"packages/bundle/desktop"},
+    {"path":"packages/bundle/desktop/tests/transport.spec.ts","lane":"vitest-runtime","owner":"packages/bundle/desktop","scopes":["13"],"disposition":"explicit-exclusion","basis":"packages/bundle/desktop"},
     {"path":"packages/bundle/headless/tests/headless.spec.ts","lane":"vitest-runtime","owner":"packages/bundle/headless","scopes":["09","13"],"disposition":"reuse-oracle","basis":"packages/bundle"},
     {"path":"packages/bundle/headless/tests/json-stream.spec.ts","lane":"vitest-runtime","owner":"packages/bundle/headless","scopes":["09","13"],"disposition":"reuse-oracle","basis":"packages/bundle"},
     {"path":"packages/bundle/headless/tests/startup.spec.ts","lane":"vitest-runtime","owner":"packages/bundle/headless","scopes":["09","13"],"disposition":"reuse-oracle","basis":"packages/bundle"},
@@ -863,13 +856,13 @@
     {"path":"packages/credentials/credentials-local/tests/watcher.spec.ts","lane":"vitest-runtime","owner":"packages/credentials/credentials-local","scopes":["05","07"],"disposition":"reuse-oracle","basis":"packages/credentials"},
     {"path":"packages/credentials/credentials/tests/credentials.spec.ts","lane":"vitest-runtime","owner":"packages/credentials/credentials","scopes":["05","07"],"disposition":"reuse-oracle","basis":"packages/credentials"},
     {"path":"packages/credentials/credentials/tests/invariant.spec.ts","lane":"vitest-runtime","owner":"packages/credentials/credentials","scopes":["05","07"],"disposition":"reuse-oracle","basis":"packages/credentials"},
-    {"path":"packages/extensions/cordis-host-runner/tests/composition.spec.ts","lane":"vitest-runtime","owner":"packages/extensions/cordis-host-runner","scopes":["12"],"disposition":"reuse-oracle","basis":"packages/extensions"},
-    {"path":"packages/extensions/cordis-host-runner/tests/runner.spec.ts","lane":"vitest-runtime","owner":"packages/extensions/cordis-host-runner","scopes":["12"],"disposition":"reuse-oracle","basis":"packages/extensions"},
-    {"path":"packages/extensions/cordis-host-runner/tests/sandbox-context.spec.ts","lane":"vitest-runtime","owner":"packages/extensions/cordis-host-runner","scopes":["12"],"disposition":"reuse-oracle","basis":"packages/extensions"},
-    {"path":"packages/extensions/cordis-host-runner/tests/sandbox.spec.ts","lane":"vitest-runtime","owner":"packages/extensions/cordis-host-runner","scopes":["12"],"disposition":"reuse-oracle","basis":"packages/extensions"},
-    {"path":"packages/extensions/cordis-host-runner/tests/versioning.spec.ts","lane":"vitest-runtime","owner":"packages/extensions/cordis-host-runner","scopes":["12"],"disposition":"reuse-oracle","basis":"packages/extensions"},
-    {"path":"packages/extensions/tool-cordis/tests/config.spec.ts","lane":"vitest-runtime","owner":"packages/extensions/tool-cordis","scopes":["12"],"disposition":"reuse-oracle","basis":"packages/extensions"},
-    {"path":"packages/extensions/tool-cordis/tests/cordis-lifecycle.spec.ts","lane":"vitest-runtime","owner":"packages/extensions/tool-cordis","scopes":["12"],"disposition":"reuse-oracle","basis":"packages/extensions"},
+    {"path":"packages/extensions/cordis-host-runner/tests/composition.spec.ts","lane":"vitest-runtime","owner":"packages/extensions/cordis-host-runner","scopes":["12"],"disposition":"explicit-exclusion","basis":"packages/extensions"},
+    {"path":"packages/extensions/cordis-host-runner/tests/runner.spec.ts","lane":"vitest-runtime","owner":"packages/extensions/cordis-host-runner","scopes":["12"],"disposition":"explicit-exclusion","basis":"packages/extensions"},
+    {"path":"packages/extensions/cordis-host-runner/tests/sandbox-context.spec.ts","lane":"vitest-runtime","owner":"packages/extensions/cordis-host-runner","scopes":["12"],"disposition":"explicit-exclusion","basis":"packages/extensions"},
+    {"path":"packages/extensions/cordis-host-runner/tests/sandbox.spec.ts","lane":"vitest-runtime","owner":"packages/extensions/cordis-host-runner","scopes":["12"],"disposition":"explicit-exclusion","basis":"packages/extensions"},
+    {"path":"packages/extensions/cordis-host-runner/tests/versioning.spec.ts","lane":"vitest-runtime","owner":"packages/extensions/cordis-host-runner","scopes":["12"],"disposition":"explicit-exclusion","basis":"packages/extensions"},
+    {"path":"packages/extensions/tool-cordis/tests/config.spec.ts","lane":"vitest-runtime","owner":"packages/extensions/tool-cordis","scopes":["12"],"disposition":"explicit-exclusion","basis":"packages/extensions"},
+    {"path":"packages/extensions/tool-cordis/tests/cordis-lifecycle.spec.ts","lane":"vitest-runtime","owner":"packages/extensions/tool-cordis","scopes":["12"],"disposition":"explicit-exclusion","basis":"packages/extensions"},
     {"path":"packages/feedback/command-feedback/tests/command-feedback.spec.ts","lane":"vitest-runtime","owner":"packages/feedback/command-feedback","scopes":["13","17"],"disposition":"reuse-oracle","basis":"packages/feedback"},
     {"path":"packages/feedback/command-feedback/tests/loader-composition.spec.ts","lane":"vitest-runtime","owner":"packages/feedback/command-feedback","scopes":["13","17"],"disposition":"reuse-oracle","basis":"packages/feedback"},
     {"path":"packages/fs/fs-local/tests/filesystem.spec.ts","lane":"vitest-runtime","owner":"packages/fs/fs-local","scopes":["04","08"],"disposition":"reuse-oracle","basis":"packages/fs"},
@@ -1316,6 +1309,8 @@
     {"path":"scripts/release/installer-animation.test.ts","lane":"bun-scripts","owner":"scripts:release","scopes":["16"],"disposition":"replace-tooling","basis":"scripts:release"},
     {"path":"scripts/release/launcher.test.ts","lane":"bun-scripts","owner":"scripts:release","scopes":["16"],"disposition":"replace-tooling","basis":"scripts:release"},
     {"path":"scripts/release/manifest.test.ts","lane":"bun-scripts","owner":"scripts:release","scopes":["16"],"disposition":"replace-tooling","basis":"scripts:release"},
+    {"path":"scripts/release/native-licenses.test.ts","lane":"bun-scripts","owner":"scripts:release","scopes":["16"],"disposition":"replace-tooling","basis":"scripts:release"},
+    {"path":"scripts/release/pack-rust.test.ts","lane":"bun-scripts","owner":"scripts:release","scopes":["16"],"disposition":"replace-tooling","basis":"scripts:release"},
     {"path":"scripts/release/permissions.test.ts","lane":"bun-scripts","owner":"scripts:release","scopes":["16"],"disposition":"replace-tooling","basis":"scripts:release"},
     {"path":"scripts/release/prepare.test.ts","lane":"bun-scripts","owner":"scripts:release","scopes":["16"],"disposition":"replace-tooling","basis":"scripts:release"},
     {"path":"scripts/release/server.test.ts","lane":"bun-scripts","owner":"scripts:release","scopes":["16"],"disposition":"replace-tooling","basis":"scripts:release"},
@@ -1593,24 +1588,24 @@
     {"name":"attachments","summary":"attachment staging, exact stored bytes, recorded model output, and metadata on resume","requires":[],"replayOnly":true,"scopes":["10","15"],"disposition":"port-contract","basis":"pty:context"}
   ],
   "profiles": [
-    {"name":"desktop","bundles":["bake-base","bake-desktop"],"surfaces":["profile:desktop"],"scopes":["13"],"disposition":"port-contract","basis":"profile:desktop"},
+    {"name":"desktop","bundles":["bake-base","bake-desktop"],"surfaces":["profile:desktop"],"scopes":["13"],"disposition":"explicit-exclusion","basis":"profile:desktop"},
     {"name":"headless","bundles":["bake-base","bake-headless"],"surfaces":["profile:headless"],"scopes":["09","13"],"disposition":"port-contract","basis":"profile:headless"},
     {"name":"tui","bundles":["bake-base","bake-tui-app"],"surfaces":["tui-preset:cordis","tui-preset:minimal","tui-preset:ptc","tui-preset:standard"],"scopes":["13","14","15"],"disposition":"port-contract","basis":"profile:tui"}
   ],
   "presets": [
-    {"name":"cordis","title":"Creation mode","surface":"tui-preset:cordis","scopes":["05","12"],"disposition":"port-contract","basis":"preset:cordis"},
+    {"name":"cordis","title":"Creation mode","surface":"tui-preset:cordis","scopes":["05","12"],"disposition":"explicit-exclusion","basis":"preset:cordis"},
     {"name":"minimal","title":"Minimal mode","surface":"tui-preset:minimal","scopes":["05","10"],"disposition":"port-contract","basis":"preset:minimal"},
     {"name":"ptc","title":"PTC mode","surface":"tui-preset:ptc","scopes":["10","12"],"disposition":"port-contract","basis":"preset:ptc"},
     {"name":"standard","title":"Standard mode","surface":"tui-preset:standard","scopes":["05","10"],"disposition":"port-contract","basis":"preset:standard"}
   ],
   "toolPackages": [
     {"package":"bake-mcp-resources","tools":["list_mcp_resource_templates","list_mcp_resources","read_mcp_resource"],"surfaces":[],"sharedNameSurfaces":[],"scopes":["12"],"disposition":"port-contract","basis":"tool:bake-mcp-resources"},
-    {"package":"bake-plugin-manager","tools":["plugin_manager"],"surfaces":["tui-preset:cordis"],"sharedNameSurfaces":[],"scopes":["12"],"disposition":"port-contract","basis":"tool:bake-plugin-manager"},
+    {"package":"bake-plugin-manager","tools":["plugin_manager"],"surfaces":["tui-preset:cordis"],"sharedNameSurfaces":[],"scopes":["12"],"disposition":"explicit-exclusion","basis":"tool:bake-plugin-manager"},
     {"package":"bake-schedule","tools":["schedule_create","schedule_delete","schedule_list"],"surfaces":[],"sharedNameSurfaces":[],"scopes":["11"],"disposition":"port-contract","basis":"tool:bake-schedule"},
     {"package":"bake-tool-ask-user","tools":["ask_user_question"],"surfaces":["tui-preset:cordis","tui-preset:standard"],"sharedNameSurfaces":[],"scopes":["08","15"],"disposition":"port-contract","basis":"tool:bake-tool-ask-user"},
     {"package":"bake-tool-bash","tools":["bash"],"surfaces":[],"sharedNameSurfaces":["profile:desktop","profile:headless","tui-preset:cordis","tui-preset:minimal","tui-preset:standard"],"scopes":["04","08"],"disposition":"port-contract","basis":"tool:bake-tool-bash"},
     {"package":"bake-tool-bash-persistent","tools":["bash"],"surfaces":[],"sharedNameSurfaces":["profile:desktop","profile:headless","tui-preset:cordis","tui-preset:minimal","tui-preset:standard"],"scopes":["04","08"],"disposition":"port-contract","basis":"tool:bake-tool-bash-persistent"},
-    {"package":"bake-tool-cordis","tools":["cordis_inspect_list","cordis_inspect_query"],"surfaces":["tui-preset:cordis"],"sharedNameSurfaces":[],"scopes":["12"],"disposition":"port-contract","basis":"tool:bake-tool-cordis"},
+    {"package":"bake-tool-cordis","tools":["cordis_inspect_list","cordis_inspect_query"],"surfaces":["tui-preset:cordis"],"sharedNameSurfaces":[],"scopes":["12"],"disposition":"explicit-exclusion","basis":"tool:bake-tool-cordis"},
     {"package":"bake-tool-fs","tools":["edit","read","read_image","write"],"surfaces":["profile:desktop","profile:headless","tui-preset:cordis","tui-preset:standard"],"sharedNameSurfaces":[],"scopes":["08"],"disposition":"port-contract","basis":"tool:bake-tool-fs"},
     {"package":"bake-tool-fs-search","tools":["glob","grep"],"surfaces":["profile:desktop","profile:headless","tui-preset:cordis","tui-preset:standard"],"sharedNameSurfaces":[],"scopes":["08"],"disposition":"port-contract","basis":"tool:bake-tool-fs-search"},
     {"package":"bake-tool-goal","tools":["create_goal","get_goal","update_goal"],"surfaces":["profile:desktop","profile:headless","tui-preset:cordis","tui-preset:standard"],"sharedNameSurfaces":[],"scopes":["11"],"disposition":"port-contract","basis":"tool:bake-tool-goal"},

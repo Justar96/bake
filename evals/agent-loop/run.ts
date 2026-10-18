@@ -19,6 +19,7 @@
  * EVAL_TRIALS  trials per scenario (default 3)
  * EVAL_OUTPUT  raw output directory (default .preflight/evals/agent-loop/<time>)
  * EVAL_EXTRA_<ARM>  optional JSON array of extra overlay rows for one arm
+ * EVAL_CONFIG_HOME optional directory holding settings.yaml and .credentials.yaml; defaults to ~/.bake
  * EVAL_GATEWAY optional JSON file of { baseUrl, apiKey } that replaces the
  *              cliproxyapi upstream and key for every arm, such as pi's
  *              ~/.pi/agent/cliproxyapi.json; DeepSeek routes are unaffected
@@ -79,9 +80,10 @@ for (const scenario of cases) if (prompts[scenario] === undefined) throw new Err
 const trials = Number(process.env.EVAL_TRIALS ?? 3)
 const nativePermission = (process.env.EVAL_NATIVE_PERMISSION ?? 'danger-full-access') as NativePermission
 if (!NATIVE_PERMISSIONS.includes(nativePermission)) throw new Error(`EVAL_NATIVE_PERMISSION must be one of ${NATIVE_PERMISSIONS.join(', ')}`)
-const settings = YAML.parse(readFileSync(join(process.env.HOME!, '.bake/settings.yaml'), 'utf8'))
+const configHome = resolve(process.env.EVAL_CONFIG_HOME ?? join(process.env.HOME!, '.bake'))
+const settings = YAML.parse(readFileSync(join(configHome, 'settings.yaml'), 'utf8'))
 const original = settings['llm-pi-ai'].providers.cliproxyapi
-const credentialFile = join(process.env.HOME!, '.bake/.credentials.yaml')
+const credentialFile = join(configHome, '.credentials.yaml')
 /**
  * An optional replacement gateway for cliproxyapi models. The proxy swaps each
  * arm's credential for this one on the way out, so both arms reach the same

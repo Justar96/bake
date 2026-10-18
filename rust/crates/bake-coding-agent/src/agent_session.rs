@@ -15,9 +15,18 @@
 //! persistence happens inside the agent's event listener, so a run is idle
 //! only after its messages are written. A failed write aborts the run and
 //! no later message is written, so the file never skips a message; Pi's
-//! throwing listener likewise ends the run. Session writes and model
-//! requests hold permits of the session's [`WorkGate`], which
-//! [`AgentSession::shutdown`] closes, so none outlives the session.
+//! throwing listener likewise ends the run.
+//!
+//! The session's [`WorkGate`] owns the work that runs outside the task
+//! awaiting it: session writes and other blocking work, model requests,
+//! model, thinking-level, and settings changes, idle compaction, and
+//! background work ([`AgentSession::spawn_background`]). Two lifetimes
+//! meet here. A turn's work ends with [`AgentSession::abort`], which
+//! signals the run, a retry wait, and a compaction, and leaves the gate's
+//! background tasks and changes running. The session's lifetime ends with
+//! [`AgentSession::shutdown`], which refuses new work at once, cancels
+//! both, and returns only after every owned task, its cleanup, and every
+//! listener call have finished.
 //!
 //! Compaction and auto-retry follow Pi (in `agent_session/recovery.rs`):
 //! after each run a retryable error is retried with backoff, and a context
@@ -40,7 +49,14 @@
 //! v1.2.0's `navigateTree` and runtime `fork` (in
 //! `agent_session/navigation.rs`).
 //!
-//! Not ported (deferred): extensions and their events (including
+//! Trusted compiled-in plugins ([`crate::plugins`], given as
+//! [`AgentSessionOptions::plugins`]) veto tool calls through the agent's
+//! `before_tool_call` hook, as Pi v1.3.0's `_beforeToolCall` runs
+//! `tool_call` handlers (in `agent_session/plugin_veto.rs`); each block is
+//! written as a `custom` entry before the denial result. With no plugins no
+//! hook is installed.
+//!
+//! Not ported (deferred): Pi's extensions and their other events (including
 //! `session_before_compact`, `session_compact`, and
 //! `session_compact_failed`), branch summaries during navigation, the
 //! `/skill:name` slash command list and its expansion error event, prompt
@@ -49,6 +65,7 @@
 //! `entry_appended` event, and tool-loadout changes between turns.
 
 mod navigation;
+mod plugin_veto;
 mod recovery;
 
 use std::path::PathBuf;
@@ -76,12 +93,15 @@ use bake_ai::{
 };
 
 use crate::compaction::CompactionResult;
+use crate::mcp::{McpOptions, McpServers};
 use crate::model_registry::resolver::{DEFAULT_THINKING_LEVEL, find_initial_model};
 use crate::model_registry::{ModelRegistry, ModelRuntime};
-use crate::owned_work::{WorkGate, WorkPermit};
+use crate::owned_work::{OwnedTask, Refused, TaskScope, WorkGate, WorkPermit};
+use crate::plugins::PluginRegistry;
+use crate::plugins::veto::VetoDispatcher;
 use crate::prompt_templates::{PromptTemplate, expand_prompt_template};
-use crate::session::SessionManager;
 use crate::session::messages::{CustomMessage, convert_to_llm};
+use crate::session::{GroupEntry, SessionError, SessionManager};
 use crate::settings::{Settings, SettingsStore};
 use crate::skills::expand_skill_command;
 use crate::system_prompt::{
@@ -175,6 +195,18 @@ pub struct AgentSessionOptions {
     /// which the prompt's `docs` section and the no-model and no-key
     /// messages name.
     pub docs_command: String,
+    /// The trusted plugins whose tool-call vetoes run before each call to
+    /// a tool they list ([`crate::plugins`]); empty, the default, installs
+    /// no hook.
+    pub plugins: PluginRegistry,
+    /// The gate that owns the session's work ([`WorkGate`]); `None` makes a
+    /// private one. Give the same gate to the tools that spawn processes
+    /// ([`crate::tools::bash::BashToolOptions::owner`],
+    /// [`crate::tools::index::ToolsOptions::owner`]) so that
+    /// [`AgentSession::shutdown`] refuses their later spawns and waits for
+    /// every process tree they started, a dropped call's included. One gate
+    /// per session: closing it is the session's shutdown.
+    pub work: Option<WorkGate>,
 }
 
 /// Tools whose calls change files or run commands. The prompt's round-trip
@@ -510,6 +542,21 @@ struct Listeners {
     list: Mutex<Vec<(u64, Listener)>>,
     /// Set by [`AgentSession::shutdown`]: later events reach no listener.
     closed: AtomicBool,
+    /// Emits in progress, so shutdown can wait until no listener runs.
+    emitting: std::sync::atomic::AtomicUsize,
+    /// Notified when the last emit in progress ends.
+    quiet: tokio::sync::Notify,
+}
+
+/// Counts one emit in progress until dropped.
+struct Emitting<'a>(&'a Listeners);
+
+impl Drop for Emitting<'_> {
+    fn drop(&mut self) {
+        if self.0.emitting.fetch_sub(1, Ordering::SeqCst) == 1 {
+            self.0.quiet.notify_waiters();
+        }
+    }
 }
 
 impl Listeners {
@@ -523,7 +570,25 @@ impl Listeners {
             .clear();
     }
 
+    /// Waits until no listener call that started before [`Self::close`]
+    /// is still running. An emit counts itself before it checks `closed`,
+    /// and `close` sets `closed` before this reads the count, so every
+    /// emit either sees `closed` or is counted here.
+    async fn quiesce(&self) {
+        loop {
+            let notified = self.quiet.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if self.emitting.load(Ordering::SeqCst) == 0 {
+                return;
+            }
+            notified.await;
+        }
+    }
+
     fn emit(&self, event: &SessionEvent<'_>) {
+        self.emitting.fetch_add(1, Ordering::SeqCst);
+        let _emitting = Emitting(self);
         if self.closed.load(Ordering::SeqCst) {
             return;
         }
@@ -576,13 +641,23 @@ fn lock(session: &SharedSession) -> MutexGuard<'_, SessionManager> {
     session.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Runs `work` on the session off the Tokio workers.
+/// The message for work the session's gate refused.
+fn refused_message(refused: Refused) -> String {
+    match refused {
+        Refused::Closed => "The session is shut down.".to_owned(),
+        refused => format!("The session could not start its work: {refused}."),
+    }
+}
+
+/// Runs `work` on the session off the Tokio workers, owned by `gate`.
 async fn with_session<R: Send + 'static>(
+    gate: &WorkGate,
     session: &SharedSession,
     work: impl FnOnce(&mut SessionManager) -> R + Send + 'static,
 ) -> Result<R, String> {
     let session = Arc::clone(session);
-    tokio::task::spawn_blocking(move || work(&mut lock(&session)))
+    gate.spawn_blocking(move || work(&mut lock(&session)))
+        .map_err(refused_message)?
         .await
         .map_err(|error| format!("Session I/O task failed: {error}"))
 }
@@ -611,12 +686,19 @@ pub struct AgentSession {
     docs_command: String,
     listeners: Arc<Listeners>,
     persist_error: Arc<Mutex<Option<String>>>,
-    subscription: Mutex<Option<Subscription>>,
+    subscription: Arc<Mutex<Option<Subscription>>>,
+    /// Set by the first [`Self::shutdown`]: the teardown's completion.
+    shutdown: OnceLock<tokio::sync::watch::Receiver<bool>>,
+    /// The runtime the session was created on, which runs its teardown
+    /// whichever thread or executor calls [`Self::shutdown`].
+    runtime: tokio::runtime::Handle,
     model_fallback_message: Option<String>,
     queue: Arc<Queue>,
     /// The first session write that failed. The file then misses a
     /// message, so no later prompt is accepted.
     write_failure: Arc<Mutex<Option<String>>>,
+    /// The MCP servers [`Self::start_mcp`] started, once it has.
+    mcp: OnceLock<McpServers>,
 }
 
 impl std::fmt::Debug for AgentSession {
@@ -883,20 +965,20 @@ async fn persist_message(
     persist_error: &Mutex<Option<String>>,
     message: &LiveMessage,
 ) -> Result<Option<String>, ()> {
-    let Some(permit) = core.work.enter() else {
-        return Ok(None);
-    };
     let message = message.clone();
     let session = Arc::clone(&core.session);
     let gap = Arc::clone(&core.gap);
-    // The permit lives in the blocking work, which keeps running if this
-    // run is cancelled.
-    let result = tokio::task::spawn_blocking(move || {
-        let _permit = permit;
-        persist_after_gap_check(&session, &gap, &message)
-    })
-    .await
-    .unwrap_or_else(|error| Err(format!("Session I/O task failed: {error}")));
+    // The gate owns the write, which keeps running if this run is
+    // cancelled.
+    let Ok(write) = core
+        .work
+        .spawn_blocking(move || persist_after_gap_check(&session, &gap, &message))
+    else {
+        return Ok(None);
+    };
+    let result = write
+        .await
+        .unwrap_or_else(|error| Err(format!("Session I/O task failed: {error}")));
     match result {
         Ok(Persisted::Written(entry_id)) => Ok(entry_id),
         // After a failed write, a later message would cross the gap.
@@ -934,27 +1016,40 @@ fn persist_after_gap_check(
 
 /// Why [`write_session`] wrote nothing more.
 #[derive(Debug)]
-enum WriteRefused {
+enum WriteRefused<E = String> {
     /// An earlier write failed; its reason.
     AfterGap(String),
     /// This write failed; the session now has a gap.
-    Failed(String),
+    Failed(E),
+}
+
+impl<E: std::fmt::Display> WriteRefused<E> {
+    /// The reason, as the session reports it.
+    fn message(&self) -> String {
+        match self {
+            Self::AfterGap(error) => error.clone(),
+            Self::Failed(error) => error.to_string(),
+        }
+    }
 }
 
 /// The session's write boundary: under the session lock, refuses once a
 /// write has failed, and records this write's failure before the lock is
-/// released, so a write queued behind a failing one sees it. Blocks.
-fn write_session<R>(
+/// released, so a write queued behind a failing one sees it. A write that
+/// fails part-way through a group of entries
+/// ([`SessionManager::append_group`]) is a failure too: nothing is written
+/// after its prefix, and the group is never written again. Blocks.
+fn write_session<R, E: std::fmt::Display>(
     session: &SharedSession,
     gap: &Mutex<Option<String>>,
-    write: impl FnOnce(&mut SessionManager) -> Result<R, String>,
-) -> Result<R, WriteRefused> {
+    write: impl FnOnce(&mut SessionManager) -> Result<R, E>,
+) -> Result<R, WriteRefused<E>> {
     let mut session = lock(session);
     if let Some(error) = lock_gap(gap).clone() {
         return Err(WriteRefused::AfterGap(error));
     }
     write(&mut session).map_err(|error| {
-        lock_gap(gap).get_or_insert_with(|| error.clone());
+        lock_gap(gap).get_or_insert_with(|| error.to_string());
         WriteRefused::Failed(error)
     })
 }
@@ -973,10 +1068,9 @@ pub(crate) type FailHook = Box<dyn FnOnce() -> Box<dyn FnOnce() + Send> + Send>;
 #[cfg(test)]
 #[derive(Default)]
 pub(crate) struct TestHooks {
-    /// Fails the next thinking-level entry of a model change.
-    pub fail_level_entry: bool,
-    /// Fails the next model-change entry. Runs under the session lock as
-    /// it fails; what it returns runs before the change goes on.
+    /// Fails the next model change's group before its first line. Runs
+    /// under the session lock as it fails; what it returns runs before the
+    /// change goes on.
     pub fail_model_entry: Option<FailHook>,
     /// What [`Self::fail_model_entry`] returned.
     pub before_continuing: Option<Box<dyn FnOnce() + Send>>,
@@ -992,6 +1086,15 @@ pub(crate) struct TestHooks {
     /// Fails the next compaction entry at the session's write boundary,
     /// running the hook under the session lock as it fails.
     pub fail_compaction_entry: Option<Box<dyn FnOnce() + Send>>,
+    /// Fails the next plugin decision entry at the session's write
+    /// boundary.
+    pub fail_plugin_decision: bool,
+    /// Runs on the blocking pool before the next plugin decision write
+    /// takes the session lock, that is before its cancellation admission.
+    pub before_plugin_decision_admission: Option<Box<dyn FnOnce() + Send>>,
+    /// Runs under the session lock once the next plugin decision write is
+    /// admitted, before its entry is appended.
+    pub plugin_decision_admitted: Option<Box<dyn FnOnce() + Send>>,
 }
 
 /// Pi's bookkeeping after persisting: the last assistant message and the
@@ -1044,35 +1147,69 @@ struct Control {
     selection: SessionSelection,
     listeners: Arc<Listeners>,
     persist_error: Arc<Mutex<Option<String>>>,
+    /// A share of the change's admission: its blocking work runs under it,
+    /// so shutdown, which never refuses an admitted claim, waits for it.
+    permit: WorkPermit,
 }
 
 impl Control {
-    /// Appends to the session file on the blocking pool. The change's task
-    /// holds the work permit while this runs, so shutdown waits for it.
+    /// Runs `work` on the blocking pool under the change's permit.
+    async fn blocking<R: Send + 'static>(
+        &self,
+        work: impl FnOnce() -> R + Send + 'static,
+        what: &str,
+    ) -> Result<R, String> {
+        self.permit
+            .spawn_blocking(work)
+            .map_err(|refused| format!("{what} task failed: {refused}"))?
+            .await
+            .map_err(|error| format!("{what} task failed: {error}"))
+    }
+
+    /// Appends to the session file on the blocking pool, under the
+    /// change's permit, so shutdown waits for it.
     async fn append(
         &self,
         write: impl FnOnce(&mut SessionManager) -> Result<(), crate::session::SessionError>
         + Send
         + 'static,
     ) -> Result<(), String> {
+        self.write(write).await.map_err(|refused| refused.message())
+    }
+
+    /// [`Self::append`], keeping the session's error.
+    async fn write(
+        &self,
+        write: impl FnOnce(&mut SessionManager) -> Result<(), crate::session::SessionError>
+        + Send
+        + 'static,
+    ) -> Result<(), WriteRefused<crate::session::SessionError>> {
         let session = Arc::clone(&self.session);
         let core = Arc::clone(&self.core);
         let agent = Arc::clone(&self.agent);
-        let written = tokio::task::spawn_blocking(move || {
-            let written = write_session(&session, &core.gap, |session| {
-                write(session).map_err(|error| error.to_string())
-            });
-            // The run stops here, as soon as the write has failed and the
-            // session lock is released, so a turn between steps takes no
-            // further step while this change's task waits for a worker.
-            if written.is_err() {
-                core.abort_requested.store(true, Ordering::SeqCst);
-                agent.abort();
-            }
-            written
-        })
-        .await
-        .map_err(|error| format!("Session I/O task failed: {error}"))?;
+        let written = self
+            .permit
+            .spawn_blocking(move || {
+                let written = write_session(&session, &core.gap, write);
+                // The run stops here, as soon as the write has failed and the
+                // session lock is released, so a turn between steps takes no
+                // further step while this change's task waits for a worker.
+                if written.is_err() {
+                    core.abort_requested.store(true, Ordering::SeqCst);
+                    agent.abort();
+                }
+                written
+            })
+            // An admitted change's blocking work is never refused for a
+            // closing gate; only a missing runtime refuses it, reported as
+            // a write that never started.
+            .map_err(|refused| {
+                WriteRefused::AfterGap(format!("Session I/O task failed: {refused}"))
+            })?
+            .await
+            // A task that did not finish reports only its reason, as a write
+            // refused before it started does.
+            .map_err(|error| WriteRefused::AfterGap(format!("Session I/O task failed: {error}")))?;
         // Off the async workers, with the hooks' lock released, so a test
         // that holds the change here never holds up the run it watches.
         #[cfg(test)]
@@ -1084,9 +1221,7 @@ impl Control {
                     .expect("the test hook");
             }
         }
-        written.map_err(|refused| match refused {
-            WriteRefused::AfterGap(error) | WriteRefused::Failed(error) => error,
-        })
+        written
     }
 
     /// A change's session write failed: the file now lacks an entry, so the
@@ -1133,11 +1268,11 @@ impl Control {
         let Some(store) = self.settings_store.clone() else {
             return DefaultSave::Failed("no settings file to save to".to_owned());
         };
-        match tokio::task::spawn_blocking(move || save(&store)).await {
+        match self.blocking(move || save(&store), "Settings").await {
             Ok(Ok(_)) => DefaultSave::Saved,
             Ok(Err(error)) if error.is_committed() => DefaultSave::Unsynced(error.to_string()),
             Ok(Err(error)) => DefaultSave::Failed(error.to_string()),
-            Err(error) => DefaultSave::Failed(format!("Settings task failed: {error}")),
+            Err(error) => DefaultSave::Failed(error),
         }
     }
 }
@@ -1145,8 +1280,8 @@ impl Control {
 impl AgentSession {
     /// Pi's `createAgentSession`: selects the model and thinking level,
     /// restores the transcript, records a new session's initial model and
-    /// thinking level, and creates the agent. Must run inside a Tokio
-    /// runtime.
+    /// thinking level as one group ([`SessionManager::append_group`]), and
+    /// creates the agent. Must run inside a Tokio runtime.
     pub async fn create(options: AgentSessionOptions) -> Result<Self, String> {
         let AgentSessionOptions {
             session,
@@ -1162,7 +1297,10 @@ impl AgentSession {
             tool_prompts,
             mut system_prompt,
             docs_command,
+            plugins,
+            work,
         } = options;
+        let plugins = VetoDispatcher::new(plugins).map(Arc::new);
         system_prompt.docs_command = docs_command.clone();
         let tools: Vec<Arc<AgentTool>> = tools.into_iter().map(run_in_order).collect();
         // Pi's `_toolPromptGuidelines`.
@@ -1177,8 +1315,11 @@ impl AgentSession {
                     .push((prompt.name.clone(), guidelines));
             }
         }
+        let runtime = tokio::runtime::Handle::try_current()
+            .map_err(|_| "An agent session must be created inside a Tokio runtime.".to_owned())?;
         let session: SharedSession = Arc::new(Mutex::new(session));
-        let (context, has_thinking_entry) = with_session(&session, |session| {
+        let work = work.unwrap_or_default();
+        let (context, has_thinking_entry) = with_session(&work, &session, |session| {
             let context = session.build_session_context();
             let has_thinking_entry = session
                 .branch_entries(None)
@@ -1211,7 +1352,6 @@ impl AgentSession {
             .collect();
         let block = settings.block_images;
         let session_id = lock(&session).session_id().to_owned();
-        let work = WorkGate::default();
         let stream_fn = with_tool_argument_whitespace(
             registry.stream_fn_owned(Arc::clone(&apis), Some(work.clone())),
             settings.max_tool_argument_whitespace,
@@ -1244,6 +1384,10 @@ impl AgentSession {
             session_io: tokio::sync::watch::Sender::new(0),
         });
         let after_tool_core = Arc::clone(&core);
+        let persist_error = Arc::new(Mutex::new(None));
+        let before_tool_call = plugins.map(|plugins| {
+            plugin_veto::plugin_veto_hook(Arc::clone(&core), Arc::clone(&persist_error), plugins)
+        });
         let agent = Agent::new(AgentOptions {
             initial_state: AgentInitialState {
                 system_prompt: None,
@@ -1270,6 +1414,7 @@ impl AgentSession {
                         ImageResizeOptions::from_input_limits(model.input_limits.as_ref())
                     })
                     .unwrap_or_default();
+                let work = after_tool_core.work.clone();
                 Box::pin(async move {
                     if !content
                         .iter()
@@ -1277,18 +1422,21 @@ impl AgentSession {
                     {
                         return Ok(None);
                     }
-                    let normalized = tokio::task::spawn_blocking(move || {
+                    // Owned by the gate, so a cancelled run's resize is
+                    // still awaited by shutdown.
+                    let Ok(normalizing) = work.spawn_blocking(move || {
                         normalize_tool_result_images(&content, auto_resize_images, resize_options)
-                    })
-                    .await
-                    .ok()
-                    .flatten();
+                    }) else {
+                        return Ok(None);
+                    };
+                    let normalized = normalizing.await.ok().flatten();
                     Ok(normalized.map(|content| AfterToolCallResult {
                         content: Some(content),
                         ..AfterToolCallResult::default()
                     }))
                 })
             })),
+            before_tool_call,
             stream_fn: Some(stream_fn),
             prepare_next_turn_with_context: Some(next_turn_hook(
                 Arc::clone(&core),
@@ -1305,16 +1453,21 @@ impl AgentSession {
 
         let model = selection.model.clone();
         let thinking = selection.thinking_level;
-        with_session(&session, move |session| {
+        with_session(&work, &session, move |session| {
             if has_existing_session {
                 if !has_thinking_entry {
                     session.append_thinking_level_change(thinking.as_str())?;
                 }
             } else {
+                // One group. A new session writes nothing until its first
+                // message, which creates the file with both entries; a
+                // written file without a conversation gets them in order.
+                let mut group = Vec::with_capacity(2);
                 if let Some(model) = &model {
-                    session.append_model_change(&model.provider, &model.id)?;
+                    group.push(GroupEntry::model_change(&model.provider, &model.id));
                 }
-                session.append_thinking_level_change(thinking.as_str())?;
+                group.push(GroupEntry::thinking_level_change(thinking.as_str()));
+                session.append_group(group)?;
             }
             Ok::<(), crate::session::SessionError>(())
         })
@@ -1325,7 +1478,6 @@ impl AgentSession {
             .into_iter()
             .filter(|name| tools.iter().any(|tool| &tool.name == name))
             .collect();
-        let persist_error = Arc::new(Mutex::new(None));
         let gap = Arc::clone(&core.gap);
         let created = Self {
             apis,
@@ -1345,10 +1497,13 @@ impl AgentSession {
             docs_command,
             listeners,
             persist_error,
-            subscription: Mutex::new(None),
+            subscription: Arc::default(),
+            shutdown: OnceLock::new(),
+            runtime,
             model_fallback_message: selection.fallback_message,
             queue: Arc::default(),
             write_failure: gap,
+            mcp: OnceLock::new(),
         };
         created.connect();
         Ok(created)
@@ -1511,9 +1666,9 @@ impl AgentSession {
                 return Err(control.stop_after_failed_write(&error, "The session name"));
             }
             let session = Arc::clone(&control.session);
-            let name = tokio::task::spawn_blocking(move || lock(&session).session_name())
-                .await
-                .map_err(|error| format!("Session I/O task failed: {error}"))?;
+            let name = control
+                .blocking(move || lock(&session).session_name(), "Session I/O")
+                .await?;
             control
                 .listeners
                 .emit(&SessionEvent::SessionInfoChanged(name.clone()));
@@ -1666,6 +1821,7 @@ impl AgentSession {
         let turn = Arc::clone(&self.control).lock_owned().await;
         let permit = self.change_permit()?;
         let work = change(Control {
+            permit: permit.share(),
             agent: Arc::clone(&self.agent),
             core: Arc::clone(&self.core),
             session: Arc::clone(&self.session),
@@ -1676,13 +1832,16 @@ impl AgentSession {
             listeners: Arc::clone(&self.listeners),
             persist_error: Arc::clone(&self.persist_error),
         });
-        tokio::spawn(async move {
-            let _turn = turn;
-            let _permit = permit;
-            work.await
-        })
-        .await
-        .map_err(|error| format!("The change failed: {error}"))?
+        // A change ignores its task's cancellation: it is short, and a
+        // half-applied change would leave the file and memory apart.
+        permit
+            .spawn(move |_scope| async move {
+                let _turn = turn;
+                work.await
+            })
+            .map_err(refused_message)?
+            .await
+            .map_err(|error| format!("The change failed: {error}"))?
     }
 
     /// Pi's `setThinkingLevel`: clamps to the model, records a change in the
@@ -1742,10 +1901,16 @@ impl AgentSession {
     /// else the default level, else the current one), applies both
     /// together, and saves the model as the default when `persist` is set.
     /// Serialized, owned, refused after shutdown, and effective from the
-    /// next model request, as [`Self::set_thinking_level`] is. When the
-    /// model entry is written but the thinking-level entry is not, the
-    /// session applies what its file holds, the new model with the previous
-    /// level clamped to it, then stops as for any failed write.
+    /// next model request, as [`Self::set_thinking_level`] is. The model
+    /// and thinking-level entries are one group
+    /// ([`SessionManager::append_group`]), written in order with no entry
+    /// between them, and the change is applied only once both are written.
+    /// When the group's write fails, the session applies the entries known
+    /// to be synced, then stops as for any failed write: nothing when the
+    /// model entry is not known to be synced, else the new model with the
+    /// previous level clamped to it. A line written without a sync may
+    /// still be read by a later open of the file, so that open can differ
+    /// ([`crate::session::GroupWriteError`]).
     pub async fn set_model(&self, model: Model, persist: bool) -> Result<DefaultSave, String> {
         self.run_change(move |control| async move {
             if control
@@ -1766,46 +1931,48 @@ impl AgentSession {
             };
             let effective = bake_ai::models::clamp_thinking_level(&model, level);
             let changes_level = effective != previous;
-            let (provider, id) = (model.provider.clone(), model.id.clone());
+            // One group, written under one hold of the session: no message
+            // lands between the model and its level.
+            let mut group = vec![GroupEntry::model_change(&model.provider, &model.id)];
+            if changes_level {
+                group.push(GroupEntry::thinking_level_change(effective.as_str()));
+            }
             #[cfg(test)]
             let injected = control.core.hooks().fail_model_entry.take();
             #[cfg(test)]
             let core = Arc::clone(&control.core);
-            let model_written = control
-                .append(move |session| {
+            let written = control
+                .write(move |session| {
                     #[cfg(test)]
                     if let Some(hook) = injected {
                         core.hooks().before_continuing = Some(hook());
                         return Err(injected_failure());
                     }
-                    session.append_model_change(&provider, &id).map(|_| ())
+                    session.append_group(group).map(|_| ())
                 })
                 .await;
-            if let Err(error) = model_written {
-                return Err(control.stop_after_failed_write(&error, "The model change"));
-            }
-            if changes_level {
-                #[cfg(test)]
-                let injected = std::mem::take(&mut control.core.hooks().fail_level_entry);
-                let level_written = control
-                    .append(move |session| {
-                        #[cfg(test)]
-                        if injected {
-                            return Err(injected_failure());
-                        }
-                        session
-                            .append_thinking_level_change(effective.as_str())
-                            .map(|_| ())
-                    })
-                    .await;
-                if let Err(error) = level_written {
-                    // The file holds the model change alone.
+            match written {
+                Ok(()) => {}
+                // The model change is synced and its thinking level is not
+                // known to be: the session applies the known synced prefix,
+                // the new model with the previous level clamped to it, and
+                // halts. A reopen projects the same only when the level's
+                // line is not readable; an unsynced line, or a torn one
+                // whose whole JSON was written, reads as the new level.
+                Err(WriteRefused::Failed(SessionError::GroupWrite(failure)))
+                    if !failure.written.is_empty() =>
+                {
                     let kept = bake_ai::models::clamp_thinking_level(&model, previous);
                     control.apply(Some(model.clone()), kept);
                     return Err(control.stop_after_failed_write(
-                        &error,
+                        &failure.to_string(),
                         "The model change was recorded, but its thinking level",
                     ));
+                }
+                Err(refused) => {
+                    return Err(
+                        control.stop_after_failed_write(&refused.message(), "The model change")
+                    );
                 }
             }
             control.apply(Some(model.clone()), effective);
@@ -1886,12 +2053,17 @@ impl AgentSession {
     /// The system message patching the sections the transcript replays,
     /// Pi's `_preparePromptAndToolLoadout`; it also activates the tools.
     fn prepare_prompt_and_tools(&self) -> Result<Option<SystemMessage>, String> {
-        let active: Vec<Arc<AgentTool>> = self
+        let mut active: Vec<Arc<AgentTool>> = self
             .active_tool_names
             .iter()
             .filter_map(|name| self.tools.iter().find(|tool| &tool.name == name))
             .cloned()
             .collect();
+        // The MCP tools published now, one generation per server; the run
+        // keeps these for its whole length.
+        if let Some(mcp) = self.mcp.get() {
+            active.extend(mcp.tools());
+        }
         self.agent.set_tools(active);
         let mut options = self.prompt_options.clone();
         options.selected_tools = self.active_tool_names.clone();
@@ -1983,6 +2155,16 @@ impl AgentSession {
         // Preparation may outlast a shutdown or a failed write.
         if let Some(reason) = self.closed_reason() {
             return Err(reason);
+        }
+        // The first prompt waits for MCP servers still connecting, so their
+        // tools are declared in its first request, as Pi's
+        // `waitForDirectServers` does.
+        if let Some(mcp) = self.mcp.get() {
+            mcp.wait_for_startup(|| self.core.aborted() || self.closed_reason().is_some())
+                .await;
+            if let Some(reason) = self.closed_reason() {
+                return Err(reason);
+            }
         }
         let mut content = vec![UserContentBlock::Text(TextContent::new(text))];
         content.extend(images.into_iter().map(UserContentBlock::Image));
@@ -2154,7 +2336,7 @@ impl AgentSession {
     /// to its file failed, so the file would miss a message.
     fn closed_reason(&self) -> Option<String> {
         // Listeners close first thing in shutdown, before the work gate.
-        if self.listeners.closed.load(Ordering::SeqCst) || self.work.is_closed() {
+        if self.listeners.closed.load(Ordering::SeqCst) || self.work.is_closing() {
             return Some("The session is shut down.".into());
         }
         self.write_failure
@@ -2225,15 +2407,13 @@ impl AgentSession {
         let mut text = if text.starts_with("/skill:") {
             let skills = self.prompt_options.skills.clone();
             let command = text.to_owned();
-            // The permit moves into the blocking work, so shutdown waits for
-            // it even when this future is dropped.
-            let permit = self.work.enter().ok_or_else(shut_down)?;
-            tokio::task::spawn_blocking(move || {
-                let _permit = permit;
-                expand_skill_command(&command, &skills)
-            })
-            .await
-            .unwrap_or_else(|_| text.to_owned())
+            // The gate owns the work, so shutdown waits for it even when
+            // this future is dropped.
+            self.work
+                .spawn_blocking(move || expand_skill_command(&command, &skills))
+                .map_err(|_| shut_down())?
+                .await
+                .unwrap_or_else(|_| text.to_owned())
         } else {
             text.to_owned()
         };
@@ -2245,13 +2425,12 @@ impl AgentSession {
         let resize_options = model
             .and_then(|model| ImageResizeOptions::from_input_limits(model.input_limits.as_ref()))
             .unwrap_or_default();
-        let permit = self.work.enter().ok_or_else(shut_down)?;
-        let (normalized, hints) = tokio::task::spawn_blocking(move || {
-            let _permit = permit;
-            normalize_prompt_images(&images, auto_resize, resize_options)
-        })
-        .await
-        .map_err(|error| format!("Image processing task failed: {error}"))?;
+        let (normalized, hints) = self
+            .work
+            .spawn_blocking(move || normalize_prompt_images(&images, auto_resize, resize_options))
+            .map_err(|_| shut_down())?
+            .await
+            .map_err(|error| format!("Image processing task failed: {error}"))?;
         if !hints.is_empty() {
             text = format!("{text}\n\n{}", hints.join("\n"));
         }
@@ -2332,17 +2511,21 @@ impl AgentSession {
         let agent = Arc::clone(&self.agent);
         let instructions = custom_instructions.map(str::to_owned);
         let no_model = format_no_model_selected_message(&self.docs_command);
-        tokio::spawn(async move {
-            let _permit = permit;
-            if signal.aborted() {
-                return Err(COMPACTION_CANCELLED.to_owned());
-            }
-            let busy = core.claim_manual_compaction(agent.is_streaming())?;
-            core.manual_compaction(instructions.as_deref(), no_model, Some(signal), busy)
-                .await
-        })
-        .await
-        .map_err(|error| format!("The compaction task failed: {error}"))?
+        // Shutdown cancels it through the compaction's abort controller
+        // (`abort_retry_and_compaction`), as `abort` does, before it closes
+        // the gate.
+        permit
+            .spawn(move |_scope| async move {
+                if signal.aborted() {
+                    return Err(COMPACTION_CANCELLED.to_owned());
+                }
+                let busy = core.claim_manual_compaction(agent.is_streaming())?;
+                core.manual_compaction(instructions.as_deref(), no_model, Some(signal), busy)
+                    .await
+            })
+            .map_err(refused_message)?
+            .await
+            .map_err(|error| format!("The compaction task failed: {error}"))?
     }
 
     /// Pi's `abortCompaction`: cancels a running compaction.
@@ -2401,18 +2584,116 @@ impl AgentSession {
             self.core.abort_requested.store(true, Ordering::SeqCst);
         }
         self.core.abort_retry_and_compaction();
+        if let Some(mcp) = self.mcp.get() {
+            mcp.interrupt_startup_wait();
+        }
         self.agent.abort();
         self.agent.wait_for_idle().await;
         self.core.wait_for_idle().await;
     }
 
-    /// Pi's `dispose`, awaited: aborts and cancels the run, a retry wait,
-    /// and a compaction, removes every listener so the cancelled work
-    /// reports nothing, waits for the run's task, its session writes, and
-    /// its model requests, disconnects from the agent, and closes the session
-    /// file for writing, releasing its lock. Later prompts fail and emit no
-    /// events, and a later model or thinking-level change is not written.
+    /// Starts the MCP servers of `options` ([`crate::mcp`]), each as a task
+    /// the session's gate owns, admitted under the session's sandbox mode
+    /// before it is spawned. Returns at once; the first prompt waits up to
+    /// [`crate::mcp::McpTimings::startup_wait`] for servers still
+    /// connecting, and each prompt declares the tools published when it
+    /// starts. [`Self::shutdown`] stops every server and returns only once
+    /// each server's process and tree are gone.
+    ///
+    /// Refused once shutdown has started, when called a second time, or,
+    /// before anything starts, when a wait in `options` gives a deadline
+    /// the clock cannot represent ([`crate::mcp`]'s checks).
+    pub fn start_mcp(&self, options: McpOptions) -> Result<McpServers, String> {
+        if self.work.is_closing() {
+            return Err(refused_message(Refused::Closed));
+        }
+        // Before anything is stored or started, so the session may start
+        // corrected options later.
+        crate::mcp::validate(&options)?;
+        let reserved: Vec<String> = self.tools.iter().map(|tool| tool.name.clone()).collect();
+        let cwd = PathBuf::from(self.cwd());
+        let mut started = None;
+        let servers = self.mcp.get_or_init(|| {
+            let (servers, refused) = crate::mcp::start(options, cwd, reserved, &self.work);
+            started = Some(refused);
+            servers
+        });
+        match started {
+            None => Err("MCP servers were already started for this session.".to_owned()),
+            Some(Some(refused)) => Err(format!(
+                "The session could not start its MCP servers: {refused}."
+            )),
+            Some(None) => Ok(servers.clone()),
+        }
+    }
+
+    /// The MCP servers [`Self::start_mcp`] started, if it has.
+    pub fn mcp_servers(&self) -> Option<&McpServers> {
+        self.mcp.get()
+    }
+
+    /// Starts work the session owns in the background, beside its turns:
+    /// [`Self::abort`] and the end of a turn leave it running; only
+    /// [`OwnedTask::cancel`] and [`Self::shutdown`] abort its
+    /// [`TaskScope::signal`], and shutdown returns only after it, and every
+    /// task it spawned from its scope, has ended. Work that ignores the
+    /// signal holds shutdown until it ends.
+    ///
+    /// `work` is called at once, before this returns, with the task's
+    /// scope; its future runs on a Tokio task. Dropping the returned task
+    /// gives up its output only. Refused with `The session is shut down.`
+    /// once shutdown has started.
+    pub fn spawn_background<T, F, Fut>(&self, work: F) -> Result<OwnedTask<T>, String>
+    where
+        T: Send + 'static,
+        F: FnOnce(TaskScope) -> Fut,
+        Fut: std::future::Future<Output = T> + Send + 'static,
+    {
+        self.work.spawn(work).map_err(refused_message)
+    }
+
+    /// Pi's `dispose`, awaited. At the first call's first poll, before it
+    /// waits for anything, it removes every listener, refuses new prompts,
+    /// changes, and owned work, and aborts the run, a retry wait, a compaction, and
+    /// every background task ([`Self::spawn_background`]). The rest runs on
+    /// a task of its own: it waits for the run's task, the session's
+    /// writes, model requests, changes, and background tasks, and for any
+    /// listener call already running, then disconnects from the agent and
+    /// closes the session file for writing, releasing its lock.
+    ///
+    /// The teardown runs on the runtime the session was created on, so
+    /// `shutdown` may be called and awaited from any thread or executor.
+    /// Every call, concurrent or later, returns once that teardown has
+    /// finished, and then no listener, hook, or owned work runs or starts.
+    /// Dropping a call's future stops neither the teardown nor the refusal:
+    /// the session never reopens. Later prompts fail and emit no events,
+    /// and a later model or thinking-level change is not written. If the
+    /// session's runtime has shut down, or the teardown panics, no teardown
+    /// can finish: calls then return without it, having done only the
+    /// first poll's part, and the session file is released when the
+    /// session is dropped.
+    ///
+    /// The drain also covers the processes of tools given this session's
+    /// gate ([`AgentSessionOptions::work`]): each holds a permit from its
+    /// spawn until its tree is settled, and the run's task, stopped first,
+    /// drops a running call, which kills the call's tree and moves the
+    /// process to a task that settles it under the same permit. Shutdown
+    /// therefore returns only once every such tree is gone, with no time
+    /// limit; a process that cannot die (uninterruptible sleep) holds it.
+    /// Processes of other sessions, or of tools given no owner, are not
+    /// waited for, and a descendant that left its tree is not owned
+    /// ([`bake_process`]). A model request's task awaits the
+    /// provider task behind its stream, so draining the gate awaits both.
     pub async fn shutdown(&self) {
+        let mut done = self.shutdown.get_or_init(|| self.begin_shutdown()).clone();
+        // An error means the teardown task ended without finishing: it
+        // panicked, or the session's runtime shut down and dropped it.
+        let _ = done.wait_for(|done| *done).await;
+    }
+
+    /// The synchronous half of [`Self::shutdown`], run once; spawns the
+    /// awaited half on the session's runtime and returns its completion.
+    fn begin_shutdown(&self) -> tokio::sync::watch::Receiver<bool> {
         // Closed before anything is cancelled: a cancelled retry wait or
         // compaction resumes on another worker at once, and Pi's
         // synchronous `dispose` clears its listeners before any of that
@@ -2420,19 +2701,41 @@ impl AgentSession {
         self.listeners.close();
         self.core.abort_requested.store(true, Ordering::SeqCst);
         self.core.abort_retry_and_compaction();
-        self.agent.shutdown().await;
-        self.work.close().await;
-        if let Some(subscription) = self
-            .subscription
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take()
-        {
-            subscription.unsubscribe();
+        if let Some(mcp) = self.mcp.get() {
+            mcp.interrupt_startup_wait();
         }
-        // Nothing writes the session any more: another writer may take
-        // its file over, and a late change stays in memory.
-        lock(&self.session).close_writer();
+        // Also cancels every MCP server's task, which stops its server
+        // before its permit is released.
+        let drained = self.work.close();
+        let agent = Arc::clone(&self.agent);
+        let listeners = Arc::clone(&self.listeners);
+        let subscription = Arc::clone(&self.subscription);
+        let session = Arc::clone(&self.session);
+        let (finished, done) = tokio::sync::watch::channel(false);
+        let teardown = async move {
+            agent.shutdown().await;
+            // The run's task is gone, so a tool call it was running has
+            // dropped its process, whose settling task holds a permit of
+            // this gate: the drain waits for it.
+            drained.await;
+            listeners.quiesce().await;
+            if let Some(subscription) = subscription
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .take()
+            {
+                subscription.unsubscribe();
+            }
+            // Nothing writes the session any more: another writer may take
+            // its file over, and a late change stays in memory.
+            lock(&session).close_writer();
+            finished.send_replace(true);
+        };
+        // Not owned by the gate, which it closes: every caller of
+        // `shutdown` waits for it, and it runs whether or not one does, on
+        // the session's runtime whatever thread or executor called.
+        drop(self.runtime.spawn(teardown));
+        done
     }
 }
 
@@ -2451,7 +2754,11 @@ mod control_tests;
 #[cfg(test)]
 mod navigation_tests;
 #[cfg(test)]
+mod plugin_tests;
+#[cfg(test)]
 mod recovery_tests;
+#[cfg(test)]
+mod service_tests;
 #[cfg(test)]
 mod tests;
 

@@ -206,7 +206,9 @@ fn a_held_lock_times_out_without_writing() {
     assert!(error.to_string().starts_with("Timed out after "));
     assert_eq!(fs::read_to_string(&path).expect("read"), "{}");
     drop(held);
-    set_a(&waiting).expect("released");
+    // The short timeout checks the held-lock refusal. The positive control
+    // uses the ordinary acquisition deadline; a leaked lock still fails.
+    set_a(&store).expect("released");
 }
 
 #[cfg(unix)]

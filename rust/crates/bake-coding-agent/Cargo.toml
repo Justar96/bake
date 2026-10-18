@@ -5,12 +5,17 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "Pi's coding-agent services for Bake's Rust agent: sessions, the file tools (read, write, edit, ls, find, grep) with their output and file-mutation ordering, the bash tool, models, prompts, skills, print mode, the CLIProxyAPI route, and the D24 permission layer over bake-sandbox"
+description = "Pi's coding-agent services for Bake's Rust agent: sessions, the file tools (read, write, edit, ls, find, grep) with their output and file-mutation ordering, the bash tool, models, prompts, skills, print mode, the CLIProxyAPI route, the D24 permission layer over bake-sandbox, and session-owned MCP stdio servers"
 
 [dependencies]
 bake-agent.workspace = true
 bake-ai.workspace = true
 bake-sandbox.workspace = true
+bake-process.workspace = true
+# MCP servers a session owns: the client and the stdio server owner.
+bake-mcp.workspace = true
+# SHA-256 for MCP tool names (`mcp::names`).
+ring.workspace = true
 tokio = { workspace = true, features = ["rt", "sync", "time", "macros", "process", "io-util"] }
 serde.workspace = true
 serde_json.workspace = true
@@ -28,9 +33,21 @@ ignore.workspace = true
 libc.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
+# `json_store`'s DACL copy.
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "time", "macros", "net", "io-util", "test-util"] }
 loom = { version = "=0.7.2", default-features = false }
 bake-sandbox = { workspace = true, features = ["testing"] }
+
+[target.'cfg(windows)'.dev-dependencies]
+# `tests/process_windows.rs`' process probes.
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading"] }
+
+# MCP servers a real session owns: the test binary re-executes itself as
+# the stdio server, so its standard output must carry only protocol
+# messages, which libtest's harness would break.
+[[test]]
+name = "mcp_session"
+harness = false

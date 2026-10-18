@@ -1,0 +1,33 @@
+[package]
+name = "bake-mcp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "The Model Context Protocol client boundary ported from Pi's `mcp` package: initialization, tool listing and calls, cancellation, and awaited shutdown over an injected, bounded transport, owned stdio server processes, and Streamable HTTP"
+
+[dependencies]
+reqwest.workspace = true
+# `stdio`'s server process and its tree: the owner the coding tools share.
+bake-process.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["rt", "sync", "time", "macros", "io-util"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "time", "macros", "io-util", "net", "test-util"] }
+
+[target.'cfg(unix)'.dev-dependencies]
+# The stdio fixture's signal handling and the tests' process probes.
+libc.workspace = true
+
+[target.'cfg(windows)'.dev-dependencies]
+# The tests' process probes.
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Threading"] }
+
+# Real stdio servers: the test binary re-executes itself as the fixture
+# server, so its standard output must carry nothing but protocol messages,
+# which libtest's harness would break.
+[[test]]
+name = "stdio"
+harness = false

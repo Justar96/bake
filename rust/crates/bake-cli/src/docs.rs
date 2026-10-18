@@ -57,6 +57,11 @@ pub const TOPICS: &[Topic] = &[
         summary: "Agent Skills, where they are found, and /skill:<name>",
         text: include_str!("../docs/skills.md"),
     },
+    Topic {
+        name: "mcp",
+        summary: "MCP servers from mcp.json, their tools, and --no-mcp",
+        text: include_str!("../docs/mcp.md"),
+    },
 ];
 
 /// The topic named `name`.

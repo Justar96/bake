@@ -7,14 +7,16 @@
 use std::ffi::{OsStr, OsString, c_void};
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::fs::OpenOptionsExt;
-use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+use std::os::windows::io::{AsHandle, AsRawHandle, FromRawHandle, OwnedHandle};
 use std::path::{Path, PathBuf};
 use std::ptr::{null, null_mut};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use bake_process::windows_job::Job;
 
 use windows_sys::Win32::Foundation::{
-    ERROR_MORE_DATA, ERROR_SUCCESS, GetLastError, HANDLE, HANDLE_FLAG_INHERIT,
-    INVALID_HANDLE_VALUE, LocalFree, SetHandleInformation, WAIT_FAILED,
+    ERROR_SUCCESS, HANDLE, HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE, LocalFree,
+    SetHandleInformation,
 };
 use windows_sys::Win32::Security::Authorization::{
     ConvertStringSidToSidW, EXPLICIT_ACCESS_W, GRANT_ACCESS, GetNamedSecurityInfoW,
@@ -32,21 +34,13 @@ use windows_sys::Win32::Security::{
 use windows_sys::Win32::System::Console::{
     GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, SetConsoleCtrlHandler,
 };
-use windows_sys::Win32::System::JobObjects::{
-    CreateJobObjectW, IsProcessInJob, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-    JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JOBOBJECT_BASIC_PROCESS_ID_LIST,
-    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectBasicAccountingInformation,
-    JobObjectBasicProcessIdList, JobObjectExtendedLimitInformation, QueryInformationJobObject,
-    SetInformationJobObject, TerminateJobObject,
-};
 use windows_sys::Win32::System::Threading::{
     CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessAsUserW,
     DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT, GetCurrentProcess,
-    GetExitCodeProcess, INFINITE, InitializeProcThreadAttributeList, OpenProcess, OpenProcessToken,
+    GetExitCodeProcess, InitializeProcThreadAttributeList, OpenProcessToken,
     PROC_THREAD_ATTRIBUTE_HANDLE_LIST, PROC_THREAD_ATTRIBUTE_JOB_LIST, PROCESS_INFORMATION,
-    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, ResumeThread, STARTF_USESHOWWINDOW,
-    STARTF_USESTDHANDLES, STARTUPINFOEXW, TerminateProcess, UpdateProcThreadAttribute,
-    WaitForSingleObject,
+    ResumeThread, STARTF_USESHOWWINDOW, STARTF_USESTDHANDLES, STARTUPINFOEXW, TerminateProcess,
+    UpdateProcThreadAttribute,
 };
 
 use super::{
@@ -54,8 +48,8 @@ use super::{
     build_command_line, temp_write_sid, workspace_write_sid,
 };
 
-/// How long the runner waits for its terminated Job to empty before it
-/// reports a cleanup failure.
+/// How long the runner waits for its terminated Job's account to settle
+/// before it reports a cleanup failure.
 const DRAIN_BUDGET: Duration = Duration::from_secs(30);
 
 const SW_HIDE: u16 = 0;
@@ -538,155 +532,22 @@ fn restricted_token(
 }
 
 // ---------------------------------------------------------------------------
-// The Job.
+// The Job: `bake_process::windows_job::Job`, kill-on-close with its
+// completion port associated before any process exists, and settled only on
+// its account, never on the active count alone.
 
-/// A kill-on-close Job holding the confined tree. Its handle is never
-/// inheritable. Closing it starts the termination of every member but does
-/// not wait: only [`Job::terminate_and_drain`] proves the tree has exited.
-struct Job {
-    handle: OwnedHandle,
-}
-
-impl Job {
-    fn new() -> Result<Self> {
-        // SAFETY: null attributes (not inheritable) and no name.
-        let raw = unsafe { CreateJobObjectW(null(), null()) };
-        if raw.is_null() {
-            return Err(last_error("CreateJobObjectW", "kill-on-close Job"));
-        }
-        let handle = owned_handle(raw);
-        // SAFETY: a zeroed struct is a valid starting value.
-        let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
-        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-        // SAFETY: `limits` has the size passed.
-        if unsafe {
-            SetInformationJobObject(
-                handle.as_raw_handle(),
-                JobObjectExtendedLimitInformation,
-                std::ptr::addr_of!(limits).cast(),
-                size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-            )
-        } == 0
-        {
-            return Err(last_error("SetInformationJobObject", "kill on close"));
-        }
-        Ok(Self { handle })
-    }
-
-    fn active_processes(&self) -> Result<u32> {
-        // SAFETY: a zeroed struct is valid output space.
-        let mut info: JOBOBJECT_BASIC_ACCOUNTING_INFORMATION = unsafe { std::mem::zeroed() };
-        // SAFETY: `info` has the size passed.
-        if unsafe {
-            QueryInformationJobObject(
-                self.handle.as_raw_handle(),
-                JobObjectBasicAccountingInformation,
-                std::ptr::addr_of_mut!(info).cast(),
-                size_of::<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>() as u32,
-                null_mut(),
-            )
-        } == 0
-        {
-            return Err(last_error("QueryInformationJobObject", "active processes"));
-        }
-        Ok(info.ActiveProcesses)
-    }
-
-    fn member_pids(&self) -> Result<Vec<u32>> {
-        const CAPACITY: usize = 1024;
-        let header = std::mem::offset_of!(JOBOBJECT_BASIC_PROCESS_ID_LIST, ProcessIdList);
-        let mut buffer = vec![0usize; header / size_of::<usize>() + CAPACITY];
-        let length = (buffer.len() * size_of::<usize>()) as u32;
-        // SAFETY: `buffer` holds `length` bytes, aligned for the struct.
-        let ok = unsafe {
-            QueryInformationJobObject(
-                self.handle.as_raw_handle(),
-                JobObjectBasicProcessIdList,
-                buffer.as_mut_ptr().cast(),
-                length,
-                null_mut(),
-            )
-        };
-        // SAFETY: the reading of a GetLastError value has no preconditions.
-        if ok == 0 && unsafe { GetLastError() } != ERROR_MORE_DATA {
-            return Err(last_error("QueryInformationJobObject", "process ids"));
-        }
-        // SAFETY: the header was written.
-        let listed = unsafe {
-            (*buffer.as_ptr().cast::<JOBOBJECT_BASIC_PROCESS_ID_LIST>()).NumberOfProcessIdsInList
-        };
-        let listed = (listed as usize).min(CAPACITY);
-        let ids = &buffer[header / size_of::<usize>()..][..listed];
-        Ok(ids.iter().map(|&id| id as u32).collect())
-    }
-
-    /// Terminates every member and waits until the Job reports none active:
-    /// the proof that no confined process is left before cleanup. An error
-    /// means that proof is missing, not that a process survives.
-    fn terminate_and_drain(&self) -> Result<()> {
-        // SAFETY: the handle is a live Job.
-        if unsafe { TerminateJobObject(self.handle.as_raw_handle(), 1) } == 0 {
-            return Err(last_error("TerminateJobObject", "confined tree"));
-        }
-        let deadline = Instant::now() + DRAIN_BUDGET;
-        loop {
-            if self.active_processes()? == 0 {
-                return Ok(());
-            }
-            let now = Instant::now();
-            if now >= deadline {
-                return Err(format!(
-                    "the confined tree did not exit within {} s of termination",
-                    DRAIN_BUDGET.as_secs()
-                ));
-            }
-            let mut waited = false;
-            for pid in self.member_pids()? {
-                // SAFETY: plain call; a null result means the process is gone.
-                let raw = unsafe {
-                    OpenProcess(
-                        PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
-                        0,
-                        pid,
-                    )
-                };
-                if raw.is_null() {
-                    continue;
-                }
-                let process = owned_handle(raw);
-                let mut member = 0;
-                // SAFETY: both handles are live. A reused pid that is not in
-                // this Job is not waited for.
-                if unsafe {
-                    IsProcessInJob(
-                        process.as_raw_handle(),
-                        self.handle.as_raw_handle(),
-                        &mut member,
-                    )
-                } == 0
-                    || member == 0
-                {
-                    continue;
-                }
-                let remaining = deadline.saturating_duration_since(Instant::now());
-                let millis = u32::try_from(remaining.as_millis()).unwrap_or(u32::MAX);
-                // SAFETY: a live process handle opened with SYNCHRONIZE. A
-                // timeout is caught by the deadline check above.
-                if unsafe { WaitForSingleObject(process.as_raw_handle(), millis) } == WAIT_FAILED {
-                    return Err(last_error(
-                        "WaitForSingleObject",
-                        format_args!("Job member {pid}"),
-                    ));
-                }
-                waited = true;
-            }
-            if !waited {
-                // Members are still counted but none could be opened (they
-                // are being torn down); yield before asking again.
-                std::thread::sleep(Duration::from_millis(1));
-            }
-        }
-    }
+/// Terminates the confined tree and waits, within [`DRAIN_BUDGET`], until
+/// the Job's account proves every member ended: each process the Job
+/// reported is held by handle until signalled. An error means that proof is
+/// missing, not that a process survives; the caller then keeps the run's
+/// grants and directory.
+fn terminate_and_drain(job: &Job) -> Result<()> {
+    job.terminate_and_settle(DRAIN_BUDGET).map_err(|verdict| {
+        format!(
+            "the confined tree's exit was not confirmed within {} s of termination ({verdict})",
+            DRAIN_BUDGET.as_secs()
+        )
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -826,7 +687,8 @@ fn environment_block(temp: Option<&Path>) -> Result<Vec<u16>> {
 }
 
 /// Starts `argv` with `token`, suspended and born inside `job`, then
-/// resumes it. A failure after creation terminates the suspended child.
+/// resumes it. A failure after creation terminates the suspended child,
+/// which stays a Job member the drain must see end.
 fn spawn(
     token: &OwnedHandle,
     job: &Job,
@@ -852,7 +714,8 @@ fn spawn(
             inherited.push(handle);
         }
     }
-    let job_list: [HANDLE; 1] = [job.handle.as_raw_handle()];
+    // Borrowed for the creation only; the Job keeps its handle.
+    let job_list: [HANDLE; 1] = [job.as_handle().as_raw_handle()];
     let mut attributes = Attributes::new(if inherited.is_empty() { 1 } else { 2 })?;
     attributes.set(
         PROC_THREAD_ATTRIBUTE_JOB_LIST,
@@ -923,11 +786,12 @@ fn spawn(
     Ok(process)
 }
 
-fn wait_for_exit(process: &OwnedHandle) -> Result<u32> {
-    // SAFETY: a live process handle.
-    if unsafe { WaitForSingleObject(process.as_raw_handle(), INFINITE) } == WAIT_FAILED {
-        return Err(last_error("WaitForSingleObject", "command"));
-    }
+/// Waits for the command's exit while the Job's account is pumped, so its
+/// members are opened soon after they start and the port's queue does not
+/// grow with the command's life (`Job::wait_pumping`).
+fn wait_for_exit(job: &Job, process: &OwnedHandle) -> Result<u32> {
+    job.wait_pumping(process.as_handle())
+        .map_err(|error| format!("WaitForSingleObject failed (command): {error}"))?;
     let mut code = 0u32;
     // SAFETY: a live process handle and a valid out pointer.
     if unsafe { GetExitCodeProcess(process.as_raw_handle(), &mut code) } == 0 {
@@ -1046,13 +910,17 @@ fn run_inner(cli: &Cli, temp: &mut Option<PrivateTemp>, settled: &mut bool) -> R
     let default_owner = private.map(|p| &p.sid).unwrap_or(&everyone);
     let token = restricted_token(&capabilities, default_owner, &everyone)?;
     let environment = environment_block(private.map(|p| p.path.as_path()))?;
-    let job = Job::new()?;
-    let outcome =
-        spawn(&token, &job, &cli.command, &environment).and_then(|process| wait_for_exit(&process));
+    // Created, with its port, before the command: a failure here starts
+    // nothing.
+    let job = Job::new().map_err(|error| {
+        format!("cannot create the kill-on-close Job and its completion port: {error}")
+    })?;
+    let outcome = spawn(&token, &job, &cli.command, &environment)
+        .and_then(|process| wait_for_exit(&job, &process));
     // The command's exit (or a failure around it) ends the run: whatever it
-    // left behind is terminated, and the Job must report no process before
-    // cleanup.
-    let drained = job.terminate_and_drain();
+    // left behind is terminated, and the Job's account must prove every
+    // member ended before cleanup.
+    let drained = terminate_and_drain(&job);
     *settled = drained.is_ok();
     match (outcome, drained) {
         (Ok(code), Ok(())) => Ok(code),

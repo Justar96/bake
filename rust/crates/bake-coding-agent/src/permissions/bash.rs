@@ -340,7 +340,8 @@ pub fn create_sandboxed_bash_tool_definition(
                 };
                 let policy = permissions.engine.resolve(&call, signal.as_ref()).await?;
                 let local = create_local_bash_operations(options.shell_path.clone())
-                    .with_bin_dir(options.bin_dir.clone());
+                    .with_bin_dir(options.bin_dir.clone())
+                    .with_owner(options.owner.clone());
                 let hint = permissions.offers_escalation_beyond(policy.mode);
                 let operations = SandboxedBashOperations::new(local, permissions.provider, policy)
                     .with_escalation_hint(hint);

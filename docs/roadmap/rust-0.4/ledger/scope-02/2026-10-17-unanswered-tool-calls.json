@@ -1,0 +1,338 @@
+{
+  "schema": "bake/rust-migration/qualification-attempt",
+  "version": 1,
+  "id": "2026-10-17-unanswered-tool-calls",
+  "scope": "02",
+  "status": "partial",
+  "recordedOn": "2026-10-17",
+  "summary": "Provider-visible unanswered tool-call projection at 32394c11f5. Linux full preflight and Intel macOS native preflight pass, including 188 session tests on each host. Two deliberate rule defects fail and restored tests pass. This does not recover durable path history or establish whether an external tool effect happened; scope 02 remains partial.",
+  "supersedes": [
+    "2026-10-14-pi-session-model"
+  ],
+  "provenance": {
+    "base": "fa471e4700eab59d0e8499286f901d37473af101",
+    "candidate": "32394c11f53b7c2863cec843031a127b7a9578ba",
+    "oracle": {
+      "notApplicable": "Pi v1.3.0 (71023aec1546d6d677a65669c5665c0927ce0dd0), packages/ai/src/api/transform-messages.ts, supplies the orphaned-call rule. Tests use hand-derived cases and agreement with the existing bake-ai port, not a TypeScript runtime arm."
+    }
+  },
+  "support": [
+    {
+      "id": "d32-pi-session-format",
+      "reference": "docs/roadmap/rust-0.4/scope-00/support.md"
+    },
+    {
+      "id": "durable-unfinished-work",
+      "reference": "docs/roadmap/rust-0.4/durable-execution.md"
+    }
+  ],
+  "fixtures": {
+    "files": [
+      {
+        "path": "rust/crates/bake-coding-agent/tests/session/main.rs",
+        "role": "fixture-definition-source",
+        "sha256": "380d685c91f800def6842767bf9350d2671283e29587604515ba5245fdbec161"
+      },
+      {
+        "path": "rust/crates/bake-coding-agent/tests/session/robustness.rs",
+        "role": "fixture-definition-source",
+        "sha256": "d4257d00f8121e11e7cc50515d0a6d6f9215abc7a7e990202ddb6477c176d5cd"
+      },
+      {
+        "path": "rust/crates/bake-coding-agent/tests/session/unanswered.rs",
+        "role": "fixture-definition-source",
+        "sha256": "071bb32ed8c0f7f3a0ee7c01c08c4ff35acb19404f3c34287a5dac61331a4747"
+      }
+    ],
+    "digest": "4397d8b020991126f33cba40fbcacb065c138a11a10d8bbb5827ec57675d5378"
+  },
+  "artifacts": {
+    "notApplicable": "No distribution artifact is qualified by this pure projection change; the preflight gates build the existing binaries."
+  },
+  "commands": [
+    {
+      "id": "linux-preflight",
+      "argv": [
+        "bun",
+        "run",
+        "preflight"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x86_64",
+        "runner": "Local Fedora; Linux 7.2.10-200.fc44.x86_64"
+      },
+      "tools": {
+        "rustc": "1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.2",
+        "node": "v26.10.0",
+        "git": "2.56.0"
+      },
+      "testedCommit": "32394c11f53b7c2863cec843031a127b7a9578ba",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 32,
+        "failed": 0,
+        "skipped": 2,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/foundation-preflight.log",
+        "sha256": "0bbc2f5cfde2a47d1dabc159a2144d68ac244d36a53f26b42cb40fb2454a42a4"
+      }
+    },
+    {
+      "id": "mac-native",
+      "argv": [
+        "env",
+        "BAKE_MAC_DIR=bake-rust-foundation-ci",
+        "bun",
+        "run",
+        "preflight:mac"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "darwin",
+        "arch": "x86_64",
+        "runner": "Intel Mac over macpro SSH; Darwin 25.6.0; isolated bake-rust-foundation-ci checkout"
+      },
+      "tools": {
+        "rustc": "1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.2",
+        "node": "v26.9.0",
+        "git": "2.55.0"
+      },
+      "testedCommit": "f35159b75b86c5960e5349654f5e02fc1973e526",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/foundation-mac-preflight.log",
+        "sha256": "493e643c927bb2979344c207938f6174e9abf5f468d3f9818f2553cf647b6fc2"
+      }
+    },
+    {
+      "id": "control-aborted-rule",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "bake-coding-agent",
+        "--test",
+        "session",
+        "unanswered"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x86_64",
+        "runner": "Local Fedora; Linux 7.2.10-200.fc44.x86_64"
+      },
+      "tools": {
+        "rustc": "1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.2",
+        "node": "v26.10.0",
+        "git": "2.56.0"
+      },
+      "testedCommit": {
+        "missing": "Candidate 32394c11f53b7c2863cec843031a127b7a9578ba with deliberate uncommitted mutation of session/unanswered.rs; mutated SHA-256 70508a543ed658e201bb8a0aadb4d65e56b304afa1b007ccc6603d766b73d5c5. The original bytes were restored in finally and hash-checked."
+      },
+      "expectedExit": 101,
+      "actualExit": 101,
+      "counts": {
+        "passed": 10,
+        "failed": 3,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/foundation-control-aborted-rule.log",
+        "sha256": "380d7baec868575678649ae6177fbcdc30e047e00d46cab777766741414b3952"
+      }
+    },
+    {
+      "id": "control-user-close",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "bake-coding-agent",
+        "--test",
+        "session",
+        "unanswered"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x86_64",
+        "runner": "Local Fedora; Linux 7.2.10-200.fc44.x86_64"
+      },
+      "tools": {
+        "rustc": "1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.2",
+        "node": "v26.10.0",
+        "git": "2.56.0"
+      },
+      "testedCommit": {
+        "missing": "Candidate 32394c11f53b7c2863cec843031a127b7a9578ba with deliberate uncommitted mutation of session/unanswered.rs; mutated SHA-256 bfeec13071eb2ac5c999043de8bba89447583f2fe2e8ff6c2cef90c513700d76. The original bytes were restored in finally and hash-checked."
+      },
+      "expectedExit": 101,
+      "actualExit": 101,
+      "counts": {
+        "passed": 9,
+        "failed": 4,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/foundation-control-user-close.log",
+        "sha256": "98e17625abe409c89534e32e6872db01361561c3efa4bf51a0c12540bb3dc120"
+      }
+    },
+    {
+      "id": "restored-tests",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "bake-coding-agent",
+        "--test",
+        "session",
+        "unanswered"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x86_64",
+        "runner": "Local Fedora; Linux 7.2.10-200.fc44.x86_64"
+      },
+      "tools": {
+        "rustc": "1.99.0 (b940084d7 2026-09-28)",
+        "cargo": "1.99.0 (5f94df478 2026-08-27)",
+        "bun": "1.4.2",
+        "node": "v26.10.0",
+        "git": "2.56.0"
+      },
+      "testedCommit": "32394c11f53b7c2863cec843031a127b7a9578ba",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 13,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/foundation-controls-restored.log",
+        "sha256": "46674a63e08350f06a10f98a6d349d64c0c898fcb7cc774d93c481a33bbb8395"
+      }
+    }
+  ],
+  "results": [
+    {
+      "id": "unanswered-projection",
+      "behavior": "The full session target passes 188 tests on Linux and Intel macOS. Thirteen new tests check hand-derived entry/call/name triples and the synthetic results from transform_messages with stored and injectively rewritten ids: branches, compaction, context edits, aborted/errored and unreadable messages, user/assistant boundaries, repeated ids, system/custom/shell messages. The last leaf is checked at every byte truncation; every leaf is checked at each line boundary. The reopen/repair test also retains unanswered calls. This predicts provider-visible synthetic results, not raw durable path history or external effects. The helper has no product caller and changes no request.",
+      "owner": "rust/crates/bake-coding-agent/src/session/unanswered.rs",
+      "report": ".preflight/rust-orchestration/foundation-rust.log",
+      "commands": [
+        "linux-preflight",
+        "mac-native",
+        "restored-tests"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "linux-gates",
+      "behavior": "32 preflight gates pass. Actionlint is unavailable; the runtime suite is not selected for a Rust-only diff. Both existing TypeScript PTYs and native Rust PTYs pass. Counts on the command are gates, not Cargo cases; filtered-out tests in the focused controls are not counted as skipped. No live-model eval ran.",
+      "owner": "scripts/preflight.ts",
+      "report": ".preflight/rust-orchestration/foundation-preflight.log",
+      "commands": [
+        "linux-preflight"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "intel-macos",
+      "behavior": "Three native gates pass: check:rust, Rust PTYs, and keyless eval fixtures. Two Rust PTY scenarios explicitly skip because they require Linux /proc process state. The command tested snapshot f35159b75b86c5960e5349654f5e02fc1973e526; its complete tree c3e4809e1db608ade7d7fa5db35542f44aa5972e equals candidate 32394c11f5, verified with git rev-parse locally and on the Mac. Logs were copied from the isolated Mac checkout.",
+      "owner": "scripts/mac-preflight.sh",
+      "report": ".preflight/rust-orchestration/foundation-mac-rust.log",
+      "commands": [
+        "mac-native"
+      ],
+      "outcome": "pass"
+    }
+  ],
+  "negativeControls": [
+    {
+      "id": "aborted-rule",
+      "defect": "Removed the return that drops tool calls in errored and aborted assistant messages. Mutation hash is in its command provenance.",
+      "assertion": "The focused target exits 101: 10 pass and 3 fail, including the every-byte agreement case.",
+      "observed": "rejected",
+      "commands": [
+        "control-aborted-rule"
+      ]
+    },
+    {
+      "id": "user-close",
+      "defect": "Replaced Message::User(_) => self.close() with a no-op. Mutation hash is in its command provenance.",
+      "assertion": "The focused target exits 101: 9 pass and 4 fail, including the every-byte agreement case.",
+      "observed": "rejected",
+      "commands": [
+        "control-user-close"
+      ]
+    }
+  ],
+  "missingEvidence": [
+    {
+      "what": "Durable unfinished-work history",
+      "reason": "This projection reads provider-visible context. Calls hidden by compaction, context edits, or dropped messages need a separate raw-path projection; it still cannot establish external effects. Open children and pending inbox depend on scope 11.",
+      "owner": "rust/crates/bake-coding-agent/src/session"
+    },
+    {
+      "what": "Native Windows and arm64 runs for this candidate",
+      "reason": "Not run in this attempt. Older records do not qualify this new API. Intel macOS does not qualify Apple Silicon.",
+      "owner": ".github/workflows/ci.yml"
+    },
+    {
+      "what": "Scope 03 crash and group append",
+      "reason": "Tests construct torn bytes; no writer was killed mid-append. Related-entry group append is not implemented.",
+      "owner": "rust/crates/bake-coding-agent/src/session"
+    },
+    {
+      "what": "Remaining Pi session integration cases",
+      "reason": "This attempt does not re-audit or port every AgentSession and CLI session case named in the earlier record.",
+      "owner": "rust/crates/bake-coding-agent"
+    }
+  ],
+  "evalRecords": {
+    "notApplicable": "Pure inspection API with no product caller or model-visible behavior change."
+  },
+  "performanceRecords": {
+    "notApplicable": "No performance claim; test durations are not product benchmarks."
+  },
+  "rollback": {
+    "observed": "The helper is pure and writes nothing. Tests own private temporary sessions. Both control mutations were restored byte-identically to SHA-256 676b76f39a3251a66c48151d215b5690d6ac42580866cc5715482d41b83ee5a1; git status was clean and the 13 restored tests passed.",
+    "commands": [
+      "control-aborted-rule",
+      "control-user-close",
+      "restored-tests"
+    ]
+  },
+  "review": {
+    "missing": "Scope acceptance has not been requested or granted by a reviewer. Passing checks do not complete scope 02."
+  }
+}

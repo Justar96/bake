@@ -5,7 +5,7 @@
 //! | this module | Pi `src/core/tools/bash.ts` (`createShellToolDefinition`, `createBashTool`), `BASH_UPDATE_THROTTLE_MS` from `src/core/tools/renderers/bash.ts` |
 //! | [`local`] | Pi `src/core/tools/bash.ts` (`createLocalShellOperations`), `src/utils/child-process.ts` (`waitForChildProcess`) |
 //! | [`shell`] | Pi `src/utils/shell.ts` (`getShellConfig`, `getShellEnv`) |
-//! | `tree` | Pi `src/utils/shell.ts` (`killProcessTree`, detached-child tracking) |
+//! | `bake-process` (a crate of its own, shared with MCP stdio servers) | Pi `src/utils/shell.ts` (`killProcessTree`, detached-child tracking) |
 //!
 //! The model-visible text (name, description, schemas, results, exit-code,
 //! timeout, abort, and truncation notices) is Pi's byte for byte;
@@ -49,17 +49,16 @@ use crate::tools::truncate::{DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, TruncatedBy, 
 
 pub mod local;
 pub mod shell;
-pub(crate) mod tree;
 
 #[cfg(test)]
 mod tests;
 
+pub use bake_process::kill_tracked_detached_children;
 pub use local::{
     LocalShellOperations, PreparedExecError, PreparedSpawn, ShellInvocation,
     create_local_bash_operations,
 };
 pub use shell::{CommandTransport, ShellConfig, get_shell_config, get_shell_env};
-pub use tree::kill_tracked_detached_children;
 
 /// Pi's `bashToolSystemPromptContribution.snippet`.
 pub const BASH_TOOL_PROMPT_SNIPPET: &str = "Execute bash commands (ls, grep, find, etc.)";
@@ -193,6 +192,11 @@ pub struct BashToolOptions {
     pub bin_dir: Option<PathBuf>,
     /// Where spill files go. Defaults to the OS temporary directory.
     pub spill_directory: Option<PathBuf>,
+    /// The owner of the shells the default local operations spawn
+    /// ([`LocalShellOperations::with_owner`]): the session's
+    /// [`crate::owned_work::WorkGate`], so its shutdown waits for every
+    /// command's tree. Ignored with custom `operations`.
+    pub owner: Option<crate::owned_work::WorkGate>,
 }
 
 impl Default for BashToolOptions {
@@ -206,6 +210,7 @@ impl Default for BashToolOptions {
             context: None,
             bin_dir: None,
             spill_directory: None,
+            owner: None,
         }
     }
 }
@@ -278,10 +283,12 @@ pub fn bash_tool_prompt() -> ToolPrompt {
 
 /// Pi's `createBashTool(cwd, options)`.
 pub fn create_bash_tool(cwd: impl Into<PathBuf>, options: BashToolOptions) -> AgentTool {
-    let operations: Arc<dyn BashOperations> = options
-        .operations
-        .clone()
-        .unwrap_or_else(|| Arc::new(create_local_bash_operations(options.shell_path.clone())));
+    let operations: Arc<dyn BashOperations> = options.operations.clone().unwrap_or_else(|| {
+        Arc::new(
+            create_local_bash_operations(options.shell_path.clone())
+                .with_owner(options.owner.clone()),
+        )
+    });
     let shared = Arc::new(Shared {
         cwd: cwd.into(),
         operations,

@@ -19,14 +19,18 @@ ring.workspace = true
 libc.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-# The Windows runner's restricted token, DACL grants, Job, and process
-# creation.
-windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Console", "Win32_System_JobObjects", "Win32_System_Threading"] }
+# The Windows runner's Job and the account its end is settled on
+# (`bake_process::windows_job`), shared with the process owner.
+bake-process.workspace = true
+# The Windows runner's restricted token, DACL grants, and process creation.
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Console", "Win32_System_Threading"] }
 
 [target.'cfg(windows)'.dev-dependencies]
 # The enforcement tests' raw deletion, open, token, and SDDL probes and
-# their process and Job guards.
-windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_Threading"] }
+# their process and Job guards; `Win32_Security_Isolation` is the mechanism
+# probe's AppContainer profile and `Win32_System_Console` its candidates'
+# output redirection.
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Isolation", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_JobObjects", "Win32_System_Pipes", "Win32_System_Threading"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["process", "time", "sync", "io-util", "rt", "rt-multi-thread", "macros"] }
