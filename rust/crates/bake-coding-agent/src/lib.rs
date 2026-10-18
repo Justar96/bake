@@ -27,6 +27,7 @@
 //! | [`print_mode`], [`json_event`] | Pi `src/modes/print-mode.ts`, `src/modes/json-event.ts` |
 //! | [`cli`] | Pi `src/main.ts`, `src/cli/args.ts`, `src/cli/initial-message.ts`, `src/cli/file-processor.ts`, `src/cli/list-models.ts`, `packages/tui/src/fuzzy.ts` |
 //! | [`mcp`] | Pi v1.3.0 `src/extensions/mcp/{index,runtime,tools,config}.ts`, `src/core/mcp-servers.ts`; Bake's tool names (`packages/mcp/mcp-client`) and D24 admission |
+//! | [`hooks`] | Bake 0.3: `packages/hooks/{hook-protocol,hooks-claude-code,hooks-codex}`, run at Pi v1.3.0's extension events (`src/core/extensions/types.ts`, `runner.ts`) |
 //! | [`owned_work`] | Bake: a session's owner of its tasks, blocking work, and background lifetime, which shutdown cancels and drains |
 //! | [`subagents`] | Bake: continuable children on any available model, in Pi session files (`packages/subagent/{subagent,tool-subagent,tool-subagent-control}`) |
 //! | [`jobs`] | Bake: a session's background-job registry over its owned work (`packages/jobs/{jobs,jobs-local}`, `packages/shell/tool-bash/src/background.ts`), structured after Pi v1.3.0 `packages/durable` task states |
@@ -43,6 +44,7 @@ pub mod compaction;
 pub mod config_value;
 pub mod exec;
 pub mod home;
+pub mod hooks;
 pub mod jobs;
 pub mod json_event;
 pub mod json_store;

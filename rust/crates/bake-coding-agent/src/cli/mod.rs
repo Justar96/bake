@@ -50,6 +50,13 @@
 //! starts. A [`Replacement`] starts its servers only once the session it
 //! replaces is shut down ([`Replacement::start_servers`]).
 //!
+//! Every session it builds also reads the hooks files `settings.json`'s
+//! `hooks` member names, under the same owner rules
+//! ([`crate::hooks::load_hook_files`]); a problem with one is a startup
+//! warning. The session runs them ([`AgentSession::set_hooks`]) under its
+//! standing permission, sandbox provider, and approver; a subagent runs
+//! only the tool hooks.
+//!
 //! Not ported (deferred): RPC mode, `--resume`,
 //! theme and extension flags, extension tools, and the missing-session-cwd
 //! prompt.
@@ -809,6 +816,8 @@ struct Resources {
     custom_prompt: Option<String>,
     append_system_prompt: Option<String>,
     plugins: crate::plugins::PluginRegistry,
+    /// The hooks files `settings.json` names ([`crate::hooks`]).
+    hooks: Vec<crate::hooks::HookFile>,
 }
 
 /// Settles `session`'s permission (D24), writing any change to its file
@@ -857,6 +866,13 @@ fn load_resources(
             warnings,
         )
     };
+    let (hooks, hook_warnings) = crate::hooks::load_hook_files(
+        &settings.hooks,
+        home,
+        Path::new(session.cwd()),
+        user_home.as_deref(),
+    );
+    warnings.extend(hook_warnings.iter().map(|warning| terminal_safe(warning)));
     let context_files = if args.no_context_files {
         Vec::new()
     } else {
@@ -898,6 +914,7 @@ fn load_resources(
         custom_prompt,
         append_system_prompt,
         plugins: loaded.registry,
+        hooks,
     })
 }
 
@@ -1151,15 +1168,24 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
         custom_prompt,
         append_system_prompt,
         plugins,
+        hooks,
     } = resources;
     let session_cwd = session.cwd().to_owned();
     let session_id = session.session_id().to_owned();
+    // A subagent's prompts come from its parent's tool calls, so it runs
+    // only the tool hooks.
+    let hook_scope = match role {
+        Role::Child(_) => crate::hooks::HookScope::ToolsOnly,
+        Role::Root(_) => crate::hooks::HookScope::Session,
+    };
     let can_ask = approver.is_some();
-    // One standing permission for the tools and the MCP servers' admission.
+    let approver: Arc<dyn Approver> = approver.unwrap_or_else(|| Arc::new(NoApprover));
+    // One standing permission for the tools, the MCP servers' admission,
+    // and the hooks' confinement.
     let standing = Arc::new(permission.standing(Path::new(&session_cwd), Some(session_id.clone())));
     let tool_permissions = ToolPermissions::new(
         Arc::clone(&standing),
-        approver.unwrap_or_else(|| Arc::new(NoApprover)),
+        Arc::clone(&approver),
         Arc::clone(&sandbox_provider),
     );
     // As the prompt states `never` without an answerer, the tools offer no
@@ -1417,6 +1443,17 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
     })
     .await?;
     session.set_prompt_templates(prompt_templates);
+    if let Err(message) = session.set_hooks(crate::hooks::HooksOptions {
+        files: hooks,
+        scope: hook_scope,
+        standing: Arc::clone(&standing),
+        sandbox: Arc::clone(&sandbox_provider),
+        approver,
+        default_timeout: crate::hooks::DEFAULT_HOOK_TIMEOUT,
+    }) {
+        session.shutdown().await;
+        return Err(message);
+    }
     // The same restrictions the built-in tools had, for MCP tools whenever
     // they are published. With nothing declarable (`--no-tools` alone) no
     // server is started: none of its tools could be declared or called.
@@ -2660,6 +2697,54 @@ mod tests {
             assert_eq!(started.session.mcp_servers().is_some(), starts, "{extra:?}");
             started.session.shutdown().await;
         }
+    }
+
+    // Every session setup builds runs the hooks files `settings.json`
+    // names, and warns about a file it cannot use. A steered prompt runs
+    // `UserPromptSubmit` without a model, so the hook's block shows.
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn sessions_run_the_hooks_files_settings_names() {
+        let dir = setup_dirs("cli-hooks");
+        let hooks = serde_json::json!({ "hooks": { "UserPromptSubmit": [{ "hooks": [
+            { "type": "command", "command": "echo 'not today' >&2; exit 2" },
+        ] }] } });
+        write_owned(&dir.join("user").join("claude.json"), &hooks.to_string());
+        write_owned(
+            &dir.join("home").join("settings.json"),
+            &serde_json::json!({ "hooks": { "claudeCode": "~/claude.json", "codex": "missing.json" } })
+                .to_string(),
+        );
+        let args = parse_args(&strings(&[
+            "--sandbox",
+            "danger-full-access",
+            "--no-session",
+        ]));
+        let (environment, stderr) = setup_environment(dir.path());
+        let Ok(started) = start_interactive(environment, args).await else {
+            panic!("setup failed: {}", text(&stderr));
+        };
+        let warnings = text(&stderr);
+        assert!(
+            warnings.contains(&format!(
+                "Warning: Codex hooks: {}: not found. None of its hooks run",
+                dir.join("home").join("missing.json").display()
+            )),
+            "{warnings}"
+        );
+        let blocked = Err("Prompt blocked by UserPromptSubmit hook: not today".to_owned());
+        assert_eq!(started.session.steer("hello", Vec::new()).await, blocked);
+        let replacement = started
+            .factory
+            .replace(&started.session, SessionTarget::New)
+            .await
+            .expect("replacement");
+        assert_eq!(
+            replacement.session.steer("hello", Vec::new()).await,
+            blocked
+        );
+        replacement.session.shutdown().await;
+        started.session.shutdown().await;
     }
 
     // A file the session's own tools could change is refused whole, before

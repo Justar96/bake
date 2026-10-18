@@ -60,6 +60,13 @@
 //! runs journal allowed dispatches through the same boundary. The session
 //! owns every Wasm helper and reaps it before shutdown returns.
 //!
+//! External hooks ([`crate::hooks`], installed by
+//! [`AgentSession::set_hooks`]) run at the same extension points (in
+//! `agent_session/hooks.rs`): `SessionStart` and `UserPromptSubmit` before
+//! a prompt, `PreToolUse` after the plugins' vetoes, `PostToolUse` before a
+//! result's images are normalized, and `Stop` where a run would settle.
+//! Each evaluation is written as a `custom` entry before it takes effect.
+//!
 //! Not ported (deferred): Pi's extensions and their other events (including
 //! `session_before_compact`, `session_compact`, and
 //! `session_compact_failed`), branch summaries during navigation, the
@@ -70,6 +77,7 @@
 
 mod background_compaction;
 mod context_masking;
+mod hooks;
 mod job_journal;
 pub mod job_notices;
 mod navigation;
@@ -765,6 +773,8 @@ pub struct AgentSession {
     mcp: Arc<OnceLock<McpServers>>,
     /// The plugin dispatcher, when any plugin is registered.
     plugins: Option<Arc<VetoDispatcher>>,
+    /// The external hooks [`Self::set_hooks`] installed, once it has.
+    hooks: hooks::SharedHooks,
     /// The reminder timer's handle, when `schedules` is on.
     #[cfg(test)]
     schedules: Option<Arc<schedules::Schedules>>,
@@ -1006,12 +1016,14 @@ fn next_turn_hook(
     core: Arc<Core>,
     selection: SessionSelection,
     jobs: JobRegistry,
+    hooks: hooks::SharedHooks,
 ) -> bake_agent::agent::AgentPrepareNextTurnWithContext {
     Arc::new(move |turn, signal| {
         let tools = turn.context.tools.clone();
         let core = Arc::clone(&core);
         let selection = selection.clone();
         let jobs = jobs.clone();
+        let hooks = hooks.get().cloned();
         Box::pin(async move {
             let mut update = core
                 .compact_before_next_response(tools, signal)
@@ -1023,6 +1035,10 @@ fn next_turn_hook(
             update
                 .messages
                 .extend(job_notices::claim(&jobs).into_iter().map(job_notices::live));
+            // Context `PostToolUse` hooks added during the step.
+            if let Some(hooks) = &hooks {
+                update.messages.extend(hooks.take_pending());
+            }
             // One read, so the model and level come from one change.
             let selected = selection.get();
             if let Some(model) = selected.model {
@@ -1527,11 +1543,18 @@ impl AgentSession {
                 Arc::clone(plugins),
             )
         });
+        let shared_hooks: hooks::SharedHooks = Arc::default();
+        let before_tool_call = Some(hooks::before_tool_call(
+            Arc::clone(&core),
+            Arc::clone(&persist_error),
+            Arc::clone(&shared_hooks),
+            before_tool_call,
+        ));
         let before_tool_call = Some(run_journal::tool_hook(
             Arc::clone(&executions),
             before_tool_call,
         ));
-        let agent = Agent::new(AgentOptions {
+        let mut agent_options = AgentOptions {
             max_concurrent_read_tools,
             initial_state: AgentInitialState {
                 system_prompt: None,
@@ -1593,6 +1616,7 @@ impl AgentSession {
                 })
             })),
             before_tool_call,
+            finish_turn: Some(hooks::finish_turn(Arc::clone(&shared_hooks))),
             prepare_request: (task_documents_enabled || read_settings(&settings).context_masking)
                 .then(|| context_masking::request_hook(Arc::clone(&core), task_documents_enabled)),
             stream_fn: Some(stream_fn),
@@ -1600,13 +1624,23 @@ impl AgentSession {
                 Arc::clone(&core),
                 published.clone(),
                 jobs.clone(),
+                Arc::clone(&shared_hooks),
             )),
             steering_mode,
             follow_up_mode,
             session_id: Some(session_id),
             ..AgentOptions::default()
-        })
-        .map_err(|error| error.to_string())?;
+        };
+        // `PostToolUse` hooks see a result before its images are normalized.
+        agent_options.after_tool_call = agent_options.after_tool_call.map(|normalize| {
+            hooks::after_tool_call(
+                Arc::clone(&core),
+                Arc::clone(&persist_error),
+                Arc::clone(&shared_hooks),
+                normalize,
+            )
+        });
+        let agent = Agent::new(agent_options).map_err(|error| error.to_string())?;
         let agent = Arc::new(agent);
         let _ = core.agent.set(Arc::downgrade(&agent));
 
@@ -1676,6 +1710,7 @@ impl AgentSession {
             write_failure: gap,
             mcp: Arc::default(),
             plugins,
+            hooks: shared_hooks,
             #[cfg(test)]
             schedules,
         };
@@ -2493,6 +2528,19 @@ impl AgentSession {
             return Err(reason);
         }
         let (text, images) = self.prepare_user_input(text, images, self.model()).await?;
+        let context = match self.hooks.get() {
+            Some(installed) => {
+                hooks::before_queued_prompt(
+                    Arc::clone(installed),
+                    Arc::clone(&self.core),
+                    Arc::clone(&self.persist_error),
+                    self.agent.messages(),
+                    text.clone(),
+                )
+                .await?
+            }
+            None => None,
+        };
         let permit = self.work.enter();
         if let Some(reason) = self.closed_reason() {
             return Err(reason);
@@ -2515,9 +2563,15 @@ impl AgentSession {
             if steer {
                 queued.steering.push(text);
                 self.agent.steer(message);
+                if let Some(context) = context {
+                    self.agent.steer(context);
+                }
             } else {
                 queued.follow_up.push(text);
                 self.agent.follow_up(message);
+                if let Some(context) = context {
+                    self.agent.follow_up(context);
+                }
             }
         }
         self.queue.announce(&self.core);
@@ -2751,6 +2805,36 @@ impl AgentSession {
         }
     }
 
+    /// Installs the external hooks of `options` ([`crate::hooks`]): from
+    /// the next prompt, steer, follow-up, or tool call on, their events run
+    /// the hooks, each process under this session's gate and confined by
+    /// `options`' sandbox, and each evaluation is written to the session
+    /// file before its decision takes effect. [`Self::shutdown`] kills a
+    /// running hook and waits until it and its tree are gone.
+    ///
+    /// Refused once shutdown has started, while a prompt runs, or when
+    /// called a second time. Options without a hook install nothing.
+    pub fn set_hooks(&self, options: crate::hooks::HooksOptions) -> Result<(), String> {
+        if let Some(reason) = self.closed_reason() {
+            return Err(reason);
+        }
+        if self.is_streaming() {
+            return Err("Hooks cannot be installed while a prompt runs.".to_owned());
+        }
+        if options.files.is_empty() {
+            return Ok(());
+        }
+        let engine = crate::hooks::engine::Hooks::new(options, self.work.clone());
+        let installed = Arc::new(hooks::SessionHooks::new(
+            engine,
+            self.session_id(),
+            PathBuf::from(self.cwd()),
+        ));
+        self.hooks
+            .set(installed)
+            .map_err(|_| "Hooks were already installed for this session.".to_owned())
+    }
+
     /// The MCP servers [`Self::start_mcp`] started, if it has.
     pub fn mcp_servers(&self) -> Option<&McpServers> {
         self.mcp.get()
@@ -2888,6 +2972,8 @@ impl AgentSession {
 
 #[cfg(test)]
 mod control_tests;
+#[cfg(test)]
+mod hook_tests;
 #[cfg(test)]
 mod job_tests;
 #[cfg(test)]

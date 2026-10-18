@@ -8,7 +8,7 @@ The Bake home is the directory that holds bake-rs's models, keys, settings, and 
 |---|---|
 | `models.json` | Providers and models (`bake-rs docs models`) |
 | `auth.json` | API keys by provider (`bake-rs docs models`) |
-| `settings.json` | Default model, tools, sessions, compaction, retry, and permission presets (`bake-rs docs settings`) |
+| `settings.json` | Default model, tools, sessions, compaction, retry, permission presets, and the hooks files to run (`bake-rs docs settings`, `bake-rs docs hooks`) |
 | `sessions/` | Saved sessions, one directory per working directory (`bake-rs docs sessions`) |
 | `mcp.json` | MCP servers each session starts, unless `--no-mcp` is given (`bake-rs docs mcp`) |
 | `plugins/` | Installed Wasm plugin packages and `plugins.json`, which enables them (`bake-rs docs plugins`) |

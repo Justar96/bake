@@ -94,6 +94,7 @@ pub(super) struct PromptExecution {
     listeners: Arc<Listeners>,
     persist_error: Arc<Mutex<Option<String>>>,
     mcp: Arc<OnceLock<McpServers>>,
+    hooks: hooks::SharedHooks,
     executions: SharedExecutions,
     runtime: tokio::runtime::Handle,
     jobs: JobRegistry,
@@ -116,6 +117,7 @@ impl PromptExecution {
             listeners: Arc::clone(&session.listeners),
             persist_error: Arc::clone(&session.persist_error),
             mcp: Arc::clone(&session.mcp),
+            hooks: Arc::clone(&session.hooks),
             executions: Arc::clone(&session.executions),
             runtime: session.runtime.clone(),
             jobs: session.jobs.clone(),
@@ -574,6 +576,9 @@ impl PromptExecution {
             .into_iter()
             .map(Into::into)
             .collect();
+        if let Some(installed) = self.hooks.get() {
+            messages.extend(installed.take_pending());
+        }
         messages.extend(
             self.pending_job_notices()
                 .into_iter()
@@ -683,6 +688,30 @@ impl PromptExecution {
                 return Err(reason);
             }
         }
+        // `SessionStart` and `UserPromptSubmit`, written before they take
+        // effect: a blocked prompt is refused and never sent.
+        let (before, after) = match self.hooks.get() {
+            Some(installed) => {
+                let transcript = self.agent.messages();
+                match hooks::before_prompt(
+                    installed,
+                    &self.core,
+                    &self.persist_error,
+                    &transcript,
+                    &text,
+                    control,
+                )
+                .await?
+                {
+                    hooks::PromptHooks::Send { before, after } => (before, after),
+                    hooks::PromptHooks::Refuse(error) => return Err(error),
+                    hooks::PromptHooks::Stopped => {
+                        return Ok(control.stopped().unwrap_or(RunOutcome::Cancelled));
+                    }
+                }
+            }
+            None => (Vec::new(), Vec::new()),
+        };
         let mut content = vec![UserContentBlock::Text(TextContent::new(text))];
         content.extend(images.into_iter().map(UserContentBlock::Image));
         let mut messages: Vec<LiveMessage> = Vec::with_capacity(2);
@@ -700,6 +729,7 @@ impl PromptExecution {
                 .into_iter()
                 .map(job_notices::live),
         );
+        messages.extend(before);
         messages.push(
             UserMessage {
                 content: UserContent::Blocks(content),
@@ -707,6 +737,7 @@ impl PromptExecution {
             }
             .into(),
         );
+        messages.extend(after);
         self.run_agent_prompt(messages, control).await
     }
 
@@ -732,6 +763,17 @@ impl PromptExecution {
             state.last_tool_results.clear();
             state.turn_tool_results.clear();
         }
+        let installed = self.hooks.get().cloned();
+        if let Some(installed) = &installed {
+            let mut state = installed.engine.state();
+            state.halted = false;
+            state.stop_active = false;
+        }
+        let halted = || {
+            installed
+                .as_ref()
+                .is_some_and(|installed| installed.engine.state().halted)
+        };
         let mut result = if core.aborted() {
             Ok(control.stopped().unwrap_or(RunOutcome::Cancelled))
         } else if let Some(messages) = messages {
@@ -748,6 +790,10 @@ impl PromptExecution {
         while result.is_ok() && !core.aborted() {
             if matches!(result, Ok(RunOutcome::Cancelled)) {
                 control.cancel();
+                break;
+            }
+            // A hook's `continue: false` ended the run: nothing continues it.
+            if halted() {
                 break;
             }
             match self.handle_post_agent_run().await {
@@ -784,7 +830,38 @@ impl PromptExecution {
                 .map(job_notices::live)
                 .collect();
             if notices.is_empty() {
-                break;
+                // `Stop` hooks may continue a run that would settle.
+                let continuation = match (&installed, &result) {
+                    (Some(installed), Ok(RunOutcome::FinishedTurn)) => {
+                        hooks::before_settle(
+                            installed,
+                            core,
+                            &self.persist_error,
+                            &self.agent.messages(),
+                            control,
+                        )
+                        .await
+                    }
+                    _ => Ok(None),
+                };
+                match continuation {
+                    Ok(Some(message)) if !core.aborted() => {
+                        result = self
+                            .agent
+                            .prompt_with_control(
+                                PromptInput::Messages(vec![message]),
+                                control.clone(),
+                            )
+                            .await
+                            .map_err(|error| error.to_string());
+                        continue;
+                    }
+                    Ok(_) => break,
+                    Err(error) => {
+                        result = Err(error);
+                        break;
+                    }
+                }
             }
             result = self
                 .agent

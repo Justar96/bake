@@ -83,7 +83,59 @@ pub fn load_home_mcp_config(home: &Path, workspace: &Path, user_home: Option<&Pa
     };
     #[cfg(test)]
     seam::after_resolve(&dir);
-    platform::load(&dir, &path, workspace, user_home)
+    match open_owner_file(&dir, &MCP_RULES, workspace, user_home) {
+        Ok(None) => McpConfig::default(),
+        Ok(Some(file)) => super::config::read_config(file, &path),
+        Err(reason) => refused(&path, &reason),
+    }
+}
+
+/// A file the module's rules admit, and how its refusals name it and say
+/// what to change. `$BAKE_HOME/mcp.json` is one; a hooks file
+/// `settings.json` names is another ([`crate::hooks`]).
+#[cfg_attr(
+    not(unix),
+    allow(dead_code, reason = "the ownership rules are read on Unix")
+)]
+pub(crate) struct OwnerFile<'a> {
+    /// The file's name in its directory.
+    pub name: &'a str,
+    /// What resolved the directory, for a directory changed since.
+    pub resolved: &'a str,
+    /// The file as the ownership rules name it, such as `an mcp.json`.
+    pub kind: &'a str,
+    /// What to do about a file inside the working directory.
+    pub workspace_remedy: &'a str,
+    /// What to do about a file inside a git work tree.
+    pub repository_remedy: &'a str,
+    /// Why an existing file is refused unread where who may change it
+    /// cannot be checked.
+    #[cfg_attr(
+        unix,
+        allow(dead_code, reason = "read where ownership cannot be checked")
+    )]
+    pub unchecked: &'a str,
+}
+
+const MCP_RULES: OwnerFile<'static> = OwnerFile {
+    name: MCP_CONFIG_FILE,
+    resolved: "the Bake home",
+    kind: "an mcp.json",
+    workspace_remedy: "set BAKE_HOME to a directory outside it, or run with --no-mcp",
+    repository_remedy: "keep mcp.json in a Bake home outside every repository (set BAKE_HOME), or run with --no-mcp",
+    unchecked: "bake-rs cannot yet check on this platform who may change mcp.json, so it does not read it; remove the file or run with --no-mcp until that check is supported",
+};
+
+/// Opens `rules.name` in the canonical directory `dir` if it passes the
+/// module's rules for a session in `workspace`; `Ok(None)` when it does not
+/// exist, and `Err` with the reason it is refused. Blocking.
+pub(crate) fn open_owner_file(
+    dir: &Path,
+    rules: &OwnerFile<'_>,
+    workspace: &Path,
+    user_home: Option<&Path>,
+) -> Result<Option<std::fs::File>, String> {
+    platform::open(dir, rules, workspace, user_home)
 }
 
 fn refused(path: &Path, reason: &str) -> McpConfig {
@@ -101,10 +153,8 @@ mod platform {
     use std::os::unix::ffi::OsStrExt;
     use std::path::{Component, Path, PathBuf};
 
-    use super::super::config::{
-        LINK_REFUSED, MAX_CONFIG_BYTES, MCP_CONFIG_FILE, McpConfig, read_config,
-    };
-    use super::refused;
+    use super::super::config::{LINK_REFUSED, MAX_CONFIG_BYTES};
+    use super::OwnerFile;
 
     /// How a directory of the chain is opened: for search only where the
     /// platform allows it.
@@ -206,7 +256,7 @@ mod platform {
     /// Opens `/` and then each component of the canonical `dir` relative to
     /// the one before, never following a link: every directory from the
     /// root down to `dir`, with its path for messages.
-    fn open_chain(dir: &Path) -> Result<Vec<(PathBuf, OwnedFd)>, String> {
+    fn open_chain(dir: &Path, rules: &OwnerFile<'_>) -> Result<Vec<(PathBuf, OwnedFd)>, String> {
         let flags = DIRECTORY_ACCESS | libc::O_DIRECTORY | libc::O_NOFOLLOW;
         let mut chain: Vec<(PathBuf, OwnedFd)> = Vec::new();
         let mut shown = PathBuf::new();
@@ -224,8 +274,9 @@ mod platform {
             };
             let fd = opened.map_err(|error| match error.raw_os_error() {
                 Some(libc::ELOOP | libc::ENOTDIR) => format!(
-                    "{} changed after bake-rs resolved the Bake home (it is now a link or not a directory)",
-                    shown.display()
+                    "{} changed after bake-rs resolved {} (it is now a link or not a directory)",
+                    shown.display(),
+                    rules.resolved
                 ),
                 _ => format!("cannot open the directory {}: {error}", shown.display()),
             })?;
@@ -412,46 +463,46 @@ mod platform {
         uid == me || uid == 0
     }
 
-    pub(super) fn load(
+    /// Opens the file under the rules (see [`super::open_owner_file`]).
+    pub(super) fn open(
         dir: &Path,
-        path: &Path,
+        rules: &OwnerFile<'_>,
         workspace: &Path,
         user_home: Option<&Path>,
-    ) -> McpConfig {
-        let chain = match open_chain(dir) {
+    ) -> Result<Option<std::fs::File>, String> {
+        let chain = match open_chain(dir, rules) {
             Ok(chain) => chain,
-            // No file, nothing to refuse: a home bake-rs cannot walk is not
-            // a reason to warn about a file it does not hold.
+            // No file, nothing to refuse: a directory bake-rs cannot walk is
+            // not a reason to warn about a file it does not hold.
             Err(_)
-                if std::fs::symlink_metadata(dir.join(MCP_CONFIG_FILE))
+                if std::fs::symlink_metadata(dir.join(rules.name))
                     .is_err_and(|error| error.kind() == io::ErrorKind::NotFound) =>
             {
-                return McpConfig::default();
+                return Ok(None);
             }
-            Err(reason) => return refused(path, &reason),
+            Err(reason) => return Err(reason),
         };
         let Some((_, last)) = chain.last() else {
-            return refused(path, "the Bake home has no directory");
+            return Err(format!("{} has no directory", rules.resolved));
         };
         let flags = libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_NOCTTY;
-        let file = match open_at(Some(last), OsStr::new(MCP_CONFIG_FILE), flags) {
+        let file = match open_at(Some(last), OsStr::new(rules.name), flags) {
             Ok(file) => file,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return McpConfig::default(),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(error) if error.raw_os_error() == Some(libc::ELOOP) => {
-                return refused(path, LINK_REFUSED);
+                return Err(LINK_REFUSED.to_owned());
             }
-            Err(error) => return refused(path, &error.to_string()),
+            Err(error) => return Err(error.to_string()),
         };
-        match check(&chain, &file, workspace, user_home) {
-            Ok(()) => read_config(std::fs::File::from(file), path),
-            Err(reason) => refused(path, &reason),
-        }
+        check(&chain, &file, rules, workspace, user_home)?;
+        Ok(Some(std::fs::File::from(file)))
     }
 
     /// Every rule, read from the opened handles.
     fn check(
         chain: &[(PathBuf, OwnedFd)],
         file: &OwnedFd,
+        rules: &OwnerFile<'_>,
         workspace: &Path,
         user_home: Option<&Path>,
     ) -> Result<(), String> {
@@ -467,8 +518,8 @@ mod platform {
         }
         if !is_trusted_owner(stat.uid) {
             return Err(format!(
-                "is owned by another user (uid {}); bake-rs reads only an mcp.json that you or root own",
-                stat.uid
+                "is owned by another user (uid {}); bake-rs reads only {} that you or root own",
+                stat.uid, rules.kind
             ));
         }
         let mode = stat.mode & 0o7777;
@@ -478,7 +529,10 @@ mod platform {
             ));
         }
         acl::check(file, stat.uid).map_err(|reason| {
-            format!("{reason}; bake-rs reads only an mcp.json that only you can change")
+            format!(
+                "{reason}; bake-rs reads only {} that only you can change",
+                rules.kind
+            )
         })?;
         let mut stats = Vec::with_capacity(chain.len());
         for (shown, fd) in chain {
@@ -523,8 +577,9 @@ mod platform {
             }
             if workspace == Some(stat.id()) {
                 return Err(format!(
-                    "is inside the session's working directory {}, which the agent's tools can change; set BAKE_HOME to a directory outside it, or run with --no-mcp",
-                    shown.display()
+                    "is inside the session's working directory {}, which the agent's tools can change; {}",
+                    shown.display(),
+                    rules.workspace_remedy
                 ));
             }
             if has_entry(fd, ".git").map_err(|error| {
@@ -534,8 +589,9 @@ mod platform {
                 )
             })? {
                 return Err(format!(
-                    "is inside the git work tree {}, whose files its repository supplies; keep mcp.json in a Bake home outside every repository (set BAKE_HOME), or run with --no-mcp",
-                    shown.display()
+                    "is inside the git work tree {}, whose files its repository supplies; {}",
+                    shown.display(),
+                    rules.repository_remedy
                 ));
             }
         }
@@ -547,30 +603,27 @@ mod platform {
 mod platform {
     use std::path::Path;
 
-    use super::super::config::{MCP_CONFIG_FILE, McpConfig};
-    use super::refused;
+    use super::OwnerFile;
 
     /// Refuses an existing file unread: who may change it cannot be shown
     /// here yet (see the module documentation).
-    pub(super) fn load(
+    pub(super) fn open(
         dir: &Path,
-        path: &Path,
+        rules: &OwnerFile<'_>,
         _workspace: &Path,
         _user_home: Option<&Path>,
-    ) -> McpConfig {
-        match std::fs::symlink_metadata(dir.join(MCP_CONFIG_FILE)) {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => McpConfig::default(),
-            _ => refused(path, UNCHECKED),
+    ) -> Result<Option<std::fs::File>, String> {
+        match std::fs::symlink_metadata(dir.join(rules.name)) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            _ => Err(rules.unchecked.to_owned()),
         }
     }
-
-    pub(crate) const UNCHECKED: &str = "bake-rs cannot yet check on this platform who may change mcp.json, so it does not read it; remove the file or run with --no-mcp until that check is supported";
 }
 
 /// Text of the refusal an existing `mcp.json` gets where its owner cannot
 /// be checked yet.
 #[cfg(not(unix))]
-pub const UNCHECKED_PLATFORM: &str = platform::UNCHECKED;
+pub const UNCHECKED_PLATFORM: &str = MCP_RULES.unchecked;
 
 /// Test hooks into the read.
 #[cfg(test)]

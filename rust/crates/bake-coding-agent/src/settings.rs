@@ -100,6 +100,9 @@ pub struct Settings {
     /// `schedules`: gives a top-level session the reminder tools and their
     /// timer ([`crate::schedules`]). Defaults to false.
     pub schedules: bool,
+    /// `hooks`: the Claude Code and Codex hooks files to run
+    /// ([`crate::hooks`]). Bake's own member; unset runs no hook.
+    pub hooks: HookSettings,
     /// `compaction` as stored, checked when read (see
     /// [`Self::compaction_settings`]).
     pub compaction: Option<Value>,
@@ -229,6 +232,7 @@ impl Default for Settings {
             task_documents: false,
             subagents: false,
             schedules: false,
+            hooks: HookSettings::default(),
             compaction: None,
             background_compaction: false,
             context_masking: false,
@@ -241,6 +245,36 @@ impl Default for Settings {
             cliproxyapi: CliProxySetting::Absent,
             warnings: Vec::new(),
         }
+    }
+}
+
+/// The `hooks` member of `settings.json`: the path of a Claude Code
+/// `hooks.json` (or a Claude Code settings file whose `hooks` member holds
+/// one) under `claudeCode`, and a Codex `hooks.json` under `codex`. A path
+/// may start with `~/`; a relative one is read from the Bake home
+/// ([`crate::hooks::home`]). An empty or non-string value is unset.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HookSettings {
+    /// `hooks.claudeCode`.
+    pub claude_code: Option<String>,
+    /// `hooks.codex`.
+    pub codex: Option<String>,
+}
+
+impl HookSettings {
+    fn from_value(value: Option<&Value>) -> Self {
+        let Some(object) = value.and_then(Value::as_object) else {
+            return Self::default();
+        };
+        Self {
+            claude_code: string(object, "claudeCode"),
+            codex: string(object, "codex"),
+        }
+    }
+
+    /// Whether a file is named.
+    pub fn is_set(&self) -> bool {
+        self.claude_code.is_some() || self.codex.is_some()
     }
 }
 
@@ -457,6 +491,7 @@ impl Settings {
             task_documents: object.get("taskDocuments").and_then(Value::as_bool) == Some(true),
             subagents: object.get("subagents").and_then(Value::as_bool) == Some(true),
             schedules: object.get("schedules").and_then(Value::as_bool) == Some(true),
+            hooks: HookSettings::from_value(object.get("hooks")),
             max_concurrent_read_tools: object.get("maxConcurrentReadTools").cloned(),
             compaction: object.get("compaction").cloned(),
             background_compaction: object.get("backgroundCompaction").and_then(Value::as_bool)
@@ -905,6 +940,24 @@ mod tests {
         assert_eq!(read(r#"{"webSearch":{"model":7}}"#), None);
         assert_eq!(read(r#"{"webSearch":"x"}"#), None);
         assert_eq!(read("{}"), None);
+    }
+
+    #[test]
+    fn reads_the_hooks_files() {
+        let read = |text: &str| Settings::parse(text, Path::new("s.json")).hooks;
+        assert_eq!(
+            read(r#"{"hooks":{"claudeCode":"~/.claude/settings.json","codex":"codex.json"}}"#),
+            HookSettings {
+                claude_code: Some("~/.claude/settings.json".into()),
+                codex: Some("codex.json".into()),
+            }
+        );
+        assert_eq!(
+            read(r#"{"hooks":{"claudeCode":"","codex":7}}"#),
+            HookSettings::default()
+        );
+        assert_eq!(read(r#"{"hooks":"x"}"#), HookSettings::default());
+        assert!(!read("{}").is_set());
     }
 
     #[test]

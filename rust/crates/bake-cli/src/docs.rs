@@ -67,6 +67,11 @@ pub const TOPICS: &[Topic] = &[
         summary: "MCP servers from mcp.json, their tools, and --no-mcp",
         text: include_str!("../docs/mcp.md"),
     },
+    Topic {
+        name: "hooks",
+        summary: "Claude Code and Codex hooks.json command hooks",
+        text: include_str!("../docs/hooks.md"),
+    },
 ];
 
 /// The topic named `name`.

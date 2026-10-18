@@ -27,6 +27,7 @@ bake-rs reads its settings from `settings.json` in the Bake home, a JSON object 
 | `contextMasking` | When `true`, experimentally replaces older eligible tool observations with logged placeholders; default `false`, with ordinary compaction retained |
 | `retry` | `enabled` (default `true`), `maxRetries` (3), `baseDelayMs` (2000), and `maxAgentDelayMs` (60000) for retrying transient model errors |
 | `permission` | `presets` and `defaultPreset` (`bake-rs docs permissions`) |
+| `hooks` | `claudeCode` and `codex`: the Claude Code and Codex `hooks.json` files whose command hooks run during sessions; unset runs none (`bake-rs docs hooks`) |
 
 An invalid compaction token value is reported, by name, as an error when compaction runs. A malformed `permission` section stops the run, since its presets bound what tools may do.
 
