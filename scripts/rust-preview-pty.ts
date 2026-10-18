@@ -1399,18 +1399,24 @@ function descendants(root: number): Map<number, string> {
 
 
 await liveScenario('a live bash call cancelled by Esc fails its card and leaves no process', async (world) => {
-  const session = world.launch()
+  // No Windows sandbox is the default yet (D24), so workspace-write refuses
+  // bash there; the call runs unconfined, still in the session's job.
+  const session = world.launch(windows ? ['--permission', 'danger-full-access'] : [])
   await session.ready()
+  // Processes the session already had, such as the ConPTY host's own
+  // helper in its job, are not the call's.
+  const before = await session.owned()
   session.send('SLEEP\r')
   // The call's own process tree (its sandbox runner, shell, and `sleep 30`):
   // on POSIX found under this session's process, so other processes on the
   // host with the same command line are not this test's; on Windows the
   // members of the job the session runs in, each pinned by the host.
   let owned = new Map<string, string>()
+  const started = async () => new Map([...await session.owned()].filter(([pid]) => !before.has(pid)))
   const sleeping = (label: string) => label === 'sleep 30' || /(?:^|[\\/])sleep\.exe$/iu.test(label)
   await session.wait('bash running', () => session.screen.includes('running bash') && session.screen.includes('sleep 30'))
   const deadline = performance.now() + 30_000
-  for (owned = await session.owned(); ![...owned.values()].some(sleeping); owned = await session.owned()) {
+  for (owned = await started(); ![...owned.values()].some(sleeping); owned = await started()) {
     if (performance.now() > deadline) throw new Error(`no sleep among the session's processes: ${[...owned.values()].join(', ')}`)
     await delay(5)
   }
