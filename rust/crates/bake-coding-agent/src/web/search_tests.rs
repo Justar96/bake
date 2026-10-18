@@ -433,6 +433,7 @@ async fn honors_cancellation() {
 }
 
 /// A registry whose CLIProxyAPI route's key is the command `key`.
+#[cfg(unix)]
 fn registry_with_key_command(base: &str, key: &str) -> ModelRuntime {
     let mut registry = ModelRegistry::new(ModelConfig::empty(), AuthStorage::empty());
     registry
