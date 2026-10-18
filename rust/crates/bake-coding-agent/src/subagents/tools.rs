@@ -5,14 +5,15 @@
 //! Ported from Bake's TypeScript `packages/subagent/tool-subagent/src/{index,list-models}.ts`
 //! and `packages/subagent/tool-subagent-control/src/{index,list-agents}.ts`
 //! under the 0.3 default surface (`backgroundMode: continuable`): the
-//! names, parameters, descriptions, and result texts. Differences, all
-//! because Bake has no task router or nested children yet: the model-choice
-//! sentence says that omitted fields inherit the caller's route rather than
-//! let the host choose; `interrupt_agent` drops "its own subagents keep
-//! running"; `list_agents` has no `scope`, since with no nested children
-//! its `descendants` are its `children`, drops the depth-1 remark, and adds
-//! each child's route to its row; and a call with no calling agent cannot
-//! occur, so those errors are gone. The model-choice fields and
+//! names, parameters, descriptions, and result texts. Differences: the
+//! model-choice texts, which every request carries once more than one
+//! model is available, are cut to what the model needs, and say that
+//! omitted fields inherit the caller's route, since Bake has no task router
+//! yet; `interrupt_agent` drops "its own subagents keep running";
+//! `list_agents` has no `scope`, since with no nested children its
+//! `descendants` are its `children`, drops the depth-1 remark, and adds each
+//! child's route to its row; and a call with no calling agent cannot occur,
+//! so those errors are gone. The model-choice fields and
 //! `list_subagent_models` are shown when more than one model is available.
 
 use bake_agent::{AgentTool, AgentToolResult, ToolReplay};
@@ -38,7 +39,7 @@ pub const CHILD_TOOL_NAMES: [&str; 1] = ["send_message"];
 
 const DESCRIPTION: &str = "Delegate a self-contained task to a subagent with its own context; it does not see this conversation and returns only its result. It runs in the background by default, returning its agent id: start independent ones together and keep working; you are notified when one finishes. `send_message` continues it later or steers it while running.";
 
-const CHOICE: &str = " Model choice is optional: omit `provider`, `model`, and `reasoning_effort` to use your own model and effort. To choose, look up routes and efforts with `list_subagent_models`, then pass `provider` and `model` together. If you change the route without `reasoning_effort`, the new model's default effort applies.";
+const CHOICE: &str = " Omit `provider`, `model`, and `reasoning_effort` to use your own route; `list_subagent_models` lists the others.";
 
 const SEND_MESSAGE: &str = "Message a direct continuable subagent, or your parent if you are one. A busy target reads it next step; an idle one starts a new turn. Confirms delivery; no reply.";
 
@@ -114,15 +115,15 @@ fn subagent_tool(host: SubagentHost, model_choice: bool) -> ToolDefinition {
     if model_choice {
         properties["provider"] = json!({
             "type": "string",
-            "description": "LLM provider for the subagent. Pass it with model; omit both to use your own route."
+            "description": "Pass with model."
         });
         properties["model"] = json!({
             "type": "string",
-            "description": "Model id for that provider. Pass it with provider; omit both to use your own route."
+            "description": "Pass with provider."
         });
         properties["reasoning_effort"] = json!({
             "type": "string",
-            "description": "Reasoning effort for the subagent's model. Omit to use your own effort, or the new model's default after a route change."
+            "description": "Omit for your own effort, or a new route's default."
         });
     }
     properties["run_in_background"] = json!({
@@ -235,17 +236,14 @@ fn list_models_tool(host: SubagentHost) -> ToolDefinition {
     let parameters = json!({
         "type": "object",
         "properties": {
-            "provider": { "type": "string", "description": "LLM provider id. Omit to list providers." },
-            "model": {
-                "type": "string",
-                "description": "Exact model id to inspect. Requires provider; omit to list that provider's models."
-            }
+            "provider": { "type": "string", "description": "Omit to list providers." },
+            "model": { "type": "string", "description": "Requires provider." }
         }
     });
     let mut tool = AgentTool::new(
         "list_subagent_models",
         "list_subagent_models",
-        "Look up the models available to subagents; this does not change your own model. Call it with no arguments to list providers, with `provider` to list that provider's models, or with `provider` and `model` to see that model and its reasoning efforts. Pass the returned ids as `subagent`'s `provider`, `model`, and `reasoning_effort`.",
+        "List the routes a subagent can run on: providers; with `provider`, its models; with `provider` and `model`, that model's efforts.",
         parameters,
         move |_id, args, _signal, _update| {
             let result = models::list(&args, &host.available_models(), host.settings())
