@@ -96,7 +96,13 @@ pub(crate) fn lock_path(session_file: &Path) -> PathBuf {
 }
 
 /// How long [`WriterLock::acquire`] waits for a held lock before it fails.
+#[cfg(not(test))]
 pub(crate) const LOCK_WAIT: Duration = Duration::from_secs(1);
+/// Unit tests share their process with every other test's children, so a
+/// lock one test releases can stay held by another test's child until its
+/// `exec`; on a loaded host that has lasted past a second.
+#[cfg(test)]
+pub(crate) const LOCK_WAIT: Duration = Duration::from_secs(10);
 
 /// How often [`WriterLock::try_acquire`] starts over when the file it
 /// locked was replaced meanwhile.
@@ -693,15 +699,7 @@ mod tests {
             Err(SessionError::Locked(path)) if path == file
         ));
         drop(first);
-        // Another test's child may hold the released lock until its
-        // `exec`; a loaded host can stretch that past `LOCK_WAIT`.
-        let deadline = Instant::now() + Duration::from_secs(30);
-        let second = loop {
-            match WriterLock::acquire(&file) {
-                Err(SessionError::Locked(_)) if Instant::now() < deadline => {}
-                taken => break taken.expect("taken over"),
-            }
-        };
+        let second = WriterLock::acquire(&file).expect("taken over");
         assert_eq!(second.session_file(), file);
         // The sidecar stays; the session file was never created.
         assert_eq!(names(&dir.0), ["s.jsonl.lock"]);
