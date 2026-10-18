@@ -47,7 +47,8 @@
 //!
 //! Tree navigation ([`AgentSession::navigate_tree`]) and the store of a
 //! forked session ([`AgentSession::fork_session_manager`]) follow Pi
-//! v1.2.0's `navigateTree` and runtime `fork` (in
+//! v1.2.0's `navigateTree` and runtime `fork`, with Pi v1.3.0's `at`
+//! position for `/clone` (in
 //! `agent_session/navigation.rs`).
 //!
 //! Plugins ([`crate::plugins`], given as [`AgentSessionOptions::plugins`]):
@@ -85,7 +86,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 
 pub use background_compaction::BackgroundCompactionStatus;
 pub use navigation::{
-    ForkPoint, ForkedSession, NAVIGATION_CANCELLED, NAVIGATION_WHILE_BUSY,
+    ForkPoint, ForkPosition, ForkedSession, NAVIGATION_CANCELLED, NAVIGATION_WHILE_BUSY,
     NAVIGATION_WHILE_STREAMING, TreeNavigation,
 };
 use recovery::{Activity, Core, RunState};

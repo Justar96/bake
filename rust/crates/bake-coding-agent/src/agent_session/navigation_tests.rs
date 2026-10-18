@@ -5,7 +5,10 @@
 //! `test/agent-session-branching.test.ts` (forking from a single message,
 //! in memory, and from the middle), `test/suite/regressions/
 //! tree-during-streaming.test.ts` and `9178-tree-during-compaction.test.ts`
-//! (busy refusals keep the leaf), with Bake's checks of the next request's
+//! (busy refusals keep the leaf), and Pi v1.3.0
+//! (`71023aec1546d6d677a65669c5665c0927ce0dd0`)
+//! `test/suite/agent-session-runtime.test.ts` (forking at the current
+//! position, persisted and in memory, and an unsaved session refused), with Bake's checks of the next request's
 //! context, the file's branches, an untouched source file, and the live
 //! model and thinking level. Each test owns its session, temporary
 //! directory, and faux provider; waits are on notifications.
@@ -371,10 +374,10 @@ async fn a_fork_copies_the_path_and_leaves_the_source_file_alone() {
     );
 
     let forked = session
-        .fork_session_manager(&points[1].entry_id)
+        .fork_session_manager(&points[1].entry_id, ForkPosition::Before)
         .await
         .expect("fork");
-    assert_eq!(forked.selected_text, "second");
+    assert_eq!(forked.selected_text.as_deref(), Some("second"));
     let fork_file = forked
         .session
         .session_file()
@@ -420,10 +423,10 @@ async fn a_fork_copies_the_path_and_leaves_the_source_file_alone() {
     // system prompt and settings entries (Pi #8724: roles `["system"]`),
     // and is written only once it has a conversation.
     let empty = session
-        .fork_session_manager(&points[0].entry_id)
+        .fork_session_manager(&points[0].entry_id, ForkPosition::Before)
         .await
         .expect("root fork");
-    assert_eq!(empty.selected_text, "first");
+    assert_eq!(empty.selected_text.as_deref(), Some("first"));
     let roles: Vec<String> = empty
         .session
         .build_session_context()
@@ -444,7 +447,7 @@ async fn a_fork_copies_the_path_and_leaves_the_source_file_alone() {
     let assistant = entry_ids(&session, "assistant")[0].clone();
     assert_eq!(
         session
-            .fork_session_manager(&assistant)
+            .fork_session_manager(&assistant, ForkPosition::Before)
             .await
             .expect_err("not a user message"),
         "Invalid entry ID for forking"
@@ -461,13 +464,136 @@ async fn an_in_memory_session_forks_in_memory() {
     two_turns(&h, &session).await;
     let points = session.user_messages_for_forking();
     let forked = session
-        .fork_session_manager(&points[1].entry_id)
+        .fork_session_manager(&points[1].entry_id, ForkPosition::Before)
         .await
         .expect("fork");
     assert!(!forked.session.is_persisted());
     assert_eq!(forked.session.session_file(), None);
-    assert_eq!(forked.selected_text, "second");
+    assert_eq!(forked.selected_text.as_deref(), Some("second"));
     assert_eq!(live_texts(&session).len(), 4, "the source is unchanged");
+}
+
+// Pi "duplicates the current active branch when forking at the current
+// position": the fork at the leaf is a new file in the same directory,
+// naming the source as its parent, with every message of the path; the
+// source file is untouched.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_fork_at_the_leaf_duplicates_the_active_branch() {
+    let dir = TempDir::new("fork-at");
+    let h = harness();
+    let session = h
+        .session(file_session(&dir), Settings::default(), None, Vec::new())
+        .await;
+    two_turns(&h, &session).await;
+    let file = session.session_file().expect("file");
+    let before = std::fs::read(&file).expect("read");
+    let leaf = session.leaf_id().expect("leaf");
+
+    let forked = session
+        .fork_session_manager(&leaf, ForkPosition::At)
+        .await
+        .expect("fork");
+    assert_eq!(forked.selected_text, None);
+    let fork_file = forked
+        .session
+        .session_file()
+        .expect("fork file")
+        .to_path_buf();
+    assert_ne!(fork_file, file);
+    assert_eq!(fork_file.parent(), file.parent(), "same session directory");
+    assert!(fork_file.exists());
+    assert_ne!(forked.session.session_id(), session.session_id());
+    assert_eq!(
+        forked
+            .session
+            .header()
+            .and_then(|h| h.parent_session().map(str::to_owned)),
+        Some(file.to_string_lossy().into_owned())
+    );
+    assert_eq!(forked.session.leaf_id(), Some(leaf.as_str()));
+    let live: Vec<_> = forked
+        .session
+        .build_session_context()
+        .messages
+        .iter()
+        .map(AgentMessage::to_agent)
+        .collect();
+    assert_eq!(texts(&convert_to_llm(&live)), live_texts(&session));
+    assert_eq!(std::fs::read(&file).expect("read"), before);
+
+    // At an assistant entry, the fork ends with that entry.
+    let assistant = entry_ids(&session, "assistant")[0].clone();
+    let at_assistant = session
+        .fork_session_manager(&assistant, ForkPosition::At)
+        .await
+        .expect("fork at assistant");
+    let live: Vec<_> = at_assistant
+        .session
+        .build_session_context()
+        .messages
+        .iter()
+        .map(AgentMessage::to_agent)
+        .collect();
+    assert_eq!(
+        texts(&convert_to_llm(&live)),
+        ["user: first", "assistant: one"]
+    );
+    assert_eq!(
+        session
+            .fork_session_manager("missing-entry", ForkPosition::At)
+            .await
+            .expect_err("missing"),
+        "Invalid entry ID for forking"
+    );
+}
+
+// Pi "duplicates the current active branch in-memory when forking at the
+// current position".
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_in_memory_fork_at_the_leaf_stays_in_memory() {
+    let h = harness();
+    let session = h
+        .session(in_memory(), Settings::default(), None, Vec::new())
+        .await;
+    two_turns(&h, &session).await;
+    let leaf = session.leaf_id().expect("leaf");
+    let forked = session
+        .fork_session_manager(&leaf, ForkPosition::At)
+        .await
+        .expect("fork");
+    assert!(!forked.session.is_persisted());
+    assert_eq!(forked.session.session_file(), None);
+    assert_eq!(forked.selected_text, None);
+    let live: Vec<_> = forked
+        .session
+        .build_session_context()
+        .messages
+        .iter()
+        .map(AgentMessage::to_agent)
+        .collect();
+    assert_eq!(texts(&convert_to_llm(&live)), live_texts(&session));
+    assert_eq!(live_texts(&session).len(), 4, "the source is unchanged");
+}
+
+// Pi "reports why an unflushed session cannot be forked": a persisted
+// session whose file is not written yet refuses a fork at its leaf.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_unsaved_session_refuses_a_fork_at_its_leaf() {
+    let dir = TempDir::new("fork-at-unsaved");
+    let h = harness();
+    let session = h
+        .session(file_session(&dir), Settings::default(), None, Vec::new())
+        .await;
+    let file = session.session_file().expect("file");
+    assert!(!file.exists());
+    let leaf = session.leaf_id().expect("leaf");
+    assert_eq!(
+        session
+            .fork_session_manager(&leaf, ForkPosition::At)
+            .await
+            .expect_err("unsaved"),
+        "This session has not been saved yet. Send a message before cloning or forking it."
+    );
 }
 
 // `SessionManager::branched_copy`, Pi's runtime `fork` at a root user

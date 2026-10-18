@@ -583,11 +583,11 @@ fn quitting_mid_turn_shuts_the_session_down_before_stop_returns() {
 fn pi_commands_are_refused_and_the_draft_comes_back() {
     let h = harness(Vec::new(), Vec::new());
     h.until(|update| matches!(update, RuntimeUpdate::Status(_)));
-    h.submit_id(4, Submission::FollowUp("/clone gpt".into()));
+    h.submit_id(4, Submission::FollowUp("/copy gpt".into()));
     let updates = h.until(|update| matches!(update, RuntimeUpdate::Refused { .. }));
     assert!(matches!(
         updates.last(),
-        Some(RuntimeUpdate::Refused { id: 4, reason }) if reason.starts_with("/clone is not available")
+        Some(RuntimeUpdate::Refused { id: 4, reason }) if reason.starts_with("/copy is not available")
     ));
     assert!(!updates.iter().any(|u| matches!(
         u,
@@ -791,7 +791,7 @@ fn a_driver_panic_still_shuts_the_session_down_and_is_reported() {
 fn commands_are_refused_but_skills_templates_and_paths_are_not() {
     let templates = ["review".to_owned()];
     assert!(refused_command("/quit", &templates).is_some_and(|r| r.contains("not available")));
-    assert!(refused_command("  /clone x", &templates).is_some());
+    assert!(refused_command("  /copy x", &templates).is_some());
     assert!(
         refused_command("/goal ship it", &templates).is_some_and(|r| r.contains("not a command"))
     );

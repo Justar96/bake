@@ -466,7 +466,7 @@ fn h_requests(requests: &Requests) -> usize {
 }
 
 // TS navigation `unavailable`: a running turn refuses `/new`, `/resume`,
-// `/tree`, `/fork`, and `/compact` with the draft kept, and the turn goes on in its own session.
+// `/tree`, `/fork`, `/clone`, and `/compact` with the draft kept, and the turn goes on in its own session.
 #[test]
 fn a_running_turn_refuses_a_replacement_and_keeps_the_draft() {
     let world = World::new("busy");
@@ -504,6 +504,7 @@ fn a_running_turn_refuses_a_replacement_and_keeps_the_draft() {
         (4, "/tree"),
         (5, "/fork"),
         (6, "/compact"),
+        (7, "/clone"),
     ] {
         h.submit_id(id, Submission::FollowUp(text.into()));
         let updates = h.ended(id);
@@ -1068,7 +1069,7 @@ fn a_driver_panic_after_new_shuts_down_the_session_in_use() {
     h.turn(3, "second");
     // Held: another process cannot take the file the session writes.
     assert!(SessionManager::open(&second, None, None).is_err());
-    h.submit_id(99, Submission::FollowUp("/clone".into()));
+    h.submit_id(99, Submission::FollowUp("/copy".into()));
     let error = h
         .port
         .take()
@@ -1305,6 +1306,109 @@ fn an_esc_at_the_fork_commit_boundary_keeps_the_source_session() {
     for file in world.files() {
         SessionManager::open(&file, None, None).expect("unlocked");
     }
+}
+
+// Pi `handleCloneCommand` and runtime `fork(leafId, { position: "at" })`,
+// with `fork` restoring the clone's recorded model: the clone is a new
+// file in the same directory that names the source as its parent and
+// holds the whole current path; the source file is unchanged; nothing
+// comes back into the draft; later prompts land in the clone.
+#[test]
+fn clone_copies_the_current_path_into_a_new_file() {
+    let world = World::new("clone");
+    let manager = persisted(&world);
+    let source = manager.session_file().expect("file").to_path_buf();
+    let (h, requests) = session_harness(&world, manager, Vec::new(), None);
+    h.turn(1, "alpha");
+    h.command(2, "/model faux/faux-2");
+    h.command(3, "/thinking high");
+    h.turn(4, "beta");
+    let before = std::fs::read(&source).expect("source");
+    let updates = h.command(5, "/clone");
+    let rows = replaced(&updates).expect("replaced");
+    assert_eq!(
+        rows.first(),
+        Some(&Row::Info("Cloned to new session".into()))
+    );
+    let cloned = saved_file(&rows);
+    assert_ne!(cloned, source);
+    assert_eq!(cloned.parent(), source.parent());
+    assert!(rows.contains(&Row::User("alpha".into())), "{rows:#?}");
+    assert!(rows.contains(&Row::User("beta".into())), "{rows:#?}");
+    assert!(restored(&updates).is_none());
+    let status = last_status(&updates).expect("status");
+    assert_eq!(status.model.as_deref(), Some("faux/faux-2"));
+    assert_eq!(status.thinking.as_deref(), Some("high"));
+    assert_eq!(std::fs::read(&source).expect("source"), before);
+    let header = entries(&cloned, "session");
+    assert_eq!(
+        header[0]["parentSession"].as_str(),
+        Some(source.to_string_lossy().as_ref())
+    );
+    assert_eq!(h_requests(&requests), 2, "cloning sent no request");
+    h.turn(6, "gamma");
+    let (model, sent) = requests.lock().expect("requests")[2].clone();
+    assert_eq!(model, "faux-2");
+    assert!(
+        sent.contains("alpha") && sent.contains("beta") && sent.contains("gamma"),
+        "{sent}"
+    );
+    h.stop();
+    assert_eq!(std::fs::read(&source).expect("source"), before);
+    assert_eq!(texts(&cloned, "user"), ["alpha", "beta", "gamma"]);
+    SessionManager::open(&source, None, None).expect("source free");
+    SessionManager::open(&cloned, None, None).expect("clone free");
+}
+
+// Pi "duplicates the current active branch in-memory when forking at the
+// current position", through `/clone` under `--no-session`.
+#[test]
+fn clone_under_no_session_stays_in_memory() {
+    let world = World::new("clone-memory");
+    let manager = SessionManager::in_memory(
+        Some(&world.project()),
+        NewSessionOptions::default(),
+        Vec::new(),
+    )
+    .expect("memory");
+    let (h, _requests) = session_harness(&world, manager, Vec::new(), None);
+    h.turn(1, "alpha");
+    h.turn(2, "beta");
+    let updates = h.command(3, "/clone");
+    let rows = replaced(&updates).expect("replaced");
+    assert!(
+        rows.contains(&Row::Info("Session not saved (--no-session)".into())),
+        "{rows:#?}"
+    );
+    assert!(rows.contains(&Row::User("alpha".into())), "{rows:#?}");
+    assert!(rows.contains(&Row::User("beta".into())), "{rows:#?}");
+    assert!(restored(&updates).is_none());
+    h.stop();
+    assert!(world.files().is_empty());
+}
+
+// Pi "shows a status message when there is nothing to clone": a session
+// with no entries stays as it is. Pi "reports why an unflushed session
+// cannot be forked": an unsaved session with entries refuses, the draft
+// kept.
+#[test]
+fn clone_without_a_saved_leaf_changes_nothing() {
+    let world = World::new("clone-empty");
+    let manager = persisted(&world);
+    let file = manager.session_file().expect("file").to_path_buf();
+    let (h, _requests) = session_harness(&world, manager, Vec::new(), None);
+    let updates = h.command(1, "/clone");
+    assert_eq!(
+        refused(&updates).as_deref(),
+        Some(
+            "Could not clone the session: This session has not been saved yet. Send a message before cloning or forking it.; your draft is kept."
+        )
+    );
+    assert!(replaced(&updates).is_none());
+    h.turn(2, "alpha");
+    h.stop();
+    assert_eq!(texts(&file, "user"), ["alpha"]);
+    assert_eq!(world.files(), [file]);
 }
 
 // Bake: an Esc after the `/tree` choice, before the session moves the

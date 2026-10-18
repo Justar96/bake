@@ -65,7 +65,9 @@ use std::sync::Arc;
 use bake_ai::ApiRegistry;
 use bake_sandbox::SandboxProvider;
 
-use crate::agent_session::{AgentSession, AgentSessionOptions, format_no_models_available_message};
+use crate::agent_session::{
+    AgentSession, AgentSessionOptions, ForkPosition, format_no_models_available_message,
+};
 use crate::cli::file_processor::{ProcessFileOptions, process_file_arguments};
 use crate::cli::list_models::list_models;
 use crate::home::sessions_dir;
@@ -1567,10 +1569,11 @@ impl SessionFactory {
             .await
     }
 
-    /// Builds the session `/fork` replaces `current` with, Pi's runtime
-    /// `fork` before the user message `entry_id`
+    /// Builds the session `/fork` or `/clone` replaces `current` with, Pi's
+    /// runtime `fork` at `entry_id` in `position`
     /// ([`AgentSession::fork_session_manager`]), and returns it with the
-    /// message's text, for the editor. A fork that holds history restores
+    /// chosen message's text, for the editor, when forking before one. A
+    /// fork that holds history restores
     /// the model, thinking level, and permission its path records, as
     /// `/resume` does; an empty fork, from a first message, starts as
     /// `/new` does. `current` and its file are not touched; a persisted
@@ -1579,8 +1582,9 @@ impl SessionFactory {
         &self,
         current: &AgentSession,
         entry_id: &str,
-    ) -> Result<(Replacement, String), String> {
-        let forked = current.fork_session_manager(entry_id).await?;
+        position: ForkPosition,
+    ) -> Result<(Replacement, Option<String>), String> {
+        let forked = current.fork_session_manager(entry_id, position).await?;
         let resume = !forked.session.build_session_context().messages.is_empty();
         let replacement = self
             .build_replacement(current, Staged::Store(Box::new(forked.session)), resume)

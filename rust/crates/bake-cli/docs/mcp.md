@@ -48,7 +48,7 @@ Each server starts under the session's sandbox mode (`bake-rs docs permissions`)
 
 ## Startup and problems
 
-Servers start in the background as the session opens. The first prompt waits up to 10 seconds for servers still starting, so their tools are in its first request; a server that is slower adds its tools to a later prompt. Esc stops a running MCP call without stopping its server. When the session ends, bake-rs stops every server and the processes it started before it exits; in print mode Ctrl+C, `SIGTERM`, and `SIGHUP` do the same at any point, while startup waits for piped input or for servers, or while a prompt runs. `/new`, `/resume`, and `/fork` stop the current session's servers before the next session starts its own.
+Servers start in the background as the session opens. The first prompt waits up to 10 seconds for servers still starting, so their tools are in its first request; a server that is slower adds its tools to a later prompt. Esc stops a running MCP call without stopping its server. When the session ends, bake-rs stops every server and the processes it started before it exits; in print mode Ctrl+C, `SIGTERM`, and `SIGHUP` do the same at any point, while startup waits for piped input or for servers, or while a prompt runs. `/new`, `/resume`, `/fork`, and `/clone` stop the current session's servers before the next session starts its own.
 
 ## Tool flags
 

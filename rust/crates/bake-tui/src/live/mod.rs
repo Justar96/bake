@@ -88,7 +88,6 @@ const PI_COMMANDS: &[&str] = &[
     "copy",
     "changelog",
     "hotkeys",
-    "clone",
     "trust",
     "reload",
     "quit",

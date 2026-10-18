@@ -75,6 +75,11 @@ pub const LIVE_CATALOG: &[Command] = &[
     command("tree", None, "Navigate the session tree (switch branches)"),
     command("fork", None, "Fork a new session from an earlier message"),
     command(
+        "clone",
+        None,
+        "Duplicate the current session at the current position",
+    ),
+    command(
         "compact",
         Some("[instructions]"),
         "Manually compact the session context",
@@ -177,7 +182,7 @@ mod tests {
         assert!(live.contains(&"refresh-models"));
         assert!(live.contains(&"resume") && live.contains(&"new"));
         assert!(live.contains(&"tree") && live.contains(&"fork"));
-        assert!(live.contains(&"compact") && !live.contains(&"clone"));
+        assert!(live.contains(&"compact") && live.contains(&"clone"));
         // `/compact`'s instructions are optional, so Enter on it submits.
         let compact = LIVE_CATALOG.iter().find(|c| c.name == "compact").unwrap();
         assert!(!requires_input(compact));

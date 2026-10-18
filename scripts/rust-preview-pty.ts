@@ -1506,9 +1506,9 @@ await liveScenario('live command-line prompts run first, and a setup failure exi
   await session.wait('both prompts answered', () => session.screen.includes('Echo: from args.') && session.screen.includes('Echo: later arg.')
     && /^ {2}✓ Completed/mu.test(session.screen))
   // A command bake-rs does not run is refused, and the draft is kept.
-  session.send('/clone other\r')
-  await session.wait('command refused', () => session.screen.includes('/clone is not available in bake-rs yet')
-    && session.screen.includes('❯ /clone other'))
+  session.send('/copy other\r')
+  await session.wait('command refused', () => session.screen.includes('/copy is not available in bake-rs yet')
+    && session.screen.includes('❯ /copy other'))
   await session.quit()
 
   const failed = world.launch(['--model', 'missing-model'])
@@ -2134,7 +2134,7 @@ for (const inline of [false, true]) {
   })
 }
 
-// ---- Session tree navigation and forks: /tree, /fork ----
+// ---- Session tree navigation and forks: /tree, /fork, /clone ----
 
 /** Waits until `answer` is on screen and the turn that wrote it has settled: its completed status sits below it. */
 async function turnSettled(session: Preview, answer: string): Promise<void> {
@@ -2147,7 +2147,7 @@ async function turnSettled(session: Preview, answer: string): Promise<void> {
 }
 
 for (const inline of [false, true]) {
-  await liveScenario(`${inline ? 'inline ' : ''}tree navigation and fork branch the right logs, restore drafts, and send no hidden request`, async (world) => {
+  await liveScenario(`${inline ? 'inline ' : ''}tree navigation, fork, and clone branch the right logs, restore drafts, and send no hidden request`, async (world) => {
     const port = world.model.port
     await writeFile(join(world.home, 'models.json'), JSON.stringify({
       providers: { loop: { baseUrl: `http://127.0.0.1:${port}/v1`, api: 'openai-responses', apiKey: 'test-key',
@@ -2205,13 +2205,33 @@ for (const inline of [false, true]) {
     await turnSettled(session, 'Echo: delta.')
     sent = JSON.stringify(world.model.requests[before]?.input)
     assert(sent.includes('ECHO alpha') && sent.includes('ECHO delta') && !sent.includes('ECHO gamma') && !sent.includes('ECHO beta'), `the forked request: ${sent}`)
+    await composerReady(session)
+    // /clone copies the whole current path into a new session and leaves the draft empty.
+    const cloneRequests = world.model.requests.length
+    session.send('/clone\r')
+    // Inline, the replacement's opening note is written into the terminal history.
+    await session.wait('cloned', () => (inline ? session.history : session.screen).includes('Cloned to new session'))
+    await composerReady(session)
+    assert(session.screen.includes('Echo: delta.') && session.screen.includes('❯ Type a draft'), session.screen)
+    assert.equal(world.model.requests.length, cloneRequests, 'the clone sent a model request')
+    before = world.model.requests.length
+    session.send('ECHO epsilon\r')
+    await turnSettled(session, 'Echo: epsilon.')
+    sent = JSON.stringify(world.model.requests[before]?.input)
+    assert(sent.includes('ECHO alpha') && sent.includes('ECHO delta') && sent.includes('ECHO epsilon') && !sent.includes('ECHO gamma'), `the cloned request: ${sent}`)
     await session.quit()
     if (inline) session.assertShellHistory()
     const files = await sessionEntries(world.home)
-    assert.equal(files.length, 2, 'expected the source and its fork')
+    assert.equal(files.length, 3, 'expected the source, its fork, and the clone')
     const source = files.find(entries => messageTexts(entries, 'user').includes('ECHO beta'))
-    const fork = files.find(entries => messageTexts(entries, 'user').includes('ECHO delta'))
-    assert(source && fork, 'a session file is missing')
+    const fork = files.find(entries => messageTexts(entries, 'user').includes('ECHO delta') && !messageTexts(entries, 'user').includes('ECHO epsilon'))
+    const clone = files.find(entries => messageTexts(entries, 'user').includes('ECHO epsilon'))
+    assert(source && fork && clone, 'a session file is missing')
+    assert.deepEqual(messageTexts(clone, 'user'), ['ECHO alpha', 'ECHO delta', 'ECHO epsilon'])
+    const forkHeader = fork[0] as { type?: string; id?: string }
+    const cloneHeader = clone[0] as { type?: string; parentSession?: string }
+    assert(cloneHeader.type === 'session' && typeof forkHeader.id === 'string' && typeof cloneHeader.parentSession === 'string'
+      && cloneHeader.parentSession.includes(forkHeader.id), 'the clone does not name the fork as its source')
     assert.deepEqual(messageTexts(source, 'user'), ['ECHO alpha', 'ECHO beta', 'ECHO gamma'])
     assert.deepEqual(messageTexts(fork, 'user'), ['ECHO alpha', 'ECHO delta'])
     const parentOf = (text: string) => source.find(entry => entry.type === 'message'

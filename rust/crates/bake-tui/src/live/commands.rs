@@ -1,6 +1,6 @@
 //! The commands a live session runs: `/model`, `/thinking`, `/settings`,
-//! `/session`, `/name`, `/new`, `/resume`, `/tree`, `/fork`, `/compact`,
-//! `/login`, `/logout`, and `/refresh-models`.
+//! `/session`, `/name`, `/new`, `/resume`, `/tree`, `/fork`, `/clone`,
+//! `/compact`, `/login`, `/logout`, and `/refresh-models`.
 //!
 //! `/model`, `/thinking`, and `/settings` follow Pi v1.2.0
 //! `packages/coding-agent/src/modes/interactive/interactive-mode.ts`
@@ -32,6 +32,11 @@
 //! with the same busy rule as `/new`. `/tree` moves the running session's
 //! leaf in place; `/fork` is staged like `/resume`. Both put a chosen user
 //! message back into the draft and never send it.
+//!
+//! `/clone` follows Pi v1.3.0 (`71023aec1546d6d677a65669c5665c0927ce0dd0`)
+//! `interactive-mode.ts` (`handleCloneCommand`) and
+//! `agent-session-runtime.ts` (`fork` with `position: "at"`): staged like
+//! `/fork`, it copies the path up to and including the current leaf.
 //!
 //! `/compact [instructions]` follows Pi v1.2.0 `interactive-mode.ts`
 //! (`handleCompactCommand`, the `compaction_end` handler) and
@@ -73,7 +78,7 @@ use std::sync::Arc;
 
 use bake_agent::QueueMode;
 use bake_ai::{AbortSignal, Model, ModelThinkingLevel};
-use bake_coding_agent::agent_session::{AgentSession, DefaultSave};
+use bake_coding_agent::agent_session::{AgentSession, DefaultSave, ForkPosition};
 use bake_coding_agent::cli::{Replacement, SessionFactory, SessionTarget};
 use bake_coding_agent::cliproxyapi::account::{
     AccountView, CliProxyAccount, RefreshOutcome, disabled_warning, refresh_account,
@@ -107,6 +112,7 @@ pub const COMMANDS: &[&str] = &[
     "resume",
     "tree",
     "fork",
+    "clone",
     "compact",
 ];
 
@@ -114,7 +120,7 @@ pub const COMMANDS: &[&str] = &[
 /// its leaf ([`Done::Navigated`]), or compact it ([`Done::Compacted`]).
 /// Each starts only while the session is idle, and no prompt is admitted
 /// while one runs.
-pub const TRANSITIONS: &[&str] = &["new", "resume", "tree", "fork", "compact"];
+pub const TRANSITIONS: &[&str] = &["new", "resume", "tree", "fork", "clone", "compact"];
 
 /// The command that runs as the session's work, as a turn does: the bar
 /// shows it, and Esc cancels it rather than a dialog.
@@ -158,9 +164,9 @@ pub struct Context {
     commit_gate: Option<CommitGate>,
 }
 
-/// Holds `/login` once its check has passed, before its commit; `/resume`
-/// and `/fork` once their replacement is built and checked, before the
-/// driver commits it; and `/tree` once its entry is chosen, before the
+/// Holds `/login` once its check has passed, before its commit; `/resume`,
+/// `/fork`, and `/clone` once their replacement is built and checked,
+/// before the driver commits it; and `/tree` once its entry is chosen, before the
 /// session moves the leaf: the command says so on `reached` and goes on
 /// when `release` lets it.
 #[cfg(test)]
@@ -353,6 +359,7 @@ pub fn refuse_argument(name: &str, argument: &str) -> Option<String> {
             "/{name} knows only CLIProxyAPI in bake-rs, not {argument}; your draft is kept."
         )),
         "refresh-models" | "settings" | "session" | "new" | "resume" | "tree" | "fork"
+        | "clone"
             if !argument.is_empty() =>
         {
             Some(format!("/{name} takes no argument; your draft is kept."))
@@ -379,6 +386,7 @@ pub async fn run(name: &str, argument: String, mut context: Context) -> Outcome 
         "resume" => resume(&mut context).await,
         "tree" => tree(&mut context).await,
         "fork" => fork(&mut context).await,
+        "clone" => clone_session(&context).await,
         "compact" => compact(&context, &argument).await,
         _ => Err(format!("/{name} is not a command.")),
     };
@@ -1248,13 +1256,52 @@ async fn fork(context: &mut Context) -> Outcome {
     let DialogAnswer::Chose { value: id, .. } = answer else {
         return Err(CANCELLED.into());
     };
+    let (replacement, selected) =
+        build_fork(context, &factory, &id, ForkPosition::Before, "fork").await?;
+    Ok(Done::Replace {
+        replacement: Box::new(replacement),
+        note: "Forked to new session".into(),
+        draft: selected.filter(|text| !text.trim().is_empty()),
+    })
+}
+
+/// `/clone`, Pi's `handleCloneCommand`: a new session holding the path up
+/// to and including the current leaf ([`SessionFactory::fork`] at
+/// [`ForkPosition::At`]), in the same session directory (in memory under
+/// `--no-session`), with this session's file named as its parent and left
+/// as it is. The driver commits it ([`Done::Replace`]); with no leaf there
+/// is nothing to copy.
+async fn clone_session(context: &Context) -> Outcome {
+    let factory = factory(context)?;
+    let Some(leaf) = context.session.leaf_id() else {
+        return Ok(Done::Note("Nothing to clone yet".into()));
+    };
+    let (replacement, _) = build_fork(context, &factory, &leaf, ForkPosition::At, "clone").await?;
+    Ok(Done::Replace {
+        replacement: Box::new(replacement),
+        note: "Cloned to new session".into(),
+        draft: None,
+    })
+}
+
+/// Builds the replacement `/fork` and `/clone` commit, forked at
+/// `entry_id` in `position`, and holds it at the test commit gate; a
+/// cancel before or after the build leaves nothing running. `verb` names
+/// the command in a failure.
+async fn build_fork(
+    context: &Context,
+    factory: &SessionFactory,
+    entry_id: &str,
+    position: ForkPosition,
+    verb: &str,
+) -> Result<(Replacement, Option<String>), String> {
     if context.signal.aborted() {
         return Err(CANCELLED.into());
     }
     let (replacement, selected) = factory
-        .fork(&context.session, &id)
+        .fork(&context.session, entry_id, position)
         .await
-        .map_err(|error| format!("Could not fork the session: {error}; your draft is kept."))?;
+        .map_err(|error| format!("Could not {verb} the session: {error}; your draft is kept."))?;
     if context.signal.aborted() {
         replacement.session.shutdown().await;
         return Err(CANCELLED.into());
@@ -1267,11 +1314,7 @@ async fn fork(context: &mut Context) -> Outcome {
             Release::Aborted => context.signal.cancelled().await,
         }
     }
-    Ok(Done::Replace {
-        replacement: Box::new(replacement),
-        note: "Forked to new session".into(),
-        draft: Some(selected).filter(|text| !text.trim().is_empty()),
-    })
+    Ok((replacement, selected))
 }
 
 /// The base URL the signed-in account uses, to offer again.

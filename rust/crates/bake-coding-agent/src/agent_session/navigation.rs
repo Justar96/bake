@@ -4,7 +4,9 @@
 //! `packages/coding-agent/src/core/agent-session.ts` (`navigateTree`,
 //! `getUserMessagesForForking`, `_refreshFinalizedContext`) and
 //! `core/agent-session-runtime.ts` (`fork` with its default `before`
-//! position). Branch summaries, labels, and the extension events
+//! position), and Pi v1.3.0 (`71023aec1546d6d677a65669c5665c0927ce0dd0`)
+//! `core/agent-session-runtime.ts` (`fork` with its `at` position, which
+//! `/clone` uses). Branch summaries, labels, and the extension events
 //! (`session_before_tree`, `session_tree`, `session_before_fork`) are not
 //! ported: navigation only moves the leaf, and the branch it leaves stays
 //! in the session file as it was.
@@ -46,14 +48,25 @@ pub struct ForkPoint {
     pub text: String,
 }
 
+/// Where a fork starts relative to its entry, Pi's runtime `fork`
+/// `position` option.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ForkPosition {
+    /// Before a user message: the path up to its parent, as `/fork` does.
+    Before,
+    /// At any entry: the path up to and including it, as `/clone` does.
+    At,
+}
+
 /// A forked session's store, built and not yet in use
 /// ([`AgentSession::fork_session_manager`]).
 #[derive(Debug)]
 pub struct ForkedSession {
     /// The new session.
     pub session: SessionManager,
-    /// The chosen message's text, Pi's `selectedText`.
-    pub selected_text: String,
+    /// The chosen message's text, Pi's `selectedText`; `None` for a fork
+    /// [`ForkPosition::At`].
+    pub selected_text: Option<String>,
 }
 
 /// Pi's `contentText(content, "")`: a string, or its text blocks joined.
@@ -225,15 +238,21 @@ impl AgentSession {
             .collect()
     }
 
-    /// The store of a session forked before the user message `entry_id`,
-    /// Pi's runtime `fork` with its default `before` position: the path up
-    /// to the message's parent copied into a new session, or an empty
-    /// session when the message is a root. The running session, its file,
-    /// and its writer lock are not touched ([`SessionManager::branched_copy`]);
+    /// The store of a session forked at `entry_id`, Pi's runtime `fork`.
+    /// [`ForkPosition::Before`] takes a user message and copies the path up
+    /// to its parent into a new session, or starts an empty session when
+    /// the message is a root; [`ForkPosition::At`] takes any entry and
+    /// copies the path up to and including it. The running session, its
+    /// file, and its writer lock are not touched
+    /// ([`SessionManager::branched_copy`]);
     /// a persisted fork goes in the same session directory, names this
     /// session's file as its parent, and holds its own file's lock, and an
     /// in-memory session forks in memory. Refused after shutdown.
-    pub async fn fork_session_manager(&self, entry_id: &str) -> Result<ForkedSession, String> {
+    pub async fn fork_session_manager(
+        &self,
+        entry_id: &str,
+        position: ForkPosition,
+    ) -> Result<ForkedSession, String> {
         let permit = self.change_permit()?;
         let session = Arc::clone(&self.session);
         let entry_id = entry_id.to_owned();
@@ -241,8 +260,13 @@ impl AgentSession {
             let source = lock(&session);
             let invalid = || "Invalid entry ID for forking".to_owned();
             let entry = source.entry(&entry_id).ok_or_else(invalid)?;
-            let selected_text = user_message_text(entry).ok_or_else(invalid)?;
-            let leaf = parent_of(entry);
+            let (leaf, selected_text) = match position {
+                ForkPosition::At => (Some(entry.id().to_owned()), None),
+                ForkPosition::Before => {
+                    let text = user_message_text(entry).ok_or_else(invalid)?;
+                    (parent_of(entry), Some(text))
+                }
+            };
             if source.is_persisted()
                 && leaf.is_some()
                 && !source.session_file().is_some_and(std::path::Path::exists)
