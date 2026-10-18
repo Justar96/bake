@@ -241,7 +241,7 @@ async fn prompts(
         write_out(
             stderr,
             &format!(
-                "{left} background job(s) still running after {} s were stopped\n",
+                "{left} background job(s) or subagent run(s) still running after {} s were stopped\n",
                 options.job_wait.as_secs()
             ),
         );
@@ -250,26 +250,22 @@ async fn prompts(
 }
 
 fn report_remaining_recoverable_jobs(session: &AgentSession, stderr: &SharedWriter) {
-    let live = session
-        .jobs()
-        .list()
-        .iter()
-        .filter(|job| !job.status.is_terminal())
-        .count();
+    let live = session.jobs().live();
     if live > 0 {
         write_out(
             stderr,
             &format!(
-                "{live} background job(s) still running at the end of the recoverable run were stopped\n"
+                "{live} background job(s) or subagent run(s) still running at the end of the recoverable run were stopped\n"
             ),
         );
     }
 }
 
 /// Bake 0.3 headless `settleJobs`: waits, up to `limit`, for the
-/// session's background jobs and for the turns their completion notices
-/// open, so the answer printed is the last turn's. Returns how many jobs
-/// were still running at the limit; the session's shutdown stops them.
+/// session's background jobs and subagent runs and for the turns their
+/// notices open, so the answer printed is the last turn's. Returns how
+/// many were still running at the limit; the session's shutdown stops
+/// them.
 /// A notice turn still running at the limit is aborted and awaited,
 /// including its cleanup, before this returns.
 async fn settle_jobs(
@@ -281,12 +277,8 @@ async fn settle_jobs(
     let jobs = session.jobs().clone();
     // Subscribed before the first check, so no settlement is missed.
     let mut events = jobs.subscribe();
-    let live_count = || {
-        jobs.list()
-            .iter()
-            .filter(|job| !job.status.is_terminal())
-            .count()
-    };
+    // Running subagents hold the registry's live count.
+    let live_count = || jobs.live();
     loop {
         if let Some(outcome) = control.stopped() {
             return Err(outcome.to_string());

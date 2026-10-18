@@ -1193,3 +1193,45 @@ mod processes {
         bounded("the close", registry.close()).await;
     }
 }
+
+// Notices other agents post wait beside unreported jobs, are claimed once
+// in arrival order, wake subscribers, and are refused and dropped once the
+// registry closes; held live work counts as live until released.
+#[tokio::test]
+async fn posted_notices_and_live_holds_follow_the_registry() {
+    let (_gate, registry) = registry(JobLimits::default());
+    let notice = |text: &str| crate::session::messages::CustomMessage {
+        custom_type: "test.notice".into(),
+        content: bake_ai::UserContent::Text(text.into()),
+        display: true,
+        details: None,
+        timestamp: 0,
+    };
+    let mut events = registry.subscribe();
+    assert!(!registry.has_undelivered());
+    registry.post(notice("one")).expect("posted");
+    registry.post(notice("two")).expect("posted");
+    assert!(bounded("a post wakes", events.changed()).await);
+    assert!(registry.has_undelivered());
+    let claimed: Vec<_> = registry.claim_mail();
+    assert_eq!(claimed, vec![notice("one"), notice("two")]);
+    assert!(registry.claim_mail().is_empty());
+    assert!(!registry.has_undelivered());
+
+    assert_eq!(registry.live(), 0);
+    let hold = registry.hold_live().expect("open");
+    assert!(bounded("a hold wakes", events.changed()).await);
+    assert_eq!(registry.live(), 1);
+    drop(hold);
+    assert!(bounded("a release wakes", events.changed()).await);
+    assert_eq!(registry.live(), 0);
+
+    registry.post(notice("late")).expect("posted");
+    drop(registry.close());
+    assert_eq!(registry.post(notice("closed")), Err(StartError::Closed));
+    assert!(
+        registry.claim_mail().is_empty(),
+        "closing drops what waited"
+    );
+    assert!(registry.hold_live().is_none());
+}

@@ -50,6 +50,19 @@ pub fn completion_notice(snapshot: &JobSnapshot) -> CustomMessage {
     notice(&snapshot.id.to_string(), text, snapshot.status.as_str())
 }
 
+/// Claims every notice due to the session: a completion notice for each
+/// terminal job not yet reported, then the notices other agents posted
+/// ([`JobRegistry::post`]), in arrival order.
+pub fn claim(jobs: &JobRegistry) -> Vec<CustomMessage> {
+    let mut notices: Vec<CustomMessage> = jobs
+        .claim_unreported()
+        .iter()
+        .map(completion_notice)
+        .collect();
+    notices.extend(jobs.claim_mail());
+    notices
+}
+
 /// The notice for a job an earlier process of the session started and did
 /// not report.
 pub fn lost_notice(id: &str, kind: &str, label: &str) -> CustomMessage {

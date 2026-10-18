@@ -22,6 +22,7 @@ use bake_coding_agent::agent_session::{
     BackgroundCompactionStatus, CompactionReason, SessionEvent,
 };
 use bake_coding_agent::session::messages::CustomMessage;
+use bake_coding_agent::subagents::messages as subagents;
 use bake_tui_view::runtime::{Pending, RuntimeUpdate, Target};
 use bake_tui_view::transcript::{CallState, Row};
 use serde_json::Value;
@@ -169,7 +170,8 @@ impl Projector {
     fn agent(&mut self, event: &AgentEvent) -> Vec<RuntimeUpdate> {
         match event {
             AgentEvent::MessageStart { message } if notice_text(message).is_some() => {
-                // A background job's notice, in a run it opened or one
+                // A background job's or subagent's notice, or a
+                // subagent's message, in a run it opened or one
                 // already streaming.
                 let mut updates: Vec<RuntimeUpdate> = Vec::new();
                 if !self.admitted {
@@ -488,12 +490,62 @@ fn argument(tool: &str, args: &Value) -> String {
             Some(path) => format!("{pattern} in {path}"),
             None => pattern,
         }),
+        // 0.3 `presentation.ts`: a subagent by its label and route, a
+        // message by its target and first line.
+        "subagent" => field("description").map(|label| {
+            let label = clip(first_line(&label), 80);
+            match (field("provider"), field("model")) {
+                (Some(provider), Some(model)) => format!("{label} · {provider}/{model}"),
+                _ => label,
+            }
+        }),
+        "send_message" => field("agent_id").map(|id| {
+            let line = clip(first_line(&field("message").unwrap_or_default()), 48);
+            if line.is_empty() {
+                id
+            } else {
+                format!("{id}: {line}")
+            }
+        }),
+        "interrupt_agent" | "list_agents" | "list_subagent_models" => {
+            Some(field("agent_id").unwrap_or_else(|| {
+                [field("provider"), field("model"), field("scope")]
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>()
+                    .join("/")
+            }))
+        }
         _ => None,
     };
     lead.unwrap_or_else(|| match args {
         Value::Object(map) if map.is_empty() => String::new(),
         other => other.to_string(),
     })
+}
+
+/// `text`'s first nonblank line with runs of whitespace collapsed, and
+/// ` …` when more lines follow.
+fn first_line(text: &str) -> String {
+    let mut lines = text
+        .lines()
+        .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|line| !line.is_empty());
+    let first = lines.next().unwrap_or_default();
+    if lines.next().is_some() {
+        format!("{first} …")
+    } else {
+        first
+    }
+}
+
+/// `text` kept to `limit` characters, the last one an ellipsis when cut.
+fn clip(text: String, limit: usize) -> String {
+    if text.chars().count() <= limit {
+        return text;
+    }
+    let kept: String = text.chars().take(limit.saturating_sub(1)).collect();
+    format!("{}…", kept.trim_end())
 }
 
 /// A result's lines: its text, an image as a note, and an edit's unified
@@ -617,12 +669,35 @@ pub fn replay_compacted(messages: &[AgentMessage]) -> Vec<Row> {
     }
 }
 
-/// The text of a background job's notice ([`NOTICE_TYPE`]), shown as an
-/// information row.
+/// The information row of a notice: a background job's notice
+/// ([`NOTICE_TYPE`]) in full, a subagent's settlement by its summary line,
+/// and a subagent's message as `← agent {id}: {first line}`, its first
+/// line kept to 48 characters as 0.3's `presentation.ts` keeps titles.
 fn notice_text(message: &AgentMessage) -> Option<String> {
     let custom = message.as_custom()?;
     let custom = custom.as_any().downcast_ref::<CustomMessage>()?;
-    (custom.custom_type == NOTICE_TYPE).then(|| user_text(&custom.content))
+    let text = user_text(&custom.content);
+    match custom.custom_type.as_str() {
+        NOTICE_TYPE => Some(text),
+        subagents::NOTICE_TYPE => Some(text.lines().next().unwrap_or_default().to_owned()),
+        subagents::MESSAGE_TYPE => {
+            let from = custom
+                .details
+                .as_ref()
+                .and_then(|details| details.get("from"))
+                .and_then(serde_json::Value::as_str)?;
+            let body = text
+                .strip_prefix(&format!("Agent {from} sent a message: "))
+                .unwrap_or(&text);
+            let line = body.lines().next().unwrap_or_default();
+            let mut title: String = line.chars().take(48).collect();
+            if title.len() < line.len() {
+                title.push('…');
+            }
+            Some(format!("← agent {from}: {title}"))
+        }
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -845,5 +920,46 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn subagent_notices_and_messages_are_information_rows() {
+        let notice = bake_coding_agent::subagents::messages::settlement_notice(
+            "child-1",
+            1,
+            bake_coding_agent::subagents::messages::StopReason::Completed,
+            Some("long\nanswer"),
+        );
+        assert_eq!(
+            notice_text(&AgentMessage::Custom(std::sync::Arc::new(notice))).as_deref(),
+            Some(
+                "Background subagent child-1 finished and will do no further work unless you send it more."
+            )
+        );
+        let message = bake_coding_agent::subagents::messages::agent_message(
+            "m",
+            "child-1",
+            "parent",
+            &format!("{}\nsecond line", "x".repeat(60)),
+        );
+        assert_eq!(
+            notice_text(&AgentMessage::Custom(std::sync::Arc::new(message))).as_deref(),
+            Some(format!("← agent child-1: {}…", "x".repeat(48)).as_str())
+        );
+        assert_eq!(
+            argument(
+                "subagent",
+                &json!({ "description": "read\n a  file", "prompt": "p", "provider": "x", "model": "y" })
+            ),
+            "read … · x/y"
+        );
+        assert_eq!(
+            argument(
+                "send_message",
+                &json!({ "agent_id": "c", "message": "hi\nthere" })
+            ),
+            "c: hi …"
+        );
+        assert_eq!(argument("list_agents", &json!({})), "");
     }
 }

@@ -6,8 +6,9 @@
 //! the names, parameters, descriptions under `wakeup` delivery, the
 //! `[status: ...]` line, the still-running guidance, the list and kill
 //! texts, and the unknown-job explanation. Differences: the `job_id`
-//! description and the unknown-job text leave out the TypeScript's
-//! mention of subagent ids until subagents exist; terminal observations
+//! description and the unknown-job text mention subagent ids only for a
+//! session that can start subagents
+//! ([`create_job_tool_definitions_with_subagents`]); terminal observations
 //! carry recovery metadata in result details; a `completing` job, which
 //! the TypeScript did not have, reads as `running`; output a stream dropped
 //! between reads is announced on its own line; and a read longer than
@@ -42,16 +43,30 @@ pub const DEFAULT_WAIT: Duration = Duration::from_secs(30);
 /// Where the model finds the id both job-addressing tools take.
 const JOB_ID_DESCRIPTION: &str = "A job id.";
 
+/// [`JOB_ID_DESCRIPTION`] for a session that can start subagents.
+const JOB_ID_DESCRIPTION_WITH_SUBAGENTS: &str = "A job id, not a continuable subagent's agent id.";
+
 /// Told to the model when a read finds the job still running and its
 /// completion would open the next turn.
 pub const STILL_RUNNING: &str = "Still running. Its completion notice will start your next turn; if nothing else needs doing now, end your turn instead of waiting.";
 
 /// `job_output`, `job_list`, and `job_kill` over `jobs`.
 pub fn create_job_tool_definitions(jobs: &JobRegistry) -> Vec<ToolDefinition> {
+    definitions(jobs, false)
+}
+
+/// The job tools of a session that can start subagents: the `job_id`
+/// description and the unknown-job text say that a subagent's id is not a
+/// job id, `tool-jobs`' wording.
+pub fn create_job_tool_definitions_with_subagents(jobs: &JobRegistry) -> Vec<ToolDefinition> {
+    definitions(jobs, true)
+}
+
+fn definitions(jobs: &JobRegistry, subagents: bool) -> Vec<ToolDefinition> {
     vec![
-        job_output_tool(jobs.clone()),
+        job_output_tool(jobs.clone(), subagents),
         job_list_tool(jobs.clone()),
-        job_kill_tool(jobs.clone()),
+        job_kill_tool(jobs.clone(), subagents),
     ]
 }
 
@@ -98,7 +113,7 @@ pub fn status_line(snapshot: &JobSnapshot) -> String {
 }
 
 /// `validateJobId` and the registry's lookup, with `explainUnknownJob`.
-fn job_id(jobs: &JobRegistry, args: &Value) -> Result<JobId, String> {
+fn job_id(jobs: &JobRegistry, args: &Value, subagents: bool) -> Result<JobId, String> {
     let text = args.get("job_id").and_then(Value::as_str).unwrap_or("");
     if text.is_empty() {
         return Err(format!(
@@ -106,11 +121,16 @@ fn job_id(jobs: &JobRegistry, args: &Value) -> Result<JobId, String> {
             Value::String(text.to_owned())
         ));
     }
-    jobs.id(text).map_err(explain)
+    jobs.id(text).map_err(|error| explain(error, subagents))
 }
 
-fn explain(error: JobError) -> String {
+fn explain(error: JobError, subagents: bool) -> String {
     match error {
+        // Models reach for job_output to wait on a subagent; say how that
+        // wait already happens.
+        JobError::Unknown(id) if subagents => format!(
+            "unknown job {id}; use job_list to find a background job id. A continuable subagent's id is not a job id: its result arrives as a notice when it finishes."
+        ),
         JobError::Unknown(id) => {
             format!("unknown job {id}; use job_list to find a background job id.")
         }
@@ -118,18 +138,23 @@ fn explain(error: JobError) -> String {
     }
 }
 
-fn job_id_parameter() -> Value {
-    json!({ "type": "string", "description": JOB_ID_DESCRIPTION })
+fn job_id_parameter(subagents: bool) -> Value {
+    let description = if subagents {
+        JOB_ID_DESCRIPTION_WITH_SUBAGENTS
+    } else {
+        JOB_ID_DESCRIPTION
+    };
+    json!({ "type": "string", "description": description })
 }
 
-fn job_output_tool(jobs: JobRegistry) -> ToolDefinition {
+fn job_output_tool(jobs: JobRegistry, subagents: bool) -> ToolDefinition {
     let max_wait = jobs.limits().max_wait;
     let description = "Read a background job's new output since your last read, or its result once done; ends with `[status: ...]`. You are notified when it finishes; do not poll or sleep. The notice starts a new turn if yours has ended, so end your turn rather than wait.";
     let parameters = json!({
         "type": "object",
         "required": ["job_id"],
         "properties": {
-            "job_id": job_id_parameter(),
+            "job_id": job_id_parameter(subagents),
             "wait": {
                 "type": "boolean",
                 "description": "Block until done or timeout; only for a job about to finish that you cannot continue without."
@@ -147,7 +172,7 @@ fn job_output_tool(jobs: JobRegistry) -> ToolDefinition {
         parameters,
         move |_id, args, signal, _update| {
             let jobs = jobs.clone();
-            Box::pin(async move { job_output(&jobs, &args, signal).await })
+            Box::pin(async move { job_output(&jobs, &args, signal, subagents).await })
         },
     );
     definition(tool)
@@ -157,8 +182,10 @@ async fn job_output(
     jobs: &JobRegistry,
     args: &Value,
     signal: Option<AbortSignal>,
+    subagents: bool,
 ) -> Result<AgentToolResult, String> {
-    let id = job_id(jobs, args)?;
+    let explain = |error| explain(error, subagents);
+    let id = job_id(jobs, args, subagents)?;
     if args.get("wait").and_then(Value::as_bool) == Some(true) {
         let max = jobs.limits().max_wait;
         let asked = args
@@ -234,12 +261,12 @@ fn job_list_tool(jobs: JobRegistry) -> ToolDefinition {
     definition(tool)
 }
 
-fn job_kill_tool(jobs: JobRegistry) -> ToolDefinition {
+fn job_kill_tool(jobs: JobRegistry, subagents: bool) -> ToolDefinition {
     let parameters = json!({
         "type": "object",
         "required": ["job_id"],
         "properties": {
-            "job_id": job_id_parameter(),
+            "job_id": job_id_parameter(subagents),
             "reason": { "type": "string" }
         }
     });
@@ -249,15 +276,16 @@ fn job_kill_tool(jobs: JobRegistry) -> ToolDefinition {
         "Stop a background job (jobs outlive your turn).",
         parameters,
         move |_id, args, _signal, _update| {
-            let result = job_kill(&jobs, &args);
+            let result = job_kill(&jobs, &args, subagents);
             Box::pin(async move { result })
         },
     );
     definition(tool)
 }
 
-fn job_kill(jobs: &JobRegistry, args: &Value) -> Result<AgentToolResult, String> {
-    let id = job_id(jobs, args)?;
+fn job_kill(jobs: &JobRegistry, args: &Value, subagents: bool) -> Result<AgentToolResult, String> {
+    let explain = |error| explain(error, subagents);
+    let id = job_id(jobs, args, subagents)?;
     let reason = args
         .get("reason")
         .and_then(Value::as_str)

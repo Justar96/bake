@@ -1010,13 +1010,12 @@ fn next_turn_hook(
                 .compact_before_next_response(tools, signal)
                 .await
                 .unwrap_or_default();
-            // Jobs that settled during the step reach its next request,
-            // `tool-jobs`' injection into a busy owner.
-            update.messages.extend(
-                jobs.claim_unreported()
-                    .iter()
-                    .map(|job| job_notices::live(job_notices::completion_notice(job))),
-            );
+            // Jobs that settled during the step, and notices other agents
+            // posted, reach its next request: `tool-jobs`' injection into
+            // a busy owner.
+            update
+                .messages
+                .extend(job_notices::claim(&jobs).into_iter().map(job_notices::live));
             // One read, so the model and level come from one change.
             let selected = selection.get();
             if let Some(model) = selected.model {
@@ -1418,7 +1417,12 @@ impl AgentSession {
         let jobs = jobs.unwrap_or_else(|| JobRegistry::new(work.clone(), JobLimits::default()));
         // Jobs an earlier process ran: their ids stay reserved, and those
         // never reported carry their recorded outcome with the next prompt.
-        let pending_notices = Arc::new(Mutex::new(job_notices::recover(&lock(&session), &jobs)));
+        let pending_notices = {
+            let session = lock(&session);
+            let mut notices = job_notices::recover(&session, &jobs);
+            notices.extend(crate::subagents::lost_runs(&session));
+            Arc::new(Mutex::new(notices))
+        };
         let (context, has_thinking_entry) = with_session(&work, &session, |session| {
             let context = session.build_session_context();
             let has_thinking_entry = session
@@ -1702,6 +1706,21 @@ impl AgentSession {
                                 .unwrap_or_else(PoisonError::into_inner)
                                 .retain(|notice| {
                                     job_notices::notice_id(notice.details.as_ref()) != Some(id)
+                                });
+                        }
+                        // A posted notice waiting for a prompt is delivered
+                        // once: its durable entry takes it off the list.
+                        if matches!(entry_id, Ok(Some(_)))
+                            && let bake_agent::AgentMessage::Custom(custom) = message
+                            && let Some(custom) = custom.as_any().downcast_ref::<CustomMessage>()
+                            && custom.custom_type != job_notices::NOTICE_TYPE
+                        {
+                            pending_notices
+                                .lock()
+                                .unwrap_or_else(PoisonError::into_inner)
+                                .retain(|notice| {
+                                    notice.custom_type != custom.custom_type
+                                        || notice.details != custom.details
                                 });
                         }
                         if entry_id.is_err() {

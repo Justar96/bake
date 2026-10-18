@@ -452,12 +452,7 @@ impl PromptExecution {
         if self.closed_reason().is_some() {
             return Ok((RunOutcome::FinishedTurn, false));
         }
-        let notices: Vec<CustomMessage> = self
-            .jobs
-            .claim_unreported()
-            .iter()
-            .map(job_notices::completion_notice)
-            .collect();
+        let notices: Vec<CustomMessage> = job_notices::claim(&self.jobs);
         if notices.is_empty() {
             return Ok((RunOutcome::FinishedTurn, false));
         }
@@ -491,7 +486,7 @@ impl PromptExecution {
         journal: &run_journal::Journal,
         control: &RunControl,
     ) -> Result<RunOutcome, String> {
-        if journal.job_wait.is_zero() || self.jobs.list().is_empty() {
+        if journal.job_wait.is_zero() || (self.jobs.list().is_empty() && self.jobs.live() == 0) {
             return Ok(control.stopped().unwrap_or(RunOutcome::FinishedTurn));
         }
         let deadline = tokio::time::Instant::now()
@@ -503,12 +498,7 @@ impl PromptExecution {
             if let Some(stopped) = control.stopped() {
                 return Ok(stopped);
             }
-            let live = self
-                .jobs
-                .list()
-                .iter()
-                .filter(|job| !job.status.is_terminal())
-                .count();
+            let live = self.jobs.live();
             if tokio::time::Instant::now() >= deadline {
                 return Ok(RunOutcome::FinishedTurn);
             }
@@ -590,10 +580,9 @@ impl PromptExecution {
                 .map(job_notices::live),
         );
         messages.extend(
-            self.jobs
-                .claim_unreported()
-                .iter()
-                .map(|job| job_notices::live(job_notices::completion_notice(job))),
+            job_notices::claim(&self.jobs)
+                .into_iter()
+                .map(job_notices::live),
         );
         self.run_agent_input((!messages.is_empty()).then_some(messages), control)
             .await
@@ -707,10 +696,9 @@ impl PromptExecution {
                 .map(job_notices::live),
         );
         messages.extend(
-            self.jobs
-                .claim_unreported()
-                .iter()
-                .map(|job| job_notices::live(job_notices::completion_notice(job))),
+            job_notices::claim(&self.jobs)
+                .into_iter()
+                .map(job_notices::live),
         );
         messages.push(
             UserMessage {
@@ -791,11 +779,9 @@ impl PromptExecution {
                     .map_err(|e| e.to_string());
                 continue;
             }
-            let notices: Vec<LiveMessage> = self
-                .jobs
-                .claim_unreported()
-                .iter()
-                .map(|job| job_notices::live(job_notices::completion_notice(job)))
+            let notices: Vec<LiveMessage> = job_notices::claim(&self.jobs)
+                .into_iter()
+                .map(job_notices::live)
                 .collect();
             if notices.is_empty() {
                 break;

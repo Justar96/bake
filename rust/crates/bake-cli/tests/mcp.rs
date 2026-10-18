@@ -723,7 +723,7 @@ fn session_lines(case: &Case) -> Vec<Value> {
         .collect()
 }
 
-const BUILTIN: [&str; 7] = [
+const BUILTIN: [&str; 11] = [
     "read",
     "bash",
     "edit",
@@ -731,7 +731,14 @@ const BUILTIN: [&str; 7] = [
     "job_output",
     "job_list",
     "job_kill",
+    "subagent",
+    "send_message",
+    "interrupt_agent",
+    "list_agents",
 ];
+
+/// The default subagent tools; with one model there is no model choice.
+const SUBAGENT_TOOLS: [&str; 4] = ["subagent", "send_message", "interrupt_agent", "list_agents"];
 
 const FIXTURE_TOOLS: [&str; 9] = [
     "mcp__fx__echo",
@@ -1334,12 +1341,15 @@ fn tool_restrictions_cover_mcp_tools(case: &Arc<Case>) {
             vec!["mcp__fx__echo"],
         ),
         (vec!["--tools", "+grep,-bash"], {
-            let mut want = vec!["read", "edit", "write", "grep"];
+            let mut want = vec!["read", "edit", "write"];
+            want.extend(SUBAGENT_TOOLS);
+            want.push("grep");
             want.extend(all_mcp.iter().copied());
             want
         }),
         (vec!["--exclude-tools", "bash,mcp__fx__s*,mcp__fx__env"], {
             let mut want = vec!["read", "edit", "write"];
+            want.extend(SUBAGENT_TOOLS);
             want.extend(
                 all_mcp
                     .iter()

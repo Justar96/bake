@@ -40,6 +40,9 @@ const RUN_TIMEOUT: Duration = Duration::from_secs(60);
 #[path = "print_mode/background_accounting.rs"]
 mod background_accounting;
 
+#[path = "print_mode/subagents.rs"]
+mod subagents;
+
 /// A canned reply.
 #[derive(Clone)]
 struct Reply {
@@ -543,7 +546,11 @@ fn print_mode_answers_saves_and_continues() {
             "write",
             "job_output",
             "job_list",
-            "job_kill"
+            "job_kill",
+            "subagent",
+            "send_message",
+            "interrupt_agent",
+            "list_agents"
         ]
     );
     assert_eq!(first_input[1], "user: Say hi");
@@ -1316,7 +1323,11 @@ fn print_mode_runs_the_bash_tool() {
             "write",
             "job_output",
             "job_list",
-            "job_kill"
+            "job_kill",
+            "subagent",
+            "send_message",
+            "interrupt_agent",
+            "list_agents"
         ]
     );
     let input = requests[1].body["input"].as_array().expect("input");

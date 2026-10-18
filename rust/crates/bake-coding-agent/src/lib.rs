@@ -28,6 +28,7 @@
 //! | [`cli`] | Pi `src/main.ts`, `src/cli/args.ts`, `src/cli/initial-message.ts`, `src/cli/file-processor.ts`, `src/cli/list-models.ts`, `packages/tui/src/fuzzy.ts` |
 //! | [`mcp`] | Pi v1.3.0 `src/extensions/mcp/{index,runtime,tools,config}.ts`, `src/core/mcp-servers.ts`; Bake's tool names (`packages/mcp/mcp-client`) and D24 admission |
 //! | [`owned_work`] | Bake: a session's owner of its tasks, blocking work, and background lifetime, which shutdown cancels and drains |
+//! | [`subagents`] | Bake: continuable children on any available model, in Pi session files (`packages/subagent/{subagent,tool-subagent,tool-subagent-control}`) |
 //! | [`jobs`] | Bake: a session's background-job registry over its owned work (`packages/jobs/{jobs,jobs-local}`, `packages/shell/tool-bash/src/background.ts`), structured after Pi v1.3.0 `packages/durable` task states |
 //! | [`plugins`] | Bake's trusted compiled-in plugins and their ordered tool-call veto, after Pi v1.3.0 `src/core/extensions/runner.ts` (`emitToolCall`), `agent-session.ts` (`_beforeToolCall`), and `examples/extensions/protected-paths.ts` |
 //! | [`permissions`] | Bake: the D24 permission presets, approvals, policy engine, and sandboxed `bash`, `write`, and `edit` (see the module's table) |
@@ -55,6 +56,7 @@ pub mod prompt_templates;
 pub mod session;
 pub mod settings;
 pub mod skills;
+pub mod subagents;
 pub mod system_prompt;
 pub mod task_documents;
 #[cfg(test)]

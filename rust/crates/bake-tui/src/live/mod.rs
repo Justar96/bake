@@ -668,17 +668,16 @@ impl Driver {
         }
     }
 
-    /// Opens a turn for the notices of background jobs that settled while
-    /// the session was idle, `tool-jobs`' `wakeup` delivery, while the
+    /// Opens a turn for the notices of background jobs that settled, and
+    /// the messages and notices of subagents that arrived, while the
+    /// session was idle, `tool-jobs`' `wakeup` delivery, while the
     /// wake budget lasts; past it the session keeps them for the next
     /// prompt ([`AgentSession::deliver_job_notices`]).
     async fn deliver_notices(&mut self) -> Option<Running> {
         let jobs = self.session.jobs();
-        let unreported = jobs
-            .list()
-            .iter()
-            .any(|job| job.status.is_terminal() && !job.reported);
-        if !unreported {
+        // A settled job not yet reported, or a subagent's message or
+        // settlement notice.
+        if !jobs.has_undelivered() {
             return None;
         }
         if !jobs.notice_would_wake() {

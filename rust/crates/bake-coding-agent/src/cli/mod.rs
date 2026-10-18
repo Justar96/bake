@@ -992,6 +992,131 @@ struct Build {
     docs_command: String,
     sandbox_provider: Arc<dyn SandboxProvider>,
     approver: Option<Arc<dyn Approver>>,
+    role: Role,
+}
+
+/// Whether a session can start subagents, or is one.
+enum Role {
+    /// A top-level session; with a factory it starts subagents built as
+    /// it was ([`crate::subagents`]).
+    Root(Option<Box<SessionFactory>>),
+    /// A subagent, which messages its parent over this link and starts no
+    /// subagents of its own.
+    Child(crate::subagents::ParentLink),
+}
+
+/// What a parent's subagents are built with: its setup, model runtime,
+/// settings, place, and permission, which every child inherits.
+struct ChildSetup {
+    factory: SessionFactory,
+    apis: Arc<ApiRegistry>,
+    registry: crate::model_registry::ModelRuntime,
+    settings: Settings,
+    cwd: String,
+    place: PathBuf,
+    persisted: bool,
+    parent_id: String,
+    parent_file: Option<PathBuf>,
+    permission: crate::permissions::SessionPermission,
+}
+
+/// The builder of a parent's subagents ([`crate::subagents::ChildBuilder`]).
+fn child_builder(setup: ChildSetup) -> crate::subagents::ChildBuilder {
+    let setup = Arc::new(setup);
+    Arc::new(move |spec| build_child(Arc::clone(&setup), spec))
+}
+
+/// Builds one subagent as its parent was built: the parent's arguments
+/// with its sandbox mode and approval policy, its settings, model runtime,
+/// home, plugins, MCP servers, sandbox provider, and approver, and the
+/// child's tools in place of the parent's.
+fn build_child(
+    setup: Arc<ChildSetup>,
+    spec: crate::subagents::ChildSpec,
+) -> bake_agent::BoxFuture<'static, Result<AgentSession, String>> {
+    Box::pin(async move {
+        let crate::subagents::ChildSpec {
+            source,
+            link,
+            route,
+        } = spec;
+        // The parent's preset, or its knobs when they match none.
+        let mut args = setup.factory.args.clone();
+        let custom = setup
+            .permission
+            .table
+            .spec(&setup.permission.preset)
+            .is_none();
+        args.permission = (!custom).then(|| setup.permission.preset.clone());
+        args.sandbox = custom.then_some(setup.permission.sandbox);
+        args.approval = custom.then_some(setup.permission.approval);
+        let loaded = {
+            let setup = Arc::clone(&setup);
+            let args = args.clone();
+            tokio::task::spawn_blocking(move || {
+                let mut session = match source {
+                    crate::subagents::ChildSource::New { id, label } => {
+                        crate::subagents::new_child_store(
+                            &setup.cwd,
+                            &setup.place,
+                            setup.persisted,
+                            &setup.parent_id,
+                            setup.parent_file.as_deref(),
+                            &id,
+                            &label,
+                        )?
+                    }
+                    crate::subagents::ChildSource::Open { path } => SessionManager::open(
+                        &path,
+                        Some(&crate::subagents::children_dir(&setup.place)),
+                        None,
+                    )
+                    .map_err(|error| error.to_string())?,
+                };
+                let mut warnings = Vec::new();
+                let factory = &setup.factory;
+                let resources = load_resources(
+                    &mut session,
+                    &setup.settings,
+                    &args,
+                    &factory.home,
+                    factory.user_home.clone(),
+                    factory.imported_default_preset.as_deref(),
+                    &factory.plugins,
+                    true,
+                    &mut warnings,
+                )?;
+                Ok::<_, String>((session, resources))
+            })
+            .await
+            .map_err(|error| format!("Subagent setup failed: {error}"))??
+        };
+        let (session, resources) = loaded;
+        let factory = &setup.factory;
+        let Built { session, servers } = build_session(
+            &args,
+            Build {
+                session,
+                apis: Arc::clone(&setup.apis),
+                resources,
+                settings: setup.settings.clone(),
+                registry: setup.registry.clone(),
+                model: route.as_ref().map(|route| route.model.clone()),
+                thinking_level: route.and_then(|route| route.thinking_level),
+                home: factory.home.clone(),
+                docs_command: factory.docs_command.clone(),
+                sandbox_provider: Arc::clone(&factory.sandbox_provider),
+                approver: factory.approver.clone(),
+                role: Role::Child(link),
+            },
+        )
+        .await?;
+        if let Err(error) = start_servers(&session, servers) {
+            session.shutdown().await;
+            return Err(error);
+        }
+        Ok(session)
+    })
 }
 
 /// Pi's `_buildRuntime` tools, `createAgentSession` tool selection, and
@@ -1009,6 +1134,7 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
         docs_command,
         sandbox_provider,
         approver,
+        role,
     } = build;
     let Resources {
         context_files,
@@ -1089,11 +1215,62 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
         owner: Some(work.clone()),
         jobs: Some(jobs.clone()),
     };
-    let definitions = sandbox_file_tools(
+    let mut definitions = sandbox_file_tools(
         create_bake_tool_definitions(Path::new(&session_cwd), &tools_options),
         Path::new(&session_cwd),
         &tool_permissions,
     );
+    // A top-level session starts subagents built as it is; a subagent
+    // messages its parent and starts none (depth 1).
+    let subagent_tools: &[&str] = match role {
+        Role::Root(Some(factory)) => {
+            let parent_file = session
+                .is_persisted()
+                .then(|| session.session_file().map(Path::to_path_buf))
+                .flatten();
+            let host = crate::subagents::SubagentHost::new(crate::subagents::HostOptions {
+                parent_id: session.session_id().to_owned(),
+                parent_file: parent_file.clone(),
+                jobs: jobs.clone(),
+                work: work.clone(),
+                selection: published.clone(),
+                registry: registry.clone(),
+                settings: settings.clone(),
+                builder: child_builder(ChildSetup {
+                    factory: *factory,
+                    apis: Arc::clone(&apis),
+                    registry: registry.clone(),
+                    settings: settings.clone(),
+                    cwd: session_cwd.clone(),
+                    place: session.session_dir().to_path_buf(),
+                    persisted: session.is_persisted(),
+                    parent_id: session.session_id().to_owned(),
+                    parent_file,
+                    permission: permission.clone(),
+                }),
+                recovered: crate::subagents::recover(&session),
+            });
+            let model_choice = registry.snapshot().available().len() > 1;
+            definitions.extend(crate::subagents::parent_tools(&host, model_choice));
+            // The job tools say a subagent's id is not a job id.
+            let job_tools =
+                crate::tools::job_tools::create_job_tool_definitions_with_subagents(&jobs);
+            for definition in &mut definitions {
+                if let Some(replacement) = job_tools
+                    .iter()
+                    .find(|tool| tool.name() == definition.name())
+                {
+                    *definition = replacement.clone();
+                }
+            }
+            &crate::subagents::PARENT_TOOL_NAMES
+        }
+        Role::Root(None) => &[],
+        Role::Child(link) => {
+            definitions.extend(crate::subagents::child_tools(&link));
+            &crate::subagents::CHILD_TOOL_NAMES
+        }
+    };
     let mut available: Vec<String> = definitions
         .iter()
         .map(|definition| definition.name().to_owned())
@@ -1108,6 +1285,9 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
     });
     if settings.task_documents && settings.default_tools.is_none() {
         defaults.push(crate::agent_session::task_documents::NAME.to_owned());
+    }
+    if settings.default_tools.is_none() {
+        defaults.extend(subagent_tools.iter().map(|name| (*name).to_owned()));
     }
     let selection_options = ToolSelectionOptions {
         tools: args.tools.clone(),
@@ -1460,6 +1640,7 @@ impl SessionFactory {
                 docs_command: self.docs_command.clone(),
                 sandbox_provider: Arc::clone(&self.sandbox_provider),
                 approver: self.approver.clone(),
+                role: Role::Root(Some(Box::new(self.clone()))),
             },
         )
         .await?;
@@ -1750,6 +1931,7 @@ async fn start_with(
             docs_command: docs_command.clone(),
             sandbox_provider,
             approver,
+            role: Role::Root(Some(Box::new(factory.clone()))),
         },
     )
     .await

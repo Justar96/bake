@@ -85,6 +85,12 @@
 //! record is force-failed; and bounded retention of terminal records.
 //! The session's model tools and background `bash` share this registry.
 //! Its journal preserves lifecycle facts, not processes or output bytes.
+//!
+//! The registry is also where other agents' notices reach the session
+//! ([`JobRegistry::post`]): a subagent's message or settlement waits here
+//! beside the completion notices and is delivered on their path, and a
+//! running subagent holds the live count ([`JobRegistry::hold_live`]), so an
+//! owner waiting for jobs waits for it too ([`crate::subagents`]).
 
 pub mod process;
 
@@ -102,6 +108,7 @@ use tokio::sync::{Notify, watch};
 
 use crate::child_process;
 use crate::owned_work::{Refused, TaskScope, WorkGate};
+use crate::session::messages::CustomMessage;
 
 /// The longest label, detail, or stop reason kept, in bytes; longer text is
 /// cut at a character boundary.
@@ -486,6 +493,12 @@ struct State {
     kinds: Vec<KindIds>,
     /// In admission order.
     records: Vec<Record>,
+    /// Notices other agents addressed to the session
+    /// ([`JobRegistry::post`]), in arrival order.
+    mail: Vec<CustomMessage>,
+    /// Live work outside the registry, such as a running subagent
+    /// ([`JobRegistry::hold_live`]).
+    holds: usize,
 }
 
 /// The ids of one kind: those at or below `floor` were issued by an
@@ -1169,8 +1182,9 @@ impl JobRegistry {
             .collect()
     }
 
-    /// A subscription that wakes when a job may have become reportable.
-    /// Dropping it unsubscribes.
+    /// A subscription that wakes when a job may have become reportable, a
+    /// notice was posted, or held live work changed. Dropping it
+    /// unsubscribes.
     pub fn subscribe(&self) -> JobEvents {
         JobEvents {
             receiver: self.inner.events.subscribe(),
@@ -1188,6 +1202,7 @@ impl JobRegistry {
         let gates: Vec<WorkGate> = {
             let mut state = self.inner.state();
             state.closed = true;
+            state.mail.clear();
             state
                 .records
                 .iter_mut()
@@ -1221,6 +1236,61 @@ impl JobRegistry {
         }
     }
 
+    /// Queues `message`, a notice another agent addressed to this
+    /// session, for delivery with the job notices: inside a run at its
+    /// next step, else by a turn the session's owner opens within the
+    /// wake budget ([`Self::has_undelivered`], [`Self::subscribe`]).
+    /// Refused once the registry is closed.
+    pub fn post(&self, message: CustomMessage) -> Result<(), StartError> {
+        {
+            let mut state = self.inner.state();
+            if state.closed {
+                return Err(StartError::Closed);
+            }
+            state.mail.push(message);
+        }
+        self.inner.announce();
+        Ok(())
+    }
+
+    /// Takes every queued notice ([`Self::post`]), in arrival order.
+    pub fn claim_mail(&self) -> Vec<CustomMessage> {
+        std::mem::take(&mut self.inner.state().mail)
+    }
+
+    /// Whether a terminal job is unreported or a posted notice waits.
+    pub fn has_undelivered(&self) -> bool {
+        let state = self.inner.state();
+        !state.mail.is_empty()
+            || state
+                .records
+                .iter()
+                .any(|record| record.status.is_terminal() && record.claim == Claim::Unclaimed)
+    }
+
+    /// Counts work outside the registry as live until the hold is dropped,
+    /// so a session's owner waits for it as for a running job
+    /// ([`Self::live`]). `None` once the registry is closed.
+    pub fn hold_live(&self) -> Option<LiveHold> {
+        {
+            let mut state = self.inner.state();
+            if state.closed {
+                return None;
+            }
+            state.holds += 1;
+        }
+        self.inner.announce();
+        Some(LiveHold {
+            inner: Arc::clone(&self.inner),
+        })
+    }
+
+    /// Live jobs and held work ([`Self::hold_live`]).
+    pub fn live(&self) -> usize {
+        let state = self.inner.state();
+        state.active() + state.holds
+    }
+
     /// Whether [`Self::close`] was called.
     pub fn is_closed(&self) -> bool {
         self.inner.state().closed
@@ -1244,6 +1314,28 @@ impl fmt::Debug for JobRegistry {
             .field("jobs", &state.records.len())
             .field("active", &state.active())
             .finish()
+    }
+}
+
+/// Live work outside the registry ([`JobRegistry::hold_live`]); dropping
+/// it releases the count and wakes subscribers.
+pub struct LiveHold {
+    inner: Arc<Inner>,
+}
+
+impl fmt::Debug for LiveHold {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("LiveHold")
+    }
+}
+
+impl Drop for LiveHold {
+    fn drop(&mut self) {
+        {
+            let mut state = self.inner.state();
+            state.holds = state.holds.saturating_sub(1);
+        }
+        self.inner.announce();
     }
 }
 
@@ -1309,7 +1401,8 @@ impl Drop for Waiter {
 }
 
 /// Wakes when a job may have become reportable: a job settled unclaimed,
-/// or a dropped wait gave a report back. Dropping it unsubscribes.
+/// a dropped wait gave a report back, a notice was posted, or held live
+/// work began or ended. Dropping it unsubscribes.
 #[derive(Debug)]
 pub struct JobEvents {
     receiver: watch::Receiver<Events>,
