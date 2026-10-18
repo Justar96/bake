@@ -1,0 +1,880 @@
+{
+  "schema": "bake/rust-migration/qualification-attempt",
+  "version": 1,
+  "id": "2026-10-19-replay-classes-checkpoints",
+  "scope": "08",
+  "status": "partial",
+  "recordedOn": "2026-10-19",
+  "summary": "Replay classes, the selected-run Safe rerun, and parent-SIGKILL checkpoint tests at 519a202b13, the develop commit that squashes slice C and the commit every HEAD run tested. The Linux preflight passed 33 gates (actionlint and the TypeScript runtime gate skipped) on its second attempt, under umask 022; the first, under umask 077, failed scripts-unit and rust-package because the unpacked bake-rs had mode 0700. The Intel x86_64 macOS native preflight passed its 4 gates, and both rust gates ran every test this slice added. Every tool bake-rs composes, MCP included, carries a replay class, and flipping or clearing the class and read_only on every tool leaves the request transcript and three provider bodies byte-identical. bake-rs -p --session <file> --resume-run <id> reaches AgentSession::resume_run (print_mode.rs), which now reruns interrupted calls only when every unresolved call is on the run's last assistant, each tool is Safe now and, if dispatched, was recorded Safe, and the run is otherwise resumable; ordinary recovery still sends No result provided and runs nothing. On Linux and Intel macOS the tests SIGKILL a fixture child 20 times per run and check its file, the next request, and an effect count shared by both processes. Seven checkpoint mutations, each run once on an uncommitted tree before the slice's final amend, were each rejected. This is the first scope 08 record. Windows runs, power loss, kills inside write or during streamed bytes, a CLI test of a crashed run's Safe rerun, logs of the worker's repeat run and rerun mutations, an eval record, and Auto review remain.",
+  "supersedes": [],
+  "provenance": {
+    "base": "72b43cd2cc3ffe6a597f3ff9c137edbf139de46c",
+    "candidate": "519a202b1344066f9247506bbbac264b67da1bb8",
+    "oracle": {
+      "notApplicable": "D32: no TypeScript runtime arm. Pi v1.3.0 (71023aec15) gives its built-in tools no replay class; the rerun rule follows Pi Durable's harness/tool.ts, which reruns an interrupted execute phase only when the stored and the current class are both safe and records an absent class as unsafe. Bake departs from it as D37 requires: a rerun goes through the current hooks, plugin vetoes, journal dispatch, and permission wrappers, and a call that is not Safe leaves the run needing reconciliation instead of settling it with an interruption error. Pi's source was read, not run."
+    }
+  },
+  "support": [
+    {
+      "id": "d37-selected-run-recovery",
+      "reference": "docs/roadmap/rust-0.4/scope-00/support.md"
+    },
+    {
+      "id": "durable-execution-crash-matrix",
+      "reference": "docs/roadmap/rust-0.4/durable-execution.md"
+    },
+    {
+      "id": "pi-v1-3-0-durable-tool-harness",
+      "reference": "https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/durable/src/harness/tool.ts"
+    },
+    {
+      "id": "pi-v1-3-0-agent-tool-replay",
+      "reference": "https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/agent/src/types.ts"
+    }
+  ],
+  "fixtures": {
+    "files": [
+      {
+        "path": "rust/crates/bake-coding-agent/src/agent_session/run_journal_job_tests.rs",
+        "role": "fixture-definition-source",
+        "sha256": "4682d3d5a5a1a0e0c3f658689b68df853e62c53fea1a80706bfc35ca04ee8070"
+      },
+      {
+        "path": "rust/crates/bake-coding-agent/src/agent_session/run_journal_kill_tests.rs",
+        "role": "fixture-definition-source",
+        "sha256": "143f92c4bce5fabf15923271799958721b83d011b63ef062d14698cc6a379a19"
+      },
+      {
+        "path": "rust/crates/bake-coding-agent/src/agent_session/run_journal_rerun_tests.rs",
+        "role": "fixture-definition-source",
+        "sha256": "86d65b3e4e1ba713310dc15ce7947bc4d29f125db126c54ed39cee0c4861ff89"
+      },
+      {
+        "path": "rust/crates/bake-coding-agent/src/agent_session/run_journal_tests.rs",
+        "role": "fixture-definition-source",
+        "sha256": "b1c679a8338aad54acb0289b6d55a044ac387f05e9f9342868270cc0a6351fc9"
+      },
+      {
+        "path": "rust/crates/bake-coding-agent/src/subagents/tests.rs",
+        "role": "fixture-definition-source",
+        "sha256": "43ff44e9ff43519b21b5b50edc7b5d52d44539fe34f4fa9aaab359a94309fdcb"
+      },
+      {
+        "path": "rust/crates/bake-coding-agent/tests/mcp_session.rs",
+        "role": "fixture-definition-source",
+        "sha256": "0b5778095d106ddf6ba7b27f1ec9f6463df339bc22932782bf40c7a251549afd"
+      },
+      {
+        "path": "rust/crates/bake-coding-agent/tests/mcp_session/fixture.rs",
+        "role": "fixture-definition-source",
+        "sha256": "6d03d29b35fb173ca940ae388813bdab510cbefe047fa124d1eeaf437fa44fe2"
+      }
+    ],
+    "digest": "6bc02f5b4ec1bbd75b7e8c31425358af7d86e0260625a0e50aa7c1ff8ab0b9fb"
+  },
+  "artifacts": {
+    "notApplicable": "Library and integration tests only; no shipped artifact is qualified by this record."
+  },
+  "commands": [
+    {
+      "id": "linux-preflight-umask077",
+      "argv": [
+        "bun",
+        "run",
+        "preflight"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml; rustc and cargo 1.99.0 observed in rust/ on this host after the run)",
+        "bun": "1.4.2 (observed after the run)",
+        "node": "v26.10.0 (observed after the run)",
+        "git": "2.56.0 (observed after the run)",
+        "cargo-about": "0.9.2, built into a temporary root and named by BAKE_CARGO_ABOUT"
+      },
+      "testedCommit": "519a202b1344066f9247506bbbac264b67da1bb8",
+      "expectedExit": 0,
+      "actualExit": 1,
+      "counts": {
+        "passed": 31,
+        "failed": 2,
+        "skipped": 2,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/linux-preflight-519a202b13.log",
+        "sha256": "11df1132b7f5e008d689cfbbf6be64bfb5e86fb0156c2e946f55ada0241d61fc"
+      }
+    },
+    {
+      "id": "linux-preflight",
+      "argv": [
+        "bun",
+        "run",
+        "preflight"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml; rustc and cargo 1.99.0 observed in rust/ on this host after the run)",
+        "bun": "1.4.2 (observed after the run)",
+        "node": "v26.10.0 (observed after the run)",
+        "git": "2.56.0 (observed after the run)",
+        "cargo-about": "0.9.2, built into a temporary root and named by BAKE_CARGO_ABOUT"
+      },
+      "testedCommit": "519a202b1344066f9247506bbbac264b67da1bb8",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 33,
+        "failed": 0,
+        "skipped": 2,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/linux-preflight-519a202b13-umask022.log",
+        "sha256": "0bc28b3cadae0625e50a027064b6eb3fe9cd1dc1b55878538f384b119ea899b0"
+      }
+    },
+    {
+      "id": "linux-rust-gate",
+      "argv": [
+        "bun",
+        "run",
+        "check:rust"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml; rustc and cargo 1.99.0 observed in rust/ on this host after the run)",
+        "bun": "1.4.2 (observed after the run)"
+      },
+      "testedCommit": "519a202b1344066f9247506bbbac264b67da1bb8",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 2422,
+        "failed": 0,
+        "skipped": 6,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/linux-519a202b13/rust.log",
+        "sha256": "ac3210dc53425f3aa1f08f1ac9e65e5afafa240a822d7a93aeb30001a195ff6a"
+      }
+    },
+    {
+      "id": "mac-preflight",
+      "argv": [
+        "bun",
+        "run",
+        "preflight:mac",
+        "ulimit -n 65536; BAKE_CARGO_ABOUT=<cargo-about 0.9.2 on the Mac> bun run preflight --only native"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "darwin",
+        "arch": "x64",
+        "runner": "macpro over SSH; Intel x86_64; macOS 26.7.1 (25G241)"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml; rustc and cargo 1.99.0 recorded in the Mac checkout after the run)",
+        "bun": "1.4.3 (recorded on the Mac after the run; package.json pins bun@1.4.2)",
+        "node": "v26.9.0 (recorded on the Mac after the run)",
+        "cargo-about": "0.9.2 on the Mac, named by BAKE_CARGO_ABOUT in the command"
+      },
+      "testedCommit": "519a202b1344066f9247506bbbac264b67da1bb8",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/mac-519a202b13.log",
+        "sha256": "3ebfab8a2d30ad3e5de33da03dc8c69101985a52defd139450f6d759ade05762"
+      }
+    },
+    {
+      "id": "mac-rust-gate",
+      "argv": [
+        "bun",
+        "run",
+        "check:rust"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "darwin",
+        "arch": "x64",
+        "runner": "macpro over SSH; Intel x86_64; macOS 26.7.1 (25G241)"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml; rustc and cargo 1.99.0 recorded in the Mac checkout after the run)",
+        "bun": "1.4.3 (recorded on the Mac after the run; package.json pins bun@1.4.2)"
+      },
+      "testedCommit": "519a202b1344066f9247506bbbac264b67da1bb8",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 2378,
+        "failed": 0,
+        "skipped": 6,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/mac-519a202b13/rust.log",
+        "sha256": "0c4d78572015d82426955ef1b0e4be2da24027ace43a9182b8379b96cbc3af58"
+      }
+    },
+    {
+      "id": "xclippy-head",
+      "argv": [
+        "/tmp/opencode/xcc/xclippy"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml; rustc and cargo 1.99.0 observed in rust/ on this host after the run)",
+        "zig": {
+          "missing": "zig cc builds the C build scripts for both targets; its version was not captured."
+        }
+      },
+      "testedCommit": "519a202b1344066f9247506bbbac264b67da1bb8",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "missing": "Clippy runs no tests. The wrapper runs cargo clippy --keep-going --locked --all-targets --workspace -- -D warnings for x86_64-pc-windows-gnu and for aarch64-apple-darwin. In a warm target directory, the log shows each pass re-checking bake-sandbox, bake-coding-agent, bake-tui, and bake-cli and finishing (3.19 s, then 3.18 s), with the other workspace crates fresh from an earlier check, and ends with exit 0."
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/xclippy-519a202b13.log",
+        "sha256": "3ba750274cd4937e072094133b011aa0552b3dde5396a07af5d3374284fbe974"
+      }
+    },
+    {
+      "id": "slice-workspace-test",
+      "argv": [
+        "cargo",
+        "test",
+        "--workspace",
+        "--locked"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "missing": "The worker's check script recorded no tool versions; the slice worktree carries the same rust/rust-toolchain.toml (1.99.0), but the toolchain in effect was not captured."
+      },
+      "testedCommit": "6337fb85bc66d535f78358173899dd256d944eab",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 2337,
+        "failed": 0,
+        "skipped": 6,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/scope-work-2026-10-18/C-checks/test-workspace.log",
+        "sha256": "fdd7bbdbf4d3db1f52c4ac6bc954965df0809822aad8b22bf8578cafb6b6e1b7"
+      }
+    },
+    {
+      "id": "slice-xclippy",
+      "argv": [
+        "/tmp/opencode/xcc/xclippy"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "missing": "The worker's check script recorded no tool versions, and the zig cc version used for the C build scripts was not captured."
+      },
+      "testedCommit": "6337fb85bc66d535f78358173899dd256d944eab",
+      "expectedExit": 0,
+      "actualExit": 1,
+      "counts": {
+        "missing": "Clippy runs no tests. The log holds the Windows pass's four errors and the Apple Silicon pass's finish; the exit status 1 is recorded in C-checks/summary.txt."
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/scope-work-2026-10-18/C-checks/xclippy.log",
+        "sha256": "7532dfd4d39f41057b1464afa7dedfdc3dd1091d8628b8ce447b3451a6e30855"
+      }
+    },
+    {
+      "id": "control-lazy-first-prompt",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "bake-coding-agent",
+        "--lib",
+        "run_journal_tests::"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "missing": "mutate-kill.py ran cargo with CARGO_BUILD_JOBS=8 and recorded no tool versions."
+      },
+      "testedCommit": {
+        "missing": "An uncommitted tree of the slice C worktree with this one mutation applied. mutate-kill-final.out was last written at 00:50:49 +07:00 on 2026-10-19, after dd5c0cba00 (00:43:36) and before its amend 6337fb85bc (00:52:08); the worker says the tree differed from the commit only by the module doc rewrap later amended in. mutate-kill.py applied a one-span edit, each span occurring once in its file at the candidate, and restored the original bytes in a finally block; no hash check or restored run was logged."
+      },
+      "expectedExit": 101,
+      "actualExit": 101,
+      "counts": {
+        "passed": 37,
+        "failed": 1,
+        "skipped": 850,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/scope-work-2026-10-18/mutate-kill-final.out",
+        "sha256": "4bb484c0200ad18a1bb202aa280c45ec7a1bbcb8217ffced589b2ded9f4a3deb"
+      }
+    },
+    {
+      "id": "control-no-dispatch-record",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "bake-coding-agent",
+        "--lib",
+        "run_journal_tests::"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "missing": "mutate-kill.py ran cargo with CARGO_BUILD_JOBS=8 and recorded no tool versions."
+      },
+      "testedCommit": {
+        "missing": "An uncommitted tree of the slice C worktree with this one mutation applied. mutate-kill-final.out was last written at 00:50:49 +07:00 on 2026-10-19, after dd5c0cba00 (00:43:36) and before its amend 6337fb85bc (00:52:08); the worker says the tree differed from the commit only by the module doc rewrap later amended in. mutate-kill.py applied a one-span edit, each span occurring once in its file at the candidate, and restored the original bytes in a finally block; no hash check or restored run was logged."
+      },
+      "expectedExit": 101,
+      "actualExit": 101,
+      "counts": {
+        "passed": 31,
+        "failed": 7,
+        "skipped": 850,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/scope-work-2026-10-18/mutate-kill-final.out",
+        "sha256": "4bb484c0200ad18a1bb202aa280c45ec7a1bbcb8217ffced589b2ded9f4a3deb"
+      }
+    },
+    {
+      "id": "control-no-retry-omission",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "bake-coding-agent",
+        "--lib",
+        "run_journal_tests::"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "missing": "mutate-kill.py ran cargo with CARGO_BUILD_JOBS=8 and recorded no tool versions."
+      },
+      "testedCommit": {
+        "missing": "An uncommitted tree of the slice C worktree with this one mutation applied. mutate-kill-final.out was last written at 00:50:49 +07:00 on 2026-10-19, after dd5c0cba00 (00:43:36) and before its amend 6337fb85bc (00:52:08); the worker says the tree differed from the commit only by the module doc rewrap later amended in. mutate-kill.py applied a one-span edit, each span occurring once in its file at the candidate, and restored the original bytes in a finally block; no hash check or restored run was logged."
+      },
+      "expectedExit": 101,
+      "actualExit": 101,
+      "counts": {
+        "passed": 37,
+        "failed": 1,
+        "skipped": 850,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/scope-work-2026-10-18/mutate-kill-final.out",
+        "sha256": "4bb484c0200ad18a1bb202aa280c45ec7a1bbcb8217ffced589b2ded9f4a3deb"
+      }
+    },
+    {
+      "id": "control-user-unacked",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "bake-coding-agent",
+        "--lib",
+        "run_journal_tests::"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "missing": "mutate-kill.py ran cargo with CARGO_BUILD_JOBS=8 and recorded no tool versions."
+      },
+      "testedCommit": {
+        "missing": "An uncommitted tree of the slice C worktree with this one mutation applied. mutate-kill-final.out was last written at 00:50:49 +07:00 on 2026-10-19, after dd5c0cba00 (00:43:36) and before its amend 6337fb85bc (00:52:08); the worker says the tree differed from the commit only by the module doc rewrap later amended in. mutate-kill.py applied a one-span edit, each span occurring once in its file at the candidate, and restored the original bytes in a finally block; no hash check or restored run was logged."
+      },
+      "expectedExit": 101,
+      "actualExit": 101,
+      "counts": {
+        "passed": 24,
+        "failed": 14,
+        "skipped": 850,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/scope-work-2026-10-18/mutate-kill-final.out",
+        "sha256": "4bb484c0200ad18a1bb202aa280c45ec7a1bbcb8217ffced589b2ded9f4a3deb"
+      }
+    },
+    {
+      "id": "control-notice-unacked",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "bake-coding-agent",
+        "--lib",
+        "run_journal_tests::"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "missing": "mutate-kill.py ran cargo with CARGO_BUILD_JOBS=8 and recorded no tool versions."
+      },
+      "testedCommit": {
+        "missing": "An uncommitted tree of the slice C worktree with this one mutation applied. mutate-kill-final.out was last written at 00:50:49 +07:00 on 2026-10-19, after dd5c0cba00 (00:43:36) and before its amend 6337fb85bc (00:52:08); the worker says the tree differed from the commit only by the module doc rewrap later amended in. mutate-kill.py applied a one-span edit, each span occurring once in its file at the candidate, and restored the original bytes in a finally block; no hash check or restored run was logged."
+      },
+      "expectedExit": 101,
+      "actualExit": 101,
+      "counts": {
+        "passed": 35,
+        "failed": 3,
+        "skipped": 850,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/scope-work-2026-10-18/mutate-kill-final.out",
+        "sha256": "4bb484c0200ad18a1bb202aa280c45ec7a1bbcb8217ffced589b2ded9f4a3deb"
+      }
+    },
+    {
+      "id": "control-no-compaction-write",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "bake-coding-agent",
+        "--lib",
+        "run_journal_tests::"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "missing": "mutate-kill.py ran cargo with CARGO_BUILD_JOBS=8 and recorded no tool versions."
+      },
+      "testedCommit": {
+        "missing": "An uncommitted tree of the slice C worktree with this one mutation applied. mutate-kill-final.out was last written at 00:50:49 +07:00 on 2026-10-19, after dd5c0cba00 (00:43:36) and before its amend 6337fb85bc (00:52:08); the worker says the tree differed from the commit only by the module doc rewrap later amended in. mutate-kill.py applied a one-span edit, each span occurring once in its file at the candidate, and restored the original bytes in a finally block; no hash check or restored run was logged."
+      },
+      "expectedExit": 101,
+      "actualExit": 101,
+      "counts": {
+        "passed": 37,
+        "failed": 1,
+        "skipped": 850,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/scope-work-2026-10-18/mutate-kill-final.out",
+        "sha256": "4bb484c0200ad18a1bb202aa280c45ec7a1bbcb8217ffced589b2ded9f4a3deb"
+      }
+    },
+    {
+      "id": "control-fixture-effect-first",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "bake-coding-agent",
+        "--lib",
+        "run_journal_tests::"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "missing": "mutate-kill.py ran cargo with CARGO_BUILD_JOBS=8 and recorded no tool versions."
+      },
+      "testedCommit": {
+        "missing": "An uncommitted tree of the slice C worktree with this one mutation applied. mutate-kill-final.out was last written at 00:50:49 +07:00 on 2026-10-19, after dd5c0cba00 (00:43:36) and before its amend 6337fb85bc (00:52:08); the worker says the tree differed from the commit only by the module doc rewrap later amended in. mutate-kill.py applied a one-span edit, each span occurring once in its file at the candidate, and restored the original bytes in a finally block; no hash check or restored run was logged."
+      },
+      "expectedExit": 101,
+      "actualExit": 101,
+      "counts": {
+        "passed": 37,
+        "failed": 1,
+        "skipped": 850,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/scope-work-2026-10-18/mutate-kill-final.out",
+        "sha256": "4bb484c0200ad18a1bb202aa280c45ec7a1bbcb8217ffced589b2ded9f4a3deb"
+      }
+    }
+  ],
+  "results": [
+    {
+      "id": "replay-class-on-every-tool",
+      "behavior": "every_composed_tool_has_a_replay_class_no_request_carries passed on Linux and Intel macOS. It builds the session through cli::start_interactive with --model faux/faux-1 --permission danger-full-access --no-session --tools *, a home whose settings enable task documents, schedules, and subagents, two faux models, and a real stdio MCP fixture server from the home's mcp.json, then sends one prompt. The tools the agent executes have no tool without a class and match exactly REPLAY_CLASSES (19 built-ins: read, grep, find, ls, job_list, schedule_list, list_subagent_models, and list_agents Safe; bash, edit, write, job_output, job_kill, subagent, send_message, interrupt_agent, task_document, schedule_create, and schedule_delete Never) plus the nine MCP fixture tools as Never, with no name repeated. The session's own request declares exactly each tool's declaration(). Flipping every class (Safe to Never, anything else to Safe) and negating read_only, or clearing both, leaves the transcript and the OpenAI Completions, OpenAI Responses, and Anthropic Messages bodies byte-identical. Counts describe Cargo tests.",
+      "owner": "rust/crates/bake-coding-agent/tests/mcp_session.rs",
+      "report": ".preflight/rust-orchestration/mac-519a202b13/rust.log",
+      "commands": [
+        "linux-preflight",
+        "linux-rust-gate",
+        "mac-preflight",
+        "mac-rust-gate"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "subagent-tool-classes",
+      "behavior": "subagents::tests::every_subagent_tool_has_a_replay_class passed on Linux and Intel macOS: the parent's subagent, list_subagent_models, send_message, interrupt_agent, and list_agents are Never, Safe, Never, Never, and Safe, and the child's send_message, which a parent never composes, is Never.",
+      "owner": "rust/crates/bake-coding-agent/src/subagents/tests.rs",
+      "report": ".preflight/rust-orchestration/mac-519a202b13/rust.log",
+      "commands": [
+        "linux-preflight",
+        "linux-rust-gate",
+        "mac-preflight",
+        "mac-rust-gate"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "selected-run-safe-rerun",
+      "behavior": "The seven run_journal_tests::rerun:: tests passed on Linux and Intel macOS; each writes a real session file at the interruption and counts each tool's executions. safe_calls_rerun_under_the_current_policy_before_the_notice: a call dispatched Safe and one never dispatched are Resumable; resume_run runs each once, makes one request (user, assistant, both results, then the recovery notice), writes each dispatch with safe, its result, and its ack before the recovery entry, and leaves the run Completed with 2 model calls. a_rerun_the_current_policy_denies_is_not_run: a current plugin veto answers the rerun with its error result before the notice and the tool runs 0 times; a tool now inactive, Never, or unclassified leaves the run NeedsReconciliation, resume_run fails with external effect, no request is made, and no resumed record is written. a_call_that_is_not_safe_needs_reconciliation_and_never_repeats covers seven cases, including a dispatch with no class or recorded never, a Safe call beside a pending Never call, a spent budget, and a later user turn: no request, no tool run. completed_calls_on_the_same_assistant_do_not_block_a_rerun, only_a_later_resumption_dispatches_a_safe_call_again (a repeat Safe dispatch is valid only after a Resumed record), and a_dispatch_records_only_a_safe_class_and_reads_no_other (a recorded class of unsafe, SAFE, true, or null makes the journal invalid) also passed.",
+      "owner": "rust/crates/bake-coding-agent/src/agent_session/run_journal_rerun_tests.rs",
+      "report": ".preflight/rust-orchestration/mac-519a202b13/rust.log",
+      "commands": [
+        "linux-preflight",
+        "linux-rust-gate",
+        "mac-preflight",
+        "mac-rust-gate"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "ordinary-recovery-unchanged",
+      "behavior": "rerun::ordinary_recovery_answers_no_result_provided_and_reruns_nothing passed on Linux and Intel macOS: an ordinary prompt after the same interruption runs no tool, and its request, passed through the providers' transform_messages, carries result first (error): No result provided before the new user turn. The plain-assistant case of kill::a_kill_after_a_synced_tool_call_and_before_its_effect_runs_nothing shows the same after a real SIGKILL, with an effect count of 0.",
+      "owner": "rust/crates/bake-coding-agent/src/agent_session/run_journal_rerun_tests.rs",
+      "report": ".preflight/rust-orchestration/linux-519a202b13/rust.log",
+      "commands": [
+        "linux-preflight",
+        "linux-rust-gate",
+        "mac-preflight",
+        "mac-rust-gate"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "kill-checkpoints",
+      "behavior": "On Linux and Intel macOS the four run_journal_tests::kill:: tests, process_crashes_preserve_recovery_boundaries_without_replaying_effects, and jobs::crash_after_job_wait_start_refuses_a_refunded_deadline_and_never_replays_the_job passed. kill_fixture re-runs the test binary as a child, waits up to 60 s for its ready marker (the child parks a thread at the kill point), kills it, and on unix asserts the status's signal is SIGKILL; a run kills 20 children (13 kill points in the kill tests, 6 in process_crashes, and the job-wait child). After each kill the test reopens the file in this process and checks its entries, the next request, and an effect count kept as synced lines in the test's own directory. A new session killed at its first request holds system and user, is listed with that prompt, and the next prompt sends both user turns. A recoverable run killed before a call's dispatch record or after it and before the effect needs reconciliation, makes no request, runs no effect, and leaves the file unchanged; a Safe probe killed there or after its effect reruns once with the notice; an effect killed after it ran is counted once and never repeated. Kills at the request after a retry, a queued follow-up, a steer queued from inside a running tool, a threshold compaction, and a job notice find each input on disk before its request and resume carrying it. Each request kill parks inside the faux provider call before any byte streams. An earlier run of mutate-kill.py (mutate-kill.out, last written at 00:38:38), before the job-notice case and under the old test name a_kill_at_a_retried_followed_up_steered_or_compacted_request_keeps_its_input, applied the six mutations other than notice-unacked to a filter that ran 4 tests (884 filtered out); each failed at least one.",
+      "owner": "rust/crates/bake-coding-agent/src/agent_session/run_journal_kill_tests.rs",
+      "report": ".preflight/rust-orchestration/mac-519a202b13/rust.log",
+      "commands": [
+        "linux-preflight",
+        "linux-rust-gate",
+        "mac-preflight",
+        "mac-rust-gate"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "resume-run-cli-path",
+      "behavior": "AgentSession::resume_run, which holds the Safe rerun, is reached from the command line: in rust/crates/bake-coding-agent/src/print_mode.rs (lines 214-221 at 519a202b13), PrintRunRecovery::Resume, selected by bake-rs -p --session <file> --resume-run <id>, refuses any new prompt, piped input, or file and calls session.resume_run. The bake-cli print_mode recovery:: tests, which run the built binary with --resume-run, passed on Linux and Intel macOS; they resume a completed run, a selected run after later work, and a run with a spent budget, and none of them resumes an interrupted Safe call.",
+      "owner": "rust/crates/bake-coding-agent/src/print_mode.rs",
+      "report": ".preflight/rust-orchestration/linux-519a202b13/rust.log",
+      "commands": [
+        "linux-preflight",
+        "linux-rust-gate",
+        "mac-preflight",
+        "mac-rust-gate"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "slice-head-workspace-tests",
+      "behavior": "At slice head 6337fb85bc, cargo test --workspace --locked passed 54 test binaries: 2337 passed, 0 failed, 6 ignored, counted from each test result line plus the 20 tests of the stdio.rs binary, whose summary line was split by interleaved output, minus the one child test that bash.rs re-runs and reports separately. C-checks/summary.txt names the commit and records status 0 for this command and for cargo fmt --all -- --check, cargo clippy --workspace --all-targets --locked -- -D warnings, and cargo test --locked -p bake-coding-agent, whose logs are kept beside it; those three are not entered as commands because the HEAD rust gates repeat them on the merged commit.",
+      "owner": "rust/Cargo.toml",
+      "report": ".preflight/rust-orchestration/scope-work-2026-10-18/C-checks/summary.txt",
+      "commands": [
+        "slice-workspace-test"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "cross-target-compile",
+      "behavior": "Cross-target Clippy at 519a202b13 linted the whole workspace, all targets, with -D warnings for x86_64-pc-windows-gnu and aarch64-apple-darwin and exited 0; each pass re-checked bake-coding-agent, which holds the replay-class, rerun, and kill tests and the cfg(not(unix)) branch of kill_fixture, so they build for Windows and Apple Silicon. Nothing ran on either target.",
+      "owner": "rust/crates/bake-coding-agent/src/agent_session/run_journal_tests.rs",
+      "report": ".preflight/rust-orchestration/xclippy-519a202b13.log",
+      "commands": [
+        "xclippy-head"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "slice-xclippy",
+      "behavior": "At slice head 6337fb85bc the cross-target Clippy exited 1: the x86_64-pc-windows-gnu pass failed bake-cli's print_mode test target with four never-used functions (outputs and declared in tests/print_mode/schedules.rs, two_models and is_child in tests/print_mode/subagents.rs), and the aarch64-apple-darwin pass finished. The slice branched from 568a6acfa1, where those helpers are used only by Unix tests and not gated; slice E (c2144d52a5) gated them with cfg(unix) on develop before C merged, C touched no bake-cli file, and the same wrapper exits 0 at 519a202b13 (xclippy-head).",
+      "owner": "rust/crates/bake-cli/tests/print_mode/schedules.rs",
+      "report": ".preflight/rust-orchestration/scope-work-2026-10-18/C-checks/xclippy.log",
+      "commands": [
+        "slice-xclippy"
+      ],
+      "outcome": "fail",
+      "reason": "The failure predates the slice and is fixed on develop; the HEAD run is the recorded cross-target check."
+    },
+    {
+      "id": "linux-preflight-umask077",
+      "behavior": "The first Linux preflight at 519a202b13 ran under umask 077, as its log header shows: 31 gates passed, including rust (95.0 s), and scripts-unit and rust-package failed. Both failures are the release packing test's mode check on the unpacked bake-rs (Expected: 493, Received: 448), because tar -x applied the process umask; no slice touched scripts/release. The same preflight under umask 022 passed every gate it ran (linux-preflight). Every gate log of this attempt is kept beside its rust-package log; its rust gate log counts 2422 passed and 6 ignored, as the umask 022 run's does, and lists every test this slice added.",
+      "owner": "scripts/preflight.ts",
+      "report": ".preflight/rust-orchestration/linux-519a202b13-umask077/rust-package.log",
+      "commands": [
+        "linux-preflight-umask077"
+      ],
+      "outcome": "fail",
+      "reason": "The failure comes from the process umask, not the candidate; the umask 022 run is the recorded Linux pass."
+    },
+    {
+      "id": "windows-kill-checkpoints",
+      "behavior": "The replay-class, rerun, and kill tests on Windows, including the cfg(not(unix)) branch of kill_fixture, which asserts only a non-success exit.",
+      "owner": "rust/crates/bake-coding-agent/src/agent_session/run_journal_tests.rs",
+      "report": {
+        "missing": "No Windows command ran at the slice head or at 519a202b13."
+      },
+      "commands": [],
+      "outcome": "missing",
+      "reason": "No Windows host was available, so these tests are compile-checked only (cross-target-compile); GitHub CI runs Windows only on the develop to main release pull request."
+    },
+    {
+      "id": "cli-safe-rerun",
+      "behavior": "bake-rs -p --session <file> --resume-run <id> resumes a crashed run with an interrupted Safe call, reruns it, and sends its result and the recovery notice.",
+      "owner": "rust/crates/bake-cli/tests/print_mode/recovery.rs",
+      "report": {
+        "missing": "No test drives the Safe rerun through the binary."
+      },
+      "commands": [],
+      "outcome": "missing",
+      "reason": "The recovery:: CLI tests resume only completed or budget-exhausted runs; the rerun is proven only through AgentSession in the library tests."
+    }
+  ],
+  "negativeControls": [
+    {
+      "id": "lazy-first-prompt",
+      "defect": "session/manager.rs: has_conversation counts only assistant messages (Pi's behavior before #10000), so a new session's file is not created at its first user message.",
+      "assertion": "kill::a_kill_before_the_first_request_keeps_the_prompt requires the killed session's file to hold system and user and to be listed; it was the one failure, 37 passed.",
+      "observed": "rejected",
+      "commands": [
+        "control-lazy-first-prompt"
+      ]
+    },
+    {
+      "id": "no-dispatch-record",
+      "defect": "agent_session/run_journal.rs: Journal::dispatch returns Ok before appending its Dispatch event, so no dispatch record precedes a tool's effect.",
+      "assertion": "7 of 38 failed: kill::a_kill_after_a_synced_tool_call_and_before_its_effect_runs_nothing, kill::a_kill_during_a_tool_keeps_its_effect_and_reruns_only_a_read, kill::a_kill_at_each_later_request_keeps_its_input, process_crashes_preserve_recovery_boundaries_without_replaying_effects, required_journal_write_failures_stop_provider_tool_and_success_publication, rerun::safe_calls_rerun_under_the_current_policy_before_the_notice, and rerun::a_dispatch_records_only_a_safe_class_and_reads_no_other.",
+      "observed": "rejected",
+      "commands": [
+        "control-no-dispatch-record"
+      ]
+    },
+    {
+      "id": "no-retry-omission",
+      "defect": "agent_session/recovery.rs: omit_recovery_attempt returns Ok without writing whenever it has edits, so a retried request is made with no context edit on disk.",
+      "assertion": "kill::a_kill_at_each_later_request_keeps_its_input, whose retry case requires the context edit on disk before the retried request, failed, 37 passed; its re-run child recoverable_run_crash_fixture also reported 0 passed, 1 failed, 887 filtered out. The output names the failing test, not the case.",
+      "observed": "rejected",
+      "commands": [
+        "control-no-retry-omission"
+      ]
+    },
+    {
+      "id": "user-unacked",
+      "defect": "agent_session.rs: the subscribe_critical listener, which acknowledges each persisted message in the run journal, skips the ack for user messages.",
+      "assertion": "14 of 38 failed, among them all four kill:: tests, process_crashes_preserve_recovery_boundaries_without_replaying_effects, and jobs::crash_after_job_wait_start_refuses_a_refunded_deadline_and_never_replays_the_job.",
+      "observed": "rejected",
+      "commands": [
+        "control-user-unacked"
+      ]
+    },
+    {
+      "id": "notice-unacked",
+      "defect": "agent_session.rs: the subscribe_critical listener skips the run journal's ack for custom messages, which carry job notices.",
+      "assertion": "3 of 38 failed: kill::a_kill_at_each_later_request_keeps_its_input, whose job-notice case requires the notice and its ack on disk, recovery_delivers_an_unfinished_job_as_unknown_before_its_first_request, and job_notice_turns_finish_inside_the_original_journal_and_allowance.",
+      "observed": "rejected",
+      "commands": [
+        "control-notice-unacked"
+      ]
+    },
+    {
+      "id": "no-compaction-write",
+      "defect": "agent_session/recovery.rs: auto-compaction always takes its cancelled branch at the commit boundary (cancelled() || true), so no compaction is written.",
+      "assertion": "kill::a_kill_at_each_later_request_keeps_its_input, whose compaction case requires the compaction on disk before the next request, failed, 37 passed.",
+      "observed": "rejected",
+      "commands": [
+        "control-no-compaction-write"
+      ]
+    },
+    {
+      "id": "fixture-effect-first",
+      "defect": "agent_session/run_journal_tests.rs: the fixture tool's hold before its effect is removed, so the effect runs before the kill.",
+      "assertion": "kill::a_kill_after_a_synced_tool_call_and_before_its_effect_runs_nothing failed, 37 passed; its re-run child recoverable_run_crash_fixture also reported 0 passed, 1 failed, 887 filtered out. This shows the test notices an effect that ran.",
+      "observed": "rejected",
+      "commands": [
+        "control-fixture-effect-first"
+      ]
+    }
+  ],
+  "missingEvidence": [
+    {
+      "what": "Windows runs",
+      "reason": "No Windows host was available; the replay-class, rerun, and kill tests and the cfg(not(unix)) branch of kill_fixture are compile-checked only. GitHub CI runs Windows only on the develop to main release pull request.",
+      "owner": "docs/roadmap/rust-0.4/verification.md"
+    },
+    {
+      "what": "Power loss and kills inside a write system call",
+      "reason": "Every kill parks the child at a Rust-level boundary and SIGKILLs it, and the page cache survives that, so removing sync_data or sync_all would still pass these tests; the syncs in session/durable.rs are read, not tested.",
+      "owner": "docs/roadmap/rust-0.4/durable-execution.md"
+    },
+    {
+      "what": "Kills during streamed response bytes",
+      "reason": "Each request kill parks inside the faux provider call before any byte streams.",
+      "owner": "docs/roadmap/rust-0.4/durable-execution.md"
+    },
+    {
+      "what": "Kills while a subagent child runs, during context masking, and of a steer queued from outside a tool",
+      "reason": "No child-specific or context-masking kill test exists, and a steer is killed only when queued from inside a running tool; the worker reports these share the tested persistence paths.",
+      "owner": "docs/roadmap/rust-0.4/durable-execution.md"
+    },
+    {
+      "what": "A crash between a delivered message's persist and its journal ack, and a notice-only first request",
+      "reason": "Untested. The worker reports the first leaves the run unowned, which recovery refuses, and the second would not create a new session's file because has_conversation counts only user and assistant messages; it reports no current path sends a notice first.",
+      "owner": "rust/crates/bake-coding-agent/src/agent_session/run_journal.rs"
+    },
+    {
+      "what": "after_tool_call on a rerun",
+      "reason": "The rerun passes the session's after hook to run_tool_call, but no test exercises it on a rerun.",
+      "owner": "rust/crates/bake-coding-agent/src/agent_session/run_journal_rerun_tests.rs"
+    },
+    {
+      "what": "Plugin tool classes and MCP report",
+      "reason": "Plugins contribute no tools yet; when the D6 plugin API adds them, each needs a class (scope 12). bake_agent::ToolReplay has no report class, so every MCP tool is Never.",
+      "owner": "docs/roadmap/rust-0.4/durable-execution.md"
+    },
+    {
+      "what": "A CLI test of the Safe rerun",
+      "reason": "The bake-cli recovery:: tests run --resume-run only on completed or budget-exhausted runs (resume-run-cli-path); none resumes a crashed run with an interrupted Safe call.",
+      "owner": "rust/crates/bake-cli/tests/print_mode/recovery.rs"
+    },
+    {
+      "what": "The 20-run repeat of run_journal_tests::",
+      "reason": "The worker reports 20 of 20 passing runs with --test-threads 8, but kill-loop.log, last written at 00:41:53 before dd5c0cba00, holds one run of 38 passed.",
+      "owner": "unassigned"
+    },
+    {
+      "what": "Logs of the nine rerun mutations",
+      "reason": "The worker reports nine mutations of the rerun rule (mutate.py), each failing at least one rerun test, and one removing grep's class failing the composition test; no output, exit status, or tree was saved.",
+      "owner": "rust/crates/bake-coding-agent/src/agent_session/run_journal_rerun_tests.rs"
+    },
+    {
+      "what": "The worker's crate test on the merged tree",
+      "reason": "merged-C-crate.log holds a bake-coding-agent run on the merged tree before C's commit, with no recorded command, commit, or exit status; it is not entered as a command.",
+      "owner": "unassigned"
+    },
+    {
+      "what": "Apple Silicon",
+      "reason": "The macOS evidence is from an Intel x86_64 Mac; aarch64-apple-darwin is only compile-checked.",
+      "owner": "docs/roadmap/rust-0.4/verification.md"
+    },
+    {
+      "what": "actionlint and the TypeScript runtime gate",
+      "reason": "Both Linux preflights skipped actionlint (1.7.12 or later is not on PATH) and the runtime gate (no runtime source changed).",
+      "owner": "unassigned"
+    },
+    {
+      "what": "Auto review",
+      "reason": "The user chose to skip Auto review for this slice; it stays open.",
+      "owner": "unassigned"
+    }
+  ],
+  "evalRecords": {
+    "missing": "The Safe rerun changes what the model sees only after bake-rs -p --session <file> --resume-run <id> resumes a crashed run with an interrupted Safe call: the request then carries the rerun results before the recovery notice instead of a refusal. Ordinary prompts, tool declarations, and the system prompt stay byte-identical (replay-class-on-every-tool, ordinary-recovery-unchanged). The standard eval suite does not exercise crash recovery, and no paired eval was run; the owner decides before push whether to run one."
+  },
+  "performanceRecords": {
+    "notApplicable": "No performance qualification attempted."
+  },
+  "rollback": {
+    "observed": "Every test writes session files and effect counters only under its own temporary directories and kills only the children it spawned, each behind a 60 s watchdog; no user home is touched. The candidate is 519a202b13 itself, so each fixture file has the same bytes at the candidate and at every HEAD run. Both Linux preflight logs open with 519a202b13, the umask (0077, then 0022), and no git status --short line, so each ran on a clean tree at that commit. preflight:mac printed no '+ working tree', so the Mac (BAKE_MAC_DIR=bake-ci-s05) tested 519a202b13 itself; its host record names that commit. The cross-target Clippy log records the commit, not the tree's status. The controls ran on an uncommitted slice tree that mutate-kill.py restored by rewriting each file's original bytes; that restoration was not verified by hash or by a logged run.",
+    "commands": [
+      "linux-preflight-umask077",
+      "linux-preflight",
+      "mac-preflight",
+      "xclippy-head",
+      "slice-workspace-test"
+    ]
+  },
+  "review": {
+    "missing": "No reviewer has accepted scope 08. The orchestrating session reviewed the slice branch before merging it; that is not scope acceptance. Auto review was skipped and stays open."
+  }
+}

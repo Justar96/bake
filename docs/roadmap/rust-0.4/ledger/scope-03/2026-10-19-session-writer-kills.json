@@ -1,0 +1,464 @@
+{
+  "schema": "bake/rust-migration/qualification-attempt",
+  "version": 1,
+  "id": "2026-10-19-session-writer-kills",
+  "scope": "03",
+  "status": "partial",
+  "recordedOn": "2026-10-19",
+  "summary": "Session writer kills at b813395413, run at develop 519a202b13, which contains it with nothing under rust/crates/bake-coding-agent/src/session/ changed. The Linux preflight passed 33 gates (actionlint and the TypeScript runtime gate skipped) on its second attempt, under umask 022; the first, under umask 077, failed scripts-unit and rust-package because the unpacked bake-rs had mode 0700. The Intel x86_64 macOS native preflight passed its 4 gates. On Linux, RLIMIT_FSIZE stops a child writer inside the write system call of a single append, of each line of a three-line group, and of a migration's temporary file, before the first byte, after one, half way, and before the newline: the default SIGXFSZ kills it, or, with the signal ignored or caught, the kernel's EFBIG returns. /dev/full returns a real ENOSPC with nothing written. On Linux and Intel macOS, a child is SIGKILLed at each of six steps of a v2 migration and of a branched-session write, and the target holds exactly its old or its new bytes. This record covers another part of scope 03. It fills gaps that the 2026-10-14 storage and 2026-10-17 group-append records list as missing without correcting what they observed, so it supersedes neither. The worker's own runs and its four mutation checks left no logs. Kills inside write on macOS and Windows, any Windows run, EIO, a file system filling up, power loss, and the in-place rewrite remain.",
+  "supersedes": [],
+  "provenance": {
+    "base": "c2144d52a59ece4ec4924a613e15e93075bb4157",
+    "candidate": "b8133954134d6c8e1784bbff53ebd9ea2244a781",
+    "oracle": {
+      "notApplicable": "D32: no TypeScript runtime arm. Pi v1.3.0 (71023aec15) has no crash tests and no rename rewrite; the torn-line assertions encode its loadEntriesFromFile behavior (skip a torn or unparseable line, then repair the newline) as Bake's load_entries_from_file ports it. Pi's source was read, not run."
+    }
+  },
+  "support": [
+    {
+      "id": "d32-pi-session-format",
+      "reference": "docs/roadmap/rust-0.4/scope-00/support.md"
+    },
+    {
+      "id": "durable-execution-crash-matrix",
+      "reference": "docs/roadmap/rust-0.4/durable-execution.md"
+    },
+    {
+      "id": "pi-v1-3-0-session-loader",
+      "reference": "https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/coding-agent/src/core/session-manager.ts"
+    }
+  ],
+  "fixtures": {
+    "files": [
+      {
+        "path": "rust/crates/bake-coding-agent/src/session/durable.rs",
+        "role": "fixture-definition-source",
+        "sha256": "168bae70d6df1679d21be54e77b10ec504597c99a594f2f5ef9f60a0b8f2d6a8"
+      },
+      {
+        "path": "rust/crates/bake-coding-agent/src/session/manager/crash_support.rs",
+        "role": "fixture-definition-source",
+        "sha256": "f641e11fe3ec1ee4616ec92c0222d230315f039cc0efc8d316b610598249845a"
+      },
+      {
+        "path": "rust/crates/bake-coding-agent/src/session/manager/group_tests.rs",
+        "role": "fixture-definition-source",
+        "sha256": "74923cec5242c51c71e45da7e14e19002dfe714fb50a028d8c61ec469d8f5f36"
+      },
+      {
+        "path": "rust/crates/bake-coding-agent/src/session/manager/kernel_write_tests.rs",
+        "role": "fixture-definition-source",
+        "sha256": "75d36e8d1e1421f4411443344946e55ca021e8e9ce46b01680ed67eb655df92f"
+      },
+      {
+        "path": "rust/crates/bake-coding-agent/src/session/manager/rewrite_tests.rs",
+        "role": "fixture-definition-source",
+        "sha256": "c88fdc8778069f2446b3c4630c57fc8107145faa65e93349b4c30dfd7fbebdb5"
+      }
+    ],
+    "digest": "e5670d2b734845160b53cd46187f6ef82dcd4c59ad9150eea7c5f7cce842e957"
+  },
+  "artifacts": {
+    "notApplicable": "Library tests only; no shipped artifact is qualified by this record."
+  },
+  "commands": [
+    {
+      "id": "linux-preflight-umask077",
+      "argv": [
+        "bun",
+        "run",
+        "preflight"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml; rustc and cargo 1.99.0 observed in rust/ on this host after the run)",
+        "bun": "1.4.2 (observed after the run)",
+        "node": "v26.10.0 (observed after the run)",
+        "git": "2.56.0 (observed after the run)",
+        "cargo-about": "0.9.2, built into a temporary root and named by BAKE_CARGO_ABOUT"
+      },
+      "testedCommit": "519a202b1344066f9247506bbbac264b67da1bb8",
+      "expectedExit": 0,
+      "actualExit": 1,
+      "counts": {
+        "passed": 31,
+        "failed": 2,
+        "skipped": 2,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/linux-preflight-519a202b13.log",
+        "sha256": "11df1132b7f5e008d689cfbbf6be64bfb5e86fb0156c2e946f55ada0241d61fc"
+      }
+    },
+    {
+      "id": "linux-preflight",
+      "argv": [
+        "bun",
+        "run",
+        "preflight"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml; rustc and cargo 1.99.0 observed in rust/ on this host after the run)",
+        "bun": "1.4.2 (observed after the run)",
+        "node": "v26.10.0 (observed after the run)",
+        "git": "2.56.0 (observed after the run)",
+        "cargo-about": "0.9.2, built into a temporary root and named by BAKE_CARGO_ABOUT"
+      },
+      "testedCommit": "519a202b1344066f9247506bbbac264b67da1bb8",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 33,
+        "failed": 0,
+        "skipped": 2,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/linux-preflight-519a202b13-umask022.log",
+        "sha256": "0bc28b3cadae0625e50a027064b6eb3fe9cd1dc1b55878538f384b119ea899b0"
+      }
+    },
+    {
+      "id": "linux-rust-gate",
+      "argv": [
+        "bun",
+        "run",
+        "check:rust"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml; rustc and cargo 1.99.0 observed in rust/ on this host after the run)",
+        "bun": "1.4.2 (observed after the run)"
+      },
+      "testedCommit": "519a202b1344066f9247506bbbac264b67da1bb8",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 2422,
+        "failed": 0,
+        "skipped": 6,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/linux-519a202b13/rust.log",
+        "sha256": "ac3210dc53425f3aa1f08f1ac9e65e5afafa240a822d7a93aeb30001a195ff6a"
+      }
+    },
+    {
+      "id": "mac-preflight",
+      "argv": [
+        "bun",
+        "run",
+        "preflight:mac",
+        "ulimit -n 65536; BAKE_CARGO_ABOUT=<cargo-about 0.9.2 on the Mac> bun run preflight --only native"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "darwin",
+        "arch": "x64",
+        "runner": "macpro over SSH; Intel x86_64; macOS 26.7.1 (25G241)"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml; rustc and cargo 1.99.0 recorded in the Mac checkout after the run)",
+        "bun": "1.4.3 (recorded on the Mac after the run; package.json pins bun@1.4.2)",
+        "node": "v26.9.0 (recorded on the Mac after the run)",
+        "cargo-about": "0.9.2 on the Mac, named by BAKE_CARGO_ABOUT in the command"
+      },
+      "testedCommit": "519a202b1344066f9247506bbbac264b67da1bb8",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/mac-519a202b13.log",
+        "sha256": "3ebfab8a2d30ad3e5de33da03dc8c69101985a52defd139450f6d759ade05762"
+      }
+    },
+    {
+      "id": "mac-rust-gate",
+      "argv": [
+        "bun",
+        "run",
+        "check:rust"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "darwin",
+        "arch": "x64",
+        "runner": "macpro over SSH; Intel x86_64; macOS 26.7.1 (25G241)"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml; rustc and cargo 1.99.0 recorded in the Mac checkout after the run)",
+        "bun": "1.4.3 (recorded on the Mac after the run; package.json pins bun@1.4.2)"
+      },
+      "testedCommit": "519a202b1344066f9247506bbbac264b67da1bb8",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 2378,
+        "failed": 0,
+        "skipped": 6,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/mac-519a202b13/rust.log",
+        "sha256": "0c4d78572015d82426955ef1b0e4be2da24027ace43a9182b8379b96cbc3af58"
+      }
+    },
+    {
+      "id": "xclippy-head",
+      "argv": [
+        "/tmp/opencode/xcc/xclippy"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml; rustc and cargo 1.99.0 observed in rust/ on this host after the run)",
+        "zig": {
+          "missing": "zig cc builds the C build scripts for both targets; its version was not captured."
+        }
+      },
+      "testedCommit": "519a202b1344066f9247506bbbac264b67da1bb8",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "missing": "Clippy runs no tests. The wrapper runs cargo clippy --keep-going --locked --all-targets --workspace -- -D warnings for x86_64-pc-windows-gnu and for aarch64-apple-darwin. In a warm target directory, the log shows each pass re-checking bake-sandbox, bake-coding-agent, bake-tui, and bake-cli and finishing (3.19 s, then 3.18 s), with the other workspace crates fresh from an earlier check, and ends with exit 0."
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/xclippy-519a202b13.log",
+        "sha256": "3ba750274cd4937e072094133b011aa0552b3dde5396a07af5d3374284fbe974"
+      }
+    }
+  ],
+  "results": [
+    {
+      "id": "append-killed-inside-write",
+      "behavior": "session::manager::kernel_write_tests (cfg target_os = \"linux\") passed in the Linux rust gate: 7 tests, plus limited_writer_child, the child entry point, which returns at once in the parent run. a_writer_killed_inside_an_append_write_leaves_a_loadable_file (4 kills) and a_writer_killed_inside_a_group_line_write_leaves_a_loadable_prefix (12 kills) re-run the test binary as a child that opens the session, lowers only RLIMIT_FSIZE's soft limit, and appends a tool result or the three-line omission group, so that the write of a line crosses the limit before its first byte, after one, half way, or before its newline. The parent requires that the child died of SIGXFSZ without a core dump, after its ARMED marker and with no RETURNED or CHECKED marker. The file must hold the base bytes, each whole line before the stopped one at its rehearsed length, and exactly the torn bytes with no newline. It loads with the torn line skipped unless all of its JSON was written, rebuilds the context of the same bytes written in full, gives a request with no provider problem, and is taken over by the next writer, whose append starts on a line of its own. For the single append, the request's last message is the real result only when the whole JSON was written, and the synthetic error result otherwise. Counts describe Cargo tests.",
+      "owner": "rust/crates/bake-coding-agent/src/session/manager/kernel_write_tests.rs",
+      "report": ".preflight/rust-orchestration/linux-519a202b13/rust.log",
+      "commands": [
+        "linux-preflight",
+        "linux-rust-gate"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "efbig-returned",
+      "behavior": "an_append_over_the_file_size_limit_returns_efbig (8 children) and a_group_over_the_file_size_limit_reports_the_line_it_stopped_at (24 children) passed on Linux: the same cases with SIGXFSZ ignored, or caught by a counting handler. The child requires SessionError::Io or SessionError::GroupWrite with errno EFBIG. A single append keeps its entry in memory as the leaf, as in Pi. A group reports the synced lines as written and the stopped line as NotWritten at offset 0 and Torn otherwise, and the manager keeps exactly the written lines. Under the handler exactly one signal was caught. The parent then runs the same file checks as after a kill.",
+      "owner": "rust/crates/bake-coding-agent/src/session/manager/kernel_write_tests.rs",
+      "report": ".preflight/rust-orchestration/linux-519a202b13/rust.log",
+      "commands": [
+        "linux-preflight",
+        "linux-rust-gate"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "migration-stopped-inside-write",
+      "behavior": "a_migration_killed_inside_its_temporary_file_write_leaves_the_old_file (4 kills) and a_migration_over_the_file_size_limit_fails_and_removes_its_temporary_file (4 children) passed on Linux. With the limit armed before open, a v2 session's migration writes its temporary file until the limit. After a SIGXFSZ kill, the session file is byte-identical to the old file, the one temporary file holds exactly the migrated bytes before the limit, and the directory holds only the file, its lock, and that temporary file. With EFBIG returned, open fails with that error and the temporary file is removed. Either way only the session is listed, and the next writer migrates it to the expected bytes and context and appends one line; a leftover temporary file stays and is never listed.",
+      "owner": "rust/crates/bake-coding-agent/src/session/manager/kernel_write_tests.rs",
+      "report": ".preflight/rust-orchestration/linux-519a202b13/rust.log",
+      "commands": [
+        "linux-preflight",
+        "linux-rust-gate"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "enospc-full-device",
+      "behavior": "appends_to_a_full_device_fail_with_enospc_and_write_nothing passed on Linux, in process: after a manager writes a conversation, its session file is set aside and replaced by a symlink to /dev/full. append_group of the omission returns GroupWrite with no line written, NotWritten, and errno ENOSPC, and the manager keeps nothing; append_session_info returns Io with ENOSPC and keeps the entry in memory. After the file is restored, its bytes are unchanged, and the next writer reads the original entries and appends one line. This is a real errno from the write path with zero bytes written, not a file system filling up.",
+      "owner": "rust/crates/bake-coding-agent/src/session/manager/kernel_write_tests.rs",
+      "report": ".preflight/rust-orchestration/linux-519a202b13/rust.log",
+      "commands": [
+        "linux-preflight",
+        "linux-rust-gate"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "rewrite-step-kills",
+      "behavior": "session::manager::rewrite_tests passed in the Linux and the Intel macOS rust gates: 2 tests, plus rewrite_holder_child, the child entry point. A child holds a rewrite through the test-only seam (Faults::hold_rewrite) at each RewriteStep (temporary file created, half written, written, synced, renamed, directory synced) and is SIGKILLed by the parent there, 6 kills per test; assert_killed requires signal 9 and rules out the watchdog exit 3, a returned write (exit 4), and a panic. a_migration_killed_at_each_rewrite_step_leaves_the_old_or_the_new_file: before the rename the session file is byte-identical to the v2 file and one temporary file holds nothing, the first half, or all of the migrated bytes; after it the file is the migrated bytes and no temporary file is left. The loader reads 4 entries either way, only the session is listed, and the next writer rebuilds the expected context, leaves the migrated bytes, and appends one line. a_branch_killed_at_each_rewrite_step_leaves_no_file_or_a_whole_one: the source stays byte-identical; before the rename the branch exists only as a temporary file holding a prefix of the expected branch file, whose header names the source; after it the branch is that whole file, is listed, and is taken over. A fresh open of the source branches again to an identical file.",
+      "owner": "rust/crates/bake-coding-agent/src/session/manager/rewrite_tests.rs",
+      "report": ".preflight/rust-orchestration/mac-519a202b13/rust.log",
+      "commands": [
+        "linux-preflight",
+        "linux-rust-gate",
+        "mac-preflight",
+        "mac-rust-gate"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "held-rewrite-seam",
+      "behavior": "session::durable::tests, 8 tests, passed on Linux and Intel macOS, including a_held_rewrite_stops_at_each_step, which checks in process that each RewriteStep sits where its name says: up to Synced the target still holds the old bytes and one temporary file holds nothing, the first half, or all of the new bytes; at Renamed and DirSynced the target holds the new bytes and no temporary file remains. A hold that returns fails the rewrite with an injected error, the temporary file is removed, and the next rewrite holds nowhere. Outside tests Faults is an empty struct that durable::replace and Staged discard, so release builds hold no seam code.",
+      "owner": "rust/crates/bake-coding-agent/src/session/durable.rs",
+      "report": ".preflight/rust-orchestration/linux-519a202b13/rust.log",
+      "commands": [
+        "linux-preflight",
+        "linux-rust-gate",
+        "mac-preflight",
+        "mac-rust-gate"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "group-tests-after-harness-move",
+      "behavior": "session::manager::group::tests, 11 tests plus group_writer_child, passed on Linux and Intel macOS after the shared crash fixtures moved to crash_support.rs and the group kill test moved to its TestChild harness, including a_writer_killed_between_group_lines_leaves_a_loadable_prefix.",
+      "owner": "rust/crates/bake-coding-agent/src/session/manager/group_tests.rs",
+      "report": ".preflight/rust-orchestration/mac-519a202b13/rust.log",
+      "commands": [
+        "linux-preflight",
+        "linux-rust-gate",
+        "mac-preflight",
+        "mac-rust-gate"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "cross-target-compile",
+      "behavior": "Cross-target Clippy at 519a202b13 linted the whole workspace, all targets, with -D warnings for x86_64-pc-windows-gnu and aarch64-apple-darwin and exited 0; each pass re-checked bake-coding-agent, which holds the rewrite and group kill tests and the seam, so they build for Windows and Apple Silicon; kernel_write_tests compile to nothing outside Linux. Nothing ran on either target.",
+      "owner": "rust/crates/bake-coding-agent/src/session/manager/rewrite_tests.rs",
+      "report": ".preflight/rust-orchestration/xclippy-519a202b13.log",
+      "commands": [
+        "xclippy-head"
+      ],
+      "outcome": "pass"
+    },
+    {
+      "id": "linux-preflight-umask077",
+      "behavior": "The first Linux preflight at 519a202b13 ran under umask 077, as its log header shows: 31 gates passed, including rust (95.0 s), and scripts-unit and rust-package failed. Both failures are the release packing test's mode check on the unpacked bake-rs (Expected: 493, Received: 448), because tar -x applied the process umask; no slice touched scripts/release. The same preflight under umask 022 passed every gate it ran (linux-preflight). Every gate log of this attempt is kept beside its rust-package log; its rust gate log counts 2422 passed and 6 ignored, as the umask 022 run's does.",
+      "owner": "scripts/preflight.ts",
+      "report": ".preflight/rust-orchestration/linux-519a202b13-umask077/rust-package.log",
+      "commands": [
+        "linux-preflight-umask077"
+      ],
+      "outcome": "fail",
+      "reason": "The failure comes from the process umask, not the candidate; the umask 022 run is the recorded Linux pass."
+    },
+    {
+      "id": "kill-inside-write-macos-windows",
+      "behavior": "A writer killed inside a write system call on macOS and on Windows leaves a loadable file.",
+      "owner": "rust/crates/bake-coding-agent/src/session/manager/kernel_write_tests.rs",
+      "report": {
+        "missing": "kernel_write_tests compile only on Linux, and no Windows command ran."
+      },
+      "commands": [],
+      "outcome": "missing",
+      "reason": "On macOS, whether XNU shortens a write that crosses RLIMIT_FSIZE or refuses it whole is unverified; Windows has no equivalent limit."
+    },
+    {
+      "id": "windows-rewrite-and-group-kills",
+      "behavior": "The rewrite kill tests, the seam test, and the group kill test on Windows, including the Windows exit code of a killed child.",
+      "owner": "rust/crates/bake-coding-agent/src/session/manager/rewrite_tests.rs",
+      "report": {
+        "missing": "No Windows command ran at this candidate or at 519a202b13."
+      },
+      "commands": [],
+      "outcome": "missing",
+      "reason": "No Windows host was available, so these tests are compile-checked only (cross-target-compile); GitHub CI runs Windows only on the develop to main release pull request."
+    }
+  ],
+  "negativeControls": {
+    "missing": "The worker reports four mutation checks on the slice branch, each reverted: PartlyWritten expected at len/3 (both rewrite kill tests failed); the default SIGXFSZ disposition swapped for SIG_IGN (the three in-write kill tests failed); the caught-signal count expected to be 2 (the three EFBIG tests failed); and torn == L-1 completeness miscounted (the four append and group tests failed). No output, exit status, or tree was saved for any of them."
+  },
+  "missingEvidence": [
+    {
+      "what": "Kill inside write on macOS and Windows",
+      "reason": "kernel_write_tests are cfg(target_os = \"linux\"); macOS's handling of a write crossing RLIMIT_FSIZE is unverified, and Windows has no such limit.",
+      "owner": "rust/crates/bake-coding-agent/src/session/manager/kernel_write_tests.rs"
+    },
+    {
+      "what": "Windows runs of the rewrite, seam, and group kill tests",
+      "reason": "No Windows host was available; the tests are compile-checked only. GitHub CI runs Windows only on the develop to main release pull request.",
+      "owner": "docs/roadmap/rust-0.4/verification.md"
+    },
+    {
+      "what": "Real EIO, a file system filling up, and partial writes or fsync errors from a full file system",
+      "reason": "They need root, a loop mount, or a fault-injecting device; ENOSPC is tested only as /dev/full's errno with zero bytes written.",
+      "owner": "docs/roadmap/rust-0.4/durable-execution.md"
+    },
+    {
+      "what": "Power loss and kernel crashes",
+      "reason": "Every test kills a process, and the page cache survives it; the durability of unsynced data, sync_data, and directory syncs is unproven.",
+      "owner": "docs/roadmap/rust-0.4/durable-execution.md"
+    },
+    {
+      "what": "The in-place rewrite",
+      "reason": "overwrite (hard links, a dangling link, a lock held on the session file) has no seam and no kill test; it truncates first, as Pi's _rewriteFile does, so a crash can leave a truncated file. durable.rs documents this, and it is outside the old-or-new claim.",
+      "owner": "rust/crates/bake-coding-agent/src/session/durable.rs"
+    },
+    {
+      "what": "Kills inside rename, sync, or fdatasync, and between create_new and the first header write",
+      "reason": "The steps around rename and the syncs are tested, not the system calls themselves; the first flush of a new file (create_new_with) has no kill test, and the empty-file first-header rewrite shares the migration's replace path without a test of its own.",
+      "owner": "rust/crates/bake-coding-agent/src/session/durable.rs"
+    },
+    {
+      "what": "Logs of the worker's own runs",
+      "reason": "At slice head 901fb425ea (based on 568a6acfa1) the worker reports fmt and Clippy exit 0, the focused session suites, 299 session:: tests, the workspace with 2317 passed and 6 ignored, cross-target Clippy exit 1 from bake-cli print_mode dead code on Windows, and repeated runs (10 of session::manager:: and 3 of the library); the commit message adds 325 session tests on the merged tree. None saved a log; the runs at 519a202b13 above stand in for them.",
+      "owner": "unassigned"
+    },
+    {
+      "what": "Negative controls with logs",
+      "reason": "The worker's four mutation checks left no output or tree; see negativeControls.",
+      "owner": "rust/crates/bake-coding-agent/src/session/manager/kernel_write_tests.rs"
+    },
+    {
+      "what": "Rest of the crash-recovery matrix and Apple Silicon",
+      "reason": "Only the append, group, and rewrite rows gained tests here; the macOS evidence is from an Intel x86_64 Mac, and Apple Silicon is only compile-checked.",
+      "owner": "docs/roadmap/rust-0.4/durable-execution.md"
+    },
+    {
+      "what": "actionlint and the TypeScript runtime gate",
+      "reason": "Both Linux preflights skipped actionlint (1.7.12 or later is not on PATH) and the runtime gate (no runtime source changed).",
+      "owner": "unassigned"
+    },
+    {
+      "what": "Auto review",
+      "reason": "The user chose to skip Auto review for this slice; it stays open.",
+      "owner": "unassigned"
+    }
+  ],
+  "evalRecords": {
+    "notApplicable": "Test-only change: every new item is cfg(test) or pub(crate), and outside tests the added Faults parameter is an empty struct the rewrite discards. No request, prompt, tool, or session byte the model sees changes."
+  },
+  "performanceRecords": {
+    "notApplicable": "No performance qualification attempted."
+  },
+  "rollback": {
+    "observed": "Every test writes session files only under its own temporary directories and kills only the children it spawned, each with a watchdog; no user home is touched. No file under rust/crates/bake-coding-agent/src/session/ differs between b813395413 and 519a202b13, and each fixture file has the same bytes at both. Both Linux preflight logs open with 519a202b13, the umask (0077, then 0022), and no git status --short line, so each ran on a clean tree at that commit. preflight:mac printed no '+ working tree', so git stash create returned nothing and the Mac (BAKE_MAC_DIR=bake-ci-s05) tested 519a202b13 itself; its host record names that commit. The cross-target Clippy log records the commit, not the tree's status.",
+    "commands": [
+      "linux-preflight-umask077",
+      "linux-preflight",
+      "mac-preflight",
+      "xclippy-head"
+    ]
+  },
+  "review": {
+    "missing": "No reviewer has accepted scope 03. The orchestrating session reviewed the slice branch before merging it; that is not scope acceptance. Auto review was skipped and stays open."
+  }
+}
