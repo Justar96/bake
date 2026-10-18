@@ -116,6 +116,12 @@ fn declares_0_3s_names_descriptions_and_parameters() {
             .all(|definition| definition.prompt_snippet.is_none()
                 && definition.prompt_guidelines.is_none())
     );
+    // 0.3 marked both `isConcurrencySafe`; read-only batching follows it.
+    assert!(
+        definitions
+            .iter()
+            .all(|definition| definition.tool.read_only)
+    );
     assert_eq!(
         web_search_tool_definition(tools.search, false)
             .tool
