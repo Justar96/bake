@@ -891,7 +891,15 @@ async fn exhausted_retries_report_failure() {
         .await
         .expect("session");
     let (events, _subscription) = record(&session);
-    session.prompt("Test", Vec::new()).await.expect("prompt");
+    assert_eq!(
+        session
+            .prompt_with_control("Test", Vec::new(), RunControl::default())
+            .await
+            .unwrap(),
+        RunOutcome::Failed {
+            message: "overloaded_error".into()
+        }
+    );
     assert_eq!(h.faux.call_count(), 3);
     let log = retry_log(&events);
     assert!(log.contains(&"start:1".to_owned()));
@@ -1050,7 +1058,7 @@ async fn abort_cancels_the_retry_wait() {
         of_type(&events, &["auto_retry_end", "agent_settled"]),
         [
             json!({ "type": "auto_retry_end", "success": false, "attempt": 1, "finalError": "Retry cancelled" }),
-            json!({ "type": "agent_settled", "aborted": true }),
+            json!({ "type": "agent_settled", "aborted": true, "outcome": { "kind": "cancelled" } }),
         ]
     );
     assert!(!session.is_retrying());
@@ -1209,7 +1217,7 @@ async fn abort_during_the_retry_omission_cancels_the_wait() {
         of_type(&events, &["auto_retry_end", "agent_settled"]),
         [
             json!({ "type": "auto_retry_end", "success": false, "attempt": 1, "finalError": "Retry cancelled" }),
-            json!({ "type": "agent_settled", "aborted": true }),
+            json!({ "type": "agent_settled", "aborted": true, "outcome": { "kind": "cancelled" } }),
         ]
     );
     assert!(!session.is_retrying());
@@ -1365,7 +1373,15 @@ async fn disabled_retry_and_compaction_leave_errors_alone() {
     let (events, _subscription) = record(&session);
     assert!(!session.auto_retry_enabled());
     assert!(!session.auto_compaction_enabled());
-    session.prompt("Test", Vec::new()).await.expect("prompt");
+    assert_eq!(
+        session
+            .prompt_with_control("Test", Vec::new(), RunControl::default())
+            .await
+            .unwrap(),
+        RunOutcome::Failed {
+            message: "overloaded_error".into()
+        }
+    );
     assert_eq!(h.faux.call_count(), 1);
     assert!(retry_log(&events).is_empty());
     session.shutdown().await;
@@ -1639,3 +1655,164 @@ async fn a_retry_whose_omission_fails_makes_no_request() {
 
 #[path = "idle_compaction_tests.rs"]
 mod idle_compaction;
+
+// One caller interval spans retries, split summaries and later prompts.
+#[tokio::test]
+async fn run_control_is_shared_by_agent_retry_attempts() {
+    let h = harness(200_000);
+    failing(&h, 3, "overloaded_error");
+    let session = AgentSession::create(options(&h, in_memory(), retry_settings(5, 1)))
+        .await
+        .unwrap();
+    let control = bake_agent::RunControl::new(bake_agent::RunLimits {
+        max_model_calls: Some(2),
+        ..Default::default()
+    });
+    let (events, _subscription) = record(&session);
+    let outcome = session
+        .prompt_with_control("Test", Vec::new(), control.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        outcome,
+        bake_agent::RunOutcome::BudgetExhausted {
+            limit: bake_agent::BudgetLimit::ModelCalls
+        }
+    );
+    assert_eq!(control.model_calls(), 2);
+    assert_eq!(h.faux.call_count(), 2);
+    let settled = of_type(&events, &["agent_settled"]);
+    assert_eq!(settled.len(), 1);
+    assert_eq!(settled[0]["outcome"]["kind"], "budget_exhausted");
+    session.shutdown().await;
+}
+
+#[tokio::test]
+async fn run_control_counts_both_overflow_summaries_without_renewing_between_prompts() {
+    let h = harness(200_000);
+    h.faux.set_responses(vec![
+        faux_assistant_message("first answer").into(),
+        failure("prompt is too long: 250000 tokens > 200000 maximum"),
+        faux_assistant_message("## Goal\nRecovered").into(),
+        faux_assistant_message("## Original Request\nsecond").into(),
+        faux_assistant_message("must not be requested").into(),
+    ]);
+    let session = AgentSession::create(options(&h, in_memory(), keep_one()))
+        .await
+        .unwrap();
+    let control = bake_agent::RunControl::new(bake_agent::RunLimits {
+        max_model_calls: Some(4),
+        ..Default::default()
+    });
+    assert_eq!(
+        session
+            .prompt_with_control("first", Vec::new(), control.clone())
+            .await
+            .unwrap(),
+        bake_agent::RunOutcome::FinishedTurn
+    );
+    let outcome = session
+        .prompt_with_control("second", Vec::new(), control.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        outcome,
+        bake_agent::RunOutcome::BudgetExhausted {
+            limit: bake_agent::BudgetLimit::ModelCalls
+        }
+    );
+    assert_eq!(control.model_calls(), 4);
+    assert_eq!(h.faux.call_count(), 4);
+    assert!(entry_types(&session).contains(&"compaction".to_owned()));
+    session.shutdown().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn run_control_deadline_interrupts_retry_backoff() {
+    let h = harness(200_000);
+    failing(&h, 1, "overloaded_error");
+    let session = Arc::new(
+        AgentSession::create(options(
+            &h,
+            in_memory(),
+            settings(json!({"retry":{"baseDelayMs":60_000}})),
+        ))
+        .await
+        .unwrap(),
+    );
+    let retry_started = Arc::new(tokio::sync::Notify::new());
+    let observed = Arc::clone(&retry_started);
+    let _subscription = session.subscribe(move |event| {
+        if matches!(event, SessionEvent::AutoRetryStart { .. }) {
+            observed.notify_one();
+        }
+    });
+    let control = bake_agent::RunControl::new(bake_agent::RunLimits {
+        deadline: Some(tokio::time::Instant::now() + Duration::from_secs(1)),
+        ..Default::default()
+    });
+    let owner = Arc::clone(&session);
+    let prompt =
+        tokio::spawn(async move { owner.prompt_with_control("go", Vec::new(), control).await });
+    retry_started.notified().await;
+    tokio::time::advance(Duration::from_secs(1)).await;
+    assert_eq!(
+        prompt.await.unwrap().unwrap(),
+        bake_agent::RunOutcome::BudgetExhausted {
+            limit: bake_agent::BudgetLimit::Deadline
+        }
+    );
+    assert_eq!(h.faux.call_count(), 1);
+    assert!(!session.is_retrying());
+    assert!(!session.is_streaming());
+    session.shutdown().await;
+}
+
+#[tokio::test]
+async fn run_control_reports_current_failure_and_zero_allowance_after_stale_success() {
+    let h = harness(200_000);
+    h.faux.set_responses(vec![
+        faux_assistant_message("success").into(),
+        failure("invalid credentials"),
+    ]);
+    let session = AgentSession::create(options(&h, in_memory(), Settings::default()))
+        .await
+        .unwrap();
+    assert_eq!(
+        session
+            .prompt_with_control("first", Vec::new(), RunControl::default())
+            .await
+            .unwrap(),
+        RunOutcome::FinishedTurn
+    );
+    assert_eq!(
+        session
+            .prompt_with_control("second", Vec::new(), RunControl::default())
+            .await
+            .unwrap(),
+        RunOutcome::Failed {
+            message: "invalid credentials".into()
+        }
+    );
+    let control = RunControl::new(bake_agent::RunLimits {
+        max_model_calls: Some(0),
+        ..Default::default()
+    });
+    assert_eq!(
+        session
+            .prompt_with_control("third", Vec::new(), control)
+            .await
+            .unwrap(),
+        RunOutcome::BudgetExhausted {
+            limit: bake_agent::BudgetLimit::ModelCalls
+        }
+    );
+    assert_eq!(h.faux.call_count(), 2);
+    session.shutdown().await;
+}
+
+#[path = "run_control_lifetime_tests.rs"]
+mod run_control_lifetime;
+
+#[path = "run_journal_tests.rs"]
+mod run_journal_tests;

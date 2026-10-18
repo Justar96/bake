@@ -55,6 +55,7 @@ use std::io;
 use std::sync::mpsc as std_mpsc;
 use std::sync::{Arc, Mutex, PoisonError};
 
+use bake_agent::{RunControl, RunOutcome};
 use bake_ai::{AbortController, ImageContent, StopReason};
 use bake_coding_agent::agent_session::AgentSession;
 use bake_coding_agent::permissions::{self, ApprovalBroker, ApprovalPrompt};
@@ -162,6 +163,8 @@ type Send = Arc<dyn Fn(RuntimeUpdate) -> bool + std::marker::Send + Sync>;
 /// The live port. Requests go to the driver task; updates come out through
 /// the `send` given to [`LivePort::start`].
 pub struct LivePort {
+    #[cfg(test)]
+    test_session: std::sync::Weak<AgentSession>,
     approvals: Option<ApprovalBroker>,
     requests: Option<mpsc::UnboundedSender<Request>>,
     begin: Option<oneshot::Sender<()>>,
@@ -188,6 +191,8 @@ impl LivePort {
             commit_gate,
         } = live;
         let session = Arc::new(session);
+        #[cfg(test)]
+        let test_session = Arc::downgrade(&session);
         // The session in use, which `/new` and `/resume` replace; what a
         // panicking driver's handler shuts down.
         let current = Arc::new(Mutex::new(Arc::clone(&session)));
@@ -279,6 +284,8 @@ impl LivePort {
             let _ = finished.send(result);
         });
         Self {
+            #[cfg(test)]
+            test_session,
             approvals,
             requests: Some(requests),
             begin: Some(begin),
@@ -399,7 +406,7 @@ struct Queued {
 
 /// The prompt that is running.
 struct Running {
-    task: JoinHandle<Result<(), String>>,
+    task: JoinHandle<Result<RunOutcome, String>>,
     id: Option<u64>,
     text: String,
     cancelled: bool,
@@ -425,7 +432,7 @@ struct CommandRun {
 
 /// What the driver does next.
 enum Next {
-    Settled(Result<Result<(), String>, tokio::task::JoinError>),
+    Settled(Result<Result<RunOutcome, String>, tokio::task::JoinError>),
     /// A background job may have settled while the session was idle.
     Jobs,
     Commanded(Result<commands::Outcome, tokio::task::JoinError>),
@@ -647,7 +654,11 @@ impl Driver {
         let session = Arc::clone(&self.session);
         let Queued { id, text, images } = prompt;
         let sent = text.clone();
-        let task = tokio::spawn(async move { session.prompt(&sent, images).await });
+        let task = tokio::spawn(async move {
+            session
+                .prompt_with_control(&sent, images, RunControl::default())
+                .await
+        });
         Running {
             task,
             id,
@@ -684,7 +695,11 @@ impl Driver {
             seed: format!("{}-{}", self.session.session_id(), self.turns),
         });
         let session = Arc::clone(&self.session);
-        let task = tokio::spawn(async move { session.deliver_job_notices().await.map(drop) });
+        let task = tokio::spawn(async move {
+            session
+                .deliver_job_notices_with_control(RunControl::default())
+                .await
+        });
         Some(Running {
             task,
             id: None,
@@ -841,40 +856,44 @@ impl Driver {
     async fn settled(
         &mut self,
         run: Running,
-        joined: Result<Result<(), String>, tokio::task::JoinError>,
+        joined: Result<Result<RunOutcome, String>, tokio::task::JoinError>,
     ) {
         // The run's abort ends before anything else starts.
         for abort in self.aborts.drain(..) {
             let _ = abort.await;
         }
-        let (admitted, last_stop, mut updates) = {
+        let (admitted, displayed_error, mut updates) = {
             let mut projector = self
                 .projector
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner);
             (
                 projector.admitted(),
-                projector.last_stop(),
+                projector.last_error().map(str::to_owned),
                 projector.finish(),
             )
         };
-        let failure = match joined {
-            Ok(Ok(())) => None,
-            Ok(Err(message)) => Some(message),
-            Err(error) => Some(format!("The agent task failed: {error}")),
-        };
-        let outcome = if run.cancelled || last_stop == Some(StopReason::Aborted) {
-            Outcome::Interrupted
-        } else if failure.is_some() || last_stop == Some(StopReason::Error) {
-            Outcome::Failed
-        } else {
-            Outcome::Completed
+        let (outcome, failure) = match joined {
+            Ok(Ok(RunOutcome::FinishedTurn)) => (Outcome::Completed, None),
+            Ok(Ok(RunOutcome::Cancelled)) => (Outcome::Interrupted, None),
+            Ok(Ok(outcome @ RunOutcome::BudgetExhausted { .. })) => {
+                (Outcome::Failed, Some(outcome.to_string()))
+            }
+            Ok(Ok(RunOutcome::Failed { message })) | Ok(Err(message)) => {
+                (Outcome::Failed, Some(message))
+            }
+            Err(error) => (
+                Outcome::Failed,
+                Some(format!("The agent task failed: {error}")),
+            ),
         };
         for update in updates.drain(..) {
             self.send(update);
         }
         if admitted {
-            if let Some(message) = failure {
+            if let Some(message) =
+                failure.filter(|message| Some(message) != displayed_error.as_ref())
+            {
                 self.send(RuntimeUpdate::Commit(vec![Row::Error(message)]));
             }
         } else if run.notice {

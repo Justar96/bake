@@ -19,6 +19,16 @@ Sessions live in `sessions/` in the Bake home, in one directory per working dire
 
 A resumed session keeps its model, thinking level, and permission unless a flag changes them.
 
+## Recovering a selected run
+
+`--recoverable` journals one print-mode prompt and reports its run id and session file before execution. For example, `bake-rs -p --recoverable --max-model-calls 20 "Fix the failing test"` gives the run one allowance shared by its model requests, retries, and summaries. Recovery is opt-in and requires a saved session.
+
+After an interrupted process, use `bake-rs -p --session /path/to/session.jsonl --resume-run <run-id>`. Select the existing file explicitly; the command takes no new prompt, piped input, file attachment, or replacement budget. It keeps already-spent model calls, recorded tool results, and the selected branch. A completed run returns its recorded outcome without calling the model again. Current tools and permission policy apply; pending approvals are not restored.
+
+A dispatched tool without a recorded result needs reconciliation, so Bake refuses continuation rather than guessing whether its effect happened. Inspect the affected files or external service before starting new work. An interrupted run with `--run-timeout-ms` also refuses continuation because this implementation cannot prove monotonic clock continuity across processes. A recorded final answer or terminal outcome can still be read.
+
+Text mode writes the run id and session path to standard error and prints the selected run's answer, even when the session has later conversation. JSON mode emits `recoverable_run_started` with `runId` before execution and `recoverable_run_result` with `runId`, `outcome`, and `finalMessage` when it returns. `finalMessage` is null when the selected run has no assistant response. `finished_turn` describes execution; it does not independently verify that the task succeeded. These flags do not recover ordinary runs that were started without `--recoverable`.
+
 ## In an interactive session
 
 - `/session` shows the session's name, file, id, and message and token counts. It changes nothing.

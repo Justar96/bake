@@ -31,7 +31,7 @@ use crate::compaction::{
     estimate_context_tokens, estimate_projected_context_tokens, estimate_tokens,
     prepare_compaction, should_compact,
 };
-use crate::owned_work::WorkGate;
+use crate::owned_work::{BlockingTask, Refused, WorkGate};
 use crate::session::time::js_date_ms;
 use crate::session::{
     AgentMessage, GroupEntry, SessionEntry, SessionError, SessionManager, SessionProjection,
@@ -283,6 +283,8 @@ pub(super) struct Activity {
     pub manual_compaction: bool,
     /// Automatic compaction.
     pub auto_compaction: bool,
+    /// Owned durable appends through their live-context publication.
+    pub context_commits: usize,
     /// [`super::AgentSession::navigate_tree`], which Pi counts in
     /// `isCompacting` through `_branchSummaryAbortController`.
     pub navigation: bool,
@@ -290,7 +292,11 @@ pub(super) struct Activity {
 
 impl Activity {
     pub fn idle(self) -> bool {
-        !self.run && !self.manual_compaction && !self.auto_compaction && !self.navigation
+        !self.run
+            && !self.manual_compaction
+            && !self.auto_compaction
+            && self.context_commits == 0
+            && !self.navigation
     }
 }
 
@@ -342,6 +348,8 @@ pub(super) struct Core {
     pub has_model: AtomicBool,
     /// Pi's `_agentRunAbortRequested`.
     pub abort_requested: AtomicBool,
+    pub run_control: Mutex<Option<bake_agent::RunControl>>,
+    pub background_compaction: super::background_compaction::BackgroundCompaction,
     pub state: Mutex<RunState>,
     pub activity: watch::Sender<Activity>,
     /// Why the session file lacks an entry, once a write to it failed.
@@ -370,6 +378,16 @@ impl Drop for ActivityGuard<'_> {
     }
 }
 
+/// The blocking commit owns this exclusion through context publication,
+/// independently of the future waiting for its result.
+struct ContextCommitLease(watch::Sender<Activity>);
+
+impl Drop for ContextCommitLease {
+    fn drop(&mut self) {
+        self.0.send_modify(|activity| activity.context_commits -= 1);
+    }
+}
+
 impl Core {
     pub fn state(&self) -> MutexGuard<'_, RunState> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
@@ -388,8 +406,18 @@ impl Core {
         self.listeners.emit(event);
     }
 
+    pub fn control(&self) -> Option<bake_agent::RunControl> {
+        self.run_control
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
     pub fn aborted(&self) -> bool {
         self.abort_requested.load(Ordering::SeqCst)
+            || self
+                .control()
+                .is_some_and(|control| control.stopped().is_some())
     }
 
     /// The selected model, unless none was available.
@@ -454,6 +482,28 @@ impl Core {
         }
     }
 
+    /// Appends and publishes under one owned exclusion. The closure must
+    /// install every committed context before returning; dropping its
+    /// caller cannot release the lease or abandon publication.
+    pub(super) fn owned_context_commit<T, F>(
+        self: &Arc<Self>,
+        commit: F,
+    ) -> Result<BlockingTask<T>, Refused>
+    where
+        T: Send + 'static,
+        F: FnOnce(&Core) -> T + Send + 'static,
+    {
+        let permit = self.work.enter().ok_or(Refused::Closed)?;
+        self.activity
+            .send_modify(|activity| activity.context_commits += 1);
+        let lease = ContextCommitLease(self.activity.clone());
+        let core = Arc::clone(self);
+        permit.spawn_blocking(move || {
+            let _lease = lease;
+            commit(&core)
+        })
+    }
+
     /// Waits until no prompt or compaction is running.
     pub async fn wait_for_idle(&self) {
         let mut idle = self.activity.subscribe();
@@ -489,7 +539,10 @@ impl Core {
             .map_err(|error| format!("Session I/O task failed: {error}"))?
     }
 
-    fn compaction_settings(&self, model: Option<&Model>) -> Result<CompactionSettings, String> {
+    pub(super) fn compaction_settings(
+        &self,
+        model: Option<&Model>,
+    ) -> Result<CompactionSettings, String> {
         super::read_settings(&self.settings)
             .compaction_settings(model.map(|model| (model.provider.as_str(), model.id.as_str())))
     }
@@ -725,6 +778,7 @@ impl Core {
         reason: CompactionReason,
     ) -> Result<CompactionResult, CompactionError> {
         let options = SummarizationOptions {
+            run_control: self.control(),
             signal: Some(controller.signal()),
             thinking_level: self.agent().map(|agent| agent.thinking_level()),
             retry: Some(super::read_settings(&self.settings).retry.policy()),
@@ -745,16 +799,13 @@ impl Core {
         if cancelled() {
             return Err(CompactionError::Cancelled);
         }
-        let Some(permit) = self.work.enter() else {
-            return Err(CompactionError::Failed(
-                "The session is shut down".to_owned(),
-            ));
-        };
         #[cfg(test)]
         self.session_io.send_modify(|count| *count += 1);
         let entry = result.clone();
-        let core = Arc::clone(self);
-        let commit = permit.spawn_blocking(move || {
+        // The prompt wrapper may be dropped while this owned write runs.
+        // Preserve its failure channel even after Core's run slot clears.
+        let control = self.control();
+        let commit = self.owned_context_commit(move |core| {
             #[cfg(test)]
             {
                 let hook = core.hooks().before_compaction_commit.take();
@@ -798,22 +849,15 @@ impl Core {
             // As every failed write does: a run stops here, as soon as the
             // session lock is released.
             if matches!(written, Err(super::WriteRefused::Failed(_))) {
+                if let (Some(control), Err(error)) = (&control, &written) {
+                    control.fail(error.message());
+                }
                 core.abort_requested.store(true, Ordering::SeqCst);
                 if let Some(agent) = core.agent() {
                     agent.abort();
                 }
             }
-            written
-        });
-        let committed = commit
-            .map_err(|refused| {
-                CompactionError::Failed(format!("Session I/O task failed: {refused}"))
-            })?
-            .await
-            .map_err(|error| {
-                CompactionError::Failed(format!("Session I/O task failed: {error}"))
-            })?;
-        let projection = match committed {
+            let projection = match written {
             Ok(Some(projection)) => projection,
             Ok(None) => return Err(CompactionError::Cancelled),
             Err(super::WriteRefused::AfterGap(error)) => {
@@ -826,10 +870,17 @@ impl Core {
                     "The compaction could not be written to the session file ({error}), so the session stopped and takes no more prompts."
                 )));
             }
-        };
-        self.refresh_context(&projection);
-        result.estimated_tokens_after = Some(projection.messages.iter().map(estimate_tokens).sum());
-        Ok(result)
+            };
+            core.refresh_context(&projection);
+            result.estimated_tokens_after = Some(projection.messages.iter().map(estimate_tokens).sum());
+            Ok(result)
+        });
+        commit
+            .map_err(|refused| {
+                CompactionError::Failed(format!("Session I/O task failed: {refused}"))
+            })?
+            .await
+            .map_err(|error| CompactionError::Failed(format!("Session I/O task failed: {error}")))?
     }
 
     /// Pi's `_runAutoCompaction`: whether the post-run loop continues.
@@ -841,6 +892,8 @@ impl Core {
         will_retry: bool,
         run_signal: Option<&AbortSignal>,
     ) -> Result<bool, String> {
+        self.cancel_background_compaction("foreground compaction")
+            .await;
         // Registered before the branch read, so an abort during it cancels
         // the request.
         let (controller, slot) = self.register_abort(|state| &mut state.auto_compaction_abort);
@@ -966,6 +1019,7 @@ impl Core {
         self.emit(&SessionEvent::CompactionStart {
             reason: CompactionReason::Manual,
         });
+        self.cancel_background_compaction("manual compaction").await;
         let cancelled =
             || controller.signal().aborted() || cancel.as_ref().is_some_and(AbortSignal::aborted);
         let work = async {
@@ -1075,6 +1129,13 @@ impl Core {
         skip_aborted_check: bool,
         tool_results: Vec<Option<String>>,
     ) -> Result<bool, String> {
+        self.mask_context(None).await?;
+        let allow_background = !matches!(
+            assistant.stop_reason,
+            StopReason::Error | StopReason::Aborted | StopReason::Length
+        );
+        self.background_compaction_boundary(allow_background)
+            .await?;
         let model = self.model();
         let settings = self.compaction_settings(model.as_ref())?;
         if !settings.enabled {
@@ -1160,6 +1221,13 @@ impl Core {
             return None;
         }
         let settings = self.compaction_settings(Some(&model)).ok()?;
+        let masked = self
+            .mask_context(signal.clone())
+            .await
+            .ok()
+            .flatten()
+            .is_some();
+        let background_committed = self.background_compaction_boundary(true).await.ok()?;
         let (branch, projection) = self
             .with_session(|session| {
                 (
@@ -1175,7 +1243,17 @@ impl Core {
             .ok()?;
         let tokens = estimate_projected_context_tokens(&projection, &branch).tokens;
         if !should_compact(tokens, model.context_window, &settings) {
-            return None;
+            return (masked || background_committed).then(|| AgentLoopTurnUpdate {
+                context: Some(AgentContext {
+                    messages: projection
+                        .messages
+                        .iter()
+                        .map(AgentMessage::to_agent)
+                        .collect(),
+                    tools,
+                }),
+                ..AgentLoopTurnUpdate::default()
+            });
         }
         // Failures are reported as events; the run goes on either way.
         let _ = self

@@ -1,0 +1,2108 @@
+[
+  {
+    "label": "deepseek-flash.independent_reads.0.base",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 6,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 4,
+      "maxCalls": 4
+    },
+    "usage": {
+      "inputTokens": 2252,
+      "outputTokens": 608,
+      "cacheReadTokens": 9472,
+      "cacheWriteTokens": 0,
+      "totalTokens": 12332
+    },
+    "requests": 5,
+    "elapsedMs": 4832
+  },
+  {
+    "label": "deepseek-flash.independent_reads.2.unbounded",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 6,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 6,
+      "maxCalls": 6
+    },
+    "usage": {
+      "inputTokens": 2126,
+      "outputTokens": 541,
+      "cacheReadTokens": 7168,
+      "cacheWriteTokens": 0,
+      "totalTokens": 9835
+    },
+    "requests": 4,
+    "elapsedMs": 4269
+  },
+  {
+    "label": "deepseek-flash.independent_reads.2.base",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 6,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 4,
+      "maxCalls": 4
+    },
+    "usage": {
+      "inputTokens": 2097,
+      "outputTokens": 498,
+      "cacheReadTokens": 6784,
+      "cacheWriteTokens": 0,
+      "totalTokens": 9379
+    },
+    "requests": 4,
+    "elapsedMs": 3449
+  },
+  {
+    "label": "deepseek-flash.independent_reads.2.candidate",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 6,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 6,
+      "maxCalls": 6
+    },
+    "usage": {
+      "inputTokens": 2233,
+      "outputTokens": 579,
+      "cacheReadTokens": 7168,
+      "cacheWriteTokens": 0,
+      "totalTokens": 9980
+    },
+    "requests": 4,
+    "elapsedMs": 4367
+  },
+  {
+    "label": "deepseek-flash.independent_reads.1.base",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 6,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 6,
+      "maxCalls": 6
+    },
+    "usage": {
+      "inputTokens": 2093,
+      "outputTokens": 517,
+      "cacheReadTokens": 7168,
+      "cacheWriteTokens": 0,
+      "totalTokens": 9778
+    },
+    "requests": 4,
+    "elapsedMs": 4091
+  },
+  {
+    "label": "deepseek-flash.independent_reads.0.candidate",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 6,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 6,
+      "maxCalls": 6
+    },
+    "usage": {
+      "inputTokens": 2136,
+      "outputTokens": 541,
+      "cacheReadTokens": 7168,
+      "cacheWriteTokens": 0,
+      "totalTokens": 9845
+    },
+    "requests": 4,
+    "elapsedMs": 3874
+  },
+  {
+    "label": "deepseek-flash.independent_reads.1.unbounded",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 6,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 6,
+      "maxCalls": 6
+    },
+    "usage": {
+      "inputTokens": 2103,
+      "outputTokens": 458,
+      "cacheReadTokens": 7040,
+      "cacheWriteTokens": 0,
+      "totalTokens": 9601
+    },
+    "requests": 4,
+    "elapsedMs": 3867
+  },
+  {
+    "label": "deepseek-flash.independent_reads.0.unbounded",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 6,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 2,
+      "multiCallBatches": 2,
+      "calls": 6,
+      "maxCalls": 4
+    },
+    "usage": {
+      "inputTokens": 2252,
+      "outputTokens": 762,
+      "cacheReadTokens": 9600,
+      "cacheWriteTokens": 0,
+      "totalTokens": 12614
+    },
+    "requests": 5,
+    "elapsedMs": 6002
+  },
+  {
+    "label": "deepseek-flash.independent_reads.1.candidate",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 6,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 6,
+      "maxCalls": 6
+    },
+    "usage": {
+      "inputTokens": 2093,
+      "outputTokens": 514,
+      "cacheReadTokens": 7168,
+      "cacheWriteTokens": 0,
+      "totalTokens": 9775
+    },
+    "requests": 4,
+    "elapsedMs": 3771
+  },
+  {
+    "label": "gemini-3.8-flash-high.independent_reads.2.base",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 5,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 4,
+      "maxCalls": 4
+    },
+    "usage": {
+      "inputTokens": 10771,
+      "outputTokens": 1882,
+      "cacheReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "totalTokens": 12653
+    },
+    "requests": 4,
+    "elapsedMs": 14969
+  },
+  {
+    "label": "gemini-3.8-flash-high.independent_reads.1.candidate",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 6,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 4,
+      "maxCalls": 4
+    },
+    "usage": {
+      "inputTokens": 10120,
+      "outputTokens": 1635,
+      "cacheReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "totalTokens": 11755
+    },
+    "requests": 4,
+    "elapsedMs": 9305
+  },
+  {
+    "label": "gemini-3.8-flash-high.independent_reads.1.base",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 6,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 4,
+      "maxCalls": 4
+    },
+    "usage": {
+      "inputTokens": 10841,
+      "outputTokens": 2040,
+      "cacheReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "totalTokens": 12881
+    },
+    "requests": 4,
+    "elapsedMs": 9561
+  },
+  {
+    "label": "gemini-3.8-flash-high.independent_reads.2.candidate",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 5,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 4,
+      "maxCalls": 4
+    },
+    "usage": {
+      "inputTokens": 11726,
+      "outputTokens": 2124,
+      "cacheReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "totalTokens": 13850
+    },
+    "requests": 4,
+    "elapsedMs": 9933
+  },
+  {
+    "label": "gemini-3.8-flash-high.independent_reads.0.unbounded",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 6,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 4,
+      "maxCalls": 4
+    },
+    "usage": {
+      "inputTokens": 11247,
+      "outputTokens": 2023,
+      "cacheReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "totalTokens": 13270
+    },
+    "requests": 4,
+    "elapsedMs": 10003
+  },
+  {
+    "label": "gemini-3.8-flash-high.independent_reads.1.unbounded",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 5,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 4,
+      "maxCalls": 4
+    },
+    "usage": {
+      "inputTokens": 10584,
+      "outputTokens": 1816,
+      "cacheReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "totalTokens": 12400
+    },
+    "requests": 4,
+    "elapsedMs": 9771
+  },
+  {
+    "label": "gemini-3.8-flash-high.independent_reads.0.base",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 6,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 4,
+      "maxCalls": 4
+    },
+    "usage": {
+      "inputTokens": 12293,
+      "outputTokens": 2538,
+      "cacheReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "totalTokens": 14831
+    },
+    "requests": 4,
+    "elapsedMs": 11886
+  },
+  {
+    "label": "gemini-3.8-flash-high.independent_reads.2.unbounded",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 5,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 4,
+      "maxCalls": 4
+    },
+    "usage": {
+      "inputTokens": 10378,
+      "outputTokens": 1720,
+      "cacheReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "totalTokens": 12098
+    },
+    "requests": 4,
+    "elapsedMs": 8981
+  },
+  {
+    "label": "gemini-3.8-flash-high.independent_reads.0.candidate",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 6,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 4,
+      "maxCalls": 4
+    },
+    "usage": {
+      "inputTokens": 11051,
+      "outputTokens": 2157,
+      "cacheReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "totalTokens": 13208
+    },
+    "requests": 4,
+    "elapsedMs": 11614
+  },
+  {
+    "label": "deepseek-v4-pro.independent_reads.0.unbounded",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 5,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 4,
+      "maxCalls": 4
+    },
+    "usage": {
+      "inputTokens": 1834,
+      "outputTokens": 562,
+      "cacheReadTokens": 9728,
+      "cacheWriteTokens": 0,
+      "totalTokens": 12124
+    },
+    "requests": 5,
+    "elapsedMs": 6475
+  },
+  {
+    "label": "deepseek-v4-pro.independent_reads.0.candidate",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 6,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 2,
+      "multiCallBatches": 2,
+      "calls": 6,
+      "maxCalls": 4
+    },
+    "usage": {
+      "inputTokens": 1916,
+      "outputTokens": 645,
+      "cacheReadTokens": 10112,
+      "cacheWriteTokens": 0,
+      "totalTokens": 12673
+    },
+    "requests": 5,
+    "elapsedMs": 7013
+  },
+  {
+    "label": "deepseek-v4-pro.independent_reads.0.base",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 6,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 6,
+      "maxCalls": 6
+    },
+    "usage": {
+      "inputTokens": 1824,
+      "outputTokens": 590,
+      "cacheReadTokens": 7936,
+      "cacheWriteTokens": 0,
+      "totalTokens": 10350
+    },
+    "requests": 4,
+    "elapsedMs": 5733
+  },
+  {
+    "label": "deepseek-v4-pro.independent_reads.1.unbounded",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 5,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 2,
+      "multiCallBatches": 1,
+      "calls": 5,
+      "maxCalls": 4
+    },
+    "usage": {
+      "inputTokens": 1766,
+      "outputTokens": 569,
+      "cacheReadTokens": 9728,
+      "cacheWriteTokens": 0,
+      "totalTokens": 12063
+    },
+    "requests": 5,
+    "elapsedMs": 6875
+  },
+  {
+    "label": "deepseek-v4-pro.independent_reads.2.candidate",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 5,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 2,
+      "multiCallBatches": 1,
+      "calls": 5,
+      "maxCalls": 4
+    },
+    "usage": {
+      "inputTokens": 1752,
+      "outputTokens": 580,
+      "cacheReadTokens": 9728,
+      "cacheWriteTokens": 0,
+      "totalTokens": 12060
+    },
+    "requests": 5,
+    "elapsedMs": 6964
+  },
+  {
+    "label": "deepseek-v4-pro.independent_reads.2.unbounded",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 5,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 4,
+      "maxCalls": 4
+    },
+    "usage": {
+      "inputTokens": 1780,
+      "outputTokens": 504,
+      "cacheReadTokens": 9728,
+      "cacheWriteTokens": 0,
+      "totalTokens": 12012
+    },
+    "requests": 5,
+    "elapsedMs": 6421
+  },
+  {
+    "label": "deepseek-v4-pro.independent_reads.1.candidate",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 5,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 5,
+      "maxCalls": 5
+    },
+    "usage": {
+      "inputTokens": 1769,
+      "outputTokens": 641,
+      "cacheReadTokens": 7680,
+      "cacheWriteTokens": 0,
+      "totalTokens": 10090
+    },
+    "requests": 4,
+    "elapsedMs": 5231
+  },
+  {
+    "label": "deepseek-v4-pro.independent_reads.2.base",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 6,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 6,
+      "maxCalls": 6
+    },
+    "usage": {
+      "inputTokens": 1911,
+      "outputTokens": 633,
+      "cacheReadTokens": 7808,
+      "cacheWriteTokens": 0,
+      "totalTokens": 10352
+    },
+    "requests": 4,
+    "elapsedMs": 5873
+  },
+  {
+    "label": "deepseek-v4-pro.independent_reads.1.base",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 6,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 2,
+      "multiCallBatches": 2,
+      "calls": 6,
+      "maxCalls": 4
+    },
+    "usage": {
+      "inputTokens": 1954,
+      "outputTokens": 701,
+      "cacheReadTokens": 10112,
+      "cacheWriteTokens": 0,
+      "totalTokens": 12767
+    },
+    "requests": 5,
+    "elapsedMs": 7380
+  },
+  {
+    "label": "claude-opus-5-5.independent_reads.0.candidate",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 5,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 5,
+      "maxCalls": 5
+    },
+    "usage": {
+      "inputTokens": 6,
+      "outputTokens": 746,
+      "cacheReadTokens": 8282,
+      "cacheWriteTokens": 1800,
+      "totalTokens": 10834
+    },
+    "requests": 3,
+    "elapsedMs": 9383
+  },
+  {
+    "label": "claude-opus-5-5.independent_reads.2.candidate",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 5,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 5,
+      "maxCalls": 5
+    },
+    "usage": {
+      "inputTokens": 6,
+      "outputTokens": 769,
+      "cacheReadTokens": 8282,
+      "cacheWriteTokens": 1800,
+      "totalTokens": 10857
+    },
+    "requests": 3,
+    "elapsedMs": 8706
+  },
+  {
+    "label": "claude-opus-5-5.independent_reads.0.unbounded",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 5,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 5,
+      "maxCalls": 5
+    },
+    "usage": {
+      "inputTokens": 6,
+      "outputTokens": 800,
+      "cacheReadTokens": 8280,
+      "cacheWriteTokens": 1812,
+      "totalTokens": 10898
+    },
+    "requests": 3,
+    "elapsedMs": 11083
+  },
+  {
+    "label": "claude-opus-5-5.independent_reads.1.base",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 5,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 5,
+      "maxCalls": 5
+    },
+    "usage": {
+      "inputTokens": 6,
+      "outputTokens": 771,
+      "cacheReadTokens": 8282,
+      "cacheWriteTokens": 1800,
+      "totalTokens": 10859
+    },
+    "requests": 3,
+    "elapsedMs": 10694
+  },
+  {
+    "label": "claude-opus-5-5.independent_reads.1.unbounded",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 5,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 5,
+      "maxCalls": 5
+    },
+    "usage": {
+      "inputTokens": 6,
+      "outputTokens": 782,
+      "cacheReadTokens": 8280,
+      "cacheWriteTokens": 1799,
+      "totalTokens": 10867
+    },
+    "requests": 3,
+    "elapsedMs": 9433
+  },
+  {
+    "label": "claude-opus-5-5.independent_reads.0.base",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 5,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 5,
+      "maxCalls": 5
+    },
+    "usage": {
+      "inputTokens": 6,
+      "outputTokens": 773,
+      "cacheReadTokens": 7916,
+      "cacheWriteTokens": 2163,
+      "totalTokens": 10858
+    },
+    "requests": 3,
+    "elapsedMs": 12617
+  },
+  {
+    "label": "claude-opus-5-5.independent_reads.2.unbounded",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 5,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 5,
+      "maxCalls": 5
+    },
+    "usage": {
+      "inputTokens": 6,
+      "outputTokens": 764,
+      "cacheReadTokens": 8282,
+      "cacheWriteTokens": 1815,
+      "totalTokens": 10867
+    },
+    "requests": 3,
+    "elapsedMs": 14549
+  },
+  {
+    "label": "claude-opus-5-5.independent_reads.1.candidate",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 5,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 5,
+      "maxCalls": 5
+    },
+    "usage": {
+      "inputTokens": 6,
+      "outputTokens": 780,
+      "cacheReadTokens": 8284,
+      "cacheWriteTokens": 1801,
+      "totalTokens": 10871
+    },
+    "requests": 3,
+    "elapsedMs": 9756
+  },
+  {
+    "label": "claude-opus-5-5.independent_reads.2.base",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 5,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 5,
+      "maxCalls": 5
+    },
+    "usage": {
+      "inputTokens": 6,
+      "outputTokens": 785,
+      "cacheReadTokens": 8280,
+      "cacheWriteTokens": 1799,
+      "totalTokens": 10870
+    },
+    "requests": 3,
+    "elapsedMs": 9097
+  },
+  {
+    "label": "gpt-6.1-sol.independent_reads.2.candidate",
+    "success": false,
+    "usageComplete": false,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 5,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 5,
+      "multiCallBatches": 0,
+      "calls": 5,
+      "maxCalls": 1
+    },
+    "usage": {
+      "inputTokens": 4071,
+      "outputTokens": 201,
+      "cacheReadTokens": 6400,
+      "cacheWriteTokens": 0,
+      "totalTokens": 10672
+    },
+    "requests": 7,
+    "elapsedMs": 180025
+  },
+  {
+    "label": "gpt-6.1-sol.independent_reads.0.unbounded",
+    "success": false,
+    "usageComplete": false,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 5,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 5,
+      "multiCallBatches": 0,
+      "calls": 5,
+      "maxCalls": 1
+    },
+    "usage": {
+      "inputTokens": 2343,
+      "outputTokens": 145,
+      "cacheReadTokens": 6272,
+      "cacheWriteTokens": 0,
+      "totalTokens": 8760
+    },
+    "requests": 6,
+    "elapsedMs": 13718
+  },
+  {
+    "label": "gpt-6.1-sol.independent_reads.2.base",
+    "success": false,
+    "usageComplete": false,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 5,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 5,
+      "multiCallBatches": 0,
+      "calls": 5,
+      "maxCalls": 1
+    },
+    "usage": {
+      "inputTokens": 3869,
+      "outputTokens": 140,
+      "cacheReadTokens": 4736,
+      "cacheWriteTokens": 0,
+      "totalTokens": 8745
+    },
+    "requests": 6,
+    "elapsedMs": 180028
+  },
+  {
+    "label": "gpt-6.1-sol.independent_reads.0.candidate",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 5,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 5,
+      "multiCallBatches": 0,
+      "calls": 5,
+      "maxCalls": 1
+    },
+    "usage": {
+      "inputTokens": 3682,
+      "outputTokens": 520,
+      "cacheReadTokens": 17408,
+      "cacheWriteTokens": 0,
+      "totalTokens": 21610
+    },
+    "requests": 11,
+    "elapsedMs": 31846
+  },
+  {
+    "label": "gpt-6.1-sol.independent_reads.1.candidate",
+    "success": false,
+    "usageComplete": false,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 5,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 5,
+      "multiCallBatches": 0,
+      "calls": 5,
+      "maxCalls": 1
+    },
+    "usage": {
+      "inputTokens": 2343,
+      "outputTokens": 145,
+      "cacheReadTokens": 6272,
+      "cacheWriteTokens": 0,
+      "totalTokens": 8760
+    },
+    "requests": 6,
+    "elapsedMs": 17953
+  },
+  {
+    "label": "gpt-6.1-sol.independent_reads.1.base",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 5,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 5,
+      "multiCallBatches": 0,
+      "calls": 5,
+      "maxCalls": 1
+    },
+    "usage": {
+      "inputTokens": 3185,
+      "outputTokens": 397,
+      "cacheReadTokens": 13440,
+      "cacheWriteTokens": 0,
+      "totalTokens": 17022
+    },
+    "requests": 9,
+    "elapsedMs": 22995
+  },
+  {
+    "label": "gpt-6.1-sol.independent_reads.2.unbounded",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 5,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 5,
+      "multiCallBatches": 0,
+      "calls": 5,
+      "maxCalls": 1
+    },
+    "usage": {
+      "inputTokens": 5463,
+      "outputTokens": 594,
+      "cacheReadTokens": 18048,
+      "cacheWriteTokens": 0,
+      "totalTokens": 24105
+    },
+    "requests": 12,
+    "elapsedMs": 32356
+  },
+  {
+    "label": "gpt-6.1-sol.independent_reads.1.unbounded",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 5,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 5,
+      "multiCallBatches": 0,
+      "calls": 5,
+      "maxCalls": 1
+    },
+    "usage": {
+      "inputTokens": 3319,
+      "outputTokens": 456,
+      "cacheReadTokens": 15488,
+      "cacheWriteTokens": 0,
+      "totalTokens": 19263
+    },
+    "requests": 10,
+    "elapsedMs": 24788
+  },
+  {
+    "label": "gpt-6.1-sol.independent_reads.0.base",
+    "success": false,
+    "usageComplete": false,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 5,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 5,
+      "multiCallBatches": 0,
+      "calls": 5,
+      "maxCalls": 1
+    },
+    "usage": {
+      "inputTokens": 3874,
+      "outputTokens": 145,
+      "cacheReadTokens": 4736,
+      "cacheWriteTokens": 0,
+      "totalTokens": 8755
+    },
+    "requests": 6,
+    "elapsedMs": 24554
+  },
+  {
+    "label": "claude-sonnet-5-5.independent_reads.0.candidate",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 5,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 5,
+      "maxCalls": 5
+    },
+    "usage": {
+      "inputTokens": 6,
+      "outputTokens": 774,
+      "cacheReadTokens": 8284,
+      "cacheWriteTokens": 1802,
+      "totalTokens": 10866
+    },
+    "requests": 3,
+    "elapsedMs": 6337
+  },
+  {
+    "label": "claude-sonnet-5-5.independent_reads.0.unbounded",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 5,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 5,
+      "maxCalls": 5
+    },
+    "usage": {
+      "inputTokens": 6,
+      "outputTokens": 790,
+      "cacheReadTokens": 8280,
+      "cacheWriteTokens": 1800,
+      "totalTokens": 10876
+    },
+    "requests": 3,
+    "elapsedMs": 6423
+  },
+  {
+    "label": "claude-sonnet-5-5.independent_reads.1.base",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 5,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 5,
+      "maxCalls": 5
+    },
+    "usage": {
+      "inputTokens": 6,
+      "outputTokens": 778,
+      "cacheReadTokens": 8286,
+      "cacheWriteTokens": 1803,
+      "totalTokens": 10873
+    },
+    "requests": 3,
+    "elapsedMs": 6560
+  },
+  {
+    "label": "claude-sonnet-5-5.independent_reads.2.base",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 5,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 5,
+      "maxCalls": 5
+    },
+    "usage": {
+      "inputTokens": 6,
+      "outputTokens": 777,
+      "cacheReadTokens": 8280,
+      "cacheWriteTokens": 1800,
+      "totalTokens": 10863
+    },
+    "requests": 3,
+    "elapsedMs": 6418
+  },
+  {
+    "label": "claude-sonnet-5-5.independent_reads.1.unbounded",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 5,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 5,
+      "maxCalls": 5
+    },
+    "usage": {
+      "inputTokens": 6,
+      "outputTokens": 771,
+      "cacheReadTokens": 8280,
+      "cacheWriteTokens": 1800,
+      "totalTokens": 10857
+    },
+    "requests": 3,
+    "elapsedMs": 6769
+  },
+  {
+    "label": "claude-sonnet-5-5.independent_reads.2.unbounded",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 5,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 5,
+      "maxCalls": 5
+    },
+    "usage": {
+      "inputTokens": 6,
+      "outputTokens": 763,
+      "cacheReadTokens": 8280,
+      "cacheWriteTokens": 1800,
+      "totalTokens": 10849
+    },
+    "requests": 3,
+    "elapsedMs": 6551
+  },
+  {
+    "label": "claude-sonnet-5-5.independent_reads.1.candidate",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 5,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 5,
+      "maxCalls": 5
+    },
+    "usage": {
+      "inputTokens": 6,
+      "outputTokens": 748,
+      "cacheReadTokens": 8280,
+      "cacheWriteTokens": 1800,
+      "totalTokens": 10834
+    },
+    "requests": 3,
+    "elapsedMs": 6089
+  },
+  {
+    "label": "claude-sonnet-5-5.independent_reads.2.candidate",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 5,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 5,
+      "maxCalls": 5
+    },
+    "usage": {
+      "inputTokens": 6,
+      "outputTokens": 805,
+      "cacheReadTokens": 8282,
+      "cacheWriteTokens": 1801,
+      "totalTokens": 10894
+    },
+    "requests": 3,
+    "elapsedMs": 6376
+  },
+  {
+    "label": "claude-sonnet-5-5.independent_reads.0.base",
+    "success": true,
+    "usageComplete": true,
+    "background": {
+      "started": 0,
+      "committed": 0,
+      "discarded": 0,
+      "attempts": 0,
+      "dispatched": 0,
+      "missingUsage": 0,
+      "elapsedMs": 0
+    },
+    "discardReasons": [],
+    "masking": {
+      "commits": 0,
+      "maskedResults": 0,
+      "removedBytes": 0
+    },
+    "reads": 5,
+    "searches": 0,
+    "requirementsReads": 0,
+    "exactRepeatedReadSearchCalls": 0,
+    "nativeReadBatches": {
+      "batches": 1,
+      "multiCallBatches": 1,
+      "calls": 5,
+      "maxCalls": 5
+    },
+    "usage": {
+      "inputTokens": 6,
+      "outputTokens": 778,
+      "cacheReadTokens": 7918,
+      "cacheWriteTokens": 2165,
+      "totalTokens": 10867
+    },
+    "requests": 3,
+    "elapsedMs": 6513
+  }
+]

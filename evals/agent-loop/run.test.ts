@@ -441,8 +441,8 @@ function contract(roster: 'headless' | 'tui', setup: { models: string; effort: s
       expect(design).toMatchObject({
         roster, models: ['fixture-model'], cases: setup.cases, trials: 1, gateway: null,
         routes: { 'fixture-model': { provider: 'cliproxyapi', api: 'openai-responses', effort: setup.effort } },
-        contextWindows: { long_session: 16_000 }, piContextWindows: { long_session: 29_184 },
-        piCompaction: { long_session: { reserveTokens: 16_384, keepRecentTokens: 2560 } },
+        contextWindows: { long_session: 16_000 }, piContextWindows: { long_session: 29_184, background_compaction: 40_000 },
+        piCompaction: { long_session: { reserveTokens: 16_384, keepRecentTokens: 2560 }, background_compaction: { reserveTokens: 16_384, keepRecentTokens: 2560 } },
       })
       expect(design.revisions.pi).toEqual({ root: join(run.realRoot, 'pi'), agent: 'pi', version: '0.0.0-contract', commit: null, dirty: false })
     })

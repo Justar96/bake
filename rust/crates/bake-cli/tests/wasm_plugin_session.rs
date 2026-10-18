@@ -684,10 +684,32 @@ async fn unsendable_arguments_block_the_call_but_fail_nothing() {
         ("write", json!({ "path": "ok.txt", "content": "ok" }), "ok"),
     ]);
     let session = fx.session(fx.new_store(), &[]).await;
-    within("prompt", session.prompt("go", Vec::new()))
+    // The 1 MiB arguments cross the faux model's compaction threshold.
+    // Reserve the scripted responses for the plugin-denial exchange.
+    session
+        .set_auto_compaction_enabled(false)
         .await
-        .expect("prompt");
+        .expect("disable fixture compaction");
+    let result = within("prompt", session.prompt("go", Vec::new())).await;
     let entries = file_entries(&session);
+    let helpers = session.plugin_helpers();
+    shutdown(&session, &helpers).await;
+    assert_eq!(
+        fx.faux.call_count(),
+        2,
+        "only the tool-call response and final answer are scripted"
+    );
+    result.expect("prompt");
+    let answer = entries
+        .iter()
+        .rev()
+        .find(|entry| entry["message"]["role"] == "assistant")
+        .expect("final assistant answer");
+    assert_eq!(answer["message"]["stopReason"], "stop");
+    assert_eq!(
+        answer["message"]["content"],
+        json!([{ "type": "text", "text": "done" }])
+    );
     let (data, text) = denied(&entries, "big");
     assert_eq!(data["decision"], "unchecked");
     assert!(
@@ -700,8 +722,6 @@ async fn unsendable_arguments_block_the_call_but_fail_nothing() {
         "ok"
     );
     assert_eq!(fx.failure("guard"), None);
-    let helpers = session.plugin_helpers();
-    shutdown(&session, &helpers).await;
 }
 
 // The failure record is part of the denial path: a home whose

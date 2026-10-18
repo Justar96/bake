@@ -12,6 +12,11 @@ mod input;
 pub mod live;
 mod port;
 mod terminal;
+// Read on Windows only; tested everywhere.
+#[cfg_attr(not(windows), allow(dead_code))]
+mod vt_parse;
+#[cfg(windows)]
+mod windows_input;
 
 pub use live::LiveSession;
 pub use terminal::{

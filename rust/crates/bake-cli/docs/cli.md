@@ -35,6 +35,9 @@ bake-rs --mode json -p "List the tests" > events.jsonl
 - Each message argument is a prompt, sent in order. `--` ends the options, so later arguments are messages even when they start with `-`.
 - When standard input is not a terminal, bake-rs reads it to the end before starting, up to 64 MiB, so give a run with nothing to pipe `< /dev/null`. The input is trimmed and joined to the first message with no separator, which is why the example above starts its message with a blank line.
 - `--mode text` prints the text of the final answer; `--mode json` prints the session header and then every event as one JSON line.
+- `--max-model-calls <n>` limits model requests across all prompts, retries, and compaction summaries in one print invocation. `--run-timeout-ms <n>` sets its deadline, starting before the first prompt after startup. Both are optional; zero admits no request. Exhaustion stops new work, cancels active work, waits for cleanup, and exits 1. Cleanup can extend past the deadline. These flags require print mode.
+- JSON `agent_settled` events include an `outcome` with `kind` equal to `finished_turn`, `cancelled`, `budget_exhausted`, or `failed`. A finished turn does not assert that the task's result has been independently verified.
+- `--recoverable` journals one print prompt. `--resume-run <id> --session <path>` selects its saved run, retaining spent requests and refusing uncertain tool effects or interrupted deadlines. Recovery takes no new prompt or replacement limits; see `bake-rs docs sessions`.
 - `@file` arguments attach files to the first prompt: text files are wrapped in `<file name="...">` tags, and supported images (`png`, `jpg`, `gif`, `webp`, `bmp`) are attached and resized to the model's limits. Empty files are skipped, and a missing file stops the run with exit status 1.
 - `--system-prompt <text|path>` replaces the default system prompt preamble, rules, and docs section with literal text or the contents of a file, while keeping the run, context, skills, permissions, and environment sections.
 - `--append-system-prompt <text|path>` appends literal text or a file's contents to the system prompt. Give it more than once to join several parts with blank lines.
@@ -64,11 +67,11 @@ Commands the `bash` tool runs receive the session's details: `BAKE_SESSION_ID`, 
 | Status | Meaning |
 |---|---|
 | 0 | The turn finished, or the interactive session was quit |
-| 1 | An error: a bad option, a startup failure, no usable model, or, in text mode, a model error (JSON mode reports it as an event) |
+| 1 | An error, a model failure, or an exhausted run budget; model failures also appear in JSON events |
 | 2 | An argument bake-rs cannot parse: one that is not UTF-8, or a bad argument to `preview`, `docs`, `--self-check`, or a `plugin` command |
 | 129, 130, 143 | Stopped by `SIGHUP` or a closed terminal, `SIGINT` (Ctrl+C; also Ctrl+Break on Windows), or `SIGTERM`; the session, its MCP servers, and the processes its tools started are closed first |
 
-Startup errors and warnings go to standard error, most as `Error: ` and `Warning: ` lines; `No models available` and `No session found matching` print without the prefix, as in Pi. A model error in text mode prints as its message.
+Startup errors and warnings go to standard error, most as `Error: ` and `Warning: ` lines; `No models available` and `No session found matching` print without the prefix, as in Pi. Model failures and exhausted run budgets print their reason to standard error and stop later prompt arguments.
 
 ## Other commands
 

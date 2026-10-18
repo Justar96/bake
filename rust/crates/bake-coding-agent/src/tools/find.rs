@@ -63,7 +63,7 @@ pub(crate) fn owned_find_tool_definition(
     owner: Option<crate::owned_work::WorkGate>,
 ) -> ToolDefinition {
     let cwd = cwd.to_path_buf();
-    let tool = AgentTool::new(
+    let mut tool = AgentTool::new(
         "find",
         "find",
         format!(
@@ -74,6 +74,7 @@ pub(crate) fn owned_find_tool_definition(
         parameters(),
         move |_id, args, signal, _update| boxed(execute(cwd.clone(), owner.clone(), args, signal)),
     );
+    tool.read_only = true;
     ToolDefinition {
         tool,
         prompt_snippet: Some(FIND_PROMPT_SNIPPET.into()),

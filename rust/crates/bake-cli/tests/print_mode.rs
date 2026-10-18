@@ -19,6 +19,9 @@ use serde_json::{Value, json};
 #[path = "print_mode/windows.rs"]
 mod windows;
 
+#[path = "print_mode/recovery.rs"]
+mod recovery;
+
 // The command the messages name, from the source the binary uses.
 #[allow(dead_code)]
 #[path = "../src/docs.rs"]
@@ -33,6 +36,9 @@ const READ_CALL_SSE: &str = include_str!("fixtures/openai-responses-read-call.ss
 
 /// How long one `bake-rs` run may take before the test fails.
 const RUN_TIMEOUT: Duration = Duration::from_secs(60);
+
+#[path = "print_mode/background_accounting.rs"]
+mod background_accounting;
 
 /// A canned reply.
 #[derive(Clone)]
@@ -885,6 +891,90 @@ fn provider_errors_exit_one_with_the_message() {
     assert_eq!(
         text(&out.stderr),
         "loop API error (401): {\"message\":\"bad key\"}\n"
+    );
+}
+
+#[test]
+fn a_model_call_allowance_is_shared_across_print_prompts() {
+    let server = Server::start(Reply::sse());
+    let workspace = Workspace::new("shared-print-budget", server.port);
+    let out = workspace.run(
+        &[
+            "--mode",
+            "json",
+            "--max-model-calls",
+            "1",
+            "first",
+            "second",
+        ],
+        None,
+    );
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out.stderr));
+    assert_eq!(server.requests().len(), 1);
+    let events: Vec<Value> = text(&out.stdout)
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let outcomes: Vec<_> = events
+        .iter()
+        .filter(|event| event["type"] == "agent_settled")
+        .map(|event| event["outcome"].clone())
+        .collect();
+    assert_eq!(
+        outcomes,
+        [
+            serde_json::json!({"kind":"finished_turn"}),
+            serde_json::json!({"kind":"budget_exhausted","limit":"model_calls"})
+        ]
+    );
+    let files = workspace.session_files();
+    assert_eq!(files.len(), 1);
+    let session = bake_coding_agent::session::SessionManager::open(&files[0], None, None)
+        .expect("settled session is unlocked");
+    assert!(
+        session
+            .entries()
+            .iter()
+            .any(|entry| entry.message_role() == Some("assistant"))
+    );
+}
+
+#[test]
+fn zero_print_budgets_admit_no_model_request() {
+    for flag in ["--max-model-calls", "--run-timeout-ms"] {
+        let server = Server::start(Reply::sse());
+        let workspace = Workspace::new("zero-print-budget", server.port);
+        let out = workspace.run(&["--mode", "json", flag, "0", "first", "second"], None);
+        assert_eq!(out.status.code(), Some(1), "{}", text(&out.stderr));
+        assert!(server.requests().is_empty());
+        let events: Vec<Value> = text(&out.stdout)
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert!(events.iter().any(|event| event["type"] == "agent_settled"
+            && event["outcome"]["kind"] == "budget_exhausted"));
+    }
+}
+
+#[test]
+fn json_provider_failures_exit_one_and_report_the_failed_outcome() {
+    let server = Server::start(Reply {
+        status: 401,
+        content_type: "application/json",
+        body: r#"{"error":{"message":"bad key"}}"#.into(),
+    });
+    let workspace = Workspace::new("json-provider-failure", server.port);
+    let out = workspace.run(&["--mode", "json", "first", "second"], None);
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(server.requests().len(), 1);
+    let events: Vec<Value> = text(&out.stdout)
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert!(
+        events
+            .iter()
+            .any(|event| event["type"] == "agent_settled" && event["outcome"]["kind"] == "failed")
     );
 }
 

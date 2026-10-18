@@ -48,6 +48,7 @@ use crate::types::{
     PrepareRequestContext, StreamFn, ToolExecutionMode,
 };
 use crate::validation::validate_tool_arguments;
+use crate::{ModelCallKind, RunControl, RunOutcome};
 
 /// Why a loop could not start or stopped without `agent_end`; Pi throws
 /// these.
@@ -61,6 +62,8 @@ pub enum AgentLoopError {
     NoStreamFn,
     /// The stream function failed instead of returning a stream.
     Stream(String),
+    /// A caller-owned execution limit or cancellation refused this request.
+    Stopped(RunOutcome),
 }
 
 impl fmt::Display for AgentLoopError {
@@ -72,6 +75,7 @@ impl fmt::Display for AgentLoopError {
             }
             Self::NoStreamFn => f.write_str(crate::stream_fn::NO_DEFAULT_STREAM_FN),
             Self::Stream(message) => f.write_str(message),
+            Self::Stopped(outcome) => outcome.fmt(f),
         }
     }
 }
@@ -208,6 +212,20 @@ pub async fn run_agent_loop(
     signal: Option<AbortSignal>,
     stream_fn: Option<StreamFn>,
 ) -> Result<Vec<AgentMessage>, AgentLoopError> {
+    run_agent_loop_with_outcome(prompts, context, config, sink, signal, stream_fn, None)
+        .await
+        .map(|(messages, _)| messages)
+}
+
+pub(crate) async fn run_agent_loop_with_outcome(
+    prompts: Vec<AgentMessage>,
+    context: AgentContext,
+    config: AgentLoopConfig,
+    sink: AgentEventSink,
+    signal: Option<AbortSignal>,
+    stream_fn: Option<StreamFn>,
+    control: Option<RunControl>,
+) -> Result<(Vec<AgentMessage>, RunOutcome), AgentLoopError> {
     let stream_fn = resolve_stream_fn(stream_fn)?;
     let initial = declare_tool_changes(&context, prompts);
     let mut new_messages = initial.clone();
@@ -227,16 +245,17 @@ pub async fn run_agent_loop(
         emit(&sink, AgentEvent::MessageEnd { message }).await;
     }
 
-    run_loop(
+    let outcome = run_loop(
         current,
         &mut new_messages,
         &config,
         signal,
         &sink,
         &stream_fn,
+        control.as_ref(),
     )
     .await?;
-    Ok(new_messages)
+    Ok((new_messages, outcome))
 }
 
 /// Pi's `runAgentLoopContinue`: continues from `context` on the caller's
@@ -248,6 +267,19 @@ pub async fn run_agent_loop_continue(
     signal: Option<AbortSignal>,
     stream_fn: Option<StreamFn>,
 ) -> Result<Vec<AgentMessage>, AgentLoopError> {
+    run_agent_loop_continue_with_outcome(context, config, sink, signal, stream_fn, None)
+        .await
+        .map(|(messages, _)| messages)
+}
+
+pub(crate) async fn run_agent_loop_continue_with_outcome(
+    context: AgentContext,
+    config: AgentLoopConfig,
+    sink: AgentEventSink,
+    signal: Option<AbortSignal>,
+    stream_fn: Option<StreamFn>,
+    control: Option<RunControl>,
+) -> Result<(Vec<AgentMessage>, RunOutcome), AgentLoopError> {
     check_continuable(&context)?;
     let stream_fn = resolve_stream_fn(stream_fn)?;
     let mut new_messages = Vec::new();
@@ -255,16 +287,17 @@ pub async fn run_agent_loop_continue(
     emit(&sink, AgentEvent::AgentStart).await;
     emit(&sink, AgentEvent::TurnStart).await;
 
-    run_loop(
+    let outcome = run_loop(
         context,
         &mut new_messages,
         &config,
         signal,
         &sink,
         &stream_fn,
+        control.as_ref(),
     )
     .await?;
-    Ok(new_messages)
+    Ok((new_messages, outcome))
 }
 
 async fn poll_messages(source: Option<&crate::types::GetMessages>) -> Vec<AgentMessage> {
@@ -312,7 +345,8 @@ async fn run_loop(
     signal: Option<AbortSignal>,
     sink: &AgentEventSink,
     stream_fn: &StreamFn,
-) -> Result<(), AgentLoopError> {
+    control: Option<&RunControl>,
+) -> Result<RunOutcome, AgentLoopError> {
     let mut current = initial_context;
     let mut model = config.model.clone();
     let mut reasoning = config.stream_options.reasoning;
@@ -325,6 +359,16 @@ async fn run_loop(
         let mut has_more_tool_calls = true;
 
         while has_more_tool_calls || !pending.is_empty() {
+            if let Some(outcome) = control.and_then(RunControl::stopped) {
+                emit(
+                    sink,
+                    AgentEvent::AgentEnd {
+                        messages: new_messages.clone(),
+                    },
+                )
+                .await;
+                return Ok(outcome);
+            }
             let mut prepared = Vec::new();
             if let Some((message, tool_results)) = &last_completed {
                 if let Some(prepare) = &config.prepare_next_turn {
@@ -387,19 +431,46 @@ async fn run_loop(
                 }
             }
 
-            let message = stream_assistant_response(
+            let response = stream_assistant_response(
                 &mut current,
                 config,
                 &model,
                 reasoning,
-                signal.as_ref(),
+                RunSignals {
+                    signal: signal.as_ref(),
+                    control,
+                },
                 sink,
                 stream_fn,
             )
-            .await?;
+            .await;
+            let message = match response {
+                Ok(message) => message,
+                Err(AgentLoopError::Stopped(outcome)) => {
+                    emit(
+                        sink,
+                        AgentEvent::AgentEnd {
+                            messages: new_messages.clone(),
+                        },
+                    )
+                    .await;
+                    return Ok(outcome);
+                }
+                Err(error) => return Err(error),
+            };
             new_messages.push(message.clone().into());
 
             if matches!(message.stop_reason, StopReason::Error | StopReason::Aborted) {
+                let outcome = if message.stop_reason == StopReason::Aborted {
+                    RunOutcome::Cancelled
+                } else {
+                    RunOutcome::Failed {
+                        message: message
+                            .error_message
+                            .clone()
+                            .unwrap_or_else(|| "Model request failed".into()),
+                    }
+                };
                 if let Some(finish) = &config.finish_turn {
                     finish(
                         AgentTurnContext {
@@ -427,7 +498,7 @@ async fn run_loop(
                     },
                 )
                 .await;
-                return Ok(());
+                return Ok(outcome);
             }
 
             let tool_calls: Vec<ToolCall> = message.tool_calls().cloned().collect();
@@ -490,7 +561,7 @@ async fn run_loop(
                     },
                 )
                 .await;
-                return Ok(());
+                return Ok(RunOutcome::FinishedTurn);
             }
 
             explicit_continuation = decision == Some(AgentTurnDecision::Continue);
@@ -525,7 +596,7 @@ async fn run_loop(
         },
     )
     .await;
-    Ok(())
+    Ok(RunOutcome::FinishedTurn)
 }
 
 /// Pi's `declareToolChanges`: announces tool loadout changes to the model.
@@ -632,6 +703,11 @@ fn event_partial(event: &AssistantMessageEvent) -> Option<&AssistantMessage> {
     }
 }
 
+struct RunSignals<'a> {
+    signal: Option<&'a AbortSignal>,
+    control: Option<&'a RunControl>,
+}
+
 /// Pi's `streamAssistantResponse`: the one place agent messages become LLM
 /// messages.
 async fn stream_assistant_response(
@@ -639,10 +715,11 @@ async fn stream_assistant_response(
     config: &AgentLoopConfig,
     model: &bake_ai::Model,
     reasoning: Option<ThinkingLevel>,
-    signal: Option<&AbortSignal>,
+    signals: RunSignals<'_>,
     sink: &AgentEventSink,
     stream_fn: &StreamFn,
 ) -> Result<AssistantMessage, AgentLoopError> {
+    let RunSignals { signal, control } = signals;
     let llm_messages = match &config.transform_context {
         Some(transform) => {
             let transformed = transform(context.messages.clone(), signal.cloned()).await;
@@ -668,6 +745,12 @@ async fn stream_assistant_response(
         .or_else(|| options.base.api_key.clone().filter(|key| !key.is_empty()));
     options.base.signal = signal.cloned();
 
+    if let Some(control) = control {
+        control
+            .admit_model_call(ModelCallKind::Agent, model)
+            .await
+            .map_err(AgentLoopError::Stopped)?;
+    }
     let response = stream_fn(model, &llm_context, options).map_err(AgentLoopError::Stream)?;
     let level = thinking_level(reasoning);
     let mut added_partial = false;
@@ -712,6 +795,12 @@ async fn stream_assistant_response(
             failed
         }
     };
+    if control.is_some() {
+        // Closing the consumer also releases providers waiting for departure.
+        let producer = response.producer_watch();
+        drop(response);
+        producer.ended().await;
+    }
     // Record the requested level, whichever stream function answered.
     final_message.thinking_level = Some(level);
     context.messages.push(final_message.clone().into());
@@ -797,16 +886,29 @@ async fn execute_tool_calls(
     sink: &AgentEventSink,
 ) -> ExecutedToolCallBatch {
     let has_sequential_tool_call = tool_calls.iter().any(|tool_call| {
-        find_tool(&context.tools, &tool_call.name)
-            .is_some_and(|tool| tool.execution_mode == Some(ToolExecutionMode::Sequential))
+        find_tool(&context.tools, &tool_call.name).map_or(
+            config.max_concurrent_read_tools.is_some(),
+            |tool| {
+                tool.execution_mode == Some(ToolExecutionMode::Sequential)
+                    || (config.max_concurrent_read_tools.is_some() && !tool.read_only)
+            },
+        )
     });
     let hooks = ToolCallHooks::of(config);
     if config.tool_execution == ToolExecutionMode::Sequential || has_sequential_tool_call {
         execute_tool_calls_sequential(context, assistant_message, tool_calls, hooks, signal, sink)
             .await
     } else {
-        execute_tool_calls_parallel(context, assistant_message, tool_calls, hooks, signal, sink)
-            .await
+        execute_tool_calls_parallel(
+            context,
+            assistant_message,
+            tool_calls,
+            hooks,
+            signal,
+            sink,
+            config.max_concurrent_read_tools,
+        )
+        .await
     }
 }
 
@@ -884,6 +986,7 @@ async fn execute_tool_calls_parallel(
     hooks: ToolCallHooks<'_>,
     signal: Option<&AbortSignal>,
     sink: &AgentEventSink,
+    max_concurrent: Option<std::num::NonZeroUsize>,
 ) -> ExecutedToolCallBatch {
     let mut entries: Vec<BoxFuture<'_, AgentToolCallOutcome>> = Vec::new();
 
@@ -946,7 +1049,7 @@ async fn execute_tool_calls_parallel(
         }
     }
 
-    let ordered = join_all(entries).await;
+    let ordered = join_all(entries, max_concurrent).await;
     let mut messages = Vec::new();
     for finalized in &ordered {
         let message = create_tool_result_message(finalized);
@@ -959,22 +1062,38 @@ async fn execute_tool_calls_parallel(
     }
 }
 
-/// Polls every future on the current task and returns their outputs in
-/// order, Pi's `Promise.all`.
-async fn join_all<T>(mut futures: Vec<BoxFuture<'_, T>>) -> Vec<T> {
+/// Pi's ordered `Promise.all`, optionally bounding the futures that have
+/// started but not finished. The current task owns every future through
+/// result finalization; cancellation skips unstarted tool work inside it.
+async fn join_all<T>(
+    mut futures: Vec<BoxFuture<'_, T>>,
+    max_concurrent: Option<std::num::NonZeroUsize>,
+) -> Vec<T> {
     let mut outputs: Vec<Option<T>> = futures.iter().map(|_| None).collect();
+    let limit = max_concurrent.map_or(usize::MAX, std::num::NonZeroUsize::get);
+    let mut started = 0;
+    let mut active = 0;
     poll_fn(|cx| {
-        let mut pending = false;
-        for (future, output) in futures.iter_mut().zip(outputs.iter_mut()) {
+        for (index, (future, output)) in futures.iter_mut().zip(outputs.iter_mut()).enumerate() {
             if output.is_some() {
                 continue;
             }
+            if index == started {
+                if active == limit {
+                    break;
+                }
+                started += 1;
+                active += 1;
+            }
             match future.as_mut().poll(cx) {
-                Poll::Ready(value) => *output = Some(value),
-                Poll::Pending => pending = true,
+                Poll::Ready(value) => {
+                    *output = Some(value);
+                    active -= 1;
+                }
+                Poll::Pending => {}
             }
         }
-        if pending {
+        if active > 0 {
             Poll::Pending
         } else {
             Poll::Ready(())

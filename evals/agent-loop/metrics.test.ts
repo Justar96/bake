@@ -1,12 +1,22 @@
 /** Loop-shape metrics over synthetic Bake and pi event streams. */
 import { describe, expect, test } from 'bun:test'
 import {
-  backgroundStarts, type Call, compactions, editCheckSplits, excessRequests, isBareGlob, jsonModeCompactions, normalizeBake, normalizePi, orientationCalls, ranCheck,
+  backgroundCompactions, backgroundStarts, type Call, compactions, contextMasking, editCheckSplits, excessRequests, isBareGlob, jsonModeCompactions, nativeReadBatches, nativeSummaryUsage, normalizeBake, normalizePi, orientationCalls, ranCheck,
   readsFile, requestsOverFloor, runawayAbort, shellEdits, skillLoads, verifiedBeforeFinal,
 } from './metrics.ts'
 
 const TEST = /\bnode\s+(?:\.\/)?test\.cjs\b/
 const WORKSPACE = '/tmp/eval/workspace'
+
+test('native experiment metrics count committed masking and same-response read batches', () => {
+  expect(contextMasking([{ type: 'context_masking', maskedResults: 2, removedBytes: 1200 },
+    { type: 'context_masking', maskedResults: 3, removedBytes: 700 }, { type: 'compaction_end' }]))
+    .toEqual({ commits: 2, maskedResults: 5, removedBytes: 1900 })
+  const assistant = (names: string[]) => ({ type: 'message_end', message: { role: 'assistant', content: names.map(name => ({ type: 'toolCall', name })) } })
+  expect(nativeReadBatches([assistant(['read', 'read', 'ls', 'grep']), assistant(['read']),
+    assistant(['read', 'edit']), assistant([]), { type: 'tool_execution_start', toolName: 'read' }]))
+    .toEqual({ batches: 2, multiCallBatches: 1, calls: 5, maxCalls: 4 })
+})
 let nextId = 0
 const call = (step: number, tool: string, input: Record<string, unknown> = {}): Call => ({ tool, input, callId: `c${nextId++}`, step })
 const bash = (step: number, command: string, extra: Record<string, unknown> = {}) => call(step, 'bash', { command, ...extra })
@@ -28,6 +38,21 @@ function bakeStream(steps: [string, Record<string, unknown>][][], final = 'done'
 }
 
 describe('normalization', () => {
+  test('counts native summary costs once, including discarded attempts and missing usage', () => {
+    const usage = { input: 7, output: 2, cacheRead: 3, cacheWrite: 0, totalTokens: 12 }
+    const events = [
+      { type: 'compaction_end', result: { usage } },
+      { type: 'background_compaction', status: 'started', elapsedMs: 0, attempts: [] },
+      { type: 'background_compaction', status: 'committed', elapsedMs: 5, result: { usage }, attempts: [{ dispatched: true, usage }] },
+      { type: 'background_compaction', status: 'discarded', elapsedMs: 8, attempts: [{ dispatched: true, usage }, { dispatched: true, usage: null }, { dispatched: false, usage: null }] },
+    ]
+    expect(nativeSummaryUsage(events)).toEqual([
+      ...Array.from({ length: 3 }, () => ({ inputTokens: 7, outputTokens: 2, cacheReadTokens: 3, cacheWriteTokens: 0, totalTokens: 12 })),
+      undefined,
+    ])
+    expect(backgroundCompactions(events)).toEqual({ started: 1, committed: 1, discarded: 1, attempts: 4, dispatched: 3, missingUsage: 1, elapsedMs: 13 })
+  })
+
   test('assigns each Bake call the step that made it', () => {
     const normalized = normalizeBake(bakeStream([[['read', { file_path: 'a' }], ['read', { file_path: 'b' }]], [['edit', {}]], []]))
     expect(normalized.calls.map(c => [c.tool, c.step])).toEqual([['read', 0], ['read', 0], ['edit', 1]])

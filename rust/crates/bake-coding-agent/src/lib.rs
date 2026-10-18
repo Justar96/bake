@@ -56,6 +56,7 @@ pub mod session;
 pub mod settings;
 pub mod skills;
 pub mod system_prompt;
+pub mod task_documents;
 #[cfg(test)]
 mod test_support;
 pub mod tools;

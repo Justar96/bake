@@ -87,6 +87,74 @@ fn held_until_aborted(started: tokio::sync::mpsc::UnboundedSender<()>) -> FauxRe
     }))
 }
 
+// Dropping the public caller after the append must not abandon the matching
+// live-context update or let a prompt overtake it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn dropped_compaction_caller_keeps_commit_and_publication_exclusive() {
+    let dir = TempDir::new("dropped-compaction-publication");
+    let h = harness(200_000);
+    h.faux.set_responses(vec![
+        faux_assistant_message("Echo: one.").into(),
+        faux_assistant_message("Echo: two.").into(),
+        faux_assistant_message("Echo: three.").into(),
+    ]);
+    let session = Arc::new(
+        AgentSession::create(options(&h, file_session(&dir), keep_one()))
+            .await
+            .expect("session"),
+    );
+    for text in ["one", "two", "three"] {
+        session.prompt(text, Vec::new()).await.expect("prompt");
+    }
+    let file = session.session_file().expect("persisted session");
+    h.faux.set_responses(vec![
+        faux_assistant_message("## Goal\nOwned summary").into(),
+        faux_assistant_message("## Original Request\nthree").into(),
+    ]);
+    let (reached_tx, reached) = tokio::sync::oneshot::channel();
+    let (release_tx, release) = std::sync::mpsc::channel();
+    session.core.hooks().after_compaction_commit = Some(Box::new(move || {
+        let _ = reached_tx.send(());
+        let _ = release.recv();
+    }));
+    let compacting = {
+        let session = Arc::clone(&session);
+        tokio::spawn(async move { session.compact(None).await })
+    };
+    reached
+        .await
+        .expect("the entry was appended before publication");
+    compacting.abort();
+    assert!(compacting.await.expect_err("caller dropped").is_cancelled());
+    assert!(
+        !session.core.activity.borrow().idle(),
+        "the owned commit retains exclusion"
+    );
+    let refused = tokio::select! {
+        biased;
+        result = session.prompt("too early", Vec::new()) => result,
+        () = std::future::ready(()) => panic!("a competing prompt must be refused before its first await"),
+    }.expect_err("publication is still pending");
+    assert!(refused.contains("context"), "{refused}");
+    release_tx.send(()).expect("release publication");
+    session.core.wait_for_idle().await;
+    assert_eq!(compaction_entries(&session), 1);
+    assert!(transcript(&session)[0].starts_with("compactionSummary: ## Goal\nOwned summary"));
+    session.shutdown().await;
+    let reopened = SessionManager::open(&file, None, None).expect("open committed session");
+    assert!(
+        reopened
+            .build_session_projection()
+            .messages
+            .iter()
+            .any(|message| {
+                serde_json::to_string(message.as_json())
+                    .unwrap()
+                    .contains("Owned summary")
+            })
+    );
+}
+
 // Pi "should trigger manual compaction via compact()" and "should maintain
 // valid session state after compaction", through the idle-only entry: the
 // instructions reach the summary request, one entry is written, the

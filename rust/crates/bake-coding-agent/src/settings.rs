@@ -87,9 +87,20 @@ pub struct Settings {
     /// `defaultTools` resolved as Pi's `getDefaultTools` resolves it:
     /// `None` when unset, and string entries only.
     pub default_tools: Option<Vec<String>>,
+    /// `maxConcurrentReadTools` as stored, checked by
+    /// [`Self::read_tool_concurrency`]. Absent preserves unlimited batches.
+    pub max_concurrent_read_tools: Option<Value>,
+    /// `taskDocuments`: enables the versioned task document tool and context.
+    pub task_documents: bool,
     /// `compaction` as stored, checked when read (see
     /// [`Self::compaction_settings`]).
     pub compaction: Option<Value>,
+    /// `backgroundCompaction`: opt-in speculative summaries before the
+    /// ordinary foreground compaction threshold. Defaults to false.
+    pub background_compaction: bool,
+    /// `contextMasking`: experimental persisted masking of old observations,
+    /// retaining ordinary foreground compaction as the fallback. Default false.
+    pub context_masking: bool,
     /// `branchSummary.reserveTokens`.
     pub branch_summary_reserve_tokens: u64,
     /// `retry`.
@@ -199,7 +210,11 @@ impl Default for Settings {
             block_images: false,
             images_auto_resize: None,
             default_tools: None,
+            max_concurrent_read_tools: None,
+            task_documents: false,
             compaction: None,
+            background_compaction: false,
+            context_masking: false,
             branch_summary_reserve_tokens: DEFAULT_BRANCH_SUMMARY_RESERVE_TOKENS,
             retry: RetrySettings::default(),
             permission: None,
@@ -212,6 +227,47 @@ impl Default for Settings {
 
 /// Pi's default `branchSummary.reserveTokens`.
 pub const DEFAULT_BRANCH_SUMMARY_RESERVE_TOKENS: u64 = 16384;
+
+#[cfg(test)]
+mod read_concurrency_tests {
+    use super::*;
+
+    #[test]
+    fn explicit_read_concurrency_is_bounded_and_checked() {
+        assert_eq!(Settings::default().read_tool_concurrency().unwrap(), None);
+        for value in [
+            serde_json::json!(1),
+            serde_json::json!(4),
+            serde_json::json!(64),
+        ] {
+            let settings = Settings::from_object(
+                serde_json::json!({"maxConcurrentReadTools":value})
+                    .as_object()
+                    .unwrap(),
+            );
+            assert_eq!(
+                settings.read_tool_concurrency().unwrap().unwrap().get() as u64,
+                value.as_u64().unwrap()
+            );
+        }
+        for value in [
+            serde_json::json!(0),
+            serde_json::json!(65),
+            serde_json::json!(-1),
+            serde_json::json!(1.5),
+            serde_json::json!("4"),
+            serde_json::json!(null),
+            serde_json::json!(true),
+        ] {
+            let settings = Settings::from_object(
+                serde_json::json!({"maxConcurrentReadTools":value})
+                    .as_object()
+                    .unwrap(),
+            );
+            assert!(settings.read_tool_concurrency().is_err(), "{value}");
+        }
+    }
+}
 
 /// Pi's `getRetrySettings()`: agent-level retry of transient errors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -379,7 +435,12 @@ impl Settings {
                     .unwrap_or_default();
                 crate::tools::index::resolve_default_tools(&entries)
             }),
+            task_documents: object.get("taskDocuments").and_then(Value::as_bool) == Some(true),
+            max_concurrent_read_tools: object.get("maxConcurrentReadTools").cloned(),
             compaction: object.get("compaction").cloned(),
+            background_compaction: object.get("backgroundCompaction").and_then(Value::as_bool)
+                == Some(true),
+            context_masking: object.get("contextMasking").and_then(Value::as_bool) == Some(true),
             branch_summary_reserve_tokens: object
                 .get("branchSummary")
                 .and_then(|summary| summary.get("reserveTokens"))
@@ -395,6 +456,24 @@ impl Settings {
             cliproxyapi: CliProxySetting::from_value(object.get(CLIPROXYAPI_MEMBER)),
             warnings: Vec::new(),
         }
+    }
+
+    /// Optional bound for trusted native read batches. Invalid explicit
+    /// values fail session creation instead of silently removing the bound.
+    pub fn read_tool_concurrency(&self) -> Result<Option<std::num::NonZeroUsize>, String> {
+        self.max_concurrent_read_tools
+            .as_ref()
+            .map(|value| {
+                value
+                    .as_u64()
+                    .filter(|value| (1..=64).contains(value))
+                    .and_then(|value| std::num::NonZeroUsize::new(value as usize))
+                    .ok_or_else(|| {
+                        "Invalid maxConcurrentReadTools setting: expected an integer from 1 to 64."
+                            .to_owned()
+                    })
+            })
+            .transpose()
     }
 
     /// Pi's `getCompactionEnabled`.

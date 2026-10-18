@@ -65,6 +65,14 @@ pub struct Args {
     pub version: bool,
     /// `--print`, `-p`.
     pub print: bool,
+    /// `--max-model-calls`: one shared print-mode request allowance.
+    pub max_model_calls: Option<u64>,
+    /// `--run-timeout-ms`: print-mode deadline starting before the first prompt.
+    pub run_timeout_ms: Option<u64>,
+    /// `--recoverable`: journal one print prompt for explicit recovery.
+    pub recoverable: bool,
+    /// `--resume-run`: continue only this recorded run in `--session`.
+    pub resume_run: Option<String>,
     /// `--mode`.
     pub mode: Option<Mode>,
     /// `--continue`, `-c`.
@@ -175,6 +183,38 @@ pub fn parse_args(args: &[String]) -> Args {
                 break;
             }
             "--help" | "-h" => result.help = true,
+            "--recoverable" => result.recoverable = true,
+            "--resume-run" => {
+                match next.filter(|value| !value.is_empty() && !value.starts_with('-')) {
+                    Some(id) => {
+                        result.resume_run = Some(id.to_owned());
+                        i += 1;
+                    }
+                    None => result
+                        .diagnostics
+                        .push(Diagnostic::error("--resume-run requires a run id")),
+                }
+            }
+            "--max-model-calls" | "--run-timeout-ms" => {
+                match next
+                    .filter(|value| {
+                        !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())
+                    })
+                    .and_then(|value| value.parse::<u64>().ok())
+                {
+                    Some(value) => {
+                        if arg == "--max-model-calls" {
+                            result.max_model_calls = Some(value);
+                        } else {
+                            result.run_timeout_ms = Some(value);
+                        }
+                        i += 1;
+                    }
+                    None => result.diagnostics.push(Diagnostic::error(format!(
+                        "{arg} requires a non-negative integer"
+                    ))),
+                }
+            }
             "--version" | "-v" | "-V" => result.version = true,
             "--mode" => match next {
                 None => result
@@ -387,6 +427,30 @@ mod tests {
 
     fn parse(args: &[&str]) -> Args {
         parse_args(&args.iter().map(|arg| (*arg).to_owned()).collect::<Vec<_>>())
+    }
+
+    #[test]
+    fn run_limits_accept_zero_and_reject_invalid_or_overflowing_values() {
+        let args = parse(&[
+            "--max-model-calls",
+            "0",
+            "--run-timeout-ms",
+            "100",
+            "prompt",
+        ]);
+        assert_eq!(args.max_model_calls, Some(0));
+        assert_eq!(args.run_timeout_ms, Some(100));
+        assert_eq!(args.messages, ["prompt"]);
+        assert!(args.diagnostics.is_empty());
+        for flag in ["--max-model-calls", "--run-timeout-ms"] {
+            for value in ["-1", "", "1.5", "18446744073709551616", "--print"] {
+                assert!(
+                    !parse(&[flag, value]).diagnostics.is_empty(),
+                    "{flag} {value}"
+                );
+            }
+            assert!(!parse(&[flag]).diagnostics.is_empty());
+        }
     }
 
     #[test]

@@ -79,7 +79,9 @@ use crate::permissions::{
 };
 use crate::plugins::installed::PluginHome;
 use crate::plugins::wasm::WasmSetup;
-use crate::print_mode::{PrintModeOptions, PrintOutput, SharedWriter, run_print_mode, write_out};
+use crate::print_mode::{
+    PrintModeOptions, PrintOutput, PrintRunRecovery, SharedWriter, run_print_mode, write_out,
+};
 use crate::prompt_templates::{LoadPromptTemplatesOptions, load_prompt_templates};
 use crate::session::file::default_session_dir_path;
 use crate::session::id::assert_valid_session_id;
@@ -307,6 +309,9 @@ pub fn plan(
     if let Some(message) = validate_session_id_flags(&parsed) {
         return Action::Exit(error(stderr, &message));
     }
+    if let Some(message) = validate_run_recovery_flags(&parsed) {
+        return Action::Exit(error(stderr, &message));
+    }
     if let Some(name) = &parsed.name
         && normalize_session_name(name).is_none()
     {
@@ -321,9 +326,59 @@ pub fn plan(
         {
             Mode::Text
         }
-        None => return Action::Interactive(Box::new(parsed)),
+        None => {
+            if parsed.recoverable || parsed.resume_run.is_some() {
+                return Action::Exit(error(
+                    stderr,
+                    "--recoverable and --resume-run require print mode (--print or --mode)",
+                ));
+            }
+            if parsed.max_model_calls.is_some() || parsed.run_timeout_ms.is_some() {
+                return Action::Exit(error(
+                    stderr,
+                    "--max-model-calls and --run-timeout-ms require print mode (--print or --mode)",
+                ));
+            }
+            return Action::Interactive(Box::new(parsed));
+        }
     };
     Action::Print(Box::new(parsed), mode)
+}
+
+fn validate_run_recovery_flags(args: &Args) -> Option<String> {
+    if !args.recoverable && args.resume_run.is_none() {
+        return None;
+    }
+    if args.no_session {
+        return Some("Run recovery requires a persisted session; remove --no-session.".into());
+    }
+    if args.recoverable && args.resume_run.is_some() {
+        return Some("--recoverable and --resume-run cannot be combined.".into());
+    }
+    if args.resume_run.is_some() {
+        if !args.session.as_deref().is_some_and(is_session_path) {
+            return Some(
+                "--resume-run requires --session with an explicit session file path.".into(),
+            );
+        }
+        if args.continue_session || args.fork.is_some() || args.session_id.is_some() {
+            return Some(
+                "--resume-run cannot be combined with --continue, --fork, or --session-id.".into(),
+            );
+        }
+        if args.max_model_calls.is_some() || args.run_timeout_ms.is_some() {
+            return Some(
+                "--resume-run restores the recorded budget; new run limits cannot replace it."
+                    .into(),
+            );
+        }
+        if !args.messages.is_empty() || !args.file_args.is_empty() {
+            return Some("--resume-run takes no new prompt or file arguments.".into());
+        }
+    } else if args.messages.len() > 1 {
+        return Some("--recoverable accepts one prompt per invocation.".into());
+    }
+    None
 }
 
 /// Pi's `readPipedStdin`: the trimmed input, or `None` when empty.
@@ -526,6 +581,11 @@ fn create_session_manager(
     if let Some(arg) = &args.session {
         return match resolve_session_path(arg, cwd, session_dir, home) {
             ResolvedSession::Path(path) => {
+                if args.resume_run.is_some() && !path.is_file() {
+                    return Err(SessionStartError::Error(
+                        "--resume-run requires an existing session file.".into(),
+                    ));
+                }
                 SessionManager::open(&path, Some(&dir), None).map_err(failed)
             }
             // Neither mode prompts whether to fork yet; point at `--fork`.
@@ -591,6 +651,13 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
     if let Some(search_pattern) = args.list_models.clone() {
         return run_list_models(environment, search_pattern.as_deref()).await;
     }
+    let max_model_calls = args.max_model_calls;
+    let run_timeout_ms = args.run_timeout_ms;
+    let recovery = match (&args.resume_run, args.recoverable) {
+        (Some(run_id), _) => PrintRunRecovery::Resume(run_id.clone()),
+        (_, true) => PrintRunRecovery::Start,
+        _ => PrintRunRecovery::Disabled,
+    };
     let started = match start(environment, args).await {
         Ok(started) => started,
         Err(code) => return code,
@@ -620,8 +687,28 @@ pub async fn run(environment: CliEnvironment, args: Args, mode: Mode) -> i32 {
             warn(&stderr, &problem);
         }
     }
+    let deadline = match run_timeout_ms {
+        Some(milliseconds) => match tokio::time::Instant::now()
+            .checked_add(std::time::Duration::from_millis(milliseconds))
+        {
+            Some(deadline) => Some(deadline),
+            None => {
+                session.shutdown().await;
+                return error(
+                    &stderr,
+                    "--run-timeout-ms exceeds this platform's clock range",
+                );
+            }
+        },
+        None => None,
+    };
     let options = PrintModeOptions {
         job_wait: crate::print_mode::DEFAULT_JOB_WAIT,
+        control: bake_agent::RunControl::new(bake_agent::RunLimits {
+            deadline,
+            max_model_calls,
+        }),
+        recovery,
         mode: match mode {
             Mode::Text => PrintOutput::Text,
             Mode::Json => PrintOutput::Json,
@@ -1007,10 +1094,21 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
         Path::new(&session_cwd),
         &tool_permissions,
     );
-    let available: Vec<String> = definitions
+    let mut available: Vec<String> = definitions
         .iter()
         .map(|definition| definition.name().to_owned())
         .collect();
+    if settings.task_documents {
+        available.push(crate::agent_session::task_documents::NAME.to_owned());
+    }
+    let mut defaults = settings.default_tools.clone().unwrap_or_else(|| {
+        crate::tools::index::BAKE_DEFAULT_TOOL_NAMES
+            .map(str::to_owned)
+            .to_vec()
+    });
+    if settings.task_documents && settings.default_tools.is_none() {
+        defaults.push(crate::agent_session::task_documents::NAME.to_owned());
+    }
     let selection_options = ToolSelectionOptions {
         tools: args.tools.clone(),
         exclude_tools: args.exclude_tools.clone(),
@@ -1022,14 +1120,7 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
             None
         },
     };
-    let bake_defaults: Vec<String> = crate::tools::index::BAKE_DEFAULT_TOOL_NAMES
-        .map(str::to_owned)
-        .to_vec();
-    let selection = select_tools(
-        &selection_options,
-        Some(settings.default_tools.as_deref().unwrap_or(&bake_defaults)),
-        &available,
-    )?;
+    let selection = select_tools(&selection_options, Some(&defaults), &available)?;
     // The job tools control `bash`'s background jobs, their only producer:
     // without `bash` they are not active.
     let mut selection = selection;
@@ -1767,6 +1858,64 @@ mod tests {
     }
 
     #[test]
+    fn recovery_flags_require_one_persisted_selected_run() {
+        for flags in [
+            vec!["-p", "--recoverable", "--no-session", "task"],
+            vec!["-p", "--recoverable", "first", "second"],
+            vec!["-p", "--resume-run", "run-1"],
+            vec!["-p", "--resume-run", "run-1", "--session", "prefix"],
+            vec![
+                "-p",
+                "--resume-run",
+                "run-1",
+                "--session",
+                "session.jsonl",
+                "extra",
+            ],
+            vec![
+                "-p",
+                "--resume-run",
+                "run-1",
+                "--session",
+                "session.jsonl",
+                "--max-model-calls",
+                "9",
+            ],
+            vec![
+                "-p",
+                "--resume-run",
+                "run-1",
+                "--session",
+                "session.jsonl",
+                "--recoverable",
+            ],
+            vec!["--recoverable", "task"],
+        ] {
+            let (stderr, errors) = sink();
+            assert_eq!(
+                plan(&strings(&flags), true, true, &stderr),
+                Action::Exit(1),
+                "{flags:?}"
+            );
+            assert!(!text(&errors).is_empty());
+        }
+        for flags in [
+            vec!["-p", "--recoverable", "--max-model-calls", "9", "task"],
+            vec!["-p", "--resume-run", "run-1", "--session", "session.jsonl"],
+        ] {
+            let (stderr, errors) = sink();
+            assert!(
+                matches!(
+                    plan(&strings(&flags), true, true, &stderr),
+                    Action::Print(_, _)
+                ),
+                "{}",
+                text(&errors)
+            );
+        }
+    }
+
+    #[test]
     fn argument_errors_exit_before_loading() {
         let (stderr, errors) = sink();
         assert_eq!(
@@ -2081,6 +2230,73 @@ mod tests {
             plugins: WasmSetup::default(),
         };
         (environment, buffer)
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn document_opt_in_obeys_cli_and_configured_tool_restrictions() {
+        use bake_ai::providers::faux::{
+            FauxProvider, FauxProviderOptions, FauxResponseStep, faux_assistant_message,
+        };
+        for (extra, defaults, expected) in [
+            (vec![], None, true),
+            (vec!["--no-tools"], None, false),
+            (vec!["--no-builtin-tools"], None, false),
+            (vec!["--tools", "read"], None, false),
+            (vec!["--exclude-tools", "task_document"], None, false),
+            (vec![], Some(serde_json::json!(["read"])), false),
+            (
+                vec!["--tools", "+task_document"],
+                Some(serde_json::json!([])),
+                true,
+            ),
+        ] {
+            let dir = setup_dirs("cli-document-selection");
+            let mut settings = serde_json::json!({"taskDocuments":true});
+            if let Some(defaults) = defaults {
+                settings["defaultTools"] = defaults;
+            }
+            write_owned(&dir.join("home/settings.json"), &settings.to_string());
+            let faux = Arc::new(FauxProvider::new(FauxProviderOptions::default()));
+            faux.set_responses(vec![FauxResponseStep::from_fn(move |context, _, _, _| {
+                assert_eq!(
+                    bake_ai::transcript::get_current_tools(context.messages())
+                        .iter()
+                        .any(|tool| tool.name == "task_document"),
+                    expected
+                );
+                Ok(faux_assistant_message("done"))
+            })]);
+            let (mut environment, errors) = setup_environment(dir.path());
+            environment.extra_providers.push((
+                "faux".into(),
+                serde_json::json!({
+                    "baseUrl":"http://127.0.0.1:9/unused", "api":faux.model().api,
+                    "models":[{"id":"faux-1"}]
+                }),
+                Some("test-key".into()),
+            ));
+            let mut args = vec![
+                "--model",
+                "faux/faux-1",
+                "--permission",
+                "danger-full-access",
+                "--no-session",
+                "--no-mcp",
+            ];
+            args.extend(extra);
+            let Ok(started) = start_interactive(environment, parse_args(&strings(&args))).await
+            else {
+                panic!("setup failed: {}", text(&errors));
+            };
+            started.session.apis().register(faux.clone());
+            started
+                .session
+                .prompt("Continue", Vec::new())
+                .await
+                .unwrap();
+            assert_eq!(faux.call_count(), 1);
+            started.session.shutdown().await;
+        }
     }
 
     // Interactive setup and every replacement session share print mode's

@@ -119,9 +119,18 @@ pub fn agent_event_json(event: &AgentEvent) -> Value {
 pub fn session_event_json(event: &SessionEvent<'_>) -> Value {
     match event {
         SessionEvent::Agent(event) => agent_event_json(event),
-        SessionEvent::AgentSettled { aborted } => {
+        SessionEvent::RecoverableRunStarted { run_id } => {
+            let mut out = object("recoverable_run_started");
+            out.insert("runId".into(), run_id.clone().into());
+            Value::Object(out)
+        }
+        SessionEvent::AgentSettled { aborted, outcome } => {
             let mut out = object("agent_settled");
             out.insert("aborted".into(), (*aborted).into());
+            out.insert(
+                "outcome".into(),
+                serde_json::to_value(outcome).unwrap_or(Value::Null),
+            );
             Value::Object(out)
         }
         SessionEvent::ThinkingLevelChanged(level) => {
@@ -168,6 +177,43 @@ pub fn session_event_json(event: &SessionEvent<'_>) -> Value {
             if let Some(message) = error_message {
                 out.insert("errorMessage".into(), message.clone().into());
             }
+            Value::Object(out)
+        }
+        SessionEvent::BackgroundCompaction {
+            status,
+            source_leaf_id,
+            result,
+            reason,
+            elapsed_ms,
+            attempts,
+        } => {
+            let mut out = object("background_compaction");
+            out.insert("status".into(), status.as_str().into());
+            out.insert("sourceLeafId".into(), (*source_leaf_id).into());
+            out.insert("elapsedMs".into(), (*elapsed_ms).into());
+            out.insert("attempts".into(), to_value(attempts));
+            if let Some(result) = result {
+                out.insert("result".into(), to_value(result));
+            }
+            if let Some(reason) = reason {
+                out.insert("reason".into(), (*reason).into());
+            }
+            Value::Object(out)
+        }
+        SessionEvent::ContextMasking {
+            source_leaf_id,
+            masked_results,
+            removed_bytes,
+            retained_recent_batches,
+        } => {
+            let mut out = object("context_masking");
+            out.insert("sourceLeafId".into(), (*source_leaf_id).into());
+            out.insert("maskedResults".into(), (*masked_results).into());
+            out.insert("removedBytes".into(), (*removed_bytes).into());
+            out.insert(
+                "retainedRecentBatches".into(),
+                (*retained_recent_batches).into(),
+            );
             Value::Object(out)
         }
         SessionEvent::AutoRetryStart {
@@ -317,8 +363,12 @@ mod tests {
             r#"{"type":"tool_execution_start","toolCallId":"c","toolName":"t","args":{"a":1}}"#
         );
         assert_eq!(
-            session_event_json(&SessionEvent::AgentSettled { aborted: false }).to_string(),
-            r#"{"type":"agent_settled","aborted":false}"#
+            session_event_json(&SessionEvent::AgentSettled {
+                aborted: false,
+                outcome: &bake_agent::RunOutcome::FinishedTurn
+            })
+            .to_string(),
+            r#"{"type":"agent_settled","aborted":false,"outcome":{"kind":"finished_turn"}}"#
         );
     }
 

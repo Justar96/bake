@@ -11,7 +11,8 @@ import { usesAgentInstructions } from './scenarios.ts'
  * A native `bake-rs` binary, a built TypeScript Bake checkout, or an installed
  * pi CLI. A native root is the checkout whose Rust workspace built the binary,
  * or a prebuilt binary's directory; a pi root is its package directory.
- * Bake overlays and settings apply to the TypeScript arm only.
+ * Bake overlays apply only to the TypeScript arm. Native settings use
+ * settings.json; pi does not accept per-arm settings.
  */
 export interface Arm {
   kind: 'bake' | 'pi' | 'native'
@@ -28,8 +29,18 @@ export interface Arm {
   revision?: { prebuilt: boolean; commit: string | null; dirty: boolean | null }
   extra: unknown[]
   settings: string
+  /** Native persistence experiment; memory is the evaluator's default. */
+  nativeSession?: NativeSessionMode
   llmDeepseek: boolean
   composition: unknown[]
+}
+
+export type NativeSessionMode = 'memory' | 'persistent' | 'recoverable'
+
+export function nativeSessionMode(value: string | undefined): NativeSessionMode {
+  if (value === undefined) return 'memory'
+  if (value === 'memory' || value === 'persistent' || value === 'recoverable') return value
+  throw new Error('EVAL_NATIVE_SESSION must be memory, persistent, or recoverable')
 }
 
 /** The retired adapter owns its route in older checkouts; adding the same route through llm-pi-ai would collide. */
@@ -119,9 +130,10 @@ function nativeArm(path: string): Arm {
  * Resolve arms and read their compositions before any sample launches. A bare
  * checkout or binary, `native`, or `native:<path>` is the native `bake-rs`;
  * `ts:<checkout>` is the frozen TypeScript agent of a built checkout; `pi` or
- * `pi:<bin>` is pi. `env` supplies per-arm EVAL_SETTINGS/EVAL_EXTRA values,
- * which only a TypeScript arm reads; pi lookup uses the current PATH, and a
- * native checkout is built here.
+ * `pi:<bin>` is pi. `env` supplies per-arm values: EVAL_SETTINGS for a native
+ * or TypeScript arm, EVAL_NATIVE_SESSION for a native arm, and EVAL_EXTRA for
+ * a TypeScript arm; one an arm would ignore stops the run. pi lookup uses the
+ * current PATH, and a native checkout is built here.
  */
 export function parseArms(spec: string, roster: Roster, env: NodeJS.ProcessEnv): Record<string, Arm> {
   return Object.fromEntries(spec.split(',').filter(Boolean).map((entry): [string, Arm] => {
@@ -129,22 +141,70 @@ export function parseArms(spec: string, roster: Roster, env: NodeJS.ProcessEnv):
     if (!name || !root) throw new Error(`EVAL_ARMS entry "${entry}" is not name=checkout`)
     const settingsKey = `EVAL_SETTINGS_${name.toUpperCase()}`
     const extraKey = `EVAL_EXTRA_${name.toUpperCase()}`
-    if (!root.startsWith('ts:')) {
-      // An overlay the arm would ignore must not pass for a measured setting.
-      const ignored = [settingsKey, extraKey].filter(key => env[key] !== undefined)
-      if (ignored.length > 0) throw new Error(`EVAL_ARMS: arm ${name} is not a TypeScript arm, so ${ignored.join(' and ')} would not apply`)
+    const sessionKey = `EVAL_NATIVE_SESSION_${name.toUpperCase()}`
+    const pi = root === 'pi' || root.startsWith('pi:')
+    const typescript = root.startsWith('ts:')
+    // An override the arm would ignore must not pass for a measured setting.
+    const ignored = [...pi ? [settingsKey] : [], ...typescript ? [] : [extraKey], ...pi || typescript ? [sessionKey] : []]
+      .filter(key => env[key] !== undefined)
+    if (ignored.length > 0) throw new Error(`EVAL_ARMS: arm ${name} would not apply ${ignored.join(' and ')}`)
+    if (pi) return [name, piArm(root)]
+    const settings = env[settingsKey] ?? '{}'
+    parseSettings(settings)
+    if (!typescript) {
+      const path = root === 'native' ? '' : root.startsWith('native:') ? root.slice('native:'.length) : root
+      return [name, { ...nativeArm(path), settings, nativeSession: nativeSessionMode(env[sessionKey]) }]
     }
-    if (root === 'pi' || root.startsWith('pi:')) return [name, piArm(root)]
-    if (!root.startsWith('ts:')) return [name, nativeArm(root === 'native' ? '' : root.startsWith('native:') ? root.slice('native:'.length) : root)]
     const checkout = root.slice('ts:'.length)
     if (!existsSync(join(checkout, 'apps/cli/lib/bin.js'))) throw new Error(`arm ${name}: ${checkout} has no built apps/cli/lib/bin.js; run bun run build there`)
-    const settings = env[settingsKey] ?? '{}'
-    JSON.parse(settings)
     return [name, {
       kind: 'bake', root: resolve(checkout), extra: JSON.parse(env[extraKey] ?? '[]'), settings, llmDeepseek: shipsLlmDeepseek(checkout),
       composition: [systemPromptOverlay(checkout), ...rosterOverlay(checkout, roster)],
     }]
   }))
+}
+
+const plainObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
+
+function parseSettings(text: string): Record<string, unknown> {
+  const value: unknown = JSON.parse(text)
+  if (!plainObject(value)) throw new Error('EVAL_SETTINGS must be a JSON object')
+  return value
+}
+
+/** Merge nested objects; arrays and scalar values replace the preceding value. */
+export function mergeSettings(base: Record<string, unknown>, extra: Record<string, unknown>): Record<string, unknown> {
+  const result = { ...base }
+  for (const [key, value] of Object.entries(extra)) {
+    const prior = result[key]
+    Object.defineProperty(result, key, { value: plainObject(prior) && plainObject(value) ? mergeSettings(prior, value) : value, enumerable: true, configurable: true, writable: true })
+  }
+  return result
+}
+
+/**
+ * Native settings.json for a sample. Per-arm settings cannot change the
+ * evaluator's route, retry policy, permission preset, or forced compaction
+ * policy; conflicting keys throw before any sample process starts.
+ */
+export function nativeSettings(text: string, provider: string, model: string,
+  compaction?: { reserveTokens: number; keepRecentTokens: number }): Record<string, unknown> {
+  const extra = parseSettings(text.replaceAll('$PROVIDER', provider).replaceAll('$MODEL', model))
+  for (const key of ['defaultProvider', 'defaultModel', 'defaultThinkingLevel', 'enabledModels', 'modelThinkingLevels',
+    'cliproxyapi', 'llm-pi-ai', 'agent-default-model', 'permission', 'retry', 'sessionDir']) {
+    if (Object.hasOwn(extra, key)) throw new Error(`native EVAL_SETTINGS cannot set evaluator-controlled ${key}`)
+  }
+  const fixed: Record<string, unknown> = { retry: { enabled: false } }
+  if (compaction !== undefined) {
+    const policy: Record<string, unknown> = { enabled: true, ...compaction }
+    if (Object.hasOwn(extra, 'compaction')) {
+      if (!plainObject(extra.compaction) || Object.entries(extra.compaction).some(([key, value]) => policy[key] !== value)) {
+        throw new Error('native EVAL_SETTINGS cannot change the scenario compaction policy')
+      }
+    }
+    fixed.compaction = policy
+  }
+  return mergeSettings(extra, fixed)
 }
 
 /** Cordis rows for one Bake sample, retaining the arm's whole-row configuration. */
@@ -172,14 +232,19 @@ export type NativePermission = typeof NATIVE_PERMISSIONS[number]
 
 /**
  * The `bake-rs` print-mode launch for one native sample: Pi's JSON event
- * stream, no session file, the permission preset (the TypeScript arms'
- * `danger-full-access` unless the run asks for the default
- * `workspace-write`), and the route's model and effort. The prompt follows
+ * stream, no session file by default, the permission preset (the TypeScript
+ * arms' `danger-full-access` unless the run asks for the default
+ * `workspace-write`), and the route's model and effort. Persistent
+ * experiments supply a private file and fixed run limits. The prompt follows
  * `--`, so it is never an option.
  */
 export function nativeCommand(bin: string, provider: string, model: string, effort: string, prompt: string,
-  permission: NativePermission = 'danger-full-access'): string[] {
-  return [bin, '-p', '--mode', 'json', '--no-session', '--permission', permission,
+  permission: NativePermission = 'danger-full-access',
+  session?: { mode: Exclude<NativeSessionMode, 'memory'>; path: string; maxModelCalls: number; timeoutMs: number }): string[] {
+  const args = session === undefined ? ['--no-session'] : ['--session', session.path,
+    '--max-model-calls', String(session.maxModelCalls), '--run-timeout-ms', String(session.timeoutMs),
+    ...session.mode === 'recoverable' ? ['--recoverable'] : []]
+  return [bin, '-p', '--mode', 'json', ...args, '--permission', permission,
     '--model', `${provider}/${model}`, '--thinking', effort, '--', prompt]
 }
 

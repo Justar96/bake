@@ -286,6 +286,10 @@ impl TerminalSession {
         let setup = || {
             enable_raw_mode()?;
             MODES.fetch_or(RAW, Ordering::SeqCst);
+            // Input as VT sequences, for bracketed paste (`windows_input`);
+            // a console that refuses it keeps Crossterm's key records.
+            #[cfg(windows)]
+            crate::windows_input::enable();
             let mut out = io::stdout();
             if mode == ScreenMode::Fullscreen {
                 MODES.fetch_or(ALTERNATE, Ordering::SeqCst);
@@ -431,6 +435,8 @@ fn restore() -> io::Result<()> {
     }
     keep(execute!(out, Show));
     if modes & RAW != 0 {
+        #[cfg(windows)]
+        keep(crate::windows_input::disable());
         keep(disable_raw_mode());
     }
     result
@@ -776,6 +782,18 @@ impl Reader {
         let thread = thread::Builder::new()
             .name("bake-tui-input".into())
             .spawn(move || {
+                #[cfg(windows)]
+                if crate::windows_input::active() {
+                    match crate::windows_input::VtConsole::open() {
+                        Ok(mut console) => {
+                            return read_input(Stopped(sender), &flag, clock, &shown, &mut console);
+                        }
+                        Err(err) => {
+                            let _ = sender.send(Source::Failed(err));
+                            return;
+                        }
+                    }
+                }
                 read_input(Stopped(sender), &flag, clock, &shown, &mut Crossterm);
             })?;
         Ok(Self {
@@ -861,6 +879,18 @@ impl Events for Crossterm {
     }
 }
 
+/// The console's VT input on Windows ([`crate::windows_input`]).
+#[cfg(windows)]
+impl Events for crate::windows_input::VtConsole {
+    fn poll(&mut self, wait: Duration) -> io::Result<bool> {
+        crate::windows_input::VtConsole::poll(self, wait)
+    }
+
+    fn read(&mut self) -> io::Result<event::Event> {
+        crate::windows_input::VtConsole::read(self)
+    }
+}
+
 /// Events the input thread reads in one sweep before it sends them.
 const SWEEP: usize = 1024;
 /// How long a sweep polls for the next waiting event. Crossterm 0.29's
@@ -896,6 +926,7 @@ fn read_input(
             .all(|msg| out.0.send(Source::Msg(msg)).is_ok())
     };
     let mut armed = 0;
+    let mut decoder = input::Decoder::new();
     while !stop.load(Ordering::SeqCst) {
         let drawn = shown.load(Ordering::SeqCst);
         if drawn != armed {
@@ -904,7 +935,7 @@ fn read_input(
                 if stop.load(Ordering::SeqCst) {
                     return;
                 }
-                let (sweep, dry) = match sweep(events, clock) {
+                let (sweep, dry) = match sweep(events, &mut decoder, clock) {
                     Ok(swept) => swept,
                     Err(err) => return fail(err),
                 };
@@ -929,7 +960,7 @@ fn read_input(
         if shown.load(Ordering::SeqCst) != armed {
             continue;
         }
-        match sweep(events, clock) {
+        match sweep(events, &mut decoder, clock) {
             Ok((swept, _)) => {
                 if !send(stamp(swept)) {
                     return;
@@ -943,11 +974,15 @@ fn read_input(
 /// Reads every waiting event, up to [`SWEEP`] events read, whether or not
 /// they decode to anything; `true` with them when the input then ran dry,
 /// `false` when the sweep stopped at its size.
-fn sweep(events: &mut impl Events, clock: Instant) -> io::Result<(Vec<Msg>, bool)> {
+fn sweep(
+    events: &mut impl Events,
+    decoder: &mut input::Decoder,
+    clock: Instant,
+) -> io::Result<(Vec<Msg>, bool)> {
     let mut swept = Vec::new();
     let mut read = 0;
     while events.poll(SWEEP_POLL)? {
-        swept.extend(input::decode(events.read()?, clock.elapsed()));
+        swept.extend(decoder.decode(events.read()?, clock.elapsed()));
         read += 1;
         if read >= SWEEP {
             return Ok((swept, false));
@@ -2027,7 +2062,7 @@ mod tests {
             stop_after: usize::MAX,
             stop,
         };
-        let (swept, dry) = sweep(&mut events, Instant::now()).unwrap();
+        let (swept, dry) = sweep(&mut events, &mut input::Decoder::new(), Instant::now()).unwrap();
         assert!(swept.is_empty());
         assert!(!dry);
         assert_eq!(events.reads, SWEEP);

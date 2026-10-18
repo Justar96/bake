@@ -26,11 +26,19 @@ const common = ' Work only inside this fixture. Do not delegate, install package
 /** The scope rules without any mention of tests or verification; the predicate still requires test.cjs unchanged. */
 const scopeOnly = ' Work only inside this fixture. Do not delegate, install packages, use the network, or make commits. Give a brief final result.'
 const roundMoneyTask = 'Fix roundMoney in src/money.js: it should round to the nearest cent, matching Math.round(value * 100) / 100.'
+const chainedTask = (notes: number) => `This task has three steps; finish all of them. 1. Read ${noteNames(notes)[0]} with the read tool. Each of the ${notes} notes holds one line that starts with "Checkpoint code:" and ends by naming the next note; read them one at a time in that chain until a note says it is the last. 2. Write codes.txt in this directory with the ${notes} codes in chain order, one per line and nothing else. 3. ` + roundMoneyTask + ' Work only inside this fixture. Do not delegate, install packages, use the network, modify test.cjs or the notes, or make commits. Run node test.cjs to verify and give a brief final result.'
 
 /** The answer `explore_answer` expects, as the exact final reply. */
 export const EXPLORE_ANSWER = '47250'
 /** The milliseconds `background_test`'s slow check sleeps before reporting, in a live run. */
 export const SLOW_CHECK_MS = 20_000
+
+/** Independent read inputs; every fact is needed by the artifact predicate. */
+export const INDEPENDENT_NOTES = ['notes/alpha.txt', 'notes/beta.txt', 'notes/gamma.txt', 'notes/delta.txt']
+export const INDEPENDENT_FACTS = ['alpha=3917', 'beta=6284', 'gamma=1059', 'delta=7432']
+/** An older unique observation that masking must retain throughout noisy search batches. */
+export const MASKING_FACTS = ['warehouse=HARBOR-73', 'currency=VIOLET-28', 'rounding=NEAREST-CENT']
+export const maskingProbe = (index: number) => `diagnostic-${String(index + 1).padStart(2, '0')}`
 
 export const prompts: Record<string, string> = {
   no_tools: 'Reply exactly TOKEN_CONTROL_OK. Do not call any tools.',
@@ -58,19 +66,23 @@ export const prompts: Record<string, string> = {
   skill_distractors: roundMoneyTask + natural,
   edit_recovery: roundMoneyTask + ' truncateMoney must keep truncating.' + common,
   long_session: `This task has three steps; finish all of them. 1. Read ${noteNames()[0]} with the read tool. Each of the ten notes holds one line that starts with "Checkpoint code:" and ends by naming the next note; read them one at a time in that chain until a note says it is the last. 2. Write codes.txt in this directory with the ten codes in chain order, one per line and nothing else. 3. ` + roundMoneyTask + ' Work only inside this fixture. Do not delegate, install packages, use the network, modify test.cjs, or make commits. Run node test.cjs to verify and give a brief final result.',
+  background_compaction: chainedTask(20),
+  independent_reads: `Read these four independent files using four read calls in the same assistant response: ${INDEPENDENT_NOTES.join(', ')}. Each holds one fact. Write facts.txt with those four fact lines in that order, then ${roundMoneyTask.replace('Fix', 'fix')} Do not change the notes.` + natural,
+  context_masking: `First read notes/requirements.txt and retain its three fact lines for the final artifact. Then inspect twenty diagnostic batches: start by calling grep with pattern "${maskingProbe(0)}" and path "diagnostics.log". Each batch's final matching line names the next pattern; call grep once per response and follow that chain until the final batch says DONE. Do not combine batches or read diagnostics.log with another tool. Finally write facts.txt with the three original fact lines in their original order and ${roundMoneyTask.replace('Fix', 'fix')} Do not change the requirements or diagnostics.` + natural,
 }
 
 /** Scenarios whose run needs more than the default 14 model requests. */
 const REQUEST_CAPS: Record<string, number> = {
   delegation: 40, delegation_auto: 40,
-  explore_answer: 20, test_fix_loop: 20, noisy_failure: 16, background_test: 20, edit_recovery: 16, long_session: 30,
+  explore_answer: 20, test_fix_loop: 20, noisy_failure: 16, background_test: 20, edit_recovery: 16, long_session: 30, background_compaction: 46,
+  context_masking: 46,
 }
 /** The most model requests a sample may make before the proxy stops it. */
 export const maxRequestsFor = (scenario: string) => REQUEST_CAPS[scenario] ?? 14
 /** Every cap the design records: the default and each raised scenario. */
 export const requestCaps = () => ({ default: 14, ...REQUEST_CAPS })
 /** Scenarios whose wall-clock cap is above the default 180 s. */
-const WALL_CLOCK_CAPS: Record<string, number> = { background_test: 240_000, long_session: 360_000 }
+const WALL_CLOCK_CAPS: Record<string, number> = { background_test: 240_000, long_session: 360_000, background_compaction: 540_000, context_masking: 540_000 }
 /** The wall-clock cap of one sample, in milliseconds. */
 export const capMsFor = (scenario: string) => WALL_CLOCK_CAPS[scenario] ?? 180_000
 /** Every wall-clock cap the design records. */
@@ -108,6 +120,11 @@ export const REQUEST_FLOORS: Record<string, number> = {
   // Ten chained reads, the first with the money read and the second with the
   // edit and its test; codes.txt; final; plus at least one summary request.
   long_session: 13,
+  // Twenty chained reads, one codes write, and a final reply. Summaries add
+  // requests; the lower bound does not assume either arm compacts.
+  background_compaction: 22,
+  independent_reads: 3,
+  context_masking: 22,
 }
 /** The request floor of a scenario; one with none declared has floor 1, so its excess is every request after the first. */
 export const requestFloorFor = (scenario: string) => REQUEST_FLOORS[scenario] ?? 1
@@ -149,6 +166,18 @@ export function piContextWindowFor(contextWindow: number) {
  */
 export function piCompactionFor(contextWindow: number) {
   return { reserveTokens: PI_RESERVE_TOKENS, keepRecentTokens: compactionBudget(contextWindow).retainTokens }
+}
+
+/** Forced windows and policies for Pi-family arms; the background case is native-only and explicitly selected. */
+export const PI_CONTEXT_WINDOWS: Record<string, number> = {
+  ...Object.fromEntries(Object.entries(CONTEXT_WINDOWS).map(([scenario, window]) => [scenario, piContextWindowFor(window)])),
+  background_compaction: 40_000,
+  context_masking: 40_000,
+}
+export const PI_COMPACTION: Record<string, { reserveTokens: number; keepRecentTokens: number }> = {
+  ...Object.fromEntries(Object.entries(CONTEXT_WINDOWS).map(([scenario, window]) => [scenario, piCompactionFor(window)])),
+  background_compaction: { reserveTokens: PI_RESERVE_TOKENS, keepRecentTokens: 2560 },
+  context_masking: { reserveTokens: PI_RESERVE_TOKENS, keepRecentTokens: 2560 },
 }
 
 /** Whether a scenario keeps `agent-instructions` mounted, so the agent reads the fixture's AGENTS.md. */
@@ -260,17 +289,16 @@ const skillPath = (name: string, file = 'SKILL.md') => `.agents/skills/${name}/$
 const twinCode = 'function roundMoney(value) {\n  return Math.floor(value * 100) / 100;\n}\n\nfunction truncateMoney(value) {\n  return Math.floor(value * 100) / 100;\n}\nmodule.exports = { roundMoney, truncateMoney };\n'
 const twinTests = fixedTests('src/money.js').replace("console.log('FIXTURE_PASS');", "const { truncateMoney } = require('./src/money.js');\nassert.equal(truncateMoney(1.239), 1.23); assert.equal(truncateMoney(2.999), 2.99);\nconsole.log('FIXTURE_PASS');")
 
-/** The ten checkpoint codes `long_session` hides in its notes, in file order. */
-export function checkpointCodes(): string[] {
-  return Array.from({ length: 10 }, (_, index) => 'CP-' + hash(`checkpoint-${index + 1}`).slice(0, 6).toUpperCase())
+/** Deterministic checkpoint codes in chain order; long_session uses ten. */
+export function checkpointCodes(count = 10): string[] {
+  return Array.from({ length: count }, (_, index) => 'CP-' + hash(`checkpoint-${index + 1}`).slice(0, 6).toUpperCase())
 }
 /**
- * The path of each `long_session` note, in chain order. The names are hashed
- * so the next one is known only from the note before it: a run reads one note
- * per response instead of all ten in one batch.
+ * Note paths in chain order. Hashed names reveal the next path only through
+ * the preceding note, so the requested chain requires sequential reads.
  */
-export function noteNames(): string[] {
-  return Array.from({ length: 10 }, (_, index) => `notes/ledger-${hash(`note-${index + 1}`).slice(0, 6)}.md`)
+export function noteNames(count = 10): string[] {
+  return Array.from({ length: count }, (_, index) => `notes/ledger-${hash(`note-${index + 1}`).slice(0, 6)}.md`)
 }
 /**
  * The token arithmetic `long_session` is sized by, at about four characters a
@@ -396,10 +424,29 @@ export function fixture(root: string, scenario: string, options: FixtureOptions 
     case 'edit_recovery':
       write('src/money.js', twinCode); write('test.cjs', twinTests)
       return { workspace, file: 'src/money.js' }
-    case 'long_session':
+    case 'independent_reads':
       write('src/money.js', baseCode); write('test.cjs', fixedTests('src/money.js'))
-      checkpointCodes().forEach((code, index) => write(noteNames()[index]!, note(index + 1, code, noteNames()[index + 1])))
-      return { workspace, file: 'src/money.js', protected: protect(workspace, noteNames()) }
+      INDEPENDENT_NOTES.forEach((name, index) => write(name, INDEPENDENT_FACTS[index]! + '\n'))
+      return { workspace, file: 'src/money.js', protected: protect(workspace, INDEPENDENT_NOTES) }
+    case 'context_masking': {
+      write('src/money.js', baseCode); write('test.cjs', fixedTests('src/money.js'))
+      write('notes/requirements.txt', MASKING_FACTS.join('\n') + '\n')
+      const diagnostics = Array.from({ length: 20 }, (_, index) => {
+        const probe = maskingProbe(index)
+        const lines = Array.from({ length: 50 }, (_, line) => `${probe} record ${line}: ${'expected cache and transport diagnostic; '.repeat(3)}`)
+        lines.push(`${probe} NEXT: ${index === 19 ? 'DONE' : maskingProbe(index + 1)}`)
+        return lines.join('\n')
+      }).join('\n') + '\n'
+      write('diagnostics.log', diagnostics)
+      return { workspace, file: 'src/money.js', protected: protect(workspace, ['notes/requirements.txt', 'diagnostics.log']) }
+    }
+    case 'long_session':
+    case 'background_compaction': {
+      write('src/money.js', baseCode); write('test.cjs', fixedTests('src/money.js'))
+      const names = noteNames(scenario === 'background_compaction' ? 20 : 10)
+      checkpointCodes(names.length).forEach((code, index) => write(names[index]!, note(index + 1, code, names[index + 1])))
+      return { workspace, file: 'src/money.js', protected: protect(workspace, names) }
+    }
   }
   const file = scenario === 'path_discovery' ? 'packages/billing/money.js' : scenario === 'multi_site_edit' ? 'src/config.js' : 'src/money.js'
   if (scenario === 'multi_site_edit') {
@@ -486,6 +533,8 @@ export function validate(scenario: string, built: Fixture, outcome: Outcome, env
     && (scenario !== 'background_test' || outcome.final.includes(slowCheckLine()))
     // The stamp is the hash of the source the project check last passed on, so it matches only when that check ran after the last edit.
     && ((scenario !== 'instructions_file' && scenario !== 'skill_check') || read('.check-stamp') === hash(source))
-    && (scenario !== 'long_session' || read('codes.txt').split(/\r?\n/).map(line => line.trim()).filter(Boolean).join('\n') === checkpointCodes().join('\n'))
+    && (!['long_session', 'background_compaction'].includes(scenario) || read('codes.txt').split(/\r?\n/).map(line => line.trim()).filter(Boolean).join('\n') === checkpointCodes(scenario === 'background_compaction' ? 20 : 10).join('\n'))
+    && (scenario !== 'independent_reads' || read('facts.txt').trim() === INDEPENDENT_FACTS.join('\n'))
+    && (scenario !== 'context_masking' || read('facts.txt').trim() === MASKING_FACTS.join('\n'))
   return { validated, source, testsUnchanged, testExit, fixturesUnchanged: unchanged }
 }

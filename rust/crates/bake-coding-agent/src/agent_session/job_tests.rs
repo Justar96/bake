@@ -16,6 +16,8 @@ use crate::print_mode::{PrintModeOptions, PrintOutput, SharedWriter, run_print_m
 
 fn print_options(job_wait: Duration) -> PrintModeOptions {
     PrintModeOptions {
+        control: RunControl::default(),
+        recovery: crate::print_mode::PrintRunRecovery::Disabled,
         mode: PrintOutput::Text,
         initial_message: None,
         initial_images: Vec::new(),
@@ -45,6 +47,15 @@ async fn zero_print_job_budget_admits_no_notice_request() {
 
 #[tokio::test]
 async fn the_print_job_deadline_aborts_and_awaits_a_notice_turn() {
+    assert_print_notice_deadline(false).await;
+}
+
+#[tokio::test]
+async fn the_shared_run_deadline_still_bounds_a_longer_print_job_wait() {
+    assert_print_notice_deadline(true).await;
+}
+
+async fn assert_print_notice_deadline(shared_deadline: bool) {
     let h = harness();
     let session = Arc::new(
         h.session(in_memory(), Settings::default(), None, Vec::new())
@@ -58,7 +69,7 @@ async fn the_print_job_deadline_aborts_and_awaits_a_notice_turn() {
     let settled = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let settled_events = Arc::clone(&settled);
     let _subscription = session.subscribe(move |event| {
-        if matches!(event, SessionEvent::AgentSettled { aborted: true }) {
+        if matches!(event, SessionEvent::AgentSettled { aborted: true, .. }) {
             settled_events.fetch_add(1, Ordering::SeqCst);
         }
     });
@@ -88,13 +99,15 @@ async fn the_print_job_deadline_aborts_and_awaits_a_notice_turn() {
         )]);
     let owner = Arc::clone(&session);
     let mut run = tokio::spawn(async move {
-        run_print_mode(
-            &owner,
-            print_options(Duration::from_secs(60)),
-            sink(),
-            sink(),
-        )
-        .await
+        let mut options =
+            print_options(Duration::from_secs(if shared_deadline { 600 } else { 60 }));
+        if shared_deadline {
+            options.control = RunControl::new(bake_agent::RunLimits {
+                deadline: Some(tokio::time::Instant::now() + Duration::from_secs(60)),
+                ..bake_agent::RunLimits::default()
+            });
+        }
+        run_print_mode(&owner, options, sink(), sink()).await
     });
     tokio::time::timeout(Duration::from_secs(10), entered.notified())
         .await
@@ -131,6 +144,119 @@ async fn the_print_job_deadline_aborts_and_awaits_a_notice_turn() {
         1,
         "the admitted notice delivery must settle, not be dropped"
     );
+}
+
+#[tokio::test]
+async fn idle_notices_share_the_prompt_call_allowance() {
+    let h = harness();
+    let session = h
+        .session(in_memory(), Settings::default(), None, Vec::new())
+        .await;
+    let control = RunControl::new(bake_agent::RunLimits {
+        max_model_calls: Some(1),
+        ..bake_agent::RunLimits::default()
+    });
+    let empty = session
+        .deliver_job_notices_with_control(control.clone())
+        .await
+        .unwrap();
+    assert_eq!(empty, RunOutcome::FinishedTurn);
+    assert_eq!(h.faux.call_count(), 0);
+    h.faux.append_responses(vec![
+        faux_assistant_message("first answer").into(),
+        faux_assistant_message("unexpected fresh allowance").into(),
+    ]);
+    let first = session
+        .prompt_with_control("first", Vec::new(), control.clone())
+        .await
+        .unwrap();
+    finished(&session, "completed after the prompt").await;
+    let notice = session
+        .deliver_job_notices_with_control(control.clone())
+        .await
+        .unwrap();
+    session.shutdown().await;
+    assert_eq!(first, RunOutcome::FinishedTurn);
+    assert!(
+        matches!(notice, RunOutcome::BudgetExhausted { .. }),
+        "{notice:?}"
+    );
+    assert_eq!(
+        h.faux.call_count(),
+        1,
+        "notice delivery refunded the shared allowance"
+    );
+    assert_eq!(control.model_calls(), 1);
+}
+
+#[tokio::test]
+async fn a_parked_notice_waiter_does_not_hold_abort_or_release_its_owned_cleanup() {
+    let h = harness();
+    let session = Arc::new(
+        h.session(in_memory(), Settings::default(), None, Vec::new())
+            .await,
+    );
+    finished(&session, "completed").await;
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let aborted = Arc::new(tokio::sync::Notify::new());
+    let cleanup = Arc::new(tokio::sync::Notify::new());
+    h.faux
+        .append_responses(vec![bake_ai::providers::faux::FauxResponseStep::Factory(
+            Arc::new({
+                let entered = Arc::clone(&entered);
+                let aborted = Arc::clone(&aborted);
+                let cleanup = Arc::clone(&cleanup);
+                move |_, options, _, _| {
+                    let signal = options.base.signal.clone().unwrap();
+                    let entered = Arc::clone(&entered);
+                    let aborted = Arc::clone(&aborted);
+                    let cleanup = Arc::clone(&cleanup);
+                    Box::pin(async move {
+                        entered.notify_one();
+                        signal.cancelled().await;
+                        aborted.notify_one();
+                        cleanup.notified().await;
+                        Err("request cancelled".into())
+                    })
+                }
+            }),
+        )]);
+    let delivery = session.deliver_job_notices_with_control(RunControl::default());
+    tokio::pin!(delivery);
+    tokio::select! {
+        () = entered.notified() => {},
+        result = &mut delivery => panic!("notice request ended before the barrier: {result:?}"),
+        () = tokio::time::sleep(Duration::from_secs(10)) => panic!("notice request did not start"),
+    }
+    let owner = Arc::clone(&session);
+    let stop = tokio::spawn(async move { owner.abort().await });
+    tokio::time::timeout(Duration::from_secs(10), aborted.notified())
+        .await
+        .unwrap();
+    let premature_abort = stop.is_finished();
+    cleanup.notify_one();
+    let independent_abort = tokio::time::timeout(Duration::from_secs(10), async {
+        while !stop.is_finished() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .is_ok();
+    // Drain even a failing borrowed-driver control before asserting.
+    let (result, stopped) = tokio::join!(&mut delivery, stop);
+    session.shutdown().await;
+    stopped.unwrap();
+    assert!(
+        !premature_abort,
+        "abort released the request before owned cleanup"
+    );
+    assert!(
+        independent_abort,
+        "abort needed the parked notice caller to be polled"
+    );
+    assert_eq!(result.unwrap(), RunOutcome::Cancelled);
+    assert_eq!(notices(&session), ["bash-1"]);
+    assert_eq!(h.faux.call_count(), 1);
 }
 
 /// Starts a job that completes at once and waits until it has settled.

@@ -351,7 +351,8 @@ class Preview {
 
   assertNoChromeResidue(exited = false): void {
     const lines = this.history.split('\n')
-    const boxes = lines.filter(line => /^╭─.*╮$/u.test(line))
+    // ConPTY re-renders a row to the full width, with trailing blanks.
+    const boxes = lines.filter(line => /^╭─.*╮ *$/u.test(line))
     assert.equal(boxes.length, exited ? 0 : 1, 'obsolete composer frames remain in terminal history')
     assert(!lines.some(line => line.includes('typing never reaches an agent')), 'obsolete inspector rows remain')
     const buffer = this.terminal.buffer.normal
@@ -756,7 +757,8 @@ await scenario('sample activity is text that advances on its own, then compacts,
   preview.send('\x1b')
   // The compaction ends. The bar keeps the turn's outcome on its left and the
   // status, no model and then the directory, right-aligned on the same row.
-  await preview.wait('sample stopped', () => /^ {2}✓ Completed {2}\d+s +no model {2}\S+$/mu.test(preview.screen)
+  // ConPTY can preserve display padding after the directory.
+  await preview.wait('sample stopped', () => preview.screen.split('\n').some(line => /^ {2}✓ Completed {2}\d+s +no model {2}\S+$/u.test(line.trimEnd()))
     && !preview.screen.includes('Compacting'))
   await preview.quit()
 })
@@ -869,7 +871,8 @@ await scenario('inline preserves shell history, commits turns once, and keeps th
       const sampleEnd = lines.findIndex(line => line.trim() === 'rejects it before splitting.')
       const userStart = lines.findIndex(line => line.trimEnd() === `> ${prompt}`)
       assert(sampleEnd >= 0 && userStart > sampleEnd, 'the committed sample-to-prompt boundary is missing')
-      assert.deepEqual(lines.slice(sampleEnd + 1, userStart), ['', '-'.repeat(79)],
+      // ConPTY re-renders a row to the full width, so trailing blanks are not compared.
+      assert.deepEqual(lines.slice(sampleEnd + 1, userStart).map(line => line.trimEnd()), ['', '-'.repeat(79)],
         'publishing a prompt inserted live-region padding into the transcript')
       await preview.resize(60, 20)
       preview.send('kept while streaming')
@@ -1398,18 +1401,24 @@ function descendants(root: number): Map<number, string> {
 
 
 await liveScenario('a live bash call cancelled by Esc fails its card and leaves no process', async (world) => {
-  const session = world.launch()
+  // No Windows sandbox is the default yet (D24), so workspace-write refuses
+  // bash there; the call runs unconfined, still in the session's job.
+  const session = world.launch(windows ? ['--permission', 'danger-full-access'] : [])
   await session.ready()
+  // Processes the session already had, such as the ConPTY host's own
+  // helper in its job, are not the call's.
+  const before = await session.owned()
   session.send('SLEEP\r')
   // The call's own process tree (its sandbox runner, shell, and `sleep 30`):
   // on POSIX found under this session's process, so other processes on the
   // host with the same command line are not this test's; on Windows the
   // members of the job the session runs in, each pinned by the host.
   let owned = new Map<string, string>()
+  const started = async () => new Map([...await session.owned()].filter(([pid]) => !before.has(pid)))
   const sleeping = (label: string) => label === 'sleep 30' || /(?:^|[\\/])sleep\.exe$/iu.test(label)
   await session.wait('bash running', () => session.screen.includes('running bash') && session.screen.includes('sleep 30'))
   const deadline = performance.now() + 30_000
-  for (owned = await session.owned(); ![...owned.values()].some(sleeping); owned = await session.owned()) {
+  for (owned = await started(); ![...owned.values()].some(sleeping); owned = await started()) {
     if (performance.now() > deadline) throw new Error(`no sleep among the session's processes: ${[...owned.values()].join(', ')}`)
     await delay(5)
   }

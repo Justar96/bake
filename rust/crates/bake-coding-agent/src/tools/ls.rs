@@ -50,8 +50,16 @@ fn parameters() -> Value {
 
 /// Pi's `createLsToolDefinition`.
 pub fn create_ls_tool_definition(cwd: &Path) -> ToolDefinition {
+    owned_ls_tool_definition(cwd, None)
+}
+
+/// The native listing whose blocking worker belongs to the session's gate.
+pub(crate) fn owned_ls_tool_definition(
+    cwd: &Path,
+    owner: Option<crate::owned_work::WorkGate>,
+) -> ToolDefinition {
     let cwd = cwd.to_path_buf();
-    let tool = AgentTool::new(
+    let mut tool = AgentTool::new(
         "ls",
         "ls",
         format!(
@@ -60,8 +68,9 @@ pub fn create_ls_tool_definition(cwd: &Path) -> ToolDefinition {
             DEFAULT_MAX_BYTES / 1024
         ),
         parameters(),
-        move |_id, args, signal, _update| boxed(execute(cwd.clone(), args, signal)),
+        move |_id, args, signal, _update| boxed(execute(cwd.clone(), args, signal, owner.clone())),
     );
+    tool.read_only = true;
     ToolDefinition {
         tool,
         prompt_snippet: Some(LS_PROMPT_SNIPPET.into()),
@@ -78,11 +87,12 @@ async fn execute(
     cwd: PathBuf,
     args: Value,
     signal: Option<AbortSignal>,
+    owner: Option<crate::owned_work::WorkGate>,
 ) -> Result<AgentToolResult, String> {
     let path = optional_string_arg(&args, "path").filter(|path| !path.is_empty());
     let limit = number_arg(&args, "limit").unwrap_or(DEFAULT_LIMIT);
     let work_signal = signal.clone();
-    run_blocking_abortable(signal, move || {
+    run_blocking_abortable(signal, owner, move || {
         let dir = resolve_to_cwd(path.as_deref().unwrap_or("."), &cwd)?;
         list(&dir, limit, work_signal.as_ref())
     })

@@ -34,6 +34,9 @@ pub(super) fn attach(core: &Arc<Core>, jobs: &JobRegistry) -> Result<(), String>
                 }
                 core.abort_requested
                     .store(true, std::sync::atomic::Ordering::SeqCst);
+                if let Some(control) = core.control() {
+                    control.fail(error.clone());
+                }
                 if let Some(agent) = core.agent.get().and_then(std::sync::Weak::upgrade) {
                     agent.abort();
                 }

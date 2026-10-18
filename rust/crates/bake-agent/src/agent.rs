@@ -13,10 +13,11 @@
 //!
 //! - [`Agent::abort`] signals the run, as Pi's `abort()` does; the provider
 //!   and tools are expected to honor the signal.
-//! - [`Agent::shutdown`] also cancels the run's task and waits until it is
-//!   gone; afterwards no hook or listener runs and new runs are refused.
-//! - Dropping the agent does the same without waiting: a listener or hook
-//!   already running finishes its current step, and none starts after.
+//! - [`Agent::shutdown`] drains required admission writes, cancels the run's
+//!   task, and waits until it is gone; new runs are refused.
+//! - Dropping the agent requests the same cleanup without waiting. A pending
+//!   admission write settles before the deferred task abort; other listeners
+//!   and hooks finish their current step and none starts after.
 //! - The agent is idle only after the run's task finished its last step, so
 //!   no listener or hook runs once [`Agent::wait_for_idle`] returns.
 //! - The provider observers in [`AgentOptions`] (`on_payload`,
@@ -47,7 +48,9 @@ use bake_ai::{
 };
 use tokio::sync::watch;
 
-use crate::agent_loop::{catching, run_agent_loop, run_agent_loop_continue};
+use crate::agent_loop::{
+    catching, run_agent_loop_continue_with_outcome, run_agent_loop_with_outcome,
+};
 use crate::hook;
 use crate::stream_fn::default_stream_fn;
 use crate::types::{
@@ -56,6 +59,7 @@ use crate::types::{
     FinishTurn, GetApiKey, PrepareNextTurn, PrepareRequest, QueueMode, StreamFn, ToolExecutionMode,
     TransformContext,
 };
+use crate::{RunControl, RunOutcome};
 
 /// Why an agent call was refused; the messages are Pi's.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -188,6 +192,8 @@ pub struct AgentOptions {
     pub max_retry_delay_ms: Option<u64>,
     /// Tool execution mode; parallel by default.
     pub tool_execution: ToolExecutionMode,
+    /// Opt-in read-only batch bound; see [`AgentLoopConfig::max_concurrent_read_tools`].
+    pub max_concurrent_read_tools: Option<std::num::NonZeroUsize>,
 }
 
 /// What to prompt with, Pi's `prompt(input, images)` overloads.
@@ -336,6 +342,7 @@ struct ActiveRun {
     idle: watch::Receiver<bool>,
     task: Option<tokio::task::AbortHandle>,
     observers: Arc<ObserverGate>,
+    control: Option<RunControl>,
 }
 
 /// Admits the run's provider observers (`on_payload`, `on_response`, and
@@ -423,6 +430,7 @@ struct Shared {
     thinking_budgets: Option<ThinkingBudgets>,
     max_retry_delay_ms: Option<u64>,
     tool_execution: ToolExecutionMode,
+    max_concurrent_read_tools: Option<std::num::NonZeroUsize>,
     active: Option<ActiveRun>,
     closed: bool,
 }
@@ -558,6 +566,7 @@ impl Agent {
             thinking_budgets: options.thinking_budgets,
             max_retry_delay_ms: options.max_retry_delay_ms,
             tool_execution: options.tool_execution,
+            max_concurrent_read_tools: options.max_concurrent_read_tools,
             active: None,
             closed: false,
         };
@@ -861,6 +870,9 @@ impl Agent {
     /// Signals the active run to abort, if one is active.
     pub fn abort(&self) {
         if let Some(run) = &self.inner.lock().active {
+            if let Some(control) = &run.control {
+                control.cancel();
+            }
             run.controller.abort();
         }
     }
@@ -878,21 +890,30 @@ impl Agent {
         }
     }
 
-    /// Aborts and cancels the active run, waits until its task is gone, and
-    /// refuses later runs.
+    /// Cancels the active run, drains required admission writes, then aborts
+    /// remaining run work and waits until its task is gone. Refuses later runs.
     pub async fn shutdown(&self) {
-        let idle = {
+        let active = {
             let mut shared = self.inner.lock();
             shared.closed = true;
             shared.active.as_ref().map(|run| {
-                run.controller.abort();
-                if let Some(task) = &run.task {
-                    task.abort();
+                if let Some(control) = &run.control {
+                    control.cancel();
                 }
-                run.idle.clone()
+                run.controller.abort();
+                (run.idle.clone(), run.task.clone(), run.control.clone())
             })
         };
-        if let Some(idle) = idle {
+        if let Some((idle, task, control)) = active {
+            if let Some(task) = task {
+                match &control {
+                    Some(control) => control.abort_after_admissions(task),
+                    None => task.abort(),
+                }
+            }
+            if let Some(control) = control {
+                let _ = control.drain_admissions().await;
+            }
             wait_idle(idle).await;
         }
     }
@@ -917,8 +938,25 @@ impl Agent {
 
     /// Starts a prompt and waits until the agent is idle.
     pub async fn prompt(&self, input: impl Into<PromptInput>) -> Result<(), AgentError> {
+        self.prompt_controlled(input, None).await.map(drop)
+    }
+
+    /// Runs a prompt using the caller's shared allowance and deadline.
+    pub async fn prompt_with_control(
+        &self,
+        input: impl Into<PromptInput>,
+        control: RunControl,
+    ) -> Result<RunOutcome, AgentError> {
+        self.prompt_controlled(input, Some(control)).await
+    }
+
+    async fn prompt_controlled(
+        &self,
+        input: impl Into<PromptInput>,
+        control: Option<RunControl>,
+    ) -> Result<RunOutcome, AgentError> {
         let messages = input.into().into_messages();
-        let idle = self.begin(|shared| {
+        let completion = self.begin(control, |shared| {
             if shared.active.is_some() {
                 return Err(AgentError::AlreadyProcessingPrompt);
             }
@@ -927,14 +965,28 @@ impl Agent {
                 skip_initial_steering_poll: false,
             })
         })?;
-        wait_idle(idle).await;
-        Ok(())
+        Ok(completion.wait().await)
     }
 
     /// Continues from the transcript, Pi's `continue()`. From an assistant
     /// tail it runs queued steering, else queued follow-ups.
     pub async fn continue_run(&self) -> Result<(), AgentError> {
-        let idle = self.begin(|shared| {
+        self.continue_controlled(None).await.map(drop)
+    }
+
+    /// Continues using the same caller-owned interval as preceding prompts.
+    pub async fn continue_with_control(
+        &self,
+        control: RunControl,
+    ) -> Result<RunOutcome, AgentError> {
+        self.continue_controlled(Some(control)).await
+    }
+
+    async fn continue_controlled(
+        &self,
+        control: Option<RunControl>,
+    ) -> Result<RunOutcome, AgentError> {
+        let completion = self.begin(control, |shared| {
             if shared.active.is_some() {
                 return Err(AgentError::AlreadyProcessingContinue);
             }
@@ -963,16 +1015,16 @@ impl Agent {
             }
             Err(AgentError::ContinueFromAssistant)
         })?;
-        wait_idle(idle).await;
-        Ok(())
+        Ok(completion.wait().await)
     }
 
     /// Selects the run under the state lock, so the check, the queue drain,
     /// and the activation are one step, then spawns it.
     fn begin(
         &self,
+        control: Option<RunControl>,
         select: impl FnOnce(&mut Shared) -> Result<RunInput, AgentError>,
-    ) -> Result<watch::Receiver<bool>, AgentError> {
+    ) -> Result<RunCompletion, AgentError> {
         let handle = tokio::runtime::Handle::try_current().map_err(|_| AgentError::NoRuntime)?;
         let mut shared = self.inner.lock();
         if shared.closed {
@@ -999,21 +1051,32 @@ impl Agent {
         shared.error_message = None;
 
         let (idle_sender, idle) = watch::channel(false);
+        let outcome = Arc::new(Mutex::new(RunOutcome::Cancelled));
         let guard = RunGuard {
             inner: Arc::clone(&self.inner),
             idle: idle_sender,
+            outcome: Arc::clone(&outcome),
             observers: Arc::clone(&observers),
+            control: control.clone(),
         };
         // The task waits for this lock before it touches the state, so the
         // run is registered before it can finish.
-        let task = handle.spawn(run_task(guard, input, context, config, signal));
+        let task = handle.spawn(run_task(
+            guard,
+            input,
+            context,
+            config,
+            controller.clone(),
+            control.clone(),
+        ));
         shared.active = Some(ActiveRun {
             controller,
             idle: idle.clone(),
             task: Some(task.abort_handle()),
             observers,
+            control,
         });
-        Ok(idle)
+        Ok(RunCompletion { idle, outcome })
     }
 
     fn loop_config(
@@ -1040,6 +1103,7 @@ impl Agent {
             thinking_budgets: shared.thinking_budgets,
         };
         config.tool_execution = shared.tool_execution;
+        config.max_concurrent_read_tools = shared.max_concurrent_read_tools;
         config.transform_context = hooks.transform_context.clone();
         config.get_api_key = hooks.get_api_key.clone();
         config.before_tool_call = hooks.before_tool_call.clone();
@@ -1088,10 +1152,16 @@ impl Drop for Agent {
         let mut shared = self.inner.lock();
         shared.closed = true;
         if let Some(run) = &shared.active {
+            if let Some(control) = &run.control {
+                control.cancel();
+            }
             run.controller.abort();
             run.observers.close_without_waiting();
             if let Some(task) = &run.task {
-                task.abort();
+                match &run.control {
+                    Some(control) => control.abort_after_admissions(task.clone()),
+                    None => task.abort(),
+                }
             }
         }
     }
@@ -1102,16 +1172,36 @@ async fn wait_idle(mut idle: watch::Receiver<bool>) {
     let _ = idle.wait_for(|done| *done).await;
 }
 
-/// Ends a run however its task ends, Pi's `finishRun`: completion, panic,
-/// or cancellation.
+/// Carries this attempt's outcome without consulting the transcript.
+struct RunCompletion {
+    idle: watch::Receiver<bool>,
+    outcome: Arc<Mutex<RunOutcome>>,
+}
+
+impl RunCompletion {
+    async fn wait(self) -> RunOutcome {
+        wait_idle(self.idle).await;
+        self.outcome
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+}
+
+/// Ends a run however its task ends, Pi's `finishRun`.
 struct RunGuard {
+    outcome: Arc<Mutex<RunOutcome>>,
     inner: Arc<Inner>,
     idle: watch::Sender<bool>,
     observers: Arc<ObserverGate>,
+    control: Option<RunControl>,
 }
 
 impl Drop for RunGuard {
     fn drop(&mut self) {
+        if let Some(outcome) = self.control.as_ref().and_then(RunControl::stopped) {
+            *self.outcome.lock().unwrap_or_else(PoisonError::into_inner) = outcome;
+        }
         // A provider task can outlive the run; its observers stop here.
         self.observers.close();
         {
@@ -1130,35 +1220,79 @@ async fn run_task(
     input: RunInput,
     context: AgentContext,
     config: AgentLoopConfig,
-    signal: AbortSignal,
+    controller: AbortController,
+    control: Option<RunControl>,
 ) {
+    let signal = controller.signal();
     let inner = Arc::clone(&guard.inner);
     let sink = event_sink(Arc::clone(&inner), signal.clone());
     let stream_fn = Some(inner.hooks.stream_fn.clone());
     let run_signal = Some(signal.clone());
-    let run: BoxFuture<'static, Result<(), String>> = match input {
+    let run_control = control.clone();
+    let run: BoxFuture<'static, Result<RunOutcome, String>> = match input {
         RunInput::Prompt { messages, .. } => Box::pin(async move {
-            run_agent_loop(messages, context, config, sink, run_signal, stream_fn)
-                .await
-                .map(drop)
-                .map_err(|error| error.to_string())
+            run_agent_loop_with_outcome(
+                messages,
+                context,
+                config,
+                sink,
+                run_signal,
+                stream_fn,
+                run_control,
+            )
+            .await
+            .map(|(_, outcome)| outcome)
+            .map_err(|error| error.to_string())
         }),
         RunInput::Continue => Box::pin(async move {
-            run_agent_loop_continue(context, config, sink, run_signal, stream_fn)
-                .await
-                .map(drop)
-                .map_err(|error| error.to_string())
+            run_agent_loop_continue_with_outcome(
+                context,
+                config,
+                sink,
+                run_signal,
+                stream_fn,
+                run_control,
+            )
+            .await
+            .map(|(_, outcome)| outcome)
+            .map_err(|error| error.to_string())
         }),
     };
-    if let Err(error) = catching(run).await {
-        let failure = handle_run_failure(&inner, error, &signal);
-        // A listener that panics again only ends the failure report.
-        let _ = catching(Box::pin(async move {
-            failure.await;
-            Ok(())
-        }))
-        .await;
+    let run = catching(run);
+    tokio::pin!(run);
+    let result = match &control {
+        Some(control) => tokio::select! {
+            result = &mut run => result,
+            _ = control.wait_stopped() => {
+                controller.abort();
+                run.await
+            }
+        },
+        None => run.await,
+    };
+    if let Some(control) = &control {
+        let _ = control.drain_admissions().await;
     }
+    let outcome = match result {
+        Ok(outcome) => control
+            .as_ref()
+            .and_then(RunControl::stopped)
+            .unwrap_or(outcome),
+        Err(error) => {
+            let outcome = RunOutcome::Failed {
+                message: error.clone(),
+            };
+            let failure = handle_run_failure(&inner, error, &signal);
+            // A listener that panics again only ends the failure report.
+            let _ = catching(Box::pin(async move {
+                failure.await;
+                Ok(())
+            }))
+            .await;
+            outcome
+        }
+    };
+    *guard.outcome.lock().unwrap_or_else(PoisonError::into_inner) = outcome;
     drop(guard);
 }
 
