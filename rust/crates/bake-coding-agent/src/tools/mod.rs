@@ -35,6 +35,7 @@ pub mod path_utils;
 pub mod process;
 pub mod read;
 pub mod truncate;
+pub mod web_tools;
 pub mod write;
 
 // The recorded cases use POSIX paths, so the replay runs on Unix only.

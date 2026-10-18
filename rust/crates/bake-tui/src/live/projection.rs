@@ -610,6 +610,18 @@ fn argument(tool: &str, args: &Value, labels: &Labels) -> String {
             }
         }),
         "send_message" => Some(clip(first_line(&field("message").unwrap_or_default()), 48)),
+        // 0.3 `tool-web`: a fetch by its URL, a search by its queries.
+        "web_fetch" => field("url"),
+        "web_search" => args
+            .get("queries")
+            .and_then(Value::as_array)
+            .map(|queries| {
+                queries
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            }),
         "job_output" | "job_kill" | "interrupt_agent" => label(),
         "list_agents" | "list_subagent_models" => Some(field("agent_id").unwrap_or_else(|| {
             [field("provider"), field("model"), field("scope")]
@@ -1473,6 +1485,15 @@ mod tests {
             "read the docs"
         );
         assert_eq!(target("job_list", &json!({})), None);
+        assert_eq!(
+            argument("web_search", &json!({ "queries": ["one", "two"] }), &known),
+            "one, two"
+        );
+        assert_eq!(
+            argument("web_fetch", &json!({ "url": "https://a.test/x" }), &known),
+            "https://a.test/x"
+        );
+        assert_eq!(display_name("web_search"), "Web search");
         assert_eq!(display_name("job_output"), "Job output");
         assert_eq!(display_name("subagent"), "Agent");
         assert_eq!(display_name("bash"), "Bash");

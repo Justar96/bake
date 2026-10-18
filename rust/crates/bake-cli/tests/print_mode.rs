@@ -46,6 +46,9 @@ mod schedules;
 #[path = "print_mode/subagents.rs"]
 mod subagents;
 
+#[path = "print_mode/web.rs"]
+mod web;
+
 /// A canned reply.
 #[derive(Clone)]
 struct Reply {
@@ -549,7 +552,9 @@ fn print_mode_answers_saves_and_continues() {
             "write",
             "job_output",
             "job_list",
-            "job_kill"
+            "job_kill",
+            "web_search",
+            "web_fetch"
         ]
     );
     assert_eq!(first_input[1], "user: Say hi");
@@ -1322,7 +1327,9 @@ fn print_mode_runs_the_bash_tool() {
             "write",
             "job_output",
             "job_list",
-            "job_kill"
+            "job_kill",
+            "web_search",
+            "web_fetch"
         ]
     );
     let input = requests[1].body["input"].as_array().expect("input");

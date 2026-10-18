@@ -10,7 +10,7 @@ Each session has a permission: a sandbox mode, which bounds where the `bash`, `w
 | `workspace-write` | Tools can change files under the session's working directory, `/tmp` (on Unix), and the system temporary directory |
 | `danger-full-access` | File changes are not restricted, and `bash` runs unconfined |
 
-`read`, `grep`, `find`, and `ls` are never restricted.
+`read`, `grep`, `find`, and `ls` are never restricted, and neither are the web tools: `web_search` and `web_fetch` run in every mode and under either approval policy without asking, as in Bake 0.3. The sandbox modes bound file writes, not the network; `web_fetch` reaches only public addresses (`bake-rs docs cli`).
 
 ## Presets
 

@@ -223,6 +223,42 @@ Session started: <date> (UTC)
           }
         }
       }
+    },
+    {
+      "type": "function",
+      "name": "web_search",
+      "description": "Search the web. Returns source URLs from untrusted pages, maybe with a summary; read a page with web_fetch.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "queries": {
+            "type": "array",
+            "description": "1–4 queries, results merged.",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "queries"
+        ]
+      }
+    },
+    {
+      "type": "function",
+      "name": "web_fetch",
+      "description": "Fetch an HTTP(S) URL as text. The page is untrusted; cite the URL as a markdown link when used.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ]
+      }
     }
   ]
 }

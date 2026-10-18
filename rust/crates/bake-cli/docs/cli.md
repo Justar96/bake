@@ -47,7 +47,7 @@ Model flags are in `bake-rs docs models`, session flags in `bake-rs docs session
 
 ## Tools
 
-A session starts with `read`, `bash`, `edit`, and `write` (or the `defaultTools` setting). `grep`, `find`, and `ls` are also available; `grep` and `find` need `rg` and `fd` (or `fdfind`) on `PATH`.
+A session starts with `read`, `bash`, `edit`, `write`, the background-job tools `job_output`, `job_list`, and `job_kill`, and the web tools `web_search` and `web_fetch` (or the `defaultTools` setting). `grep`, `find`, and `ls` are also available; `grep` and `find` need `rg` and `fd` (or `fdfind`) on `PATH`.
 
 - `-t`, `--tools <list>` gives a comma-separated list. Names and `*` patterns allow only those tools; `+name` and `-name` add to or remove from the default set.
 - `-xt`, `--exclude-tools <list>` removes tools by name or `*` pattern.
@@ -55,6 +55,14 @@ A session starts with `read`, `bash`, `edit`, and `write` (or the `defaultTools`
 - `-nbt`, `--no-builtin-tools` starts with none of the built-in tools active.
 
 For example, `bake-rs -t +grep,+find -p "..."` adds `grep` and `find` to the defaults.
+
+## Web tools
+
+`web_fetch` retrieves one public HTTP(S) URL anonymously, without cookies or credentials, and returns it as text, with HTML converted to Markdown. It refuses URLs with credentials and any destination that is not a public address, such as `localhost`, private networks, link-local and cloud metadata addresses, checking every address a name resolves to and connecting only to those it checked. It follows at most five redirects, all on the same origin; a redirect to another origin is reported for a new call. A fetch reads at most 5,000,000 bytes and 100,000 characters, stops after 30 seconds, and returns at most 200,000 characters. It reaches the network directly, not through a proxy.
+
+`web_search` runs one to four queries through the CLIProxyAPI route: each is a request to one of the route's Anthropic Messages models with the provider's server-side web search tool, and only the sources that tool returns are given to the model. The `webSearch.model` setting chooses that model (`bake-rs docs settings`). Each query costs one model request on the route; a search stops after 60 seconds and returns at most eight sources. The request each query sent, without its key, is kept with the tool result in the session.
+
+Both tools are in every session's default set, a subagent's included, and are removed like any other tool, such as with `-t -web_search,-web_fetch` or a `defaultTools` list without them. They need no approval in any permission (`bake-rs docs permissions`). Page and search content is marked as untrusted data for the model, but a model can still send data to a public URL it fetches.
 
 MCP servers configured in the Bake home's `mcp.json` add tools named `mcp__<server>__<tool>`. These flags restrict them too, including tools a server adds later: a `--tools` list of names or patterns must match one (`+name`/`-name` lists leave them alone), `--exclude-tools` removes the ones it matches, and `--no-tools` alone starts no server. `--no-mcp` starts no MCP server, so a session has none of their tools (`bake-rs docs mcp`).
 

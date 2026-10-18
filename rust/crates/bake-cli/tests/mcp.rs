@@ -723,7 +723,7 @@ fn session_lines(case: &Case) -> Vec<Value> {
         .collect()
 }
 
-const BUILTIN: [&str; 7] = [
+const BUILTIN: [&str; 9] = [
     "read",
     "bash",
     "edit",
@@ -731,6 +731,8 @@ const BUILTIN: [&str; 7] = [
     "job_output",
     "job_list",
     "job_kill",
+    "web_search",
+    "web_fetch",
 ];
 
 const FIXTURE_TOOLS: [&str; 9] = [
@@ -1333,13 +1335,14 @@ fn tool_restrictions_cover_mcp_tools(case: &Arc<Case>) {
             vec!["-nt", "--tools", "mcp__fx__echo"],
             vec!["mcp__fx__echo"],
         ),
+        // The job tools leave with `bash`; the web tools stay.
         (vec!["--tools", "+grep,-bash"], {
-            let mut want = vec!["read", "edit", "write", "grep"];
+            let mut want = vec!["read", "edit", "write", "web_search", "web_fetch", "grep"];
             want.extend(all_mcp.iter().copied());
             want
         }),
         (vec!["--exclude-tools", "bash,mcp__fx__s*,mcp__fx__env"], {
-            let mut want = vec!["read", "edit", "write"];
+            let mut want = vec!["read", "edit", "write", "web_search", "web_fetch"];
             want.extend(
                 all_mcp
                     .iter()

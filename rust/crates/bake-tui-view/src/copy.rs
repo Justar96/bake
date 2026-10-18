@@ -107,6 +107,8 @@ pub const TOOL_TITLES: &[(&str, &str)] = &[
     ("job_output", "Job output"),
     ("job_list", "Jobs"),
     ("job_kill", "Stop job"),
+    ("web_search", "Web search"),
+    ("web_fetch", "Web fetch"),
 ];
 /// Between the parts of a call's status, such as `exit 1 · earlier process`.
 pub const STATUS_SEP: &str = " · ";

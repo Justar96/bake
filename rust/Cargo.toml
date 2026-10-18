@@ -75,6 +75,11 @@ icu_normalizer = { version = "=2.3.0", default-features = false, features = ["co
 base64 = { version = "=0.22.1", default-features = false, features = ["std"] }
 libc = { version = "=0.2.190", default-features = false }
 windows-sys = { version = "=0.61.2", default-features = false }
+# The `bake-coding-agent` web fetch decodes a response's declared charset
+# with the WHATWG encodings `TextDecoder` used in 0.3; the version the lock
+# already carries through `serde-saphyr` and Wasmtime. (Apache-2.0 OR MIT)
+# AND BSD-3-Clause.
+encoding_rs = { version = "=0.8.42", default-features = false, features = ["alloc"] }
 # The `bake-sandbox` Windows runner: SHA-256 for the capability SIDs and the
 # OS random source for private temp names, from the `ring` the lock already
 # carries for rustls. Apache-2.0 AND ISC.

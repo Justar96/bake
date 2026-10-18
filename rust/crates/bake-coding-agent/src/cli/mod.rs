@@ -1220,6 +1220,17 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
         )?),
         owner: Some(work.clone()),
         jobs: Some(jobs.clone()),
+        web: Some(crate::tools::web_tools::WebTools {
+            fetcher: crate::web::fetch::HttpFetcher::new(
+                crate::web::fetch::HttpFetchLimits::default(),
+                Some(work.clone()),
+            ),
+            search: crate::web::search::CliProxySearch::new(
+                registry.clone(),
+                Some(published.clone()),
+                settings.web_search_model.clone(),
+            ),
+        }),
     };
     let mut definitions = sandbox_file_tools(
         create_bake_tool_definitions(Path::new(&session_cwd), &tools_options),
@@ -1330,6 +1341,17 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
                 .any(|name| name == definition.name())
         })
         .collect();
+    // `web_search` names `web_fetch` only when the model can call it.
+    if !selection.active.iter().any(|name| name == "web_fetch") {
+        for definition in &mut registered {
+            if definition.name() == "web_search"
+                && let Some(web) = &tools_options.web
+            {
+                *definition =
+                    crate::tools::web_tools::web_search_tool_definition(web.search.clone(), false);
+            }
+        }
+    }
     // `bash` takes `run_in_background` only when the model can read the
     // job it starts.
     if selection.active.iter().any(|name| name == "job_output") {

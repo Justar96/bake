@@ -7,7 +7,8 @@
 //! directory, `blockImages`, `images.autoResize`, `defaultTools`, `compaction`
 //! (with per-model overrides), `branchSummary.reserveTokens` and
 //! `branchSummary.skipPrompt`, and `retry`,
-//! and Bake's own `permission` section ([`crate::permissions`]) and
+//! and Bake's own `permission` section ([`crate::permissions`]),
+//! `webSearch.model` ([`crate::web::search`]), and
 //! `maxToolArgumentWhitespace` (Bake's route option in
 //! `packages/llm/llm-pi-ai/src/config.ts`). Pi reads `~/.pi/agent/settings.json` and
 //! merges a project's `.pi/settings.json` over it; Bake reads
@@ -122,6 +123,10 @@ pub struct Settings {
     /// tool call's arguments may end with (`config.ts`, a positive integer);
     /// `None` uses [`bake_ai::DEFAULT_MAX_TOOL_ARGUMENT_WHITESPACE`].
     pub max_tool_argument_whitespace: Option<usize>,
+    /// `webSearch.model`: Bake's own, the CLIProxyAPI route model
+    /// `web_search` runs on ([`crate::web::search::select_search_model`]);
+    /// `None` selects one.
+    pub web_search_model: Option<String>,
     /// `cliproxyapi`: Bake's own member, the CLIProxyAPI route a Rust
     /// login wrote, or `null` after a logout (see [`CliProxySetting`]).
     pub cliproxyapi: CliProxySetting,
@@ -232,6 +237,7 @@ impl Default for Settings {
             retry: RetrySettings::default(),
             permission: None,
             max_tool_argument_whitespace: None,
+            web_search_model: None,
             cliproxyapi: CliProxySetting::Absent,
             warnings: Vec::new(),
         }
@@ -473,6 +479,10 @@ impl Settings {
                 .and_then(Value::as_u64)
                 .filter(|max| *max >= 1)
                 .and_then(|max| usize::try_from(max).ok()),
+            web_search_model: object
+                .get("webSearch")
+                .and_then(Value::as_object)
+                .and_then(|search| string(search, "model")),
             cliproxyapi: CliProxySetting::from_value(object.get(CLIPROXYAPI_MEMBER)),
             warnings: Vec::new(),
         }
@@ -880,6 +890,20 @@ mod tests {
         assert_eq!(read(r#"{"maxToolArgumentWhitespace":-1}"#), None);
         assert_eq!(read(r#"{"maxToolArgumentWhitespace":1.5}"#), None);
         assert_eq!(read(r#"{"maxToolArgumentWhitespace":"9"}"#), None);
+        assert_eq!(read("{}"), None);
+    }
+
+    // Bake's own: the `web_search` model on the CLIProxyAPI route.
+    #[test]
+    fn reads_the_web_search_model() {
+        let read = |text: &str| Settings::parse(text, Path::new("s.json")).web_search_model;
+        assert_eq!(
+            read(r#"{"webSearch":{"model":"claude-haiku-4-5"}}"#).as_deref(),
+            Some("claude-haiku-4-5")
+        );
+        assert_eq!(read(r#"{"webSearch":{"model":""}}"#), None);
+        assert_eq!(read(r#"{"webSearch":{"model":7}}"#), None);
+        assert_eq!(read(r#"{"webSearch":"x"}"#), None);
         assert_eq!(read("{}"), None);
     }
 

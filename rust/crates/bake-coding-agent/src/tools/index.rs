@@ -29,6 +29,7 @@ use crate::tools::grep::owned_grep_tool_definition;
 use crate::tools::job_tools::create_job_tool_definitions;
 use crate::tools::ls::owned_ls_tool_definition;
 use crate::tools::read::{ReadToolOptions, owned_read_tool_definition};
+use crate::tools::web_tools::{WebTools, create_web_tool_definitions};
 use crate::tools::write::create_write_tool_definition;
 
 /// Pi's `allToolNames`, in Pi's order; `powershell` has no Bake port.
@@ -47,10 +48,10 @@ pub const ALL_TOOL_NAMES: [&str; 8] = [
 /// `defaultTools` does not change them.
 pub const DEFAULT_TOOL_NAMES: [&str; 4] = ["read", "bash", "edit", "write"];
 
-/// Bake's default tools: Pi's, then the job tools. A `defaultTools`
-/// setting replaces them, as it replaces Pi's; its modifiers apply to
-/// Pi's list.
-pub const BAKE_DEFAULT_TOOL_NAMES: [&str; 7] = [
+/// Bake's default tools: Pi's, then the job tools and the web tools. A
+/// `defaultTools` setting replaces them, as it replaces Pi's; its
+/// modifiers apply to Pi's list.
+pub const BAKE_DEFAULT_TOOL_NAMES: [&str; 9] = [
     "read",
     "bash",
     "edit",
@@ -58,6 +59,8 @@ pub const BAKE_DEFAULT_TOOL_NAMES: [&str; 7] = [
     "job_output",
     "job_list",
     "job_kill",
+    "web_search",
+    "web_fetch",
 ];
 
 /// Pi's `ToolsOptions` for the ported tools.
@@ -80,6 +83,8 @@ pub struct ToolsOptions {
     /// ([`BashToolOptions::jobs`]) and the session
     /// ([`crate::agent_session::AgentSessionOptions::jobs`]).
     pub jobs: Option<crate::jobs::JobRegistry>,
+    /// The fetcher and search route; with them the web tools are built.
+    pub web: Option<WebTools>,
 }
 
 /// Pi's `createBashToolDefinition(cwd, options)`: the bash tool with its
@@ -148,11 +153,15 @@ pub fn create_all_tool_definitions(cwd: &Path, options: &ToolsOptions) -> Vec<To
 }
 
 /// Pi's `createAllToolDefinitions`, then the job tools when
-/// [`ToolsOptions::jobs`] is set.
+/// [`ToolsOptions::jobs`] is set and the web tools when
+/// [`ToolsOptions::web`] is.
 pub fn create_bake_tool_definitions(cwd: &Path, options: &ToolsOptions) -> Vec<ToolDefinition> {
     let mut all = create_all_tool_definitions(cwd, options);
     if let Some(jobs) = &options.jobs {
         all.extend(create_job_tool_definitions(jobs));
+    }
+    if let Some(web) = &options.web {
+        all.extend(create_web_tool_definitions(web));
     }
     all
 }

@@ -159,6 +159,7 @@ dependencies = [
  "bake-process",
  "bake-sandbox",
  "base64 0.22.1",
+ "encoding_rs",
  "getrandom 0.2.17",
  "icu_normalizer",
  "ignore",
