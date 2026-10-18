@@ -14,7 +14,8 @@
 //! The request a search sends, without its key, is returned with the
 //! result ([`SearchRequest`]) so the tool records it in the session.
 
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 
 use bake_ai::{AbortSignal, Model};
 use serde_json::{Value, json};
@@ -22,7 +23,9 @@ use serde_json::{Value, json};
 use super::{WEB_ABORTED, WEB_PROVIDER_ERROR, WEB_PROVIDER_UNAVAILABLE, WebError};
 use crate::agent_session::SessionSelection;
 use crate::cliproxyapi::CLIPROXYAPI_ID;
+use crate::config_value::with_command_cancel;
 use crate::model_registry::ModelRuntime;
+use crate::owned_work::WorkGate;
 
 /// The `anthropic-version` header value.
 pub const SEARCH_API_VERSION: &str = "2023-06-01";
@@ -322,6 +325,7 @@ pub struct CliProxySearch {
     registry: ModelRuntime,
     selection: Option<SessionSelection>,
     configured_model: Option<String>,
+    owner: Option<WorkGate>,
 }
 
 impl std::fmt::Debug for CliProxySearch {
@@ -335,16 +339,19 @@ impl std::fmt::Debug for CliProxySearch {
 impl CliProxySearch {
     /// Searches over `registry`, preferring the model `selection`
     /// publishes and the `webSearch.model` setting's `configured_model`
-    /// ([`select_search_model`]).
+    /// ([`select_search_model`]). `owner`, the session's gate, owns the
+    /// key lookups, so shutdown waits for a key command a search started.
     pub fn new(
         registry: ModelRuntime,
         selection: Option<SessionSelection>,
         configured_model: Option<String>,
+        owner: Option<WorkGate>,
     ) -> Self {
         Self {
             registry,
             selection,
             configured_model,
+            owner,
         }
     }
 
@@ -383,13 +390,37 @@ impl CliProxySearch {
             current.as_ref(),
             self.configured_model.as_deref(),
         )?;
-        // Resolving a key may run a configured command, so it blocks.
+        // Resolving a key may run a configured command, so it blocks. As a
+        // model request's does, the lookup holds a permit of the session's
+        // gate, and a search that ends early (its signal aborted, or its
+        // future dropped) kills the command; shutdown then waits for the
+        // lookup's thread.
+        struct CancelOnDrop(Arc<AtomicBool>);
+        impl Drop for CancelOnDrop {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+        let permit = match &self.owner {
+            Some(owner) => Some(
+                owner
+                    .enter()
+                    .ok_or_else(|| WebError::new(WEB_ABORTED, "web search aborted"))?,
+            ),
+            None => None,
+        };
+        let cancel = Arc::new(AtomicBool::new(false));
+        let _cancel_on_drop = CancelOnDrop(Arc::clone(&cancel));
         let auth = {
             let model = model.clone();
-            tokio::task::spawn_blocking(move || registry.get_auth(&model))
-                .await
-                .map_err(|error| WebError::new(WEB_PROVIDER_ERROR, error.to_string()))?
-                .map_err(|error| WebError::new(WEB_PROVIDER_ERROR, error))?
+            tokio::task::spawn_blocking(move || {
+                let auth = with_command_cancel(cancel, || registry.get_auth(&model));
+                drop(permit);
+                auth
+            })
+            .await
+            .map_err(|error| WebError::new(WEB_PROVIDER_ERROR, error.to_string()))?
+            .map_err(|error| WebError::new(WEB_PROVIDER_ERROR, error))?
         };
         let name = format!("{}/{}", model.provider, model.id);
         let Some(auth) = auth else {

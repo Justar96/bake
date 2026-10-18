@@ -44,7 +44,7 @@ fn search_route(base: &str) -> CliProxySearch {
             Some("key".into()),
         )
         .expect("route");
-    CliProxySearch::new(ModelRuntime::new(registry), None, None)
+    CliProxySearch::new(ModelRuntime::new(registry), None, None, None)
 }
 
 fn loopback_fetcher() -> HttpFetcher {

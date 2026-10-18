@@ -1229,6 +1229,7 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
                 registry.clone(),
                 Some(published.clone()),
                 settings.web_search_model.clone(),
+                Some(work.clone()),
             ),
         }),
     };

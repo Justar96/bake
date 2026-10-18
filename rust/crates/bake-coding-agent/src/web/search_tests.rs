@@ -12,6 +12,7 @@ use serde_json::json;
 use super::*;
 use crate::auth_storage::AuthStorage;
 use crate::model_registry::{ModelConfig, ModelRegistry};
+use crate::owned_work::WorkGate;
 use crate::web::test_server::{Server, Step, reply};
 
 const RECORDED: &str = include_str!("fixtures/cliproxyapi-web-search.json");
@@ -302,7 +303,7 @@ fn json_reply(status: u16, body: &str) -> Vec<Step> {
 async fn posts_the_server_tool_request_through_the_route() {
     let server = gateway(json_reply(200, RECORDED)).await;
     let runtime = registry(&server.base(), &route());
-    let search = CliProxySearch::new(runtime, None, None);
+    let search = CliProxySearch::new(runtime, None, None, None);
     let (result, request) = search.search("rust 1.90", None).await.expect("search");
     assert_eq!(result.sources.len(), 10);
     let head = server.head(0).to_ascii_lowercase();
@@ -337,7 +338,7 @@ async fn a_model_that_cannot_search_is_named_with_the_setting() {
         r#"{"type":"error","error":{"type":"not_found_error","message":"model: claude-haiku-4-5"}}"#,
     ))
     .await;
-    let search = CliProxySearch::new(registry(&server.base(), &route()), None, None);
+    let search = CliProxySearch::new(registry(&server.base(), &route()), None, None, None);
     let error = search.search("q", None).await.expect_err("not found");
     assert_eq!(error.code, WEB_PROVIDER_ERROR);
     assert_eq!(
@@ -352,7 +353,7 @@ async fn a_model_that_cannot_search_is_named_with_the_setting() {
         r#"{"content":[{"type":"text","text":"I cannot search."}]}"#,
     ))
     .await;
-    let search = CliProxySearch::new(registry(&server.base(), &route()), None, None);
+    let search = CliProxySearch::new(registry(&server.base(), &route()), None, None, None);
     let error = search.search("q", None).await.expect_err("prose");
     assert!(
         error.message.starts_with("Web search model \"cliproxyapi/claude-haiku-4-5\" could not search: the model returned no web_search_tool_result blocks"),
@@ -367,19 +368,19 @@ async fn a_model_that_cannot_search_is_named_with_the_setting() {
 #[tokio::test]
 async fn maps_gateway_failures() {
     let server = gateway(json_reply(429, r#"{"error":"model_cooldown"}"#)).await;
-    let search = CliProxySearch::new(registry(&server.base(), &route()), None, None);
+    let search = CliProxySearch::new(registry(&server.base(), &route()), None, None, None);
     assert_eq!(
         search.search("q", None).await.expect_err("429").message,
         "CLIProxyAPI web search error (HTTP 429): model_cooldown (model \"cliproxyapi/claude-haiku-4-5\")"
     );
     let server = gateway(reply(502, &[], b"<html>bad gateway</html>")).await;
-    let search = CliProxySearch::new(registry(&server.base(), &route()), None, None);
+    let search = CliProxySearch::new(registry(&server.base(), &route()), None, None, None);
     assert_eq!(
         search.search("q", None).await.expect_err("502").message,
         "CLIProxyAPI web search error (HTTP 502) (model \"cliproxyapi/claude-haiku-4-5\")"
     );
     let server = gateway(json_reply(200, "not json")).await;
-    let search = CliProxySearch::new(registry(&server.base(), &route()), None, None);
+    let search = CliProxySearch::new(registry(&server.base(), &route()), None, None, None);
     assert!(
         search
             .search("q", None)
@@ -394,7 +395,7 @@ async fn maps_gateway_failures() {
         closed.local_addr().expect("address").port()
     );
     drop(closed);
-    let search = CliProxySearch::new(registry(&base, &route()), None, None);
+    let search = CliProxySearch::new(registry(&base, &route()), None, None, None);
     let error = search.search("q", None).await.expect_err("refused");
     assert_eq!(error.code, WEB_PROVIDER_ERROR);
     assert!(
@@ -409,7 +410,7 @@ async fn maps_gateway_failures() {
 #[tokio::test]
 async fn honors_cancellation() {
     let server = gateway(vec![Step::Sleep(std::time::Duration::from_secs(10))]).await;
-    let search = CliProxySearch::new(registry(&server.base(), &route()), None, None);
+    let search = CliProxySearch::new(registry(&server.base(), &route()), None, None, None);
     let controller = bake_ai::AbortController::new();
     controller.abort();
     let error = search
@@ -429,4 +430,100 @@ async fn honors_cancellation() {
     };
     let (result, ()) = tokio::join!(search.search("q", Some(&signal)), abort);
     assert_eq!(result.expect_err("aborted").code, WEB_ABORTED);
+}
+
+/// A registry whose CLIProxyAPI route's key is the command `key`.
+fn registry_with_key_command(base: &str, key: &str) -> ModelRuntime {
+    let mut registry = ModelRegistry::new(ModelConfig::empty(), AuthStorage::empty());
+    registry
+        .add_provider_config(
+            CLIPROXYAPI_ID,
+            json!({
+                "baseUrl": format!("{base}/v1"),
+                "api": ANTHROPIC_MESSAGES,
+                "apiKey": key,
+                "models": [{ "id": "claude-haiku-4-5", "baseUrl": base }],
+            }),
+            None,
+        )
+        .expect("route");
+    ModelRuntime::new(registry)
+}
+
+// Bake's own: a search's key command is session work, as a model
+// request's is. Aborting the search kills the command, and shutdown
+// waits for the lookup's thread rather than leaving it running.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn aborting_kills_a_slow_key_command_and_shutdown_awaits_it() {
+    let dir = crate::test_support::TempDir::new("web-search-key");
+    let marker = dir.join("key-command-finished");
+    let key = format!("!sleep 5; touch '{}'; echo slow-key", marker.display());
+    let gate = WorkGate::default();
+    let search = CliProxySearch::new(
+        registry_with_key_command("http://127.0.0.1:9", &key),
+        None,
+        None,
+        Some(gate.clone()),
+    );
+    let controller = bake_ai::AbortController::new();
+    let signal = controller.signal();
+    let running = tokio::spawn(async move { search.search("q", Some(&signal)).await });
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let closing = gate.close();
+    assert!(!gate.is_closed(), "shutdown waits for the key lookup");
+    let started = std::time::Instant::now();
+    controller.abort();
+    let error = running.await.expect("search task").expect_err("aborted");
+    assert_eq!(error.code, WEB_ABORTED);
+    tokio::time::timeout(std::time::Duration::from_secs(2), closing)
+        .await
+        .expect("the key command is killed");
+    assert!(started.elapsed() < std::time::Duration::from_secs(2));
+    assert!(gate.is_closed());
+    assert!(!marker.exists(), "the key command did not finish");
+}
+
+// A search the closed gate refuses runs no key command.
+#[tokio::test]
+async fn a_closed_session_refuses_a_search() {
+    let gate = WorkGate::default();
+    gate.close().await;
+    let search = CliProxySearch::new(
+        registry("http://127.0.0.1:9", &route()),
+        None,
+        None,
+        Some(gate),
+    );
+    let error = search.search("q", None).await.expect_err("closed");
+    assert_eq!(
+        (error.code, error.message.as_str()),
+        (WEB_ABORTED, "web search aborted")
+    );
+}
+
+// Bake's own: dropping a search with no signal kills its key command too.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn dropping_a_search_kills_its_key_command() {
+    let dir = crate::test_support::TempDir::new("web-search-key-drop");
+    let marker = dir.join("key-command-finished");
+    let key = format!("!sleep 5; touch '{}'; echo dropped-key", marker.display());
+    let gate = WorkGate::default();
+    let search = CliProxySearch::new(
+        registry_with_key_command("http://127.0.0.1:9", &key),
+        None,
+        None,
+        Some(gate.clone()),
+    );
+    let dropped = tokio::time::timeout(
+        std::time::Duration::from_millis(300),
+        search.search("q", None),
+    )
+    .await;
+    assert!(dropped.is_err(), "still looking up the key");
+    tokio::time::timeout(std::time::Duration::from_secs(2), gate.close())
+        .await
+        .expect("the key command is killed");
+    assert!(!marker.exists(), "the key command did not finish");
 }
