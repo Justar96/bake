@@ -95,18 +95,50 @@ fn sheet_body_cap(height: u16) -> usize {
     usize::from(height / 2).clamp(3, 14)
 }
 
-/// The rows a dialog draws around its body, frame excluded: a list's
-/// title, note, filter, selected row's detail, and keys; a field's title,
-/// prompt, field, error, and keys; an information sheet's title and keys.
-fn sheet_chrome(dialog: &Dialog) -> usize {
+/// The most rows a list's note or a field's prompt wraps to; past them,
+/// the last row ends in `…`.
+const SHEET_TEXT_ROWS: usize = 6;
+
+/// A list's note or a field's prompt as a sheet `width` columns wide shows
+/// it: each line wrapped to the framed sheet's inner width, so a notice the
+/// person must read, such as what an upload sends, is shown whole rather
+/// than cut at the edge, and at most [`SHEET_TEXT_ROWS`] rows.
+fn sheet_text(text: &str, width: u16) -> Vec<String> {
+    let room = usize::from(width.min(SHEET_WIDTH)).saturating_sub(4).max(1);
+    let mut rows: Vec<String> = text
+        .split('\n')
+        .flat_map(|line| transcript::wrap(&editor::sanitize(line).replace(['\r', '\t'], " "), room))
+        .collect();
+    if rows.len() > SHEET_TEXT_ROWS {
+        rows.truncate(SHEET_TEXT_ROWS);
+        if let Some(last) = rows.last_mut() {
+            *last = fit(&format!("{last}…"), room);
+        }
+    }
+    if rows.is_empty() {
+        rows.push(String::new());
+    }
+    rows
+}
+
+/// The rows a dialog draws around its body at `width` columns, frame
+/// excluded: a list's title, note, filter, selected row's detail, and
+/// keys; a field's title, prompt, field, error, and keys; an information
+/// sheet's title and keys.
+fn sheet_chrome(dialog: &Dialog, width: u16) -> usize {
     match &dialog.request.kind {
         DialogKind::List(list) => {
-            2 + usize::from(list.note.is_some())
+            2 + list
+                .note
+                .as_deref()
+                .map_or(0, |note| sheet_text(note, width).len())
                 + usize::from(list.search.is_some())
                 + usize::from(list.filterable)
                 + usize::from(list.items.iter().any(|item| item.about.is_some()))
         }
-        DialogKind::Field(field) => 4 + usize::from(field.error.is_some()),
+        DialogKind::Field(field) => {
+            3 + sheet_text(&field.prompt, width).len() + usize::from(field.error.is_some())
+        }
         DialogKind::Info(_) => 2,
     }
 }
@@ -132,7 +164,8 @@ fn dialog_rows(app: &State, width: u16, height: u16) -> u16 {
     let Some(dialog) = app.dialog.as_ref().filter(|_| app.approval().is_none()) else {
         return 0;
     };
-    let rows = sheet_chrome(dialog) + sheet_body(dialog, width).min(sheet_body_cap(height)) + 2;
+    let rows =
+        sheet_chrome(dialog, width) + sheet_body(dialog, width).min(sheet_body_cap(height)) + 2;
     u16::try_from(rows).unwrap_or(u16::MAX)
 }
 
@@ -397,7 +430,7 @@ fn render_dialog(app: &mut State, area: Rect, buf: &mut Buffer) {
     };
     let clean = |text: &str| editor::sanitize(text).replace(['\n', '\t'], " ");
     let width = area.width.min(SHEET_WIDTH);
-    let chrome = sheet_chrome(dialog);
+    let chrome = sheet_chrome(dialog, width);
     let least = chrome + usize::from(!matches!(dialog.request.kind, DialogKind::Field(_)));
     let framed = width >= SHEET_FRAME_COLUMNS && usize::from(area.height) >= least + 2;
     let inner = if framed {
@@ -446,7 +479,9 @@ fn render_dialog(app: &mut State, area: Rect, buf: &mut Buffer) {
         DialogKind::List(list) => {
             head.push(Line::styled(fit(&clean(&list.title), w), title_style));
             if let Some(note) = &list.note {
-                head.push(Line::styled(fit(&clean(note), w), dim()));
+                for row in sheet_text(note, width) {
+                    head.push(Line::styled(fit(&row, w), dim()));
+                }
             }
             // A session search's state, or why its query matches nothing.
             let search = dialog.search.clone().filter(|_| list.search.is_some());
@@ -671,7 +706,9 @@ fn render_dialog(app: &mut State, area: Rect, buf: &mut Buffer) {
         }
         DialogKind::Field(field) => {
             head.push(Line::styled(fit(&clean(&field.title), w), title_style));
-            head.push(Line::raw(fit(&clean(&field.prompt), w)));
+            for row in sheet_text(&field.prompt, width) {
+                head.push(Line::raw(fit(&row, w)));
+            }
             let shown = if field.secret {
                 "•".repeat(dialog.text.chars())
             } else {
@@ -2407,6 +2444,68 @@ mod tests {
         assert!(rows[row_index(&rows, "current-model")].contains("  current-model  Current  faux"));
         assert!(rows[row_index(&rows, "browsed-model")].contains("▸ browsed-model           faux"));
         assert!(rows.iter().any(|r| r.contains("2/2")));
+    }
+
+    // Bake: a list's note and a field's prompt wrap to the sheet's width,
+    // their lines kept, so a notice such as what `/share` uploads is read
+    // whole; past six rows the last ends in `…`.
+    #[test]
+    fn notes_and_prompts_wrap_whole_within_the_sheet() {
+        use crate::dialog::{DialogKind, DialogRequest, FieldDialog, ListDialog, ListItem};
+        use crate::runtime::RuntimeUpdate;
+        let note = "The gist holds this session as a web page, and anyone with its link can read every word of it until it is deleted.\nSecond line.";
+        let mut app = State::live(FrameStyle::default(), Tones::None, Vec::new());
+        open_list(
+            &mut app,
+            ListDialog {
+                title: "Share?".into(),
+                items: vec![ListItem {
+                    value: "no".into(),
+                    label: "No".into(),
+                    ..ListItem::default()
+                }],
+                current: None,
+                selected: None,
+                filterable: false,
+                saves_default: false,
+                note: Some(note.into()),
+                search: None,
+            },
+        );
+        arm(&mut app, 50, 24);
+        let (rows, _) = draw(&mut app, 50, 24);
+        let screen = rows.join("\n");
+        for word in [
+            "web page,",
+            "read every",
+            "word of it",
+            "deleted.",
+            "Second line.",
+        ] {
+            assert!(screen.contains(word), "{word}: {screen}");
+        }
+        assert!(app.dialog_ready());
+        let long = vec!["word"; 200].join(" ");
+        update(
+            &mut app,
+            Msg::Runtime(RuntimeUpdate::Dialog(Some(DialogRequest {
+                id: 2,
+                kind: DialogKind::Field(FieldDialog {
+                    title: "Report".into(),
+                    prompt: long.clone(),
+                    secret: false,
+                    initial: String::new(),
+                    error: None,
+                }),
+            }))),
+        );
+        assert_eq!(super::sheet_text(&long, 50).len(), super::SHEET_TEXT_ROWS);
+        assert!(super::sheet_text(&long, 50)[5].ends_with('…'));
+        arm(&mut app, 50, 24);
+        let (rows, _) = draw(&mut app, 50, 24);
+        let prompt_rows = rows.iter().filter(|row| row.contains("word word")).count();
+        assert_eq!(prompt_rows, super::SHEET_TEXT_ROWS, "{rows:#?}");
+        assert!(app.dialog_ready());
     }
 
     /// A session search for render tests: `bad` is an invalid pattern,
