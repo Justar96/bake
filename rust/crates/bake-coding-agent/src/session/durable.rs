@@ -70,14 +70,24 @@
 //!   a session. A file with other hard links, a dangling link, or a file
 //!   locked in place is instead truncated and rewritten in place, as Pi
 //!   does, and synced: renaming would split the links or leave the target
-//!   behind. The rewritten file keeps its permissions but, when renamed,
-//!   takes the writer as its owner.
+//!   behind. A crash during that rewrite can leave the file truncated. The
+//!   rewritten file keeps its permissions but, when renamed, takes the
+//!   writer as its owner.
 //! - After a file is created or renamed, its directory is synced on Unix,
 //!   best effort as SQLite does: the data is already synced, and a
 //!   filesystem that cannot sync a directory does not fail the write.
 //!   Windows has no directory sync through `std`.
 //! - On macOS, `std` syncs with `F_FULLFSYNC`; where a filesystem refuses it
 //!   (`ENOTSUP` or `EINVAL`), a plain `fsync` is used.
+//!
+//! The crate's tests kill a writer process at each step of a rewrite through
+//! a temporary file (`Faults::hold_rewrite`, a test-only seam) and, on
+//! Linux, stop one inside the `write` of an append, of each line of a group,
+//! and of a rewrite's temporary file with a file size limit, which either
+//! kills it there (`SIGXFSZ`) or fails the write with `EFBIG`; `/dev/full`
+//! fails appends with `ENOSPC`. They kill processes, not the machine, so
+//! they do not test what a power loss leaves unsynced. The in-place rewrite
+//! is not tested.
 
 use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions, TryLockError};
@@ -330,12 +340,62 @@ pub(crate) struct LinesFailure {
     pub(crate) error: io::Error,
 }
 
-/// Faults the crate's unit tests inject into [`append_lines`]; empty, and
-/// never consulted, outside tests.
+/// Faults the crate's unit tests inject into [`append_lines`] and
+/// [`replace`]; empty, and never consulted, outside tests.
 #[derive(Debug, Default)]
 pub(crate) struct Faults {
     #[cfg(test)]
     next: Option<Fault>,
+    #[cfg(test)]
+    rewrite: Option<RewriteHold>,
+}
+
+/// A step of a rewrite through a temporary file ([`replace`]) at which a
+/// test can stop the process ([`Faults::hold_rewrite`]).
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RewriteStep {
+    /// The temporary file is created and empty.
+    Created,
+    /// The first half of the new contents is written to it, unsynced.
+    PartlyWritten,
+    /// All of the new contents are written to it, unsynced.
+    Written,
+    /// It is synced, with the file's permissions.
+    Synced,
+    /// It is renamed over the file; the directory is not synced.
+    Renamed,
+    /// The directory is synced: the rewrite is done.
+    DirSynced,
+}
+
+#[cfg(test)]
+impl RewriteStep {
+    /// Every step, in the order a rewrite reaches them.
+    pub(crate) const ALL: [Self; 6] = [
+        Self::Created,
+        Self::PartlyWritten,
+        Self::Written,
+        Self::Synced,
+        Self::Renamed,
+        Self::DirSynced,
+    ];
+}
+
+/// A callback the next rewrite runs at its step.
+#[cfg(test)]
+struct RewriteHold {
+    step: RewriteStep,
+    hold: Box<dyn FnOnce() + Send>,
+}
+
+#[cfg(test)]
+impl std::fmt::Debug for RewriteHold {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RewriteHold")
+            .field("step", &self.step)
+            .finish()
+    }
 }
 
 /// A fault at one line of the next [`append_lines`] call.
@@ -381,6 +441,44 @@ impl Faults {
             return self.next.take().map(|fault| fault.kind);
         }
         None
+    }
+
+    /// Run `hold` when the next rewrite through a temporary file reaches
+    /// `step`; a test uses it to stop the process there. The rewrite fails
+    /// if `hold` returns.
+    #[cfg(test)]
+    pub(crate) fn hold_rewrite(&mut self, step: RewriteStep, hold: Box<dyn FnOnce() + Send>) {
+        self.rewrite = Some(RewriteHold { step, hold });
+    }
+
+    /// Whether the held rewrite stops at `step`.
+    #[cfg(test)]
+    fn holds_at(&self, step: RewriteStep) -> bool {
+        self.rewrite.as_ref().is_some_and(|held| held.step == step)
+    }
+
+    /// The rewrite has reached `step`: run the callback held for it, and
+    /// fail if that returns.
+    #[cfg(test)]
+    fn reach(&mut self, step: RewriteStep) -> io::Result<()> {
+        if !self.holds_at(step) {
+            return Ok(());
+        }
+        if let Some(held) = self.rewrite.take() {
+            (held.hold)();
+        }
+        Err(io::Error::other("injected: held rewrite"))
+    }
+
+    /// With a hold at [`RewriteStep::PartlyWritten`], write the first half
+    /// of `bytes` to the temporary file and hold there.
+    #[cfg(test)]
+    fn partly_write(&mut self, file: &mut File, bytes: &[u8]) -> io::Result<()> {
+        if !self.holds_at(RewriteStep::PartlyWritten) {
+            return Ok(());
+        }
+        file.write_all(bytes.get(..bytes.len() / 2).unwrap_or_default())?;
+        self.reach(RewriteStep::PartlyWritten)
     }
 }
 
@@ -536,11 +634,13 @@ pub(crate) struct Staged {
 
 impl Staged {
     /// Write `bytes` to a new temporary file beside `target`, with
-    /// `permissions` when given, and sync it.
+    /// `permissions` when given, and sync it. `faults` is consulted only by
+    /// the crate's tests.
     pub(crate) fn write(
         target: &Path,
         bytes: &[u8],
         permissions: Option<fs::Permissions>,
+        faults: &mut Faults,
     ) -> io::Result<Self> {
         let dir = target.parent().unwrap_or_else(|| Path::new(""));
         let name = target
@@ -556,11 +656,22 @@ impl Staged {
             .write(true)
             .create_new(true)
             .open(&staged.temp)?;
+        #[cfg(test)]
+        {
+            faults.reach(RewriteStep::Created)?;
+            faults.partly_write(&mut file, bytes)?;
+        }
+        #[cfg(not(test))]
+        let _ = faults;
         file.write_all(bytes)?;
+        #[cfg(test)]
+        faults.reach(RewriteStep::Written)?;
         if let Some(permissions) = permissions {
             file.set_permissions(permissions)?;
         }
         sync(&file, true)?;
+        #[cfg(test)]
+        faults.reach(RewriteStep::Synced)?;
         Ok(staged)
     }
 
@@ -571,10 +682,17 @@ impl Staged {
     }
 
     /// Rename the temporary file over the target and sync the directory.
-    pub(crate) fn commit(mut self) -> io::Result<()> {
+    /// `faults` is consulted only by the crate's tests.
+    pub(crate) fn commit(mut self, faults: &mut Faults) -> io::Result<()> {
         fs::rename(&self.temp, &self.target)?;
         self.committed = true;
+        #[cfg(test)]
+        faults.reach(RewriteStep::Renamed)?;
+        #[cfg(not(test))]
+        let _ = faults;
         sync_parent_dir(&self.target);
+        #[cfg(test)]
+        faults.reach(RewriteStep::DirSynced)?;
         Ok(())
     }
 }
@@ -616,8 +734,14 @@ fn has_other_links(metadata: &fs::Metadata) -> bool {
 /// over the real file, the file holds either its old contents or all of
 /// `bytes` whenever the process stops; with `in_place`, or for a file with
 /// other hard links or a dangling link, it is rewritten in place
-/// (module docs).
-pub(crate) fn replace(path: &Path, bytes: &[u8], in_place: bool) -> io::Result<()> {
+/// (module docs). `faults` is consulted only by the crate's tests, and
+/// only by a rewrite through a temporary file.
+pub(crate) fn replace(
+    path: &Path,
+    bytes: &[u8],
+    in_place: bool,
+    faults: &mut Faults,
+) -> io::Result<()> {
     if in_place {
         return overwrite(path, bytes);
     }
@@ -639,7 +763,7 @@ pub(crate) fn replace(path: &Path, bytes: &[u8], in_place: bool) -> io::Result<(
         return overwrite(&target, bytes);
     }
     let permissions = existing.map(|metadata| metadata.permissions());
-    Staged::write(&target, bytes, permissions)?.commit()
+    Staged::write(&target, bytes, permissions, faults)?.commit(faults)
 }
 
 #[cfg(test)]
@@ -754,7 +878,13 @@ mod tests {
             WriterLock::acquire(&without),
             Err(SessionError::Locked(_))
         ));
-        replace(&without, b"rewritten\n", in_place.in_place()).expect("in place");
+        replace(
+            &without,
+            b"rewritten\n",
+            in_place.in_place(),
+            &mut Faults::default(),
+        )
+        .expect("in place");
         assert_eq!(fs::read(&without).expect("read"), b"rewritten\n");
         // A missing session in such a directory fails, naming the session.
         let missing = dir.0.join("c.jsonl");
@@ -792,7 +922,7 @@ mod tests {
         let dir = Dir::new("stage");
         let file = dir.0.join("s.jsonl");
         fs::write(&file, b"old\n").expect("write");
-        let staged = Staged::write(&file, b"new\n", None).expect("stage");
+        let staged = Staged::write(&file, b"new\n", None, &mut Faults::default()).expect("stage");
         let temp = staged.temp().to_path_buf();
         let name = temp
             .file_name()
@@ -807,9 +937,60 @@ mod tests {
         drop(staged);
         assert!(!temp.exists());
         assert_eq!(names(&dir.0), ["s.jsonl"]);
-        replace(&file, b"new\n", false).expect("replace");
+        replace(&file, b"new\n", false, &mut Faults::default()).expect("replace");
         assert_eq!(fs::read(&file).expect("read"), b"new\n");
         assert_eq!(names(&dir.0), ["s.jsonl"]);
+    }
+
+    /// Each step of the rewrite seam is where its name says: the target and
+    /// the temporary file hold there what a crash at that point leaves. A
+    /// hold that returns fails the rewrite, which removes a temporary file
+    /// not yet renamed, and the next rewrite holds nowhere.
+    #[test]
+    fn a_held_rewrite_stops_at_each_step() {
+        use std::sync::{Arc, Mutex};
+        type Seen = Arc<Mutex<Option<(Vec<u8>, Vec<Vec<u8>>)>>>;
+        let new: &[u8] = b"{\"new\":\"contents\"}\n";
+        for step in RewriteStep::ALL {
+            let dir = Dir::new("held-rewrite");
+            let file = dir.0.join("s.jsonl");
+            fs::write(&file, b"old\n").expect("write");
+            let seen: Seen = Arc::default();
+            let mut faults = Faults::default();
+            let (record, probe, target) = (Arc::clone(&seen), dir.0.clone(), file.clone());
+            faults.hold_rewrite(
+                step,
+                Box::new(move || {
+                    let temps = names(&probe)
+                        .into_iter()
+                        .filter(|name| name.ends_with(".tmp"))
+                        .map(|name| fs::read(probe.join(name)).expect("temp"))
+                        .collect();
+                    let now = (fs::read(&target).expect("target"), temps);
+                    *record.lock().expect("record") = Some(now);
+                }),
+            );
+            let error = replace(&file, new, false, &mut faults).expect_err("held");
+            assert_eq!(error.to_string(), "injected: held rewrite", "{step:?}");
+            let (target, temps) = seen.lock().expect("seen").take().expect("the hold ran");
+            let renamed = matches!(step, RewriteStep::Renamed | RewriteStep::DirSynced);
+            let staged = match step {
+                RewriteStep::Created => &new[..0],
+                RewriteStep::PartlyWritten => &new[..new.len() / 2],
+                _ => new,
+            };
+            if renamed {
+                assert_eq!((target.as_slice(), temps.len()), (new, 0), "{step:?}");
+            } else {
+                assert_eq!(target, b"old\n", "{step:?}");
+                assert_eq!(temps, [staged], "{step:?}");
+            }
+            assert_eq!(names(&dir.0), ["s.jsonl"], "{step:?}");
+            let kept: &[u8] = if renamed { new } else { b"old\n" };
+            assert_eq!(fs::read(&file).expect("read"), kept, "{step:?}");
+            replace(&file, b"again\n", false, &mut faults).expect("next rewrite");
+            assert_eq!(fs::read(&file).expect("read"), b"again\n");
+        }
     }
 
     /// A rewrite keeps the file's mode, follows a symbolic link to the real
@@ -824,12 +1005,12 @@ mod tests {
         fs::set_permissions(&real, fs::Permissions::from_mode(0o600)).expect("chmod");
         let mode = |path: &Path| fs::metadata(path).expect("stat").permissions().mode() & 0o777;
 
-        replace(&real, b"one\n", false).expect("replace");
+        replace(&real, b"one\n", false, &mut Faults::default()).expect("replace");
         assert_eq!(mode(&real), 0o600);
 
         let link = dir.0.join("link.jsonl");
         std::os::unix::fs::symlink(&real, &link).expect("symlink");
-        replace(&link, b"two\n", false).expect("through link");
+        replace(&link, b"two\n", false, &mut Faults::default()).expect("through link");
         assert!(
             fs::symlink_metadata(&link)
                 .expect("lstat")
@@ -842,7 +1023,7 @@ mod tests {
         let hard = dir.0.join("hard.jsonl");
         fs::hard_link(&real, &hard).expect("hard link");
         let inode = fs::metadata(&real).expect("stat").ino();
-        replace(&real, b"three\n", false).expect("hard-linked");
+        replace(&real, b"three\n", false, &mut Faults::default()).expect("hard-linked");
         assert_eq!(fs::metadata(&real).expect("stat").ino(), inode);
         assert_eq!(fs::read(&hard).expect("read"), b"three\n");
         assert_eq!(names(&dir.0), ["hard.jsonl", "link.jsonl", "real.jsonl"]);

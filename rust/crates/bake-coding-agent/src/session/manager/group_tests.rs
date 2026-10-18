@@ -3,90 +3,21 @@
 //! write, and a writer process killed between the lines of a group. Each
 //! test owns its temporary directory and any child process it starts.
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::Write;
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
-use std::sync::mpsc;
-use std::time::{Duration, Instant};
 
-use bake_ai::Message;
 use serde_json::{Value, json};
 
 use super::*;
 use crate::session::durable::{Fault, FaultKind};
+use crate::session::manager::crash_support::{
+    CHILD_RETURNED_EXIT, CHILD_WATCHDOG_EXIT, Conversation, PATIENCE, TestChild, context_of,
+    conversation, entries_of, file_session, lines, omission, provider_problem, request, take_over,
+};
 use crate::session::{
-    AgentMessage, FailedLine, LeafSelector, NewSessionOptions, SessionContext, SessionEntry,
-    build_session_context, load_entries_from_file,
+    FailedLine, LeafSelector, NewSessionOptions, SessionEntry, build_session_context,
 };
 use crate::test_support::TempDir;
-
-/// The longest a test waits on a child before it fails instead of hanging.
-const PATIENCE: Duration = Duration::from_secs(30);
-
-fn message(value: Value) -> AgentMessage {
-    match value {
-        Value::Object(object) => AgentMessage::from_json(object),
-        other => panic!("not an object: {other}"),
-    }
-}
-
-fn usage() -> Value {
-    json!({"input": 1, "output": 1, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 2,
-        "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0}})
-}
-
-/// The ids a session's conversation gives its entries.
-struct Conversation {
-    assistant: String,
-    results: Vec<String>,
-}
-
-/// A written session: a prompt, an assistant that called two tools, and
-/// both results, as an overflowing tool turn leaves it.
-fn conversation(manager: &mut SessionManager) -> Conversation {
-    manager
-        .append_message(message(
-            json!({"role": "user", "content": "go", "timestamp": 1}),
-        ))
-        .expect("user");
-    let assistant = manager
-        .append_message(message(json!({"role": "assistant", "content": [
-            {"type": "toolCall", "id": "c1", "name": "read", "arguments": {}},
-            {"type": "toolCall", "id": "c2", "name": "read", "arguments": {}},
-        ], "api": "faux", "provider": "faux", "model": "faux-1", "usage": usage(),
-            "stopReason": "toolUse", "timestamp": 2})))
-        .expect("assistant");
-    let results = ["c1", "c2"]
-        .iter()
-        .map(|call| {
-            manager
-                .append_message(message(json!({"role": "toolResult", "toolCallId": call,
-                    "toolName": "read", "content": [{"type": "text", "text": "x"}],
-                    "isError": false, "timestamp": 3})))
-                .expect("result")
-        })
-        .collect();
-    Conversation { assistant, results }
-}
-
-fn file_session(dir: &TempDir) -> SessionManager {
-    SessionManager::create(
-        &dir.path().to_string_lossy(),
-        Some(&dir.join("sessions")),
-        NewSessionOptions::default(),
-    )
-    .expect("session")
-}
-
-/// A recovery omission in the order Bake writes it: the results, then
-/// the attempt.
-fn omission(ids: &Conversation) -> Vec<GroupEntry> {
-    ids.results
-        .iter()
-        .chain([&ids.assistant])
-        .map(|id| GroupEntry::context_edit(id.clone(), None))
-        .collect()
-}
 
 /// A model switch with its thinking level.
 fn model_switch() -> Vec<GroupEntry> {
@@ -171,69 +102,6 @@ fn initial_durable_custom_groups_keep_only_the_synced_prefix_on_failure() {
             assert_eq!(manager.entries(), seen[..line].iter().collect::<Vec<_>>());
         }
     }
-}
-
-fn lines(bytes: &[u8]) -> Vec<&[u8]> {
-    bytes
-        .split_inclusive(|byte| *byte == b'\n')
-        .collect::<Vec<_>>()
-}
-
-fn entries_of(path: &Path) -> Vec<SessionEntry> {
-    load_entries_from_file(path)
-        .expect("load")
-        .into_iter()
-        .filter_map(|entry| entry.as_entry().cloned())
-        .collect()
-}
-
-fn context_of(path: &Path) -> SessionContext {
-    build_session_context(&entries_of(path), LeafSelector::Last)
-}
-
-/// What a provider would refuse in `messages`: a tool result that answers
-/// no call of the assistant message it follows, or a call left without a
-/// result before the next message.
-fn provider_problem(messages: &[Message]) -> Option<String> {
-    let mut open: Vec<String> = Vec::new();
-    let mut after_assistant = false;
-    for message in messages {
-        match message {
-            Message::ToolResult(result) => {
-                if !after_assistant || !open.contains(&result.tool_call_id) {
-                    return Some(format!("{} answers no open call", result.tool_call_id));
-                }
-                open.retain(|id| id != &result.tool_call_id);
-            }
-            other => {
-                if !open.is_empty() {
-                    return Some(format!("calls {open:?} have no result"));
-                }
-                after_assistant = false;
-                if let Message::Assistant(assistant) = other {
-                    open = assistant.tool_calls().map(|call| call.id.clone()).collect();
-                    after_assistant = true;
-                }
-            }
-        }
-    }
-    (!open.is_empty()).then(|| format!("calls {open:?} have no result"))
-}
-
-/// The request a context rebuilds: Bake's `convert_to_llm`, then
-/// `bake_ai`'s `transform_messages` as every provider runs it.
-fn request(context: &SessionContext) -> Vec<Message> {
-    let live: Vec<_> = context
-        .messages
-        .iter()
-        .map(AgentMessage::to_agent)
-        .collect();
-    let model = bake_ai::providers::faux::faux_model("faux-1");
-    bake_ai::api::transform_messages::transform_messages(
-        &crate::session::messages::convert_to_llm(&live),
-        &model,
-        None,
-    )
 }
 
 /// A written group is the lines its single appends write, chained from the
@@ -618,6 +486,7 @@ fn a_closed_writer_refuses_the_whole_group() {
 }
 
 const CHILD_ENV: &str = "BAKE_TEST_GROUP_WRITER";
+const CHILD_TEST: &str = "session::manager::group::tests::group_writer_child";
 const HOLDING: &str = "bake-test-holding-group-line";
 
 /// Not a test of its own: the child of
@@ -637,13 +506,7 @@ fn group_writer_child() {
     let line: usize = line.parse().expect("line");
     let torn: usize = torn.parse().expect("torn");
     let mut manager = SessionManager::open(Path::new(file), None, None).expect("child open");
-    let ids = Conversation {
-        assistant: manager.entries()[1].id().to_owned(),
-        results: vec![
-            manager.entries()[2].id().to_owned(),
-            manager.entries()[3].id().to_owned(),
-        ],
-    };
+    let ids = Conversation::of(&manager);
     manager.arm_group_fault(Fault {
         line,
         kind: FaultKind::Hold(
@@ -660,129 +523,6 @@ fn group_writer_child() {
     });
     let _ = manager.append_group(omission(&ids));
     std::process::exit(CHILD_RETURNED_EXIT);
-}
-
-/// Exit codes [`group_writer_child`] ends with on its own, which a kill by
-/// the parent must not be mistaken for: its watchdog, and a group write
-/// that returned.
-const CHILD_WATCHDOG_EXIT: i32 = 3;
-const CHILD_RETURNED_EXIT: i32 = 4;
-
-/// A child process in [`group_writer_child`] and the thread reading its
-/// stdout. Drop kills and reaps the child, then joins the reader, which
-/// ends at the pipe's end once the child is gone, so neither outlives the
-/// fixture, whichever assertion fails first.
-struct WriterChild {
-    child: Child,
-    reader: Option<std::thread::JoinHandle<()>>,
-}
-
-impl WriterChild {
-    fn spawn(file: &Path, line: usize, torn: usize) -> Self {
-        let mut child = Command::new(std::env::current_exe().expect("test binary"))
-            .args([
-                "--exact",
-                "session::manager::group::tests::group_writer_child",
-                "--nocapture",
-                "--test-threads",
-                "1",
-            ])
-            .env(CHILD_ENV, format!("{line}|{torn}|{}", file.display()))
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("spawn writer");
-        let Some(stdout) = child.stdout.take() else {
-            let _ = child.kill();
-            let _ = child.wait();
-            panic!("the writer child has no stdout");
-        };
-        let (held, holding) = mpsc::channel();
-        // Owned before anything can fail, so Drop disposes of both.
-        let mut writer = Self {
-            child,
-            reader: None,
-        };
-        writer.reader = Some(
-            std::thread::Builder::new()
-                .name("group-writer-output".into())
-                .spawn(move || {
-                    for line in BufReader::new(stdout).lines() {
-                        let Ok(line) = line else {
-                            return;
-                        };
-                        if line.contains(HOLDING) {
-                            let _ = held.send(());
-                        }
-                    }
-                })
-                .expect("spawn writer output reader"),
-        );
-        holding
-            .recv_timeout(PATIENCE)
-            .expect("the writer child did not reach its line");
-        writer
-    }
-
-    /// Kill the child, reap it, and check that the parent's kill ended it:
-    /// it was still running when killed, and it did not exit on its own
-    /// through its watchdog, a returned write, or a panic.
-    fn kill(&mut self) {
-        assert!(
-            self.child.try_wait().expect("writer status").is_none(),
-            "the writer child exited before the parent killed it"
-        );
-        self.child.kill().expect("kill writer");
-        let deadline = Instant::now() + PATIENCE;
-        let status = loop {
-            if let Some(status) = self.child.try_wait().expect("writer status") {
-                break status;
-            }
-            assert!(Instant::now() < deadline, "the writer child did not exit");
-            std::thread::sleep(Duration::from_millis(10));
-        };
-        assert_killed(status);
-    }
-}
-
-/// `status` is that of a child ended by [`Child::kill`]: SIGKILL on Unix;
-/// on Windows, `TerminateProcess` with exit code 1, which the child never
-/// exits with on its own (its own codes are 3, 4, and a panic's 101).
-fn assert_killed(status: std::process::ExitStatus) {
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::ExitStatusExt;
-        assert_eq!(
-            (status.signal(), status.code()),
-            (Some(9), None),
-            "the writer child was not ended by the parent's kill: {status}"
-        );
-    }
-    #[cfg(windows)]
-    assert_eq!(
-        status.code(),
-        Some(1),
-        "the writer child was not ended by the parent's kill: {status}"
-    );
-    #[cfg(not(any(unix, windows)))]
-    assert!(!status.success(), "{status}");
-    assert_ne!(status.code(), Some(CHILD_WATCHDOG_EXIT), "{status}");
-    assert_ne!(status.code(), Some(CHILD_RETURNED_EXIT), "{status}");
-}
-
-impl Drop for WriterChild {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-        if let Some(reader) = self.reader.take() {
-            // The reader's own panic is reported here only when no other
-            // failure is already unwinding.
-            if reader.join().is_err() && !std::thread::panicking() {
-                panic!("the writer child's stdout reader panicked");
-            }
-        }
-    }
 }
 
 /// A writer process killed while it writes a group, after each synced line
@@ -802,7 +542,9 @@ fn a_writer_killed_between_group_lines_leaves_a_loadable_prefix() {
         let before = std::fs::read(&file).expect("read");
         drop(manager);
 
-        let mut child = WriterChild::spawn(&file, line, torn);
+        let spec = format!("{line}|{torn}|{}", file.display());
+        let mut child = TestChild::spawn(CHILD_TEST, CHILD_ENV, &spec);
+        child.wait_for(HOLDING);
         child.kill();
         drop(child);
 
@@ -821,17 +563,8 @@ fn a_writer_killed_between_group_lines_leaves_a_loadable_prefix() {
         if let Some(problem) = provider_problem(&request(&context)) {
             panic!("{line} {torn}: {problem}");
         }
-        // The lock died with the writer; Windows may release it a moment
-        // after the process exits.
-        let deadline = Instant::now() + PATIENCE;
-        let mut taken = loop {
-            match SessionManager::open(&file, None, None) {
-                Err(SessionError::Locked(_)) if Instant::now() < deadline => {
-                    std::thread::sleep(Duration::from_millis(20));
-                }
-                result => break result.expect("taken over"),
-            }
-        };
+        // The lock died with the writer.
+        let mut taken = take_over(&file);
         assert_eq!(taken.build_session_context(), context);
         taken.append_session_info("after").expect("append");
         drop(taken);

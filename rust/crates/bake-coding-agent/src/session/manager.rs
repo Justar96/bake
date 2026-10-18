@@ -147,7 +147,7 @@ pub struct SessionManager {
     writer: Option<WriterLock>,
     /// Set by [`SessionManager::close_writer`]: no lock is taken again.
     writer_closed: bool,
-    /// Faults the crate's tests inject into group appends.
+    /// Faults the crate's tests inject into group appends and rewrites.
     faults: durable::Faults,
 }
 
@@ -540,8 +540,24 @@ impl SessionManager {
         };
         self.hold_writer(&path)?;
         let in_place = self.writer.as_ref().is_some_and(WriterLock::in_place);
-        durable::replace(&path, &lines_of(&self.file_entries), in_place)
-            .map_err(|error| SessionError::io(&path, error))
+        durable::replace(
+            &path,
+            &lines_of(&self.file_entries),
+            in_place,
+            &mut self.faults,
+        )
+        .map_err(|error| SessionError::io(&path, error))
+    }
+
+    /// Run `hold` when the next rewrite through a temporary file reaches
+    /// `step` ([`durable::Faults::hold_rewrite`]).
+    #[cfg(test)]
+    pub(crate) fn hold_rewrite(
+        &mut self,
+        step: durable::RewriteStep,
+        hold: Box<dyn FnOnce() + Send>,
+    ) {
+        self.faults.hold_rewrite(step, hold);
     }
 
     fn holds_writer(&self, path: &Path) -> bool {
@@ -1667,6 +1683,18 @@ impl SessionManager {
 #[cfg(test)]
 #[path = "manager/task_branch_tests.rs"]
 mod task_branch_tests;
+
+#[cfg(test)]
+#[path = "manager/crash_support.rs"]
+mod crash_support;
+
+#[cfg(test)]
+#[path = "manager/rewrite_tests.rs"]
+mod rewrite_tests;
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "manager/kernel_write_tests.rs"]
+mod kernel_write_tests;
 
 #[cfg(test)]
 mod tests {
