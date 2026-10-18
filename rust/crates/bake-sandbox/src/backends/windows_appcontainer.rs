@@ -227,9 +227,9 @@
 //!   `WSAEACCES` (10013) without a capability and succeeded with
 //!   `internetClient`, while a loopback connection timed out with and
 //!   without capabilities; a timeout is not proof of a deliberate denial.
-//!   The loopback test accepts only a refusal code, or a timeout while
-//!   the TCP table shows the command's SYN unanswered and the listener
-//!   nothing; it has not run natively. Firewall-service state and
+//!   The loopback test accepts only a refusal code and fails a timeout as
+//!   inconclusive, even when the TCP table shows the command's SYN
+//!   unanswered and the listener nothing; it has not run natively. Firewall-service state and
 //!   enterprise policy are untested.
 //! - **Residue.** A renamed root leaves its ACEs behind.
 //! - **Grant propagation is eager.** The first grant on a root walks the

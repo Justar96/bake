@@ -1364,8 +1364,7 @@ fn loopback_stays_closed_with_and_without_network_grants() {
             NetworkGrant::PrivateNetworkClientServer,
         ][..],
     ] {
-        // A refusal, or a SYN the TCP table shows unanswered; never a
-        // bare timeout.
+        // Only a refusal counts; a timeout fails as inconclusive.
         let outcome = objects::loopback_outcome(&fixture, &workspace, network);
         observe(format_args!(
             "case=loopback-connect network={network:?} outcome={outcome}"
