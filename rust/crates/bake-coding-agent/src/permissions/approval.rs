@@ -7,8 +7,8 @@
 //! The TypeScript service dispatched an `approval/request` waterfall to
 //! composed answerers; here an answerer is one [`Approver`], and
 //! [`PolicyApprover`] is the service in front of it. The `approval/asked`
-//! and `approval/decided` audit events are not written (see the module
-//! table in [`crate::permissions`]).
+//! and `approval/decided` audit events are written around it by the engine
+//! ([`super::history`]).
 
 use std::fmt;
 use std::future::Future;

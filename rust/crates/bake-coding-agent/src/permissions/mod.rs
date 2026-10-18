@@ -14,6 +14,7 @@
 //! | [`approval`] | `packages/interaction/user-approval/src/{index,types}.ts` |
 //! | [`broker`] | the approval half of `apps/tui/packages/app/src/interactions.ts` (`Interactions`) |
 //! | [`state`] | the `permission/preset`, `sandbox/mode`, and `approval/policy` events and their folds (`permission-presets/src/index.ts`, `packages/sandbox/sandbox-policy/src/session-mode.ts`, `user-approval/src/index.ts`) |
+//! | [`history`] | the `approval/asked` and `approval/decided` audit events (`ApprovalService.request` in `user-approval/src/index.ts`, their payloads in `user-approval/src/types.ts`), as `bake.approval` session entries, and their fold |
 //! | [`engine`] | `packages/sandbox/sandbox-policy/src/index.ts` (`resolve`), `packages/sandbox/sandbox/src/escalation.ts` (`approveEscalation`), the escalation steps of `packages/shell/tool-bash/src/index.ts` and `packages/fs/tool-fs/src/sandbox.ts` |
 //! | [`context`] | `renderPolicyContext` in `sandbox-policy/src/index.ts`, the `approval:policy` contribution in `user-approval/src/index.ts` |
 //! | [`bash`] | `packages/shell/bash-sandbox/src/{index,helpers}.ts`, the sandbox parts of `packages/shell/tool-bash/src/{index,render}.ts` |
@@ -31,16 +32,18 @@
 //! A call runs only under the policy the engine resolved. A confined mode
 //! no backend can enforce refuses the bash call ([`bake_sandbox::SandboxUnavailable`]);
 //! a file mutation outside the policy is refused before any effect; an
-//! escalation nobody approves is refused before anything runs.
+//! escalation nobody approves is refused before anything runs. In a
+//! session that persists, a request and its answer are written to the
+//! session file before the call can run ([`history`]); a failed write
+//! refuses the call and stops the session.
 //!
 //! # Not ported
 //!
-//! The `approval/asked` and `approval/decided` audit events: no entry
-//! records a request or its answer in the session file, and the outcome
-//! reaches the model only as the tool's result; the live `/permission` command and its "approval policy changed"
+//! The live `/permission` command and its "approval policy changed"
 //! notice; the Auto review integration (`registerAuto`); background bash
 //! jobs and their `runnerFailed` notice; the Cordis projection, catalog,
-//! and invariant companions.
+//! and invariant companions. The `approval/asked` and `approval/decided`
+//! audit events are ported, as session entries ([`history`]).
 
 pub mod approval;
 pub mod bash;
@@ -49,6 +52,7 @@ pub mod broker;
 pub mod context;
 pub mod engine;
 pub mod fs;
+pub mod history;
 pub mod import;
 pub mod presets;
 pub mod state;
@@ -67,6 +71,10 @@ pub use broker::{ApprovalAnswer, ApprovalBroker, ApprovalListener, ApprovalPromp
 pub use engine::{
     BlankJustification, EscalationLayer, LayerDecision, PermissionEngine, PolicyLayer,
     StandingModeLayer, StandingPermissions, ToolCall,
+};
+pub use history::{
+    APPROVAL_CUSTOM_TYPE, ApprovalEntry, ApprovalHistory, ApprovalRecorder, RecorderSlot,
+    approval_history,
 };
 pub use presets::{CUSTOM_PRESET, KnobDefaults, KnobState, PresetSpec, PresetTable};
 pub use state::PERMISSION_CUSTOM_TYPE;

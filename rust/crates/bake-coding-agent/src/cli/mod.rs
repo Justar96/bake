@@ -1443,6 +1443,12 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
         jobs: Some(jobs),
     })
     .await?;
+    // Before any prompt: each approval request and its answer is written to
+    // this session's file before the call can run.
+    if let Err(message) = session.record_approvals(tool_permissions.engine.recorder_slot()) {
+        session.shutdown().await;
+        return Err(message);
+    }
     session.set_prompt_templates(prompt_templates);
     if let Err(message) = session.set_hooks(crate::hooks::HooksOptions {
         files: hooks,

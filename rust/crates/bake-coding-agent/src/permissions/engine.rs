@@ -17,7 +17,9 @@
 //! [`LayerDecision`]: pass, replace the policy (narrower or wider), refuse
 //! with model-visible text, or require approval for a policy. The engine
 //! asks the [`Approver`] for that last one, so every approval goes through
-//! the session's `ask`/`never` policy. The wrapped tools only call
+//! the session's `ask`/`never` policy, and records the request and its
+//! answer in the session file once a session binds its recorder
+//! ([`super::history`]). The wrapped tools only call
 //! [`PermissionEngine::resolve`], so new layers need no tool change:
 //!
 //! - command-prefix rules for bash, or path rules for the file tools: a
@@ -43,6 +45,7 @@ use bake_sandbox::{EscalationOutcome, SandboxMode, SandboxPolicy};
 use serde_json::Value;
 
 use super::approval::{ApprovalPolicy, ApprovalRequest, Approver};
+use super::history::{ApprovalAsked, ApprovalEntry, RecorderSlot};
 
 /// The session's standing permission: the knobs in force, the preset they
 /// came from, the workspace root (the session's working directory), and
@@ -350,12 +353,14 @@ impl PolicyLayer for EscalationLayer {
 pub struct PermissionEngine {
     layers: Vec<Arc<dyn PolicyLayer>>,
     approver: Arc<dyn Approver>,
+    recorder: RecorderSlot,
 }
 
 impl fmt::Debug for PermissionEngine {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PermissionEngine")
             .field("layers", &self.layer_names())
+            .field("recorder", &self.recorder)
             .finish_non_exhaustive()
     }
 }
@@ -367,6 +372,7 @@ impl PermissionEngine {
         Self {
             layers: Vec::new(),
             approver,
+            recorder: RecorderSlot::default(),
         }
     }
 
@@ -397,6 +403,13 @@ impl PermissionEngine {
         self.layers.iter().map(|layer| layer.name()).collect()
     }
 
+    /// Where this engine records its approval requests and answers: empty
+    /// until a session binds its recorder
+    /// ([`crate::agent_session::AgentSession::record_approvals`]).
+    pub fn recorder_slot(&self) -> &RecorderSlot {
+        &self.recorder
+    }
+
     /// The policy `call` runs under, or its refusal text. `signal` is the
     /// call's abort signal; approval requests ride it.
     pub async fn resolve(
@@ -411,21 +424,13 @@ impl PermissionEngine {
                 LayerDecision::SetPolicy(next) => policy = Some(next),
                 LayerDecision::Refuse(text) => return Err(text),
                 LayerDecision::RequireApproval(need) => {
-                    let outcome = self
-                        .approver
-                        .request(
-                            ApprovalRequest {
-                                tool_name: call.tool_name.to_owned(),
-                                call_id: call.call_id.to_owned(),
-                                reason: need.reason,
-                                arguments: call.args.clone(),
-                            },
-                            signal.cloned(),
-                        )
-                        .await;
-                    match outcome {
-                        EscalationOutcome::AllowedOnce => policy = Some(need.grant),
-                        outcome => return Err((need.refusal)(outcome)),
+                    match self
+                        .approve(call, need.reason, need.grant.mode, signal)
+                        .await
+                    {
+                        Ok(EscalationOutcome::AllowedOnce) => policy = Some(need.grant),
+                        Ok(outcome) => return Err((need.refusal)(outcome)),
+                        Err(text) => return Err(text),
                     }
                 }
             }
@@ -435,6 +440,49 @@ impl PermissionEngine {
                 "permission: no policy layer resolved a sandbox policy for this {} call",
                 call.tool_name
             )
+        })
+    }
+
+    /// Asks the approver whether `call` may run under `mode`, recording the
+    /// request and its answer when a recorder is bound (`ApprovalService.request`
+    /// in `user-approval/src/index.ts`, lines 208-227): the `asked` entry is
+    /// written before the approver is asked, and the `decided` entry before
+    /// the answer is returned, so an `allowed-once` is on disk before the
+    /// call can run. The answer returned is the one written; a request whose
+    /// `asked` entry an abort kept out is `cancelled` without asking. `Err`
+    /// is the call's refusal when a write failed; the session has stopped.
+    async fn approve(
+        &self,
+        call: &ToolCall<'_>,
+        reason: String,
+        mode: SandboxMode,
+        signal: Option<&AbortSignal>,
+    ) -> Result<EscalationOutcome, String> {
+        let request = ApprovalRequest {
+            tool_name: call.tool_name.to_owned(),
+            call_id: call.call_id.to_owned(),
+            reason,
+            arguments: call.args.clone(),
+        };
+        let Some(recorder) = self.recorder.get() else {
+            return Ok(self.approver.request(request, signal.cloned()).await);
+        };
+        let id = crate::session::id::uuid_v4();
+        let asked = ApprovalEntry::Asked(ApprovalAsked {
+            id: id.clone(),
+            tool_name: request.tool_name.clone(),
+            call_id: Some(request.call_id.clone()),
+            reason: Some(request.reason.clone()),
+            sandbox: Some(mode),
+        });
+        if recorder.record(asked, signal.cloned()).await?.is_none() {
+            return Ok(EscalationOutcome::Cancelled);
+        }
+        let outcome = self.approver.request(request, signal.cloned()).await;
+        let decided = ApprovalEntry::Decided { id, outcome };
+        Ok(match recorder.record(decided, signal.cloned()).await? {
+            Some(ApprovalEntry::Decided { outcome, .. }) => outcome,
+            _ => EscalationOutcome::Cancelled,
         })
     }
 }

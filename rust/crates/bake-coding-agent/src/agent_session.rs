@@ -58,7 +58,10 @@
 //! `tool_call` handlers (in `agent_session/plugin_veto.rs`); each block is
 //! written as a `custom` entry before the denial result. Opt-in recoverable
 //! runs journal allowed dispatches through the same boundary. The session
-//! owns every Wasm helper and reaps it before shutdown returns.
+//! owns every Wasm helper and reaps it before shutdown returns. A
+//! permission engine bound to the session ([`AgentSession::record_approvals`])
+//! writes each approval request and its answer through that boundary too
+//! (in `agent_session/approval_history.rs`), before the call can run.
 //!
 //! External hooks ([`crate::hooks`], installed by
 //! [`AgentSession::set_hooks`]) run at the same extension points (in
@@ -75,6 +78,7 @@
 //! models, virtual models and their failed-response routing, the
 //! `entry_appended` event, and tool-loadout changes between turns.
 
+mod approval_history;
 mod background_compaction;
 mod context_masking;
 mod hooks;
@@ -1203,7 +1207,24 @@ pub(crate) struct TestHooks {
     /// Runs under the session lock once the next plugin decision write is
     /// admitted, before its entry is appended.
     pub plugin_decision_admitted: Option<Box<dyn FnOnce() + Send>>,
+    /// Runs on the blocking pool before each approval entry's write takes
+    /// the session lock, that is before its cancellation admission.
+    pub before_approval_admission: Option<ApprovalHook>,
+    /// Runs under the session lock once each approval entry's write is
+    /// admitted, with the entry admitted, before it is appended; a test can
+    /// arm a fault on the manager here.
+    pub approval_admitted: Option<ApprovalAdmittedHook>,
+    /// Runs on the blocking pool after each approval entry is written and
+    /// synced, with the session lock released, before the engine goes on.
+    pub approval_written: Option<ApprovalHook>,
 }
+
+#[cfg(test)]
+type ApprovalHook = Arc<dyn Fn(&crate::permissions::ApprovalEntry) + Send + Sync>;
+
+#[cfg(test)]
+type ApprovalAdmittedHook =
+    Arc<dyn Fn(&crate::permissions::ApprovalEntry, &mut SessionManager) + Send + Sync>;
 
 /// Pi's bookkeeping after persisting: the last assistant message and the
 /// turn's tool results, overflow recovery, and the end of a successful
@@ -2870,6 +2891,24 @@ impl AgentSession {
         &self.jobs
     }
 
+    /// Records the approvals of an engine whose tools this session runs:
+    /// binds `slot` ([`crate::permissions::PermissionEngine::recorder_slot`])
+    /// to this session, so each request and its answer is written to the
+    /// session file before the call can run ([`crate::permissions::history`]).
+    /// A failed write refuses the call and stops the session. A slot binds
+    /// once; a second binding is refused. A session that does not persist
+    /// (`--no-session`) binds nothing: its engine asks and answers as an
+    /// unbound one does, and no entry is kept.
+    pub fn record_approvals(&self, slot: &crate::permissions::RecorderSlot) -> Result<(), String> {
+        if !lock(&self.session).is_persisted() {
+            return Ok(());
+        }
+        slot.bind(Arc::new(approval_history::SessionRecorder::new(
+            &self.core,
+            Arc::clone(&self.persist_error),
+        )))
+    }
+
     /// Pi's `dispose`, awaited. At the first call's first poll, before it
     /// waits for anything, it removes every listener, refuses new prompts,
     /// changes, owned work, and jobs, and aborts the run, a retry wait, a
@@ -2969,6 +3008,8 @@ impl AgentSession {
     }
 }
 
+#[cfg(test)]
+mod approval_tests;
 #[cfg(test)]
 mod control_tests;
 #[cfg(test)]

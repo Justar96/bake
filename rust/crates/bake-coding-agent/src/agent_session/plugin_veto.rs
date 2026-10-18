@@ -160,7 +160,7 @@ async fn persist_decision(
 }
 
 /// Aborts the run and records `error` as its result; returns `error`.
-fn stop(core: &Core, persist_error: &Mutex<Option<String>>, error: String) -> String {
+pub(super) fn stop(core: &Core, persist_error: &Mutex<Option<String>>, error: String) -> String {
     core.abort_requested.store(true, Ordering::SeqCst);
     if let Some(agent) = core.agent() {
         agent.abort();
