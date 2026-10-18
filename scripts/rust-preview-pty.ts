@@ -351,7 +351,8 @@ class Preview {
 
   assertNoChromeResidue(exited = false): void {
     const lines = this.history.split('\n')
-    const boxes = lines.filter(line => /^╭─.*╮$/u.test(line))
+    // ConPTY re-renders a row to the full width, with trailing blanks.
+    const boxes = lines.filter(line => /^╭─.*╮ *$/u.test(line))
     assert.equal(boxes.length, exited ? 0 : 1, 'obsolete composer frames remain in terminal history')
     assert(!lines.some(line => line.includes('typing never reaches an agent')), 'obsolete inspector rows remain')
     const buffer = this.terminal.buffer.normal
@@ -870,7 +871,8 @@ await scenario('inline preserves shell history, commits turns once, and keeps th
       const sampleEnd = lines.findIndex(line => line.trim() === 'rejects it before splitting.')
       const userStart = lines.findIndex(line => line.trimEnd() === `> ${prompt}`)
       assert(sampleEnd >= 0 && userStart > sampleEnd, 'the committed sample-to-prompt boundary is missing')
-      assert.deepEqual(lines.slice(sampleEnd + 1, userStart), ['', '-'.repeat(79)],
+      // ConPTY re-renders a row to the full width, so trailing blanks are not compared.
+      assert.deepEqual(lines.slice(sampleEnd + 1, userStart).map(line => line.trimEnd()), ['', '-'.repeat(79)],
         'publishing a prompt inserted live-region padding into the transcript')
       await preview.resize(60, 20)
       preview.send('kept while streaming')
