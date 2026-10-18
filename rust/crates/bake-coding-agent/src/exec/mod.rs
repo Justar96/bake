@@ -12,6 +12,7 @@ use std::process::ExitStatus;
 use std::time::Duration;
 
 use bake_ai::AbortSignal;
+use bake_process::environment::scrub_environment;
 use tokio::time::Instant;
 
 use crate::child_process::{self, ProcessSpec, wait_for_process};
@@ -162,17 +163,6 @@ fn code(status: ExitStatus) -> i64 {
     {
         status.code().map_or(0, i64::from)
     }
-}
-
-fn scrub_environment(
-    env: impl IntoIterator<Item = (OsString, OsString)>,
-) -> impl Iterator<Item = (OsString, OsString)> {
-    env.into_iter().filter(|(name, _)| {
-        let name = name.to_string_lossy().to_ascii_uppercase();
-        !["KEY", "PASSWORD", "SECRET", "TOKEN"]
-            .iter()
-            .any(|pattern| name.contains(pattern))
-    })
 }
 
 #[cfg(test)]

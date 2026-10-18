@@ -21,7 +21,7 @@
 //! producer.
 
 use std::collections::VecDeque;
-use std::future::poll_fn;
+use std::future::{Future, poll_fn};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::task::{Poll, Waker};
 use std::time::Instant;
@@ -145,15 +145,19 @@ impl<T, R> EventSender<T, R> {
 
     /// Completes once every consumer is gone; at once if they already are.
     pub async fn closed(&self) {
-        poll_fn(|cx| {
-            let mut inner = self.shared.lock();
+        self.closed_owned().await;
+    }
+
+    fn closed_owned(&self) -> impl Future<Output = ()> + use<T, R> {
+        let shared = Arc::clone(&self.shared);
+        poll_fn(move |cx| {
+            let mut inner = shared.lock();
             if inner.consumers == 0 {
                 return Poll::Ready(());
             }
             register(&mut inner.closed_wakers, cx.waker());
             Poll::Pending
         })
-        .await;
     }
 
     /// A token that counts as a live producer until dropped, so
@@ -435,6 +439,11 @@ impl AssistantMessageEventSender {
     /// [`EventSender::closed`].
     pub async fn closed(&self) {
         self.inner.closed().await;
+    }
+
+    /// Watches consumers without borrowing or retaining the unique sender.
+    pub(crate) fn closed_owned(&self) -> impl Future<Output = ()> + Send + use<> {
+        self.inner.closed_owned()
     }
 
     /// [`EventSender::producer_guard`].

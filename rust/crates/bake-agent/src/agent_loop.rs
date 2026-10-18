@@ -278,6 +278,32 @@ fn thinking_level(reasoning: Option<ThinkingLevel>) -> ModelThinkingLevel {
     reasoning.map_or(ModelThinkingLevel::Off, ModelThinkingLevel::from)
 }
 
+async fn append_messages(
+    current: &mut AgentContext,
+    new_messages: &mut Vec<AgentMessage>,
+    pending: Vec<AgentMessage>,
+    sink: &AgentEventSink,
+) {
+    for message in declare_tool_changes(current, pending) {
+        emit(
+            sink,
+            AgentEvent::MessageStart {
+                message: message.clone(),
+            },
+        )
+        .await;
+        emit(
+            sink,
+            AgentEvent::MessageEnd {
+                message: message.clone(),
+            },
+        )
+        .await;
+        current.messages.push(message.clone());
+        new_messages.push(message);
+    }
+}
+
 /// Pi's `runLoop`, shared by both entry points.
 async fn run_loop(
     initial_context: AgentContext,
@@ -332,24 +358,7 @@ async fn run_loop(
             }
 
             prepared.append(&mut pending);
-            for message in declare_tool_changes(&current, prepared) {
-                emit(
-                    sink,
-                    AgentEvent::MessageStart {
-                        message: message.clone(),
-                    },
-                )
-                .await;
-                emit(
-                    sink,
-                    AgentEvent::MessageEnd {
-                        message: message.clone(),
-                    },
-                )
-                .await;
-                current.messages.push(message.clone());
-                new_messages.push(message);
-            }
+            append_messages(&mut current, new_messages, prepared, sink).await;
 
             if let Some(prepare) = &config.prepare_request {
                 let update = prepare(
@@ -364,6 +373,10 @@ async fn run_loop(
                 if let Some(update) = update {
                     if let Some(context) = update.context {
                         current = context;
+                        // A replacement may change the executable tools or
+                        // discard their transcript declarations. Persist the
+                        // reconciled loadout before this request uses it.
+                        append_messages(&mut current, new_messages, Vec::new(), sink).await;
                     }
                     if let Some(next) = update.model {
                         model = next;

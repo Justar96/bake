@@ -445,11 +445,17 @@ struct Hooks {
 
 struct Inner {
     shared: Mutex<Shared>,
-    listeners: Mutex<Vec<(u64, AgentListener)>>,
+    listeners: Mutex<Vec<ListenerRegistration>>,
     next_listener: AtomicU64,
     /// Serializes event processing so listeners never overlap.
     event_order: tokio::sync::Mutex<()>,
     hooks: Hooks,
+}
+
+struct ListenerRegistration {
+    id: u64,
+    listener: AgentListener,
+    critical: bool,
 }
 
 impl Inner {
@@ -459,7 +465,7 @@ impl Inner {
         self.shared.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn listeners(&self) -> MutexGuard<'_, Vec<(u64, AgentListener)>> {
+    fn listeners(&self) -> MutexGuard<'_, Vec<ListenerRegistration>> {
         self.listeners
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -477,7 +483,7 @@ impl Subscription {
     /// Removes the listener. A run already calling it finishes that call.
     pub fn unsubscribe(self) {
         if let Some(inner) = self.inner.upgrade() {
-            inner.listeners().retain(|(id, _)| *id != self.id);
+            inner.listeners().retain(|entry| entry.id != self.id);
         }
     }
 }
@@ -586,6 +592,8 @@ impl Agent {
     /// Subscribes to events. Listeners are awaited in subscription order and
     /// are part of the run: the agent is idle only after the `agent_end`
     /// listeners settle. Each receives the run's abort signal.
+    /// Observer panics are reported by Rust's panic hook and contained, so
+    /// later listeners still receive the event and the run continues.
     ///
     /// A listener that needs the agent should capture a
     /// [`Weak`] reference: one that owns an `Arc<Agent>`
@@ -595,8 +603,27 @@ impl Agent {
     where
         F: for<'a> Fn(&'a AgentEvent, &'a AbortSignal) -> BoxFuture<'a, ()> + Send + Sync + 'static,
     {
+        self.add_listener(Arc::new(listener), false)
+    }
+
+    /// Subscribes a participant whose successful completion is required for
+    /// the run to continue, such as durable session persistence. It runs in
+    /// subscription order; a panic stops the run and reports a failed turn.
+    /// Use [`Self::subscribe`] for observers that must not interrupt the run.
+    pub fn subscribe_critical<F>(&self, listener: F) -> Subscription
+    where
+        F: for<'a> Fn(&'a AgentEvent, &'a AbortSignal) -> BoxFuture<'a, ()> + Send + Sync + 'static,
+    {
+        self.add_listener(Arc::new(listener), true)
+    }
+
+    fn add_listener(&self, listener: AgentListener, critical: bool) -> Subscription {
         let id = self.inner.next_listener.fetch_add(1, Ordering::Relaxed);
-        self.inner.listeners().push((id, Arc::new(listener)));
+        self.inner.listeners().push(ListenerRegistration {
+            id,
+            listener,
+            critical,
+        });
         Subscription {
             inner: Arc::downgrade(&self.inner),
             id,
@@ -1226,15 +1253,23 @@ async fn process_event(inner: &Inner, event: AgentEvent, signal: &AbortSignal) {
             | AgentEvent::ToolExecutionUpdate { .. } => {}
         }
     }
-    let listeners: Vec<AgentListener> = inner
+    let listeners: Vec<_> = inner
         .listeners()
         .iter()
-        .map(|(_, listener)| Arc::clone(listener))
+        .map(|entry| (Arc::clone(&entry.listener), entry.critical))
         .collect();
-    for listener in listeners {
+    for (listener, critical) in listeners {
         if inner.lock().closed {
             return;
         }
-        listener(&event, signal).await;
+        if critical {
+            listener(&event, signal).await;
+        } else {
+            let _ = catching(Box::pin(async {
+                listener(&event, signal).await;
+                Ok(())
+            }))
+            .await;
+        }
     }
 }

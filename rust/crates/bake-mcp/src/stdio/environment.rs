@@ -11,8 +11,7 @@
 
 use std::ffi::{OsStr, OsString};
 
-/// Name fragments that mark a credential, matched case-insensitively.
-const SENSITIVE: [&str; 4] = ["KEY", "PASSWORD", "SECRET", "TOKEN"];
+use bake_process::environment::is_credential_name;
 
 /// The `BAKE_*` spellings of the facts the harness manages (`managedBakeNames`
 /// in the TypeScript source); other `BAKE_*` names are user settings and pass.
@@ -27,9 +26,7 @@ const MANAGED_BAKE: [&str; 4] = [
 /// Windows environment names do.
 pub fn is_scrubbed_name(name: &OsStr) -> bool {
     let upper = name.to_string_lossy().to_ascii_uppercase();
-    SENSITIVE.iter().any(|fragment| upper.contains(fragment))
-        || upper.starts_with("DSH_")
-        || MANAGED_BAKE.contains(&upper.as_str())
+    is_credential_name(name) || upper.starts_with("DSH_") || MANAGED_BAKE.contains(&upper.as_str())
 }
 
 /// This process's environment without the names [`is_scrubbed_name`] drops:

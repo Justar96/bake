@@ -145,6 +145,21 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn simple_requests_keep_both_transport_timeouts() {
+        for idle_timeout_ms in [None, Some(0), Some(120_000)] {
+            let options = SimpleStreamOptions::from(StreamOptions {
+                timeout_ms: Some(30_000),
+                idle_timeout_ms,
+                ..Default::default()
+            });
+            let built =
+                build_base_options(&faux_model("m"), &TranscriptContext::default(), &options);
+            assert_eq!(built.timeout_ms, Some(30_000));
+            assert_eq!(built.idle_timeout_ms, idle_timeout_ms);
+        }
+    }
+
+    #[test]
     fn merges_sampling_params_in_order() {
         let mut model = faux_model("m");
         assert_eq!(
