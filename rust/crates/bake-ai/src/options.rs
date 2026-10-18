@@ -47,6 +47,11 @@ pub struct StreamOptions {
     pub headers: Option<ProviderHeaders>,
     /// Timeout until response headers; 10 minutes when `None`.
     pub timeout_ms: Option<u64>,
+    /// Longest wait for the next HTTP body chunk, including an error body;
+    /// 10 minutes when `None`, disabled when 0. Each chunk, including an
+    /// SSE heartbeat, starts a fresh wait. Independent of `timeout_ms` and
+    /// not a limit on the total duration of a progressing response.
+    pub idle_timeout_ms: Option<u64>,
     /// Request retries; 0 when `None`.
     pub max_retries: Option<u32>,
     /// Cap of a server-requested retry delay; 60 s when `None`, none when 0.
@@ -77,6 +82,7 @@ impl fmt::Debug for StreamOptions {
             .field("api_key", &self.api_key.as_ref().map(|_| "<redacted>"))
             .field("headers", &self.headers.as_ref().map(Vec::len))
             .field("timeout_ms", &self.timeout_ms)
+            .field("idle_timeout_ms", &self.idle_timeout_ms)
             .field("max_retries", &self.max_retries)
             .field("temperature", &self.temperature)
             .field("max_tokens", &self.max_tokens)

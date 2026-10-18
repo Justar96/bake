@@ -26,7 +26,7 @@ This is a non-interactive run: no one can answer questions. Make reasonable assu
 <permissions>
 File sandbox: workspace-write. Sandboxed tools can modify files under "<project>", and possibly in some temporary directories.
 
-Approval prompts: disabled. Actions that need approval are rejected automatically, so do not request sandbox escalation with `sandbox_permissions`.
+Approval prompts: disabled. Actions that need approval are rejected automatically.
 </permissions>
 
 <environment>
@@ -87,7 +87,7 @@ Session started: <date> (UTC)
     {
       "type": "function",
       "name": "bash",
-      "description": "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds. A file sandbox may block commands; trying is safe. `[sandbox: file access denied under <mode> mode]` is a policy denial: do not work around it. If a wider mode would help, retry the same command once this turn with the narrowest `sandbox_permissions` and a `justification`; that asks the user, so do not ask in chat. Request wider access up front only after this session was denied the same access. A rejection is final for that command.",
+      "description": "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds. A file sandbox may block commands; trying is safe. `[sandbox: file access denied under <mode> mode]` is a policy denial: do not work around it.",
       "parameters": {
         "type": "object",
         "required": [
@@ -101,18 +101,6 @@ Session started: <date> (UTC)
           "timeout": {
             "type": "number",
             "description": "Timeout in seconds (optional, no default timeout)"
-          },
-          "sandbox_permissions": {
-            "type": "string",
-            "enum": [
-              "workspace-write",
-              "danger-full-access"
-            ],
-            "description": "For retrying a denied command."
-          },
-          "justification": {
-            "type": "string",
-            "description": "One sentence for the user."
           }
         }
       }
@@ -152,18 +140,6 @@ Session started: <date> (UTC)
               }
             },
             "description": "One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead."
-          },
-          "sandbox_permissions": {
-            "type": "string",
-            "enum": [
-              "workspace-write",
-              "danger-full-access"
-            ],
-            "description": "One retry after a sandbox denial; asks the user."
-          },
-          "justification": {
-            "type": "string",
-            "description": "One sentence for the user; required with sandbox_permissions."
           }
         }
       }
@@ -186,18 +162,6 @@ Session started: <date> (UTC)
           "content": {
             "type": "string",
             "description": "Content to write to the file"
-          },
-          "sandbox_permissions": {
-            "type": "string",
-            "enum": [
-              "workspace-write",
-              "danger-full-access"
-            ],
-            "description": "One retry after a sandbox denial; asks the user."
-          },
-          "justification": {
-            "type": "string",
-            "description": "One sentence for the user; required with sandbox_permissions."
           }
         }
       }

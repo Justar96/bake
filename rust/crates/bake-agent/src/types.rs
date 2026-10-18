@@ -624,7 +624,8 @@ pub struct AgentLoopConfig {
     /// Error and aborted responses end the run regardless.
     pub finish_turn: Option<FinishTurn>,
     /// Runs before every provider request; its replacements last for the
-    /// rest of the run. It does not poll queues.
+    /// rest of the run. Replacement tool declarations are reconciled and
+    /// emitted before the request. It does not poll queues.
     pub prepare_request: Option<PrepareRequest>,
     /// Runs after `turn_end` when the loop continues, before the next turn.
     pub prepare_next_turn: Option<PrepareNextTurn>,

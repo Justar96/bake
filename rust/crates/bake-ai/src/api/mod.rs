@@ -9,6 +9,8 @@ pub mod simple_options;
 pub mod transform_messages;
 
 #[cfg(test)]
+mod lifecycle_tests;
+#[cfg(test)]
 mod producer_tests;
 #[cfg(test)]
 mod protocol_tests;
@@ -54,6 +56,27 @@ where
         )),
     }
     stream
+}
+
+/// Runs an HTTP provider until it settles or every consumer leaves. Its
+/// request, response, and retry wait belong to the future, so dropping that
+/// future closes them before `spawn_stream` releases its producer guard.
+pub(crate) fn spawn_http_stream<F, Fut>(model: &Model, run: F) -> AssistantMessageEventStream
+where
+    F: FnOnce(AssistantMessageEventSender) -> Fut,
+    Fut: Future<Output = ()> + Send + 'static,
+{
+    spawn_stream(model, move |sender| {
+        let closed = sender.closed_owned();
+        let running = run(sender);
+        async move {
+            tokio::select! {
+                biased;
+                () = closed => {},
+                () = running => {},
+            }
+        }
+    })
 }
 
 /// A producer task's future. Fields drop in order: the work first, then

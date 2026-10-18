@@ -204,7 +204,7 @@ async function evaluate(options: { roster: 'headless' | 'tui'; models: string; c
     for (const dir of ['tmp', 'capture', 'out']) mkdirSync(join(root, dir))
     const env: Record<string, string> = {
       PATH: process.env.PATH ?? '', HOME: join(root, 'home'), TMPDIR: join(root, 'tmp'),
-      EVAL_ARMS: `base=${join(root, 'base')},cand=${join(root, 'cand')},pi=pi:${join(root, 'pi/bin/pi')}`,
+      EVAL_ARMS: `base=ts:${join(root, 'base')},cand=ts:${join(root, 'cand')},pi=pi:${join(root, 'pi/bin/pi')}`,
       EVAL_MODELS: options.models, EVAL_CASES: options.cases.join(','), EVAL_ROSTER: options.roster, EVAL_TRIALS: '1',
       EVAL_OUTPUT: join(root, 'out'), EVAL_CONTRACT_CAPTURE: join(root, 'capture'),
       // Planted, not ambient: the evaluator must keep it from every agent.
@@ -506,6 +506,13 @@ contract('tui', {
   env: { EVAL_EXTRA_BASE: JSON.stringify(EXTRA_BASE), EVAL_SETTINGS_BASE: SETTINGS_BASE },
   baseExtra: EXTRA_BASE,
   baseSettings: { provider: { strictTools: true }, sections: { 'fixture-section': { model: 'fixture-model' } } },
+})
+
+test('an effort the model entry does not list stops the run before any sample', async () => {
+  const run = await evaluate({ roster: 'headless', models: 'fixture-model@medium', cases: ['ordinary_edit'] })
+  expect(run.code).not.toBe(0)
+  expect(run.stderr).toContain('EVAL_MODELS entry "fixture-model@medium": fixture-model lists efforts low, high, not medium')
+  expect(run.captures).toEqual([])
 })
 
 describe('the stale writer', () => {

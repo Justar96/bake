@@ -4,23 +4,28 @@
 //! this module provides what those SDKs did for them: header merging (a
 //! caller header overrides a default of the same name, case-insensitively,
 //! and a `None` value removes it), a timeout until response headers (the
-//! SDKs' 10-minute default), cancellation, retries through
+//! SDKs' 10-minute default), an independent idle timeout between body
+//! chunks (also 10 minutes by default), cancellation, retries through
 //! [`retry_provider_request`], SDK-shaped errors for non-2xx responses, and a
-//! streamed body read as server-sent events. HTTP/1.1 over rustls; no proxy
-//! is read from the environment.
+//! streamed body read as server-sent events. Error bodies keep at most
+//! 64 KiB with an explicit truncation notice, preserving the HTTP status
+//! and retry headers. HTTP/1.1 over rustls; no proxy is read from the
+//! environment.
 
 use std::collections::BTreeMap;
+use std::future::Future;
 use std::sync::OnceLock;
 use std::time::Duration;
 
 use crate::options::{ProviderHeaders, StreamOptions};
 use crate::types::ProviderResponse;
 use crate::utils::abort::{AbortSignal, cancelled, is_aborted};
-use crate::utils::error_body::ProviderError;
+use crate::utils::error_body::{ProviderError, ProviderErrorKind};
 use crate::utils::provider_retry::{ProviderRetryOptions, retry_provider_request};
 use crate::utils::sse::{ServerSentEvent, SseDecoder};
 
 const DEFAULT_TIMEOUT_MS: u64 = 600_000;
+const MAX_ERROR_BODY_BYTES: usize = 64 * 1024;
 
 /// The `User-Agent` sent by default: crate version, OS, and architecture.
 pub fn user_agent() -> String {
@@ -125,6 +130,7 @@ fn lowercase_headers(headers: &reqwest::header::HeaderMap) -> BTreeMap<String, S
 async fn send_once(
     request: &HttpRequest,
     timeout: Duration,
+    idle_timeout: Option<Duration>,
     signal: Option<&AbortSignal>,
 ) -> Result<reqwest::Response, ProviderError> {
     let client = client()?;
@@ -155,14 +161,62 @@ async fn send_once(
         return Ok(response);
     }
     let headers = lowercase_headers(response.headers());
-    let body = tokio::select! {
-        body = response.text() => body.unwrap_or_else(|error| error_chain(&error)),
-        () = cancelled(signal) => return Err(ProviderError::aborted()),
+    let body = match error_body(response, idle_timeout, signal).await {
+        Ok(body) => body,
+        Err(error) if error.kind == ProviderErrorKind::Aborted => return Err(error),
+        // Keep the HTTP failure visible even when its body is unavailable.
+        // Calling a known 401 a request timeout would invite an agent retry.
+        Err(error) if error.kind == ProviderErrorKind::Timeout => {
+            "HTTP error body unavailable: idle deadline reached.".to_owned()
+        }
+        Err(error) => format!("HTTP error body unavailable: {}", error.message),
     };
     Err(match request.error_shape {
         SdkErrorShape::OpenAI => ProviderError::http(status, headers, &body),
         SdkErrorShape::Anthropic => ProviderError::anthropic_http(status, headers, &body),
     })
+}
+
+/// Bounds each read, not the full response, so heartbeat bytes keep a
+/// long reasoning request alive. An explicit abort wins a ready chunk.
+async fn body_read<T>(
+    chunk: impl Future<Output = Result<T, reqwest::Error>>,
+    idle_timeout: Option<Duration>,
+    signal: Option<&AbortSignal>,
+) -> Result<T, ProviderError> {
+    let read = async {
+        match idle_timeout {
+            Some(timeout) => tokio::time::timeout(timeout, chunk)
+                .await
+                .map_err(|_| ProviderError::timeout())?,
+            None => chunk.await,
+        }
+        .map_err(|error| ProviderError::other(format!("Network error: {}", error_chain(&error))))
+    };
+    tokio::select! {
+        biased;
+        () = cancelled(signal) => Err(ProviderError::aborted()),
+        chunk = read => chunk,
+    }
+}
+
+async fn error_body(
+    mut response: reqwest::Response,
+    idle_timeout: Option<Duration>,
+    signal: Option<&AbortSignal>,
+) -> Result<String, ProviderError> {
+    let mut body = Vec::new();
+    while let Some(chunk) = body_read(response.chunk(), idle_timeout, signal).await? {
+        let left = MAX_ERROR_BODY_BYTES - body.len();
+        body.extend_from_slice(&chunk[..chunk.len().min(left)]);
+        if chunk.len() > left {
+            return Ok(format!(
+                "{}\n[HTTP error body truncated at {MAX_ERROR_BODY_BYTES} bytes]",
+                String::from_utf8_lossy(&body)
+            ));
+        }
+    }
+    Ok(String::from_utf8_lossy(&body).into_owned())
 }
 
 /// Sends `request` with the options' timeout, signal, and retries, and
@@ -175,6 +229,10 @@ pub async fn send(
         return Err(ProviderError::aborted());
     }
     let timeout = Duration::from_millis(options.timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS));
+    let idle_timeout = match options.idle_timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS) {
+        0 => None,
+        millis => Some(Duration::from_millis(millis)),
+    };
     let retry = ProviderRetryOptions {
         max_retries: options.max_retries,
         max_retry_delay_ms: options.max_retry_delay_ms,
@@ -182,7 +240,7 @@ pub async fn send(
         no_retry_statuses: Vec::new(),
     };
     let response = retry_provider_request(
-        || send_once(request, timeout, options.signal.as_ref()),
+        || send_once(request, timeout, idle_timeout, options.signal.as_ref()),
         &retry,
     )
     .await?;
@@ -195,6 +253,7 @@ pub async fn send(
         decoder: SseDecoder::new(),
         finished: false,
         signal: options.signal.clone(),
+        idle_timeout,
     })
 }
 
@@ -206,6 +265,7 @@ pub struct SseResponse {
     decoder: SseDecoder,
     finished: bool,
     signal: Option<AbortSignal>,
+    idle_timeout: Option<Duration>,
 }
 
 impl SseResponse {
@@ -215,20 +275,19 @@ impl SseResponse {
         if self.finished {
             return Ok(None);
         }
-        let chunk = tokio::select! {
-            chunk = self.response.chunk() => chunk,
-            () = cancelled(self.signal.as_ref()) => return Err(ProviderError::aborted()),
-        };
+        let chunk = body_read(
+            self.response.chunk(),
+            self.idle_timeout,
+            self.signal.as_ref(),
+        )
+        .await;
         match chunk {
-            Ok(Some(bytes)) => Ok(Some(self.decoder.push(&bytes))),
+            Ok(Some(bytes)) => Ok(Some(self.decoder.push(bytes.as_ref()))),
             Ok(None) => {
                 self.finished = true;
                 Ok(Some(self.decoder.finish()))
             }
-            Err(error) => Err(ProviderError::other(format!(
-                "Network error: {}",
-                error_chain(&error)
-            ))),
+            Err(error) => Err(error),
         }
     }
 }
