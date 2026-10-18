@@ -991,8 +991,12 @@ async fn a_torn_compaction_entry_reopens_to_the_old_context_and_compacts_again()
     assert_eq!(llm_of_stored(&compacted_context.messages), live_after);
     assert_eq!(summary_of(&old_context.messages), None);
 
-    let copy = dir.join("torn.jsonl");
     for cut in line.start..=line.end {
+        // A fresh path per cut: a lock just released on a reused path can
+        // stay held by another test's child until its `exec` (see
+        // `session::durable`), which a loaded host can stretch past
+        // `LOCK_WAIT`.
+        let copy = dir.join(&format!("prefix-{cut}.jsonl"));
         let prefix = &after[..cut];
         std::fs::write(&copy, prefix).expect("write prefix");
         let reopened = SessionManager::open(&copy, None, None).expect("reopen");
