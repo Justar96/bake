@@ -414,7 +414,9 @@ fn bug_files_a_redacted_issue_and_records_it() {
     h.choose(&dialog, "yes");
     let dialog = h.sheet();
     let summary = list_note(&dialog);
-    assert!(summary.starts_with("Description: the edit tool failed\nwith a stack\nTranscript: included in the zip archive only"));
+    assert!(summary.ends_with(
+        "\nTranscript: in the zip archive only\nDescription: the edit tool failed\nwith a stack"
+    ));
     let DialogKind::List(list) = &dialog.kind else {
         unreachable!()
     };
@@ -479,7 +481,7 @@ fn a_cancelled_bug_report_sends_nothing() {
     let dialog = h.sheet();
     h.choose(&dialog, "no");
     let dialog = h.sheet();
-    assert!(list_note(&dialog).starts_with("Description: none\nTranscript: not included"));
+    assert!(list_note(&dialog).ends_with("\nTranscript: not included\nDescription: none"));
     h.choose(&dialog, "cancel");
     let updates = h.settled(2);
     assert_eq!(
@@ -590,12 +592,142 @@ fn changelog_shows_the_shipped_entries() {
     assert!(admitted(&updates, 1));
     let rows = committed(&updates);
     assert_eq!(rows[0], Row::Info("What's New".into()));
-    assert!(matches!(&rows[1], Row::Answer(text) if text.contains("## [0.3.8]")));
+    let newest = commands::changelog::parse(commands::changelog::CHANGELOG)
+        .into_iter()
+        .next()
+        .expect("a released entry");
+    let heading = newest.content.lines().next().expect("a heading").to_owned();
+    assert!(
+        matches!(&rows[1], Row::Answer(text) if text.trim_end().ends_with(
+        commands::changelog::normalize_links(&newest.content, &newest).as_str()
+    ) && text.contains(&heading))
+    );
     assert!(
         !updates
             .iter()
             .any(|update| matches!(update, RuntimeUpdate::Dialog(_)))
     );
     assert_eq!(h.faux.call_count(), 0);
+    h.stop();
+}
+
+/// `text` with its `%XX` escapes decoded, as the browser reads a link.
+fn percent_decoded(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut at = 0;
+    while at < bytes.len() {
+        let hex = bytes
+            .get(at + 1..at + 3)
+            .and_then(|hex| std::str::from_utf8(hex).ok())
+            .and_then(|hex| u8::from_str_radix(hex, 16).ok());
+        match (bytes[at], hex) {
+            (b'%', Some(byte)) => {
+                out.push(byte);
+                at += 3;
+            }
+            (byte, _) => {
+                out.push(byte);
+                at += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+// Bake: the project's path, which Pi lists beside an included transcript,
+// stays in the zip archive; neither the public issue's body nor the
+// prefilled link names it, with the transcript or without, even when the
+// description does.
+#[test]
+fn the_public_issue_never_names_the_project_path() {
+    let place = Place::new("bug-paths");
+    place.mark("issue-fails");
+    let h = share_harness(&place, place.gh());
+    h.talk(1, "hi", "hello");
+    let project = place.project().to_string_lossy().into_owned();
+    for (id, transcript) in [(2, "yes"), (3, "no")] {
+        let _ = std::fs::remove_file(place.0.join("gh").join("body.md"));
+        h.submit_id(id, Submission::FollowUp("/bug".into()));
+        let dialog = h.sheet();
+        h.reply_to(
+            &dialog,
+            DialogAnswer::Entered(SecretText::from(format!("{project}/src/a.rs breaks"))),
+        );
+        let dialog = h.sheet();
+        h.choose(&dialog, transcript);
+        let dialog = h.sheet();
+        h.choose(&dialog, "issue");
+        let dialog = h.sheet();
+        h.choose(&dialog, "link");
+        let updates = h.settled(id);
+        let link = note(&updates).expect("the link");
+        let body = place.recorded("body.md").expect("the issue body gh read");
+        let title = place.recorded("title").expect("the title");
+        assert!(body.starts_with("<project>/src/a.rs breaks"), "{body}");
+        assert_eq!(title, "Bug report: <project>/src/a.rs breaks");
+        let decoded = percent_decoded(&link);
+        assert!(
+            decoded.contains("body=<project>/src/a.rs breaks"),
+            "{decoded}"
+        );
+        for text in [&body, &decoded, &title] {
+            assert!(!text.contains(&project), "{transcript}: {text}");
+            assert!(!text.contains("\"cwd\""), "{transcript}: {text}");
+        }
+    }
+    h.stop();
+}
+
+// Bake: while `/share` or `/bug` reads the session, from its first sheet
+// to the upload, a prompt is refused with its draft kept, so no turn
+// starts and the upload holds only the settled session.
+#[test]
+fn share_and_bug_hold_prompts_until_they_end() {
+    let place = Place::new("hold");
+    let h = share_harness(&place, place.gh());
+    h.talk(1, "hello there", "general kenobi");
+    let calls = h.faux.call_count();
+    h.submit_id(2, Submission::FollowUp("/share".into()));
+    let dialog = h.sheet();
+    h.submit_id(3, Submission::FollowUp("sneaky follow-up".into()));
+    let updates = h.settled(3);
+    assert_eq!(
+        refused(&updates).as_deref(),
+        Some("/share is reading the session; send this when it ends. Your draft is kept.")
+    );
+    h.choose(&dialog, "yes");
+    assert!(admitted(&h.settled(2), 2));
+    let data = decoded_session(&place.recorded("uploaded.html").expect("uploaded"));
+    assert!(data.contains("general kenobi") && !data.contains("sneaky"));
+
+    h.submit_id(4, Submission::FollowUp("/bug".into()));
+    let dialog = h.sheet();
+    h.reply_to(
+        &dialog,
+        DialogAnswer::Entered(SecretText::from("hangs".to_owned())),
+    );
+    let dialog = h.sheet();
+    h.choose(&dialog, "yes");
+    let dialog = h.sheet();
+    h.submit_id(5, Submission::FollowUp("another prompt".into()));
+    let updates = h.settled(5);
+    assert!(
+        refused(&updates).is_some_and(|reason| reason.starts_with("/bug is reading the session")),
+        "{updates:?}"
+    );
+    h.choose(&dialog, "zip");
+    let updates = h.settled(4);
+    let shown = note(&updates).expect("note");
+    let path = shown
+        .strip_prefix("Bug report exported to: ")
+        .and_then(|rest| rest.split('\n').next())
+        .expect("path");
+    let archive = String::from_utf8_lossy(&std::fs::read(path).expect("archive")).into_owned();
+    assert!(archive.contains("general kenobi") && !archive.contains("another prompt"));
+    assert_eq!(h.faux.call_count(), calls, "no turn started");
+    // Once they end, prompts run again.
+    h.talk(6, "after", "back");
+    assert_eq!(h.faux.call_count(), calls + 1);
     h.stop();
 }

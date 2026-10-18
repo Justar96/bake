@@ -64,8 +64,9 @@
 //! `/changelog` ([`changelog`]), `/share` ([`share`]), and `/bug`
 //! ([`bug`]) follow Pi v1.3.0. `/share` and `/bug` upload through the
 //! GitHub CLI ([`gh`]) only after a sheet that says what leaves the machine
-//! and where it goes, and only while the session is idle ([`IDLE`]), so
-//! they read a settled session.
+//! and where it goes, and only while the session is idle ([`IDLE`]); a
+//! prompt sent while one runs is refused with its draft kept, so they read
+//! a settled session from the sheet to the upload.
 //!
 //! `/login`, `/logout`, and `/refresh-models` keep Bake's CLIProxyAPI
 //! contract: `apps/tui/packages/app/src/cliproxyapi.ts`
@@ -148,8 +149,8 @@ pub const COMMANDS: &[&str] = &[
 pub const TRANSITIONS: &[&str] = &["new", "resume", "tree", "fork", "clone", "compact"];
 
 /// The commands that start only while the session is idle, as
-/// [`TRANSITIONS`] do, but leave prompts admitted while they run: they
-/// read the settled session and upload it.
+/// [`TRANSITIONS`] do, and refuse prompts until they end: they read the
+/// settled session and upload it, so no turn may start under them.
 pub const IDLE: &[&str] = &["share", "bug"];
 
 /// The commands that open no dialog, so none is closed when they end:

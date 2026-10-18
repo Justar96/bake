@@ -2446,6 +2446,21 @@ mod tests {
         assert!(rows.iter().any(|r| r.contains("2/2")));
     }
 
+    // Bake: on a narrow terminal `/share`'s note is cut to six rows, so
+    // who can read the gist comes first and is shown whole.
+    #[test]
+    fn the_share_warning_survives_a_narrow_sheet() {
+        let rows = super::sheet_text(crate::copy::SHARE_CONFIRM_NOTE, 40);
+        assert_eq!(rows.len(), super::SHEET_TEXT_ROWS);
+        assert!(rows[5].ends_with('…'), "the note is cut: {rows:#?}");
+        assert!(
+            rows.join(" ").starts_with(
+                "Anyone with the gist's link can read it: a secret gist is unlisted, not private."
+            ),
+            "{rows:#?}"
+        );
+    }
+
     // Bake: a list's note and a field's prompt wrap to the sheet's width,
     // their lines kept, so a notice such as what `/share` uploads is read
     // whole; past six rows the last ends in `…`.

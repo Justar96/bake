@@ -282,9 +282,13 @@ pub const CHANGELOG_EMPTY: &str = "No changelog entries found.";
 /// what the gist holds and who can read it, and its two choices. Nothing is
 /// uploaded unless the first is chosen.
 pub const SHARE_CONFIRM_TITLE: &str = "Share this session as a secret GitHub gist?";
-pub const SHARE_CONFIRM_NOTE: &str = "The gist holds this session as a web page: your messages, the model's answers, tool calls and their results (including file contents and command output read during the session), the system prompt, and the tool definitions. A secret gist is unlisted, but anyone with its link can read it.";
+pub const SHARE_CONFIRM_NOTE: &str = "Anyone with the gist's link can read it: a secret gist is unlisted, not private. It holds this session as a web page: your messages, the model's answers, tool calls and their results (including file contents and command output read during the session), the system prompt, and the tool definitions.";
 pub const SHARE_CONFIRM_YES: &str = "Yes, create the gist";
 pub const SHARE_CONFIRM_NO: &str = "No";
+/// Why a prompt is refused while `/share` or `/bug` (`{command}`) reads
+/// the session it uploads.
+pub const SESSION_BEING_READ: &str =
+    "/{command} is reading the session; send this when it ends. Your draft is kept.";
 /// Pi's `/share` notes and errors.
 pub const SHARE_CANCELLED: &str = "Share cancelled";
 pub const SHARE_GH_NOT_LOGGED_IN: &str = "GitHub CLI is not logged in. Run 'gh auth login' first.";

@@ -35,6 +35,8 @@ pub struct BugReportRequest<'a> {
     pub global_settings: Option<Value>,
     /// [`bug_report::current_environment`] or a test's facts.
     pub environment: Value,
+    /// The person's home directory, which the public issue names as `~`.
+    pub home_dir: Option<String>,
 }
 
 impl AgentSession {
@@ -130,6 +132,8 @@ impl AgentSession {
             metadata,
             diagnostics,
             session_jsonl,
+            cwd: session.cwd().to_owned(),
+            home_dir: request.home_dir,
         }
     }
 

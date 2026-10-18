@@ -7,8 +7,10 @@
 //! Pi uploads its report privately to Radius. Bake's report goes to Bake's
 //! repository ([`BAKE_REPOSITORY`]) as a GitHub issue, which is public, so
 //! the issue body ([`issue_body`]) holds only the description, the redacted
-//! metadata, and the failure diagnostics; the transcript, when the person
-//! includes it, goes only into the local zip archive. The metadata keeps
+//! metadata, and the failure diagnostics, without error stacks, and names
+//! the working directory as `<project>` and the home directory as `~`; the
+//! transcript, when the person includes it, goes only into the local zip
+//! archive, with the working directory Pi lists beside it. The metadata keeps
 //! Pi's shape, with Bake's facts: the `bake-rs` version and user agent, the
 //! `BAKE_`/`DSH_` variable names (never their values), and `settings.json`
 //! of the Bake home, which is Bake's only settings scope. Not ported: the
@@ -305,7 +307,8 @@ pub fn collect_metadata(input: MetadataInput<'_>) -> Value {
 }
 
 /// Pi's `collectBugReportDiagnostics`: the assistant turns that failed,
-/// were aborted, or carry provider diagnostics, without their content.
+/// were aborted, or carry provider diagnostics, without their content,
+/// each redacted ([`redact_json_value`]).
 pub fn collect_diagnostics(session: &SessionManager) -> Value {
     let entries = session.entries();
     let mut assistant = Vec::new();
@@ -353,7 +356,9 @@ pub fn collect_diagnostics(session: &SessionManager) -> Value {
             }
         }
         failed.insert("diagnostics".into(), diagnostics);
-        assistant.push(Value::Object(failed));
+        // An error or a provider's diagnostic can quote a request, so it is
+        // redacted as the metadata is.
+        assistant.push(redact_json_value(&Value::Object(failed)));
     }
     json!({
         "schemaVersion": SCHEMA_VERSION,
@@ -375,6 +380,47 @@ pub struct BugReportBundle {
     /// The branch as JSONL when the transcript is included; it goes only
     /// into the archive.
     pub session_jsonl: Option<String>,
+    /// The session's working directory, which the issue's text names as
+    /// [`PROJECT_PLACEHOLDER`]; it is never written into the issue.
+    pub cwd: String,
+    /// The person's home directory, which the issue's text names as `~`.
+    pub home_dir: Option<String>,
+}
+
+/// What the public issue writes in place of the session's working
+/// directory.
+pub const PROJECT_PLACEHOLDER: &str = "<project>";
+
+/// `value` without any `stack` member, at any depth.
+fn without_stacks(value: &Value) -> Value {
+    match value {
+        Value::Object(object) => Value::Object(
+            object
+                .iter()
+                .filter(|(key, _)| key.as_str() != "stack")
+                .map(|(key, child)| (key.clone(), without_stacks(child)))
+                .collect(),
+        ),
+        Value::Array(items) => Value::Array(items.iter().map(without_stacks).collect()),
+        other => other.clone(),
+    }
+}
+
+/// `text` with every occurrence of `path`, as written and as a JSON string
+/// escapes it, replaced by `with`. A root path names nothing particular
+/// and is left alone.
+fn replace_path(text: &str, path: &str, with: &str) -> String {
+    let path = path.trim_end_matches(['/', '\\']);
+    if path.is_empty() {
+        return text.to_owned();
+    }
+    let text = text.replace(path, with);
+    let escaped = path.replace('\\', "\\\\");
+    if escaped == path {
+        text
+    } else {
+        text.replace(&escaped, with)
+    }
 }
 
 /// One file of a report.
@@ -405,6 +451,32 @@ impl BugReportBundle {
     /// The description, trimmed, when one was given.
     pub fn hint(&self) -> Option<&str> {
         self.metadata["hint"].as_str()
+    }
+
+    /// The metadata the public issue shows: without the working directory,
+    /// which belongs with the transcript in the archive alone.
+    pub fn public_metadata(&self) -> Value {
+        let mut metadata = self.metadata.clone();
+        if let Some(session) = metadata.get_mut("session").and_then(Value::as_object_mut) {
+            session.shift_remove("cwd");
+        }
+        metadata
+    }
+
+    /// The diagnostics the public issue shows: without error stacks, which
+    /// stay in the archive.
+    pub fn public_diagnostics(&self) -> Value {
+        without_stacks(&self.diagnostics)
+    }
+
+    /// `text` as the public issue shows it: the working directory as
+    /// [`PROJECT_PLACEHOLDER`] and the home directory as `~`.
+    pub fn redact_paths(&self, text: &str) -> String {
+        let text = replace_path(text, &self.cwd, PROJECT_PLACEHOLDER);
+        match &self.home_dir {
+            Some(home) => replace_path(&text, home, "~"),
+            None => text,
+        }
     }
 
     /// Pi's `bugReportFiles`: `report.json` and `diagnostics.json`, and
@@ -474,11 +546,13 @@ pub fn archive_file_name(id: &str) -> String {
     format!("bake-bug-report-{id}.zip")
 }
 
-/// The issue's title: `Bug report: ` and the description's first line, at
-/// most 80 characters of it, or `Bug report`.
+/// The issue's title: `Bug report: ` and the description's first line,
+/// its paths redacted ([`BugReportBundle::redact_paths`]), at most 80
+/// characters of it, or `Bug report`.
 pub fn issue_title(bundle: &BugReportBundle) -> String {
-    let first = bundle
-        .hint()
+    let hint = bundle.hint().map(|hint| bundle.redact_paths(hint));
+    let first = hint
+        .as_deref()
         .and_then(|hint| hint.lines().map(str::trim).find(|line| !line.is_empty()));
     match first {
         Some(line) if line.chars().count() > 80 => {
@@ -514,28 +588,37 @@ fn details(name: &str, text: &str) -> String {
 }
 
 /// The issue's body: the description, the report id and version, and the
-/// redacted `report.json` and `diagnostics.json`, each folded; never the
-/// transcript. When the whole would exceed `limit` as `measure` counts it,
-/// the diagnostics, then the metadata, are left out with a note saying so,
-/// and last the description is shortened.
+/// redacted `report.json` ([`BugReportBundle::public_metadata`]) and
+/// `diagnostics.json` ([`BugReportBundle::public_diagnostics`]), each
+/// folded, with paths redacted ([`BugReportBundle::redact_paths`]); never
+/// the transcript. When the whole would exceed `limit` as `measure` counts
+/// it, the diagnostics, then the metadata, are left out with a note saying
+/// so, and last the description is shortened.
 pub fn issue_body_within(
     bundle: &BugReportBundle,
     limit: usize,
     measure: impl Fn(&str) -> usize,
 ) -> String {
-    let description = bundle
-        .hint()
-        .map_or_else(|| "_No description given._".to_owned(), str::to_owned);
+    let description = bundle.hint().map_or_else(
+        || "_No description given._".to_owned(),
+        |hint| bundle.redact_paths(hint),
+    );
     let environment = &bundle.metadata["environment"];
-    let footer = format!(
+    let footer = bundle.redact_paths(&format!(
         "---\nReport ID: `{}` · bake-rs {} · {}/{}\nFiled with `/bug`. The session transcript is not included.",
         bundle.id(),
         environment["version"].as_str().unwrap_or("unknown"),
         environment["platform"].as_str().unwrap_or("unknown"),
         environment["arch"].as_str().unwrap_or("unknown"),
+    ));
+    let report = details(
+        "report.json",
+        &bundle.redact_paths(&pretty(&bundle.public_metadata())),
     );
-    let report = details("report.json", &pretty(&bundle.metadata));
-    let diagnostics = details("diagnostics.json", &pretty(&bundle.diagnostics));
+    let diagnostics = details(
+        "diagnostics.json",
+        &bundle.redact_paths(&pretty(&bundle.public_diagnostics())),
+    );
     const LEFT_OUT: &str =
         "_Left out to fit the issue; the zip archive `/bug` exports holds the whole report._";
     let candidates = [
@@ -563,17 +646,27 @@ pub fn issue_body_within(
             return body;
         }
     }
+    // The longest prefix of the description, in whole characters, that
+    // fits, found by halving: each probe measures one body, so even a
+    // description far past the limit costs a few dozen measures.
     let tail = format!("\n\n{footer}\n\nreport.json and diagnostics.json: {LEFT_OUT}");
-    let mut kept = String::new();
-    for c in description.chars() {
-        let mut next = kept.clone();
-        next.push(c);
-        if measure(&format!("{next}…{tail}")) > limit {
-            break;
+    let cut = |chars: usize| {
+        let end = description
+            .char_indices()
+            .nth(chars)
+            .map_or(description.len(), |(at, _)| at);
+        format!("{}…{tail}", &description[..end])
+    };
+    let (mut fits, mut over) = (0, description.chars().count());
+    while fits < over {
+        let middle = fits + (over - fits).div_ceil(2);
+        if measure(&cut(middle)) <= limit {
+            fits = middle;
+        } else {
+            over = middle - 1;
         }
-        kept = next;
     }
-    format!("{kept}…{tail}")
+    cut(fits)
 }
 
 /// [`issue_body_within`] at GitHub's [`ISSUE_BODY_LIMIT`] characters.

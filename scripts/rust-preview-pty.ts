@@ -2750,7 +2750,7 @@ if (windows) {
       // No is selected first: Enter declines and nothing is uploaded.
       session.send('/share\r')
       await sheetReady(session, 'Share this session as a secret GitHub gist?')
-      assert(session.screen.includes('anyone with its') && session.screen.includes('▸ No'), session.screen)
+      assert(session.screen.includes("Anyone with the gist's link") && session.screen.includes('▸ No'), session.screen)
       session.send('\r')
       await session.wait('share declined', () => session.screen.includes('Share cancelled; your draft is back.') && session.screen.includes('❯ /share'))
       assert.deepEqual(gh.calls(), ['auth status'])

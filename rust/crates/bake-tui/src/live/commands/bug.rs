@@ -65,6 +65,22 @@ struct Options {
     issue: bool,
 }
 
+/// The last sheet's note: where the report goes and whether the
+/// transcript goes with it come first, so a sheet that cuts the note's
+/// rows cuts the person's own description, never them.
+fn delivery_summary(hint: Option<&str>, include_session: bool) -> String {
+    format!(
+        "{}\nTranscript: {}\nDescription: {}",
+        repository(copy::BUG_DELIVERY_ISSUE_NOTE),
+        if include_session {
+            "in the zip archive only"
+        } else {
+            "not included"
+        },
+        hint.unwrap_or("none"),
+    )
+}
+
 /// Pi's `promptForOptions`; why not, when the person cancelled: Esc gives
 /// [`CANCELLED`], and the `Cancel` choice Pi's `Bug report cancelled`.
 async fn options(context: &mut Context, initial: &str) -> Result<Options, String> {
@@ -99,16 +115,7 @@ async fn options(context: &mut Context, initial: &str) -> Result<Options, String
         return Err(CANCELLED.into());
     };
     let include_session = value == "yes";
-    let summary = format!(
-        "Description: {}\nTranscript: {}\n{}",
-        hint.as_deref().unwrap_or("none"),
-        if include_session {
-            "included in the zip archive only"
-        } else {
-            "not included"
-        },
-        repository(copy::BUG_DELIVERY_ISSUE_NOTE),
-    );
+    let summary = delivery_summary(hint.as_deref(), include_session);
     let issue_label = if include_session {
         copy::BUG_CREATE_ISSUE_WITHOUT_TRANSCRIPT
     } else {
@@ -166,6 +173,7 @@ pub(super) async fn bug(context: &mut Context, argument: &str) -> Outcome {
             include_session,
             global_settings: global_settings(home.as_deref()),
             environment: bug_report::current_environment(),
+            home_dir: std::env::home_dir().map(|home| home.to_string_lossy().into_owned()),
         })
     })
     .await
@@ -332,5 +340,36 @@ async fn record(
     {
         Ok(()) => note,
         Err(error) => format!("{note}\n{} {error}", copy::BUG_NOT_RECORDED),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Bake: a sheet shows at most six rows of its note, wrapped to the
+    // sheet's inner width (`render::sheet_text`, four columns inside the
+    // sheet), so on a 40-column terminal where the report goes and whether
+    // the transcript goes with it are read before a long description,
+    // which alone is cut.
+    #[test]
+    fn the_delivery_summary_keeps_where_the_report_goes_first() {
+        let description = "the edit tool failed ".repeat(40);
+        for include_session in [true, false] {
+            let summary = delivery_summary(Some(&description), include_session);
+            let shown: Vec<String> = summary
+                .split('\n')
+                .flat_map(|line| bake_tui_view::transcript::wrap(line, 36))
+                .take(6)
+                .collect();
+            let shown = shown.join(" ");
+            assert!(
+                shown.contains(&format!("public issue on {BAKE_REPOSITORY}")),
+                "{shown}"
+            );
+            assert!(shown.contains("Transcript: "), "{shown}");
+            assert!(shown.contains("Description: the edit tool"), "{shown}");
+        }
+        assert!(delivery_summary(None, false).ends_with("Description: none"));
     }
 }

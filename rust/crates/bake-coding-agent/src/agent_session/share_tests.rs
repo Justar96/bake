@@ -19,6 +19,7 @@ fn request(include_session: bool) -> BugReportRequest<'static> {
         include_session,
         global_settings: Some(json!({"cliproxyapi": {"apiKey": "sk-hidden"}})),
         environment: json!({"version": "test"}),
+        home_dir: Some("/home/someone".into()),
     }
 }
 
@@ -114,10 +115,14 @@ async fn the_bundle_includes_the_branch_only_when_asked() {
     assert_eq!(without.metadata["provider"]["authConfigured"], true);
     assert!(!without.metadata.to_string().contains("sk-hidden"));
     let with = session.bug_report_bundle(request(true));
-    let jsonl = with.session_jsonl.expect("branch");
+    let jsonl = with.session_jsonl.as_deref().expect("branch");
     assert!(jsonl.contains("question") && jsonl.contains("reply"));
     assert!(jsonl.contains("\"customType\":\"pi.share\""));
     assert_eq!(with.metadata["session"]["cwd"], "/tmp");
+    // The issue's report never lists the directory.
+    assert_eq!(with.cwd, "/tmp");
+    assert_eq!(with.home_dir.as_deref(), Some("/home/someone"));
+    assert!(with.public_metadata()["session"].get("cwd").is_none());
     session.shutdown().await;
 }
 

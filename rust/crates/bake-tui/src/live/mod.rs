@@ -60,6 +60,7 @@ use bake_agent::{RunControl, RunOutcome};
 use bake_ai::{AbortController, ImageContent, StopReason};
 use bake_coding_agent::agent_session::AgentSession;
 use bake_coding_agent::permissions::{self, ApprovalBroker, ApprovalPrompt};
+use bake_tui_view::copy;
 use bake_tui_view::dialog::DialogAnswer;
 use bake_tui_view::paste::Image;
 use bake_tui_view::runtime::{Approval, ApprovalAnswer, RuntimeUpdate, SessionStatus};
@@ -780,6 +781,16 @@ impl Driver {
                         "The session is being replaced; your draft is kept."
                     };
                     return self.refuse(id, text, reason.into());
+                }
+                // `/share` and `/bug` read the session they upload until
+                // they end, so no turn starts under them.
+                if let Some(command) = self
+                    .command
+                    .as_ref()
+                    .filter(|command| commands::IDLE.contains(&command.name))
+                {
+                    let reason = copy::SESSION_BEING_READ.replace("{command}", command.name);
+                    return self.refuse(id, text, reason);
                 }
                 let images: Vec<ImageContent> = prompt.images.iter().map(image_content).collect();
                 match running {

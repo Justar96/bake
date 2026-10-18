@@ -6,6 +6,14 @@ fn message(value: Value) -> AgentMessage {
 }
 
 fn bundle(hint: Option<&str>, settings: Option<&Value>) -> BugReportBundle {
+    bundle_with(hint, settings, false)
+}
+
+fn bundle_with(
+    hint: Option<&str>,
+    settings: Option<&Value>,
+    include_session: bool,
+) -> BugReportBundle {
     let model: Model = serde_json::from_value(json!({
         "id": "m1", "name": "Model One", "api": "openai-responses", "provider": "proxy",
         "baseUrl": "https://user:pw@proxy.example/v1?token=abc&region=eu",
@@ -19,7 +27,7 @@ fn bundle(hint: Option<&str>, settings: Option<&Value>) -> BugReportBundle {
         hint,
         session_id: "session-1",
         cwd: "/home/me/project",
-        include_session: false,
+        include_session,
         message_count: 3,
         model: Some(&model),
         provider_auth_configured: Some(true),
@@ -34,6 +42,8 @@ fn bundle(hint: Option<&str>, settings: Option<&Value>) -> BugReportBundle {
         metadata,
         diagnostics: json!({"assistant": [{"errorMessage": "429 from provider"}]}),
         session_jsonl: Some("{\"transcript\":\"private words\"}\n".into()),
+        cwd: "/home/me/project".into(),
+        home_dir: Some("/home/me".into()),
     }
 }
 
@@ -349,4 +359,119 @@ fn an_archive_is_written_once_and_never_over_a_file() {
     assert_eq!(u32_at(&bytes, 0), 0x0403_4b50);
     assert!(write_archive(&report, &path).is_err());
     std::fs::remove_dir_all(&dir).expect("cleanup");
+}
+
+// Bake: the working directory Pi lists beside an included transcript goes
+// into the archive's `report.json` alone; the public issue and its link
+// never name it, whichever the transcript choice.
+#[test]
+fn the_issue_never_names_the_working_directory() {
+    for include_session in [false, true] {
+        let report = bundle_with(Some("fails"), None, include_session);
+        assert_eq!(
+            report.metadata["session"].get("cwd").is_some(),
+            include_session
+        );
+        assert!(report.public_metadata()["session"].get("cwd").is_none());
+        let body = issue_body(&report);
+        let url = new_issue_url(&report);
+        for text in [&body, &url] {
+            assert!(!text.contains("/home/me"), "{text}");
+            assert!(!text.contains("%2Fhome%2Fme"), "{text}");
+        }
+        let archived = &report.files()[0].data;
+        assert_eq!(archived.contains("/home/me/project"), include_session);
+    }
+}
+
+// Bake: the issue's text names the working directory `<project>` and the
+// home directory `~`, in the title, the description, and the JSON.
+#[test]
+fn the_issue_names_the_project_and_home_by_placeholder() {
+    let mut report = bundle(
+        Some("/home/me/project/src/a.rs breaks, see /home/me/notes"),
+        None,
+    );
+    report.diagnostics =
+        json!({"assistant": [{"errorMessage": "ENOENT /home/me/project/x and C:\\Users\\me\\y"}]});
+    report.home_dir = Some("C:\\Users\\me".into());
+    let body = issue_body(&report);
+    assert!(body.starts_with("<project>/src/a.rs breaks, see /home/me/notes"));
+    assert!(body.contains("ENOENT <project>/x and ~\\\\y"), "{body}");
+    assert!(!body.contains("Users"));
+    assert_eq!(
+        issue_title(&report),
+        "Bug report: <project>/src/a.rs breaks, see /home/me/notes"
+    );
+    // A root directory names nothing particular and is kept.
+    report.cwd = "/".into();
+    report.home_dir = None;
+    assert!(issue_body(&report).starts_with("/home/me/project/src/a.rs"));
+}
+
+// Bake: an error message and a provider's diagnostics are redacted as the
+// metadata is; their stacks stay in the archive and out of the issue.
+#[test]
+fn diagnostics_are_redacted_and_stacks_stay_in_the_archive() {
+    let mut session =
+        SessionManager::in_memory(Some("/w"), NewSessionOptions::default(), Vec::new())
+            .expect("session");
+    session
+        .append_message(message(json!({"role": "assistant", "content": [],
+            "api": "faux", "provider": "faux", "model": "faux-1", "stopReason": "error",
+            "errorMessage": "https://me:pw@proxy.example/v1?api_key=sk-err",
+            "diagnostics": [{"type": "error", "error": {"message": "bad", "stack": "at secret (/w/src/x.rs:1)"},
+                "data": {"authorization": "Bearer sk-data", "url": "https://proxy.example/?token=sk-q"}}],
+            "usage": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 0,
+                "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0}},
+            "timestamp": 1})))
+        .expect("error");
+    let mut report = bundle(Some("x"), None);
+    report.diagnostics = collect_diagnostics(&session);
+    let archived = report.diagnostics.to_string();
+    for secret in ["sk-err", "me:pw", "sk-data", "sk-q"] {
+        assert!(!archived.contains(secret), "{secret} in the diagnostics");
+    }
+    assert!(
+        archived.contains("at secret"),
+        "the archive keeps the stack"
+    );
+    let body = issue_body(&report);
+    assert!(body.contains("\"message\": \"bad\""));
+    assert!(!body.contains("stack") && !body.contains("at secret"));
+    for secret in ["sk-err", "me:pw", "sk-data", "sk-q"] {
+        assert!(!body.contains(secret), "{secret} in the issue");
+    }
+}
+
+// Bake: a description far past GitHub's limit is cut in a few measures,
+// within the limit and on a character boundary.
+#[test]
+fn a_huge_description_is_cut_quickly_within_the_limit() {
+    let report = bundle(Some(&"é".repeat(200_000)), None);
+    let started = std::time::Instant::now();
+    let body = issue_body(&report);
+    let url = new_issue_url(&report);
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "{:?}",
+        started.elapsed()
+    );
+    let count = body.chars().count();
+    assert!(
+        count <= ISSUE_BODY_LIMIT && count > ISSUE_BODY_LIMIT - 400,
+        "{count}"
+    );
+    assert!(body.starts_with("éé") && body.contains("é…\n\n---\nReport ID"));
+    let encoded = url.split("&body=").nth(1).expect("body");
+    assert!(encoded.len() <= ISSUE_LINK_BODY_LIMIT);
+    // Every cut is the longest that fits, found in a few dozen measures
+    // rather than one per character.
+    let measures = std::cell::Cell::new(0);
+    let cut = issue_body_within(&report, 1_000, |body| {
+        measures.set(measures.get() + 1);
+        body.len()
+    });
+    assert!(cut.len() <= 1_000 && cut.len() > 1_000 - "é".len());
+    assert!(measures.get() <= 40, "{} measures", measures.get());
 }
