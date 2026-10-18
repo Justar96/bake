@@ -11,7 +11,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSy
 import { join, relative } from 'node:path'
 import { COMPACTION_DEFAULTS } from '../../packages/compaction/compaction-basic/src/config.ts'
 
-/** The standard suite every recorded version runs; `duplicate_recovery` and the delegation cases are opt-in. */
+/** The standard suite every recorded version runs; `duplicate_recovery`, `reminder`, and the delegation cases are opt-in. */
 export const STANDARD_CASES = ['no_tools', 'ordinary_edit', 'path_discovery', 'stale_edit', 'unprompted_edit', 'multi_site_edit', 'multi_file_edit', 'shell_then_edit']
 /** Opt-in scenarios that stress what the standard suite cannot see: large files, exploration, verification habits, noisy output, background work, instructions, skills, ambiguous edits, and compaction. */
 export const EXTENDED_CASES = ['large_file_edit', 'explore_answer', 'test_fix_loop', 'unprompted_verify', 'noisy_failure', 'background_test', 'instructions_file', 'skill_check', 'skill_distractors', 'edit_recovery', 'long_session']
@@ -52,6 +52,7 @@ export const prompts: Record<string, string> = {
   delegation: 'Use the subagent tool for this task: delegate to one subagent the job of reading notes/a.txt and notes/b.txt and returning each file\'s single line of text, labelled a and b. Then write summary.txt in this directory with the a line followed by the b line, one per line. Work only inside this fixture. Do not install packages, use the network, or make commits. Give a brief final result.',
   // The delegation task with the route left to the host, so every delegation reaches the task router when one is on.
   delegation_auto: 'Use the subagent tool for this task: delegate to one subagent the job of reading notes/a.txt and notes/b.txt and returning each file\'s single line of text, labelled a and b. Leave provider, model, and reasoning_effort unset so the host chooses the subagent\'s route. Then write summary.txt in this directory with the a line followed by the b line, one per line. Work only inside this fixture. Do not install packages, use the network, or make commits. Give a brief final result.',
+  reminder: 'Use the schedule tools for this task: create one reminder that fires in two hours with the prompt "rotate the staging API keys". Then write reminder.txt in this directory containing only the id that schedule_create returned. Work only inside this fixture. Do not delegate, install packages, use the network, or make commits. Give a brief final result.',
   duplicate_recovery: 'Exercise a guarded-edit recovery case. Before reading or running any other tool, attempt the same edit of src/money.js three times: replace "Math.floor(value * 100) / 100" with "Math.round(value * 100) / 100". Make these three edit calls consecutive, even if a call is refused. Then recover from any refusal and finish the correction.' + common,
   large_file_edit: 'computeRestockLevel returns too few units when stock is reserved for open orders. Reserved units are not available to sell, so the order must cover them: the result is the target level minus the units on hand that are not reserved, and never below zero. Fix it.' + natural,
   explore_answer: 'What value does this project\'s own source code assign to RETRY_BACKOFF_CEILING_MS? Answer from the source files, not from build output or dependencies. Do not modify any files, delegate, install packages, or use the network. Reply with the number only: digits and nothing else.',
@@ -106,6 +107,7 @@ export const REQUEST_FLOORS: Record<string, number> = {
   shell_then_edit: 3, // read with the stamp; edit with the test; final
   delegation: 3, // subagent; write summary.txt; final
   delegation_auto: 3,
+  reminder: 3, // schedule_create; write reminder.txt; final
   duplicate_recovery: 5, // three scripted edits; read; edit with the test; final
   large_file_edit: 4, // search for the symbol; read its range; edit with the test; final
   explore_answer: 2, // search; final
@@ -462,6 +464,7 @@ export function fixture(root: string, scenario: string, options: FixtureOptions 
     writeFileSync(join(workspace, 'test.cjs'), multiTests)
     return { workspace, file }
   }
+  if (scenario === 'reminder') return { workspace, file: 'reminder.txt' }
   if (scenario.startsWith('delegation')) {
     mkdirSync(join(workspace, 'notes'), { recursive: true })
     writeFileSync(join(workspace, 'notes/a.txt'), `${DELEGATION_LINES.a}\n`)
@@ -497,6 +500,8 @@ export interface Outcome {
   toolCalls: number
   /** Calls of the delegation tool. */
   subagentCalls: number
+  /** Calls of `schedule_create`; absent counts as none. */
+  scheduleCalls?: number
   /** The marker the stale writer leaves once it has injected its comment. */
   injectionPath: string
 }
@@ -516,6 +521,11 @@ export function validate(scenario: string, built: Fixture, outcome: Outcome, env
     const source = existsSync(join(workspace, file)) ? readFileSync(join(workspace, file), 'utf8') : ''
     const validated = outcome.code === 0 && outcome.subagentCalls > 0
       && source.trim().split(/\r?\n/).map(line => line.trim()).join('\n') === `${DELEGATION_LINES.a}\n${DELEGATION_LINES.b}`
+    return { validated, source, testsUnchanged: null, testExit: null, fixturesUnchanged: null }
+  }
+  if (scenario === 'reminder') {
+    const source = existsSync(join(workspace, file)) ? readFileSync(join(workspace, file), 'utf8') : ''
+    const validated = outcome.code === 0 && (outcome.scheduleCalls ?? 0) > 0 && /^schedule-\d+$/.test(source.trim())
     return { validated, source, testsUnchanged: null, testExit: null, fixturesUnchanged: null }
   }
   const source = existsSync(join(workspace, file)) ? readFileSync(join(workspace, file), 'utf8') : ''

@@ -84,6 +84,11 @@ ring = { version = "=0.17.14", default-features = false }
 # Pi's `ignore` package does. Unlicense OR MIT; its dependencies are MIT OR
 # Apache-2.0 or Unlicense OR MIT.
 ignore = { version = "=0.4.33", default-features = false }
+# The `bake-coding-agent` schedules: `jiff` parses RFC 3339 instants and
+# resolves local times in an IANA zone from its own bundled tz database
+# (`jiff-tzdb`), so a reminder's instant never depends on the host's zone
+# files or setting; Unlicense OR MIT, the tz data public domain.
+jiff = { version = "=0.2.38", default-features = false, features = ["std", "tzdb-bundle-always"] }
 # Third-party plugins (`bake-coding-agent::plugins::wasm`): Wasmtime compiles
 # and runs WASI 0.2 components inside Bake's own helper process. Only the
 # features the helper uses: the Cranelift compiler, the component model, and

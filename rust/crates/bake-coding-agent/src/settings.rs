@@ -95,6 +95,9 @@ pub struct Settings {
     /// `subagents`: gives a top-level session the subagent tools
     /// ([`crate::subagents`]). Defaults to false.
     pub subagents: bool,
+    /// `schedules`: gives a top-level session the reminder tools and their
+    /// timer ([`crate::schedules`]). Defaults to false.
+    pub schedules: bool,
     /// `compaction` as stored, checked when read (see
     /// [`Self::compaction_settings`]).
     pub compaction: Option<Value>,
@@ -216,6 +219,7 @@ impl Default for Settings {
             max_concurrent_read_tools: None,
             task_documents: false,
             subagents: false,
+            schedules: false,
             compaction: None,
             background_compaction: false,
             context_masking: false,
@@ -441,6 +445,7 @@ impl Settings {
             }),
             task_documents: object.get("taskDocuments").and_then(Value::as_bool) == Some(true),
             subagents: object.get("subagents").and_then(Value::as_bool) == Some(true),
+            schedules: object.get("schedules").and_then(Value::as_bool) == Some(true),
             max_concurrent_read_tools: object.get("maxConcurrentReadTools").cloned(),
             compaction: object.get("compaction").cloned(),
             background_compaction: object.get("backgroundCompaction").and_then(Value::as_bool)

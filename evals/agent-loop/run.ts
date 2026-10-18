@@ -246,8 +246,8 @@ function routeOf(entry: string): Route {
   }
 }
 const routes = models.map(resolveRoute)
-/** Scenarios that need a Bake tool pi does not ship; a pi arm skips them, so it has no pair. A native arm runs them: a bake-rs build without `subagent` fails them. */
-const piUnsupported = (scenario: string) => scenario.startsWith('delegation')
+/** Scenarios that need a Bake tool pi does not ship; a pi arm skips them, so it has no pair. A native arm runs them: a bake-rs build without `subagent`, or without `schedules` on, fails them. */
+const piUnsupported = (scenario: string) => scenario.startsWith('delegation') || scenario === 'reminder'
 /**
  * A credential a pi arm passes to pi: the environment first, then the reference
  * of that name in ~/.bake/.credentials.yaml, which a TypeScript arm reads itself.
@@ -525,7 +525,7 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
     const accounting = reconcile(api, wire, usage)
     if (nativeRoute !== undefined && !accounting.matches) usageComplete = false
     const { validated, source, testsUnchanged, testExit, fixturesUnchanged } = validate(scenario, built, {
-      code, final, toolCalls: calls.length, subagentCalls: byTool.subagent ?? 0, injectionPath,
+      code, final, toolCalls: calls.length, subagentCalls: byTool.subagent ?? 0, scheduleCalls: byTool.schedule_create ?? 0, injectionPath,
     })
     const check = checkCommandFor(scenario)
     const logged = jsonMode ? [] : sessionEvents(join(root, 'sessions'))

@@ -38,7 +38,7 @@ const roundFix = (workspace: string) => patch(workspace, 'src/money.js', 'return
 describe('scenario registry', () => {
   test('the standard suite is unchanged and every scenario has a prompt and a floor', () => {
     expect(STANDARD_CASES).toEqual(['no_tools', 'ordinary_edit', 'path_discovery', 'stale_edit', 'unprompted_edit', 'multi_site_edit', 'multi_file_edit', 'shell_then_edit'])
-    for (const scenario of [...STANDARD_CASES, ...EXTENDED_CASES, 'delegation', 'delegation_auto', 'duplicate_recovery']) {
+    for (const scenario of [...STANDARD_CASES, ...EXTENDED_CASES, 'delegation', 'delegation_auto', 'duplicate_recovery', 'reminder']) {
       expect(prompts[scenario]).toBeString()
       expect(REQUEST_FLOORS[scenario]).toBe(requestFloorFor(scenario))
       expect(requestFloorFor(scenario)).toBeLessThan(maxRequestsFor(scenario))
@@ -63,6 +63,20 @@ describe('large_file_edit', () => {
     expect(validate('large_file_edit', built, outcome()).validated).toBe(false)
     patch(built.workspace, built.file, 'const available = onHand + reserved;', 'const available = onHand - reserved;')
     expect(validate('large_file_edit', built, outcome()).validated).toBe(true)
+  })
+})
+
+describe('reminder', () => {
+  test('needs a schedule_create call and a reminder.txt holding only a schedule id', () => {
+    const built = build('reminder')
+    expect(readdirSync(built.workspace)).toEqual([])
+    expect(validate('reminder', built, outcome({ scheduleCalls: 1 })).validated).toBe(false)
+    writeFileSync(join(built.workspace, 'reminder.txt'), 'schedule-1\n')
+    expect(validate('reminder', built, outcome()).validated).toBe(false)
+    expect(validate('reminder', built, outcome({ scheduleCalls: 1, code: 1 })).validated).toBe(false)
+    expect(validate('reminder', built, outcome({ scheduleCalls: 1 })).validated).toBe(true)
+    writeFileSync(join(built.workspace, 'reminder.txt'), 'The id is schedule-1')
+    expect(validate('reminder', built, outcome({ scheduleCalls: 1 })).validated).toBe(false)
   })
 })
 

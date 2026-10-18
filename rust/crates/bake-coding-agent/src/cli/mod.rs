@@ -1099,7 +1099,11 @@ fn build_child(
                 session,
                 apis: Arc::clone(&setup.apis),
                 resources,
-                settings: setup.settings.clone(),
+                // Reminders belong to the user's session, not to a subagent.
+                settings: Settings {
+                    schedules: false,
+                    ..setup.settings.clone()
+                },
                 registry: setup.registry.clone(),
                 model: route.as_ref().map(|route| route.model.clone()),
                 thinking_level: route.and_then(|route| route.thinking_level),
@@ -1278,6 +1282,9 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
     if settings.task_documents {
         available.push(crate::agent_session::task_documents::NAME.to_owned());
     }
+    if settings.schedules {
+        available.extend(crate::agent_session::schedules::NAMES.map(str::to_owned));
+    }
     let mut defaults = settings.default_tools.clone().unwrap_or_else(|| {
         crate::tools::index::BAKE_DEFAULT_TOOL_NAMES
             .map(str::to_owned)
@@ -1288,6 +1295,9 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
     }
     if settings.default_tools.is_none() {
         defaults.extend(subagent_tools.iter().map(|name| (*name).to_owned()));
+        if settings.schedules {
+            defaults.extend(crate::agent_session::schedules::NAMES.map(str::to_owned));
+        }
     }
     let selection_options = ToolSelectionOptions {
         tools: args.tools.clone(),

@@ -53,6 +53,7 @@ pub mod permissions;
 pub mod plugins;
 pub mod print_mode;
 pub mod prompt_templates;
+pub mod schedules;
 pub mod session;
 pub mod settings;
 pub mod skills;

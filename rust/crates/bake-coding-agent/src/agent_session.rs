@@ -76,6 +76,7 @@ mod plugin_veto;
 mod prompt_execution;
 mod recovery;
 mod run_journal;
+pub(crate) mod schedules;
 pub(crate) mod task_documents;
 
 use std::path::PathBuf;
@@ -761,6 +762,9 @@ pub struct AgentSession {
     mcp: Arc<OnceLock<McpServers>>,
     /// The plugin dispatcher, when any plugin is registered.
     plugins: Option<Arc<VetoDispatcher>>,
+    /// The reminder timer's handle, when `schedules` is on.
+    #[cfg(test)]
+    schedules: Option<Arc<schedules::Schedules>>,
 }
 
 impl std::fmt::Debug for AgentSession {
@@ -1362,6 +1366,12 @@ impl Control {
 }
 
 impl AgentSession {
+    /// The reminder timer's handle, for tests that move its clock.
+    #[cfg(test)]
+    pub(crate) fn schedules(&self) -> Arc<schedules::Schedules> {
+        Arc::clone(self.schedules.as_ref().expect("schedules is on"))
+    }
+
     /// Pi's `createAgentSession`: selects the model and thinking level,
     /// restores the transcript, records a new session's initial model and
     /// thinking level as one group ([`SessionManager::append_group`]), and
@@ -1393,6 +1403,14 @@ impl AgentSession {
             return Err(
                 "The task_document tool name is reserved when taskDocuments is enabled.".into(),
             );
+        }
+        let schedules_enabled = settings.schedules;
+        if schedules_enabled
+            && tools
+                .iter()
+                .any(|tool| schedules::NAMES.contains(&tool.name.as_str()))
+        {
+            return Err("The schedule tool names are reserved when schedules is enabled.".into());
         }
         let mut tools: Vec<Arc<AgentTool>> = tools.into_iter().map(run_in_order).collect();
         // Pi's `_toolPromptGuidelines`.
@@ -1491,6 +1509,10 @@ impl AgentSession {
         });
         if task_documents_enabled {
             tools.push(task_documents::tool(Arc::clone(&core)));
+        }
+        let schedules = schedules_enabled.then(|| Arc::new(schedules::Schedules::default()));
+        if let Some(schedules) = &schedules {
+            tools.extend(schedules::tools(&core, schedules));
         }
         let after_tool_core = Arc::clone(&core);
         let persist_error = Arc::new(Mutex::new(None));
@@ -1613,6 +1635,9 @@ impl AgentSession {
             .filter(|name| tools.iter().any(|tool| &tool.name == name))
             .collect();
         job_journal::attach(&core, &jobs)?;
+        if let Some(shared) = &schedules {
+            schedules::start(&core, jobs.clone(), Arc::clone(shared))?;
+        }
         // Last, after every fallible step: the keeper of the Wasm plugins'
         // helpers is owned work of the gate from here on.
         if let Some(plugins) = &plugins {
@@ -1648,6 +1673,8 @@ impl AgentSession {
             write_failure: gap,
             mcp: Arc::default(),
             plugins,
+            #[cfg(test)]
+            schedules,
         };
         created.connect();
         Ok(created)

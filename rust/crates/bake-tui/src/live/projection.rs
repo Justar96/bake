@@ -21,6 +21,7 @@ use bake_coding_agent::agent_session::job_notices::NOTICE_TYPE;
 use bake_coding_agent::agent_session::{
     BackgroundCompactionStatus, CompactionReason, SessionEvent,
 };
+use bake_coding_agent::schedules;
 use bake_coding_agent::session::messages::CustomMessage;
 use bake_coding_agent::subagents::messages as subagents;
 use bake_tui_view::runtime::{Pending, RuntimeUpdate, Target};
@@ -672,7 +673,9 @@ pub fn replay_compacted(messages: &[AgentMessage]) -> Vec<Row> {
 /// The information row of a notice: a background job's notice
 /// ([`NOTICE_TYPE`]) in full, a subagent's settlement by its summary line,
 /// and a subagent's message as `← agent {id}: {first line}`, its first
-/// line kept to 48 characters as 0.3's `presentation.ts` keeps titles.
+/// line kept to 48 characters as 0.3's `presentation.ts` keeps titles,
+/// and a schedule reminder as `reminder {id}: {first line}`, or a batch
+/// as `reminders {id}, {id}`.
 fn notice_text(message: &AgentMessage) -> Option<String> {
     let custom = message.as_custom()?;
     let custom = custom.as_any().downcast_ref::<CustomMessage>()?;
@@ -689,15 +692,41 @@ fn notice_text(message: &AgentMessage) -> Option<String> {
             let body = text
                 .strip_prefix(&format!("Agent {from} sent a message: "))
                 .unwrap_or(&text);
-            let line = body.lines().next().unwrap_or_default();
-            let mut title: String = line.chars().take(48).collect();
-            if title.len() < line.len() {
-                title.push('…');
+            Some(format!("← agent {from}: {}", title(body)))
+        }
+        schedules::REMINDER_TYPE => {
+            let reminders = custom
+                .details
+                .as_ref()
+                .and_then(|details| details.get("reminders"))
+                .and_then(Value::as_array)?;
+            match reminders.as_slice() {
+                [one] => Some(format!(
+                    "reminder {}: {}",
+                    one.get("id").and_then(Value::as_str)?,
+                    title(one.get("prompt").and_then(Value::as_str)?)
+                )),
+                many => Some(format!(
+                    "reminders {}",
+                    many.iter()
+                        .filter_map(|reminder| reminder.get("id").and_then(Value::as_str))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )),
             }
-            Some(format!("← agent {from}: {title}"))
         }
         _ => None,
     }
+}
+
+/// A notice's first line, kept to 48 characters.
+fn title(text: &str) -> String {
+    let line = text.lines().next().unwrap_or_default();
+    let mut title: String = line.chars().take(48).collect();
+    if title.len() < line.len() {
+        title.push('…');
+    }
+    title
 }
 
 #[cfg(test)]
@@ -961,5 +990,43 @@ mod tests {
             "c: hi …"
         );
         assert_eq!(argument("list_agents", &json!({})), "");
+    }
+
+    #[test]
+    fn schedule_reminders_are_information_rows() {
+        use bake_coding_agent::schedules::{Due, Record, Rule, delivery};
+        let record = |id: &str, prompt: &str| Record {
+            id: id.into(),
+            rule: Rule::Every { seconds: 300 },
+            prompt: prompt.into(),
+            scheduled_at: 0,
+        };
+        let row = |due: Due| {
+            let (message, _) = delivery(&due).expect("a delivery");
+            notice_text(&AgentMessage::Custom(std::sync::Arc::new(message)))
+        };
+        assert_eq!(
+            row(Due::OneShot(record(
+                "schedule-1",
+                &format!(
+                    "{}
+more",
+                    "y".repeat(50)
+                )
+            )))
+            .as_deref(),
+            Some(format!("reminder schedule-1: {}…", "y".repeat(48)).as_str())
+        );
+        assert_eq!(
+            row(Due::Every {
+                reminders: vec![
+                    (record("schedule-1", "a"), 0),
+                    (record("schedule-2", "b"), 0)
+                ],
+                accepted_at: 0,
+            })
+            .as_deref(),
+            Some("reminders schedule-1, schedule-2")
+        );
     }
 }

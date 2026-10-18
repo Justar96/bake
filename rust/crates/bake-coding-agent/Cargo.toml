@@ -29,6 +29,8 @@ image.workspace = true
 icu_normalizer.workspace = true
 base64.workspace = true
 ignore.workspace = true
+# Schedules: RFC 3339 and IANA time zones from a bundled tz database.
+jiff.workspace = true
 # The Wasm plugin host (`plugins::wasm`): Wasmtime runs plugin components in
 # Bake's helper process; `wasmparser` checks them before compiling.
 wasmtime.workspace = true
