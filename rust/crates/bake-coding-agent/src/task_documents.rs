@@ -1,4 +1,4 @@
-//! Branch-local plan, todo, and goal snapshots in Pi custom entries (D36).
+//! Branch-local plan, todo, and goal snapshots in Pi custom entries (D37).
 //!
 //! Bake's revision and compare-and-set rules draw on
 //! `packages/goal/goal/src/{types,fold}.ts`; these entries do not read that
