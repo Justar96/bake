@@ -12,6 +12,7 @@ import {
   INVENTORY_FILE,
   LicenseBundleError,
   main,
+  neverEdges,
   outputDir,
   parseHostSide,
   type PlatformId,
@@ -420,6 +421,33 @@ describe('build-host crates', () => {
     const linked = new Set(['bake-cli@0.4.0-dev', 'image@0.25.10', 'num-traits@0.2.19', 'png@0.18.1', 'tokio@1.53.1'])
     expect(parseHostSide(nested, linked).map(entry => entry.name)).toEqual(['autocfg'])
     expect(() => parseHostSide('bake-cli v0.4.0-dev (/r)\n├── a v1\n│   │   └── b v1', linked)).toThrow(LicenseBundleError)
+  })
+
+  test('leave out a proc macro declared only under cfg(any()), which no target builds', () => {
+    // jiff pins jiff-static's version this way; `--target all` still lists it.
+    const tree = ['bake-cli v0.4.0-dev (/r)', '└── jiff v0.2.38', '    ├── jiff-static v0.2.38 (proc-macro)', '    └── jiff-tzdb v0.1.9'].join('\n')
+    const linked = new Set(['bake-cli@0.4.0-dev', 'jiff@0.2.38', 'jiff-tzdb@0.1.9'])
+    expect(parseHostSide(tree, linked).map(entry => entry.name)).toEqual(['jiff-static'])
+    const metadata = {
+      packages: [
+        { name: 'jiff', version: '0.2.38', id: 'jiff-id', source: null, license: null, manifest_path: '/j/Cargo.toml' },
+        { name: 'jiff-static', version: '0.2.38', id: 'static-id', source: null, license: null, manifest_path: '/s/Cargo.toml' },
+        { name: 'jiff-tzdb', version: '0.1.9', id: 'tzdb-id', source: null, license: null, manifest_path: '/t/Cargo.toml' },
+      ],
+      workspace_members: [],
+      resolve: {
+        nodes: [{
+          id: 'jiff-id',
+          deps: [
+            { pkg: 'static-id', dep_kinds: [{ target: 'cfg(any())' }] },
+            { pkg: 'tzdb-id', dep_kinds: [{ target: null }, { target: 'cfg(any())' }] },
+          ],
+        }],
+      },
+    }
+    const never = neverEdges(metadata)
+    expect([...never]).toEqual(['jiff@0.2.38>jiff-static@0.2.38'])
+    expect(parseHostSide(tree, linked, never)).toEqual([])
   })
 
   test('are listed on every platform, linked crates only where they link', () => {

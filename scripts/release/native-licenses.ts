@@ -109,6 +109,33 @@ export interface CargoMetadata {
     readonly manifest_path: string
   }[]
   readonly workspace_members: readonly string[]
+  /** The resolved graph; each dependency edge with the `cfg()` it is declared under. */
+  readonly resolve?: {
+    readonly nodes: readonly {
+      readonly id: string
+      readonly deps: readonly { readonly pkg: string; readonly dep_kinds: readonly { readonly target: string | null }[] }[]
+    }[]
+  } | null
+}
+
+/**
+ * The dependency edges no build compiles, as `parent@version>child@version`:
+ * those declared only under `cfg(any())`, which no target matches. Crates
+ * such as jiff use one to pin a proc macro's version without building it,
+ * and `cargo tree --target all` lists it anyway.
+ */
+export function neverEdges(metadata: CargoMetadata): Set<string> {
+  const keys = new Map(metadata.packages.map(pkg => [pkg.id, `${pkg.name}@${pkg.version}`]))
+  const edges = new Set<string>()
+  for (const node of metadata.resolve?.nodes ?? []) {
+    for (const dep of node.deps) {
+      if (dep.dep_kinds.length === 0 || !dep.dep_kinds.every(kind => kind.target === 'cfg(any())')) continue
+      const parent = keys.get(node.id)
+      const child = keys.get(dep.pkg)
+      if (parent !== undefined && child !== undefined) edges.add(`${parent}>${child}`)
+    }
+  }
+  return edges
 }
 
 /** Everything generation reads, gathered by {@link collect}. */
@@ -147,9 +174,10 @@ export function parseTree(text: string): TreeEntry[] {
  * `[build-dependencies]` heading or a proc macro, in an indented,
  * undeduplicated `cargo tree --target all` listing, below a chain of crates
  * all in `linked`, the platform's own linked set. A build host's `cfg()` is
- * not evaluated, so this is the union over every host that could build it.
+ * not evaluated, so this is the union over every host that could build it,
+ * less the edges in `never` ({@link neverEdges}), which no host builds.
  */
-export function parseHostSide(text: string, linked: ReadonlySet<string>): TreeEntry[] {
+export function parseHostSide(text: string, linked: ReadonlySet<string>, never: ReadonlySet<string> = new Set()): TreeEntry[] {
   const seen = new Map<string, TreeEntry>()
   // By depth: whether the package there is built for the host, whether it is
   // part of this platform's build, and whether its children printed so far sit
@@ -157,6 +185,7 @@ export function parseHostSide(text: string, linked: ReadonlySet<string>): TreeEn
   const host: boolean[] = []
   const active: boolean[] = []
   const build: boolean[] = []
+  const keys: string[] = []
   for (const line of text.split(/\r?\n/u)) {
     if (line.trim() === '') continue
     const heading = /^((?:│ {3}| {4})*)\[(dependencies|build-dependencies|dev-dependencies)\]$/u.exec(line)
@@ -173,10 +202,13 @@ export function parseHostSide(text: string, linked: ReadonlySet<string>): TreeEn
     const entry = { name: match[2] as string, version: match[3] as string }
     const key = `${entry.name}@${entry.version}`
     const isHost = depth > 0 && ((host[depth - 1] as boolean) || (build[depth - 1] as boolean) || (match[4] as string).includes('(proc-macro)'))
-    const isActive = depth === 0 ? linked.has(key) : (active[depth - 1] as boolean) && (isHost || linked.has(key))
+    const isActive = depth === 0 ? linked.has(key)
+      : (active[depth - 1] as boolean) && (isHost || linked.has(key)) && !never.has(`${keys[depth - 1]}>${key}`)
     host.length = depth
     active.length = depth
     build.length = depth
+    keys.length = depth
+    keys[depth] = key
     host[depth] = isHost
     active[depth] = isActive
     build[depth] = false
@@ -461,13 +493,14 @@ export function buildBundle(inputs: BundleInputs): Bundle {
   const third = new Map<string, ThirdParty>()
   const workspace = new Map<string, { pkg: Package; platforms: Set<PlatformId> }>()
   const perPlatform = {} as Record<PlatformId, number>
+  const never = neverEdges(inputs.metadata)
   const treeIds = new Set(inputs.trees.map(tree => tree.id))
   for (const platform of PLATFORMS) if (!treeIds.has(platform.id)) problems.push(`no cargo tree for ${platform.id}`)
   for (const tree of inputs.trees) {
     const linkedEntries = parseTree(tree.linked)
     const linked = new Set(linkedEntries.map(entry => `${entry.name}@${entry.version}`))
     if (linkedEntries[0]?.name !== ROOT_PACKAGE) problems.push(`the ${tree.id} tree does not start at ${ROOT_PACKAGE}`)
-    const hostSide = parseHostSide(inputs.hostTree, linked)
+    const hostSide = parseHostSide(inputs.hostTree, linked, never)
     const compiled = [...linkedEntries, ...hostSide.filter(entry => !linked.has(`${entry.name}@${entry.version}`))]
     let count = 0
     for (const entry of compiled) {
