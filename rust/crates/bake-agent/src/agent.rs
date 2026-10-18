@@ -267,32 +267,44 @@ impl From<Vec<AgentMessage>> for PromptInput {
     }
 }
 
-/// Pi's `PendingMessageQueue`.
+/// Pi's `PendingMessageQueue`, whose items are units of messages: a Bake
+/// deviation from Pi v1.3.0's `packages/agent/src/agent.ts`, which queues
+/// single messages. [`Agent::steer_all`] and [`Agent::follow_up_all`]
+/// queue several messages as one unit that drains together, so a prompt
+/// and the hook context that follows it reach the same step even in
+/// [`QueueMode::OneAtATime`]. [`Agent::steer`] and [`Agent::follow_up`]
+/// queue one-message units, which drain exactly as Pi's messages do.
 #[derive(Debug, Default)]
 struct PendingMessageQueue {
-    messages: VecDeque<AgentMessage>,
+    units: VecDeque<Vec<AgentMessage>>,
     mode: QueueMode,
 }
 
 impl PendingMessageQueue {
     fn new(mode: QueueMode) -> Self {
         Self {
-            messages: VecDeque::new(),
+            units: VecDeque::new(),
             mode,
+        }
+    }
+
+    fn push(&mut self, unit: Vec<AgentMessage>) {
+        if !unit.is_empty() {
+            self.units.push_back(unit);
         }
     }
 
     fn peek(&self) -> Vec<AgentMessage> {
         match self.mode {
-            QueueMode::All => self.messages.iter().cloned().collect(),
-            QueueMode::OneAtATime => self.messages.front().cloned().into_iter().collect(),
+            QueueMode::All => self.units.iter().flatten().cloned().collect(),
+            QueueMode::OneAtATime => self.units.front().cloned().unwrap_or_default(),
         }
     }
 
     fn drain(&mut self) -> Vec<AgentMessage> {
         match self.mode {
-            QueueMode::All => self.messages.drain(..).collect(),
-            QueueMode::OneAtATime => self.messages.pop_front().into_iter().collect(),
+            QueueMode::All => self.units.drain(..).flatten().collect(),
+            QueueMode::OneAtATime => self.units.pop_front().unwrap_or_default(),
         }
     }
 }
@@ -808,43 +820,48 @@ impl Agent {
 
     /// Queues a message for after the current assistant turn.
     pub fn steer(&self, message: impl Into<AgentMessage>) {
-        self.inner
-            .lock()
-            .steering
-            .messages
-            .push_back(message.into());
+        self.inner.lock().steering.push(vec![message.into()]);
+    }
+
+    /// Queues `messages` for after the current assistant turn as one item,
+    /// delivered together and in order in either [`QueueMode`]. Nothing is
+    /// queued when `messages` is empty.
+    pub fn steer_all(&self, messages: Vec<AgentMessage>) {
+        self.inner.lock().steering.push(messages);
     }
 
     /// Queues a message for when the agent would otherwise stop.
     pub fn follow_up(&self, message: impl Into<AgentMessage>) {
-        self.inner
-            .lock()
-            .follow_up
-            .messages
-            .push_back(message.into());
+        self.inner.lock().follow_up.push(vec![message.into()]);
+    }
+
+    /// Queues `messages` for when the agent would otherwise stop as one
+    /// item, as [`Self::steer_all`] does.
+    pub fn follow_up_all(&self, messages: Vec<AgentMessage>) {
+        self.inner.lock().follow_up.push(messages);
     }
 
     /// Clears queued steering.
     pub fn clear_steering_queue(&self) {
-        self.inner.lock().steering.messages.clear();
+        self.inner.lock().steering.units.clear();
     }
 
     /// Clears queued follow-ups.
     pub fn clear_follow_up_queue(&self) {
-        self.inner.lock().follow_up.messages.clear();
+        self.inner.lock().follow_up.units.clear();
     }
 
     /// Clears both queues.
     pub fn clear_all_queues(&self) {
         let mut shared = self.inner.lock();
-        shared.steering.messages.clear();
-        shared.follow_up.messages.clear();
+        shared.steering.units.clear();
+        shared.follow_up.units.clear();
     }
 
     /// Whether either queue holds messages.
     pub fn has_queued_messages(&self) -> bool {
         let shared = self.inner.lock();
-        !shared.steering.messages.is_empty() || !shared.follow_up.messages.is_empty()
+        !shared.steering.units.is_empty() || !shared.follow_up.units.is_empty()
     }
 
     /// The messages the next drain would take, without taking them.
@@ -931,8 +948,8 @@ impl Agent {
         shared.streaming_message = None;
         shared.pending_tool_calls.clear();
         shared.error_message = None;
-        shared.steering.messages.clear();
-        shared.follow_up.messages.clear();
+        shared.steering.units.clear();
+        shared.follow_up.units.clear();
         Ok(())
     }
 

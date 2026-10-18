@@ -1133,6 +1133,56 @@ fn peeks_the_next_queued_messages_without_consuming_them() {
     assert_eq!(agent.peek_queued_messages(), [follow_up]);
 }
 
+/// Bake: `steer_all` and `follow_up_all` queue one item whose messages
+/// are peeked, drained, and cleared together in either mode, and an empty
+/// item queues nothing.
+#[tokio::test]
+async fn a_queued_unit_drains_in_one_step() {
+    for mode in [QueueMode::OneAtATime, QueueMode::All] {
+        let (stream_fn, requests) = recording_users();
+        let agent = Agent::new(AgentOptions {
+            steering_mode: mode,
+            follow_up_mode: mode,
+            stream_fn: Some(stream_fn),
+            initial_state: AgentInitialState {
+                messages: vec![user("existing")],
+                ..AgentInitialState::default()
+            },
+            ..AgentOptions::default()
+        })
+        .unwrap();
+        agent.steer_all(Vec::new());
+        agent.follow_up_all(Vec::new());
+        assert!(!agent.has_queued_messages(), "{mode:?}");
+        let (prompt, context) = (user("steer"), user("steer context"));
+        agent.steer_all(vec![prompt.clone(), context.clone()]);
+        agent.steer(user("second"));
+        let peeked = agent.peek_queued_messages();
+        assert_eq!(peeked[..2], [prompt, context], "{mode:?}");
+        assert_eq!(peeked.len(), if mode == QueueMode::All { 3 } else { 2 });
+        agent.follow_up_all(vec![user("follow"), user("follow context")]);
+        agent.continue_run().await.unwrap();
+        let requests = requests.lock().unwrap();
+        let first = &requests[0];
+        assert!(first.contains(&"steer".to_owned()), "{mode:?}");
+        assert!(first.contains(&"steer context".to_owned()), "{mode:?}");
+        assert_eq!(first.contains(&"second".to_owned()), mode == QueueMode::All);
+        let last = requests.last().unwrap();
+        assert!(last.contains(&"follow".to_owned()), "{mode:?}");
+        assert!(last.contains(&"follow context".to_owned()), "{mode:?}");
+        let expected = if mode == QueueMode::All { 2 } else { 3 };
+        assert_eq!(requests.len(), expected, "{mode:?}");
+    }
+    let agent = Agent::new(AgentOptions {
+        stream_fn: Some(unused()),
+        ..AgentOptions::default()
+    })
+    .unwrap();
+    agent.steer_all(vec![user("a"), user("b")]);
+    agent.clear_steering_queue();
+    assert!(!agent.has_queued_messages());
+}
+
 /// Pi: "forwards provider stream event observers through AgentOptions".
 #[tokio::test]
 async fn forwards_provider_stream_event_observers() {
