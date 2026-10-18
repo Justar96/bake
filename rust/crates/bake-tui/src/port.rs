@@ -31,6 +31,8 @@ pub enum Request {
         id: u64,
         answer: DialogAnswer,
     },
+    /// Stop the background shell with this id, for the user.
+    StopJob(String),
 }
 
 /// Runs the fixture on a thread. Requests go in over a channel; updates
@@ -81,7 +83,10 @@ impl FixturePort {
                         Some(Request::Cancel) => updates.extend(fixture.cancel(now)),
                         Some(Request::SendPending) => updates.extend(fixture.send_pending(now)),
                         // The fixture asks for no approval and opens no dialog.
-                        Some(Request::Answer { .. } | Request::Dialog { .. }) | None => {}
+                        Some(
+                            Request::Answer { .. } | Request::Dialog { .. } | Request::StopJob(_),
+                        )
+                        | None => {}
                     }
                     updates.extend(fixture.advance(now));
                     if !emit(updates) {

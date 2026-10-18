@@ -18,6 +18,7 @@ use crate::copy;
 use crate::dialog::{Dialog, DialogKind, InfoLine, ListLine, SearchOrder};
 use crate::editor::{self, display};
 use crate::frame::FrameStyle;
+use crate::jobs;
 use crate::layout::{self, Needs};
 use crate::mention::PathKind;
 use crate::mode::{self, HINT_MIN_COLUMNS};
@@ -61,8 +62,9 @@ fn needs(app: &State, width: u16, height: u16) -> Needs {
     let draft = editor::layout(app.draft.text(), app.draft.caret(), geometry.wrap_width);
     Needs {
         draft_rows: u16::try_from(draft.rows.len()).unwrap_or(u16::MAX),
-        // The sample agents' row belongs to the preview.
-        standing: !app.live,
+        // The sample agents' row belongs to the preview; a live session's
+        // shows its background shells while any runs, or one is open.
+        standing: !app.live || app.jobs_row() || matches!(app.focus, Focus::Jobs | Focus::Shell),
         notice: u16::from(app.notice.is_some() || app.quitting()),
         pending: panel_rows(app.pending.len()),
         panel: panel_rows(app.attachments.len()),
@@ -986,7 +988,11 @@ fn render_region(
     render_dialog(app, inset(approval_area), buf);
     let columns = area.width;
     render_bar(app, inset(bar), buf);
-    render_agents_row(columns, inset(agents), buf);
+    if app.live {
+        render_jobs_row(app, columns, inset(agents), buf);
+    } else {
+        render_agents_row(columns, inset(agents), buf);
+    }
 
     let visible = usize::from(band.height);
     let total = draft.rows.len();
@@ -1011,7 +1017,7 @@ fn render_region(
     let above_label = (above > 0).then(|| format!("+{above} {}", copy::ABOVE));
     // The sample-agent list holds focus outside the composer, so the
     // composer names no key while it is open.
-    let listing = app.focus == Focus::AgentList;
+    let listing = matches!(app.focus, Focus::AgentList | Focus::Jobs | Focus::Shell);
     let approving = app.approval().is_some();
     let asking = approving || app.dialog.is_some();
     let mut mode = mode::view(app.mode(), !app.draft.is_empty(), area.width);
@@ -1243,6 +1249,28 @@ fn bar_left(app: &State) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
                 Style::new().add_modifier(Modifier::BOLD),
             )],
             vec![Span::styled(format!("  {}", copy::HEADER_LIST_HINT), dim())],
+        ),
+        Focus::Jobs => (
+            vec![Span::styled(
+                copy::JOBS_TITLE,
+                Style::new().add_modifier(Modifier::BOLD),
+            )],
+            vec![Span::styled(format!("  {}", copy::JOBS_LIST_KEYS), dim())],
+        ),
+        Focus::Shell => (
+            vec![
+                Span::styled(
+                    copy::JOBS_TITLE,
+                    accent().add_modifier(Modifier::UNDERLINED),
+                ),
+                Span::styled(" / ", dim()),
+                Span::styled(
+                    app.selected_job()
+                        .map_or_else(String::new, |job| job.id.clone()),
+                    Style::new().add_modifier(Modifier::BOLD),
+                ),
+            ],
+            vec![Span::styled(format!("  {}", copy::JOBS_SHELL_KEYS), dim())],
         ),
         // A breadcrumb, as a catalogue's: where it came from, then where it is.
         Focus::Inspect(id) => (
@@ -1577,7 +1605,7 @@ fn render_pending(app: &State, area: Rect, buf: &mut Buffer) {
 
 /// `text` cut to `width` cells, between graphemes, with `…` standing for
 /// what was cut.
-fn fit(text: &str, width: usize) -> String {
+pub(crate) fn fit(text: &str, width: usize) -> String {
     if text.width() <= width {
         return text.to_owned();
     }
@@ -1640,6 +1668,27 @@ fn render_panel(
             content,
         );
     }
+}
+
+/// A live session's standing row: its running background shells, with
+/// the key that opens their list while the composer has focus and the
+/// terminal is wide enough for keys.
+fn render_jobs_row(app: &State, columns: u16, area: Rect, buf: &mut Buffer) {
+    let (left, right) = jobs::standing(
+        &app.jobs,
+        app.jobs_at,
+        app.now,
+        usize::from(area.width),
+        Look {
+            tones: app.tones,
+            classic: app.frame == FrameStyle::Classic,
+            lit: true,
+        },
+        // The key draws where any row's key does, so the command takes its
+        // cells elsewhere.
+        app.focus == Focus::Composer && columns >= HINT_MIN_COLUMNS,
+    );
+    split_row(buf, columns, area, left, right);
 }
 
 /// The agents' standing row: `Agents  2 samples · none running`, with the
@@ -1951,6 +2000,39 @@ fn render_body(app: &mut State, area: Rect, gap: Rect, buf: &mut Buffer, publish
                 lit: true,
             },
         ),
+        Focus::Jobs => jobs::list(
+            &app.jobs,
+            app.job_selected.as_deref(),
+            app.jobs_at,
+            app.now,
+            width,
+            Look {
+                tones: app.tones,
+                classic,
+                lit: true,
+            },
+        ),
+        Focus::Shell => match app.selected_job() {
+            Some(job) => {
+                let (lines, most) = jobs::shell(
+                    job,
+                    app.jobs_at,
+                    app.now,
+                    width,
+                    usize::from(area.height),
+                    app.shell_scroll,
+                    Look {
+                        tones: app.tones,
+                        classic,
+                        lit: true,
+                    },
+                );
+                app.shell_most = most;
+                app.shell_scroll = app.shell_scroll.min(most);
+                lines
+            }
+            None => Vec::new(),
+        },
     };
     // Anchored to the body's foot, beside the controls, as the transcript is.
     let skip = lines.len().saturating_sub(usize::from(area.height));
@@ -4050,5 +4132,66 @@ mod tests {
         assert_eq!(short.approval_drawn(), None);
         let (_, _) = draw(&mut short, 80, 4);
         assert_eq!(short.approval_drawn(), Some(1));
+    }
+
+    // The shells' row sits under the composer box while one runs, and the
+    // list and a shell take the body with their keys on the bar.
+    #[test]
+    fn background_shells_draw_under_the_box_and_in_the_body() {
+        use crate::jobs::{BackgroundJob, JobState};
+        use crate::runtime::RuntimeUpdate;
+        use crate::state::{Msg, update};
+        let mut app = State::live(FrameStyle::Round, Tones::None, Vec::new());
+        let (rows, _) = draw(&mut app, 60, 12);
+        assert!(!rows.iter().any(|row| row.contains("manage")), "{rows:#?}");
+        update(
+            &mut app,
+            Msg::Runtime(RuntimeUpdate::Jobs(vec![BackgroundJob {
+                id: "bash-1".into(),
+                command: "bun run build".into(),
+                state: JobState::Running,
+                elapsed: Duration::from_secs(72),
+                output: "compiling\nerror: boom\n".into(),
+                omitted_bytes: 0,
+            }])),
+        );
+        let (rows, _) = draw(&mut app, 60, 12);
+        let last = rows.last().unwrap();
+        assert!(
+            last.contains("● bash-1  bun run build  1m 12s"),
+            "{rows:#?}"
+        );
+        assert!(last.trim_end().ends_with("↓ manage"), "{last}");
+        assert!(
+            rows[rows.len() - 2].contains('╰'),
+            "the row is under the box: {rows:#?}"
+        );
+        update(&mut app, Msg::Key(KeyInput::plain(Key::Down)));
+        let (rows, _) = draw(&mut app, 60, 12);
+        assert!(
+            rows.iter()
+                .any(|row| row.contains("› ● bash-1  bun run build")),
+            "{rows:#?}"
+        );
+        assert!(
+            rows.iter().any(|row| row.contains("Background shells")),
+            "{rows:#?}"
+        );
+        assert!(!rows.last().unwrap().contains("manage"));
+        update(&mut app, Msg::Key(KeyInput::plain(Key::Enter)));
+        let (rows, _) = draw(&mut app, 60, 12);
+        assert!(
+            rows.iter().any(|row| row.contains("$ bun run build")),
+            "{rows:#?}"
+        );
+        assert!(
+            rows.iter().any(|row| row.contains("error: boom")),
+            "{rows:#?}"
+        );
+        assert!(
+            rows.iter()
+                .any(|row| row.contains("Background shells / bash-1")),
+            "{rows:#?}"
+        );
     }
 }

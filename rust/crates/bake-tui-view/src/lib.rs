@@ -14,6 +14,7 @@ pub mod dialog;
 pub mod diff;
 pub mod editor;
 pub mod frame;
+pub mod jobs;
 pub mod keys;
 pub mod layout;
 pub mod live;

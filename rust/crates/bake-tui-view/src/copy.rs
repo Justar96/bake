@@ -167,6 +167,23 @@ pub const DRAFT_LIMIT: &str = "Draft limit reached; the rest of the input was no
 pub const AGENTS: &str = "Agents";
 /// The key that opens the agent list, at the right of the agents row.
 pub const AGENTS_KEY: &str = "Ctrl+G";
+/// Background shells: the standing row's key and count word, the list's
+/// subtitle and keys, the shell view's keys, and each job's state words.
+pub const JOBS_KEY: &str = "↓ manage";
+pub const JOBS_RUNNING: &str = "shells running";
+pub const JOBS_TITLE: &str = "Background shells";
+pub const JOBS_SUBTITLE: &str = "They stop when Bake exits.";
+pub const JOBS_LIST_KEYS: &str = "↑↓ select · Enter open · x stop · Esc back";
+pub const JOBS_SHELL_KEYS: &str = "↑↓ PgUp/PgDn scroll · x stop · Esc list";
+pub const JOB_RUNNING: &str = "running";
+pub const JOB_STOPPING: &str = "stopping";
+pub const JOB_EXIT: &str = "exit";
+pub const JOB_DONE: &str = "done";
+pub const JOB_STOPPED: &str = "stopped";
+pub const JOB_FAILED: &str = "failed";
+/// Before the size of output a shell no longer keeps.
+pub const JOB_EARLIER: &str = "earlier";
+pub const JOB_NO_OUTPUT: &str = "No output yet.";
 /// Shown while a first Ctrl+C is armed.
 pub const QUIT: &str = "Press Ctrl-C again to quit";
 pub const AGENTS_SUMMARY: &str = "samples · none running";

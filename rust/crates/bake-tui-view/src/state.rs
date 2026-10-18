@@ -10,6 +10,7 @@ use crate::composer::ComposerWindow;
 use crate::dialog::{Dialog, DialogAnswer};
 use crate::editor::Draft;
 use crate::frame::FrameStyle;
+use crate::jobs::{self, BackgroundJob};
 use crate::keys::{self, Action, Key, KeyInput, Mods, Scope};
 use crate::live;
 use crate::mention::{self, Candidate, Choice};
@@ -284,6 +285,9 @@ pub enum Effect {
         id: u64,
         answer: DialogAnswer,
     },
+    /// Stop the background shell with this id; the runtime reports it
+    /// stopping and stopped ([`RuntimeUpdate::Jobs`]).
+    StopJob(String),
 }
 
 /// A fixed example row for the agent list; it describes no running work.
@@ -320,6 +324,10 @@ pub enum Focus {
     AgentList,
     /// Read-only inspection of the sample agent with this id.
     Inspect(&'static str),
+    /// The background shells' list ([`crate::jobs`]).
+    Jobs,
+    /// The selected background shell's output.
+    Shell,
 }
 
 impl Focus {
@@ -328,6 +336,8 @@ impl Focus {
             Self::Composer => Scope::Composer,
             Self::AgentList => Scope::AgentList,
             Self::Inspect(_) => Scope::Inspect,
+            Self::Jobs => Scope::Jobs,
+            Self::Shell => Scope::Shell,
         }
     }
 }
@@ -546,6 +556,17 @@ pub struct State {
     /// many rows the last frame showed, for paging.
     pub(crate) approval_scroll: usize,
     pub(crate) approval_page: usize,
+    /// The background shells as the runtime last reported them, in start
+    /// order, and when that report arrived, which running clocks go on
+    /// from.
+    pub jobs: Vec<BackgroundJob>,
+    pub jobs_at: Duration,
+    /// The shell the list selects, by id; `None` selects the newest.
+    pub job_selected: Option<String>,
+    /// Rows the shell view is scrolled up from its output's end, and the
+    /// most it could be at the last frame, set by rendering.
+    pub shell_scroll: usize,
+    pub(crate) shell_most: usize,
 }
 
 /// A submitted prompt's draft, kept until the runtime admits the prompt.
@@ -625,6 +646,11 @@ impl State {
             approval_answered: None,
             approval_scroll: 0,
             approval_page: 0,
+            jobs: Vec::new(),
+            jobs_at: Duration::ZERO,
+            job_selected: None,
+            shell_scroll: 0,
+            shell_most: 0,
         }
     }
 
@@ -873,6 +899,17 @@ impl State {
         }
     }
 
+    /// Whether the row under the composer shows background shells: in a
+    /// live session, while any runs.
+    pub fn jobs_row(&self) -> bool {
+        self.live && self.jobs.iter().any(|job| job.state.is_live())
+    }
+
+    /// The background shell the list selects.
+    pub fn selected_job(&self) -> Option<&BackgroundJob> {
+        jobs::selected(&self.jobs, self.job_selected.as_deref())
+    }
+
     pub fn selected_agent(&self) -> &'static SampleAgent {
         agent(self.selected).unwrap_or(&SAMPLE_AGENTS[0])
     }
@@ -896,6 +933,20 @@ impl State {
             .edge
             .map(|edge| edge.next.saturating_sub(self.now));
         let copied = self.copied.map(|(_, until)| until.saturating_sub(self.now));
+        // A running shell's clock, where it shows, turns each second.
+        let clock = (self.jobs_row() || matches!(self.focus, Focus::Jobs | Focus::Shell))
+            .then(|| {
+                self.jobs
+                    .iter()
+                    .filter(|job| job.state.is_live())
+                    .map(|job| {
+                        let shown = jobs::elapsed(job, self.jobs_at, self.now);
+                        Duration::from_secs(1)
+                            - Duration::from_nanos(u64::from(shown.subsec_nanos()))
+                    })
+                    .min()
+            })
+            .flatten();
         activity
             .into_iter()
             .chain(blink)
@@ -903,6 +954,7 @@ impl State {
             .chain(quit)
             .chain(edge)
             .chain(copied)
+            .chain(clock)
             .min()
     }
 
@@ -1004,7 +1056,7 @@ fn apply(state: &mut State, msg: Msg) -> Vec<Effect> {
             }
             // The list's keys are on the bar; a paste there is ignored, as
             // the oracle ignores one while a sheet is open.
-            Focus::AgentList => {}
+            Focus::AgentList | Focus::Jobs | Focus::Shell => {}
             Focus::Inspect(_) => state.notice = Some(Notice::ReadOnly),
         },
         Msg::Resize { cols, .. } => {
@@ -1070,6 +1122,25 @@ fn runtime(state: &mut State, update: RuntimeUpdate) {
         }
         RuntimeUpdate::Phase(phase) => state.phase = Some(phase),
         RuntimeUpdate::Pending(pending) => state.pending = pending,
+        RuntimeUpdate::Jobs(list) => {
+            state.jobs = list;
+            state.jobs_at = state.now;
+            // A shell no longer kept, as after a new session, closes its
+            // view; an empty list gives the keyboard back to the composer.
+            if state
+                .job_selected
+                .as_ref()
+                .is_some_and(|id| !state.jobs.iter().any(|job| &job.id == id))
+            {
+                state.job_selected = None;
+                if state.focus == Focus::Shell {
+                    state.focus = Focus::Jobs;
+                }
+            }
+            if state.jobs.is_empty() && matches!(state.focus, Focus::Jobs | Focus::Shell) {
+                state.focus = Focus::Composer;
+            }
+        }
         RuntimeUpdate::Live(rows) => state.transcript.set_live(rows),
         RuntimeUpdate::Commit(rows) => state.transcript.commit(rows),
         RuntimeUpdate::Replaced(rows) => {
@@ -1296,6 +1367,8 @@ fn pointer_at(state: &mut State, mouse: Mouse) {
             Focus::Composer => state.transcript.scroll_down(rows),
             Focus::AgentList => step_selection(state, isize::from(direction)),
             Focus::Inspect(_) => {}
+            Focus::Jobs => step_job(state, isize::from(direction)),
+            Focus::Shell => scroll_shell(state, -isize::from(direction) * rows as isize),
         }
         return;
     }
@@ -1661,6 +1734,7 @@ fn key(state: &mut State, input: KeyInput) -> Vec<Effect> {
         }
         Focus::AgentList => list_key(state, bound),
         Focus::Inspect(_) => inspect_key(state, bound),
+        Focus::Jobs | Focus::Shell => return jobs_key(state, bound),
     }
     Vec::new()
 }
@@ -1816,6 +1890,7 @@ fn composer_key(state: &mut State, bound: Option<Action>, input: KeyInput) -> Ve
         return Vec::new();
     }
     let running = turn_running(state);
+    let shells = state.jobs_row();
     let draft = &mut state.draft;
     let complete = match bound {
         Some(Action::ToggleAgentList) if state.live => {
@@ -1920,11 +1995,20 @@ fn composer_key(state: &mut State, bound: Option<Action>, input: KeyInput) -> Ve
         // Up and Down move between drawn rows, and from the first or the
         // last row browse the prompts the session holds; Ctrl+P and Ctrl+N
         // browse at once.
+        // Down with nothing newer to show moves to the background shells'
+        // row while any runs.
         Some(Action::CaretUp | Action::CaretDown) => {
             let up = bound == Some(Action::CaretUp);
             let width = state.window.width();
-            if !draft.vertical(width, up) {
-                draft.recall(&input_history(&state.transcript), up, width);
+            if !draft.vertical(width, up)
+                && !draft.recall(&input_history(&state.transcript), up, width)
+                && !up
+                && shells
+            {
+                state.focus = Focus::Jobs;
+                state.job_selected = None;
+                state.notice = None;
+                return Vec::new();
             }
             true
         }
@@ -2013,6 +2097,68 @@ fn list_key(state: &mut State, bound: Option<Action>) {
         // Other keys do nothing: the bar already names the list's keys.
         _ => {}
     }
+}
+
+/// Keys in the background shells' list and in one shell.
+fn jobs_key(state: &mut State, bound: Option<Action>) -> Vec<Effect> {
+    let shell = state.focus == Focus::Shell;
+    match bound {
+        Some(Action::SelectPrevious) if shell => scroll_shell(state, 1),
+        Some(Action::SelectNext) if shell => scroll_shell(state, -1),
+        Some(Action::PageUp) => scroll_shell(state, shell_page(state)),
+        Some(Action::PageDown) => scroll_shell(state, -shell_page(state)),
+        Some(Action::ToLatest) => state.shell_scroll = 0,
+        Some(Action::SelectPrevious) => step_job(state, -1),
+        Some(Action::SelectNext) => step_job(state, 1),
+        Some(Action::OpenJob) if state.selected_job().is_some() => {
+            state.job_selected = state.selected_job().map(|job| job.id.clone());
+            state.shell_scroll = 0;
+            state.focus = Focus::Shell;
+        }
+        Some(Action::StopJob) => {
+            if let Some(job) = state
+                .selected_job()
+                .filter(|job| job.state == jobs::JobState::Running)
+            {
+                return vec![Effect::StopJob(job.id.clone())];
+            }
+        }
+        Some(Action::ReturnToJobs) => state.focus = Focus::Jobs,
+        Some(Action::ReturnToComposer) => state.focus = Focus::Composer,
+        // Other keys do nothing: the bar names the keys that work here.
+        _ => {}
+    }
+    Vec::new()
+}
+
+/// Rows a page of the shell view moves: its output rows less one.
+fn shell_page(state: &State) -> isize {
+    (state.transcript.page().saturating_sub(4)).max(1) as isize
+}
+
+/// Scrolls the shell view `by` rows toward its output's start, within
+/// what the last frame could show.
+fn scroll_shell(state: &mut State, by: isize) {
+    state.shell_scroll = state
+        .shell_scroll
+        .saturating_add_signed(by)
+        .min(state.shell_most);
+}
+
+/// Moves the shells' selection `by` rows in list order, newest first,
+/// stopping at the ends.
+fn step_job(state: &mut State, by: isize) {
+    let order: Vec<&str> = jobs::shown(&state.jobs)
+        .map(|job| job.id.as_str())
+        .collect();
+    let Some(current) = state
+        .selected_job()
+        .and_then(|job| order.iter().position(|id| *id == job.id))
+    else {
+        return;
+    };
+    let next = current.saturating_add_signed(by).min(order.len() - 1);
+    state.job_selected = Some(order[next].to_owned());
 }
 
 fn inspect_key(state: &mut State, bound: Option<Action>) {
@@ -2172,6 +2318,135 @@ mod tests {
 
     fn live() -> State {
         State::live(FrameStyle::default(), Tones::default(), Vec::new())
+    }
+
+    fn shell_job(id: &str, state: crate::jobs::JobState) -> BackgroundJob {
+        BackgroundJob {
+            id: id.into(),
+            command: format!("run {id}"),
+            state,
+            elapsed: Duration::from_secs(1),
+            output: "out\n".into(),
+            omitted_bytes: 0,
+        }
+    }
+
+    // Down with nothing newer to recall reaches the background shells'
+    // list while one runs; Enter opens one, `x` asks to stop a running one,
+    // and Esc steps back out. Up keeps its history meaning.
+    #[test]
+    fn down_opens_the_background_shells_and_their_keys_work() {
+        use crate::jobs::JobState;
+        let mut state = live();
+        press(&mut state, Key::Down);
+        assert_eq!(state.focus, Focus::Composer, "no shells, no list");
+        runtime(
+            &mut state,
+            RuntimeUpdate::Jobs(vec![
+                shell_job("bash-1", JobState::Completed(Some("exit code: 0".into()))),
+                shell_job("bash-2", JobState::Running),
+            ]),
+        );
+        assert!(state.jobs_row());
+        type_str(&mut state, "draft");
+        press(&mut state, Key::Down);
+        assert_eq!(state.focus, Focus::Jobs);
+        assert_eq!(state.draft.text(), "draft", "the draft stays");
+        assert_eq!(
+            state.selected_job().map(|job| job.id.as_str()),
+            Some("bash-2")
+        );
+        assert_eq!(
+            press(&mut state, Key::Char('x')),
+            [Effect::StopJob("bash-2".into())]
+        );
+        press(&mut state, Key::Down);
+        assert_eq!(
+            state.selected_job().map(|job| job.id.as_str()),
+            Some("bash-1")
+        );
+        press(&mut state, Key::Down);
+        assert_eq!(
+            state.selected_job().map(|job| job.id.as_str()),
+            Some("bash-1"),
+            "stops at the end"
+        );
+        assert_eq!(
+            press(&mut state, Key::Char('x')),
+            [],
+            "a finished shell has nothing to stop"
+        );
+        press(&mut state, Key::Enter);
+        assert_eq!(state.focus, Focus::Shell);
+        assert_eq!(
+            press(&mut state, Key::Char('q')),
+            [],
+            "typing reaches nothing"
+        );
+        press(&mut state, Key::Esc);
+        assert_eq!(state.focus, Focus::Jobs);
+        press(&mut state, Key::Esc);
+        assert_eq!(state.focus, Focus::Composer);
+        assert_eq!(state.draft.text(), "draft");
+    }
+
+    // A shell that is gone closes its view, and no shells at all, as after
+    // a new session, hand the keyboard back; finished shells hide the row.
+    #[test]
+    fn reported_shells_steer_the_focus() {
+        use crate::jobs::JobState;
+        let mut state = live();
+        runtime(
+            &mut state,
+            RuntimeUpdate::Jobs(vec![shell_job("bash-1", JobState::Running)]),
+        );
+        press(&mut state, Key::Down);
+        press(&mut state, Key::Enter);
+        assert_eq!(state.focus, Focus::Shell);
+        runtime(
+            &mut state,
+            RuntimeUpdate::Jobs(vec![shell_job("bash-2", JobState::Running)]),
+        );
+        assert_eq!(state.focus, Focus::Jobs);
+        runtime(
+            &mut state,
+            RuntimeUpdate::Jobs(vec![shell_job("bash-2", JobState::Killed(None))]),
+        );
+        assert!(!state.jobs_row());
+        assert_eq!(
+            state.focus,
+            Focus::Jobs,
+            "the open list keeps finished shells"
+        );
+        runtime(&mut state, RuntimeUpdate::Jobs(Vec::new()));
+        assert_eq!(state.focus, Focus::Composer);
+        // The preview has no shells row.
+        let mut preview = State::default();
+        runtime(
+            &mut preview,
+            RuntimeUpdate::Jobs(vec![shell_job("bash-1", JobState::Running)]),
+        );
+        assert!(!preview.jobs_row());
+    }
+
+    // A running shell's clock turns the screen each second; none, no wake.
+    #[test]
+    fn a_running_shell_wakes_the_screen_each_second() {
+        use crate::jobs::JobState;
+        let mut state = live();
+        assert_eq!(state.next_change(), None);
+        update(&mut state, Msg::Tick(Duration::from_millis(400)));
+        runtime(
+            &mut state,
+            RuntimeUpdate::Jobs(vec![shell_job("bash-1", JobState::Running)]),
+        );
+        update(&mut state, Msg::Tick(Duration::from_millis(700)));
+        assert_eq!(state.next_change(), Some(Duration::from_millis(700)));
+        runtime(
+            &mut state,
+            RuntimeUpdate::Jobs(vec![shell_job("bash-1", JobState::Completed(None))]),
+        );
+        assert_eq!(state.next_change(), None);
     }
 
     fn live_image(state: &mut State, name: &str) {

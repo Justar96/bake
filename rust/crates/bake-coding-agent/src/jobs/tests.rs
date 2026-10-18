@@ -1235,3 +1235,101 @@ async fn posted_notices_and_live_holds_follow_the_registry() {
     );
     assert!(registry.hold_live().is_none());
 }
+
+// A viewer sees a stream job's newest output whether or not the model read
+// it, and its look consumes nothing and claims no report.
+#[tokio::test]
+async fn views_show_the_tail_without_consuming_or_claiming() {
+    let (_gate, registry) = registry(JobLimits::default());
+    let (more_tx, more) = oneshot::channel::<()>();
+    let (wrote_tx, wrote) = oneshot::channel::<()>();
+    let stream = registry
+        .start(
+            spec("bash", OutputMode::Stream),
+            move |context| async move {
+                let output = context.output().expect("a stream job").clone();
+                output.append(b"one\n");
+                let _ = wrote_tx.send(());
+                let _ = more.await;
+                output.append(b"two\n");
+                JobOutcome::completed("exit code: 0")
+            },
+        )
+        .expect("admitted");
+    bounded("the first write", wrote).await.expect("wrote");
+    let view = registry.views().remove(0);
+    assert_eq!((view.tail.as_str(), view.omitted_bytes), ("one\n", 0));
+    assert_eq!(view.snapshot.status, JobStatus::Running);
+    assert_eq!(
+        registry.read(stream).expect("read").text,
+        "one\n",
+        "unconsumed"
+    );
+    assert_eq!(registry.views()[0].tail, "one\n", "a read leaves the view");
+    more_tx.send(()).expect("held");
+    settled(&registry, stream).await;
+    let view = registry.views().remove(0);
+    assert_eq!(view.tail, "one\ntwo\n");
+    assert!(!view.snapshot.reported, "a view claims no report");
+    assert_eq!(registry.claim_unreported().len(), 1);
+    bounded("the close", registry.close()).await;
+}
+
+// The view's tail is bounded, counts what it dropped, and never starts
+// inside a character.
+#[test]
+fn the_view_tail_is_bounded_between_characters() {
+    let mut buffer = StreamBuffer::new(4);
+    let mut big = vec![b'a'; VIEW_TAIL_BYTES - 1];
+    big.extend_from_slice("é".as_bytes());
+    assert!(buffer.append(b"xyz"));
+    assert!(buffer.append(&big));
+    let (text, omitted) = buffer.recent();
+    assert!(
+        text.ends_with('é') && !text.starts_with('\u{FFFD}'),
+        "{text:?}"
+    );
+    assert_eq!(text.len() as u64 + omitted, 3 + big.len() as u64);
+    assert!(text.len() <= VIEW_TAIL_BYTES);
+    assert_eq!(tail_start("aé€", 4), 3);
+}
+
+// A user's stop requests the stop as a kill does, but the job settles
+// unreported, so the session's notice tells the model the user stopped it.
+#[tokio::test]
+async fn a_user_stop_leaves_the_report_for_the_notice() {
+    let (_gate, registry) = registry(JobLimits::default());
+    let held = start_held(&registry, "bash");
+    let signal = bounded("the start", held.started).await.expect("started");
+    assert_eq!(registry.stop(held.id), Ok(KillResult::Requested));
+    assert!(signal.aborted());
+    assert_eq!(registry.stop(held.id), Ok(KillResult::AlreadyStopping));
+    held.release
+        .send(JobOutcome::killed("killed before exit"))
+        .expect("held");
+    let snapshot = settled(&registry, held.id).await;
+    assert!(!snapshot.reported);
+    assert_eq!(
+        snapshot.stop,
+        Some(StopCause::Kill {
+            reason: Some(USER_STOP_REASON.to_owned())
+        })
+    );
+    assert_eq!(registry.stop(held.id), Ok(KillResult::AlreadyFinished));
+    let unreported = registry.claim_unreported();
+    assert_eq!(unreported.len(), 1, "the stop left the report");
+    let notice = crate::agent_session::job_notices::completion_notice(&unreported[0]);
+    let bake_ai::UserContent::Blocks(blocks) = &notice.content else {
+        panic!("blocks");
+    };
+    let bake_ai::UserContentBlock::Text(text) = &blocks[0] else {
+        panic!("text");
+    };
+    assert!(
+        text.text
+            .contains("[status: killed, killed before exit]. The user stopped it."),
+        "{}",
+        text.text
+    );
+    bounded("the close", registry.close()).await;
+}

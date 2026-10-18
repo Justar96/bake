@@ -10,6 +10,7 @@
 //! displayed one with [`crate::state::Effect::Answer`].
 
 use crate::dialog::DialogRequest;
+use crate::jobs::BackgroundJob;
 use crate::paste::Image;
 use crate::state::Outcome;
 use crate::status::ContextUsage;
@@ -164,4 +165,8 @@ pub enum RuntimeUpdate {
     /// any open one, or closes it (`None`). A waiting approval request
     /// still takes the keyboard first.
     Dialog(Option<DialogRequest>),
+    /// Every background shell the session keeps, in start order, with its
+    /// newest output ([`crate::jobs`]). Sent whenever the list or an output
+    /// changes; an empty list hides the row under the composer.
+    Jobs(Vec<BackgroundJob>),
 }

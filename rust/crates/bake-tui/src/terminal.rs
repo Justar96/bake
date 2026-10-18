@@ -735,6 +735,7 @@ fn drive(
                             Effect::Dialog { id, answer } => {
                                 (owners.runtime)(Request::Dialog { id, answer });
                             }
+                            Effect::StopJob(id) => (owners.runtime)(Request::StopJob(id)),
                         }
                     }
                 }

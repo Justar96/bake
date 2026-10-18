@@ -602,7 +602,7 @@ fn code_runs(
 /// row keeps the style its bytes have, so a token split by a wrap keeps its
 /// colour on both rows. Bytes no run covers take `base`; a run's style is
 /// laid over `base`. `text` must hold no tabs.
-fn hang_runs(
+pub(crate) fn hang_runs(
     text: &str,
     runs: &[(Range<usize>, Style)],
     base: Style,
@@ -1905,7 +1905,7 @@ fn returned(
     lines
 }
 
-fn output_tone(tones: Tones) -> Style {
+pub(crate) fn output_tone(tones: Tones) -> Style {
     colour(tones, (0xb4, 0xb8, 0xbf), Color::Gray)
 }
 

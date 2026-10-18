@@ -1093,12 +1093,17 @@ class FakeModel {
     if (toolOutput !== undefined) {
       if (prompt.startsWith('READ ')) return sse(text(n, `Read it: ${toolOutput.split('\n')[0]}`))
       if (prompt.startsWith('MCP ')) return sse(text(n, `MCP said: ${toolOutput.split('\n')[0]}`))
+      if (prompt.startsWith('BACKGROUND')) return sse(text(n, 'Started.'))
       return sse(text(n, 'Slept.'))
     }
     if (prompt.startsWith('READ ')) return sse(call(n, 'read', { path: prompt.slice(5).trim() }))
     // `MCP <text>` calls the configured fixture server's `echo` tool.
     if (prompt.startsWith('MCP ')) return sse(call(n, 'mcp__fx__echo', { text: prompt.slice(4).trim() }))
     if (prompt.startsWith('SLEEP')) return sse(call(n, 'bash', { command: 'sleep 30' }))
+    // `BACKGROUND` starts a shell that prints a line a second, then sleeps.
+    if (prompt.startsWith('BACKGROUND')) {
+      return sse(call(n, 'bash', { command: 'for i in 1 2 3 4 5 6 7 8 9; do echo bg-$i; sleep 1; done; sleep 60', run_in_background: true }))
+    }
     if (prompt.startsWith('STEER ')) return sse(text(n, `Steered: ${prompt.slice(6).trim()}.`))
     if (prompt.startsWith('HOLD')) {
       const events = text(n, 'Holding until released.')
@@ -1428,6 +1433,42 @@ await liveScenario('a live bash call cancelled by Esc fails its card and leaves 
     const left = await session.survivors(owned)
     assert.deepEqual(left, [], `the cancelled bash call left its process: ${left.map(pid => `${pid} ${owned.get(pid)}`).join(', ')}`)
     await session.quit()
+  } finally {
+    await session.release(owned)
+  }
+})
+
+await liveScenario('background shells show under the box, open to their output, stop for the user, and end with the session', async (world) => {
+  const session = world.launch(windows ? ['--permission', 'danger-full-access'] : [])
+  await session.ready()
+  const before = await session.owned()
+  const started = async () => new Map([...await session.owned()].filter(([pid]) => !before.has(pid)))
+  session.send('BACKGROUND\r')
+  await session.wait('the shells row', () => session.screen.includes('Started.') && /● bash-1 .*↓ manage/u.test(session.screen))
+  session.send('\x1b[B')
+  await session.wait('the shells list', () => session.screen.includes('Background shells') && /› ● bash-1/u.test(session.screen))
+  session.send('\r')
+  await session.wait('the shell output', () => session.screen.includes('Background shells / bash-1') && session.screen.includes('bg-2'))
+  const owned = await started()
+  try {
+    const requests = world.model.requests.length
+    session.send('x')
+    // The stop reaches the model as the job's notice, in a turn it opens.
+    await session.wait('the model told', () => world.model.requests.slice(requests).some(body => JSON.stringify(body).includes('The user stopped it.')))
+    await session.wait('the shell stopped', () => /✗|■ stopped|stopped ·/u.test(session.screen))
+    session.send('\x1b')
+    await session.wait('back to the list', () => !session.screen.includes('Background shells /'))
+    session.send('\x1b')
+    await session.wait('the row gone', () => !session.screen.includes('↓ manage') && !session.screen.includes('Background shells'))
+    const left = await session.survivors(owned)
+    assert.deepEqual(left, [], `the stopped shell left its process: ${left.map(pid => `${pid} ${owned.get(pid)}`).join(', ')}`)
+    // A shell still running when Bake quits does not outlive it.
+    session.send('BACKGROUND\r')
+    await session.wait('a second shell', () => /● bash-2 .*↓ manage/u.test(session.screen))
+    const second = await started()
+    await session.quit()
+    const after = await session.survivors(second)
+    assert.deepEqual(after, [], `quitting left a shell: ${after.map(pid => `${pid} ${second.get(pid)}`).join(', ')}`)
   } finally {
     await session.release(owned)
   }

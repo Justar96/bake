@@ -61,7 +61,9 @@
 //! [`JobLimits::stream_bytes`] of unread streamed output per job (oldest
 //! dropped first, counted), [`JobLimits::final_output_bytes`] of final
 //! output (its tail kept), and labels, details, and reasons cut to
-//! [`MAX_TEXT_BYTES`].
+//! [`MAX_TEXT_BYTES`]. A stream job also keeps its last [`VIEW_TAIL_BYTES`]
+//! of output for viewers ([`JobRegistry::views`]); reading it consumes
+//! nothing the model has not read.
 //!
 //! Bake's own. Pi v1.3.0 (`71023aec`; MIT, see the crate `NOTICE`) has no
 //! job registry; its `packages/durable` task states give the structure
@@ -118,6 +120,14 @@ pub const MAX_TEXT_BYTES: usize = 1024;
 /// user prompt, `tool-jobs`' `maxConsecutiveWakes`: it bounds a chain in
 /// which a woken turn starts the job whose completion wakes it again.
 pub const MAX_CONSECUTIVE_WAKES: usize = 3;
+
+/// The output a viewer sees of each stream job: its newest bytes, read or
+/// not ([`JobRegistry::views`]).
+pub const VIEW_TAIL_BYTES: usize = 16 * 1024;
+
+/// The stop reason [`JobRegistry::stop`] records for a stop the user asked
+/// for; the completion notice names it.
+pub const USER_STOP_REASON: &str = "stopped by the user";
 
 /// The longest kind name, in bytes.
 pub const MAX_KIND_BYTES: usize = 32;
@@ -355,6 +365,18 @@ pub struct JobRead {
     pub omitted_bytes: u64,
     /// The job after the read.
     pub snapshot: JobSnapshot,
+}
+
+/// What a viewer shows of one job ([`JobRegistry::views`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JobView {
+    /// The job.
+    pub snapshot: JobSnapshot,
+    /// Its newest output, at most [`VIEW_TAIL_BYTES`]: a stream job's
+    /// whether or not the model read it, a final job's once terminal.
+    pub tail: String,
+    /// Bytes of output before `tail`, not kept for viewers.
+    pub omitted_bytes: u64,
 }
 
 /// What [`JobRegistry::kill`] did.
@@ -1041,6 +1063,38 @@ impl JobRegistry {
             .collect()
     }
 
+    /// Every retained job with its newest output, for a viewer such as the
+    /// terminal's job list. Unlike [`Self::read`], it consumes no output
+    /// and claims no report, so the model's reads and notices are
+    /// unchanged by it.
+    pub fn views(&self) -> Vec<JobView> {
+        self.inner
+            .state()
+            .records
+            .iter()
+            .map(|record| {
+                let (tail, omitted_bytes) = match &record.stream {
+                    Some(stream) => lock(stream).recent(),
+                    None => match &record.final_output {
+                        Some(output) => {
+                            let start = tail_start(output, VIEW_TAIL_BYTES);
+                            (
+                                output[start..].to_owned(),
+                                record.final_omitted + start as u64,
+                            )
+                        }
+                        None => (String::new(), 0),
+                    },
+                };
+                JobView {
+                    snapshot: record.snapshot(),
+                    tail,
+                    omitted_bytes,
+                }
+            })
+            .collect()
+    }
+
     /// Reads `id`'s output: a stream job's output since the last read
     /// (consumed; while live, an incomplete trailing character waits for
     /// the next read), or a final job's output, empty while live and the
@@ -1073,16 +1127,35 @@ impl JobRegistry {
     /// work. Idempotent, and never waits. Claims the report: the caller
     /// asked for the stop, so no completion notice is wanted.
     pub fn kill(&self, id: JobId, reason: Option<String>) -> Result<KillResult, JobError> {
+        self.request_kill(id, reason, true)
+    }
+
+    /// Requests that `id` stop for the user, as [`Self::kill`] does, with
+    /// [`USER_STOP_REASON`], but claims no report: the job settles
+    /// unreported, so the session gets its completion notice and the model
+    /// learns of the stop. A terminal job is left as it is.
+    pub fn stop(&self, id: JobId) -> Result<KillResult, JobError> {
+        self.request_kill(id, Some(USER_STOP_REASON.to_owned()), false)
+    }
+
+    fn request_kill(
+        &self,
+        id: JobId,
+        reason: Option<String>,
+        claim: bool,
+    ) -> Result<KillResult, JobError> {
         let gate = {
             let mut state = self.inner.state();
             let record = state.find(self.inner.id, id)?;
             if record.status.is_terminal() {
-                if record.claim != Claim::Claimed {
+                if claim && record.claim != Claim::Claimed {
                     record.claim = self.inner.delivery_claim();
                 }
                 return Ok(KillResult::AlreadyFinished);
             }
-            record.claim = Claim::Claimed;
+            if claim {
+                record.claim = Claim::Claimed;
+            }
             if record.status != JobStatus::Running {
                 return Ok(KillResult::AlreadyStopping);
             }
@@ -1500,11 +1573,24 @@ impl fmt::Debug for JobOutput {
 }
 
 /// Unread streamed output, at most `cap` bytes: the newest are kept.
+/// Beside it, the newest [`VIEW_TAIL_BYTES`] of all output, read or not,
+/// for viewers.
 struct StreamBuffer {
     bytes: Vec<u8>,
     dropped: u64,
     cap: usize,
     closed: bool,
+    recent: Vec<u8>,
+    total: u64,
+}
+
+/// The first char boundary of `text` that leaves at most `max` bytes after it.
+fn tail_start(text: &str, max: usize) -> usize {
+    let mut start = text.len().saturating_sub(max);
+    while !text.is_char_boundary(start) {
+        start += 1;
+    }
+    start
 }
 
 /// The length of the sequence a UTF-8 lead byte starts, if it is one.
@@ -1524,13 +1610,37 @@ impl StreamBuffer {
             dropped: 0,
             cap,
             closed: false,
+            recent: Vec::new(),
+            total: 0,
         }
+    }
+
+    /// The newest output, read or not, as text, and the bytes before it.
+    /// A cut through a character at the start drops the rest of it; an
+    /// incomplete character at the end shows as a replacement.
+    fn recent(&self) -> (String, u64) {
+        let skip = self
+            .recent
+            .iter()
+            .take(3)
+            .take_while(|byte| **byte & 0xC0 == 0x80)
+            .count();
+        let shown = &self.recent[skip..];
+        (
+            String::from_utf8_lossy(shown).into_owned(),
+            self.total - shown.len() as u64,
+        )
     }
 
     fn append(&mut self, data: &[u8]) -> bool {
         if self.closed {
             return false;
         }
+        self.total += data.len() as u64;
+        let keep = data.len().min(VIEW_TAIL_BYTES);
+        self.recent.extend_from_slice(&data[data.len() - keep..]);
+        let excess = self.recent.len().saturating_sub(VIEW_TAIL_BYTES);
+        self.recent.drain(..excess);
         if data.len() >= self.cap {
             self.dropped += (self.bytes.len() + data.len() - self.cap) as u64;
             self.bytes.clear();

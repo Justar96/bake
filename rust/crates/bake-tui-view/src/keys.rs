@@ -92,6 +92,10 @@ pub enum Scope {
     Composer,
     AgentList,
     Inspect,
+    /// The background shells' list.
+    Jobs,
+    /// One background shell's output.
+    Shell,
 }
 
 /// What a bound key asks the view to do.
@@ -148,6 +152,12 @@ pub enum Action {
     InspectSelected,
     ReturnToComposer,
     ReturnToAgentList,
+    /// Enter in the background shells' list: that shell's output.
+    OpenJob,
+    /// `x` in the shells' list or a shell: ask the runtime to stop it.
+    StopJob,
+    /// Esc in a shell: back to the list.
+    ReturnToJobs,
     /// Transcript navigation, from the composer.
     PageUp,
     PageDown,
@@ -331,8 +341,23 @@ pub const BINDINGS: &[Binding] = &[
     ),
     bind(S::Inspect, K::Esc, ANY, ANY, A::ReturnToComposer),
     bind(S::Inspect, K::Tab, ANY, ANY, A::ReturnToAgentList),
+    bind(S::Jobs, K::Up, ANY, ANY, A::SelectPrevious),
+    bind(S::Jobs, K::Down, ANY, ANY, A::SelectNext),
+    bind(S::Jobs, K::Enter, ANY, ANY, A::OpenJob),
+    bind(S::Jobs, K::Char('x'), ANY, CTRL_ALT, A::StopJob),
+    bind(S::Jobs, K::Esc, ANY, ANY, A::ReturnToComposer),
+    bind(S::Shell, K::Up, ANY, ANY, A::SelectPrevious),
+    bind(S::Shell, K::Down, ANY, ANY, A::SelectNext),
+    bind(S::Shell, K::PageUp, ANY, ANY, A::PageUp),
+    bind(S::Shell, K::PageDown, ANY, ANY, A::PageDown),
+    bind(S::Shell, K::End, ANY, ANY, A::ToLatest),
+    bind(S::Shell, K::Char('x'), ANY, CTRL_ALT, A::StopJob),
+    bind(S::Shell, K::Esc, ANY, ANY, A::ReturnToJobs),
     bind(S::Composer, K::Tab, ANY, ANY, A::Complete),
 ];
+
+/// Ctrl or Alt: a letter bound bare must not take its chorded forms.
+const CTRL_ALT: Mods = Mods(Mods::CTRL.0 | Mods::ALT.0);
 
 /// The first binding for `input` in `scope`, or one that applies anywhere.
 pub fn action(scope: Scope, input: KeyInput) -> Option<Action> {
@@ -350,8 +375,6 @@ pub fn action(scope: Scope, input: KeyInput) -> Option<Action> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    const CTRL_ALT: Mods = Mods(Mods::CTRL.0 | Mods::ALT.0);
 
     #[test]
     fn modifiers_must_include_the_required_and_exclude_the_forbidden() {
@@ -377,7 +400,13 @@ mod tests {
     #[test]
     fn ctrl_c_quits_in_every_scope() {
         let input = KeyInput::new(Key::Char('c'), Mods::CTRL);
-        for scope in [Scope::Composer, Scope::AgentList, Scope::Inspect] {
+        for scope in [
+            Scope::Composer,
+            Scope::AgentList,
+            Scope::Inspect,
+            Scope::Jobs,
+            Scope::Shell,
+        ] {
             assert_eq!(action(scope, input), Some(Action::Quit));
         }
     }

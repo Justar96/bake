@@ -46,6 +46,7 @@
 //! [`LivePort::stop`] returns. No update is sent after that.
 
 pub mod commands;
+mod jobs;
 mod mcp;
 pub mod projection;
 pub mod tree;
@@ -249,6 +250,7 @@ impl LivePort {
             dialog_ids: Arc::default(),
             startup: None,
             orphans: Arc::default(),
+            shells: Vec::new(),
         };
         let closing = approvals.clone();
         let orphans = Arc::clone(&driver.orphans);
@@ -438,6 +440,8 @@ enum Next {
     Commanded(Result<commands::Outcome, tokio::task::JoinError>),
     McpChanged,
     Request(Option<Request>),
+    /// Time to look at the background shells again.
+    Shells,
 }
 
 struct Driver {
@@ -471,7 +475,13 @@ struct Driver {
     orphans: Orphans,
     #[cfg(test)]
     commit_gate: Option<commands::CommitGate>,
+    /// The background shells last sent to the view.
+    shells: Vec<bake_tui_view::jobs::BackgroundJob>,
 }
+
+/// How often the driver looks for changes in the background shells: their
+/// states and output, which the job registry does not announce.
+const SHELLS_EVERY: std::time::Duration = std::time::Duration::from_millis(250);
 
 /// The tasks a driver owned when it was dropped without its shutdown.
 type Orphans = Arc<Mutex<Vec<std::pin::Pin<Box<dyn Future<Output = ()> + std::marker::Send>>>>>;
@@ -527,6 +537,8 @@ impl Driver {
             running = Some(self.begin(next));
         }
         self.publish_pending();
+        let mut shells = tokio::time::interval(SHELLS_EVERY);
+        shells.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         while !self.gone.is_set() {
             // Subscribed before the check, so a job that settles after it
             // still wakes the loop.
@@ -565,6 +577,7 @@ impl Driver {
                     () = settled_job => Next::Jobs,
                     done = commanded => Next::Commanded(done),
                     () = mcp_changed => Next::McpChanged,
+                    _ = shells.tick() => Next::Shells,
                     request = inbox.recv() => Next::Request(request),
                     () = self.gone.notify.notified() => Next::Request(None),
                 }
@@ -583,6 +596,7 @@ impl Driver {
                 Next::Jobs => {}
                 Next::Commanded(done) => self.commanded(done, running.as_ref()).await,
                 Next::McpChanged => self.publish_mcp(),
+                Next::Shells => self.publish_shells(),
                 Next::Request(None) => break,
                 Next::Request(Some(request)) => self.request(request, &mut running).await,
             }
@@ -813,6 +827,10 @@ impl Driver {
             // with images keeps waiting for its own turn.
             // The port answers approvals itself.
             Request::Answer { .. } => {}
+            Request::StopJob(id) => {
+                jobs::stop(self.session.jobs(), &id);
+                self.publish_shells();
+            }
             // To the running command, which drops an answer for a dialog
             // it no longer shows.
             Request::Dialog { id, answer } => {
@@ -1139,6 +1157,16 @@ impl Driver {
     }
 
     /// Sends the pending panel: the session's queues and the driver's own.
+    /// Sends the background shells when more than their clocks changed;
+    /// a replaced session's empty list closes what the view showed.
+    fn publish_shells(&mut self) {
+        let now = jobs::shells(self.session.jobs(), bake_ai::now_ms());
+        if jobs::changed(&self.shells, &now) {
+            self.shells = now.clone();
+            self.send(RuntimeUpdate::Jobs(now));
+        }
+    }
+
     fn publish_pending(&self) {
         let queued = self.session.queued_messages();
         let waiting: Vec<String> = self.waiting.iter().map(|q| q.text.clone()).collect();

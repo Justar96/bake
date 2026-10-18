@@ -28,7 +28,7 @@ use bake_ai::{TextContent, UserContent, UserContentBlock};
 use serde_json::{Value, json};
 
 use super::job_journal::JOURNAL_TYPE;
-use crate::jobs::{JobRegistry, JobSnapshot, parse_job_id};
+use crate::jobs::{JobRegistry, JobSnapshot, StopCause, USER_STOP_REASON, parse_job_id};
 use crate::session::SessionManager;
 use crate::session::messages::CustomMessage;
 use crate::tools::bash::BACKGROUND_JOB_DETAIL;
@@ -39,13 +39,21 @@ pub const NOTICE_TYPE: &str = "bake.job.notice";
 
 /// The notice for `snapshot`, a terminal job: `fitCompletionNotice`'s text
 /// without a byte limit.
+///
+/// A job the user stopped ([`crate::jobs::JobRegistry::stop`]) says so,
+/// since the model did not ask for the stop.
 pub fn completion_notice(snapshot: &JobSnapshot) -> CustomMessage {
+    let by_user = matches!(
+        &snapshot.stop,
+        Some(StopCause::Kill { reason: Some(reason) }) if reason == USER_STOP_REASON
+    );
     let text = format!(
-        "background job {} ({}: {}) finished {}. Read its output with job_output.",
+        "background job {} ({}: {}) finished {}.{} Read its output with job_output.",
         snapshot.id,
         snapshot.id.kind(),
         snapshot.label,
-        status_line(snapshot)
+        status_line(snapshot),
+        if by_user { " The user stopped it." } else { "" }
     );
     notice(&snapshot.id.to_string(), text, snapshot.status.as_str())
 }
