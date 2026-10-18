@@ -286,6 +286,10 @@ impl TerminalSession {
         let setup = || {
             enable_raw_mode()?;
             MODES.fetch_or(RAW, Ordering::SeqCst);
+            // Input as VT sequences, for bracketed paste (`windows_input`);
+            // a console that refuses it keeps Crossterm's key records.
+            #[cfg(windows)]
+            crate::windows_input::enable();
             let mut out = io::stdout();
             if mode == ScreenMode::Fullscreen {
                 MODES.fetch_or(ALTERNATE, Ordering::SeqCst);
@@ -431,6 +435,8 @@ fn restore() -> io::Result<()> {
     }
     keep(execute!(out, Show));
     if modes & RAW != 0 {
+        #[cfg(windows)]
+        keep(crate::windows_input::disable());
         keep(disable_raw_mode());
     }
     result
@@ -776,6 +782,18 @@ impl Reader {
         let thread = thread::Builder::new()
             .name("bake-tui-input".into())
             .spawn(move || {
+                #[cfg(windows)]
+                if crate::windows_input::active() {
+                    match crate::windows_input::VtConsole::open() {
+                        Ok(mut console) => {
+                            return read_input(Stopped(sender), &flag, clock, &shown, &mut console);
+                        }
+                        Err(err) => {
+                            let _ = sender.send(Source::Failed(err));
+                            return;
+                        }
+                    }
+                }
                 read_input(Stopped(sender), &flag, clock, &shown, &mut Crossterm);
             })?;
         Ok(Self {
@@ -858,6 +876,18 @@ impl Events for Crossterm {
 
     fn read(&mut self) -> io::Result<event::Event> {
         event::read()
+    }
+}
+
+/// The console's VT input on Windows ([`crate::windows_input`]).
+#[cfg(windows)]
+impl Events for crate::windows_input::VtConsole {
+    fn poll(&mut self, wait: Duration) -> io::Result<bool> {
+        crate::windows_input::VtConsole::poll(self, wait)
+    }
+
+    fn read(&mut self) -> io::Result<event::Event> {
+        crate::windows_input::VtConsole::read(self)
     }
 }
 

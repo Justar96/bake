@@ -261,6 +261,7 @@ dependencies = [
  "serde_json",
  "signal-hook",
  "tokio",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
