@@ -297,8 +297,7 @@ fn no_cut_point_separates_a_tool_call_from_its_result() {
             );
         }
     }
-    // The sweep cut at user messages, at assistant messages holding calls,
-    // and at answers.
+    // The sweep cut at user messages and at assistant messages holding calls.
     assert!(kept_roles.contains("user"), "{kept_roles:?}");
     assert!(kept_roles.contains("assistant"), "{kept_roles:?}");
     assert!(kept_ids.len() >= 5, "{kept_ids:?}");
@@ -658,9 +657,16 @@ async fn a_cancel_during_the_summary_retry_wait_writes_nothing() {
         assert_eq!(end["aborted"], true);
         assert_eq!(compactions_in(&session), 0);
         assert_eq!(std::fs::read(&file).expect("read"), bytes);
+        let seen = Arc::new(Mutex::new(Vec::new()));
         h.faux
-            .set_responses(vec![faux_assistant_message("still here").into()]);
+            .set_responses(vec![capture(&seen, faux_assistant_message("still here"))]);
         session.prompt("next", Vec::new()).await.expect("next");
+        let request = seen.lock().unwrap_or_else(PoisonError::into_inner)[0].clone();
+        assert_eq!(
+            user_texts(&request),
+            ["message to compact".to_owned(), "next".to_owned()],
+            "idle {idle}"
+        );
         session.shutdown().await;
     }
 }

@@ -1308,8 +1308,9 @@ fn an_esc_at_the_fork_commit_boundary_keeps_the_source_session() {
     }
 }
 
-// Pi `handleCloneCommand` and runtime `fork(leafId, { position: "at" })`,
-// with `fork` restoring the clone's recorded model: the clone is a new
+// Pi `handleCloneCommand` and runtime `fork(leafId, { position: "at" })`:
+// the clone keeps the model and thinking level of its path (the /fork test
+// shows them restored from the path rather than inherited). It is a new
 // file in the same directory that names the source as its parent and
 // holds the whole current path; the source file is unchanged; nothing
 // comes back into the draft; later prompts land in the clone.
@@ -1387,10 +1388,10 @@ fn clone_under_no_session_stays_in_memory() {
     assert!(world.files().is_empty());
 }
 
-// Pi "shows a status message when there is nothing to clone": a session
-// with no entries stays as it is. Pi "reports why an unflushed session
-// cannot be forked": an unsaved session with entries refuses, the draft
-// kept.
+// Pi "reports why an unflushed session cannot be forked": an unsaved
+// session with entries refuses, the draft kept. Pi's "nothing to clone"
+// case is unreachable here, since every live session writes its thinking
+// level when it starts.
 #[test]
 fn clone_without_a_saved_leaf_changes_nothing() {
     let world = World::new("clone-empty");
