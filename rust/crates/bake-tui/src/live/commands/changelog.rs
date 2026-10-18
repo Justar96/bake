@@ -296,9 +296,24 @@ mod tests {
         let Row::Answer(text) = &rows[1] else {
             panic!("an answer row");
         };
-        let first = text.find("## [0.1.0]").expect("oldest");
-        let last = text.find("## [0.3.8]").expect("newest");
-        assert!(first < last);
+        // Whatever versions ship, each released heading appears once, in
+        // order from the oldest to the newest.
+        let entries = parse(CHANGELOG);
+        assert!(!entries.is_empty(), "the changelog has released entries");
+        let mut at = 0;
+        for entry in entries.iter().rev() {
+            let heading = entry.content.lines().next().expect("a heading");
+            let found = text[at..].find(heading).expect(heading);
+            at += found + heading.len();
+        }
+        let versions: Vec<(u64, u64, u64)> = entries
+            .iter()
+            .map(|entry| (entry.major, entry.minor, entry.patch))
+            .collect();
+        assert!(
+            versions.windows(2).all(|pair| pair[0] > pair[1]),
+            "the file lists the newest first: {versions:?}"
+        );
         assert!(!text.contains("## [Unreleased]"));
         assert_eq!(
             super::rows("# Changelog\n")[1],
