@@ -1220,10 +1220,10 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
         Path::new(&session_cwd),
         &tool_permissions,
     );
-    // A top-level session starts subagents built as it is; a subagent
-    // messages its parent and starts none (depth 1).
+    // With `subagents` on, a top-level session starts subagents built as it
+    // is; a subagent messages its parent and starts none (depth 1).
     let subagent_tools: &[&str] = match role {
-        Role::Root(Some(factory)) => {
+        Role::Root(Some(factory)) if settings.subagents => {
             let parent_file = session
                 .is_persisted()
                 .then(|| session.session_file().map(Path::to_path_buf))
@@ -1265,7 +1265,7 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
             }
             &crate::subagents::PARENT_TOOL_NAMES
         }
-        Role::Root(None) => &[],
+        Role::Root(_) => &[],
         Role::Child(link) => {
             definitions.extend(crate::subagents::child_tools(&link));
             &crate::subagents::CHILD_TOOL_NAMES

@@ -92,6 +92,9 @@ pub struct Settings {
     pub max_concurrent_read_tools: Option<Value>,
     /// `taskDocuments`: enables the versioned task document tool and context.
     pub task_documents: bool,
+    /// `subagents`: gives a top-level session the subagent tools
+    /// ([`crate::subagents`]). Defaults to false.
+    pub subagents: bool,
     /// `compaction` as stored, checked when read (see
     /// [`Self::compaction_settings`]).
     pub compaction: Option<Value>,
@@ -212,6 +215,7 @@ impl Default for Settings {
             default_tools: None,
             max_concurrent_read_tools: None,
             task_documents: false,
+            subagents: false,
             compaction: None,
             background_compaction: false,
             context_masking: false,
@@ -436,6 +440,7 @@ impl Settings {
                 crate::tools::index::resolve_default_tools(&entries)
             }),
             task_documents: object.get("taskDocuments").and_then(Value::as_bool) == Some(true),
+            subagents: object.get("subagents").and_then(Value::as_bool) == Some(true),
             max_concurrent_read_tools: object.get("maxConcurrentReadTools").cloned(),
             compaction: object.get("compaction").cloned(),
             background_compaction: object.get("backgroundCompaction").and_then(Value::as_bool)

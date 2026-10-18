@@ -246,7 +246,7 @@ function routeOf(entry: string): Route {
   }
 }
 const routes = models.map(resolveRoute)
-/** Scenarios that need a Bake tool pi and bake-rs do not ship; those arms skip them, so they have no pair. */
+/** Scenarios that need a Bake tool pi does not ship; a pi arm skips them, so it has no pair. A native arm runs them: a bake-rs build without `subagent` fails them. */
 const piUnsupported = (scenario: string) => scenario.startsWith('delegation')
 /**
  * A credential a pi arm passes to pi: the environment first, then the reference
@@ -643,7 +643,7 @@ writeFileSync(join(out, 'design.json'), JSON.stringify({
   composition: 'Built headless CLI with each revision\'s own headless system-prompt config (harness opener off, working-directory suffix) and its standard-preset persona prefix; host tools retained.'
     + (roster === 'tui' ? ' Roster tui: the standard preset\'s tool-fs, tool-fs-search, and tool-result-pruner configs and the terminal spill-policy inline cap; ask_user_question stays out, having no one to answer it headless.' : ' Roster headless: the headless bundle\'s own tool configs.')
     + ' Session title and ambient AGENTS disabled equally; instructions_file keeps agent-instructions for its own AGENTS.md.'
-    + (armNames.some(name => ARMS[name]!.kind === 'native') ? ' A native arm runs bake-rs -p --mode json with the built binary\'s own system prompt and default tools unless recorded defaultTools overrides them, the recorded session mode (memory uses --no-session), the ' + nativePermission + ' preset, and agent-level retry off; a cliproxyapi model comes through the 0.3 settings.yaml and .credentials.yaml it imports read-only, and a DeepSeek model through models.json over Chat Completions. It skips scenarios that need a Bake-only tool, and its stale writer acts on its event stream. Its recorded EVAL_SETTINGS object configures settings.json except evaluator-controlled route, retry, permission, and scenario policy. Forced windows and compaction settings are recorded in piContextWindows and piCompaction.' : '')
+    + (armNames.some(name => ARMS[name]!.kind === 'native') ? ' A native arm runs bake-rs -p --mode json with the built binary\'s own system prompt and default tools unless recorded defaultTools overrides them, the recorded session mode (memory uses --no-session), the ' + nativePermission + ' preset, and agent-level retry off; a cliproxyapi model comes through the 0.3 settings.yaml and .credentials.yaml it imports read-only, and a DeepSeek model through models.json over Chat Completions. Its stale writer acts on its event stream. Its recorded EVAL_SETTINGS object configures settings.json except evaluator-controlled route, retry, permission, and scenario policy. Forced windows and compaction settings are recorded in piContextWindows and piCompaction.' : '')
     + (armNames.some(name => ARMS[name]!.kind === 'pi') ? ' A pi arm runs pi --mode json with its own system prompt and default tools, no session, extensions, prompt templates, or context files, no skills but a skill scenario\'s own, agent-level retry off, and pi\'s own wire for each model; it skips scenarios that need a Bake-only tool. Where a scenario forces a context window, pi gets its window for it (piContextWindows), Bake\'s threshold plus pi\'s default reserve, and compaction settings that keep Bake\'s retained tail (piCompaction).' : ''),
   cache: 'Fresh process/home/workspace/session per sample; provider cache is observed, not assumed cold. Pair order alternates by trial and scenario.',
   endpoint: 'Agent exits; external Node test passes without test modification; injected external comment is preserved.',
@@ -659,7 +659,7 @@ for (const route of routes) {
       const order = [...armNames.slice(shift), ...armNames.slice(0, shift)]
       const pair = []
       for (const variant of order) {
-        if (ARMS[variant]!.kind !== 'bake' && piUnsupported(scenario)) continue
+        if (ARMS[variant]!.kind === 'pi' && piUnsupported(scenario)) continue
         if (summaries.reduce((sum, sample) => sum + sample.logicalTotalTokens, 0) > maxLogicalTokens) throw new Error('Evaluation token limit reached; partial results retained')
         const sample = await run(route, scenario, trial, variant)
         pair.push(sample)

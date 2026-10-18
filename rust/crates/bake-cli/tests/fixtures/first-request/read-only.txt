@@ -182,7 +182,7 @@ Session started: <date> (UTC)
         "properties": {
           "job_id": {
             "type": "string",
-            "description": "A job id, not a continuable subagent's agent id."
+            "description": "A job id."
           },
           "wait": {
             "type": "boolean",
@@ -216,83 +216,12 @@ Session started: <date> (UTC)
         "properties": {
           "job_id": {
             "type": "string",
-            "description": "A job id, not a continuable subagent's agent id."
+            "description": "A job id."
           },
           "reason": {
             "type": "string"
           }
         }
-      }
-    },
-    {
-      "type": "function",
-      "name": "subagent",
-      "description": "Delegate a self-contained task to a subagent with its own context; it does not see this conversation and returns only its result. It runs in the background by default, returning its agent id: start independent ones together and keep working; you are notified when one finishes. `send_message` continues it later or steers it while running.",
-      "parameters": {
-        "type": "object",
-        "required": [
-          "description",
-          "prompt"
-        ],
-        "properties": {
-          "description": {
-            "type": "string",
-            "description": "3-5 words, for display."
-          },
-          "prompt": {
-            "type": "string",
-            "description": "Standalone, with everything it needs."
-          },
-          "run_in_background": {
-            "type": "boolean",
-            "description": "false only when your next step needs the result."
-          }
-        }
-      }
-    },
-    {
-      "type": "function",
-      "name": "send_message",
-      "description": "Message a direct continuable subagent, or your parent if you are one. A busy target reads it next step; an idle one starts a new turn. Confirms delivery; no reply.",
-      "parameters": {
-        "type": "object",
-        "required": [
-          "agent_id",
-          "message"
-        ],
-        "properties": {
-          "agent_id": {
-            "type": "string"
-          },
-          "message": {
-            "type": "string"
-          }
-        }
-      }
-    },
-    {
-      "type": "function",
-      "name": "interrupt_agent",
-      "description": "Request a stop of a continuable subagent's current turn; it stays available.",
-      "parameters": {
-        "type": "object",
-        "required": [
-          "agent_id"
-        ],
-        "properties": {
-          "agent_id": {
-            "type": "string"
-          }
-        }
-      }
-    },
-    {
-      "type": "function",
-      "name": "list_agents",
-      "description": "List your continuable subagents: agent id, status (running, idle, or ready = saved, resumable, not a result), label, and model. For ids only; you are notified on finish.",
-      "parameters": {
-        "type": "object",
-        "properties": {}
       }
     }
   ]

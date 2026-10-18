@@ -198,7 +198,7 @@ The `--mode json` stream is pi's, so `normalizePi` reads it. Each assistant `mes
 |---|---|
 | `composition` | null: `bake-rs` builds its own prompt, so the shipped-composition check does not apply. `systemPrompt` is still captured |
 | `roster` | null |
-| `routingDecisions`, `subagentCalls` | empty and 0; the `delegation` scenarios are skipped, since `bake-rs` has no `subagent` tool |
+| `routingDecisions`, `subagentCalls` | `routingDecisions` is empty, since `bake-rs` has no task router; `subagentCalls` counts the parent's `subagent` calls. A child's requests pass the proxy but not the parent's event stream, so a `delegation` sample's `usageComplete` is false and it enters success and request comparisons only. A build without `subagent` fails the `delegation` scenarios |
 | `duplicateRefusals`, `guardRefusals`, `editedLineEchoes`, `toolHelpCalls` | 0 by construction: they match Bake's tool texts and tools |
 | `multiEditCalls` | every `edit` call, since Pi's `edit` always takes an `edits` array, as for a pi arm |
 | `runaway` | true when Bake's native tool-argument whitespace guard stops an unfinished tool call; the failure remains in the record |

@@ -1,10 +1,17 @@
 //! Subagents through the built binary over the loopback model server, with
-//! two models so each request's route can be seen.
+//! `subagents` on and two models so each request's route can be seen. The
+//! other print-mode tests show the tools are absent by default.
 
 use super::*;
 
-/// The workspace's models: the parent's and a second one for children.
+/// Turns subagents on, with the workspace's models: the parent's and a
+/// second one for children.
 fn two_models(workspace: &Workspace, port: u16) {
+    std::fs::write(
+        workspace.home().join("settings.json"),
+        json!({ "subagents": true }).to_string(),
+    )
+    .expect("settings.json");
     let models = json!({
         "providers": {
             "loop": {
