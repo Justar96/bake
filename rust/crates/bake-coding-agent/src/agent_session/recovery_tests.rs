@@ -1656,6 +1656,9 @@ async fn a_retry_whose_omission_fails_makes_no_request() {
 #[path = "idle_compaction_tests.rs"]
 mod idle_compaction;
 
+#[path = "compaction_proof_tests.rs"]
+mod compaction_proof;
+
 // One caller interval spans retries, split summaries and later prompts.
 #[tokio::test]
 async fn run_control_is_shared_by_agent_retry_attempts() {
