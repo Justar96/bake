@@ -4,22 +4,13 @@ Thanks for helping improve Bake. The [development guide](docs/development.md) co
 
 ## Making a change
 
-1. Branch from `develop` and keep each change focused on one behavior. `develop` is Rust-first: see [The Rust agent and the frozen TypeScript agent](#the-rust-agent-and-the-frozen-typescript-agent) before changing TypeScript.
+1. Work on an up-to-date `develop` and keep each commit focused on one behavior. `develop` is Rust-first: see [The Rust agent and the frozen TypeScript agent](#the-rust-agent-and-the-frozen-typescript-agent) before changing TypeScript.
 2. Update the owning README or JSDoc with the code, and write English only. Product text shown in the TUI belongs in [`copy.ts`](apps/tui/packages/ui/src/copy.ts).
 3. Run the checks that cover the change while you work (see [Checks](docs/development.md#checks)). Terminal behavior changes also need the PTY scenarios.
-4. Before opening the pull request, run `bun run preflight` ([Before a pull request](docs/development.md#before-a-pull-request)). It runs every gate CI runs and lists each result. Report what it said, including failures and anything skipped.
-5. Open a pull request against `develop` describing the behavior change and how you verified it; the pull request template lists what to include.
+4. Before pushing, run `bun run preflight` ([Before pushing](docs/development.md#before-pushing)). It runs every gate CI runs and lists each result. A change to `rust/`, native code, or terminal behavior also runs `bun run preflight:mac` on a Mac over SSH, and the native checks on Windows when a Windows host is available. Report what ran, including failures, skipped checks, and platforms not checked.
+5. Rebase on `origin/develop` and push directly to `develop`. No pull request goes into `develop`, and `develop` is never force-pushed.
 
 Never commit credentials or `.env`, never overwrite recorded session generations under `snapshots/`, and do not bypass Git hooks. If a check fails, fix the cause rather than refreshing every snapshot.
-
-## Stacked pull requests
-
-When a change needs another that has not landed, stack them instead of waiting or growing one pull request. Each pull request in a stack is based on the branch below it, so its diff and review show only its own layer.
-
-1. Branch the next layer from the one below it and open its pull request against that branch.
-2. Link the chain bottom to top with the [`gh stack`](https://github.com/github/gh-stack) extension (`gh extension install github/gh-stack`): `gh stack link --base develop <bottom> … <top>`. `gh stack link <stack> <new-pr>` adds a layer to an existing stack.
-3. Fix a review comment on the layer that introduced the code, then merge it forward into each layer above, as the [stack review guide](docs/cookbook/responding-to-pr-review-on-a-stack.md) describes. Run each layer's checks before pushing it.
-4. Land the stack, or the layers up to one, with `gh stack merge <stack-or-pr> --merge`, never by merging and retargeting its pull requests one at a time.
 
 ## The Rust agent and the frozen TypeScript agent
 
@@ -30,9 +21,9 @@ Bake's Rust agent, `bake-rs` under [`rust/`](rust/README.md), is the product lin
 
 0.3 bug and security maintenance ends when 0.4.0 ships. From that release, Bake ships and maintains only Rust; supported legacy `dsh`, profile, and package aliases retire with 0.3. The 0.4.0 release notes must announce retirement and the separate Rust installation. Native environment fallbacks and existing user-owned command links remain preserved, as [D10 and D13](docs/roadmap/rust-0.4/scope-00/support.md#decision-register) require.
 
-### CI for pull requests into develop
+### CI
 
-CI runs the native job (Cargo checks, the Rust PTY scenarios, and the compiled eval fixture arm) on Linux and Windows. No CI job runs on macOS: run `bun run preflight --only native` on a Mac before opening the pull request, or `bun run preflight:mac` to run it on one over SSH, and paste its summary there. TypeScript checks run on Linux only: none when the pull request changes only `rust/` or `scripts/rust-preview-pty.ts`; the static half when the rest is Markdown; and both preflight parts and the Windows release check otherwise. A stack whose bottom targets `develop` is planned the same way. [`scripts/ci-scope.ts`](scripts/ci-scope.ts) makes the choice and states it in the run summary. Still run `bun run preflight` before opening the pull request.
+GitHub CI runs only on the release pull request from `develop` into `main`: TypeScript checks on Linux, the native job (Cargo checks, the Rust PTY scenarios, and the compiled eval fixture arm) on Linux and Windows, and the Windows release check. No CI job runs on macOS. Every push to `develop` relies on the local checks above, so run them before pushing.
 
 ## Upstream DeepSeek Harness
 

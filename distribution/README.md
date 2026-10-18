@@ -56,16 +56,15 @@ This is a preview of the package layout, not a release: nothing signs, hashes in
 The [release workflow](../.github/workflows/release.yml) builds, checks, signs, and publishes every platform from one tag. This page describes a release from `develop` through `main`, which is next used for the Rust release, 0.4.0, once the [roadmap's release qualification](../docs/roadmap/rust-0.4/README.md#release-qualification) passes. 0.3 versions of the frozen TypeScript agent are released from `release/0.3`, whose copy of this guide and of the workflow describes that path.
 
 ```sh
-# on the branch that carries the release's last change, made from develop
+# on an up-to-date develop, after the release's last change is pushed
 NEXT=0.1.2                           # choose a stable version newer than the current one
 bun run release:prepare "$NEXT"       # both manifests, bun.lock, and a CHANGELOG.md section
 # write the new section in CHANGELOG.md, then:
 bun run release:preflight --offline --tag "v$NEXT"
 git add package.json apps/cli/package.json bun.lock CHANGELOG.md
 git commit -m "release: $NEXT"
-git push -u origin HEAD
-gh pr create --base develop           # merge it, then:
-gh pr create --base main --head develop
+git push origin HEAD:develop
+gh pr create --base main --head develop   # CI runs here; fix failures on develop
 # once that pull request merges:
 git switch main && git pull --ff-only
 git tag "v$NEXT"

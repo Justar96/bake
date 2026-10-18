@@ -1,9 +1,8 @@
 name: Bake
 
 on:
-  push:
-    branches: [main]
   pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -13,56 +12,22 @@ concurrency:
   group: bake-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# A merged pull request was already checked on its merge ref, and the release
-# tag pushed alongside it builds and tests every platform again, so its merge
-# commit on main is skipped. Direct pushes to main still run.
-#
-# A pull request from develop to main runs Linux alone. Every change it carries
-# already ran on every CI platform in its own pull request, and the release
-# tag after it builds and checks every platform again. Only the combination of
-# those changes is new, which no earlier run has tested, so the Linux jobs stay.
-#
-# A pull request into develop, directly or through a stack on it, runs the
-# native job on Linux and Windows and TypeScript checks on Linux only as far as
-# its files need; one that changes TypeScript also runs the Windows release
-# check. A pull request into release/0.3 runs everything. No job runs on macOS,
-# which is checked locally before a pull request opens. scripts/ci-scope.ts
-# makes these choices.
+# CI runs only on the release pull request from develop into main, and on
+# demand. Work reaches develop as direct pushes checked locally: Linux and
+# macOS over SSH before every push, Windows when a Windows host is available.
+# This run is the one CI check of everything a release carries, so it runs
+# every job: TypeScript checks on Linux, the native job on Linux and Windows,
+# and the Windows release check. No job runs on macOS. The release tag after
+# it builds and checks every platform again.
 jobs:
-  scope:
-    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Merge pull request ')
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-      pull-requests: read
-    outputs:
-      preflight: ${{ steps.plan.outputs.preflight }}
-      rust: ${{ steps.plan.outputs.rust }}
-      windows_release: ${{ steps.plan.outputs.windows_release }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: package.json
-      # Branch names are untrusted input, so they reach the script as variables.
-      - id: plan
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BASE_REF: ${{ github.base_ref }}
-          HEAD_REF: ${{ github.head_ref }}
-          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: bun scripts/ci-scope.ts
-
   # TypeScript gates share the local preflight table; Rust has its own matrix.
   preflight:
-    needs: scope
-    if: needs.scope.outputs.preflight != '[]'
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.scope.outputs.preflight) }}
+        include:
+          - { os: ubuntu-latest, name: checks, args: '--full --skip runtime,native' }
+          - { os: ubuntu-latest, name: runtime, args: '--full --only build,runtime' }
     name: ${{ matrix.name }} (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
@@ -113,11 +78,10 @@ jobs:
           include-hidden-files: true
 
   rust:
-    needs: scope
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(needs.scope.outputs.rust) }}
+        os: [ubuntu-latest, windows-latest]
     name: rust (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     # Cold Windows Wasmtime checks took 21.5 minutes; setup and the archive
@@ -207,8 +171,6 @@ jobs:
           include-hidden-files: true
 
   windows-release:
-    needs: scope
-    if: needs.scope.outputs.windows_release == 'true'
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
