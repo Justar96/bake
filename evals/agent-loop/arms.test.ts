@@ -83,6 +83,24 @@ describe('native arms', () => {
     mkdirSync(join(root, 'plain'))
     expect(() => parseArms(`cand=native:${join(root, 'plain')}`, 'headless', {})).toThrow(/no rust\/Cargo.toml/)
   })
+
+  test.skipIf(!posix)('a bare path is the native agent, and ts: names the TypeScript agent', () => {
+    const text = '#!/bin/sh\necho "bake-rs 9.9.9-bare"\n'
+    const bin = script(join(root, 'bare/bake-rs'), text)
+    expect(parseArms(`cand=${bin}`, 'headless', {}).cand).toMatchObject({ kind: 'native', bin: realpathSync(bin), version: 'bake-rs 9.9.9-bare' })
+    // A built TypeScript checkout without a Rust workspace points at ts:.
+    const typescript = join(root, 'typescript')
+    mkdirSync(join(typescript, 'apps/cli/lib'), { recursive: true })
+    writeFileSync(join(typescript, 'apps/cli/lib/bin.js'), '')
+    expect(() => parseArms(`base=${typescript}`, 'headless', {})).toThrow(`name=ts:${typescript} runs its TypeScript agent`)
+    expect(() => parseArms(`base=ts:${join(root, 'plain')}`, 'headless', {})).toThrow(/no built apps\/cli\/lib\/bin.js/)
+  })
+
+  test.skipIf(!posix)('per-arm Bake settings and overlays are refused for an arm that would ignore them', () => {
+    const bin = script(join(root, 'ignored/bake-rs'), '#!/bin/sh\necho "bake-rs 9.9.9-ignored"\n')
+    expect(() => parseArms(`cand=${bin}`, 'headless', { EVAL_SETTINGS_CAND: '{}' })).toThrow(/EVAL_SETTINGS_CAND would not apply/)
+    expect(() => parseArms(`cand=native:${bin}`, 'headless', { EVAL_EXTRA_CAND: '[]' })).toThrow(/EVAL_EXTRA_CAND would not apply/)
+  })
 })
 
 describe('the native stale writer', () => {
