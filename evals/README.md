@@ -1,13 +1,13 @@
 # Agent-loop evals
 
-Every Bake version records what its agent loop costs on a fixed task suite, measured against the version before it, so a regression shows up as a number rather than an impression. A record comes from a paired live run. The built headless CLI of each checkout runs the same scenarios through the same model gateway, and the arms are interleaved so that gateway and cache drift affect both alike.
+Every Bake version records what its agent loop costs on a fixed task suite, measured against the version before it, so a regression shows up as a number rather than an impression. A record comes from a paired live run. Each checkout's native agent, `bake-rs`, runs the same scenarios through the same model gateway, and the arms are interleaved so that gateway and cache drift affect both alike. The frozen TypeScript agent and pi can be measured as arms too.
 
 ## Layout
 
 ```text
 evals/agent-loop/
   run.ts          paired runner: routes, the capturing proxy, sample summaries
-  arms.ts         checkout and native binary resolution, per-sample Bake overlays, and launch arguments
+  arms.ts         native, TypeScript, and pi arm resolution, per-sample TypeScript overlays, and launch arguments
   scenarios.ts    each scenario's prompt, fixture, success predicate, request floor and cap
   composition.ts  each arm's overlay rows, read from its own checkout, and the rendered-prompt check
   run.test.ts     keyless checks of actual Bake and pi launches, configuration, and test cleanup
@@ -36,44 +36,54 @@ Record an eval for any change that can alter what a model sees or how many round
 
 ## Run
 
-Build a clean worktree of the base, which is the PR base or the previous release, and of the candidate. A dirty checkout is flagged in the record.
+Pair a clean worktree of the base, which is the PR base or the previous release, with the candidate. Each checkout arm is the [native bake-rs arm](#native-bake-rs-arm): the evaluator builds its `rust/` workspace with Cargo's locked release profile before any sample and records the commit and whether tracked files differed. Warm both builds first, so the parallel per-model processes find nothing to rebuild.
 
 ```sh
 git worktree add --detach .agents/worktrees/eval-base <base-commit>
-(cd .agents/worktrees/eval-base && bun install --frozen-lockfile && bun run build)
-bun run build
-EVAL_ARMS=base=.agents/worktrees/eval-base,candidate=. \
-EVAL_MODELS=claude-sonnet-5-5 EVAL_OUTPUT=.preflight/evals/agent-loop/<topic>/claude-sonnet-5-5 \
-  bun run eval
+(cd .agents/worktrees/eval-base && bun install --frozen-lockfile && cd rust && cargo build --locked --release -p bake-cli)
+(cd rust && cargo build --locked --release -p bake-cli)
+topic=<topic>
+mkdir -p .preflight/evals/agent-loop/$topic
+for model in gemini-3.8-flash-high@high gemini-4-argon-high@medium gpt-6.1-sol claude-sonnet-5-5 claude-opus-5-5 deepseek/deepseek-flash deepseek/deepseek-v4-pro; do
+  name=${model#deepseek/}; name=${name%@*}
+  EVAL_ARMS=base=.agents/worktrees/eval-base,candidate=. EVAL_MODELS=$model \
+    EVAL_OUTPUT=.preflight/evals/agent-loop/$topic/$name \
+    bun run eval > .preflight/evals/agent-loop/$topic/$name.log 2>&1 &
+done
+wait
 ```
 
-Run one process per model, in parallel. The runner reads the `cliproxyapi` route from `~/.bake/settings.yaml`, sends DeepSeek models to the official Anthropic-format endpoint through the shipped `llm-pi-ai` `deepseek-official` route (or, for an arm whose base bundle still mounts `llm-deepseek`, through that adapter's settings section), and copies `~/.bake/.credentials.yaml`, which holds `CLIPROXYAPI_API_KEY` and `DEEPSEEK_API_KEY`, into a private home for each sample. A record needs those locally; neither is ever written into the output. Raw output, including transcripts and captured requests, stays under the ignored `.preflight/`. The standard set alone takes about 40 minutes and 4 million tokens at three trials; each extended model adds its own process and tokens, and Opus costs the most per token.
+`name=ts:<checkout>` measures a built checkout's frozen TypeScript agent instead (`bun install --frozen-lockfile && bun run build` there first), for a 0.3 fix or a comparison with it; [Composition](#composition) describes that arm.
 
-A record covers both model sets. `EVAL_MODELS` takes model ids, set names, or both, so `EVAL_MODELS=standard` reruns the first three and `EVAL_MODELS=deepseek/deepseek-flash` one model.
+Run one process per model, in parallel. The runner reads the `cliproxyapi` route from `~/.bake/settings.yaml`, sends DeepSeek models to the official Anthropic-format endpoint through the shipped `llm-pi-ai` `deepseek-official` route (or, for an arm whose base bundle still mounts `llm-deepseek`, through that adapter's settings section), and copies `~/.bake/.credentials.yaml`, which holds `CLIPROXYAPI_API_KEY` and `DEEPSEEK_API_KEY`, into a private home for each sample. A record needs those locally; neither is ever written into the output. Raw output, including transcripts and captured requests, stays under the ignored `.preflight/`. At three trials, each standard model's process takes about 40 minutes and over a million tokens; each extended model adds its own process and tokens, and Opus costs the most per token.
+
+A record covers both model sets. `EVAL_MODELS` takes model ids, set names, or both, so `EVAL_MODELS=standard` reruns the first four and `EVAL_MODELS=deepseek/deepseek-flash` one model.
 
 | Set | Model | Route | Effort |
 |---|---|---|---|
-| `standard` | `gemini-3.8-flash-medium` | `cliproxyapi`, OpenAI Responses | medium |
+| `standard` | `gemini-3.8-flash-high` | `cliproxyapi`, OpenAI Responses | high |
+| `standard` | `gemini-4-argon-high` | `cliproxyapi`, OpenAI Responses | medium |
 | `standard` | `gpt-6.1-sol` | `cliproxyapi`, OpenAI Responses | medium |
 | `standard` | `claude-sonnet-5-5` | `cliproxyapi`, Anthropic Messages | medium |
 | `extended` | `claude-opus-5-5` | `cliproxyapi`, Anthropic Messages | medium |
 | `extended` | `deepseek-flash` | DeepSeek official, Anthropic Messages | high |
 | `extended` | `deepseek-v4-pro` | DeepSeek official, Anthropic Messages | high |
 
-DeepSeek offers `low`, `high`, and `max` but no `medium`, so it runs at `high`, its default. `design.json` and each sample record the provider, wire format, and effort. Each raw sample's `requestMetrics` also carries the stream timing of every request: milliseconds from the proxy receiving it to the response headers, the first and last byte, and the stream's end (null if it never ended), with the event count and the last event type. A sample stopped at the wall-clock cap whose last request shows events that stop well before the cap points to the gateway, not the model.
+The gateway names its Gemini models by tier rather than effort, so the standard set gives each its effort with `@`: Gemini 3.8 Flash runs at `high` and Gemini 4 Argon at `medium`. It lists no `gemini-3.8-flash-medium`, the alias earlier records name; those records ran `gemini-3.8-flash-high` at `medium` in its place, as their notes say, so compare their Gemini rows with later ones only through a new paired run. DeepSeek offers `low`, `high`, and `max` but no `medium`, so it runs at `high`, its default. An `@<effort>` the model's entry in `settings.yaml` does not list stops the run before any sample. `design.json` and each sample record the provider, wire format, and effort. Each raw sample's `requestMetrics` also carries the stream timing of every request: milliseconds from the proxy receiving it to the response headers, the first and last byte, and the stream's end (null if it never ended), with the event count and the last event type. A sample stopped at the wall-clock cap whose last request shows events that stop well before the cap points to the gateway, not the model.
 
 | Variable | Meaning |
 |---|---|
-| `EVAL_ARMS` | `name=checkout` pairs, two or more; `name=pi` or `name=pi:<bin>` is the pi coding agent instead of a checkout, and `name=native`, `name=native:<checkout>`, or `name=native:<bin>` is the native `bake-rs` ([Native bake-rs arm](#native-bake-rs-arm)) |
+| `EVAL_ARMS` | `name=checkout` pairs, two or more. A checkout is its native `bake-rs`, built from its `rust/` workspace, and `name=<bin>` a prebuilt `bake-rs` ([Native bake-rs arm](#native-bake-rs-arm)); `name=native` (this checkout) and `name=native:<path>` name the same arm. `name=ts:<checkout>` is a built checkout's TypeScript agent, and `name=pi` or `name=pi:<bin>` the pi coding agent |
 | `EVAL_MODELS` | model ids or set names, default `standard,extended`; a bare id is a `cliproxyapi` model, and `deepseek/<id>`, or a bare `deepseek-*` id the gateway does not list, is a DeepSeek model; a trailing `@<effort>`, as in `gemini-3.8-flash-high@high`, replaces the model's default effort |
 | `EVAL_CASES` | scenario names or set names, `standard` or `extended`; the default is the standard suite below |
-| `EVAL_ROSTER` | `headless`, the default, runs the headless bundle's own tool configs; `tui` gives every Bake arm the terminal's, as described under [Composition](#composition) |
+| `EVAL_ROSTER` | `headless`, the default, runs the headless bundle's own tool configs; `tui` gives every TypeScript arm the terminal's, as described under [Composition](#composition) |
 | `EVAL_TRIALS` | trials per scenario, default 3 |
 | `EVAL_OUTPUT` | raw output directory |
 | `EVAL_CONFIG_HOME` | Directory containing the evaluator’s `settings.yaml` and `.credentials.yaml`; defaults to `~/.bake`. Use a private directory to qualify a route without editing personal settings. Sample homes remain isolated. |
 | `EVAL_GATEWAY` | a JSON file of `{ baseUrl, apiKey }`, such as pi's `~/.pi/agent/cliproxyapi.json`, that replaces the `cliproxyapi` upstream and key for every arm; the proxy swaps each arm's key for this one, so both arms reach one upstream with one account. DeepSeek routes are unaffected |
-| `EVAL_EXTRA_<ARM>` | a JSON array of extra overlay rows for one Bake arm, for an attribution arm such as `[{"id":"fs-observation-policy","config":{"editGuard":"version"}}]` |
-| `EVAL_SETTINGS_<ARM>` | a JSON object deep-merged into one Bake arm's `settings.yaml`, for settings no overlay row carries; it can change one route key, such as `{"llm-pi-ai":{"providers":{"$PROVIDER":{"strictTools":true}}}}`, without replacing the route, and arrays replace; `$PROVIDER` and `$MODEL` become the route under test |
+| `EVAL_NATIVE_PERMISSION` | the preset every native arm runs under: `danger-full-access`, the default, as the TypeScript arms run, or `workspace-write`, the default preset, whose `bash` needs a usable sandbox backend on the host; `design.json` records it as `nativePermission` |
+| `EVAL_EXTRA_<ARM>` | a JSON array of extra overlay rows for one TypeScript arm, refused for any other arm, for an attribution arm such as `[{"id":"fs-observation-policy","config":{"editGuard":"version"}}]` |
+| `EVAL_SETTINGS_<ARM>` | a JSON object deep-merged into one TypeScript arm's `settings.yaml`, refused for any other arm, for settings no overlay row carries; it can change one route key, such as `{"llm-pi-ai":{"providers":{"$PROVIDER":{"strictTools":true}}}}`, without replacing the route, and arrays replace; `$PROVIDER` and `$MODEL` become the route under test |
 
 | Scenario | What it checks |
 |---|---|
@@ -116,12 +126,12 @@ Each arm sees a skill scenario's `.agents/skills` as it ships: `bake-rs` lists t
 
 ## Composition
 
-Each Bake arm runs its own built headless CLI under an overlay that `composition.ts` reads from that arm's checkout, so an older revision is measured as it shipped. A Cordis patch replaces a row's whole `config`, so every overlay row restates the config it needs:
+Each TypeScript arm (`ts:<checkout>`) runs its own built headless CLI under an overlay that `composition.ts` reads from that arm's checkout, so an older revision is measured as it shipped. A Cordis patch replaces a row's whole `config`, so every overlay row restates the config it needs:
 
 - `system-prompt` is the headless bundle's own row, with the harness opener off (`includeHarnessIdentity: false`) and the `Your working directory is {{cwd}}.` suffix, and with the persona prefix replaced by that arm's standard-preset persona.
 - With `EVAL_ROSTER=tui`, `tool-fs` (`readMaxBytes: 16384`), `tool-fs-search`, and `tool-result-pruner` (8,192, 4,096, and 1,024 characters) take the standard preset's configs, and `spill-policy` takes the terminal profile's inline cap (`maxInlineBytes: 16384` in `apps/tui/packages/app/cordis.built.patch.yml`, against the base bundle's 50,000). A checkout whose terminal patch sets no cap keeps the base bundle's.
 
-Rows are found by id, so a checkout from before the `bake-*` rename, with `@deepseek-ai/dsh-*` row names, composes the same way. The runner captures the system prompt of each sample's first request in the raw sample (`systemPrompt`), and `composition` records whether it has the `powered by DeepSeek Harness` opener and the working-directory line. A Bake sample whose prompt fails that check stops the run, keeping the samples so far. `design.json` and every sample record the roster.
+Rows are found by id, so a checkout from before the `bake-*` rename, with `@deepseek-ai/dsh-*` row names, composes the same way. The runner captures the system prompt of each sample's first request in the raw sample (`systemPrompt`), and `composition` records whether it has the `powered by DeepSeek Harness` opener and the working-directory line. A TypeScript sample whose prompt fails that check stops the run, keeping the samples so far. `design.json` and every sample record the roster.
 
 Records made before this composition, up to and including `versions/unreleased/2026-10-05-bake-core-names`, set only `personaPrefix` on `system-prompt`, which replaced the bundle row's config. Their prompts open with `You are an AI agent powered by DeepSeek Harness.` and lack the working-directory line, so their first requests differ from what Bake ships by those two lines. Both arms of each such record carried the same difference, so its paired comparisons stand. Its absolute counts, such as first-request bytes, are not comparable with later records; compare versions only through a new paired run.
 
@@ -158,23 +168,23 @@ Run the adapter's script-arm tests with `bun test --timeout=30000 evals/agent-lo
 
 ### Native bake-rs arm
 
-An arm named `native` runs the native agent, `bake-rs -p --mode json`, through the same capturing proxy, fixtures, and checks as the other arms. `native` builds this evaluator's checkout with `cargo build --locked --release -p bake-cli` from its `rust/` directory, so the pinned toolchain applies, and `native:<checkout>` builds another checkout the same way. The arm runs the executable Cargo reports in its JSON messages, wherever `CARGO_TARGET_DIR` or `build.target-dir` put it, so an older binary left under `rust/target` is never measured. The build runs once, before any sample, and Cargo's progress goes to stderr. `native:<bin>` runs a prebuilt `bake-rs` as given.
+A checkout arm runs the native agent, `bake-rs -p --mode json`, through the same capturing proxy, fixtures, and checks as the other arms. `name=<checkout>` builds that checkout with `cargo build --locked --release -p bake-cli` from its `rust/` directory, so the pinned toolchain applies; `name=native` builds this evaluator's checkout, and `name=native:<checkout>` is the same as `name=<checkout>`. A checkout without `rust/Cargo.toml` is refused, with a pointer to `ts:` when it holds a built TypeScript agent. The arm runs the executable Cargo reports in its JSON messages, wherever `CARGO_TARGET_DIR` or `build.target-dir` put it, so an older binary left under `rust/target` is never measured. The build runs once, before any sample, and Cargo's progress goes to stderr. A path to a file, bare or after `native:`, runs a prebuilt `bake-rs` as given.
 
 `design.json` records each native arm's binary path, `bake-rs --version`, and SHA-256. A built arm also records `prebuilt: false` with the checkout's commit and whether its tracked files differed, both read right after the build. A prebuilt binary records `prebuilt: true` with no commit, since nothing ties it to one, and a record names no candidate commit for it. A record meant to name a commit builds its native arm from a checkout.
 
-Each sample runs `bake-rs -p --mode json --no-session --permission danger-full-access --model <provider>/<model> --thinking <effort> -- <prompt>` in the fixture workspace, with `BAKE_HOME` and `DSH_HOME` set to the sample's private home. The evaluator fills that home as it fills a Bake arm's:
+Each sample runs `bake-rs -p --mode json --no-session --permission danger-full-access --model <provider>/<model> --thinking <effort> -- <prompt>` in the fixture workspace, with `workspace-write` in place of `danger-full-access` when `EVAL_NATIVE_PERMISSION` asks for it, with `BAKE_HOME` and `DSH_HOME` set to the sample's private home. The evaluator fills that home as it fills a TypeScript arm's:
 
-- A `cliproxyapi` model gets the same `settings.yaml` route, pointed at the proxy, and a copy of `~/.bake/.credentials.yaml`. `bake-rs` imports both read-only, as it imports a 0.3 home (D25), so the native arm measures the route users get.
-- A DeepSeek model gets a `models.json` `deepseek` provider over Chat Completions at `api.deepseek.com`, whose model entry carries the shipped profile's metadata. `bake-rs` ships no Anthropic-format DeepSeek profile, so this arm reaches DeepSeek over the wire pi uses, not the Bake arm's. Its key, `DEEPSEEK_API_KEY` from the environment or `~/.bake/.credentials.yaml`, reaches the agent as `EVAL_API_KEY`.
+- A `cliproxyapi` model gets the same `settings.yaml` route, pointed at the proxy, and a copy of `~/.bake/.credentials.yaml`. `bake-rs` imports both read-only, as it imports a 0.3 home (D25), so the native arm measures the route users get. The route's `agent-default-model` carries the effort `--thinking` names, including an `@<effort>` override.
+- A DeepSeek model gets a `models.json` `deepseek` provider over Chat Completions at `api.deepseek.com`, whose model entry carries the shipped profile's metadata. `bake-rs` ships no Anthropic-format DeepSeek profile, so this arm reaches DeepSeek over the wire pi uses, not the TypeScript arm's. Its key, `DEEPSEEK_API_KEY` from the environment or `~/.bake/.credentials.yaml`, reaches the agent as `EVAL_API_KEY`.
 - `settings.json` turns agent-level retry off. A scenario that forces a context window gets pi's window for it (`piContextWindows`) on the route and pi's compaction settings (`piCompaction`).
 
-Every native arm uses the system prompt `bake-rs` builds and Pi's default tools: `read`, `bash`, `edit`, and `write`. `EVAL_ROSTER`, `EVAL_EXTRA_<ARM>`, and `EVAL_SETTINGS_<ARM>` apply to Bake arms only.
+Every native arm uses the system prompt `bake-rs` builds and Pi's default tools: `read`, `bash`, `edit`, and `write`. `EVAL_ROSTER`, `EVAL_EXTRA_<ARM>`, and `EVAL_SETTINGS_<ARM>` apply to TypeScript arms only.
 
 `bake-rs` has no extensions, so its stale writer runs in the evaluator. The evaluator writes the change when it reads the `tool_execution_end` line of the first successful `read` of the target file, while `bake-rs` has already moved on. An edit in a later response comes after the write. An edit in the same response as that read can run before the write lands, whichever order its `tool_execution_start` line arrives in. The evaluator then records `staleInjection.raced` and marks the sample `invalid: stale_injection_raced`, which fails it and leaves its cell out of every comparison rather than scoring it as the agent's behavior. A pi arm has a narrower form of the same race that is not detected: its extension writes synchronously on the read's `tool_result`, but an edit pi runs in parallel with that read can still finish first. An exception in the writer stops the sample and marks it `invalid: evaluator_error`, with the message in `evaluatorErrors`.
 
 `bake-rs` has no `--no-context-files` option. It loads `~/.agents/AGENTS.md` and the skills in `~/.agents/skills` from the user's home, one `AGENTS.override.md` or `AGENTS.md` (in either case of `.md`) from each directory between the filesystem root and the workspace, and the skills in the `.agents/skills` of each directory from the workspace up to its git root, or to the filesystem root outside a repository. Each native sample gets an empty user home of its own as `HOME` and `USERPROFILE`, so the evaluator's own `~/.agents` never reaches it. Before each native sample, the evaluator looks for such files and skill directories in that home, the workspace's ancestors, and the workspace itself, leaving out the workspace's own context file when the scenario provides it (`instructions_file`), and the workspace's own `.agents/skills` when the scenario provides skills (`skill_check`, `skill_distractors`). If it finds any, it stops the run with an error naming them. Recording them instead would leave samples whose prompts differ from what the fixture defines. Move the files, or point `TMPDIR` at a directory without them.
 
-The `--mode json` stream is pi's, so `normalizePi` reads it. Each assistant `message_end` is a step, and its usage is that step's usage. Tool calls come from `tool_execution_start`, and tool errors come from `tool_execution_end`. The proxy counts requests and reconciles the wire's usage, as it does for every arm. `compactions` comes from `compaction_end` events rather than a session log. Each completed result is a summary, each `errorMessage` is an error, and aborted compactions count as neither. The following native fields are absent or are not comparable with a Bake arm's:
+The `--mode json` stream is pi's, so `normalizePi` reads it. Each assistant `message_end` is a step, and its usage is that step's usage. Tool calls come from `tool_execution_start`, and tool errors come from `tool_execution_end`. The proxy counts requests and reconciles the wire's usage, as it does for every arm. `compactions` comes from `compaction_end` events rather than a session log. Each completed result is a summary, each `errorMessage` is an error, and aborted compactions count as neither. The following native fields are absent or are not comparable with a TypeScript arm's:
 
 | Field | Native arm |
 |---|---|
@@ -184,7 +194,7 @@ The `--mode json` stream is pi's, so `normalizePi` reads it. Each assistant `mes
 | `duplicateRefusals`, `guardRefusals`, `editedLineEchoes`, `toolHelpCalls` | 0 by construction: they match Bake's tool texts and tools |
 | `multiEditCalls` | every `edit` call, since Pi's `edit` always takes an `edits` array, as for a pi arm |
 | `runaway` | true when Bake's native tool-argument whitespace guard stops an unfinished tool call; the failure remains in the record |
-| `toolErrors` | counts a command that exits non-zero, since Pi's `bash` reports it as an error; a Bake arm's `bash` returns the exit code in a completed result, so the same failing command counts only on the native arm |
+| `toolErrors` | counts a command that exits non-zero, since Pi's `bash` reports it as an error; a TypeScript arm's `bash` returns the exit code in a completed result, so the same failing command counts only on the native arm |
 
 Check the arm without a key:
 
@@ -205,17 +215,18 @@ The smoke uses dummy credentials, owns its port and temporary root, and is skipp
 
 #### Live paired run
 
-A record of the native arm pairs it with the TypeScript arm of the same commit, on the standard suite with both model sets and three trials. Build the TypeScript arm in a clean checkout, warm the Cargo build, then run one process per model. Each process names the checkout (`native:.`), so its own `cargo build` is a locked no-op that reports the binary and credits it to the checkout's commit. Each run spends model tokens, as described under [Run](#run).
+A record of the native arm against the TypeScript agent pairs the two agents of the same commit, on the standard suite with both model sets and three trials. Build the TypeScript arm in a clean checkout, warm the Cargo build, then run one process per model. Each process names the checkout (`.`), so its own `cargo build` is a locked no-op that reports the binary and credits it to the checkout's commit. Each run spends model tokens, as described under [Run](#run).
 
 ```sh
 bun install --frozen-lockfile && bun run build
 (cd rust && cargo build --locked --release -p bake-cli)   # once, so the parallel runs do not rebuild
 topic=native-arm
 mkdir -p .preflight/evals/agent-loop/$topic
-for model in gemini-3.8-flash-medium gpt-6.1-sol claude-sonnet-5-5 claude-opus-5-5 deepseek/deepseek-flash deepseek/deepseek-v4-pro; do
-  EVAL_ARMS=base=.,candidate=native:. EVAL_MODELS=$model EVAL_TRIALS=3 \
-    EVAL_CASES=standard EVAL_OUTPUT=.preflight/evals/agent-loop/$topic/${model#deepseek/} \
-    bun run eval > .preflight/evals/agent-loop/$topic/${model#deepseek/}.log 2>&1 &
+for model in gemini-3.8-flash-high@high gemini-4-argon-high@medium gpt-6.1-sol claude-sonnet-5-5 claude-opus-5-5 deepseek/deepseek-flash deepseek/deepseek-v4-pro; do
+  name=${model#deepseek/}; name=${name%@*}
+  EVAL_ARMS=base=ts:.,candidate=. EVAL_MODELS=$model EVAL_TRIALS=3 \
+    EVAL_CASES=standard EVAL_OUTPUT=.preflight/evals/agent-loop/$topic/$name \
+    bun run eval > .preflight/evals/agent-loop/$topic/$name.log 2>&1 &
 done
 wait
 bun run eval:record --raw .preflight/evals/agent-loop/$topic \
@@ -225,11 +236,11 @@ bun run eval:record --raw .preflight/evals/agent-loop/$topic \
   --note 'Native arm: Pi prompt and tools, cliproxyapi through the D25 import, DeepSeek over Chat Completions; composition, roster, and delegation are absent for it.'
 ```
 
-As with pi, a native arm measures a different agent rather than one change to the same agent. Its regressions are evidence of where `bake-rs` costs more, not a gate. To compare two native builds, as for a change under `rust/`, pair `base=native:<base worktree>` with `candidate=native`.
+As with pi, a native arm measures a different agent rather than one change to the same agent. Its regressions are evidence of where `bake-rs` costs more, not a gate. To compare two native builds, as for a change under `rust/`, follow [Run](#run).
 
 ## Comparing with pi
 
-An arm named `pi` (or `pi:<path to the CLI>`) runs the installed pi coding agent through the same capturing proxy, fixtures, and checks, so a record can compare Bake with pi on tool calls, round trips, tokens, and cache reads. Each sample runs `pi --mode json` in a private agent directory whose `models.json` points one `eval` provider at the proxy. pi keeps its own system prompt and default tools (`read`, `bash`, `edit`, `write`), with no session, extensions, prompt templates, or context files, and no skills but a skill scenario's own, and agent-level retry is off as in the Bake arms. A `cliproxyapi` model uses the same gateway wire and model metadata as the Bake arm. A DeepSeek model uses pi's own DeepSeek catalog entry, which is Chat Completions at `api.deepseek.com`, so the two arms reach DeepSeek over different wires. The pi arm passes `CLIPROXYAPI_API_KEY` or `DEEPSEEK_API_KEY` from the environment, or from the reference of that name in `~/.bake/.credentials.yaml`. It skips the delegation scenarios, which need tools pi does not ship, so leave them out of `EVAL_CASES`. The stale writer runs as a pi extension on pi's `tool_result` event.
+An arm named `pi` (or `pi:<path to the CLI>`) runs the installed pi coding agent through the same capturing proxy, fixtures, and checks, so a record can compare Bake with pi on tool calls, round trips, tokens, and cache reads. Each sample runs `pi --mode json` in a private agent directory whose `models.json` points one `eval` provider at the proxy. pi keeps its own system prompt and default tools (`read`, `bash`, `edit`, `write`), with no session, extensions, prompt templates, or context files, and no skills but a skill scenario's own, and agent-level retry is off as in the other arms. A `cliproxyapi` model uses the same gateway wire and model metadata as the other arms. A DeepSeek model uses pi's own DeepSeek catalog entry, which is Chat Completions at `api.deepseek.com`, so the two arms reach DeepSeek over different wires. The pi arm passes `CLIPROXYAPI_API_KEY` or `DEEPSEEK_API_KEY` from the environment, or from the reference of that name in `~/.bake/.credentials.yaml`. It skips the delegation scenarios, which need tools pi does not ship, so leave them out of `EVAL_CASES`. The stale writer runs as a pi extension on pi's `tool_result` event.
 
 ```sh
 EVAL_ARMS=bake=.,pi=pi EVAL_MODELS=gpt-6.1-sol EVAL_CASES=no_tools,ordinary_edit,path_discovery,stale_edit,unprompted_edit,multi_site_edit,multi_file_edit,shell_then_edit \

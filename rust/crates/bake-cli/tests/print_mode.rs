@@ -15,6 +15,10 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
+#[cfg(windows)]
+#[path = "print_mode/windows.rs"]
+mod windows;
+
 // The command the messages name, from the source the binary uses.
 #[allow(dead_code)]
 #[path = "../src/docs.rs"]
@@ -305,9 +309,7 @@ impl Workspace {
         self.root.join("project")
     }
 
-    /// Runs `bake-rs` in the project, failing the test if it takes longer
-    /// than [`RUN_TIMEOUT`] rather than hanging it.
-    fn run(&self, args: &[&str], stdin: Option<&str>) -> Output {
+    fn command(&self, args: &[&str], piped_stdin: bool) -> Command {
         let mut command = Command::new(env!("CARGO_BIN_EXE_bake-rs"));
         command
             .args(args)
@@ -317,7 +319,7 @@ impl Workspace {
             .env_remove("CLIPROXYAPI_API_KEY")
             .env("HOME", self.root.join("user"))
             .env("USERPROFILE", self.root.join("user"))
-            .stdin(if stdin.is_some() {
+            .stdin(if piped_stdin {
                 Stdio::piped()
             } else {
                 Stdio::null()
@@ -331,7 +333,16 @@ impl Workspace {
                 command.env_remove(key);
             }
         }
-        let mut child = command.spawn().expect("bake-rs starts");
+        command
+    }
+
+    /// Runs `bake-rs` in the project, failing the test if it takes longer
+    /// than [`RUN_TIMEOUT`] rather than hanging it.
+    fn run(&self, args: &[&str], stdin: Option<&str>) -> Output {
+        let mut child = self
+            .command(args, stdin.is_some())
+            .spawn()
+            .expect("bake-rs starts");
         let input = child.stdin.take();
         let text = stdin.unwrap_or_default().to_owned();
         let writer = std::thread::spawn(move || {
@@ -686,6 +697,178 @@ fn json_mode_writes_the_header_and_every_event() {
     assert_eq!(events[events.len() - 2]["willRetry"], false);
     assert_eq!(events[events.len() - 1]["aborted"], false);
     assert!(workspace.session_files().is_empty());
+}
+
+#[test]
+fn json_mode_drains_large_unicode_records_in_order() {
+    let delta = "é🦀".repeat(12 * 1024);
+    let mut reply = Reply::sse();
+    reply.body = reply.body.replace("Hello from", &delta);
+    let server = Server::start(reply);
+    let workspace = Workspace::new("large-json", server.port);
+    let out = workspace.run(&["--mode", "json", "--no-session", "Say hi"], None);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    assert!(out.stderr.is_empty());
+    let events: Vec<Value> = std::str::from_utf8(&out.stdout)
+        .expect("complete UTF-8")
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("complete JSON line"))
+        .collect();
+    let final_message = events
+        .iter()
+        .find(|event| event["type"] == "message_end" && event["message"]["role"] == "assistant")
+        .expect("completed assistant message");
+    assert_eq!(
+        final_message["message"]["content"][0]["text"],
+        format!("{delta} the loop.")
+    );
+    assert_eq!(events.last().expect("settled")["type"], "agent_settled");
+}
+
+#[test]
+fn a_closed_json_output_pipe_reports_failure_after_session_shutdown() {
+    let server = Server::start(Reply::sse());
+    let workspace = Workspace::new("closed-json", server.port);
+    let (reader, writer) = std::io::pipe().expect("output pipe");
+    drop(reader);
+    let mut child = OwnedChild(
+        workspace
+            .command(&["--mode", "json", "Say hi"], false)
+            .stdout(writer)
+            .spawn()
+            .expect("bake-rs starts"),
+    );
+    let deadline = Instant::now() + RUN_TIMEOUT;
+    let status = loop {
+        if let Some(status) = child.0.try_wait().expect("status") {
+            break status;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "closed output prevented session completion"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    assert_eq!(status.code(), Some(1));
+    let entries = lines(&workspace.session_files()[0]);
+    assert!(
+        entries
+            .iter()
+            .any(|entry| entry["message"]["role"] == "assistant")
+    );
+}
+
+struct OwnedChild(std::process::Child);
+
+impl Drop for OwnedChild {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_full_json_output_pipe_can_be_cancelled_without_a_reader() {
+    use std::os::fd::AsRawFd;
+
+    let mut reply = Reply::sse();
+    reply.body = reply.body.replace("Hello from", &"x".repeat(64 * 1024));
+    let server = Server::start(reply);
+    let workspace = Workspace::new("blocked-json", server.port);
+    let (mut reader, writer) = std::io::pipe().expect("output pipe");
+    // One page makes the full-pipe state observable without relying on the
+    // host's default capacity. Keep a writer to verify flag restoration.
+    assert_eq!(
+        unsafe { libc::fcntl(writer.as_raw_fd(), libc::F_SETPIPE_SZ, 4096) },
+        4096
+    );
+    let probe = writer.try_clone().expect("pipe probe");
+    let original_flags = unsafe { libc::fcntl(probe.as_raw_fd(), libc::F_GETFL) };
+    let mut child = OwnedChild(
+        workspace
+            .command(
+                &[
+                    "--mode",
+                    "json",
+                    "--no-tools",
+                    "--system-prompt",
+                    "Reply briefly.",
+                    "Say hi",
+                ],
+                false,
+            )
+            // A blocked producer must not occupy the only signal executor.
+            .env("TOKIO_WORKER_THREADS", "1")
+            .stdout(writer)
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("bake-rs starts"),
+    );
+    let deadline = Instant::now() + RUN_TIMEOUT;
+    assert_ne!(
+        unsafe { libc::fcntl(reader.as_raw_fd(), libc::F_SETFL, libc::O_NONBLOCK) },
+        -1
+    );
+    // Drain only startup and the beginning of the large provider delta. Once
+    // its marker arrives, tens of KiB still need the pipe and no reader helps.
+    loop {
+        let mut prefix = [0; 4096];
+        match reader.read(&mut prefix) {
+            Ok(count) if prefix[..count].windows(32).any(|bytes| bytes == [b'x'; 32]) => break,
+            Ok(0) => panic!("stdout closed before the provider delta"),
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+            Err(error) => panic!("read startup: {error}"),
+        }
+        assert!(
+            Instant::now() < deadline,
+            "no large provider delta reached stdout"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(!server.requests().is_empty());
+    loop {
+        let mut available: libc::c_int = 0;
+        assert_eq!(
+            unsafe { libc::ioctl(reader.as_raw_fd(), libc::FIONREAD, &mut available) },
+            0
+        );
+        if available == 4096 {
+            break;
+        }
+        assert!(
+            child.0.try_wait().expect("status").is_none(),
+            "exited before filling stdout"
+        );
+        assert!(
+            Instant::now() < deadline,
+            "stdout did not fill after a provider request"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(unsafe { libc::kill(child.0.id() as i32, libc::SIGTERM) }, 0);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let status = loop {
+        if let Some(status) = child.0.try_wait().expect("status") {
+            break status;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "SIGTERM did not stop the process while stdout stayed unread"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    assert_eq!(status.code(), Some(143));
+    assert_eq!(
+        unsafe { libc::fcntl(probe.as_raw_fd(), libc::F_GETFL) },
+        original_flags
+    );
+    let files = workspace.session_files();
+    assert_eq!(files.len(), 1);
+    let session = bake_coding_agent::session::SessionManager::open(&files[0], None, None)
+        .expect("the stopped session can be reopened");
+    drop(session);
 }
 
 #[test]
@@ -1188,8 +1371,9 @@ fn sent_tool_output(request: &Request) -> String {
 
 /// D24 through `bake-rs -p --permission workspace-write`: the model's
 /// `write` outside the project is refused before any effect, and the tool
-/// result sent back is the denial marker and the escalation hint
-/// (`packages/fs/tool-fs/src/sandbox.ts` `mapError`). The target lives under
+/// result sent back is the denial marker (`packages/fs/tool-fs/src/sandbox.ts`
+/// `mapError`), without the escalation hint, since `-p` has no one to
+/// approve one. The target lives under
 /// Cargo's per-target temporary directory, outside the project and outside
 /// the temporary directories `workspace-write` also allows.
 /// Removes a test's directory on drop, so a failed assertion leaves nothing.
@@ -1236,23 +1420,17 @@ fn print_mode_refuses_a_write_outside_the_project() {
     assert_eq!(requests.len(), 2);
     assert_eq!(
         sent_tool_output(&requests[1]),
-        "[sandbox: file access denied under workspace-write mode]\n[sandbox: escalation available — retry this exact operation once with sandbox_permissions (the narrowest wider mode that suffices) + justification; the approval prompt asks the user]"
+        "[sandbox: file access denied under workspace-write mode]"
     );
-    // The file tools advertise the escalation parameters.
-    let write = requests[0].body["tools"]
-        .as_array()
-        .expect("tools")
-        .iter()
-        .find(|tool| tool["name"] == "write")
-        .expect("write is declared");
-    assert_eq!(
-        write["parameters"]["properties"]["sandbox_permissions"],
-        json!({
-            "type": "string",
-            "enum": ["workspace-write", "danger-full-access"],
-            "description": "One retry after a sandbox denial; asks the user.",
-        })
-    );
+    // With no one to approve an escalation, no tool offers one.
+    for tool in requests[0].body["tools"].as_array().expect("tools") {
+        let properties = &tool["parameters"]["properties"];
+        assert!(
+            properties.get("sandbox_permissions").is_none()
+                && properties.get("justification").is_none(),
+            "{tool}"
+        );
+    }
     // The permission is stated in the system prompt.
     let system = &transcript(&requests[0])[0];
     let root = serde_json::to_string(
@@ -1263,7 +1441,7 @@ fn print_mode_refuses_a_write_outside_the_project() {
     .expect("root");
     assert!(
         system.contains(&format!(
-            "\n<permissions>\nFile sandbox: workspace-write. Sandboxed tools can modify files under {root}, and possibly in some temporary directories.\n\nApproval prompts: disabled. Actions that need approval are rejected automatically, so do not request sandbox escalation with `sandbox_permissions`.\n</permissions>\n\n<environment>\n"
+            "\n<permissions>\nFile sandbox: workspace-write. Sandboxed tools can modify files under {root}, and possibly in some temporary directories.\n\nApproval prompts: disabled. Actions that need approval are rejected automatically.\n</permissions>\n\n<environment>\n"
         )),
         "{system}"
     );
@@ -1276,7 +1454,7 @@ fn print_mode_refuses_a_write_outside_the_project() {
 /// D24 through `bake-rs -p` on a real backend: under `workspace-write`, a
 /// bash write outside the project and the temporary directories is denied by
 /// the kernel, nothing is created, and the result carries the denial marker
-/// and the escalation hint.
+/// without the escalation hint.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn workspace_write_confines_bash() {
@@ -1307,7 +1485,8 @@ fn workspace_write_confines_bash() {
         sent.contains("[sandbox: file access denied under workspace-write mode]"),
         "{sent}"
     );
-    assert!(sent.contains("[sandbox: escalation available"), "{sent}");
+    // `-p` has no one to approve an escalation, so the denial offers none.
+    assert!(!sent.contains("[sandbox: escalation available"), "{sent}");
     let _ = std::fs::remove_dir_all(&outside);
 }
 

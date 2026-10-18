@@ -2,9 +2,9 @@
 
 ## Summary
 
-Shape the native runtime so that every unit of agent work (a model request, a tool call, a compaction, a child agent, a background job) is an owned, typed task whose start, progress, and outcome are recoverable from the session file. This page takes the task-and-scheduler model of Pi Durable as a design reference and applies it inside Bake's retained contracts: Pi's session format ([D32](scope-00/support.md#decision-register)), one serialized owner per agent, and model requests reconstructable from the session file. It adds internal structure and crash-recovery proofs to scopes 02 to 13. Changes the model or Pi's session reader could observe are listed separately as post-0.4.0 candidates, each needing its own decision and paired eval.
+Shape the native runtime so that every unit of agent work (a model request, a tool call, a compaction, a child agent, a background job) is an owned, typed task whose start, progress, and outcome are recoverable from the session file. This page takes the task-and-scheduler model of Pi Durable as a design reference and applies it inside Bake's retained contracts: Pi's session format ([D32](scope-00/support.md#decision-register)), one serialized owner per agent, and model requests reconstructable from the session file. It adds internal structure and crash-recovery proofs to scopes 02 to 13. The owner adopted selected-run recovery, typed task documents, and background compaction as [opt-in 0.4.0 features](#opt-in-features-for-040) under [D37](scope-00/support.md#decision-register); each still needs implementation, crash evidence, and paired evals. Other model-visible changes remain post-0.4.0 candidates.
 
-**Status: proposed direction, 2026-10-08; reconciled with [D22](scope-00/support.md#decision-register), [D32](scope-00/support.md#decision-register), and [D33](scope-00/support.md#decision-register) on 2026-10-14.** The rules below are requirements for the native runtime, and none is qualified. [Current implementation](#current-implementation) says which already hold in `bake-rs` and which test, if any, shows it; [Crash-recovery matrix](#crash-recovery-matrix) marks each kill point's evidence. This page changes no support decision. Bake Session format 3 and its events (`tool/call`, `assistant/attempt`, `compaction/start`, and the rest) are not written or read by 0.4; where this page names them, it describes 0.3. Pi Durable's storage, API, and entry kinds are not adopted.
+**Status: proposed direction, 2026-10-08; reconciled with [D22](scope-00/support.md#decision-register), [D32](scope-00/support.md#decision-register), and [D33](scope-00/support.md#decision-register) on 2026-10-14.** The rules below are requirements for the native runtime, and none is qualified. [Current implementation](#current-implementation) says which already hold in `bake-rs` and which test, if any, shows it; [Crash-recovery matrix](#crash-recovery-matrix) marks each kill point's evidence. The support register owns the adopted scope; this page specifies its required behavior and missing evidence. Bake Session format 3 and its events (`tool/call`, `assistant/attempt`, `compaction/start`, and the rest) are not written or read by 0.4; where this page names them, it describes 0.3. Pi Durable's storage, API, and entry kinds are not adopted.
 
 ## Table of Contents
 
@@ -12,6 +12,7 @@ Shape the native runtime so that every unit of agent work (a model request, a to
 - [What 0.3 recorded and what Pi's session records](#what-03-recorded-and-what-pis-session-records)
 - [Design rules for 0.4.0](#design-rules-for-040)
 - [Current implementation](#current-implementation)
+- [Opt-in features for 0.4.0](#opt-in-features-for-040)
 - [Post-0.4.0 candidates](#post-040-candidates)
 - [Non-goals](#non-goals)
 - [Scope additions](#scope-additions)
@@ -45,7 +46,7 @@ Bake 0.3 was closer to durable execution than a typical session harness. Under [
 
 ## Design rules for 0.4.0
 
-These rules change internal structure, not the model surface or the session format. Each is testable through the matrix below.
+These rules define the baseline internal structure and Pi-format behavior. The separately adopted opt-in features add model-visible policy under D37. Each rule is testable through the matrix below.
 
 ### 1. Work is an owned task with a recoverable status
 
@@ -63,7 +64,7 @@ Keep the order: persist the assistant message that requests a call before any ef
 | `idempotent` | Rerunning with the same key has the same effect (a write of identical bytes, a child lookup by owner) | Pi's synthetic error result; no automatic rerun |
 | `report` | Effects may have happened and repeating could duplicate them (shell, edits with relative changes, external deploys) | Pi's synthetic error result; no automatic rerun |
 
-In 0.4.0 the class is internal metadata with tests, not a behavior change: automatic rerun alters what the model sees and is a [post-0.4.0 candidate](#post-040-candidates). The native plugin API ([D6](scope-00/support.md#decision-register)) requires every contributed tool to declare a class and defaults to `report`. MCP tools default to `report`, matching the [Pi reference](pi-reference.md#native-mcp-direction) rule against retrying calls whose outcome is uncertain.
+The baseline keeps the class as internal metadata. D37 allows selected-run continuation from safe checkpoints, with no automatic replay of uncertain external effects; automatic tool rerun remains a separate [post-0.4.0 candidate](#post-040-candidates). The native plugin API ([D6](scope-00/support.md#decision-register)) requires every contributed tool to declare a class and defaults to `report`. MCP tools default to `report`, matching the [Pi reference](pi-reference.md#native-mcp-direction) rule against retrying calls whose outcome is uncertain.
 
 ### 3. One ownership tree, with an explicit background boundary
 
@@ -95,7 +96,7 @@ Not groups: a compaction is one entry, its usage inside it; a message, a session
 
 ### 5. Compaction is a task, not a phase of the loop
 
-Implement compaction as a task owned by the agent, with its own cancellation, retries, usage accounting, and recovered status, instead of a step the loop calls inline. In 0.4.0 the loop still waits for it where Pi waits, so prompts and placement are unchanged. The structure lets a later release start a summary in the background and place it at a turn boundary without redesigning the loop.
+Implement compaction as a task owned by the agent, with its own cancellation, retries, usage accounting, and recovered status, instead of a step the loop calls inline. The default loop still waits where Pi waits. D37 adds opt-in background summarization with validation and commit at a turn boundary; synchronous overflow recovery remains available.
 
 ### 6. Clients attach to the owner's view
 
@@ -103,7 +104,7 @@ The agent owner publishes one view: transcript projection, live stream, running 
 
 ### 7. Decisions are recorded once
 
-Any human or hook decision that gates an effect, such as an approval, a question answer, or a hook's block or rewrite, is committed before the effect it gates. Recovery reads the recorded decision instead of asking again or re-evaluating a hook that may answer differently. Scopes 04, 08, and 12 choose how each decision is recorded in the session file before its effect; the session's permission settings already use `bake.permission` custom entries, which the model does not see.
+Any human or hook decision that gates an effect, such as an approval, a question answer, or a hook's block or rewrite, is committed before the effect it gates. Recovery reads the recorded decision as evidence of the original effect. A new or resumed dispatch still checks current permissions and never inherits a one-time approval from another execution. Scopes 04, 08, and 12 choose how each decision is recorded in the session file before its effect; the session's permission settings already use `bake.permission` custom entries, which the model does not see.
 
 ## Current implementation
 
@@ -120,18 +121,33 @@ At candidate `e32476594bace82b57980fe8e1d57e48e3c4c53c`, with the group append a
 | Replay classes, compaction as a task, attached views, logged decisions (rules 2, 3, 5 to 7) | Not implemented | None |
 | Ownership tree (rule 3) | Partial: every tool's child (bash, exec, grep, find) is spawned through `OwnedProcess` under the session's `WorkGate`, which after a kill awaits the leader and its whole tree with no time limit, never signals a tree whose leader it no longer pins, and on drop settles the process under the same permit; a model request's task awaits its provider task; `AgentSession`'s `WorkGate` owns the session's tasks and blocking work, with cancellation passed from a task to the tasks it spawned, and `spawn_background` is the background lifetime that `abort` leaves and shutdown cancels and awaits; `AgentSession::shutdown` removes listeners and closes the writer | Tested for bash and exec process trees and for the gate and session (`owned_work::tests`, `agent_session::service_tests`); process-tree waits are proven on Linux with a subreaper (`tests/process_reap.rs`), Windows and macOS only cross-checked, and provider tasks over loopback HTTP (`model_registry::tests`); a normal exit's backgrounded descendants, a descendant that leaves its tree, the bubblewrap payload's namespace, `config_value` commands, and sandbox probes are outside it; no tree spans agents, jobs, or children |
 
+## Opt-in features for 0.4.0
+
+**Accepted scope, not implemented or qualified (2026-10-18, [D37](scope-00/support.md#decision-register)).** The owner adopted all three features for 0.4.0 with opt-in activation and the qualification gates below. Preserve the Pi loop. Their common prerequisite is a versioned run journal in Pi `custom` entries: run identity, admission, limits, provider-call debits, effect dispatch, and terminal outcome. A debit is synced before a provider call starts and is retained after a crash even if usage is unknown. Normal requests, retry attempts exposed at the model-call boundary, both summaries of a split-turn compaction, and verification share the allowance. HTTP transport retries need their own accounting if a wire-request cap is promised. A deadline cancels execution and stops admission, then awaits cleanup; its cleanup duration is reported separately. Across a restart, expiry never extends automatically: store the original expiry and refuse automatic continuation when clock continuity cannot be established. An in-process timer uses a monotonic clock.
+
+| Decision | Required 0.4.0 behavior | Excluded from this adoption |
+|---|---|---|
+| Automatic continuation | An explicit opt-in resumes one selected interrupted run after acquiring its session writer lock, validating its selected branch, checking remaining limits, and rebuilding its durable checkpoint. A fully committed final assistant response closes the run even if its terminal journal entry was interrupted. | Scanning and resuming every session; reviving cancelled, expired, or failed runs; inheriting an old approval; replaying an external effect with an unknown outcome. |
+| Typed task documents | Store small, complete, versioned plan, todo, and goal snapshots in Pi `custom` entries. Each update names the expected previous revision, and a pure branch projection owns the current state. Persist the exact chosen revision as a model-visible message before using it in a request. | New top-level session entry kinds; executable document content; a general patch language; plugin-defined task schedulers. |
+| Background compaction | One opt-in session-owned task summarizes a closed prefix. At a later turn boundary, the owner commits a normal Pi `compaction` entry only if the snapshot's ancestry, projected input, retained boundary, and context revision still match. | Mid-stream context replacement; rebasing a stale summary by guesswork; cross-process reattachment; removing synchronous overflow recovery. |
+
+Automatic continuation and effect replay are separate decisions. A synced assistant call proves intent, not dispatch. New journaled runs sync a dispatch record before a tool starts; without that record, a call may be dispatched only after current permission checks. A dispatch without a durable result is uncertain. Shell, MCP, plugins, and other tools with external effects stop for reconciliation in that state. A `safe` classification permits rereading only under current policy; an idempotence claim needs a target-enforced key or checked precondition. The runtime promises no automatic replay of uncertain effects, not exactly-once external execution. Old sessions without a dispatch journal cannot prove that a call never started. A recovery notice that informs the model is committed before the resumed request.
+
+Document snapshots carry a document id, kind, revision, previous revision entry id, content, state, and evidence references. Model claims and verified state remain separate. Evidence names the checked artifact versions and becomes stale when they change; a successful check over yesterday's files cannot close today's goal. A fork inherits immutable document history at its branch point and creates new execution identities, with no active lease or approval inherited. Branches update their own projections. New sessions currently delay writing custom-only entries until a conversation exists, so admission must commit a conversation-bearing group before acknowledging durability; every prefix of that group must recover deterministically.
+
+A background summary holds no authority to mutate the session. Its candidate records the source branch and compaction revision, exact input fingerprint, model/settings, and retained boundary. Transcript growth can preserve a candidate only if the summarized prefix remains valid; navigation, context edits, or another compaction can invalidate it. The owner rejects stale candidates and publishes only after the compaction append succeeds. Shutdown, branch switching, or manual compaction cancels and awaits the candidate. Reserve enough allowance for useful foreground work, including both requests a split-turn summary may require. Crashing before commit preserves the original context; crashing after commit rebuilds from the one recorded compaction.
+
+Adoption gates are concrete: kill after each admission, debit, dispatch, result, and terminal-record boundary; prove an external counter is never incremented again for an uncertain effect; race two writer contenders; deny resumed work under current D24 policy; reopen every partial group; compare replayed requests with the committed inputs; reject stale document revisions and evidence; grow the transcript during summarization and invalidate a candidate through navigation and context edits; cancel on each side of the commit; and verify no late task or view update after shutdown. Paired evals must report verified success, unsuccessful clean exits, repeated work, recovery requests, wasted speculative summaries, verification overhead, total tokens, cache reads, and latency. A feature remains opt-in until those records justify a default change.
+
 ## Post-0.4.0 candidates
 
 Each of these changes what the model sees, what a released reader must understand, or a public protocol. None is a 0.4.0 requirement. Each needs an owner decision, a regression test, and, when model-visible, a paired eval record.
 
 | Candidate | Benefit | Constraint |
 |---|---|---|
-| Continue an interrupted run on resume | A crash or sleep no longer ends the user's request | Must not rerun `report` tools; the resumed request must be reconstructable from the session file |
 | Automatically rerun `safe` tools after a crash | Fewer wasted model round trips after recovery | Changes the model surface; eval against Pi's synthetic `No result provided` result |
-| Background compaction placed at a turn boundary | Long sessions stop pausing for summaries | New placement and staleness rules; prompt-cache and request reconstruction proofs; long-session eval |
 | Idempotent submissions keyed by a client request id | Headless and retained transport clients' retries after a crash cannot double-submit | Desktop is deferred beyond 0.4.0 ([D9](scope-00/support.md#decision-register)); a Desktop client needs a coordinated protocol change in a later release |
 | Durable background jobs and schedules | Background work survives restarts | Process and sandbox ownership after restart; scope 04 proofs for adopting or killing orphans |
-| Typed agent documents (plans, todos, goals) with fork rules | Application state stays consistent with the transcript through forks | New entry kinds that Pi's reader must still open; a decision on extending Pi's format |
 | Hook memos and plugin-defined task types | Native plugins get crash-safe decisions and long-running work | Part of the D6 plugin API design; needs a named consumer |
 
 ## Non-goals
@@ -139,7 +155,7 @@ Each of these changes what the model sees, what a released reader must understan
 - No SQLite, Pi Durable JSONL, or other new storage backend. Pi's session files, with the writer exclusion scope 03 adds, remain the only storage.
 - No general scheduler that bypasses the agent owner. Concurrency stays bounded work that returns results to the owner, and only the owner commits.
 - No multi-writer or multi-process execution of one session; the writer lock excludes a second writer.
-- No change in this direction to tool names, schemas, results, or recovery messages, which follow Pi ([D33](scope-00/support.md#decision-register)).
+- No unrelated changes to tool names, schemas, results, or recovery messages. D33 governs the baseline; D37 permits the documented opt-in task documents and continuation policy.
 
 ## Scope additions
 
@@ -179,3 +195,15 @@ Add these cases to [verification](verification.md#acceptance-matrix) as each sco
 ## Dev Note
 
 This page owns the durable-execution direction and its Pi Durable provenance. The [Pi reference](pi-reference.md) owns the other inspected Pi revisions, and the [support register](scope-00/support.md#decision-register) owns product decisions; any candidate above that is adopted moves into that register first.
+
+**Harness experiments proposed after the 2026-10-18 audit; not adopted behavior.** Keep one Pi-style executor and qualify its lifecycle fixes before changing its continuation policy. A run ending says only that execution stopped. Proposed native outcomes distinguish a finished turn, cancellation, exhausted budget, and failure; verified task completion additionally requires evidence for the final artifact versions. A common run policy would carry an absolute monotonic deadline and a request allowance through retries, compaction, tools, and completion-notice turns. Exhaustion stops admission and cancels work, then awaits cleanup; cleanup time remains separately measured and is never treated as permission to abandon a process.
+
+| Experiment | Candidate and control | Acceptance evidence |
+|---|---|---|
+| Selective verification | Compare the existing executor with an optional final or milestone check over the same artifact hashes. A verifier inspects an isolated copy and may write its test outputs there. A changed artifact invalidates earlier evidence. Do not add a manager and auditor to every turn. | Independent fixture checks, false completion count, stale evidence rejected, repair requests, verification tokens, and total latency. Charge verification against the same task budget. |
+| Context reduction | Compare current compaction with masking older tool observations, then a masking-plus-compaction arm. Preserve the session log, tool-call/result pairing, recent errors, and the exact deterministic projection needed to reconstruct each request. | Paired long-session success, repeated reads, retained facts, cache reads, summary requests, tokens, and latency. Tune thresholds on separate tasks; do not copy a paper's window size. |
+| Bounded tool parallelism | Compare current batch-wide serialization with bounded groups of independent read tools separated by mutation barriers. Treat shell, unknown tools, and state-changing tools as barriers. Preserve source-order result persistence and approval and cancellation ownership. | Controlled overlap and barrier tests, active-task bound, equal final files and permissions, cancelled work drained, plus paired task success and latency. Keep sequential tasks in the comparison. |
+
+These are hypotheses. [LongHorizon-Harness](https://arxiv.org/html/2608.01964v1) supports independently checking the environment while retaining an executor's native loop, but its cost varies by benchmark and its GUI comparison also changes available capabilities; it does not isolate the value of each role. [The Complexity Trap](https://arxiv.org/html/2508.21433v3) motivates a masking control, with model-dependent quality losses and cache tradeoffs that prevent treating masking as a universal improvement. [Towards a Science of Scaling Agent Systems](https://arxiv.org/html/2512.08296v3) motivates testing parallelizable and sequential workloads separately; its multi-agent results do not establish that any particular Bake scheduler improves task success.
+
+The owner adopted the three [opt-in features](#opt-in-features-for-040) on 2026-10-18 under D37; implementation and qualification remain open. Measurement must use native-versus-native arms, independent artifact checks, three trials across the standard and extended model sets, and all evaluator failures retained. Lifecycle measurements also need deterministic full-pipe, provider-stall, cancellation, and crash fixtures, since a live model's success rate cannot prove those properties.

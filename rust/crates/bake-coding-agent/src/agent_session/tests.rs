@@ -486,6 +486,81 @@ async fn every_listener_sees_queue_updates_in_order() {
     session.shutdown().await;
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn message_end_observers_see_the_committed_assistant() {
+    let dir = TempDir::new("observer-commit");
+    let cwd = dir.path().to_string_lossy().into_owned();
+    let h = harness();
+    h.faux
+        .set_responses(vec![faux_assistant_message("committed answer").into()]);
+    let manager = new_file_session(&dir);
+    let file = manager.session_file().expect("file path").to_path_buf();
+    let session = AgentSession::create(options(&h, manager, &cwd))
+        .await
+        .expect("session");
+    let observations = Arc::new(Mutex::new(Vec::new()));
+    let observed = Arc::clone(&observations);
+    session.subscribe(move |event| {
+        if let SessionEvent::Agent(AgentEvent::MessageEnd { message }) = event
+            && let Some(assistant) = message.as_assistant()
+        {
+            let written = std::fs::read_to_string(&file)
+                .map_err(|error| error.to_string())
+                .map(|text| {
+                    text.lines().any(|line| {
+                        serde_json::from_str::<serde_json::Value>(line)
+                            .ok()
+                            .and_then(|entry| entry.get("message").cloned())
+                            .and_then(|value| serde_json::from_value::<Message>(value).ok())
+                            .is_some_and(|stored| stored == Message::Assistant(assistant.clone()))
+                    })
+                });
+            observed.lock().expect("observations").push(written);
+        }
+    });
+    let result = session.prompt("answer", Vec::new()).await;
+    session.shutdown().await;
+    result.expect("prompt");
+    assert_eq!(*observations.lock().expect("observations"), [Ok(true)]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_panicking_session_observer_does_not_starve_persistence_or_observers() {
+    let dir = TempDir::new("observer-panic");
+    let cwd = dir.path().to_string_lossy().into_owned();
+    let h = harness();
+    h.faux
+        .set_responses(vec![faux_assistant_message("done").into()]);
+    let session = AgentSession::create(options(&h, new_file_session(&dir), &cwd))
+        .await
+        .expect("session");
+    session.subscribe(|event| {
+        if matches!(event, SessionEvent::Agent(AgentEvent::MessageEnd { .. })) {
+            panic!("broken presentation subscriber");
+        }
+    });
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let log = Arc::clone(&seen);
+    session.subscribe(move |event| {
+        if let SessionEvent::Agent(AgentEvent::MessageEnd { message }) = event {
+            log.lock()
+                .expect("observations")
+                .push(message.role().to_owned());
+        }
+    });
+    let result = session.prompt("answer", Vec::new()).await;
+    session.shutdown().await;
+    result.expect("prompt");
+    assert_eq!(h.faux.call_count(), 1);
+    assert_eq!(
+        *seen.lock().expect("observations"),
+        ["system", "user", "assistant"]
+    );
+    let reopened = SessionManager::open(&session.session_file().expect("file"), None, None)
+        .expect("persisted session");
+    assert_eq!(reopened.build_session_context().messages.len(), 3);
+}
+
 // Pi: "should persist message_end events in order with slow extension
 // handlers", with a slow session listener in place of the extension.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -846,9 +921,19 @@ async fn a_failed_write_aborts_the_run() {
     })
     .await
     .expect("session");
+    let completed_results = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let observed = Arc::clone(&completed_results);
+    session.subscribe(move |event| {
+        if let SessionEvent::Agent(AgentEvent::MessageEnd { message }) = event
+            && message.as_tool_result().is_some()
+        {
+            observed.fetch_add(1, Ordering::SeqCst);
+        }
+    });
     let result = session.prompt("run", Vec::new()).await;
     assert!(result.is_err(), "{result:?}");
     assert_eq!(runs.load(Ordering::SeqCst), 1);
+    assert_eq!(completed_results.load(Ordering::SeqCst), 0);
     let tool_errors = blocked
         .lock()
         .unwrap_or_else(PoisonError::into_inner)

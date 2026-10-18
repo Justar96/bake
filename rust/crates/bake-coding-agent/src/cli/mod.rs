@@ -943,6 +943,13 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
         approver.unwrap_or_else(|| Arc::new(NoApprover)),
         Arc::clone(&sandbox_provider),
     );
+    // As the prompt states `never` without an answerer, the tools offer no
+    // escalation that would fail.
+    let tool_permissions = if can_ask {
+        tool_permissions
+    } else {
+        tool_permissions.without_escalation()
+    };
     let session_file = session
         .session_file()
         .map(|file| file.to_string_lossy().into_owned());

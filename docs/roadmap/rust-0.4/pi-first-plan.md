@@ -59,7 +59,7 @@ Not retained: Bake Session logs of any format (0.4 writes Pi's session format), 
 1. **Start from Pi's owner, not Bake's package.** Port Pi's structure and code for the concern, then add only what a retained contract or an accepted Bake design rule needs.
 2. **Pi's session is the log.** The native loop takes Pi's shape (explicit inputs, typed hook points, injected stream function) and writes Pi's session format; a resumed session rebuilds its context from that file as Pi's session manager does.
 3. **Bake's design rules still apply:**
-   - the [durable execution direction](durable-execution.md): owned tasks, intent before effect, replay classes, and one ownership tree;
+   - the [durable execution direction](durable-execution.md): owned tasks, intent before effect, replay classes, and one ownership tree; [D37](scope-00/support.md#decision-register) additionally adopts opt-in selected-run recovery, typed task documents, and background compaction for 0.4.0, with the [specified replay limits and qualification gates](durable-execution.md#opt-in-features-for-040);
    - [defensive patterns](../../defensive-patterns.md): awaited teardown and no late callbacks;
    - the [harness audit](#dev-note) recommendations: typed stages instead of open waterfalls, and one owner per agent.
 4. **Where Pi has no equivalent, port Bake selectively.** Examples are the sandbox, approvals, subagents, goals, jobs, schedules, hooks, and the web tools. Keep the parts the model sees; redesign the rest within Pi's structure.

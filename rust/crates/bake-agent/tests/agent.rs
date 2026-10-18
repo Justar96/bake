@@ -1392,17 +1392,64 @@ async fn nothing_runs_after_the_agent_is_idle() {
     assert_eq!(*last.lock().unwrap(), "agent_end");
 }
 
-/// Bake: a panicking listener ends the run as a failed turn and leaves the
-/// agent idle and usable.
+/// Bake: synchronous and asynchronous observer panics must not prevent a
+/// completed tool's result from reaching later listeners or the next turn.
 #[tokio::test]
-async fn a_panicking_listener_fails_the_run_without_wedging_the_agent() {
+async fn panicking_observers_do_not_interrupt_tool_results_or_later_listeners() {
+    let agent = agent(tools_then_done(vec![call("call_1", "echo", json!({}))]));
+    agent.set_tools(vec![tool("echo")]);
+    agent.subscribe_fn(|event, _| {
+        if matches!(event, AgentEvent::ToolExecutionEnd { .. }) {
+            panic!("synchronous observer failed");
+        }
+    });
+    agent.subscribe(|event, _| {
+        Box::pin(async move {
+            if matches!(event, AgentEvent::MessageEnd { .. }) {
+                tokio::task::yield_now().await;
+                panic!("asynchronous observer failed");
+            }
+        })
+    });
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let observed = Arc::clone(&events);
+    agent.subscribe_fn(move |event, _| observed.lock().unwrap().push(event.clone()));
+
+    agent.prompt("go").await.unwrap();
+
+    assert!(!agent.is_streaming());
+    assert!(agent.pending_tool_calls().is_empty());
+    assert_eq!(agent.error_message(), None);
+    let events = events.lock().unwrap();
+    assert_eq!(tool_end_ids(&events), ["call_1"]);
+    assert_eq!(tool_result_ids(&events), ["call_1"]);
+    assert_eq!(kinds(&events).last().copied(), Some("agent_end"));
+    let recorded: Vec<_> = events
+        .iter()
+        .filter_map(|event| match event {
+            AgentEvent::MessageEnd { message } => Some(message.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(recorded, agent.messages());
+    assert_eq!(
+        recorded.last().unwrap().as_assistant().unwrap().stop_reason,
+        StopReason::Stop
+    );
+}
+
+/// Bake: a failed critical participant stops the run and leaves the agent
+/// idle and usable.
+#[tokio::test]
+async fn a_panicking_critical_listener_fails_the_run_without_wedging_the_agent() {
     let agent = agent(done());
     let armed = Arc::new(AtomicBool::new(true));
     let a = Arc::clone(&armed);
-    agent.subscribe_fn(move |event, _| {
+    agent.subscribe_critical(move |event, _| {
         if event.kind() == "agent_start" && a.swap(false, Ordering::SeqCst) {
             panic!("listener exploded");
         }
+        Box::pin(async {})
     });
     agent.prompt("one").await.unwrap();
     assert!(!agent.is_streaming());

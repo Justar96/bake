@@ -134,6 +134,7 @@ dependencies = [
  "bake-agent",
  "bake-ai",
  "bake-coding-agent",
+ "bake-process",
  "bake-sandbox",
  "bake-tui",
  "getrandom 0.2.17",

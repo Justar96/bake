@@ -16,7 +16,7 @@ use crate::api::openai_responses_shared::{
     convert_responses_tools,
 };
 use crate::api::simple_options::{build_base_options, resolve_sampling_params};
-use crate::api::{error_message, spawn_stream};
+use crate::api::{error_message, spawn_http_stream, spawn_stream};
 use crate::http::{HttpRequest, SdkErrorShape, join_url, send};
 use crate::models::clamp_thinking_level;
 use crate::options::{
@@ -402,7 +402,7 @@ pub fn stream(
 ) -> AssistantMessageEventStream {
     let model = model.clone();
     let context = context.clone();
-    spawn_stream(&model.clone(), move |sender| {
+    spawn_http_stream(&model.clone(), move |sender| {
         run(sender, model, context, options)
     })
 }

@@ -33,6 +33,11 @@
 //! withdraws a waiting request, and closes the broker, so any later request
 //! is `unavailable`.
 //!
+//! MCP registry changes are observed even while the session is idle.
+//! Startup, refresh, and connection failures publish diagnostic rows with
+//! the server's name; server error bodies and stderr stay out of the view.
+//! Replacing the session replaces this subscription along with its tools.
+//!
 //! The port owns the session from [`LivePort::start`], but runs nothing
 //! until [`LivePort::begin`], so no prompt starts before the terminal is
 //! set up. Stopping or dropping it closes the request channel, as does a
@@ -41,6 +46,7 @@
 //! [`LivePort::stop`] returns. No update is sent after that.
 
 pub mod commands;
+mod mcp;
 pub mod projection;
 pub mod tree;
 
@@ -65,6 +71,7 @@ use tokio::task::JoinHandle;
 
 use crate::port::Request;
 use bake_coding_agent::cli::SessionFactory;
+use mcp::McpNotices;
 use projection::Projector;
 
 /// Pi v1.2.0's built-in slash commands (`core/slash-commands.ts`) that
@@ -212,6 +219,7 @@ impl LivePort {
         let (finished, done) = std_mpsc::channel();
         let driver = Driver {
             session: Arc::clone(&session),
+            mcp: session.mcp_servers().map(McpNotices::new),
             projector,
             send,
             gone,
@@ -421,11 +429,13 @@ enum Next {
     /// A background job may have settled while the session was idle.
     Jobs,
     Commanded(Result<commands::Outcome, tokio::task::JoinError>),
+    McpChanged,
     Request(Option<Request>),
 }
 
 struct Driver {
     session: Arc<AgentSession>,
+    mcp: Option<McpNotices>,
     projector: Arc<Mutex<Projector>>,
     send: Send,
     gone: Arc<Gone>,
@@ -490,6 +500,7 @@ impl Driver {
     async fn run(mut self, mut inbox: mpsc::UnboundedReceiver<Request>) {
         let mut running: Option<Running> = None;
         self.status();
+        self.publish_mcp();
         if let Some(home) = self.home.clone() {
             let abort = AbortController::new();
             let session = Arc::clone(&self.session);
@@ -536,10 +547,17 @@ impl Driver {
                     }
                     std::future::pending::<()>().await;
                 };
+                let mcp_changed = async {
+                    match &mut self.mcp {
+                        Some(mcp) => mcp.changed().await,
+                        None => std::future::pending().await,
+                    }
+                };
                 tokio::select! {
                     joined = settle => Next::Settled(joined),
                     () = settled_job => Next::Jobs,
                     done = commanded => Next::Commanded(done),
+                    () = mcp_changed => Next::McpChanged,
                     request = inbox.recv() => Next::Request(request),
                     () = self.gone.notify.notified() => Next::Request(None),
                 }
@@ -557,6 +575,7 @@ impl Driver {
                 // Checked at the top of the loop.
                 Next::Jobs => {}
                 Next::Commanded(done) => self.commanded(done, running.as_ref()).await,
+                Next::McpChanged => self.publish_mcp(),
                 Next::Request(None) => break,
                 Next::Request(Some(request)) => self.request(request, &mut running).await,
             }
@@ -597,6 +616,15 @@ impl Driver {
 
     fn send(&self, update: RuntimeUpdate) {
         (self.send)(update);
+    }
+
+    fn publish_mcp(&mut self) {
+        if let Some(mcp) = &mut self.mcp {
+            let rows = mcp.take_rows();
+            if !rows.is_empty() {
+                self.send(RuntimeUpdate::Commit(rows));
+            }
+        }
     }
 
     fn refuse(&self, id: Option<u64>, text: String, reason: String) {
@@ -1082,11 +1110,13 @@ impl Driver {
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = Projector::default();
         self.session = Arc::clone(&session);
+        self.mcp = session.mcp_servers().map(McpNotices::new);
         *self.current.lock().unwrap_or_else(PoisonError::into_inner) = Arc::clone(&session);
         self.subscription = Some(subscribe(&session, &self.projector, &self.send));
         self.turns = 0;
         let notes = replacement_notes(note, &session, warnings);
         self.send(RuntimeUpdate::Replaced(opening_rows(&notes, &session)));
+        self.publish_mcp();
         self.publish_pending();
     }
 

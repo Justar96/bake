@@ -1025,4 +1025,5 @@ fn only_the_commands_own_cancellation_interrupts_its_work() {
 }
 
 mod commands_live;
+mod mcp_live;
 mod sessions_live;

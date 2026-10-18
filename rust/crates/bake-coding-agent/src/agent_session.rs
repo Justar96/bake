@@ -615,7 +615,9 @@ impl Listeners {
             .map(|(_, listener)| Arc::clone(listener))
             .collect();
         for listener in listeners {
-            listener(event);
+            // Subscribers observe state; a panic must not prevent another
+            // observer or the session's owner from completing its work.
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| listener(event)));
         }
     }
 }
@@ -1567,8 +1569,8 @@ impl AgentSession {
         Ok(created)
     }
 
-    /// Subscribes the session to its agent: listeners first, then
-    /// persistence, as Pi's `_handleAgentEvent` orders them.
+    /// Commits finished messages before publishing them to observers.
+    /// Persistence participates in execution: its failure stops the run.
     fn connect(&self) {
         let core = Arc::clone(&self.core);
         let persist_error = Arc::clone(&self.persist_error);
@@ -1578,7 +1580,7 @@ impl AgentSession {
         let pending_notices = Arc::clone(&self.pending_notices);
         // Weak: the agent owns this listener.
         let agent = Arc::downgrade(&self.agent);
-        let subscription = self.agent.subscribe(move |event, _signal| {
+        let subscription = self.agent.subscribe_critical(move |event, _signal| {
             let core = Arc::clone(&core);
             let persist_error = Arc::clone(&persist_error);
             let queue = Arc::clone(&queue);
@@ -1598,16 +1600,6 @@ impl AgentSession {
                     if delivered {
                         queue.announce(&core);
                     }
-                }
-                match event {
-                    AgentEvent::AgentEnd { messages } => {
-                        let will_retry = core.will_retry_after_agent_end(messages);
-                        core.emit(&SessionEvent::AgentEnd {
-                            messages,
-                            will_retry,
-                        });
-                    }
-                    event => core.emit(&SessionEvent::Agent(event)),
                 }
                 match event {
                     AgentEvent::MessageEnd { message } => {
@@ -1642,6 +1634,7 @@ impl AgentSession {
                             if let Some(agent) = agent.upgrade() {
                                 agent.abort();
                             }
+                            return;
                         }
                         track_message(&core, message, entry_id.unwrap_or_default());
                     }
@@ -1651,6 +1644,16 @@ impl AgentSession {
                     }
                     _ => {}
                 }
+                match event {
+                    AgentEvent::AgentEnd { messages } => {
+                        let will_retry = core.will_retry_after_agent_end(messages);
+                        core.emit(&SessionEvent::AgentEnd {
+                            messages,
+                            will_retry,
+                        });
+                    }
+                    event => core.emit(&SessionEvent::Agent(event)),
+                }
             })
         });
         *self
@@ -1659,8 +1662,10 @@ impl AgentSession {
             .unwrap_or_else(PoisonError::into_inner) = Some(subscription);
     }
 
-    /// Subscribes to session events. Listeners run synchronously inside
-    /// the agent's event dispatch; keep them short.
+    /// Subscribes to session events. Finished messages are persisted before
+    /// observers run. Listeners run synchronously inside the agent's event
+    /// dispatch; keep them short. A listener panic is isolated from later
+    /// observers and execution; the process panic hook reports it.
     pub fn subscribe(
         &self,
         listener: impl Fn(&SessionEvent<'_>) + Send + Sync + 'static,
