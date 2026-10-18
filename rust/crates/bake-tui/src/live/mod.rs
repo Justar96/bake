@@ -218,7 +218,7 @@ impl LivePort {
                 ))
             }));
         }
-        let projector = Arc::new(Mutex::new(Projector::default()));
+        let projector = Arc::new(Mutex::new(Projector::with_history(&session.messages())));
         let subscription = subscribe(&session, &projector, &send);
         let (requests, inbox) = mpsc::unbounded_channel();
         let (begin, begun) = oneshot::channel();
@@ -1064,7 +1064,8 @@ impl Driver {
                 *self
                     .projector
                     .lock()
-                    .unwrap_or_else(PoisonError::into_inner) = Projector::default();
+                    .unwrap_or_else(PoisonError::into_inner) =
+                    Projector::with_history(&self.session.messages());
                 self.send(RuntimeUpdate::Replaced(opening_rows(
                     &[note],
                     &self.session,
@@ -1084,7 +1085,8 @@ impl Driver {
                 *self
                     .projector
                     .lock()
-                    .unwrap_or_else(PoisonError::into_inner) = Projector::default();
+                    .unwrap_or_else(PoisonError::into_inner) =
+                    Projector::with_history(&self.session.messages());
                 let mut rows = projection::replay_compacted(&self.session.messages());
                 rows.push(Row::Info(note));
                 self.send(RuntimeUpdate::Replaced(rows));
@@ -1144,7 +1146,7 @@ impl Driver {
         *self
             .projector
             .lock()
-            .unwrap_or_else(PoisonError::into_inner) = Projector::default();
+            .unwrap_or_else(PoisonError::into_inner) = Projector::with_history(&session.messages());
         self.session = Arc::clone(&session);
         self.mcp = session.mcp_servers().map(McpNotices::new);
         *self.current.lock().unwrap_or_else(PoisonError::into_inner) = Arc::clone(&session);

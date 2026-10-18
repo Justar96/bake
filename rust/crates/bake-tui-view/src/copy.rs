@@ -74,6 +74,32 @@ pub const SAMPLE_COMMAND: &str = "bun run build";
 pub const SAMPLE_SCRIPT: &str = "Read every manifest, then build";
 pub const SAMPLE_DONE: &str = "exit 0";
 pub const INTERRUPTED_NOTE: &str = "interrupted";
+/// The titles of the cards whose tool names read poorly with only their
+/// first letter raised; any other tool's card takes its name that way.
+pub const TOOL_TITLES: &[(&str, &str)] = &[
+    ("subagent", "Agent"),
+    ("send_message", "Message"),
+    ("interrupt_agent", "Interrupt"),
+    ("list_agents", "Agents"),
+    ("list_subagent_models", "Models"),
+    ("job_output", "Job output"),
+    ("job_list", "Jobs"),
+    ("job_kill", "Stop job"),
+];
+/// Between the parts of a call's status, such as `exit 1 · earlier process`.
+pub const STATUS_SEP: &str = " · ";
+/// Call statuses: work handed to the background; an empty list; a message
+/// handed to an agent; output waited for; a subagent that ran out of
+/// tokens; a job whose end was not seen; a notice about a process before
+/// this one; and a stop asked of a job that had already ended.
+pub const BACKGROUND: &str = "background";
+pub const NONE: &str = "none";
+pub const DELIVERED: &str = "delivered";
+pub const WAITING: &str = "waiting";
+pub const TOKEN_LIMIT: &str = "token limit";
+pub const JOB_LOST: &str = "outcome unknown";
+pub const EARLIER_PROCESS: &str = "earlier process";
+pub const ALREADY_FINISHED: &str = "already finished";
 pub const COMPACTING_PHASES: &[&str] = &["preparing", "summarizing", "saving"];
 pub const PHASE_SECONDS: u64 = 4;
 pub const ABOVE: &str = "above";

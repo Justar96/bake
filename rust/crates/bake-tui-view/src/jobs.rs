@@ -52,6 +52,15 @@ impl JobState {
     pub fn is_live(&self) -> bool {
         matches!(self, Self::Running | Self::Stopping)
     }
+
+    /// Whether the job ended badly: an exit other than 0, or a failure to run.
+    pub fn failed(&self) -> bool {
+        match self {
+            Self::Completed(detail) => exit_code(detail.as_deref()).is_some_and(|code| code != 0),
+            Self::Failed(_) => true,
+            _ => false,
+        }
+    }
 }
 
 /// How long `job` has run at `now`, its report having arrived at `at`.
@@ -74,11 +83,7 @@ fn mark(state: &JobState, classic: bool, tones: Tones) -> Span<'static> {
     let (round, ascii, color) = match state {
         JobState::Running => ("●", "*", Color::Cyan),
         JobState::Stopping => ("◌", "~", Color::Yellow),
-        JobState::Completed(detail)
-            if exit_code(detail.as_deref()).is_none_or(|code| code == 0) =>
-        {
-            ("✓", "+", Color::Green)
-        }
+        JobState::Completed(_) if !state.failed() => ("✓", "+", Color::Green),
         JobState::Completed(_) | JobState::Failed(_) => ("✗", "x", Color::Red),
         JobState::Killed(_) => ("■", "#", Color::Yellow),
     };

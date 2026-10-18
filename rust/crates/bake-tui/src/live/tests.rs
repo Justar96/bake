@@ -257,8 +257,8 @@ fn a_prompt_streams_its_answer_commits_it_once_and_reports_the_status() {
 }
 
 /// A background job that settles while the session is idle opens a turn
-/// of its own: the notice shows as an information row, and the model's
-/// answer follows it.
+/// of its own: the notice shows as the job's card, and the model's answer
+/// follows it.
 #[test]
 fn an_idle_job_notice_opens_a_turn_that_shows_it() {
     let (runtime, faux, live) = setup(Vec::new(), Vec::new(), Some("test-key"));
@@ -289,9 +289,14 @@ fn an_idle_job_notice_opens_a_turn_that_shows_it() {
     assert_eq!(
         committed(&updates),
         [
-            Row::Info(
-                "background job bash-1 (bash: make) finished [status: completed, exit code: 0]. Read its output with job_output.".into()
-            ),
+            Row::Call {
+                tool: "Bash".into(),
+                argument: "make".into(),
+                id: Some("bash-1".into()),
+                state: CallState::Done,
+                summary: Some("exit 0".into()),
+                output: Vec::new(),
+            },
             Row::Answer("Noted.".into()),
         ]
     );
@@ -334,6 +339,7 @@ fn a_tool_call_runs_and_settles_in_the_turn_it_belongs_to() {
             Row::Call {
                 tool: "Echo".into(),
                 argument: String::new(),
+                id: None,
                 state: CallState::Done,
                 summary: None,
                 output: vec!["echoed".into(), "line two".into()],

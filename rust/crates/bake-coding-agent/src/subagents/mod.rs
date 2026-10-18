@@ -86,8 +86,9 @@ pub const CHILDREN_DIR: &str = "subagents";
 /// The `customType` of the entry that starts a child's file.
 pub const CHILD_ENTRY: &str = "bake.subagent.child";
 
-/// The `details` key of a `subagent` result that records the child.
-const SUBAGENT_DETAIL: &str = "subagent";
+/// The `details` key of a `subagent` result that records the child: its
+/// `agentId`, `label`, route, and whether it ran in the `foreground`.
+pub const SUBAGENT_DETAIL: &str = "subagent";
 
 /// Where a child session comes from.
 #[derive(Debug, Clone, PartialEq, Eq)]

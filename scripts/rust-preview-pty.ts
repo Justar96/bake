@@ -1445,6 +1445,8 @@ await liveScenario('background shells show under the box, open to their output, 
   const started = async () => new Map([...await session.owned()].filter(([pid]) => !before.has(pid)))
   session.send('BACKGROUND\r')
   await session.wait('the shells row', () => session.screen.includes('Started.') && /● bash-1 .*↓ manage/u.test(session.screen))
+  // The call that started the shell is tagged with its id.
+  await session.wait('the start card tagged', () => /bash-1 +background/u.test(session.screen))
   session.send('\x1b[B')
   await session.wait('the shells list', () => session.screen.includes('Background shells') && /› ● bash-1/u.test(session.screen))
   session.send('\r')
@@ -1460,6 +1462,8 @@ await liveScenario('background shells show under the box, open to their output, 
     await session.wait('back to the list', () => !session.screen.includes('Background shells /'))
     session.send('\x1b')
     await session.wait('the row gone', () => !session.screen.includes('↓ manage') && !session.screen.includes('Background shells'))
+    // The notice reads as the shell's card, with how it ended.
+    await session.wait('the notice card', () => /bash-1 +stopped/u.test(session.screen))
     const left = await session.survivors(owned)
     assert.deepEqual(left, [], `the stopped shell left its process: ${left.map(pid => `${pid} ${owned.get(pid)}`).join(', ')}`)
     // A shell still running when Bake quits does not outlive it.

@@ -61,8 +61,13 @@ pub enum Row {
     Call {
         tool: String,
         argument: String,
+        /// The background job or subagent the call started or reached, such
+        /// as `bash-1`, drawn as a blue tag before its status.
+        id: Option<String>,
         state: CallState,
         /// The card's headline on the head, such as `3 matches` or `exit 1`.
+        /// Its parts, split by [`copy::STATUS_SEP`], each read alone: an
+        /// exit code, an interruption, or a stop is a tag.
         summary: Option<String>,
         output: Vec<String>,
     },
@@ -101,6 +106,7 @@ pub fn sample_session() -> Vec<Row> {
         |tool: &str, argument: &str, state, summary: Option<&str>, output: &[&str]| Row::Call {
             tool: tool.into(),
             argument: argument.into(),
+            id: None,
             state,
             summary: summary.map(str::to_owned),
             output: output.iter().map(|line| (*line).to_owned()).collect(),
@@ -289,19 +295,49 @@ pub fn tag(text: &str, tone: TagTone, tones: Tones) -> Span<'static> {
     Span::styled(format!(" {text} "), style)
 }
 
-/// A call's status as drawn: an exit code or an interruption as a tag, green
-/// for success and red or yellow otherwise, and any other status as text.
-fn status_spans(summary: &str, quiet: Style, look: Look) -> Vec<Span<'static>> {
-    let tone = match summary.strip_prefix("exit ") {
+/// The tag a status part reads as: green for a clean exit, red for a
+/// failing one, and yellow for an interruption, a stop, or a lost job.
+fn status_tone(part: &str) -> Option<TagTone> {
+    match part.strip_prefix("exit ") {
         Some("0") => Some(TagTone::Green),
         Some(code) if code.parse::<i32>().is_ok() => Some(TagTone::Red),
-        _ if summary == copy::INTERRUPTED_NOTE => Some(TagTone::Yellow),
+        _ if [copy::INTERRUPTED_NOTE, copy::JOB_STOPPED, copy::JOB_LOST].contains(&part) => {
+            Some(TagTone::Yellow)
+        }
         _ => None,
-    };
-    match tone {
-        Some(tone) => vec![tag(summary, tone, look.tones)],
-        None => vec![Span::styled(summary.to_owned(), quiet)],
     }
+}
+
+/// A call's status as drawn: each part split by [`copy::STATUS_SEP`] that
+/// has a [`status_tone`] as a tag, and the rest as text, so `already
+/// finished · exit 0` ends in a green tag. A status with no such part is
+/// one run of text.
+fn status_spans(summary: &str, quiet: Style, look: Look) -> Vec<Span<'static>> {
+    let parts: Vec<(&str, Option<TagTone>)> = summary
+        .split(copy::STATUS_SEP)
+        .map(|part| (part, status_tone(part)))
+        .collect();
+    if parts.iter().all(|(_, tone)| tone.is_none()) {
+        return vec![Span::styled(summary.to_owned(), quiet)];
+    }
+    let mut spans = Vec::new();
+    for (index, (part, tone)) in parts.iter().enumerate() {
+        if index > 0 {
+            // A tag's padding stands in for the separator's space beside it.
+            let before = if parts[index - 1].1.is_some() {
+                ""
+            } else {
+                " "
+            };
+            let after = if tone.is_some() { "" } else { " " };
+            spans.push(Span::styled(format!("{before}·{after}"), quiet));
+        }
+        spans.push(match tone {
+            Some(tone) => tag(part, *tone, look.tones),
+            None => Span::styled((*part).to_owned(), quiet),
+        });
+    }
+    spans
 }
 
 /// The palette the transcript draws with, as a strip of swatches: the hues,
@@ -735,6 +771,7 @@ pub fn present(rows: &[Row], index: usize, width: usize, look: Look) -> Vec<Line
         Row::Call {
             tool,
             argument,
+            id,
             state,
             summary,
             output,
@@ -742,6 +779,7 @@ pub fn present(rows: &[Row], index: usize, width: usize, look: Look) -> Vec<Line
             let mut block = present_call(
                 tool,
                 argument,
+                id.as_deref(),
                 *state,
                 summary.as_deref(),
                 output,
@@ -956,8 +994,9 @@ fn labelled(
 
 /// Puts a call's status, such as `2 lines`, two cells after the last row's
 /// text, so it reads with the call at any width. When it does not fit there,
-/// it takes rows of its own opening with `lead`, under the argument, and a
-/// one-run status wraps there rather than being cut.
+/// it takes rows of its own opening with `lead`, under the argument, and
+/// wraps there rather than being cut: a one-run status in its own style, and
+/// one of several runs, such as tags, as dim text.
 fn ride(
     lines: &mut Vec<Line<'static>>,
     summary: Vec<Span<'static>>,
@@ -987,6 +1026,16 @@ fn ride(
             lead.clone(),
             lead,
             only.style,
+        ));
+    } else {
+        let joined: String = summary.iter().map(|span| span.content.as_ref()).collect();
+        lines.extend(hang(
+            joined.trim(),
+            width,
+            lead_cells,
+            lead.clone(),
+            lead,
+            dim(),
         ));
     }
 }
@@ -1261,11 +1310,14 @@ fn line_count(count: usize) -> Option<String> {
     }
 }
 
-/// A call as one block: `✓ Bash: argument` with its status after it, then
-/// its output hung from a gutter; an edit's output is its diff.
+/// A call as one block: `✓ Bash: argument` with its status after it, the
+/// job or agent it reached tagged first, then its output hung from a
+/// gutter; an edit's output is its diff.
+#[allow(clippy::too_many_arguments)]
 fn present_call(
     tool: &str,
     argument: &str,
+    id: Option<&str>,
     state: CallState,
     summary: Option<&str>,
     output: &[String],
@@ -1302,13 +1354,21 @@ fn present_call(
         .collect();
     let texts: Vec<String> = cleaned.iter().map(|line| line.text.clone()).collect();
     let counted = texts.iter().filter(|line| !line.trim().is_empty()).count();
-    let status = match summary {
+    let mut status = match summary {
         Some(summary) => status_spans(summary, quiet, look),
         None if edit => diff_counts(output, look),
         None => line_count(counted)
             .map(|count| vec![Span::styled(count, quiet)])
             .unwrap_or_default(),
     };
+    if let Some(id) = id.filter(|id| !id.is_empty()) {
+        let mut tagged = vec![tag(id, TagTone::Blue, look.tones)];
+        if !status.is_empty() {
+            tagged.push(pad(1));
+        }
+        tagged.append(&mut status);
+        status = tagged;
+    }
     ride(&mut lines, status, under, width);
     let glyph = gutter(look);
     let gutter = || vec![pad(RAIL), Span::styled(format!("{glyph} "), quiet)];
@@ -2557,6 +2617,7 @@ mod tests {
         let call = vec![Row::Call {
             tool: "Bash".into(),
             argument: "one two three four".into(),
+            id: None,
             state: CallState::Running,
             summary: None,
             output: vec!["0123456789abcdef".into()],
@@ -2884,6 +2945,7 @@ mod tests {
         let rows = vec![Row::Call {
             tool: "Bash".into(),
             argument: "bun run build".into(),
+            id: None,
             state: CallState::Running,
             summary: None,
             output: Vec::new(),
@@ -2919,6 +2981,7 @@ mod tests {
         let rows = vec![Row::Call {
             tool: "Bash".into(),
             argument: "make".into(),
+            id: None,
             state: CallState::Failed,
             summary: Some("error: no rule to make target build".into()),
             output: Vec::new(),
@@ -2931,6 +2994,52 @@ mod tests {
                 "          make target build"
             ]
         );
+    }
+
+    #[test]
+    fn the_job_or_agent_a_call_reached_is_tagged_before_its_status() {
+        let call = |tool: &str, argument: &str, summary: Option<&str>| Row::Call {
+            tool: tool.into(),
+            argument: argument.into(),
+            id: Some(if tool == "Bash" { "bash-1" } else { "a1" }.into()),
+            state: CallState::Done,
+            summary: summary.map(str::to_owned),
+            output: Vec::new(),
+        };
+        let rows = vec![
+            call("Bash", "sleep 30", Some("background")),
+            call("Agent", "review", None),
+            call("Bash", "sleep 30", Some("already finished · exit 0")),
+        ];
+        let lines = |index, width| text(&present(&rows, index, width, PLAIN));
+        assert_eq!(lines(0, 60), ["  ✓ Bash: sleep 30   bash-1  background"]);
+        // Without a status, the tag stands alone.
+        assert_eq!(lines(1, 60), ["", "  ✓ Agent: review   a1"]);
+        assert_eq!(
+            lines(2, 60),
+            ["", "  ✓ Bash: sleep 30   bash-1  already finished · exit 0"]
+        );
+        // Too narrow for the tags, the status still reads, as text.
+        assert_eq!(
+            lines(2, 30),
+            [
+                "",
+                "  ✓ Bash: sleep 30",
+                "          bash-1  already",
+                "          finished · exit 0"
+            ]
+        );
+        let look = Look {
+            tones: Tones::TrueColor,
+            ..PLAIN
+        };
+        let tagged = present(&rows, 0, 60, look);
+        let id = tagged
+            .iter()
+            .flat_map(|l| &l.spans)
+            .find(|s| s.content == " bash-1 ")
+            .unwrap();
+        assert_eq!(id.style.bg, Some(Color::Rgb(0x1c, 0x2b, 0x44)));
     }
 
     #[test]
@@ -3022,6 +3131,7 @@ mod tests {
         let rows = vec![Row::Call {
             tool: "Bash".into(),
             argument: "x".into(),
+            id: None,
             state: CallState::Done,
             summary: None,
             output: vec!["0123456789abcdefghij".into()],
@@ -3103,6 +3213,7 @@ mod tests {
         let rows = vec![Row::Call {
             tool: "Bash".into(),
             argument: r#"echo "a long quoted string""#.into(),
+            id: None,
             state: CallState::Done,
             summary: None,
             output: Vec::new(),
@@ -3171,9 +3282,36 @@ mod tests {
         assert_eq!(bg(one("exit 0")), Some(Color::Rgb(0x17, 0x33, 0x22)));
         assert_eq!(bg(one("exit 127")), Some(Color::Rgb(0x3f, 0x1d, 0x22)));
         assert_eq!(bg(one("interrupted")), Some(Color::Rgb(0x3a, 0x34, 0x16)));
-        // Anything else stays text.
+        assert_eq!(bg(one("stopped")), Some(Color::Rgb(0x3a, 0x34, 0x16)));
+        assert_eq!(
+            bg(one("outcome unknown")),
+            Some(Color::Rgb(0x3a, 0x34, 0x16))
+        );
+        // Anything else stays text, one run even with several parts.
         assert_eq!(one("412 lines")[0].content, "412 lines");
         assert_eq!(bg(one("exit code")), None);
+        assert_eq!(one("done · earlier process").len(), 1);
+        // Each part of a status reads alone, and a tag's padding stands in
+        // for the separator's space beside it.
+        let parts = one("already finished · exit 1 · earlier process");
+        let contents: Vec<&str> = parts.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(
+            contents,
+            [
+                "already finished",
+                " ·",
+                " exit 1 ",
+                "· ",
+                "earlier process"
+            ]
+        );
+        assert_eq!(parts[2].style.bg, Some(Color::Rgb(0x3f, 0x1d, 0x22)));
+        assert!(
+            parts
+                .iter()
+                .enumerate()
+                .all(|(i, s)| i == 2 || s.style == quiet)
+        );
         // The tag keeps its padding, and its width, without colour.
         let plain = tag("exit 1", TagTone::Red, Tones::None);
         assert_eq!(
@@ -3390,6 +3528,7 @@ mod tests {
         let rows = vec![Row::Call {
             tool: "Write".into(),
             argument: "notes.txt".into(),
+            id: None,
             state: CallState::Done,
             summary: None,
             output,
@@ -3484,6 +3623,7 @@ mod tests {
         let call = |tool: &str| Row::Call {
             tool: tool.into(),
             argument: "x".into(),
+            id: None,
             state: CallState::Done,
             summary: None,
             output: vec!["\u{1b}[31mred\u{1b}[0m\u{1b}[2J\tend".into()],

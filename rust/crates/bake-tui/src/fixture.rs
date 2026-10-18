@@ -183,6 +183,7 @@ fn step_for(prompts: Vec<String>, start: Duration) -> Step {
     let call = |state, summary: Option<&str>| Row::Call {
         tool: "Bash".into(),
         argument: "true".into(),
+        id: None,
         state,
         summary: summary.map(str::to_owned),
         output: Vec::new(),
@@ -246,12 +247,14 @@ fn interrupted(row: Row) -> Row {
         Row::Call {
             tool,
             argument,
+            id,
             state: CallState::Running,
             output,
             ..
         } => Row::Call {
             tool,
             argument,
+            id,
             state: CallState::Failed,
             summary: Some("interrupted".into()),
             output,
