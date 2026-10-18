@@ -189,6 +189,7 @@ impl Fixture {
             docs_command: "bake-rs docs".into(),
             plugins,
             work: None,
+            jobs: None,
         })
         .await
         .expect("session")

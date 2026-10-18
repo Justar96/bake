@@ -42,8 +42,8 @@ use super::engine::{BlankJustification, ToolCall};
 use super::with_escalation_parameters;
 use crate::tools::bash::{
     BashDataCallback, BashExecError, BashExecOptions, BashOperations, BashToolOptions,
-    LocalShellOperations, PreparedExecError, PreparedSpawn, bash_tool_description,
-    bash_tool_parameters, bash_tool_prompt, create_bash_tool, create_local_bash_operations,
+    LocalShellOperations, PreparedExecError, PreparedSpawn, bash_tool_description_for,
+    bash_tool_parameters_for, bash_tool_prompt, create_bash_tool, create_local_bash_operations,
 };
 use crate::tools::definition::ToolDefinition;
 
@@ -63,8 +63,9 @@ pub const BASH_JUSTIFICATION_DESCRIPTION: &str = "One sentence for the user.";
 pub const STDERR_CLASSIFY_BYTES: usize = 64 * 1024;
 
 /// Pi's description with the sandbox paragraph, whose escalation sentences
-/// appear only when `targets` is not empty.
-pub fn sandboxed_bash_tool_description(targets: &[SandboxMode]) -> String {
+/// appear only when `targets` is not empty, and the background sentence when
+/// the tool takes `run_in_background`.
+pub fn sandboxed_bash_tool_description(targets: &[SandboxMode], background: bool) -> String {
     let escalation = if targets.is_empty() {
         ""
     } else {
@@ -72,15 +73,16 @@ pub fn sandboxed_bash_tool_description(targets: &[SandboxMode]) -> String {
     };
     format!(
         "{}{BASH_SANDBOX_DESCRIPTION}{escalation}",
-        bash_tool_description()
+        bash_tool_description_for(background)
     )
 }
 
 /// Pi's parameters with `sandbox_permissions` (enum `targets`) and
-/// `justification`; Pi's alone when `targets` is empty.
-pub fn sandboxed_bash_tool_parameters(targets: &[SandboxMode]) -> Value {
+/// `justification`, Pi's alone when `targets` is empty, with
+/// `run_in_background` when `background`.
+pub fn sandboxed_bash_tool_parameters(targets: &[SandboxMode], background: bool) -> Value {
     with_escalation_parameters(
-        bash_tool_parameters(),
+        bash_tool_parameters_for(background),
         targets,
         BASH_SANDBOX_PERMISSIONS_DESCRIPTION,
         BASH_JUSTIFICATION_DESCRIPTION,
@@ -323,8 +325,9 @@ pub fn create_sandboxed_bash_tool_definition(
     let mut tool = create_bash_tool(cwd, options.clone());
     let cwd = cwd.to_path_buf();
     let permissions = permissions.clone();
-    tool.description = sandboxed_bash_tool_description(permissions.escalation_targets);
-    tool.parameters = sandboxed_bash_tool_parameters(permissions.escalation_targets);
+    let background = options.jobs.is_some();
+    tool.description = sandboxed_bash_tool_description(permissions.escalation_targets, background);
+    tool.parameters = sandboxed_bash_tool_parameters(permissions.escalation_targets, background);
     tool.execute = Arc::new(
         move |id: String, args: Value, signal: Option<AbortSignal>, on_update| {
             let cwd = cwd.clone();

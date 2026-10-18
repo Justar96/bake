@@ -491,6 +491,7 @@ async fn session(case: &Case, model: &Model, store: Option<SessionManager>) -> A
             docs_command: "bake-rs docs".into(),
             plugins: bake_coding_agent::plugins::PluginRegistry::default(),
             work: Some(WorkGate::default()),
+            jobs: None,
         })
         .await
         .expect("session"),

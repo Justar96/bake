@@ -9,6 +9,13 @@
 //! Pi's `bash` tool lives in [`crate::tools::bash`] and joins through
 //! [`ToolsOptions::bash`] ([`create_bash_tool_definition`]); without it,
 //! every set leaves `bash` out. Pi's `powershell` tool is not ported.
+//!
+//! Bake adds the background-job tools ([`crate::tools::job_tools`]),
+//! built only with [`ToolsOptions::jobs`] ([`create_bake_tool_definitions`]),
+//! and makes them default tools ([`BAKE_DEFAULT_TOOL_NAMES`]): the owner
+//! decided on 2026-10-18 that background jobs are on by default, as in
+//! Bake 0.3's `standard` preset. Pi's names, sets, and selection rules are
+//! unchanged.
 
 use std::path::Path;
 
@@ -19,6 +26,7 @@ use crate::tools::definition::ToolDefinition;
 use crate::tools::edit::create_edit_tool_definition;
 use crate::tools::find::owned_find_tool_definition;
 use crate::tools::grep::owned_grep_tool_definition;
+use crate::tools::job_tools::create_job_tool_definitions;
 use crate::tools::ls::create_ls_tool_definition;
 use crate::tools::read::{ReadToolOptions, create_read_tool_definition};
 use crate::tools::write::create_write_tool_definition;
@@ -39,6 +47,19 @@ pub const ALL_TOOL_NAMES: [&str; 8] = [
 /// `defaultTools` does not change them.
 pub const DEFAULT_TOOL_NAMES: [&str; 4] = ["read", "bash", "edit", "write"];
 
+/// Bake's default tools: Pi's, then the job tools. A `defaultTools`
+/// setting replaces them, as it replaces Pi's; its modifiers apply to
+/// Pi's list.
+pub const BAKE_DEFAULT_TOOL_NAMES: [&str; 7] = [
+    "read",
+    "bash",
+    "edit",
+    "write",
+    "job_output",
+    "job_list",
+    "job_kill",
+];
+
 /// Pi's `ToolsOptions` for the ported tools.
 #[derive(Debug, Clone, Default)]
 pub struct ToolsOptions {
@@ -53,6 +74,11 @@ pub struct ToolsOptions {
     /// `None` leaves them unowned. The `bash` tool takes its own owner
     /// ([`BashToolOptions::owner`]).
     pub owner: Option<crate::owned_work::WorkGate>,
+    /// The session's background jobs; with them the job tools are built.
+    /// Give the same registry to the `bash` tool
+    /// ([`BashToolOptions::jobs`]) and the session
+    /// ([`crate::agent_session::AgentSessionOptions::jobs`]).
+    pub jobs: Option<crate::jobs::JobRegistry>,
 }
 
 /// Pi's `createBashToolDefinition(cwd, options)`: the bash tool with its
@@ -114,6 +140,16 @@ pub fn create_read_only_tool_definitions(
 /// Pi's `createAllToolDefinitions`, in Pi's order.
 pub fn create_all_tool_definitions(cwd: &Path, options: &ToolsOptions) -> Vec<ToolDefinition> {
     definitions(&ALL_TOOL_NAMES, cwd, options)
+}
+
+/// Pi's `createAllToolDefinitions`, then the job tools when
+/// [`ToolsOptions::jobs`] is set.
+pub fn create_bake_tool_definitions(cwd: &Path, options: &ToolsOptions) -> Vec<ToolDefinition> {
+    let mut all = create_all_tool_definitions(cwd, options);
+    if let Some(jobs) = &options.jobs {
+        all.extend(create_job_tool_definitions(jobs));
+    }
+    all
 }
 
 /// Pi's `createCodingTools`.

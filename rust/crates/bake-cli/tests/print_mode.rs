@@ -528,7 +528,18 @@ fn print_mode_answers_saves_and_continues() {
         .iter()
         .map(|tool| tool["name"].as_str().unwrap_or_default())
         .collect();
-    assert_eq!(declared, ["read", "bash", "edit", "write"]);
+    assert_eq!(
+        declared,
+        [
+            "read",
+            "bash",
+            "edit",
+            "write",
+            "job_output",
+            "job_list",
+            "job_kill"
+        ]
+    );
     assert_eq!(first_input[1], "user: Say hi");
 
     let files = workspace.session_files();
@@ -1206,7 +1217,18 @@ fn print_mode_runs_the_bash_tool() {
         .iter()
         .filter_map(|tool| tool["name"].as_str())
         .collect();
-    assert_eq!(tools, ["read", "bash", "edit", "write"]);
+    assert_eq!(
+        tools,
+        [
+            "read",
+            "bash",
+            "edit",
+            "write",
+            "job_output",
+            "job_list",
+            "job_kill"
+        ]
+    );
     let input = requests[1].body["input"].as_array().expect("input");
     let output = input
         .iter()
@@ -1225,6 +1247,78 @@ fn print_mode_runs_the_bash_tool() {
     let result = &entries[7]["message"];
     assert_eq!(result["toolName"], "bash");
     assert_eq!(result["isError"], false);
+}
+
+/// A background `bash` job outlives the turn that started it: `-p` waits
+/// for it, and its completion notice opens one more turn, sent to the
+/// model as a user message and logged once as a `custom_message` entry.
+#[cfg(unix)]
+#[test]
+fn print_mode_waits_for_a_background_job_and_reports_it_once() {
+    let server = Server::start_sequence(vec![
+        Reply::tool_call(
+            "bash",
+            &json!({ "command": "sleep 0.3; echo built", "run_in_background": true }),
+        ),
+        Reply::sse(),
+        Reply::sse(),
+    ]);
+    let workspace = Workspace::new("bash-background", server.port);
+
+    let out = workspace.run(
+        &["-p", "--permission", "danger-full-access", "Build it"],
+        None,
+    );
+    assert_eq!(text(&out.stderr), "");
+    assert_eq!(out.status.code(), Some(0));
+    // Text mode prints the last turn's answer: the notice turn's.
+    assert_eq!(text(&out.stdout), "Hello from the loop.\n");
+
+    let requests = server.requests();
+    assert_eq!(requests.len(), 3);
+    assert_eq!(
+        sent_tool_output(&requests[1]),
+        "started background job bash-1"
+    );
+    let notice = transcript(&requests[2]);
+    assert_eq!(
+        notice.last().map(String::as_str),
+        Some(
+            "user: background job bash-1 (bash: sleep 0.3; echo built) finished [status: completed, exit code: 0]. Read its output with job_output."
+        ),
+        "{notice:?}"
+    );
+    let entries = lines(&workspace.session_files()[0]);
+    let notices: Vec<&Value> = entries
+        .iter()
+        .filter(|entry| entry["type"] == "custom_message")
+        .collect();
+    assert_eq!(notices.len(), 1, "{entries:?}");
+    assert_eq!(notices[0]["customType"], "bake.job.notice");
+    assert_eq!(notices[0]["details"]["jobId"], "bash-1");
+    let result = entries
+        .iter()
+        .find(|entry| entry["message"]["role"] == "toolResult")
+        .expect("the bash result");
+    assert_eq!(
+        result["message"]["details"]["backgroundJob"],
+        json!({ "id": "bash-1", "label": "sleep 0.3; echo built" })
+    );
+
+    // A resumed session reserves the id and sends no second notice.
+    let again = workspace.run(&["-p", "--continue", "Again"], None);
+    assert_eq!(again.status.code(), Some(0), "{}", text(&again.stderr));
+    let requests = server.requests();
+    assert_eq!(requests.len(), 4);
+    let resumed = transcript(&requests[3]);
+    assert_eq!(
+        resumed
+            .iter()
+            .filter(|line| line.starts_with("user: background job bash-1"))
+            .count(),
+        1,
+        "{resumed:?}"
+    );
 }
 
 /// The prompt says tool calls in one response run in order, so a response

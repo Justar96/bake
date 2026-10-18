@@ -87,6 +87,7 @@ fn options(h: &Harness, session: SessionManager, settings: Settings) -> AgentSes
         docs_command: "bake-rs docs".into(),
         plugins: crate::plugins::PluginRegistry::default(),
         work: None,
+        jobs: None,
     }
 }
 

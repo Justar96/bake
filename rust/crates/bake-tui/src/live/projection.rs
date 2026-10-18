@@ -17,7 +17,9 @@ use std::collections::HashMap;
 
 use bake_agent::{AgentEvent, AgentMessage, AgentToolResult};
 use bake_ai::{AssistantContentBlock, AssistantMessage, StopReason, UserContent, UserContentBlock};
+use bake_coding_agent::agent_session::job_notices::NOTICE_TYPE;
 use bake_coding_agent::agent_session::{CompactionReason, SessionEvent};
+use bake_coding_agent::session::messages::CustomMessage;
 use bake_tui_view::runtime::{Pending, RuntimeUpdate, Target};
 use bake_tui_view::transcript::{CallState, Row};
 use serde_json::Value;
@@ -150,6 +152,20 @@ impl Projector {
 
     fn agent(&mut self, event: &AgentEvent) -> Vec<RuntimeUpdate> {
         match event {
+            AgentEvent::MessageStart { message } if notice_text(message).is_some() => {
+                // A background job's notice, in a run it opened or one
+                // already streaming.
+                let mut updates: Vec<RuntimeUpdate> = Vec::new();
+                if !self.admitted {
+                    self.admitted = true;
+                    updates.extend(self.prompt_id.take().map(RuntimeUpdate::Admitted));
+                }
+                updates.extend(self.settle());
+                updates.extend(
+                    notice_text(message).map(|text| RuntimeUpdate::Commit(vec![Row::Info(text)])),
+                );
+                updates
+            }
             AgentEvent::MessageStart { message } => match message.as_user() {
                 Some(user) => {
                     let mut updates: Vec<RuntimeUpdate> = Vec::new();
@@ -553,6 +569,8 @@ pub fn replay(messages: &[AgentMessage]) -> Vec<Row> {
             }
         } else if message.role() == "compactionSummary" {
             rows.push(Row::Info("Earlier conversation was compacted".into()));
+        } else if let Some(text) = notice_text(message) {
+            rows.push(Row::Info(text));
         }
     }
     rows
@@ -574,6 +592,14 @@ pub fn replay_compacted(messages: &[AgentMessage]) -> Vec<Row> {
         }
         None => replay(messages),
     }
+}
+
+/// The text of a background job's notice ([`NOTICE_TYPE`]), shown as an
+/// information row.
+fn notice_text(message: &AgentMessage) -> Option<String> {
+    let custom = message.as_custom()?;
+    let custom = custom.as_any().downcast_ref::<CustomMessage>()?;
+    (custom.custom_type == NOTICE_TYPE).then(|| user_text(&custom.content))
 }
 
 #[cfg(test)]

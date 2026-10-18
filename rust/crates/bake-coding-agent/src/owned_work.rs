@@ -58,6 +58,13 @@ pub struct WorkGate {
     inner: Arc<Inner>,
 }
 
+impl WorkGate {
+    /// Whether `other` is this gate (a clone of it), not merely alike.
+    pub fn is_same(&self, other: &WorkGate) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
+    }
+}
+
 #[derive(Default)]
 struct Inner {
     state: Mutex<State>,

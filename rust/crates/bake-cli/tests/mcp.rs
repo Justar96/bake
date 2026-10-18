@@ -723,7 +723,15 @@ fn session_lines(case: &Case) -> Vec<Value> {
         .collect()
 }
 
-const BUILTIN: [&str; 4] = ["read", "bash", "edit", "write"];
+const BUILTIN: [&str; 7] = [
+    "read",
+    "bash",
+    "edit",
+    "write",
+    "job_output",
+    "job_list",
+    "job_kill",
+];
 
 const FIXTURE_TOOLS: [&str; 9] = [
     "mcp__fx__echo",

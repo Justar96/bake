@@ -85,6 +85,7 @@ impl Harness {
             docs_command: "bake-rs docs".into(),
             plugins: crate::plugins::PluginRegistry::default(),
             work: None,
+            jobs: None,
         })
         .await
         .expect("session")
@@ -860,6 +861,7 @@ async fn a_new_sessions_model_and_level_are_one_group() {
             docs_command: "bake-rs docs".into(),
             plugins: Default::default(),
             work: None,
+            jobs: None,
         })
         .await;
         let read = file_entries(&file);

@@ -67,6 +67,8 @@
 //! models, virtual models and their failed-response routing, the
 //! `entry_appended` event, and tool-loadout changes between turns.
 
+mod job_journal;
+pub mod job_notices;
 mod navigation;
 mod plugin_veto;
 mod recovery;
@@ -212,6 +214,14 @@ pub struct AgentSessionOptions {
     /// every process tree they started, a dropped call's included. One gate
     /// per session: closing it is the session's shutdown.
     pub work: Option<WorkGate>,
+    /// The session's background jobs, built over `work`
+    /// ([`JobRegistry::new`]); `None` makes a registry of its own. Give the
+    /// same registry to the job tools and to `bash`
+    /// ([`crate::tools::index::ToolsOptions::jobs`]) so their jobs are the
+    /// ones the session delivers notices for and shuts down. A registry
+    /// over another gate is refused, as is a closed or nonempty registry:
+    /// the session attaches its immutable journal before the first job.
+    pub jobs: Option<JobRegistry>,
 }
 
 /// Tools whose calls change files or run commands. The prompt's round-trip
@@ -678,6 +688,9 @@ pub struct AgentSession {
     work: WorkGate,
     /// The session's background jobs, owned by `work`.
     jobs: JobRegistry,
+    /// Job notices that wait for the next prompt: lost jobs found at
+    /// creation, and completions when the wake budget is spent.
+    pending_notices: Arc<Mutex<Vec<CustomMessage>>>,
     session: SharedSession,
     registry: ModelRuntime,
     /// The live settings, shared with the core: the setters change them,
@@ -947,16 +960,25 @@ fn persist(session: &mut SessionManager, message: &LiveMessage) -> Result<Option
 fn next_turn_hook(
     core: Arc<Core>,
     selection: SessionSelection,
+    jobs: JobRegistry,
 ) -> bake_agent::agent::AgentPrepareNextTurnWithContext {
     Arc::new(move |turn, signal| {
         let tools = turn.context.tools.clone();
         let core = Arc::clone(&core);
         let selection = selection.clone();
+        let jobs = jobs.clone();
         Box::pin(async move {
             let mut update = core
                 .compact_before_next_response(tools, signal)
                 .await
                 .unwrap_or_default();
+            // Jobs that settled during the step reach its next request,
+            // `tool-jobs`' injection into a busy owner.
+            update.messages.extend(
+                jobs.claim_unreported()
+                    .iter()
+                    .map(|job| job_notices::live(job_notices::completion_notice(job))),
+            );
             // One read, so the model and level come from one change.
             let selected = selection.get();
             if let Some(model) = selected.model {
@@ -1075,10 +1097,15 @@ fn lock_gap(gap: &Mutex<Option<String>>) -> std::sync::MutexGuard<'_, Option<Str
 #[cfg(test)]
 pub(crate) type FailHook = Box<dyn FnOnce() -> Box<dyn FnOnce() + Send> + Send>;
 
+#[cfg(test)]
+type JobRecordHook = Arc<dyn Fn(&crate::jobs::JobSnapshot) + Send + Sync>;
+
 /// Failures tests inject at the session's write boundary.
 #[cfg(test)]
 #[derive(Default)]
 pub(crate) struct TestHooks {
+    pub after_job_record: Option<JobRecordHook>,
+    pub after_job_observation: Option<Box<dyn FnOnce() + Send>>,
     /// Fails the next model change's group before its first line. Runs
     /// under the session lock as it fails; what it returns runs before the
     /// change goes on.
@@ -1310,6 +1337,7 @@ impl AgentSession {
             docs_command,
             plugins,
             work,
+            jobs,
         } = options;
         let plugins = VetoDispatcher::new(plugins).map(Arc::new);
         system_prompt.docs_command = docs_command.clone();
@@ -1330,6 +1358,13 @@ impl AgentSession {
             .map_err(|_| "An agent session must be created inside a Tokio runtime.".to_owned())?;
         let session: SharedSession = Arc::new(Mutex::new(session));
         let work = work.unwrap_or_default();
+        if jobs.as_ref().is_some_and(|jobs| !jobs.is_owned_by(&work)) {
+            return Err("The session's job registry must be built over its work gate.".to_owned());
+        }
+        let jobs = jobs.unwrap_or_else(|| JobRegistry::new(work.clone(), JobLimits::default()));
+        // Jobs an earlier process ran: their ids stay reserved, and those
+        // never reported carry their recorded outcome with the next prompt.
+        let pending_notices = Arc::new(Mutex::new(job_notices::recover(&lock(&session), &jobs)));
         let (context, has_thinking_entry) = with_session(&work, &session, |session| {
             let context = session.build_session_context();
             let has_thinking_entry = session
@@ -1456,6 +1491,7 @@ impl AgentSession {
             prepare_next_turn_with_context: Some(next_turn_hook(
                 Arc::clone(&core),
                 published.clone(),
+                jobs.clone(),
             )),
             steering_mode,
             follow_up_mode,
@@ -1493,19 +1529,20 @@ impl AgentSession {
             .into_iter()
             .filter(|name| tools.iter().any(|tool| &tool.name == name))
             .collect();
+        job_journal::attach(&core, &jobs)?;
         // Last, after every fallible step: the keeper of the Wasm plugins'
         // helpers is owned work of the gate from here on.
         if let Some(plugins) = &plugins {
             plugins.attach(&work).map_err(refused_message)?;
         }
         let gap = Arc::clone(&core.gap);
-        let jobs = JobRegistry::new(work.clone(), JobLimits::default());
         let created = Self {
             apis,
             agent,
             core,
             work,
             jobs,
+            pending_notices,
             session,
             registry,
             settings,
@@ -1539,6 +1576,8 @@ impl AgentSession {
         let persist_error = Arc::clone(&self.persist_error);
         let queue = Arc::clone(&self.queue);
         let write_failure = Arc::clone(&self.write_failure);
+        let jobs = self.jobs.clone();
+        let pending_notices = Arc::clone(&self.pending_notices);
         // Weak: the agent owns this listener.
         let agent = Arc::downgrade(&self.agent);
         let subscription = self.agent.subscribe_critical(move |event, _signal| {
@@ -1546,6 +1585,8 @@ impl AgentSession {
             let persist_error = Arc::clone(&persist_error);
             let queue = Arc::clone(&queue);
             let write_failure = Arc::clone(&write_failure);
+            let jobs = jobs.clone();
+            let pending_notices = Arc::clone(&pending_notices);
             let agent = agent.clone();
             Box::pin(async move {
                 if let AgentEvent::MessageStart { message } = event
@@ -1563,6 +1604,24 @@ impl AgentSession {
                 match event {
                     AgentEvent::MessageEnd { message } => {
                         let entry_id = persist_message(&core, &persist_error, message).await;
+                        if matches!(entry_id, Ok(Some(_)))
+                            && let Some(id) = job_notices::observation_id(message)
+                        {
+                            #[cfg(test)]
+                            {
+                                let hook = core.hooks().after_job_observation.take();
+                                if let Some(hook) = hook {
+                                    hook();
+                                }
+                            }
+                            jobs.acknowledge(id);
+                            pending_notices
+                                .lock()
+                                .unwrap_or_else(PoisonError::into_inner)
+                                .retain(|notice| {
+                                    job_notices::notice_id(notice.details.as_ref()) != Some(id)
+                                });
+                        }
                         if entry_id.is_err() {
                             let failed = persist_error
                                 .lock()
@@ -2144,7 +2203,13 @@ impl AgentSession {
         if let Some(refusal) = refusal {
             return Err(refusal.to_owned());
         }
-        let run = RunGuard(&self.core);
+        let run = RunGuard {
+            core: &self.core,
+            jobs: &self.jobs,
+            pending: &self.pending_notices,
+            agent: &self.agent,
+            runtime: &self.runtime,
+        };
         // Reset at the claim, not at the run as in Pi, so an abort during
         // the compaction before the prompt also ends the prompt.
         self.core.abort_requested.store(false, Ordering::SeqCst);
@@ -2198,6 +2263,21 @@ impl AgentSession {
         if let Some(update) = self.prepare_prompt_and_tools()? {
             messages.push(update.into());
         }
+        // A user prompt refills the notices' wake budget and carries the
+        // notices that waited for it, and those of jobs settled since,
+        // before its own text.
+        self.jobs.reset_wakes();
+        messages.extend(
+            self.pending_job_notices()
+                .into_iter()
+                .map(job_notices::live),
+        );
+        messages.extend(
+            self.jobs
+                .claim_unreported()
+                .iter()
+                .map(|job| job_notices::live(job_notices::completion_notice(job))),
+        );
         messages.push(
             UserMessage {
                 content: UserContent::Blocks(content),
@@ -2206,6 +2286,78 @@ impl AgentSession {
             .into(),
         );
         self.run_agent_prompt(messages, run).await
+    }
+
+    /// Pending notices remain recoverable until the listener acknowledges
+    /// their durable message, even if preparation or delivery is aborted.
+    fn pending_job_notices(&self) -> Vec<CustomMessage> {
+        self.pending_notices
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Delivers the notices of jobs that settled while the session was
+    /// idle, `tool-jobs`' `wakeup` delivery: while the wake budget lasts
+    /// ([`JobRegistry::spend_wake`]) they open a turn, as Pi's
+    /// `sendCustomMessage` with `triggerTurn` does, and the call returns
+    /// once that turn settles; past it they wait for the next prompt.
+    /// Returns whether a turn ran. Does nothing while a run, compaction,
+    /// or navigation is in progress (the run delivers them itself), or
+    /// once the session is shut down. A driver calls this when it is idle
+    /// and [`JobRegistry::subscribe`] reports a change.
+    pub async fn deliver_job_notices(&self) -> Result<bool, String> {
+        let agent_streaming = self.agent.is_streaming();
+        let claimed = self.core.activity.send_if_modified(|activity| {
+            if activity.manual_compaction || activity.navigation || activity.run || agent_streaming
+            {
+                false
+            } else {
+                activity.run = true;
+                true
+            }
+        });
+        if !claimed {
+            return Ok(false);
+        }
+        let run = RunGuard {
+            core: &self.core,
+            jobs: &self.jobs,
+            pending: &self.pending_notices,
+            agent: &self.agent,
+            runtime: &self.runtime,
+        };
+        if self.closed_reason().is_some() {
+            return Ok(false);
+        }
+        let notices: Vec<CustomMessage> = self
+            .jobs
+            .claim_unreported()
+            .iter()
+            .map(job_notices::completion_notice)
+            .collect();
+        if notices.is_empty() {
+            return Ok(false);
+        }
+        if self.model().is_none() || !self.jobs.spend_wake() {
+            self.pending_notices
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .extend(notices);
+            return Ok(false);
+        }
+        self.core.abort_requested.store(false, Ordering::SeqCst);
+        let mut messages: Vec<LiveMessage> = Vec::with_capacity(notices.len() + 1);
+        if let Some(update) = self.prepare_prompt_and_tools()? {
+            messages.push(update.into());
+        }
+        messages.extend(
+            self.pending_job_notices()
+                .into_iter()
+                .map(job_notices::live),
+        );
+        messages.extend(notices.into_iter().map(job_notices::live));
+        self.run_agent_prompt(messages, run).await.map(|()| true)
     }
 
     /// Pi's `_runAgentPrompt`: the run, then retries, overflow recovery,
@@ -2245,12 +2397,29 @@ impl AgentSession {
                     break;
                 }
             }
-            // Without extensions, Pi's pre-settlement boundary continues
-            // only for queued messages.
-            if core.aborted() || !self.agent.has_queued_messages() {
+            if core.aborted() {
                 break;
             }
-            result = self.agent.continue_run().await.map_err(|e| e.to_string());
+            if self.agent.has_queued_messages() {
+                result = self.agent.continue_run().await.map_err(|e| e.to_string());
+                continue;
+            }
+            // A notice batch is admitted directly, so an abort cannot
+            // leave it queued after its delivery reservation is released.
+            let notices: Vec<LiveMessage> = self
+                .jobs
+                .claim_unreported()
+                .iter()
+                .map(|job| job_notices::live(job_notices::completion_notice(job)))
+                .collect();
+            if notices.is_empty() {
+                break;
+            }
+            result = self
+                .agent
+                .prompt(PromptInput::Messages(notices))
+                .await
+                .map_err(|error| error.to_string());
         }
         if core.aborted() {
             core.finish_cancelled_retry();
@@ -2793,16 +2962,58 @@ impl AgentSession {
 
 /// Clears the session's run flag however the prompt ends, including when
 /// its future is dropped.
-struct RunGuard<'a>(&'a Core);
+struct RunGuard<'a> {
+    core: &'a Arc<Core>,
+    jobs: &'a JobRegistry,
+    pending: &'a Arc<Mutex<Vec<CustomMessage>>>,
+    agent: &'a Arc<Agent>,
+    runtime: &'a tokio::runtime::Handle,
+}
 
 impl Drop for RunGuard<'_> {
     fn drop(&mut self) {
-        self.0.activity.send_modify(|activity| activity.run = false);
+        let core = Arc::clone(self.core);
+        let jobs = self.jobs.clone();
+        let pending = Arc::clone(self.pending);
+        let release = move || {
+            let pending: Vec<String> = pending
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .iter()
+                .filter_map(|notice| {
+                    job_notices::notice_id(notice.details.as_ref()).map(str::to_owned)
+                })
+                .collect();
+            // The run claim excludes a newer turn until every old lease
+            // has been returned. Registry wakes cannot race that turn.
+            core.activity.send_modify(|activity| {
+                jobs.release_deliveries(&pending);
+                activity.run = false;
+            });
+        };
+        if self.agent.is_streaming()
+            && let Some(permit) = self.core.work.enter()
+        {
+            let agent = Arc::clone(self.agent);
+            // Dropping the caller's prompt future does not stop Agent's
+            // task. Admit cleanup while open and keep its run claim until
+            // every persistence listener has finished. A closing gate
+            // already owns that drain through Agent::shutdown.
+            drop(self.runtime.spawn(async move {
+                let _permit = permit;
+                agent.wait_for_idle().await;
+                release();
+            }));
+        } else {
+            release();
+        }
     }
 }
 
 #[cfg(test)]
 mod control_tests;
+#[cfg(test)]
+mod job_tests;
 #[cfg(test)]
 mod navigation_tests;
 #[cfg(test)]
