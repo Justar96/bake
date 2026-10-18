@@ -324,6 +324,10 @@ async function smokeNativeArm(): Promise<void> {
     deepStrictEqual(recordDesign.settings.armSettings, { base: '{"backgroundCompaction":false}', candidate: '{"backgroundCompaction":true}' })
     console.log('pass native compaction settings and costs retained by record.ts')
 
+    // The masking fixture's grep calls need ripgrep on PATH, which bake-rs
+    // looks up and never downloads; without it every call fails and there
+    // is nothing to mask.
+    if (Bun.which('rg') === null) throw new Error('the native masking smoke needs ripgrep (rg) on PATH for the grep tool')
     for (const [mode, scenario] of [['independent', 'independent_reads'], ['masking', 'context_masking'], ['recovery', 'ordinary_edit']] as const) {
       const paired = await evaluate(mode, [scenario])
       for (const arm of ['base', 'candidate']) {
@@ -336,6 +340,7 @@ async function smokeNativeArm(): Promise<void> {
           deepStrictEqual(sample.nativeSettings, { maxConcurrentReadTools: arm === 'base' ? 1 : 4, retry: { enabled: false } })
           if (sample.requests !== 3) throw new Error(`${label}: independent fixed-response fixture used ${sample.requests} requests`)
         } else if (mode === 'masking') {
+          if (sample.toolErrors !== 0) throw new Error(`${label}: masking fixture tool calls failed ${JSON.stringify(sample.toolErrorMessages)}`)
           if (sample.nativeSettings.contextMasking !== (arm === 'candidate') || sample.nativeSettings.backgroundCompaction !== false
             || sample.contextWindow !== 40_000 || sample.requests > 46 || sample.backgroundCompactions.started !== 0
             || (arm === 'candidate' ? sample.contextMasking.commits < 1 || sample.contextMasking.maskedResults < 1 || sample.contextMasking.removedBytes < 1

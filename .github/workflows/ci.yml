@@ -145,6 +145,13 @@ jobs:
       - name: Enable Linux process namespaces
         if: runner.os == 'Linux'
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      # The native eval smoke's masking fixture calls the grep tool, which
+      # runs ripgrep from PATH; Ubuntu runners do not ship it.
+      - name: Install ripgrep
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ripgrep
       - name: Install the pinned Rust toolchain
         working-directory: rust
         run: rustup toolchain install --no-self-update
