@@ -83,8 +83,8 @@ use crate::model_registry::resolver::{
     ScopedModel, resolve_cli_model, resolve_model_scope_from_models,
 };
 use crate::permissions::{
-    Approver, NoApprover, PermissionInputs, ToolPermissions, prepare_session_permission,
-    sandbox_file_tools, sandboxed_bash_tool,
+    Approver, NoApprover, PermissionInputs, ToolPermissions, owned_sandbox_file_tools,
+    prepare_session_permission, sandboxed_bash_tool,
 };
 use crate::plugins::installed::PluginHome;
 use crate::plugins::wasm::WasmSetup;
@@ -1203,8 +1203,8 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
     // each call starts; both read what the session publishes now, so a
     // model change reaches the next call.
     let published = crate::agent_session::SessionSelection::default();
-    // The session's owner of its work, given to the tools that spawn
-    // processes so that shutdown waits for every tree they start.
+    // The session's owner of its work, given to the tools so that shutdown
+    // waits for their blocking work and every tree they start.
     let work = crate::owned_work::WorkGate::default();
     // The session's background jobs, shared by `bash`, the job tools, and
     // the session that delivers their notices.
@@ -1259,10 +1259,11 @@ async fn build_session(args: &Args, build: Build) -> Result<Built, String> {
             ),
         }),
     };
-    let mut definitions = sandbox_file_tools(
+    let mut definitions = owned_sandbox_file_tools(
         create_bake_tool_definitions(Path::new(&session_cwd), &tools_options),
         Path::new(&session_cwd),
         &tool_permissions,
+        Some(work.clone()),
     );
     // With `subagents` on, a top-level session starts subagents built as it
     // is; a subagent messages its parent and starts none (depth 1).

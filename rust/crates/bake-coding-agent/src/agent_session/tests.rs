@@ -17,6 +17,8 @@ use serde_json::json;
 use tokio::sync::Notify;
 
 #[cfg(unix)]
+mod mutation_shutdown;
+#[cfg(unix)]
 mod read_shutdown;
 
 use super::*;

@@ -54,6 +54,7 @@ use super::ToolPermissions;
 use super::beneath::BeneathTarget;
 use super::engine::{BlankJustification, ToolCall};
 use super::with_escalation_parameters;
+use crate::owned_work::WorkGate;
 use crate::tools::definition::{MutationGuard, MutationTarget, PathTarget, ToolDefinition};
 use crate::tools::edit::{create_edit_tool_definition, validate_edit_input};
 use crate::tools::write::create_write_tool_definition;
@@ -225,10 +226,21 @@ fn call<'a>(tool_name: &'a str, id: &'a str, args: &'a Value) -> ToolCall<'a> {
     }
 }
 
-/// Pi's `write` under the permission engine.
+/// Pi's `write` under the permission engine. Its blocking work has no
+/// owner.
 pub fn create_sandboxed_write_tool_definition(
     cwd: &Path,
     permissions: &ToolPermissions,
+) -> ToolDefinition {
+    owned_sandboxed_write_tool_definition(cwd, permissions, None)
+}
+
+/// [`create_sandboxed_write_tool_definition`] whose blocking work `owner`
+/// owns, as [`crate::tools::index::ToolsOptions::owner`] owns `write`'s.
+pub(crate) fn owned_sandboxed_write_tool_definition(
+    cwd: &Path,
+    permissions: &ToolPermissions,
+    owner: Option<WorkGate>,
 ) -> ToolDefinition {
     let mut definition = create_write_tool_definition(cwd);
     let cwd = cwd.to_path_buf();
@@ -239,17 +251,19 @@ pub fn create_sandboxed_write_tool_definition(
         move |id: String, args: Value, signal: Option<AbortSignal>, _update| {
             let cwd = cwd.clone();
             let permissions = permissions.clone();
+            let owner = owner.clone();
             Box::pin(async move {
                 let policy = permissions
                     .engine
                     .resolve(&call("write", &id, &args), signal.as_ref())
                     .await?;
                 let hint = permissions.offers_escalation_beyond(policy.mode);
-                crate::tools::write::execute_guarded(
+                crate::tools::write::execute_owned(
                     cwd,
                     args,
                     signal,
                     Some(containment_guard(policy, hint)),
+                    owner,
                 )
                 .await
             }) as BoxFuture<'static, _>
@@ -259,10 +273,21 @@ pub fn create_sandboxed_write_tool_definition(
 }
 
 /// Pi's `edit` under the permission engine. Pi's input check runs before
-/// the escalation step, so an invalid edit never asks for approval.
+/// the escalation step, so an invalid edit never asks for approval. Its
+/// blocking work has no owner.
 pub fn create_sandboxed_edit_tool_definition(
     cwd: &Path,
     permissions: &ToolPermissions,
+) -> ToolDefinition {
+    owned_sandboxed_edit_tool_definition(cwd, permissions, None)
+}
+
+/// [`create_sandboxed_edit_tool_definition`] whose blocking work `owner`
+/// owns, as [`crate::tools::index::ToolsOptions::owner`] owns `edit`'s.
+pub(crate) fn owned_sandboxed_edit_tool_definition(
+    cwd: &Path,
+    permissions: &ToolPermissions,
+    owner: Option<WorkGate>,
 ) -> ToolDefinition {
     let mut definition = create_edit_tool_definition(cwd);
     let cwd = cwd.to_path_buf();
@@ -273,6 +298,7 @@ pub fn create_sandboxed_edit_tool_definition(
         move |id: String, args: Value, signal: Option<AbortSignal>, _update| {
             let cwd = cwd.clone();
             let permissions = permissions.clone();
+            let owner = owner.clone();
             Box::pin(async move {
                 validate_edit_input(&args)?;
                 let policy = permissions
@@ -280,11 +306,12 @@ pub fn create_sandboxed_edit_tool_definition(
                     .resolve(&call("edit", &id, &args), signal.as_ref())
                     .await?;
                 let hint = permissions.offers_escalation_beyond(policy.mode);
-                crate::tools::edit::execute_guarded(
+                crate::tools::edit::execute_owned(
                     cwd,
                     args,
                     signal,
                     Some(containment_guard(policy, hint)),
+                    owner,
                 )
                 .await
             }) as BoxFuture<'static, _>
@@ -305,7 +332,7 @@ pub(crate) mod seam {
     static AFTER_CHECK: Mutex<Option<HashMap<PathBuf, Hook>>> = Mutex::new(None);
 
     /// Runs `hook` once, after the guard has checked `path` and before the
-    /// call touches it. The swap tests use it on Unix only.
+    /// call touches it. The swap and shutdown tests use it on Unix only.
     #[cfg(unix)]
     pub(crate) fn on_after_check(path: &Path, hook: impl FnOnce() + Send + 'static) {
         AFTER_CHECK

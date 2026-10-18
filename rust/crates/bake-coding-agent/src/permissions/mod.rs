@@ -181,18 +181,29 @@ pub fn with_escalation_parameters(
     parameters
 }
 
-/// Replaces `write` and `edit` in `definitions` with their sandboxed forms;
-/// other tools are unchanged.
+/// Replaces `write` and `edit` in `definitions` with their sandboxed forms,
+/// whose blocking work has no owner; other tools are unchanged.
 pub fn sandbox_file_tools(
     definitions: Vec<ToolDefinition>,
     cwd: &Path,
     permissions: &ToolPermissions,
 ) -> Vec<ToolDefinition> {
+    owned_sandbox_file_tools(definitions, cwd, permissions, None)
+}
+
+/// [`sandbox_file_tools`] with the sandboxed forms' blocking work under
+/// `owner`, the session's gate.
+pub(crate) fn owned_sandbox_file_tools(
+    definitions: Vec<ToolDefinition>,
+    cwd: &Path,
+    permissions: &ToolPermissions,
+    owner: Option<crate::owned_work::WorkGate>,
+) -> Vec<ToolDefinition> {
     definitions
         .into_iter()
         .map(|definition| match definition.name() {
-            "write" => fs::create_sandboxed_write_tool_definition(cwd, permissions),
-            "edit" => fs::create_sandboxed_edit_tool_definition(cwd, permissions),
+            "write" => fs::owned_sandboxed_write_tool_definition(cwd, permissions, owner.clone()),
+            "edit" => fs::owned_sandboxed_edit_tool_definition(cwd, permissions, owner.clone()),
             _ => definition,
         })
         .collect()

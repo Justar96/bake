@@ -19,8 +19,8 @@ use bake_ai::AbortSignal;
 use serde_json::{Map, Value, json};
 
 use crate::tools::definition::{
-    ABORTED, ToolDefinition, aborted, boxed, number_arg, optional_string_arg, string_arg,
-    text_result,
+    ABORTED, ToolDefinition, aborted, admit, blocking_under, boxed, number_arg,
+    optional_string_arg, string_arg, text_result,
 };
 use crate::tools::head::HeadCollector;
 use crate::tools::js::{number_to_string, number_value, trim};
@@ -57,7 +57,8 @@ pub fn create_find_tool_definition(cwd: &Path) -> ToolDefinition {
 }
 
 /// [`create_find_tool_definition`] whose `fd` processes `owner` owns
-/// ([`crate::child_process`]): its close waits for each call's tree.
+/// ([`crate::child_process`]), with the blocking work that builds their
+/// arguments: its close waits for each call's tree and work.
 pub(crate) fn owned_find_tool_definition(
     cwd: &Path,
     owner: Option<crate::owned_work::WorkGate>,
@@ -247,10 +248,11 @@ async fn execute(
     let Some(fd) = process::find_executable(&["fd", "fdfind"]) else {
         return Err("fd is not available and could not be downloaded".into());
     };
+    let permit = admit(owner.as_ref()).map_err(|refused| format!("Failed to run fd: {refused}"))?;
     let fd_args = {
         let search_path = search_path.clone();
         let pattern = pattern.clone();
-        tokio::task::spawn_blocking(move || fd_args(&pattern, &search_path, limit))
+        blocking_under(permit, move || fd_args(&pattern, &search_path, limit))
             .await
             .map_err(|error| format!("Failed to run fd: {error}"))?
     };

@@ -23,14 +23,14 @@ use bake_agent::AgentTool;
 
 use crate::tools::bash::{BashToolOptions, bash_tool_prompt, create_bash_tool};
 use crate::tools::definition::ToolDefinition;
-use crate::tools::edit::create_edit_tool_definition;
+use crate::tools::edit::owned_edit_tool_definition;
 use crate::tools::find::owned_find_tool_definition;
 use crate::tools::grep::owned_grep_tool_definition;
 use crate::tools::job_tools::create_job_tool_definitions;
 use crate::tools::ls::owned_ls_tool_definition;
 use crate::tools::read::{ReadToolOptions, owned_read_tool_definition};
 use crate::tools::web_tools::{WebTools, create_web_tool_definitions};
-use crate::tools::write::create_write_tool_definition;
+use crate::tools::write::owned_write_tool_definition;
 
 /// Pi's `allToolNames`, in Pi's order; `powershell` has no Bake port.
 pub const ALL_TOOL_NAMES: [&str; 8] = [
@@ -72,11 +72,13 @@ pub struct ToolsOptions {
     /// `createBashToolDefinition(cwd, options.bash)`. The bash port supplies
     /// it; `None` leaves `bash` out of every set.
     pub bash: Option<ToolDefinition>,
-    /// The owner of `read` and `ls` blocking work and `grep` and `find`
-    /// processes: the session's
+    /// The owner of `read`, `ls`, `write`, and `edit` blocking work and of
+    /// `grep` and `find` processes and their blocking work: the session's
     /// [`crate::owned_work::WorkGate`], so its shutdown waits for them.
     /// `None` leaves them unowned. The `bash` tool takes its own owner
-    /// ([`BashToolOptions::owner`]).
+    /// ([`BashToolOptions::owner`]). The sandboxed `write` and `edit` that
+    /// [`crate::permissions::sandbox_file_tools`] puts in their place have
+    /// no owner; the session the CLI builds owns them.
     pub owner: Option<crate::owned_work::WorkGate>,
     /// The session's background jobs; with them the job tools are built.
     /// Give the same registry to the `bash` tool
@@ -113,8 +115,8 @@ pub fn create_tool_definition(
             options.owner.clone(),
         )),
         "bash" => options.bash.clone(),
-        "edit" => Some(create_edit_tool_definition(cwd)),
-        "write" => Some(create_write_tool_definition(cwd)),
+        "edit" => Some(owned_edit_tool_definition(cwd, options.owner.clone())),
+        "write" => Some(owned_write_tool_definition(cwd, options.owner.clone())),
         "grep" => Some(owned_grep_tool_definition(cwd, options.owner.clone())),
         "find" => Some(owned_find_tool_definition(cwd, options.owner.clone())),
         "ls" => Some(owned_ls_tool_definition(cwd, options.owner.clone())),

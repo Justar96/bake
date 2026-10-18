@@ -27,9 +27,10 @@ use bake_agent::{AgentTool, AgentToolResult};
 use bake_ai::AbortSignal;
 use serde_json::{Map, Value, json};
 
+use crate::owned_work::WorkPermit;
 use crate::tools::definition::{
-    ABORTED, ToolDefinition, aborted, bool_arg, boxed, number_arg, optional_string_arg, string_arg,
-    text_result,
+    ABORTED, ToolDefinition, aborted, admit, blocking_under, bool_arg, boxed, number_arg,
+    optional_string_arg, string_arg, text_result,
 };
 use crate::tools::head::HeadCollector;
 use crate::tools::js::{as_index, number_to_string, number_value, trim};
@@ -76,7 +77,8 @@ pub fn create_grep_tool_definition(cwd: &Path) -> ToolDefinition {
 }
 
 /// [`create_grep_tool_definition`] whose `rg` processes `owner` owns
-/// ([`crate::child_process`]): its close waits for each call's tree.
+/// ([`crate::child_process`]), with the blocking work that formats their
+/// output: its close waits for each call's tree and work.
 pub(crate) fn owned_grep_tool_definition(
     cwd: &Path,
     owner: Option<crate::owned_work::WorkGate>,
@@ -184,6 +186,10 @@ async fn execute(
         context,
         limit: number_arg(&args, "limit").unwrap_or(DEFAULT_LIMIT).max(1.0),
     };
+    // Held through the run, so each line's blocking work, which reads the
+    // context lines, holds a share and the owner waits for it.
+    let permit =
+        admit(owner.as_ref()).map_err(|refused| format!("Failed to run ripgrep: {refused}"))?;
     let formatter = Arc::new(Mutex::new(GrepFormatter::new(request.clone())));
     let line_formatter = Arc::clone(&formatter);
     let line_signal = signal.clone();
@@ -195,16 +201,13 @@ async fn execute(
         move |line| {
             let formatter = Arc::clone(&line_formatter);
             let signal = line_signal.clone();
-            async move {
-                tokio::task::spawn_blocking(move || {
-                    formatter
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .line(&line, signal.as_ref())
-                })
-                .await
-                .unwrap_or(Flow::Stop)
-            }
+            let work = blocking_under(permit.as_ref().map(WorkPermit::share), move || {
+                formatter
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .line(&line, signal.as_ref())
+            });
+            async move { work.await.unwrap_or(Flow::Stop) }
         },
     )
     .await

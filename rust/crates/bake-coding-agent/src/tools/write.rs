@@ -2,7 +2,10 @@
 //! the crate's `NOTICE`): creates parent directories, then writes the
 //! content as UTF-8, inside the file's mutation queue on Tokio's blocking
 //! pool. An abort is observed between steps and never releases the queue
-//! while a step runs. Pi's pluggable `WriteOperations` are not ported;
+//! while a step runs. Under the session's owner that blocking work holds a
+//! permit, so shutdown waits for a write even when its run was dropped
+//! ([`crate::tools::index::ToolsOptions::owner`]). Pi's pluggable
+//! `WriteOperations` are not ported;
 //! [`execute_guarded`] is Bake's seam for the sandbox's containment check.
 
 use std::io::Write;
@@ -37,15 +40,34 @@ fn parameters() -> Value {
     })
 }
 
-/// Pi's `createWriteToolDefinition`.
+/// Pi's `createWriteToolDefinition`. Its blocking work has no owner: a
+/// dropped call's write runs to its end unawaited.
 pub fn create_write_tool_definition(cwd: &Path) -> ToolDefinition {
+    owned_write_tool_definition(cwd, None)
+}
+
+/// [`create_write_tool_definition`] whose blocking work `owner` owns: its
+/// close waits for a call's write, even one whose run was dropped, and a
+/// call made once it is closing is refused.
+pub(crate) fn owned_write_tool_definition(
+    cwd: &Path,
+    owner: Option<crate::owned_work::WorkGate>,
+) -> ToolDefinition {
     let cwd = cwd.to_path_buf();
     let mut tool = AgentTool::new(
         "write",
         "write",
         "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.",
         parameters(),
-        move |_id, args, signal, _update| boxed(execute(cwd.clone(), args, signal)),
+        move |_id, args, signal, _update| {
+            boxed(execute_owned(
+                cwd.clone(),
+                args,
+                signal,
+                None,
+                owner.clone(),
+            ))
+        },
     );
     tool.constrained_sampling = Some(ConstrainedSampling::JsonSchema {
         strict: StrictPreference::Prefer,
@@ -67,28 +89,31 @@ pub fn create_write_tool(cwd: &Path) -> AgentTool {
     create_write_tool_definition(cwd).tool
 }
 
-async fn execute(
-    cwd: PathBuf,
-    args: Value,
-    signal: Option<AbortSignal>,
-) -> Result<AgentToolResult, String> {
-    execute_guarded(cwd, args, signal, None).await
-}
-
 /// Runs a `write` call, first passing the target to `guard` inside its
 /// mutation queue, after the first abort check and before any effect; the
 /// directories and the file are then made through the target the guard
-/// returns.
+/// returns. The blocking work has no owner.
 pub async fn execute_guarded(
     cwd: PathBuf,
     args: Value,
     signal: Option<AbortSignal>,
     guard: Option<MutationGuard>,
 ) -> Result<AgentToolResult, String> {
+    execute_owned(cwd, args, signal, guard, None).await
+}
+
+/// [`execute_guarded`] with the blocking work under `owner`.
+pub(crate) async fn execute_owned(
+    cwd: PathBuf,
+    args: Value,
+    signal: Option<AbortSignal>,
+    guard: Option<MutationGuard>,
+    owner: Option<crate::owned_work::WorkGate>,
+) -> Result<AgentToolResult, String> {
     let path = string_arg(&args, "path");
     let content = string_arg(&args, "content");
     let absolute = resolve_to_cwd(&path, &cwd)?;
-    run_blocking(move || {
+    run_blocking(owner, move || {
         let check = || {
             if signal.as_ref().is_some_and(AbortSignal::aborted) {
                 Err(ABORTED.to_owned())

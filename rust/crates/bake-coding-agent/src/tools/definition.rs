@@ -14,6 +14,7 @@ use bake_ai::AbortSignal;
 use serde_json::Value;
 
 use crate::agent_session::ToolPrompt;
+use crate::owned_work::{Refused, WorkGate, WorkPermit};
 
 /// Checks a mutation's target before `write` or `edit` changes it: Bake's
 /// seam for the sandbox's write containment ([`crate::permissions`]). It
@@ -144,15 +145,50 @@ pub(crate) fn text_result(text: impl Into<String>, details: Option<Value>) -> Ag
     }
 }
 
+/// A permit of `owner`, if given; refused once it is closing.
+pub(crate) fn admit(owner: Option<&WorkGate>) -> Result<Option<WorkPermit>, Refused> {
+    owner
+        .map(|owner| owner.enter().ok_or(Refused::Closed))
+        .transpose()
+}
+
+/// Runs `work` on Tokio's blocking pool and waits for it; under a share of
+/// `permit`, when given, so the permit's owner waits for the work even if
+/// this future is dropped. The error is the failed task's text.
+pub(crate) async fn blocking_under<T: Send + 'static>(
+    permit: Option<WorkPermit>,
+    work: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, String> {
+    match permit {
+        Some(permit) => permit
+            .spawn_blocking(work)
+            .map_err(|error| error.to_string())?
+            .await
+            .map_err(|error| error.to_string()),
+        None => tokio::task::spawn_blocking(work)
+            .await
+            .map_err(|error| error.to_string()),
+    }
+}
+
 /// Runs blocking work on Tokio's blocking pool and waits for it, even when
 /// the caller's run is aborted: the work checks `signal` itself, as Pi's
-/// write and edit tools do inside their mutation queue.
+/// write and edit tools do inside their mutation queue. The owner retains
+/// the worker even if hard shutdown drops this future; a closing owner
+/// refuses the work before it starts.
 pub(crate) async fn run_blocking<T: Send + 'static>(
+    owner: Option<WorkGate>,
     work: impl FnOnce() -> Result<T, String> + Send + 'static,
 ) -> Result<T, String> {
-    tokio::task::spawn_blocking(work)
-        .await
-        .unwrap_or_else(|error| Err(format!("Tool task failed: {error}")))
+    let permit = admit(owner.as_ref()).map_err(|refused| refused.to_string())?;
+    tokio::task::spawn_blocking(move || {
+        let result = work();
+        // The work and its captures have dropped before shutdown can finish.
+        drop(permit);
+        result
+    })
+    .await
+    .unwrap_or_else(|error| Err(format!("Tool task failed: {error}")))
 }
 
 /// Runs blocking work that stops at an abort, as Pi's tools that reject
@@ -161,20 +197,13 @@ pub(crate) async fn run_blocking<T: Send + 'static>(
 /// The owner retains the worker even if hard shutdown drops this future.
 pub(crate) async fn run_blocking_abortable<T: Send + 'static>(
     signal: Option<AbortSignal>,
-    owner: Option<crate::owned_work::WorkGate>,
+    owner: Option<WorkGate>,
     work: impl FnOnce() -> Result<T, String> + Send + 'static,
 ) -> Result<T, String> {
     if signal.as_ref().is_some_and(AbortSignal::aborted) {
         return Err(ABORTED.into());
     }
-    let permit = owner
-        .as_ref()
-        .map(|owner| {
-            owner
-                .enter()
-                .ok_or_else(|| crate::owned_work::Refused::Closed.to_string())
-        })
-        .transpose()?;
+    let permit = admit(owner.as_ref()).map_err(|refused| refused.to_string())?;
     let mut task = tokio::task::spawn_blocking(move || {
         let result = work();
         // The work and its captures have dropped before shutdown can finish.
@@ -249,25 +278,32 @@ mod ownership_tests {
     use std::task::Poll;
     use std::time::Duration;
 
-    #[tokio::test]
-    async fn dropped_blocking_waiter_keeps_work_owned_through_file_cleanup() {
-        let dir = crate::test_support::TempDir::new("read-worker-cleanup");
+    type Work = Box<dyn FnOnce() + Send>;
+
+    /// Starts `start`'s waiter on blocking work that holds a file open
+    /// until released, aborts the waiter, and checks that the gate's close
+    /// waits for the work, whose write is complete once the close returns.
+    async fn dropped_waiter_keeps_work_owned<Fut>(
+        name: &str,
+        start: impl FnOnce(WorkGate, Work) -> Fut,
+    ) where
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        let dir = crate::test_support::TempDir::new(name);
         let path = dir.join("worker");
         let output = path.clone();
-        let gate = crate::owned_work::WorkGate::default();
+        let gate = WorkGate::default();
         let (entered, ready) = tokio::sync::oneshot::channel();
         let (release, held) = std::sync::mpsc::channel::<()>();
-        let waiter = tokio::spawn(run_blocking_abortable(
-            None,
-            Some(gate.clone()),
-            move || {
+        let waiter = tokio::spawn(start(
+            gate.clone(),
+            Box::new(move || {
                 let mut file = std::fs::File::create(output).unwrap();
                 entered.send(()).unwrap();
                 let _ = held.recv();
                 file.write_all(b"settled").unwrap();
                 file.sync_all().unwrap();
-                Ok(())
-            },
+            }),
         ));
         tokio::time::timeout(Duration::from_secs(10), ready)
             .await
@@ -286,9 +322,190 @@ mod ownership_tests {
         }
         assert!(
             waiting,
-            "dropping a waiter released a still-running blocking worker"
+            "{name}: dropping a waiter released a still-running blocking worker"
         );
-        assert_eq!(std::fs::read(path).unwrap(), b"settled");
+        assert_eq!(std::fs::read(path).unwrap(), b"settled", "{name}");
+    }
+
+    #[tokio::test]
+    async fn dropped_blocking_waiter_keeps_work_owned_through_file_cleanup() {
+        dropped_waiter_keeps_work_owned("read-worker-cleanup", |gate, work| async move {
+            let _ = run_blocking_abortable(None, Some(gate), move || {
+                work();
+                Ok(())
+            })
+            .await;
+        })
+        .await;
+    }
+
+    // The write and edit tools' worker.
+    #[tokio::test]
+    async fn dropped_mutation_waiter_keeps_work_owned_through_file_cleanup() {
+        dropped_waiter_keeps_work_owned("mutation-worker-cleanup", |gate, work| async move {
+            let _ = run_blocking(Some(gate), move || {
+                work();
+                Ok(())
+            })
+            .await;
+        })
+        .await;
+    }
+
+    // The grep and find tools' worker, under a share of the call's permit.
+    #[tokio::test]
+    async fn dropped_shared_permit_waiter_keeps_work_owned_through_file_cleanup() {
+        dropped_waiter_keeps_work_owned("shared-worker-cleanup", |gate, work| {
+            let call = admit(Some(&gate)).unwrap().unwrap();
+            let line = blocking_under(Some(call.share()), work);
+            async move {
+                let _call = call;
+                let _ = line.await;
+            }
+        })
+        .await;
+    }
+
+    #[test]
+    fn admit_refuses_a_closing_owner() {
+        assert!(matches!(admit(None), Ok(None)));
+        let owner = WorkGate::default();
+        let permit = admit(Some(&owner)).unwrap();
+        assert!(permit.is_some());
+        drop(owner.close());
+        assert_eq!(admit(Some(&owner)).err(), Some(Refused::Closed));
+        drop(permit);
+        assert!(owner.is_closed());
+    }
+
+    /// `write` and `edit` from [`crate::tools::index::create_tool`] and in
+    /// their sandboxed forms, all under `owner`.
+    fn owned_mutation_tools(
+        cwd: &std::path::Path,
+        owner: &WorkGate,
+    ) -> Vec<(String, bake_agent::AgentTool)> {
+        use crate::permissions::{
+            ApprovalPolicy, NoApprover, StandingPermissions, ToolPermissions,
+            owned_sandbox_file_tools,
+        };
+        use crate::tools::index::{ToolsOptions, create_tool_definition};
+        let options = ToolsOptions {
+            owner: Some(owner.clone()),
+            ..Default::default()
+        };
+        let permissions = ToolPermissions::new(
+            std::sync::Arc::new(StandingPermissions::new(
+                bake_sandbox::SandboxMode::WorkspaceWrite,
+                ApprovalPolicy::Never,
+                "workspace-write",
+                cwd,
+                None,
+            )),
+            std::sync::Arc::new(NoApprover),
+            std::sync::Arc::new(bake_sandbox::UnavailableProvider::new(None)),
+        );
+        let native: Vec<ToolDefinition> = ["write", "edit"]
+            .iter()
+            .map(|name| create_tool_definition(name, cwd, &options).unwrap())
+            .collect();
+        let sandboxed =
+            owned_sandbox_file_tools(native.clone(), cwd, &permissions, Some(owner.clone()));
+        native
+            .into_iter()
+            .map(|definition| (definition.name().to_owned(), definition.tool))
+            .chain(
+                sandboxed.into_iter().map(|definition| {
+                    (format!("sandboxed {}", definition.name()), definition.tool)
+                }),
+            )
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn owned_write_and_edit_refuse_a_closed_owner_without_an_effect() {
+        let dir = crate::test_support::TempDir::new("mutation-closed-owner");
+        std::fs::write(dir.join("present"), "alpha\n").unwrap();
+        let owner = WorkGate::default();
+        let tools = owned_mutation_tools(dir.path(), &owner);
+        owner.close().await;
+        for (label, tool) in tools {
+            let args = if tool.name == "write" {
+                serde_json::json!({"path": "present", "content": "replaced\n"})
+            } else {
+                serde_json::json!({"path": "present", "edits": [{"oldText": "alpha", "newText": "beta"}]})
+            };
+            let result = (tool.execute)(
+                "call".into(),
+                args,
+                None,
+                bake_agent::AgentToolUpdateCallback::ignore(),
+            )
+            .await;
+            assert_eq!(result.unwrap_err(), "the session is shut down", "{label}");
+            if tool.name == "write" {
+                let created = (tool.execute)(
+                    "call".into(),
+                    serde_json::json!({"path": "sub/new", "content": "new\n"}),
+                    None,
+                    bake_agent::AgentToolUpdateCallback::ignore(),
+                )
+                .await;
+                assert_eq!(created.unwrap_err(), "the session is shut down", "{label}");
+            }
+        }
+        assert_eq!(
+            std::fs::read_to_string(dir.join("present")).unwrap(),
+            "alpha\n"
+        );
+        assert!(!dir.join("sub").exists());
+    }
+
+    // The text is the one the refused `rg` or `fd` spawn gives
+    // ([`crate::child_process`]); the blocking work's admission now comes
+    // first.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn grep_and_find_refuse_a_closed_owner() {
+        use crate::tools::index::{ToolsOptions, create_tool};
+        use crate::tools::process::find_executable;
+        let dir = crate::test_support::TempDir::new("search-closed-owner");
+        std::fs::write(dir.join("present"), "needle\n").unwrap();
+        let owner = WorkGate::default();
+        owner.close().await;
+        for (name, program, refused) in [
+            (
+                "grep",
+                &["rg"][..],
+                "Failed to run ripgrep: the session is shut down",
+            ),
+            (
+                "find",
+                &["fd", "fdfind"][..],
+                "Failed to run fd: the session is shut down",
+            ),
+        ] {
+            if find_executable(program).is_none() {
+                println!("skipping {name}: {program:?} is not on PATH");
+                continue;
+            }
+            let tool = create_tool(
+                name,
+                dir.path(),
+                &ToolsOptions {
+                    owner: Some(owner.clone()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let result = (tool.execute)(
+                "call".into(),
+                serde_json::json!({"pattern": "needle"}),
+                None,
+                bake_agent::AgentToolUpdateCallback::ignore(),
+            )
+            .await;
+            assert_eq!(result.unwrap_err(), refused, "{name}");
+        }
     }
 
     #[tokio::test]

@@ -2,11 +2,12 @@
 //! TypeScript `packages/schedule/schedule/tests/{tools,runtime}.spec.ts`:
 //! tool results and errors, delivery at most once with the dispatch
 //! durable first, overdue delivery on resume, a clock moved back, and a
-//! fork that adopts nothing. Time is a test clock the timer is woken for,
+//! fork that adopts nothing; and Bake's shutdown during a look. Time is a test clock the timer is woken for,
 //! so no case waits on the wall clock.
 
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::task::Poll;
 use std::time::Duration;
 
 use bake_ai::StopReason;
@@ -337,6 +338,82 @@ async fn a_fork_keeps_the_history_and_delivers_none_of_it() {
     assert_eq!(results[0], json!([]));
     assert_eq!(results[1]["id"], "schedule-2", "the copied id stays used");
     session.shutdown().await;
+}
+
+// Bake: shutdown during a look waits for it, and the reminder the look
+// found due is neither dispatched nor posted; the timer has ended once
+// shutdown returns. The look is held in the test clock, which it reads
+// with the session's I/O permit held.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn shutdown_waits_for_a_look_and_nothing_is_delivered_after() {
+    // 2100-01-01T00:00:00.000Z: no real clock reaches it, so only the
+    // test clock makes the reminder due.
+    const FAR: i64 = 4_102_444_800_000;
+    let dir = TempDir::new("schedule-shutdown");
+    let h = harness();
+    let mut file_session = new_file_session(&dir);
+    let owner = file_session.session_id().to_owned();
+    file_session
+        .append_custom_entry(
+            CHANGE_TYPE,
+            Some(
+                Change::Create {
+                    session_id: owner,
+                    record: schedules::create_after("schedule-1".into(), "ping", 60, FAR)
+                        .expect("record"),
+                }
+                .to_json(),
+            ),
+        )
+        .expect("create");
+    let mut opts = options(&h, file_session, &dir.path().to_string_lossy());
+    opts.settings.schedules = true;
+    opts.active_tool_names.extend(NAMES.map(str::to_owned));
+    let session = AgentSession::create(opts).await.expect("session");
+    let due = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (entered, ready) = tokio::sync::oneshot::channel();
+    // Dropped on every path out of the test, so the look is never left
+    // held for the runtime to wait on.
+    let (release, held) = std::sync::mpsc::channel::<()>();
+    let hold = Mutex::new(Some((entered, held)));
+    let reading = Arc::clone(&due);
+    session.schedules().set_clock(Arc::new(move || {
+        if !reading.load(Ordering::SeqCst) {
+            return FAR;
+        }
+        let taken = hold
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        if let Some((entered, held)) = taken {
+            let _ = entered.send(());
+            let _ = held.recv();
+        }
+        FAR + 3_600_000
+    }));
+    due.store(true, Ordering::SeqCst);
+    session.schedules().kick();
+    tokio::time::timeout(Duration::from_secs(10), ready)
+        .await
+        .expect("the timer looks")
+        .expect("entered");
+
+    let mut shutdown = std::pin::pin!(session.shutdown());
+    // The first poll refuses new work and closes the gate.
+    let _ = std::future::poll_fn(|cx| Poll::Ready(shutdown.as_mut().poll(cx))).await;
+    let mut drained = std::pin::pin!(session.work.close());
+    let waiting =
+        std::future::poll_fn(|cx| Poll::Ready(drained.as_mut().poll(cx).is_pending())).await;
+    drop(release);
+    tokio::time::timeout(Duration::from_secs(10), shutdown)
+        .await
+        .expect("shutdown finishes once the look ends");
+    assert!(waiting, "the gate drained during the timer's look");
+    assert!(session.work.is_closed(), "the timer outlived shutdown");
+    assert_eq!(changes(&session).len(), 1, "a dispatch was written");
+    assert!(reminders(&session).is_empty());
+    assert!(!session.jobs().has_undelivered(), "a reminder was posted");
+    assert_eq!(h.faux.call_count(), 0, "a turn ran");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
