@@ -5,11 +5,11 @@
   "scope": "05",
   "status": "partial",
   "recordedOn": "2026-10-19",
-  "summary": "Native process owner qualification at candidate c2144d52a5, the squash of rust/s05-native-process-qual (064128eefc, 13b504bfb9, 6f50e695d8, from branch point 568a6acfa1). The candidate changes tests only: tests/process_macos.rs, the macOS counterpart of the Linux-only tests/process_reap.rs; a nested-job case in tests/process_windows.rs; and #[cfg(unix)] on bake-cli's print_mode test helpers. No product code changed. HEAD 519a202b13 contains the candidate. There, from a clean checkout, the Intel x86_64 macOS native preflight passed 4 gates, and its rust gate ran process_macos's 10 cases, with its 2 subprocess bodies ignored. The Linux preflight passed 33 gates under umask 022, with actionlint and runtime skipped; under umask 077 it failed scripts-unit and rust-package on the unpacked bake-rs binary's mode, which no slice touched. On the slice branch, process_macos passed in seven more Mac runs, and Linux Clippy, the Linux workspace tests, and cross-target Clippy passed. The first Mac run failed in the build on the runner's open-file limit. No Windows test ran, so the nested-job case and the README's 'a job breakaway' phrase it questions are unverified. Apple Silicon is cross-target Clippy only, and the worker's negative controls kept no logs. This record does not supersede 2026-10-14-persistent-settings-credentials, which covers settings and credential storage APIs, not process ownership.",
+  "summary": "Native process owner qualification at candidate c2144d52a5, the squash of rust/s05-native-process-qual (064128eefc, 13b504bfb9, 6f50e695d8, from branch point 568a6acfa1). The candidate changes tests only: tests/process_macos.rs, the macOS counterpart of the Linux-only tests/process_reap.rs; a nested-job case in tests/process_windows.rs; and #[cfg(unix)] on bake-cli's print_mode test helpers. No product code changed. HEAD 519a202b13 contains the candidate. There, from a clean checkout, the Intel x86_64 macOS native preflight passed 4 gates, and its rust gate ran process_macos's 10 cases, with its 2 subprocess bodies ignored. The Linux preflight passed 33 gates under umask 022, with actionlint and runtime skipped; under umask 077 it failed scripts-unit and rust-package on the unpacked bake-rs binary's mode, which no slice touched. On the slice branch, process_macos passed in seven more Mac runs, and Linux Clippy, the Linux workspace tests, and cross-target Clippy passed. The first Mac run failed in the build on the runner's open-file limit. No Windows test ran, so the nested-job case and the README's 'a job breakaway' phrase it questions are unverified. Apple Silicon is cross-target Clippy only, and the worker's negative controls kept no logs. This record does not supersede 2026-10-14-persistent-settings-credentials, which covers settings and credential storage APIs, not process ownership. Before push the stack was rebased onto develop c5f02c476a (scope 12 web tools and hooks, scope 15 commands), which changed every hash: this record's candidate c2144d52a5 became 97d2c60707 and its base 4703b27537 became c5f02c476a, with the fixture bytes unchanged. The runs above at 519a202b13 are pre-rebase. A second run set at bfdbbcb875, the rebased stack with three integration commits on top (Windows lint fixes in the scope 12 and 15 code, D41's inconclusive loopback timeout, and Never replay classes for web_search and web_fetch), passed: the Linux preflight's 33 gates (actionlint and the TypeScript runtime skipped; 2534 Cargo tests, 6 ignored; PTY 58/58), the Intel macOS native preflight's 4 gates (2512, 6 ignored; PTY 56/56), and cross-target Clippy for Windows and Apple Silicon.",
   "supersedes": [],
   "provenance": {
-    "base": "4703b27537ddfd5d17f64fb2c5e1414b9bc1c78c",
-    "candidate": "c2144d52a59ece4ec4924a613e15e93075bb4157",
+    "base": "c5f02c476aa3844dadda0e57adfef5a6e60395cc",
+    "candidate": "97d2c607076b1ec99efeb51a159930f12dfb23c0",
     "oracle": {
       "notApplicable": "No Pi code was adapted: the slice adds tests of Bake's existing owner in rust/crates/bake-process. That owner follows Pi v1.3.0 (71023aec1546d6d677a65669c5665c0927ce0dd0) packages/coding-agent/src/utils/shell.ts: detached spawn, killProcessTree, killTrackedDetachedChildren, and a normal exit leaving background descendants running. The porting is recorded in rust/README.md's bake-process row. The macOS cases port Bake's own Rust tests/process_reap.rs, and no retained contract or TypeScript source is involved."
     }
@@ -571,6 +571,175 @@
         "reference": ".preflight/rust-orchestration/scope-work-2026-10-18/E-linux-test-workspace.log",
         "sha256": "2035f240438fb63d852e85f5c276ef291edfc61427555ef1391ca235d6f95afd"
       }
+    },
+    {
+      "id": "rebased-linux-preflight",
+      "argv": [
+        "bun",
+        "run",
+        "preflight"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml; rustc 1.99.0 observed in rust/ after the run)",
+        "bun": "1.4.2 (observed after the run)",
+        "node": "v26.10.0 (observed after the run)",
+        "git": "2.56.0 (observed after the run)",
+        "cargo-about": "0.9.2, built into a temporary root and named by BAKE_CARGO_ABOUT"
+      },
+      "testedCommit": "bfdbbcb875aabba88d676ef9308a183e8389e8fc",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 33,
+        "failed": 0,
+        "skipped": 2,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/linux-preflight-bfdbbcb875.log",
+        "sha256": "c516b82cb769110824c640672cdad5663215ef7198c2a7e4f18cb866806e0f61"
+      }
+    },
+    {
+      "id": "rebased-linux-rust-gate",
+      "argv": [
+        "bun",
+        "run",
+        "preflight"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml; rustc 1.99.0 observed in rust/ after the run)",
+        "bun": "1.4.2 (observed after the run)",
+        "node": "v26.10.0 (observed after the run)",
+        "git": "2.56.0 (observed after the run)",
+        "cargo-about": "0.9.2, built into a temporary root and named by BAKE_CARGO_ABOUT"
+      },
+      "testedCommit": "bfdbbcb875aabba88d676ef9308a183e8389e8fc",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 2534,
+        "failed": 0,
+        "skipped": 6,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/linux-bfdbbcb875/rust.log",
+        "sha256": "7abced60c063c9cf3c604358da13fd3649bde6861b3988423e4bcbc3e14c8956"
+      }
+    },
+    {
+      "id": "rebased-mac-preflight",
+      "argv": [
+        "bun",
+        "run",
+        "preflight:mac",
+        "BAKE_CARGO_ABOUT=<cargo-about 0.9.2 on the Mac> bun run preflight --only native"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "darwin",
+        "arch": "x64",
+        "runner": "macpro over SSH; Intel x86_64; macOS 26.7.1"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml)",
+        "cargo-about": "0.9.2 on the Mac, named by BAKE_CARGO_ABOUT in the command"
+      },
+      "testedCommit": "bfdbbcb875aabba88d676ef9308a183e8389e8fc",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/mac-bfdbbcb875.log",
+        "sha256": "8f62d65f3e20235ca4f520d41fb3b98d48925077116b07a1c3684f11e679de94"
+      }
+    },
+    {
+      "id": "rebased-mac-rust-gate",
+      "argv": [
+        "bun",
+        "run",
+        "preflight:mac",
+        "BAKE_CARGO_ABOUT=<cargo-about 0.9.2 on the Mac> bun run preflight --only native"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "darwin",
+        "arch": "x64",
+        "runner": "macpro over SSH; Intel x86_64; macOS 26.7.1"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml)"
+      },
+      "testedCommit": "bfdbbcb875aabba88d676ef9308a183e8389e8fc",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 2512,
+        "failed": 0,
+        "skipped": 6,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/mac-bfdbbcb875/rust.log",
+        "sha256": "fdd9da35dae9a490726934f36a18195e35bb7e2ba78d311d83b15512e6b11edf"
+      }
+    },
+    {
+      "id": "rebased-xclippy",
+      "argv": [
+        "cargo",
+        "clippy",
+        "--workspace",
+        "--all-targets",
+        "--locked",
+        "--target",
+        "<x86_64-pc-windows-gnu, then aarch64-apple-darwin>",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml)",
+        "zig": "zig cc as the C compiler for ring, one target per pass"
+      },
+      "testedCommit": "bfdbbcb875aabba88d676ef9308a183e8389e8fc",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/xclippy-bfdbbcb875.log",
+        "sha256": "9eecce6c7ab6f1fcdc5e72eabcbdeae39ec87fc914f30ed94d65be7a0ce661ea"
+      }
     }
   ],
   "results": [
@@ -583,7 +752,8 @@
         "mac-preflight",
         "mac-rust-gate",
         "slice-mac-process-tests",
-        "slice-mac-head"
+        "slice-mac-head",
+        "rebased-mac-rust-gate"
       ],
       "outcome": "pass"
     },
@@ -608,7 +778,9 @@
         "linux-preflight-umask022",
         "linux-rust-gate",
         "mac-preflight",
-        "mac-rust-gate"
+        "mac-rust-gate",
+        "rebased-linux-rust-gate",
+        "rebased-mac-rust-gate"
       ],
       "outcome": "pass"
     },
@@ -633,7 +805,9 @@
         "slice-cross-target-clippy",
         "linux-rust-gate",
         "mac-rust-gate",
-        "slice-linux-workspace-tests"
+        "slice-linux-workspace-tests",
+        "rebased-linux-rust-gate",
+        "rebased-mac-rust-gate"
       ],
       "outcome": "pass"
     },

@@ -5,11 +5,11 @@
   "scope": "08",
   "status": "partial",
   "recordedOn": "2026-10-19",
-  "summary": "Replay classes, the selected-run Safe rerun, and parent-SIGKILL checkpoint tests at 519a202b13, the develop commit that squashes slice C and the commit every HEAD run tested. The Linux preflight passed 33 gates (actionlint and the TypeScript runtime gate skipped) on its second attempt, under umask 022; the first, under umask 077, failed scripts-unit and rust-package because the unpacked bake-rs had mode 0700. The Intel x86_64 macOS native preflight passed its 4 gates, and both rust gates ran every test this slice added. Every tool bake-rs composes, MCP included, carries a replay class, and flipping or clearing the class and read_only on every tool leaves the request transcript and three provider bodies byte-identical. bake-rs -p --session <file> --resume-run <id> reaches AgentSession::resume_run (print_mode.rs), which now reruns interrupted calls only when every unresolved call is on the run's last assistant, each tool is Safe now and, if dispatched, was recorded Safe, and the run is otherwise resumable; ordinary recovery still sends No result provided and runs nothing. On Linux and Intel macOS the tests SIGKILL a fixture child 20 times per run and check its file, the next request, and an effect count shared by both processes. Seven checkpoint mutations, each run once on an uncommitted tree before the slice's final amend, were each rejected. This is the first scope 08 record. Windows runs, power loss, kills inside write or during streamed bytes, a CLI test of a crashed run's Safe rerun, logs of the worker's repeat run and rerun mutations, an eval record, and Auto review remain.",
+  "summary": "Replay classes, the selected-run Safe rerun, and parent-SIGKILL checkpoint tests at 519a202b13, the develop commit that squashes slice C and the commit every HEAD run tested. The Linux preflight passed 33 gates (actionlint and the TypeScript runtime gate skipped) on its second attempt, under umask 022; the first, under umask 077, failed scripts-unit and rust-package because the unpacked bake-rs had mode 0700. The Intel x86_64 macOS native preflight passed its 4 gates, and both rust gates ran every test this slice added. Every tool bake-rs composes, MCP included, carries a replay class, and flipping or clearing the class and read_only on every tool leaves the request transcript and three provider bodies byte-identical. bake-rs -p --session <file> --resume-run <id> reaches AgentSession::resume_run (print_mode.rs), which now reruns interrupted calls only when every unresolved call is on the run's last assistant, each tool is Safe now and, if dispatched, was recorded Safe, and the run is otherwise resumable; ordinary recovery still sends No result provided and runs nothing. On Linux and Intel macOS the tests SIGKILL a fixture child 20 times per run and check its file, the next request, and an effect count shared by both processes. Seven checkpoint mutations, each run once on an uncommitted tree before the slice's final amend, were each rejected. This is the first scope 08 record. Windows runs, power loss, kills inside write or during streamed bytes, a CLI test of a crashed run's Safe rerun, logs of the worker's repeat run and rerun mutations, an eval record, and Auto review remain. Before push the stack was rebased onto develop c5f02c476a (scope 12 web tools and hooks, scope 15 commands), which changed every hash: this record's candidate 519a202b13 became d8c2e3c691 and its base 72b43cd2cc became 8fdc5e13b1, with the fixture bytes unchanged. The runs above at 519a202b13 are pre-rebase. A second run set at bfdbbcb875, the rebased stack with three integration commits on top (Windows lint fixes in the scope 12 and 15 code, D41's inconclusive loopback timeout, and Never replay classes for web_search and web_fetch), passed: the Linux preflight's 33 gates (actionlint and the TypeScript runtime skipped; 2534 Cargo tests, 6 ignored; PTY 58/58), the Intel macOS native preflight's 4 gates (2512, 6 ignored; PTY 56/56), and cross-target Clippy for Windows and Apple Silicon.",
   "supersedes": [],
   "provenance": {
-    "base": "72b43cd2cc3ffe6a597f3ff9c137edbf139de46c",
-    "candidate": "519a202b1344066f9247506bbbac264b67da1bb8",
+    "base": "8fdc5e13b15e29fd49ec8710b241afc448b5d897",
+    "candidate": "d8c2e3c69130366ffc2f72eb957455f71343fd5c",
     "oracle": {
       "notApplicable": "D32: no TypeScript runtime arm. Pi v1.3.0 (71023aec15) gives its built-in tools no replay class; the rerun rule follows Pi Durable's harness/tool.ts, which reruns an interrupted execute phase only when the stored and the current class are both safe and records an absent class as unsafe. Bake departs from it as D37 requires: a rerun goes through the current hooks, plugin vetoes, journal dispatch, and permission wrappers, and a call that is not Safe leaves the run needing reconciliation instead of settling it with an interruption error. Pi's source was read, not run."
     }
@@ -575,6 +575,175 @@
         "reference": ".preflight/rust-orchestration/scope-work-2026-10-18/mutate-kill-final.out",
         "sha256": "4bb484c0200ad18a1bb202aa280c45ec7a1bbcb8217ffced589b2ded9f4a3deb"
       }
+    },
+    {
+      "id": "rebased-linux-preflight",
+      "argv": [
+        "bun",
+        "run",
+        "preflight"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml; rustc 1.99.0 observed in rust/ after the run)",
+        "bun": "1.4.2 (observed after the run)",
+        "node": "v26.10.0 (observed after the run)",
+        "git": "2.56.0 (observed after the run)",
+        "cargo-about": "0.9.2, built into a temporary root and named by BAKE_CARGO_ABOUT"
+      },
+      "testedCommit": "bfdbbcb875aabba88d676ef9308a183e8389e8fc",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 33,
+        "failed": 0,
+        "skipped": 2,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/linux-preflight-bfdbbcb875.log",
+        "sha256": "c516b82cb769110824c640672cdad5663215ef7198c2a7e4f18cb866806e0f61"
+      }
+    },
+    {
+      "id": "rebased-linux-rust-gate",
+      "argv": [
+        "bun",
+        "run",
+        "preflight"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml; rustc 1.99.0 observed in rust/ after the run)",
+        "bun": "1.4.2 (observed after the run)",
+        "node": "v26.10.0 (observed after the run)",
+        "git": "2.56.0 (observed after the run)",
+        "cargo-about": "0.9.2, built into a temporary root and named by BAKE_CARGO_ABOUT"
+      },
+      "testedCommit": "bfdbbcb875aabba88d676ef9308a183e8389e8fc",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 2534,
+        "failed": 0,
+        "skipped": 6,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/linux-bfdbbcb875/rust.log",
+        "sha256": "7abced60c063c9cf3c604358da13fd3649bde6861b3988423e4bcbc3e14c8956"
+      }
+    },
+    {
+      "id": "rebased-mac-preflight",
+      "argv": [
+        "bun",
+        "run",
+        "preflight:mac",
+        "BAKE_CARGO_ABOUT=<cargo-about 0.9.2 on the Mac> bun run preflight --only native"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "darwin",
+        "arch": "x64",
+        "runner": "macpro over SSH; Intel x86_64; macOS 26.7.1"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml)",
+        "cargo-about": "0.9.2 on the Mac, named by BAKE_CARGO_ABOUT in the command"
+      },
+      "testedCommit": "bfdbbcb875aabba88d676ef9308a183e8389e8fc",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/mac-bfdbbcb875.log",
+        "sha256": "8f62d65f3e20235ca4f520d41fb3b98d48925077116b07a1c3684f11e679de94"
+      }
+    },
+    {
+      "id": "rebased-mac-rust-gate",
+      "argv": [
+        "bun",
+        "run",
+        "preflight:mac",
+        "BAKE_CARGO_ABOUT=<cargo-about 0.9.2 on the Mac> bun run preflight --only native"
+      ],
+      "cwd": ".",
+      "host": {
+        "os": "darwin",
+        "arch": "x64",
+        "runner": "macpro over SSH; Intel x86_64; macOS 26.7.1"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml)"
+      },
+      "testedCommit": "bfdbbcb875aabba88d676ef9308a183e8389e8fc",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 2512,
+        "failed": 0,
+        "skipped": 6,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/mac-bfdbbcb875/rust.log",
+        "sha256": "fdd9da35dae9a490726934f36a18195e35bb7e2ba78d311d83b15512e6b11edf"
+      }
+    },
+    {
+      "id": "rebased-xclippy",
+      "argv": [
+        "cargo",
+        "clippy",
+        "--workspace",
+        "--all-targets",
+        "--locked",
+        "--target",
+        "<x86_64-pc-windows-gnu, then aarch64-apple-darwin>",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "cwd": "rust",
+      "host": {
+        "os": "linux",
+        "arch": "x64",
+        "runner": "local Fedora Linux 44; kernel 7.2.11-200.fc44.x86_64; 32 threads"
+      },
+      "tools": {
+        "rust-toolchain": "1.99.0 (pinned by rust/rust-toolchain.toml)",
+        "zig": "zig cc as the C compiler for ring, one target per pass"
+      },
+      "testedCommit": "bfdbbcb875aabba88d676ef9308a183e8389e8fc",
+      "expectedExit": 0,
+      "actualExit": 0,
+      "counts": {
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "warned": 0
+      },
+      "evidence": {
+        "reference": ".preflight/rust-orchestration/xclippy-bfdbbcb875.log",
+        "sha256": "9eecce6c7ab6f1fcdc5e72eabcbdeae39ec87fc914f30ed94d65be7a0ce661ea"
+      }
     }
   ],
   "results": [
@@ -587,7 +756,9 @@
         "linux-preflight",
         "linux-rust-gate",
         "mac-preflight",
-        "mac-rust-gate"
+        "mac-rust-gate",
+        "rebased-linux-rust-gate",
+        "rebased-mac-rust-gate"
       ],
       "outcome": "pass"
     },
@@ -600,7 +771,9 @@
         "linux-preflight",
         "linux-rust-gate",
         "mac-preflight",
-        "mac-rust-gate"
+        "mac-rust-gate",
+        "rebased-linux-rust-gate",
+        "rebased-mac-rust-gate"
       ],
       "outcome": "pass"
     },
@@ -613,7 +786,9 @@
         "linux-preflight",
         "linux-rust-gate",
         "mac-preflight",
-        "mac-rust-gate"
+        "mac-rust-gate",
+        "rebased-linux-rust-gate",
+        "rebased-mac-rust-gate"
       ],
       "outcome": "pass"
     },
@@ -626,7 +801,9 @@
         "linux-preflight",
         "linux-rust-gate",
         "mac-preflight",
-        "mac-rust-gate"
+        "mac-rust-gate",
+        "rebased-linux-rust-gate",
+        "rebased-mac-rust-gate"
       ],
       "outcome": "pass"
     },
@@ -639,7 +816,9 @@
         "linux-preflight",
         "linux-rust-gate",
         "mac-preflight",
-        "mac-rust-gate"
+        "mac-rust-gate",
+        "rebased-linux-rust-gate",
+        "rebased-mac-rust-gate"
       ],
       "outcome": "pass"
     },
@@ -652,7 +831,9 @@
         "linux-preflight",
         "linux-rust-gate",
         "mac-preflight",
-        "mac-rust-gate"
+        "mac-rust-gate",
+        "rebased-linux-rust-gate",
+        "rebased-mac-rust-gate"
       ],
       "outcome": "pass"
     },
@@ -858,9 +1039,9 @@
       "owner": "unassigned"
     }
   ],
-  "evalRecords": {
-    "missing": "The Safe rerun changes what the model sees only after bake-rs -p --session <file> --resume-run <id> resumes a crashed run with an interrupted Safe call: the request then carries the rerun results before the recovery notice instead of a refusal. Ordinary prompts, tool declarations, and the system prompt stay byte-identical (replay-class-on-every-tool, ordinary-recovery-unchanged). The standard eval suite does not exercise crash recovery, and no paired eval was run; the owner decides before push whether to run one."
-  },
+  "evalRecords": [
+    "evals/agent-loop/versions/unreleased/2026-10-19-safe-rerun/REPORT.md"
+  ],
   "performanceRecords": {
     "notApplicable": "No performance qualification attempted."
   },
