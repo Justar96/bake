@@ -157,9 +157,12 @@ async fn run(
         require_finished(result.outcome)?;
         result.final_message
     } else {
+        // A note a run ended with (a `Stop` hook cap) may follow the answer.
         session
             .messages()
-            .last()
+            .iter()
+            .rev()
+            .find(|message| message.as_custom().is_none())
             .and_then(|message| message.as_assistant().cloned())
     };
     if options.mode == PrintOutput::Text

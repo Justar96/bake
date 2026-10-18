@@ -171,12 +171,23 @@ impl Fixture {
         files: Vec<HookFile>,
         outcome: EscalationOutcome,
     ) -> AgentSession {
+        let tools: Vec<Arc<AgentTool>> =
+            create_all_tool_definitions(&self.ws(), &ToolsOptions::default())
+                .into_iter()
+                .filter(|definition| definition.name() == "write")
+                .map(|definition| Arc::new(definition.tool))
+                .collect();
+        self.session_with_tools(store, files, outcome, tools).await
+    }
+
+    async fn session_with_tools(
+        &self,
+        store: SessionManager,
+        files: Vec<HookFile>,
+        outcome: EscalationOutcome,
+        tools: Vec<Arc<AgentTool>>,
+    ) -> AgentSession {
         let ws = self.ws();
-        let tools: Vec<Arc<AgentTool>> = create_all_tool_definitions(&ws, &ToolsOptions::default())
-            .into_iter()
-            .filter(|definition| definition.name() == "write")
-            .map(|definition| Arc::new(definition.tool))
-            .collect();
         let session = AgentSession::create(AgentSessionOptions {
             session: store,
             registry: Arc::clone(&self.registry).into(),
@@ -801,4 +812,443 @@ async fn shutdown_awaits_a_slow_hook() {
     assert_eq!(fx.faux.call_count(), 0);
     assert!(decisions(&entries(&session)).is_empty());
     session.shutdown().await;
+}
+
+/// A Codex `UserPromptSubmit` hook whose plain output, its context, names
+/// the prompt it saw: `ctx:<prompt>`.
+const PROMPT_CONTEXT: &str = r#"sed -n 's/.*"prompt":"\([^"]*\)".*/ctx:\1/p'"#;
+
+impl Fixture {
+    /// A reply that records its request, then waits for `gate`.
+    fn held_reply(
+        &self,
+        gate: Arc<tokio::sync::Notify>,
+        message: bake_ai::AssistantMessage,
+    ) -> FauxResponseStep {
+        let seen = Arc::clone(&self.seen);
+        FauxResponseStep::Factory(Arc::new(move |context, _, _, _| {
+            seen.lock().unwrap().push(texts(context.messages()));
+            let gate = Arc::clone(&gate);
+            let message = message.clone();
+            Box::pin(async move {
+                gate.notified().await;
+                Ok(message)
+            })
+        }))
+    }
+
+    async fn prompt_context_session(&self) -> AgentSession {
+        self.session(
+            self.new_store(),
+            vec![one(
+                HookDialect::Codex,
+                "UserPromptSubmit",
+                None,
+                command(PROMPT_CONTEXT),
+            )],
+            EscalationOutcome::Rejected,
+        )
+        .await
+    }
+}
+
+// 0.3 appended a prompt's UserPromptSubmit context in the step that took
+// the prompt (`hooks-claude-code`'s `agent/pre-step`). A steer or
+// follow-up queued while a request streams reaches the next request with
+// its context, in the default one-at-a-time mode, with no request for the
+// context alone; the file keeps the prompt, then its context.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_queued_prompt_and_its_context_reach_the_same_request() {
+    for steer in [true, false] {
+        let fx = Fixture::new("hooks-queued-context");
+        let release = Arc::new(tokio::sync::Notify::new());
+        fx.faux.append_responses(vec![
+            fx.held_reply(Arc::clone(&release), faux_assistant_message("first")),
+            fx.reply(faux_assistant_message("second")),
+            fx.reply(faux_assistant_message("unexpected")),
+        ]);
+        let session = Arc::new(fx.prompt_context_session().await);
+        assert_eq!(session.steering_mode(), QueueMode::OneAtATime);
+        assert_eq!(session.follow_up_mode(), QueueMode::OneAtATime);
+        let run = tokio::spawn({
+            let session = Arc::clone(&session);
+            async move { session.prompt("start", Vec::new()).await }
+        });
+        within("the first request", async {
+            while fx.faux.call_count() < 1 {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await;
+        if steer {
+            session.steer("more", Vec::new()).await.expect("steer");
+        } else {
+            session
+                .follow_up("more", Vec::new())
+                .await
+                .expect("follow up");
+        }
+        let queued = session.queued_messages();
+        let (listed, other) = if steer {
+            (&queued.steering, &queued.follow_up)
+        } else {
+            (&queued.follow_up, &queued.steering)
+        };
+        assert_eq!(listed, &["more"], "steer={steer}");
+        assert!(other.is_empty());
+        release.notify_one();
+        assert_eq!(within("the prompt", run).await.expect("join"), Ok(()));
+        assert_eq!(fx.faux.call_count(), 2, "steer={steer}: one request more");
+        let requests = fx.requests();
+        assert_eq!(requests[0], ["start", "ctx:start"]);
+        assert_eq!(
+            requests[1][requests[1].len() - 2..],
+            ["more", "ctx:more"],
+            "steer={steer}"
+        );
+        assert!(session.queued_messages().is_empty());
+        let recorded = file_entries(&session);
+        let user = position(&recorded, |entry| {
+            entry["message"]["role"] == "user" && entry["message"]["content"][0]["text"] == "more"
+        });
+        assert_eq!(recorded[user + 1]["customType"], CONTEXT_MESSAGE_TYPE);
+        assert_eq!(recorded[user + 1]["content"][0]["text"], "ctx:more");
+        session.shutdown().await;
+    }
+}
+
+// The queue lists, announces, and hands back only what the user typed: a
+// queued prompt's hook context goes with it when the queue is cleared.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cleared_queue_hands_back_only_the_users_text() {
+    let fx = Fixture::new("hooks-queued-clear");
+    fx.faux
+        .append_responses(vec![fx.reply(faux_assistant_message("only"))]);
+    let session = fx.prompt_context_session().await;
+    let updates = Arc::new(Mutex::new(Vec::new()));
+    let seen = Arc::clone(&updates);
+    let subscription = session.subscribe(move |event| {
+        if let SessionEvent::QueueUpdate {
+            steering,
+            follow_up,
+        } = event
+        {
+            seen.lock()
+                .unwrap()
+                .push((steering.to_vec(), follow_up.to_vec()));
+        }
+    });
+    session.steer("more", Vec::new()).await.expect("steer");
+    session
+        .follow_up("later", Vec::new())
+        .await
+        .expect("follow up");
+    let expected = QueuedMessages {
+        steering: vec!["more".into()],
+        follow_up: vec!["later".into()],
+    };
+    assert_eq!(session.queued_messages(), expected);
+    assert_eq!(session.clear_queue(), expected);
+    assert!(!session.agent.has_queued_messages());
+    session.prompt("start", Vec::new()).await.expect("prompt");
+    assert_eq!(fx.requests(), [["start", "ctx:start"]]);
+    drop(subscription);
+    let updates = updates.lock().unwrap().clone();
+    assert_eq!(
+        updates,
+        [
+            (vec!["more".to_owned()], Vec::new()),
+            (vec!["more".to_owned()], vec!["later".to_owned()]),
+            (Vec::new(), Vec::new()),
+        ]
+    );
+    session.shutdown().await;
+}
+
+// A decision entry names each hook by its place in the file, 0.3's
+// opaque `handlerId`, and keeps neither the command, which may hold a
+// secret, nor the `systemMessage` it printed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn decision_records_name_each_hook_without_its_command() {
+    let fx = Fixture::new("hooks-record-ids");
+    fx.faux
+        .append_responses(vec![fx.reply(faux_assistant_message("done"))]);
+    let hooks = file(
+        HookDialect::ClaudeCode,
+        json!({ "hooks": { "UserPromptSubmit": [
+            { "hooks": [command("true # SECRET_TOKEN=abc123")] },
+            { "hooks": [
+                command("exit 0"),
+                command(r#"echo '{"systemMessage":"private note"}' # SECRET_TOKEN=abc123"#),
+            ] },
+        ] } }),
+    );
+    let session = fx
+        .session(fx.new_store(), vec![hooks], EscalationOutcome::Rejected)
+        .await;
+    session.prompt("hi", Vec::new()).await.expect("prompt");
+    let text = std::fs::read_to_string(session.session_file().expect("file")).expect("read");
+    assert!(!text.contains("SECRET_TOKEN"), "{text}");
+    assert!(!text.contains("private note"), "{text}");
+    let recorded = file_entries(&session);
+    let data = decisions(&recorded);
+    let hooks = data[0]["hooks"].as_array().expect("hooks");
+    let ids: Vec<&str> = hooks
+        .iter()
+        .map(|hook| hook["handlerId"].as_str().expect("handlerId"))
+        .collect();
+    assert_eq!(
+        ids,
+        [
+            "UserPromptSubmit/0/0",
+            "UserPromptSubmit/1/0",
+            "UserPromptSubmit/1/1"
+        ]
+    );
+    assert!(hooks.iter().all(|hook| hook.get("command").is_none()));
+    assert!(hooks.iter().all(|hook| hook.get("systemMessage").is_none()));
+    session.shutdown().await;
+}
+
+// A first prompt stopped while its SessionStart hook runs leaves
+// SessionStart unrun: the next prompt runs it again and sends its context.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_interrupted_session_start_runs_again() {
+    let fx = Fixture::new("hooks-start-again");
+    let (starts, marker, pid_file) = (fx.path("starts"), fx.path("marker"), fx.path("pid"));
+    let hook = format!(
+        r#"echo x >> '{starts}'; if [ ! -e '{marker}' ]; then touch '{marker}'; echo $$ > '{pid}'; exec sleep 60; fi; echo '{{"hookSpecificOutput":{{"hookEventName":"SessionStart","additionalContext":"session ctx"}}}}'"#,
+        starts = starts.display(),
+        marker = marker.display(),
+        pid = pid_file.display(),
+    );
+    let session = Arc::new(
+        fx.session(
+            fx.new_store(),
+            vec![one(
+                HookDialect::ClaudeCode,
+                "SessionStart",
+                None,
+                command(&hook),
+            )],
+            EscalationOutcome::Rejected,
+        )
+        .await,
+    );
+    let prompt = tokio::spawn({
+        let session = Arc::clone(&session);
+        async move { session.prompt("first", Vec::new()).await }
+    });
+    let pid = wait_for_pid(&pid_file).await;
+    within("abort", session.abort()).await;
+    assert_eq!(within("the prompt", prompt).await.expect("join"), Ok(()));
+    assert!(!alive(pid));
+    assert_eq!(fx.faux.call_count(), 0);
+    assert!(decisions(&entries(&session)).is_empty());
+
+    fx.faux
+        .append_responses(vec![fx.reply(faux_assistant_message("done"))]);
+    session.prompt("second", Vec::new()).await.expect("prompt");
+    assert_eq!(fx.requests(), [["session ctx", "second"]]);
+    assert_eq!(std::fs::read_to_string(&starts).expect("starts"), "x\nx\n");
+    let recorded = file_entries(&session);
+    assert_eq!(decisions(&recorded)[0]["event"], "SessionStart");
+    session.shutdown().await;
+}
+
+// A result a PostToolUse hook replaced still passes the session's own
+// result step, which sees an error: provenance the tool claimed for
+// context masking is stripped, and its other details are kept.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_replaced_result_keeps_no_observation_provenance_the_tool_claimed() {
+    let fx = Fixture::new("hooks-post-provenance");
+    let tool = AgentTool::new(
+        "grep",
+        "Custom grep",
+        "A custom grep",
+        json!({ "type": "object", "properties": {} }),
+        |_, _, _, _| {
+            Box::pin(async {
+                Ok(bake_agent::AgentToolResult {
+                    details: Some(json!({
+                        "bake.contextObservation": { "version": 1, "kind": "grep" },
+                        "customDetail": "preserved",
+                    })),
+                    ..bake_agent::AgentToolResult::text("found it")
+                })
+            })
+        },
+    );
+    fx.faux.append_responses(vec![
+        fx.reply(faux_assistant_blocks(
+            vec![faux_tool_call("grep", json!({}), Some("g1"))],
+            StopReason::ToolUse,
+        )),
+        fx.reply(faux_assistant_message("done")),
+    ]);
+    let session = fx
+        .session_with_tools(
+            fx.new_store(),
+            vec![one(
+                HookDialect::ClaudeCode,
+                "PostToolUse",
+                Some("grep"),
+                command("echo 'bad output' >&2; exit 2"),
+            )],
+            EscalationOutcome::Rejected,
+            vec![Arc::new(tool)],
+        )
+        .await;
+    session.prompt("go", Vec::new()).await.expect("prompt");
+    let recorded = file_entries(&session);
+    assert_eq!(tool_result(&recorded), ("bad output".to_owned(), true));
+    let details = &recorded[position(&recorded, is_tool_result)]["message"]["details"];
+    assert_eq!(details["customDetail"], "preserved");
+    assert!(
+        details.get("bake.contextObservation").is_none(),
+        "{details}"
+    );
+    session.shutdown().await;
+}
+
+// 0.3's `TODO(stop-loop-guard)`: a Stop hook that always blocks continues
+// a prompt at most MAX_STOP_HOOK_CONTINUATIONS times. The next block is
+// recorded as `capped`, and the run ends with a note, written with that
+// decision and shown without a request, which the model gets with the
+// next prompt and a resumed session rebuilds.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_stop_hook_that_always_blocks_is_capped() {
+    use crate::hooks::engine::{MAX_STOP_HOOK_CONTINUATIONS, stop_cap_note};
+
+    let fx = Fixture::new("hooks-stop-cap");
+    let allow = fx.path("allow");
+    let hook = format!(
+        "if [ -e '{}' ]; then exit 0; fi; echo 'again' >&2; exit 2",
+        allow.display()
+    );
+    let cap = usize::try_from(MAX_STOP_HOOK_CONTINUATIONS).expect("cap");
+    fx.faux.append_responses(
+        (0..=cap)
+            .map(|index| fx.reply(faux_assistant_message(&format!("reply {index}"))))
+            .collect(),
+    );
+    let session = fx
+        .session(
+            fx.new_store(),
+            vec![one(HookDialect::Codex, "Stop", None, command(&hook))],
+            EscalationOutcome::Rejected,
+        )
+        .await;
+    let notes = Arc::new(Mutex::new(Vec::new()));
+    let seen = Arc::clone(&notes);
+    let subscription = session.subscribe(move |event| {
+        if let SessionEvent::Agent(AgentEvent::MessageStart { message }) = event
+            && let Some(custom) = message
+                .as_custom()
+                .and_then(|custom| custom.as_any().downcast_ref::<CustomMessage>())
+            && custom
+                .details
+                .as_ref()
+                .is_some_and(|details| details["capped"] == true)
+        {
+            seen.lock().unwrap().push(custom.custom_type.clone());
+        }
+    });
+    session.prompt("go", Vec::new()).await.expect("prompt");
+    drop(subscription);
+    assert_eq!(
+        fx.faux.call_count(),
+        u64::from(MAX_STOP_HOOK_CONTINUATIONS) + 1,
+        "eight continuations, no more"
+    );
+    let recorded = file_entries(&session);
+    let data = decisions(&recorded);
+    assert_eq!(data.len(), cap + 1);
+    assert!(
+        data[..cap]
+            .iter()
+            .all(|data| data["decision"] == "continue")
+    );
+    let last = data[cap];
+    assert_eq!(last["decision"], "capped");
+    assert_eq!(last["reason"], "again");
+    assert_eq!(last["continuations"], MAX_STOP_HOOK_CONTINUATIONS);
+    let capped = recorded.len() - 2;
+    assert_eq!(recorded[capped]["data"]["decision"], "capped");
+    let note = &recorded[capped + 1];
+    assert_eq!(note["type"], "custom_message");
+    assert_eq!(note["customType"], CONTEXT_MESSAGE_TYPE);
+    assert_eq!(note["content"][0]["text"], stop_cap_note());
+    assert_eq!(note["details"]["capped"], true);
+    // Shown live: the note starts and ends as a message.
+    assert_eq!(*notes.lock().unwrap(), [CONTEXT_MESSAGE_TYPE]);
+    let live = llm(&session);
+    assert_eq!(texts(&live).last(), Some(&stop_cap_note()));
+
+    let path = session.session_file().expect("file");
+    std::fs::write(&allow, "").expect("allow");
+    fx.faux
+        .append_responses(vec![fx.reply(faux_assistant_message("next reply"))]);
+    session.prompt("next", Vec::new()).await.expect("prompt");
+    let requests = fx.requests();
+    let next = requests.last().expect("request");
+    assert_eq!(next[next.len() - 2..], [stop_cap_note(), "next".to_owned()]);
+    let live = llm(&session);
+    session.shutdown().await;
+    let resumed = fx
+        .session(
+            SessionManager::open(&path, None, None).expect("open"),
+            Vec::new(),
+            EscalationOutcome::Rejected,
+        )
+        .await;
+    assert_eq!(texts(&llm(&resumed)), texts(&live));
+    resumed.shutdown().await;
+}
+
+// Print mode still prints the answer a capped run ends with, before its
+// note.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn print_mode_prints_the_answer_of_a_capped_run() {
+    use crate::hooks::engine::MAX_STOP_HOOK_CONTINUATIONS;
+    use crate::print_mode::{PrintModeOptions, PrintOutput, PrintRunRecovery, run_print_mode};
+
+    let fx = Fixture::new("hooks-stop-cap-print");
+    let cap = usize::try_from(MAX_STOP_HOOK_CONTINUATIONS).expect("cap");
+    fx.faux.append_responses(
+        (0..=cap)
+            .map(|index| fx.reply(faux_assistant_message(&format!("reply {index}"))))
+            .collect(),
+    );
+    let session = fx
+        .session(
+            fx.new_store(),
+            vec![one(HookDialect::Codex, "Stop", None, command("exit 2"))],
+            EscalationOutcome::Rejected,
+        )
+        .await;
+    let stdout = Arc::new(Mutex::new(Vec::<u8>::new()));
+    let stderr: crate::print_mode::SharedWriter = Arc::new(Mutex::new(Vec::<u8>::new()));
+    let code = run_print_mode(
+        &session,
+        PrintModeOptions {
+            control: RunControl::default(),
+            recovery: PrintRunRecovery::Disabled,
+            mode: PrintOutput::Text,
+            initial_message: Some("go".into()),
+            initial_images: Vec::new(),
+            messages: Vec::new(),
+            job_wait: Duration::ZERO,
+        },
+        Arc::clone(&stdout) as crate::print_mode::SharedWriter,
+        stderr,
+    )
+    .await;
+    assert_eq!(code, 0);
+    assert_eq!(
+        fx.faux.call_count(),
+        u64::from(MAX_STOP_HOOK_CONTINUATIONS) + 1
+    );
+    let printed = String::from_utf8(stdout.lock().unwrap().clone()).expect("utf-8");
+    assert_eq!(printed, format!("reply {cap}\n"));
 }

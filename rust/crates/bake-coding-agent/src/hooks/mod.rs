@@ -63,7 +63,8 @@ use crate::permissions::{Approver, StandingPermissions};
 pub const DECISION_ENTRY_TYPE: &str = "bake.hook.decision";
 
 /// The `customType` of the message carrying a hook's context or a `Stop`
-/// hook's reason to the model.
+/// hook's reason to the model, and of the note a run ends with when its
+/// `Stop` hooks reach their cap (`details.capped`).
 pub const CONTEXT_MESSAGE_TYPE: &str = "bake.hook.context";
 
 /// A `hooks.json` format.

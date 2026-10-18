@@ -1,11 +1,18 @@
 //! The session's external hooks ([`crate::hooks`]) at Pi v1.3.0's
-//! extension points (`src/core/agent-session.ts`): `SessionStart` and
-//! `UserPromptSubmit` where `_prepareRun` and `_runInputHandlers` run
-//! (`session_start`, `input`), `PreToolUse` in the agent's
+//! extension points (`src/core/agent-session.ts`): `UserPromptSubmit`
+//! where `_runInputHandlers` runs (`input`), `PreToolUse` in the agent's
 //! `before_tool_call` after the plugins' vetoes (`_beforeToolCall`,
 //! `tool_call`), `PostToolUse` in its `after_tool_call` before image
 //! normalization (`_afterToolCall`, `tool_result`), and `Stop` where the
 //! run would settle (`_runBeforeSettleBoundary`, `agent_before_settle`).
+//!
+//! `SessionStart` deviates from both sources: Pi emits `session_start`
+//! when extensions bind (`bindExtensions`), and 0.3 ran the hook on
+//! `agent/created`, both before any prompt. Here it runs inside the first
+//! prompt's execution, before `UserPromptSubmit`, so its process is owned
+//! and stopped like the prompt's other hooks, and its context is written
+//! with that prompt. It counts as run once its decision is written (or no
+//! hook matched); a first prompt stopped before then runs it again.
 //!
 //! Every evaluation that ran a hook is written as a `custom` entry
 //! ([`DECISION_ENTRY_TYPE`]) through the session's write boundary before
@@ -28,19 +35,20 @@ use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use bake_agent::{
-    AfterToolCall, AfterToolCallResult, AgentMessage as LiveMessage, AgentTurnDecision,
-    BeforeToolCall, BeforeToolCallContext, BeforeToolCallResult, FinishTurn, RunControl, hook,
+    AfterToolCall, AfterToolCallContext, AfterToolCallResult, AgentEvent,
+    AgentMessage as LiveMessage, AgentToolResult, AgentTurnDecision, BeforeToolCall,
+    BeforeToolCallContext, BeforeToolCallResult, FinishTurn, RunControl, hook,
 };
 use bake_ai::{AbortController, AbortSignal, Message, TextContent, UserContent, UserContentBlock};
 use bake_sandbox::EscalationOutcome;
 use serde_json::{Map, Value, json};
 
 use super::recovery::Core;
-use super::{WriteRefused, write_session};
+use super::{SessionEvent, WriteRefused, write_session};
 use crate::hooks::engine::{
-    Evaluated, EventInput, Hooks, PROMPT_BLOCKED, PayloadBase, PreToolAction, PromptAction,
-    SessionSource, decision_entry, post_tool_action, pre_tool_action, prompt_action,
-    session_start_context, stop_continuation,
+    Evaluated, EventInput, Hooks, MAX_STOP_HOOK_CONTINUATIONS, PROMPT_BLOCKED, PayloadBase,
+    PreToolAction, PromptAction, SessionSource, decision_entry, post_tool_action, pre_tool_action,
+    prompt_action, session_start_context, stop_cap_note, stop_continuation,
 };
 use crate::hooks::{CONTEXT_MESSAGE_TYPE, DECISION_ENTRY_TYPE, HookEvent};
 use crate::permissions::ApprovalRequest;
@@ -122,6 +130,17 @@ async fn write_decision(
     data: Value,
     cancelled: impl Fn() -> bool + Send + 'static,
 ) -> Result<bool, String> {
+    write_decision_with_note(core, persist_error, data, None, cancelled).await
+}
+
+/// [`write_decision`], then `note`, a custom message, in the same write.
+async fn write_decision_with_note(
+    core: &Core,
+    persist_error: &Mutex<Option<String>>,
+    data: Value,
+    note: Option<Arc<CustomMessage>>,
+    cancelled: impl Fn() -> bool + Send + 'static,
+) -> Result<bool, String> {
     let Some(permit) = core.work.enter() else {
         return Err("The session is shut down.".to_owned());
     };
@@ -134,8 +153,18 @@ async fn write_decision(
             }
             session
                 .append_custom_entry(DECISION_ENTRY_TYPE, Some(data))
-                .map(|_| true)
-                .map_err(|error| error.to_string())
+                .map_err(|error| error.to_string())?;
+            if let Some(note) = &note {
+                session
+                    .append_custom_message_entry(
+                        &note.custom_type,
+                        note.content.clone(),
+                        note.display,
+                        note.details.clone(),
+                    )
+                    .map_err(|error| error.to_string())?;
+            }
+            Ok(true)
         })
     });
     drop(permit);
@@ -189,21 +218,23 @@ fn ask_text(reason: Option<&str>) -> String {
     }
 }
 
-/// The model's text for an `ask` that was not approved.
-fn refusal(outcome: EscalationOutcome, reason: Option<&str>) -> String {
+/// The model's text for an `ask` that was not approved, or `None` when
+/// the user allowed the call.
+fn refusal(outcome: EscalationOutcome, reason: Option<&str>) -> Option<String> {
     let base = match outcome {
+        EscalationOutcome::AllowedOnce => return None,
         EscalationOutcome::Unavailable => {
             "a PreToolUse hook asked to confirm this call, but no approval channel is available"
         }
         EscalationOutcome::Cancelled => "approval for this call was cancelled",
-        EscalationOutcome::Rejected | EscalationOutcome::AllowedOnce => {
+        EscalationOutcome::Rejected => {
             "the user rejected this call, which a PreToolUse hook asked to confirm"
         }
     };
-    match reason {
+    Some(match reason {
         Some(reason) => format!("{base}: {reason}"),
         None => base.to_owned(),
-    }
+    })
 }
 
 /// The agent's `before_tool_call`: `plugins` first, then the `PreToolUse`
@@ -287,17 +318,17 @@ pub(super) fn before_tool_call(
                         return Ok(Some(aborted()));
                     }
                     facts.insert("approval".into(), outcome.as_str().into());
-                    if outcome == EscalationOutcome::AllowedOnce {
-                        ("allow", None, false)
-                    } else {
-                        let text = refusal(outcome, reason.as_deref());
-                        facts.insert("reason".into(), text.clone().into());
-                        let result = BeforeToolCallResult {
-                            block: true,
-                            reason: Some(text),
-                            terminate: false,
-                        };
-                        ("deny", Some(result), false)
+                    match refusal(outcome, reason.as_deref()) {
+                        None => ("allow", None, false),
+                        Some(text) => {
+                            facts.insert("reason".into(), text.clone().into());
+                            let result = BeforeToolCallResult {
+                                block: true,
+                                reason: Some(text),
+                                terminate: false,
+                            };
+                            ("deny", Some(result), false)
+                        }
                     }
                 }
             };
@@ -319,8 +350,9 @@ pub(super) fn before_tool_call(
 }
 
 /// The agent's `after_tool_call`: the `PostToolUse` hooks, then `inner`
-/// (image normalization and masking details) unless a hook replaced the
-/// result with its feedback.
+/// (image normalization and masking details). When a hook replaced the
+/// result with its feedback, `inner` sees the replacement, an error, so
+/// the result keeps no observation provenance the tool supplied.
 pub(super) fn after_tool_call(
     core: Arc<Core>,
     persist_error: Arc<Mutex<Option<String>>>,
@@ -394,14 +426,30 @@ pub(super) fn after_tool_call(
             if action.halt {
                 hooks.engine.state().halted = true;
             }
-            match action.feedback {
-                Some(feedback) => Ok(Some(AfterToolCallResult {
-                    content: Some(vec![UserContentBlock::Text(TextContent::new(feedback))]),
-                    is_error: Some(true),
-                    ..AfterToolCallResult::default()
-                })),
-                None => inner(context, signal).await,
-            }
+            let Some(feedback) = action.feedback else {
+                return inner(context, signal).await;
+            };
+            let content = vec![UserContentBlock::Text(TextContent::new(feedback))];
+            let replaced = AgentToolResult {
+                content: content.clone(),
+                is_error: true,
+                ..context.result.clone()
+            };
+            let finished = inner(
+                AfterToolCallContext {
+                    result: &replaced,
+                    is_error: true,
+                    ..context
+                },
+                signal,
+            )
+            .await?
+            .unwrap_or_default();
+            Ok(Some(AfterToolCallResult {
+                content: Some(finished.content.unwrap_or(content)),
+                is_error: Some(true),
+                ..finished
+            }))
         })
     })
 }
@@ -463,8 +511,8 @@ pub(super) async fn before_prompt(
 ) -> Result<PromptHooks, String> {
     let mut before = Vec::new();
     let mut after = Vec::new();
-    let starting = hooks.engine.runs(HookEvent::SessionStart)
-        && !std::mem::replace(&mut hooks.engine.state().session_started, true);
+    let starting =
+        hooks.engine.runs(HookEvent::SessionStart) && !hooks.engine.state().session_started;
     if starting {
         let source = if messages
             .iter()
@@ -497,6 +545,7 @@ pub(super) async fn before_prompt(
         } else if control.stopped().is_some() {
             return Ok(PromptHooks::Stopped);
         }
+        hooks.engine.state().session_started = true;
     }
     before.extend(hooks.take_pending());
     if !hooks.engine.runs(HookEvent::UserPromptSubmit) {
@@ -607,7 +656,10 @@ pub(super) async fn before_queued_prompt(
 }
 
 /// `Stop` where a run would settle: the message continuing it, once its
-/// decision is written, or `None` to settle. Not run after a halt.
+/// decision is written, or `None` to settle. Not run after a halt. A
+/// continuation past [`MAX_STOP_HOOK_CONTINUATIONS`] is refused: its
+/// decision (`capped`) and the [`stop_cap_note`] message are written
+/// together, and the note joins the transcript without a model request.
 pub(super) async fn before_settle(
     hooks: &SessionHooks,
     core: &Core,
@@ -630,25 +682,61 @@ pub(super) async fn before_settle(
         return Ok(None);
     }
     let continuation = stop_continuation(&evaluated.outcomes);
+    let continuations = hooks.engine.state().stop_continuations;
+    let capped = continuation.is_some() && continuations >= MAX_STOP_HOOK_CONTINUATIONS;
     let mut facts = Map::new();
     facts.insert("stopHookActive".into(), active.into());
     if let Some(reason) = &continuation {
         facts.insert("reason".into(), reason.clone().into());
     }
-    let decision = if continuation.is_some() {
-        "continue"
-    } else {
-        "pass"
+    let decision = match &continuation {
+        Some(_) if capped => {
+            facts.insert("continuations".into(), continuations.into());
+            "capped"
+        }
+        Some(_) => "continue",
+        None => "pass",
     };
+    let note = capped.then(|| {
+        Arc::new(CustomMessage {
+            custom_type: CONTEXT_MESSAGE_TYPE.to_owned(),
+            content: UserContent::Blocks(vec![UserContentBlock::Text(TextContent::new(
+                stop_cap_note(),
+            ))]),
+            display: true,
+            details: Some(json!({ "event": HookEvent::Stop.as_str(), "capped": true })),
+            timestamp: bake_ai::now_ms(),
+        })
+    });
     let data = decision_entry(HookEvent::Stop, decision, facts, evaluated.hooks);
     let stop = control.clone();
-    if !write_decision(core, persist_error, data, move || stop.stopped().is_some()).await? {
+    if !write_decision_with_note(core, persist_error, data, note.clone(), move || {
+        stop.stopped().is_some()
+    })
+    .await?
+    {
+        return Ok(None);
+    }
+    if let Some(note) = note {
+        let note = LiveMessage::Custom(note);
+        if let Some(agent) = core.agent() {
+            agent.update_messages(|messages| messages.push(note.clone()));
+        }
+        core.emit(&SessionEvent::Agent(&AgentEvent::MessageStart {
+            message: note.clone(),
+        }));
+        core.emit(&SessionEvent::Agent(&AgentEvent::MessageEnd {
+            message: note,
+        }));
         return Ok(None);
     }
     let Some(reason) = continuation else {
         return Ok(None);
     };
-    hooks.engine.state().stop_active = true;
+    let mut state = hooks.engine.state();
+    state.stop_active = true;
+    state.stop_continuations += 1;
+    drop(state);
     Ok(context_message(HookEvent::Stop, vec![reason]))
 }
 
@@ -659,13 +747,20 @@ mod tests {
     #[test]
     fn refusals_name_the_hook_and_its_reason() {
         assert_eq!(
-            refusal(EscalationOutcome::Rejected, Some("prod")),
-            "the user rejected this call, which a PreToolUse hook asked to confirm: prod"
+            refusal(EscalationOutcome::Rejected, Some("prod")).as_deref(),
+            Some("the user rejected this call, which a PreToolUse hook asked to confirm: prod")
         );
         assert_eq!(
-            refusal(EscalationOutcome::Unavailable, None),
-            "a PreToolUse hook asked to confirm this call, but no approval channel is available"
+            refusal(EscalationOutcome::Unavailable, None).as_deref(),
+            Some(
+                "a PreToolUse hook asked to confirm this call, but no approval channel is available"
+            )
         );
+        assert_eq!(
+            refusal(EscalationOutcome::Cancelled, None).as_deref(),
+            Some("approval for this call was cancelled")
+        );
+        assert_eq!(refusal(EscalationOutcome::AllowedOnce, Some("prod")), None);
         assert_eq!(
             ask_text(None),
             "A PreToolUse hook asks to confirm this call"

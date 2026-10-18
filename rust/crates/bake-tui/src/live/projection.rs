@@ -26,6 +26,7 @@ use bake_coding_agent::agent_session::job_notices::NOTICE_TYPE;
 use bake_coding_agent::agent_session::{
     BackgroundCompactionStatus, CompactionReason, SessionEvent,
 };
+use bake_coding_agent::hooks;
 use bake_coding_agent::schedules;
 use bake_coding_agent::session::messages::CustomMessage;
 use bake_coding_agent::subagents::SUBAGENT_DETAIL;
@@ -933,50 +934,58 @@ pub fn replay_compacted(messages: &[AgentMessage]) -> Vec<Row> {
 /// cannot be read that way; a subagent's message as `← agent {id}: {first
 /// line}`, its first line kept to 48 characters as 0.3's `presentation.ts`
 /// keeps titles; and a schedule reminder as `reminder {id}: {first line}`,
-/// or a batch as `reminders {id}, {id}`.
+/// or a batch as `reminders {id}, {id}`; and the note of a run its `Stop`
+/// hooks kept going too often, as its text.
 fn notice_row(message: &AgentMessage, labels: &Labels) -> Option<Row> {
     let custom = message.as_custom()?;
     let custom = custom.as_any().downcast_ref::<CustomMessage>()?;
     let text = user_text(&custom.content);
     let details = custom.details.as_ref();
-    let info =
-        match custom.custom_type.as_str() {
-            NOTICE_TYPE => return Some(job_notice(&text).unwrap_or(Row::Info(text))),
-            subagents::NOTICE_TYPE => {
-                return Some(agent_notice(&text, details, labels).unwrap_or_else(|| {
+    let info = match custom.custom_type.as_str() {
+        NOTICE_TYPE => return Some(job_notice(&text).unwrap_or(Row::Info(text))),
+        subagents::NOTICE_TYPE => {
+            return Some(
+                agent_notice(&text, details, labels).unwrap_or_else(|| {
                     Row::Info(text.lines().next().unwrap_or_default().to_owned())
-                }));
+                }),
+            );
+        }
+        subagents::MESSAGE_TYPE => {
+            let from = details
+                .and_then(|details| details.get("from"))
+                .and_then(Value::as_str)?;
+            let body = text
+                .strip_prefix(&format!("Agent {from} sent a message: "))
+                .unwrap_or(&text);
+            format!("← agent {from}: {}", title(body))
+        }
+        schedules::REMINDER_TYPE => {
+            let reminders = details
+                .and_then(|details| details.get("reminders"))
+                .and_then(Value::as_array)?;
+            match reminders.as_slice() {
+                [one] => format!(
+                    "reminder {}: {}",
+                    one.get("id").and_then(Value::as_str)?,
+                    title(one.get("prompt").and_then(Value::as_str)?)
+                ),
+                many => format!(
+                    "reminders {}",
+                    many.iter()
+                        .filter_map(|reminder| reminder.get("id").and_then(Value::as_str))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
             }
-            subagents::MESSAGE_TYPE => {
-                let from = details
-                    .and_then(|details| details.get("from"))
-                    .and_then(Value::as_str)?;
-                let body = text
-                    .strip_prefix(&format!("Agent {from} sent a message: "))
-                    .unwrap_or(&text);
-                format!("← agent {from}: {}", title(body))
-            }
-            schedules::REMINDER_TYPE => {
-                let reminders = details
-                    .and_then(|details| details.get("reminders"))
-                    .and_then(Value::as_array)?;
-                match reminders.as_slice() {
-                    [one] => format!(
-                        "reminder {}: {}",
-                        one.get("id").and_then(Value::as_str)?,
-                        title(one.get("prompt").and_then(Value::as_str)?)
-                    ),
-                    many => format!(
-                        "reminders {}",
-                        many.iter()
-                            .filter_map(|reminder| reminder.get("id").and_then(Value::as_str))
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    ),
-                }
-            }
-            _ => return None,
-        };
+        }
+        // The note a run ends with when its `Stop` hooks reach their cap.
+        hooks::CONTEXT_MESSAGE_TYPE
+            if details.and_then(|details| details.get("capped")) == Some(&Value::Bool(true)) =>
+        {
+            text
+        }
+        _ => return None,
+    };
     Some(Row::Info(info))
 }
 
@@ -1456,6 +1465,30 @@ mod tests {
             info(notice_row(&custom(message), &known)).as_deref(),
             Some(format!("← agent child-1: {}…", "x".repeat(48)).as_str())
         );
+    }
+
+    #[test]
+    fn a_stop_hook_cap_note_is_an_info_row_and_other_hook_context_is_not_shown() {
+        let message = |details: Value| {
+            custom(CustomMessage {
+                custom_type: hooks::CONTEXT_MESSAGE_TYPE.into(),
+                content: UserContent::Text("Stop hooks kept this run going".into()),
+                display: true,
+                details: Some(details),
+                timestamp: 0,
+            })
+        };
+        let capped = message(serde_json::json!({ "event": "Stop", "capped": true }));
+        assert_eq!(
+            info(notice_row(&capped, &Labels::new())).as_deref(),
+            Some("Stop hooks kept this run going")
+        );
+        assert_eq!(
+            replay(std::slice::from_ref(&capped)),
+            [Row::Info("Stop hooks kept this run going".into())]
+        );
+        let context = message(serde_json::json!({ "event": "Stop" }));
+        assert_eq!(notice_row(&context, &Labels::new()), None);
     }
 
     #[test]

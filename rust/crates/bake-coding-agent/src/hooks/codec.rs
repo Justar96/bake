@@ -59,7 +59,7 @@ pub struct HookOutput {
     pub hook_event_name: Option<String>,
     /// `hookSpecificOutput.additionalContext`.
     pub additional_context: Option<String>,
-    /// `systemMessage`, logged and not shown.
+    /// `systemMessage`, which is neither shown nor recorded.
     pub system_message: Option<String>,
     /// Whether `hookSpecificOutput.updatedInput` was given; it is not
     /// honored.

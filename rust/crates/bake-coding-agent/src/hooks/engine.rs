@@ -17,7 +17,7 @@ use bake_sandbox::EscalationOutcome;
 use serde_json::{Map, Value, json};
 
 use super::codec::HookOutput;
-use super::config::{CommandHook, MatcherGroup};
+use super::config::MatcherGroup;
 use super::matcher::matches_matcher;
 use super::merge::{MergedDecision, MergedOutcome, merge_hook_outputs};
 use super::runner::{HookProcesses, HookRun, run_hook};
@@ -32,6 +32,19 @@ pub const PRE_TOOL_USE_BLOCKED: &str = "blocked by PreToolUse hook";
 pub const POST_TOOL_USE_BLOCKED: &str = "blocked by PostToolUse hook";
 /// The model's text for a `Stop` hook's block without a reason.
 pub const STOP_BLOCKED: &str = "continue: blocked by Stop hook";
+/// The most `Stop` continuations one prompt takes in a row. A `Stop` hook
+/// that blocks again after them is overruled: the run ends with
+/// [`stop_cap_note`]. 0.3 had no bound (its `TODO(stop-loop-guard)`).
+pub const MAX_STOP_HOOK_CONTINUATIONS: u32 = 8;
+
+/// The note the model and the user see when a run ends at
+/// [`MAX_STOP_HOOK_CONTINUATIONS`].
+pub fn stop_cap_note() -> String {
+    format!(
+        "Stop hooks kept this run going {MAX_STOP_HOOK_CONTINUATIONS} times in a row, so it ended without continuing again."
+    )
+}
+
 /// The error a prompt a `UserPromptSubmit` hook blocked is refused with,
 /// followed by `: <reason>` when the hook gave one.
 pub const PROMPT_BLOCKED: &str = "Prompt blocked by UserPromptSubmit hook";
@@ -184,13 +197,17 @@ pub fn payload(dialect: HookDialect, input: &EventInput<'_>, base: &PayloadBase)
 /// Per-session hook state.
 #[derive(Debug, Default)]
 pub struct HookState {
-    /// `SessionStart` has run in this process.
+    /// `SessionStart`'s decision was written in this process, or no
+    /// hook matched it.
     pub session_started: bool,
     /// A Claude Code tool hook's `continue: false` ends the current run
     /// once its batch's calls finish.
     pub halted: bool,
     /// The run was last continued by a `Stop` hook.
     pub stop_active: bool,
+    /// The `Stop` continuations of the current prompt, at most
+    /// [`MAX_STOP_HOOK_CONTINUATIONS`].
+    pub stop_continuations: u32,
 }
 
 /// Every hook an event ran, with each dialect's merged outcome.
@@ -249,8 +266,17 @@ fn summarize_stderr(stderr: &str) -> Option<String> {
     }
 }
 
+/// A hook's stable id in its file, `<event>/<group>/<hook>`: the indexes
+/// of its matcher group among the event's groups and of the hook in that
+/// group. Like 0.3's opaque `handlerId`, it stands in for the command,
+/// whose text may hold secrets and is never recorded.
+fn handler_id(event: HookEvent, group: usize, hook: usize) -> String {
+    format!("{}/{group}/{hook}", event.as_str())
+}
+
 /// One hook's record: 0.3's `hook/invoked` and `hook/result` together.
-fn record(dialect: HookDialect, group: &MatcherGroup, hook: &CommandHook, run: &HookRun) -> Value {
+/// It holds neither the command text nor the hook's `systemMessage`.
+fn record(dialect: HookDialect, group: &MatcherGroup, handler_id: String, run: &HookRun) -> Value {
     let output = &run.output;
     let decision = match (output.decision, output.continue_) {
         (Some(decision), _) => decision.as_str(),
@@ -262,7 +288,7 @@ fn record(dialect: HookDialect, group: &MatcherGroup, hook: &CommandHook, run: &
     if let Some(matcher) = &group.matcher {
         record.insert("matcher".into(), matcher.clone().into());
     }
-    record.insert("command".into(), hook.command.clone().into());
+    record.insert("handlerId".into(), handler_id.into());
     record.insert("decision".into(), decision.into());
     if let Some(code) = output.exit_code {
         record.insert("exitCode".into(), code.into());
@@ -273,9 +299,6 @@ fn record(dialect: HookDialect, group: &MatcherGroup, hook: &CommandHook, run: &
     record.insert("durationMs".into(), run.duration_ms.into());
     if let Some(stderr) = summarize_stderr(&output.stderr) {
         record.insert("stderr".into(), stderr.into());
-    }
-    if let Some(message) = &output.system_message {
-        record.insert("systemMessage".into(), message.clone().into());
     }
     if output.updated_input {
         record.insert("updatedInput".into(), "ignored".into());
@@ -362,11 +385,11 @@ impl Hooks {
         for file in &self.files {
             let dialect = file.dialect;
             let mut outputs = Vec::new();
-            for group in file.groups.of(event) {
+            for (group_index, group) in file.groups.of(event).iter().enumerate() {
                 if !matches_matcher(group.matcher.as_deref(), input.subject(), dialect) {
                     continue;
                 }
-                for hook in &group.hooks {
+                for (hook_index, hook) in group.hooks.iter().enumerate() {
                     let mut stdin = payload(dialect, input, base).to_string().into_bytes();
                     // Claude Code ends the payload with a newline; Codex
                     // does not.
@@ -391,7 +414,8 @@ impl Hooks {
                     )
                     .await;
                     plain_stdout_as_context(dialect, event, &mut run.output);
-                    evaluated.hooks.push(record(dialect, group, hook, &run));
+                    let id = handler_id(event, group_index, hook_index);
+                    evaluated.hooks.push(record(dialect, group, id, &run));
                     outputs.push(run.output);
                 }
             }

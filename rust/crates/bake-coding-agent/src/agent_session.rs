@@ -2558,20 +2558,18 @@ impl AgentSession {
             content: UserContent::Blocks(content),
             timestamp: bake_ai::now_ms(),
         };
+        // The prompt and its hook context are one queued item, so they
+        // reach the same step in either queue mode.
+        let mut unit = vec![LiveMessage::from(message)];
+        unit.extend(context);
         {
             let mut queued = self.queue.lock();
             if steer {
                 queued.steering.push(text);
-                self.agent.steer(message);
-                if let Some(context) = context {
-                    self.agent.steer(context);
-                }
+                self.agent.steer_all(unit);
             } else {
                 queued.follow_up.push(text);
-                self.agent.follow_up(message);
-                if let Some(context) = context {
-                    self.agent.follow_up(context);
-                }
+                self.agent.follow_up_all(unit);
             }
         }
         self.queue.announce(&self.core);

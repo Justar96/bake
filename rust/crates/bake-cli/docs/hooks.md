@@ -28,10 +28,12 @@ Because a hooks file runs commands and decides which tool calls run, bake-rs rea
 | Event | When it runs | Its matcher selects | What a hook can do |
 |---|---|---|---|
 | `SessionStart` | before the first prompt bake-rs sends in a session | `startup` for a new session, `resume` for one with a conversation | add context |
-| `UserPromptSubmit` | before a prompt is sent, and before a steering or follow-up prompt is queued | nothing (every hook runs) | block the prompt, or add context after it |
+| `UserPromptSubmit` | before a prompt is sent, and before a steering or follow-up prompt is queued; the hook sees the prompt after `/skill:` and prompt-template expansion | nothing (every hook runs) | block the prompt, or add context after it |
 | `PreToolUse` | before a tool call runs | the tool's name, such as `bash`, `read`, `edit`, `write`, or `mcp__files__search` | deny the call; a Claude Code hook can also ask you |
 | `PostToolUse` | after a tool call, before its result is kept | the tool's name | replace the result with feedback, or add context |
 | `Stop` | when a run is about to end | nothing | keep the run going with a reason |
+
+Claude Code and Codex run `SessionStart` when a session opens; bake-rs runs it as the session's first prompt starts, before that prompt's `UserPromptSubmit` hooks. If that prompt is stopped, as with Esc, before the `SessionStart` decision is written, the next prompt runs the hooks again.
 
 Other events in a file are ignored. Claude Code's `SubagentStart` and `SubagentStop` hooks are reported as not run. A subagent (`bake-rs docs settings`) runs only the `PreToolUse` and `PostToolUse` hooks.
 
@@ -50,11 +52,11 @@ What each answer does:
 - A blocked prompt is not sent. bake-rs reports `Prompt blocked by UserPromptSubmit hook` with the reason.
 - A denied tool call does not run; the model gets the reason as the call's error, or `blocked by PreToolUse hook`. A Claude Code `ask` asks you as an approval does (`bake-rs docs permissions`); without an approval, as in print mode, the call is denied.
 - A `PostToolUse` block replaces the call's result with the reason, or `blocked by PostToolUse hook`, as an error.
-- A `Stop` block sends the model the reason, or `continue: blocked by Stop hook`, and the run goes on. The next `Stop` hook sees `stop_hook_active: true`, so a hook can let the run end the second time.
+- A `Stop` block sends the model the reason, or `continue: blocked by Stop hook`, and the run goes on. The next `Stop` hook sees `stop_hook_active: true`, so a hook can let the run end the second time. One prompt is kept going at most 8 times in a row: a ninth block is recorded as `capped`, and the run ends with the note `Stop hooks kept this run going 8 times in a row, so it ended without continuing again.`, which the transcript shows and the model reads with the next prompt.
 - `continue: false` stops as the hook's tool would: it blocks a prompt; a Claude Code `PreToolUse` hook denies the call with its `stopReason` and ends the run once the other calls of that response finish, and a Claude Code `PostToolUse` hook keeps the result, ends the run likewise, and passes its `stopReason` on as context; a Codex `PostToolUse` hook replaces the result with its reason or `stopReason`; and on `Stop` it lets the run end. A Codex `PreToolUse` hook's `continue: false` is ignored, as are `allow` and `ask` there.
-- Context is shown to the model as a message: `SessionStart` context before the first prompt, prompt context after the prompt, and `PostToolUse` context before the next request.
+- Context is shown to the model as a message: `SessionStart` context before the first prompt, prompt context right after the prompt in the same request (a steering or follow-up prompt's too), and `PostToolUse` context before the next request.
 
-`systemMessage` and `updatedInput` are recorded but not used.
+`systemMessage` and `updatedInput` are not used; the session file notes that a hook gave `updatedInput`.
 
 ## How hooks run
 
@@ -66,4 +68,4 @@ A hook's `timeout` is in seconds; without one it may run for 10 minutes. bake-rs
 
 ## The session file
 
-Every time hooks run, bake-rs writes a `bake.hook.decision` entry to the session file before the decision takes effect: the event, the decision, the tool call it concerns, and for each hook its dialect, matcher, command, exit code, duration, and the start of its standard error. Context and `Stop` reasons are kept as `bake.hook.context` messages, so a resumed session sends the model what it saw before.
+Every time hooks run, bake-rs writes a `bake.hook.decision` entry to the session file before the decision takes effect: the event, the decision, the tool call it concerns, and for each hook its dialect, matcher, `handlerId`, exit code, duration, and the start of its standard error. A `handlerId` such as `PreToolUse/0/1` names the hook by its place in its file: the event, the index of its matcher group under that event, and its index in the group, counting from 0. The command itself is not written, since it may hold a secret. Context and `Stop` reasons are kept as `bake.hook.context` messages, so a resumed session sends the model what it saw before.

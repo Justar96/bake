@@ -768,6 +768,7 @@ impl PromptExecution {
             let mut state = installed.engine.state();
             state.halted = false;
             state.stop_active = false;
+            state.stop_continuations = 0;
         }
         let halted = || {
             installed
