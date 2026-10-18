@@ -219,6 +219,9 @@ pub fn web_search_tool_definition(search: CliProxySearch, fetch_offered: bool) -
     tool.output_schema = Some(search_output_schema());
     // 0.3's `isConcurrencySafe`: a provider read changes no session state.
     tool.read_only = true;
+    // A request leaves the machine (a search is a paid model call), so a
+    // recovered run never repeats it: reconciliation decides.
+    tool.replay = Some(bake_agent::ToolReplay::Never);
     definition(tool)
 }
 
@@ -255,6 +258,9 @@ pub fn web_fetch_tool_definition(fetcher: HttpFetcher) -> ToolDefinition {
     tool.output_schema = Some(fetch_output_schema());
     // 0.3's `isConcurrencySafe`: a provider read changes no session state.
     tool.read_only = true;
+    // A request leaves the machine (a search is a paid model call), so a
+    // recovered run never repeats it: reconciliation decides.
+    tool.replay = Some(bake_agent::ToolReplay::Never);
     definition(tool)
 }
 

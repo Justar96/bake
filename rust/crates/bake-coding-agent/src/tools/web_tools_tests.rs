@@ -122,6 +122,12 @@ fn declares_0_3s_names_descriptions_and_parameters() {
             .iter()
             .all(|definition| definition.tool.read_only)
     );
+    // An external request is never replayed by a recovered run.
+    assert!(
+        definitions
+            .iter()
+            .all(|definition| definition.tool.replay == Some(bake_agent::ToolReplay::Never))
+    );
     assert_eq!(
         web_search_tool_definition(tools.search, false)
             .tool
