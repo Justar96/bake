@@ -89,16 +89,22 @@ pub fn classify_content_type(content_type: Option<&str>) -> Option<FetchableKind
     None
 }
 
-/// `parseCharset`: the lower-cased `charset` parameter, if any.
+/// `parseCharset`: the lower-cased `charset` parameter, if any. The
+/// header is untrusted and may carry non-ASCII text, so the parameter
+/// name is compared by bytes rather than sliced.
 pub fn parse_charset(content_type: Option<&str>) -> Option<String> {
     let value = content_type?;
-    let lower = value.to_ascii_lowercase();
     let mut search = 0;
-    while let Some(found) = lower[search..].find(';') {
+    while let Some(found) = value.get(search..)?.find(';') {
         let start = search + found + 1;
-        let rest = value[start..].trim_start();
-        if rest.len() >= 7 && rest[..7].eq_ignore_ascii_case("charset") {
-            let after = rest[7..].trim_start();
+        let rest = value.get(start..)?.trim_start();
+        if rest
+            .as_bytes()
+            .get(..7)
+            .is_some_and(|name| name.eq_ignore_ascii_case(b"charset"))
+            && let Some(after) = rest.get(7..)
+        {
+            let after = after.trim_start();
             if let Some(after) = after.strip_prefix('=') {
                 let after = after.trim_start();
                 let after = after.strip_prefix('"').unwrap_or(after);
@@ -434,6 +440,13 @@ mod tests {
         );
         assert_eq!(parse_charset(Some("text/plain")), None);
         assert_eq!(parse_charset(None), None);
+        // Bake's own: non-ASCII header text never splits a character.
+        assert_eq!(parse_charset(Some("text/html;charse\u{fffd}")), None);
+        assert_eq!(parse_charset(Some("text/html;\u{fffd}\u{fffd}")), None);
+        assert_eq!(
+            parse_charset(Some("text/plain;charseé=x; charset=UTF-8")).as_deref(),
+            Some("utf-8")
+        );
     }
 
     // "builds a decoder for a charset and defaults to UTF-8".

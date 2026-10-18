@@ -208,6 +208,44 @@ async fn decodes_declared_charsets() {
     assert_eq!(error.message, "unsupported charset \"x-nope\"");
 }
 
+/// A response whose `content-type` value is the raw `content_type` bytes.
+fn raw_content_type(content_type: &[u8], body: &[u8]) -> Vec<Step> {
+    let mut bytes = format!("HTTP/1.1 200 OK\r\ncontent-length: {}\r\n", body.len()).into_bytes();
+    bytes.extend_from_slice(b"content-type: ");
+    bytes.extend_from_slice(content_type);
+    bytes.extend_from_slice(b"\r\nconnection: close\r\n\r\n");
+    bytes.extend_from_slice(body);
+    vec![Step::Write(bytes)]
+}
+
+// Bake's own: a non-ASCII `content-type` (obs-text) is untrusted input,
+// so the charset parameter is read without slicing inside a character.
+#[tokio::test]
+async fn reads_a_non_ascii_content_type_without_panicking() {
+    let server = server(|path| match path {
+        "/cut" => raw_content_type(b"text/html;charse\xff", b"<p>x</p>"),
+        "/utf8" => raw_content_type(
+            "text/plain;charseé=x; charset=iso-8859-1".as_bytes(),
+            b"caf\xe9",
+        ),
+        _ => raw_content_type(b"text/plain; charset=\xff\xfe", b"x"),
+    })
+    .await;
+    let result = fetch(limits(), &format!("{}/cut", server.base()))
+        .await
+        .expect("cut");
+    assert_eq!(result.body, WebFetchBody::Html("<p>x</p>".into()));
+    let result = fetch(limits(), &format!("{}/utf8", server.base()))
+        .await
+        .expect("utf8");
+    assert_eq!(result.body.content(), "café");
+    let error = fetch(limits(), &format!("{}/label", server.base()))
+        .await
+        .expect_err("label");
+    assert_eq!(error.code, WEB_UNSUPPORTED_CONTENT_TYPE);
+    assert_eq!(error.message, "unsupported charset \"\u{fffd}\u{fffd}\"");
+}
+
 fn redirect(location: &str) -> Vec<Step> {
     reply(302, &[("location", location)], b"")
 }
