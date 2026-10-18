@@ -501,6 +501,30 @@ fn a_grant_root_may_not_contain_the_profile() {
 }
 
 #[test]
+fn a_grant_root_may_not_contain_the_run_records() {
+    let temp = at(&["Users", "agent", "AppData", "Local", "Temp"]);
+    let records = temp.join(RUN_RECORD_DIRECTORY);
+    let elsewhere = at(&["work", "repo"]);
+    assert_eq!(
+        check_records_outside_grants(&records, &elsewhere, &[at(&["tools"])]),
+        Ok(())
+    );
+    // A workspace beside the records, under the same temporary directory.
+    assert_eq!(
+        check_records_outside_grants(&records, &temp.join("scratch"), &[]),
+        Ok(())
+    );
+    for workspace in [temp.clone(), records.clone()] {
+        let error = check_records_outside_grants(&records, &workspace, &[])
+            .expect_err("a workspace holding the records");
+        assert!(error.contains("the workspace"), "{error}");
+    }
+    let error = check_records_outside_grants(&records, &elsewhere, &[temp])
+        .expect_err("a read root holding the records");
+    assert!(error.contains("the read root"), "{error}");
+}
+
+#[test]
 fn only_a_successful_creation_owns_the_profile() {
     assert_eq!(classify_profile_creation(0), ProfileCreation::Created);
     assert_eq!(classify_profile_creation(1), ProfileCreation::Created);
@@ -529,4 +553,133 @@ fn the_profile_write_mask_is_every_mutation_and_no_read() {
         PROFILE_WRITE_MASK,
         (WORKSPACE_WRITE_MASK & !READ_EXECUTE) | 0x0004_0000 | 0x0008_0000
     );
+}
+
+#[test]
+fn only_a_failed_deletion_keeps_a_reclaimed_record() {
+    assert_eq!(classify_profile_deletion(0), ProfileDeletion::Deleted);
+    assert_eq!(classify_profile_deletion(1), ProfileDeletion::Deleted);
+    for status in [0x8007_0002_u32, 0x8007_0003, 0x8007_0490] {
+        assert_eq!(
+            classify_profile_deletion(status as i32),
+            ProfileDeletion::Absent,
+            "{status:#010x}"
+        );
+    }
+    for status in [0x8007_0005_u32, 0x8007_0020, 0x8000_4005] {
+        assert_eq!(
+            classify_profile_deletion(status as i32),
+            ProfileDeletion::Failed,
+            "{status:#010x}"
+        );
+    }
+}
+
+#[test]
+fn a_propagating_grant_refuses_links_reparse_points_and_foreign_owners() {
+    const FILE: u32 = 0x20;
+    const DIRECTORY: u32 = FILE_ATTRIBUTE_DIRECTORY;
+    const REPARSE: u32 = FILE_ATTRIBUTE_REPARSE_POINT;
+    assert_eq!(grant_object_refusal(FILE, 1, true), None);
+    // A directory's link count is its subdirectories, not a hard link.
+    assert_eq!(grant_object_refusal(DIRECTORY, 7, true), None);
+    assert_eq!(
+        grant_object_refusal(FILE, 2, true),
+        Some(GrantObjectRefusal::HardLink { links: 2 })
+    );
+    assert_eq!(
+        grant_object_refusal(FILE, 1, false),
+        Some(GrantObjectRefusal::ForeignOwner)
+    );
+    // A reparse point is refused first, whatever else it reports: a
+    // junction, a directory symbolic link, or a linked file.
+    for (attributes, links, owner) in [
+        (DIRECTORY | REPARSE, 1, true),
+        (FILE | REPARSE, 1, true),
+        (FILE | REPARSE, 3, false),
+    ] {
+        assert_eq!(
+            grant_object_refusal(attributes, links, owner),
+            Some(GrantObjectRefusal::ReparsePoint),
+            "{attributes:#x} {links} {owner}"
+        );
+    }
+    // A hard link is reported before a foreign owner.
+    assert_eq!(
+        grant_object_refusal(FILE, 2, false),
+        Some(GrantObjectRefusal::HardLink { links: 2 })
+    );
+}
+
+#[test]
+fn a_run_reclaims_only_records_of_its_own_namespace() {
+    let random = "0123456789abcdef0123456789abcdef";
+    let tag = ProfileTag::parse("0123456789abcdef").expect("a tag");
+    let other = ProfileTag::parse("fedcba9876543210").expect("a tag");
+    let untagged = run_moniker(None, random);
+    let tagged = run_moniker(Some(&tag), random);
+    assert_eq!(run_record_name(&tagged), format!("{tagged}.run"));
+    assert_eq!(
+        reclaimable_moniker(&run_record_name(&untagged), None),
+        Some(untagged.as_str())
+    );
+    assert_eq!(
+        reclaimable_moniker(&run_record_name(&tagged), Some(&tag)),
+        Some(tagged.as_str())
+    );
+    // Untagged runs and other tags never reclaim each other's records.
+    assert_eq!(reclaimable_moniker(&run_record_name(&tagged), None), None);
+    assert_eq!(
+        reclaimable_moniker(&run_record_name(&untagged), Some(&tag)),
+        None
+    );
+    assert_eq!(
+        reclaimable_moniker(&run_record_name(&tagged), Some(&other)),
+        None
+    );
+    let short = &random[..31];
+    let upper = random.to_ascii_uppercase();
+    for name in [
+        tagged.clone(),
+        format!("{tagged}.run.tmp"),
+        format!("{RUN_MONIKER_PREFIX}{short}.run"),
+        format!("{RUN_MONIKER_PREFIX}{random}0.run"),
+        format!("{RUN_MONIKER_PREFIX}{upper}.run"),
+        format!("{RUN_MONIKER_PREFIX}../{short}.run"),
+        ".run".to_owned(),
+    ] {
+        assert_eq!(reclaimable_moniker(&name, None), None, "{name:?}");
+        assert_eq!(reclaimable_moniker(&name, Some(&tag)), None, "{name:?}");
+    }
+}
+
+#[test]
+fn run_records_round_trip_and_refuse_partial_text() {
+    let text = format_run_record(4242, 133_000_000_000_000_000);
+    assert_eq!(text, "pid 4242 created 133000000000000000\n");
+    assert_eq!(
+        parse_run_record(&text),
+        Some((4242, 133_000_000_000_000_000))
+    );
+    assert_eq!(
+        parse_run_record(&format_run_record(u32::MAX, u64::MAX)),
+        Some((u32::MAX, u64::MAX))
+    );
+    // A record whose writer was killed part-way, or any other text, names
+    // no runner, so its run is never reclaimed.
+    for bad in [
+        "",
+        "pid 4242",
+        "pid 4242 created 1",
+        "pid 4242 created \n",
+        "pid  4242 created 1\n",
+        "pid +4242 created 1\n",
+        "pid 4242 created 1 extra\n",
+        "pid 4294967296 created 1\n",
+        "pid 4242 created 18446744073709551616\n",
+        "PID 4242 created 1\n",
+        "pid 4242 created 1\r\n",
+    ] {
+        assert_eq!(parse_run_record(bad), None, "{bad:?}");
+    }
 }

@@ -14,9 +14,7 @@
 //! not a release qualification. Compatibility facts the owner needs (a
 //! shell, PowerShell, `git`, a remote connection) are printed as
 //! `appcontainer-observation:` lines and never asserted, because they depend
-//! on the host and its network. The hard-link boundary, a qualification
-//! blocker, is measured from the disk and printed as
-//! `appcontainer-blocker:` lines for the same reason.
+//! on the host and its network.
 //!
 //! Each case owns its roots ([`user_scratch`], removed on drop) and its
 //! processes: every runner it starts is a [`Started`], owned through
@@ -52,6 +50,9 @@ use super::{
     BOUND, DENIED, OwnedPid, PROBE_ARG, Run, Scratch, assert_denied, assert_ok, harness, is_image,
     mklink_junction, runtime, signaled_within, text, user_scratch, win32,
 };
+
+#[path = "windows_appcontainer_objects.rs"]
+mod objects;
 
 pub fn tests() -> Vec<harness::Test> {
     let scenarios: &[(&str, fn())] = &[
@@ -105,8 +106,12 @@ pub fn tests() -> Vec<harness::Test> {
             exit_codes_and_output_pass_through,
         ),
         (
-            "hard_link_aliases_are_measured",
-            hard_link_aliases_are_measured,
+            "hard_links_refuse_a_propagating_grant",
+            hard_links_refuse_a_propagating_grant,
+        ),
+        (
+            "foreign_owned_descendants_refuse_a_propagating_grant",
+            foreign_owned_descendants_refuse_a_propagating_grant,
         ),
         (
             "a_shared_profile_shares_its_temp_directory",
@@ -120,6 +125,7 @@ pub fn tests() -> Vec<harness::Test> {
     ];
     scenarios
         .iter()
+        .chain(objects::SCENARIOS)
         .map(|(name, scenario)| {
             let scenario = *scenario;
             harness::Test::new(format!("windows-appcontainer::{name}"), scenario)
@@ -329,6 +335,27 @@ impl Fixture {
             .collect()
     }
 
+    /// The run records under this fixture's tag in [`records_dir`], which
+    /// the runners it starts share with this process: those of runs whose
+    /// profile may remain.
+    fn records(&self) -> BTreeSet<String> {
+        let prefix = self.tag.moniker_prefix();
+        let records = records_dir();
+        let listing = match std::fs::read_dir(&records) {
+            Ok(listing) => listing,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return BTreeSet::new(),
+            Err(error) => panic!("cannot inspect {}: {error}", records.display()),
+        };
+        listing
+            .filter_map(|entry| {
+                let name = entry.expect("a run record entry").file_name();
+                name.to_str()
+                    .filter(|name| name.starts_with(&prefix) && name.ends_with(".run"))
+                    .map(str::to_owned)
+            })
+            .collect()
+    }
+
     /// Checks that `name` is one of this fixture's run profile names,
     /// `bake.run.<tag>.<32 hex>`, and returns it.
     fn own<'a>(&self, name: &'a str) -> &'a str {
@@ -426,15 +453,22 @@ impl Drop for Fixture {
             }
             panic!("{error}");
         }
-        let failures: Vec<String> = left
+        let mut failures: Vec<String> = left
             .iter()
             .filter_map(|name| self.delete_profile(name).err())
             .collect();
-        if left.is_empty() {
+        // A record goes after its profile, as a reclaiming run removes it.
+        let records = self.records();
+        failures.extend(records.iter().filter_map(|name| {
+            std::fs::remove_file(records_dir().join(name))
+                .err()
+                .map(|error| format!("{name}: {error}"))
+        }));
+        if left.is_empty() && records.is_empty() {
             return;
         }
         let error = format!(
-            "runs left AppContainer profiles under tag {}, now deleted: {left:?} {failures:?}",
+            "runs left AppContainer profiles {left:?} and run records {records:?} under tag {}, now deleted: {failures:?}",
             self.tag
         );
         if std::thread::panicking() {
@@ -671,6 +705,25 @@ impl Drop for Started {
 
 /// `%LOCALAPPDATA%\Packages` as this unconfined process sees it, where
 /// Windows keeps AppContainer profile storage.
+/// The runners' run-record directory: this process's temporary directory,
+/// which every runner a [`Fixture`] starts inherits.
+fn records_dir() -> PathBuf {
+    std::env::temp_dir().join(windows_appcontainer::RUN_RECORD_DIRECTORY)
+}
+
+/// Asserts that `run` is a runner failure whose detail names `expected`.
+fn assert_refused(run: &Run, expected: &str) {
+    let failure = run.runner_failure();
+    assert!(
+        failure
+            .as_deref()
+            .is_some_and(|detail| detail.contains(expected)),
+        "a runner failure naming {expected:?}, got {failure:?}: exit {:?}\nstderr: {}",
+        run.code,
+        run.stderr
+    );
+}
+
 fn packages_dir() -> PathBuf {
     PathBuf::from(std::env::var_os("LOCALAPPDATA").expect("LOCALAPPDATA")).join("Packages")
 }
@@ -1052,19 +1105,38 @@ fn each_run_gets_a_private_temp_directory() {
 fn junction_escapes_are_denied() {
     let fixture = Fixture::new();
     let (workspace, outside) = (user_scratch("ac-ws"), user_scratch("ac-out"));
-    let link = workspace.join("escape");
-    mklink_junction(&link, &outside.0);
-    let outside_before = dacl(&outside.0);
+    let target = outside.write("victim.txt", "keep");
+    let (workspace_before, outside_before) = (dacl(&workspace.0), dacl(&outside.0));
     let policy = ww(&workspace);
-    // The first run grants the workspace after the junction exists, so the
-    // propagation meets it.
+    // A junction anywhere under the workspace before its first grant
+    // refuses the run before that grant would propagate.
+    let nested = workspace.join("deep").join("er");
+    std::fs::create_dir_all(&nested).expect("nested directories");
+    let link = nested.join("escape");
+    mklink_junction(&link, &outside.0);
+    assert_refused(&fixture.run(&policy, &["exit", "0"]), "is a reparse point");
+    assert_eq!(
+        dacl(&workspace.0),
+        workspace_before,
+        "a refused run granted the workspace"
+    );
+    assert_eq!(
+        dacl(&outside.0),
+        outside_before,
+        "a refused run granted the junction's target"
+    );
+    // Without it the grant stands, and a junction made afterwards meets no
+    // propagation: the target's own DACL decides, and it denies.
+    std::fs::remove_dir(&link).expect("remove the junction, not its target");
+    assert!(target.is_file(), "removing the junction kept its target");
+    assert_ok(&fixture.run(&policy, &["exit", "0"]), "the first grant");
+    mklink_junction(&link, &outside.0);
     let through = link.join("new.txt");
     assert_denied(
         &fixture.run(&policy, &["write", &text(&through), "x"]),
         "write through a junction",
     );
     assert!(!outside.join("new.txt").exists());
-    let target = outside.write("victim.txt", "keep");
     assert_denied(
         &fixture.run(
             &policy,
@@ -1081,28 +1153,40 @@ fn junction_escapes_are_denied() {
         "read through a junction",
     );
     assert_eq!(std::fs::read_to_string(&target).expect("kept"), "keep");
-    // Direct evidence that propagation stopped at the junction: the
-    // target's own DACL gained nothing.
     assert_eq!(
         dacl(&outside.0),
         outside_before,
-        "the workspace grant propagated through the junction"
+        "the workspace grant reached the junction's target"
     );
     // The same inside a read root.
     let read = user_scratch("ac-read");
     let inner = read.join("escape");
     mklink_junction(&inner, &outside.0);
-    let run = fixture.run_with(
-        &ro(&workspace),
-        &[&read.0],
-        &[],
-        &["read", &text(&inner.join("victim.txt"))],
+    let read_before = dacl(&read.0);
+    let through_read = ["read", &text(&inner.join("victim.txt"))];
+    assert_refused(
+        &fixture.run_with(&ro(&workspace), &[&read.0], &[], &through_read),
+        "is a reparse point",
     );
-    assert_denied(&run, "read through a junction in a read root");
+    assert_eq!(
+        dacl(&read.0),
+        read_before,
+        "a refused run granted the read root"
+    );
+    std::fs::remove_dir(&inner).expect("remove the junction, not its target");
+    assert_ok(
+        &fixture.run_with(&ro(&workspace), &[&read.0], &[], &["exit", "0"]),
+        "the first read grant",
+    );
+    mklink_junction(&inner, &outside.0);
+    assert_denied(
+        &fixture.run_with(&ro(&workspace), &[&read.0], &[], &through_read),
+        "read through a junction in a read root",
+    );
     assert_eq!(
         dacl(&outside.0),
         outside_before,
-        "the read grant propagated through the junction"
+        "the read grant reached the junction's target"
     );
     // A read root that is itself a junction is refused before any grant.
     let parent = user_scratch("ac-link-parent");
@@ -1228,20 +1312,37 @@ fn a_killed_runner_takes_its_tree() {
     // before the profile is touched.
     let ended = started.settle();
     assert_eq!(ended.code, Some(1), "the killed runner's status");
-    // The documented residue: exactly the killed runner's profile, by the
-    // name its command reported. Its tree has exited, so this case deletes
-    // it, as no runner does yet.
+    // The residue until a later run: exactly the killed runner's profile,
+    // by the name its command reported, and its run record, which only a
+    // runner that settled removes.
     assert!(
         root.is_dir(),
         "the killed runner's profile {}",
         root.display()
     );
     assert_eq!(fixture.profiles(), BTreeSet::from([name.clone()]));
+    assert_eq!(
+        fixture.records(),
+        BTreeSet::from([windows_appcontainer::run_record_name(&name)])
+    );
     observe(format_args!("case=killed-runner-residue profile={name}"));
-    fixture
-        .delete_profile(&name)
-        .expect("delete the killed runner's profile");
-    assert!(!root.exists(), "{} must be deleted", root.display());
+    // Another fixture's run, in another namespace, leaves it alone.
+    let other = Fixture::new();
+    assert_ok(
+        &other.run(&ww(&workspace), &["exit", "0"]),
+        "a run under another tag",
+    );
+    assert!(root.is_dir(), "another tag's run took {}", root.display());
+    assert_eq!(fixture.profiles(), BTreeSet::from([name.clone()]));
+    // The next run in the same namespace reclaims it before it creates its
+    // own profile: the record's runner has exited, so its profile is
+    // deleted, then the record. That run then removes its own at its end.
+    let run = fixture.run(&ww(&workspace), &["exit", "0"]);
+    assert_ok(&run, "the reclaiming run");
+    assert!(!run.stderr.contains("cleanup:"), "{}", run.stderr);
+    assert!(!root.exists(), "{} must be reclaimed", root.display());
+    assert_eq!(fixture.profiles(), BTreeSet::new());
+    assert_eq!(fixture.records(), BTreeSet::new());
 }
 
 fn loopback_stays_closed_with_and_without_network_grants() {
@@ -1263,27 +1364,11 @@ fn loopback_stays_closed_with_and_without_network_grants() {
             NetworkGrant::PrivateNetworkClientServer,
         ][..],
     ] {
-        let run = fixture.run_with(
-            &ww(&workspace),
-            &[],
-            network,
-            &["mechanism", "connect", &address],
-        );
-        assert_eq!(
-            run.runner_failure(),
-            None,
-            "a refused connection is not a runner failure: {}",
-            run.stderr
-        );
-        assert_ne!(
-            run.code,
-            Some(0),
-            "loopback must stay closed with {network:?}"
-        );
+        // A refusal, or a SYN the TCP table shows unanswered; never a
+        // bare timeout.
+        let outcome = objects::loopback_outcome(&fixture, &workspace, network);
         observe(format_args!(
-            "case=loopback-connect network={network:?} exit={:?} stderr={:?}",
-            run.code,
-            run.stderr.trim()
+            "case=loopback-connect network={network:?} outcome={outcome}"
         ));
     }
     drop(listener);
@@ -1401,6 +1486,11 @@ fn runner_failures_grant_nothing_and_clean_up() {
         BTreeSet::new(),
         "a refused run created a profile"
     );
+    assert_eq!(
+        fixture.records(),
+        BTreeSet::new(),
+        "a refused run left a run record"
+    );
     // A program that cannot start, in both modes: a runner failure from
     // `CreateProcessW`, which the runner reaches only after it created the
     // tagged profile, and that profile deleted again.
@@ -1422,6 +1512,11 @@ fn runner_failures_grant_nothing_and_clean_up() {
             BTreeSet::new(),
             "{mode}: the profile must be deleted after a failed spawn"
         );
+        assert_eq!(
+            fixture.records(),
+            BTreeSet::new(),
+            "{mode}: the run record must be removed with the profile"
+        );
     }
 }
 
@@ -1441,48 +1536,132 @@ fn exit_codes_and_output_pass_through() {
     assert_eq!(run.stderr.trim(), "err");
 }
 
-/// Measures the documented hard-link boundary, a qualification blocker: an
-/// outside file hard-linked into a workspace or read root before the first
-/// grant shares one descriptor with its alias. The outcome is decided from
-/// the disk and printed as an `appcontainer-blocker:` line; the case asserts
-/// only that each report agrees with the disk, so it records whichever way
-/// Windows behaves. Enabling confinement needs this line read natively.
-fn hard_link_aliases_are_measured() {
+/// A file with more than one name under a workspace or read root before
+/// that root's first grant refuses the run: the grant's inherited ACE would
+/// land on the one descriptor every name shares, wherever the others are.
+/// CI 39033317835 measured exactly that before this refusal
+/// (`acl_widened=true outside_write=effect`, `outside_read=allowed`). A
+/// link made after the grant stands meets no propagation, and a container
+/// cannot make one to a file outside its grants.
+fn hard_links_refuse_a_propagating_grant() {
     let fixture = Fixture::new();
     let (workspace, outside) = (user_scratch("ac-ws"), user_scratch("ac-out"));
     let victim = outside.write("victim.txt", "keep");
-    std::fs::hard_link(&victim, workspace.join("alias.txt")).expect("an unconfined hard link");
-    let before = dacl(&victim);
-    let run = fixture.run(&ww(&workspace), &["write", &text(&victim), "changed"]);
-    let changed = std::fs::read_to_string(&victim).expect("victim") == "changed";
-    let consistent = match run.code {
-        Some(0) => changed,
-        Some(DENIED) => !changed,
-        _ => panic!("neither success nor a denial: {}", run.stderr),
-    };
-    assert!(
-        consistent,
-        "the report contradicts the disk: {}",
-        run.stderr
+    let alias = workspace.join("alias.txt");
+    std::fs::hard_link(&victim, &alias).expect("an unconfined hard link");
+    let (workspace_before, victim_before) = (dacl(&workspace.0), dacl(&victim));
+    let victim_text = text(&victim);
+    assert_refused(
+        &fixture.run(&ww(&workspace), &["write", &victim_text, "changed"]),
+        "is a hard link with 2 names",
     );
-    let widened = !added(&before, &dacl(&victim), &victim).is_empty();
-    eprintln!(
-        "appcontainer-blocker: case=hardlink-alias-workspace acl_widened={widened} outside_write={}",
-        if changed { "effect" } else { "denied" }
+    assert_eq!(std::fs::read_to_string(&victim).expect("victim"), "keep");
+    assert_eq!(
+        dacl(&workspace.0),
+        workspace_before,
+        "a refused run granted the workspace"
     );
+    assert_eq!(
+        dacl(&victim),
+        victim_before,
+        "a refused run granted the linked file"
+    );
+    // The same in a read root.
     let read = user_scratch("ac-read");
     let secret = outside.write("secret.txt", "secret");
     std::fs::hard_link(&secret, read.join("alias.txt")).expect("an unconfined hard link");
-    let run = fixture.run_with(&ro(&workspace), &[&read.0], &[], &["read", &text(&secret)]);
-    let observed = match run.code {
-        Some(0) => {
-            assert_eq!(run.stdout, "secret", "{}", run.stderr);
-            "allowed"
-        }
-        Some(DENIED) => "denied",
-        _ => panic!("neither success nor a denial: {}", run.stderr),
-    };
-    eprintln!("appcontainer-blocker: case=hardlink-alias-read-root outside_read={observed}");
+    let (read_before, secret_before) = (dacl(&read.0), dacl(&secret));
+    let secret_text = text(&secret);
+    assert_refused(
+        &fixture.run_with(&ro(&workspace), &[&read.0], &[], &["read", &secret_text]),
+        "is a hard link with 2 names",
+    );
+    assert_eq!(
+        dacl(&read.0),
+        read_before,
+        "a refused run granted the read root"
+    );
+    assert_eq!(
+        dacl(&secret),
+        secret_before,
+        "a refused run granted the linked file"
+    );
+    // Once the grant stands, a link made afterwards meets no propagation:
+    // the file keeps its own DACL, which denies the container through
+    // either name.
+    std::fs::remove_file(&alias).expect("remove the alias, not the victim");
+    assert_ok(
+        &fixture.run(&ww(&workspace), &["exit", "0"]),
+        "the first grant",
+    );
+    std::fs::hard_link(&victim, &alias).expect("an unconfined hard link after the grant");
+    let alias_text = text(&alias);
+    assert_denied(
+        &fixture.run(&ww(&workspace), &["write", &alias_text, "changed"]),
+        "write through a later alias",
+    );
+    assert_denied(
+        &fixture.run(&ww(&workspace), &["read", &alias_text]),
+        "read through a later alias",
+    );
+    assert_eq!(std::fs::read_to_string(&victim).expect("victim"), "keep");
+    assert_eq!(
+        dacl(&victim),
+        victim_before,
+        "a later alias gained the workspace grant"
+    );
+    // A container cannot name an outside file it cannot open.
+    let made = workspace.join("made.txt");
+    assert_denied(
+        &fixture.run(&ww(&workspace), &["hardlink", &secret_text, &text(&made)]),
+        "a confined hard link to an outside file",
+    );
+    assert!(!made.exists(), "the confined hard link was made");
+}
+
+/// An object under a workspace owned by neither this user nor its default
+/// owner refuses the workspace's first grant, as a foreign-owned root does:
+/// its owner chose its DACL. The owner is set to `SYSTEM` by `icacls
+/// /setowner` in its own process, which needs `SeRestorePrivilege` (an
+/// elevated administrator, as CI's runner is); without it the case prints
+/// an `appcontainer-unproven:` line instead of passing in silence.
+fn foreign_owned_descendants_refuse_a_propagating_grant() {
+    let fixture = Fixture::new();
+    let workspace = user_scratch("ac-ws");
+    let nested = workspace.join("sub");
+    std::fs::create_dir(&nested).expect("a subdirectory");
+    let file = nested.join("system-owned.txt");
+    std::fs::write(&file, "x").expect("seed file");
+    let set = std::process::Command::new("icacls")
+        .arg(&file)
+        .args(["/setowner", "*S-1-5-18"])
+        .output()
+        .expect("icacls");
+    if !set.status.success() {
+        eprintln!(
+            "appcontainer-unproven: case=foreign-owner-descendant icacls_exit={:?} output={:?}",
+            set.status.code(),
+            String::from_utf8_lossy(&set.stdout).trim()
+        );
+        return;
+    }
+    let before = dacl(&workspace.0);
+    assert_refused(
+        &fixture.run(&ww(&workspace), &["exit", "0"]),
+        "is owned by another principal",
+    );
+    assert_eq!(
+        dacl(&workspace.0),
+        before,
+        "a refused run granted the workspace"
+    );
+    // Its inherited DACL still lets this user delete it; without it the
+    // same workspace is granted.
+    std::fs::remove_file(&file).expect("remove the foreign-owned file");
+    assert_ok(
+        &fixture.run(&ww(&workspace), &["exit", "0"]),
+        "the grant without a foreign owner",
+    );
 }
 
 /// The evidence that each run needs its own profile, not a runner case:
@@ -1638,6 +1817,7 @@ pub fn probe(ops: &[&str]) -> std::io::Result<i32> {
             let _ = std::io::stdin().read_to_end(&mut Vec::new());
             Ok(0)
         }
+        ["objects", rest @ ..] => objects::probe(rest),
         other => panic!("unknown appcontainer operation {other:?}"),
     }
 }

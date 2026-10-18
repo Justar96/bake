@@ -104,29 +104,47 @@
 //! snapshot is ever written back, and owner, group, and label stay as they
 //! are. Each grant root's own owner must be the token's user or its default
 //! owner, which on an elevated administrator token is `Administrators`.
-//! That check covers the root only: the ACE then propagates to every
-//! descendant, whatever its owner, and descendants are not checked for
-//! reparse points or hard links. A grant root must also pass
-//! [`AppContainerGrants::validate_shape`] and
+//! When a grant's exact ACE is missing, so that adding it would propagate
+//! through the tree, the runner first walks every object under the root
+//! under the same per-path lock (at most 2^20 objects, each opened without
+//! following a reparse point) and refuses the run, with that DACL
+//! untouched, at any reparse point, any file with more than one name, or
+//! any object whose owner is not one the root may have. A grant root must
+//! also pass [`AppContainerGrants::validate_shape`] and
 //! [`AppContainerGrants::check_on_disk`].
+//!
+//! Each run also writes a record, `<moniker>.run` in
+//! [`RUN_RECORD_DIRECTORY`] under the runner's own temporary directory,
+//! before it creates its profile: the runner's pid and creation time, held
+//! open without sharing for the runner's life, and deleted only after the
+//! profile is. A grant root containing that directory is refused. Before
+//! creating its own profile, a run reclaims those of its namespace (its
+//! tag's, or the untagged ones) whose record no live runner holds and whose
+//! runner has exited, killed ones included: it deletes the profile, checks
+//! that its root is gone, then deletes the record. A record it cannot
+//! decide on is left; a failed reclaim prints a `cleanup:` line, keeps the
+//! record for a later run, and never fails this one.
 //!
 //! # What one run does
 //!
 //! 1. Validates the arguments and every root, and checks each grant root's
-//!    owner, before any change.
-//! 2. Creates the run's profile exclusively and resolves its root, refusing
-//!    a grant root that contains it.
-//! 3. Grants the standing ACEs that are missing (an exact standing ACE skips
-//!    the full-tree propagation), and under `read-only` restricts the
-//!    profile's storage to reads.
+//!    owner and that no grant root contains the run records, before any
+//!    change.
+//! 2. Reclaims the profiles of exited runs in its namespace, writes its own
+//!    run record, then creates the run's profile exclusively and resolves
+//!    its root, refusing a grant root that contains it.
+//! 3. Grants the standing ACEs that are missing, each after a walk of its
+//!    root (an exact standing ACE skips both the walk and the full-tree
+//!    propagation), and under `read-only` restricts the profile's storage
+//!    to reads.
 //! 4. Creates a kill-on-close Job without breakaway, starts the command
 //!    suspended with `PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES`, born in
 //!    that Job (`PROC_THREAD_ATTRIBUTE_JOB_LIST`), inheriting only its
 //!    standard handles, with `TEMP` and `TMP` set to the profile's
 //!    `AC\Temp`; under `read-only` it repeats the read-only pass, then resumes.
 //! 5. Waits for the command while pumping the Job's account, terminates
-//!    the Job and settles its account, deletes the profile, and exits with
-//!    the command's status.
+//!    the Job and settles its account, deletes the profile and then its
+//!    record, and exits with the command's status.
 //!
 //! A failure before the resume prints one `windows-appcontainer-run: ` line
 //! and exits [`RUNNER_FAILURE_EXIT`] without running the command; there is
@@ -144,33 +162,42 @@
 //!   change a DACL or owner (an owner's implicit rights included), and that
 //!   the profile is gone after every settled run
 //!   (`tests/enforcement/windows_appcontainer.rs`).
-//! - **Registry and object storage.** A profile also has per-user registry
-//!   storage and a named-object namespace. The read-only pass covers only the
-//!   filesystem; whether a `read-only` command can write that registry key
-//!   is unmeasured. Both are deleted with the profile.
+//! - **Registry and object storage, unproven natively.** A profile also has
+//!   per-user registry storage and a named-object namespace. The read-only
+//!   pass covers only the filesystem; whether a `read-only` command can
+//!   write that registry key is unmeasured. Both are deleted with the
+//!   profile. That the user's own named objects and `HKEY_CURRENT_USER`
+//!   keys stay closed, and that objects a command creates after its resume
+//!   live in its run's namespace, closed to another run and gone after its
+//!   own, have tests that have not run natively
+//!   (`tests/enforcement/windows_appcontainer_objects.rs`).
 //! - **Brokered objects.** A system broker that creates an object under the
 //!   profile after the resume, with its own explicit ACEs, is not covered by
 //!   either read-only pass; only its parent's inheritable read grant
 //!   reaches it, and its own explicit ACEs may still grant writes.
-//! - **Killed-runner residue.** A runner killed before its cleanup leaves
-//!   its profile (folder and registry storage) behind; nothing reclaims it
-//!   yet.
+//! - **Killed-runner residue, reclaim unproven natively.** A runner killed
+//!   before its cleanup leaves its profile (folder and registry storage)
+//!   and its run record behind until the next run in its namespace
+//!   reclaims them. A host where no later run comes keeps them, and a
+//!   profile a runner without records left is never reclaimed.
 //! - **Standing host mutations.** Each workspace and read root leaves
 //!   explicit ACEs propagated through its whole tree. Nothing removes them,
 //!   and they are not inert while their workspace lives: any later run on
 //!   that workspace holds the capabilities.
-//! - **Hard-link alias widening, confirmed natively.** A file under a
-//!   granted root that is hard-linked to a path outside it when an ACE
+//! - **Hard-link alias widening, refusal unproven natively.** A file under
+//!   a granted root that is hard-linked to a path outside it when an ACE
 //!   propagates receives that ACE on the one shared descriptor, so the
 //!   outside path gains the workspace's write grant, or a read root's read
 //!   grant. CI 39033317835 measured both (`acl_widened=true
-//!   outside_write=effect`, `outside_read=allowed`). Nothing detects or
-//!   refuses such links.
-//! - **Descendant ownership and reparse points.** The owner and reparse
-//!   checks apply to grant roots only. Whether propagation follows or
-//!   stops at junctions, symbolic links, and other reparse points inside a
-//!   root, and which descendants it rewrites, is unproven; a descendant
-//!   owned by another principal still receives the inherited ACE.
+//!   outside_write=effect`, `outside_read=allowed`). The walk before a
+//!   propagating grant refuses any file with more than one name; that
+//!   refusal, and that a link made after the grant gains nothing, have not
+//!   run natively.
+//! - **Descendant ownership and reparse points, refusal unproven
+//!   natively.** The same walk refuses a reparse point anywhere under the
+//!   root and a descendant whose owner is not one a root may have. It is a
+//!   check, not a lock: an object the user's own unconfined process swaps
+//!   in between the walk and the propagation is not seen.
 //! - **Settlement under AppContainer.** The shared Job's account passed
 //!   natively for the restricted-token runner (PR 245); this runner's use
 //!   of it, including the suspended-start failure paths, has not run
@@ -182,9 +209,12 @@
 //!   enforcement cases passed and the two `TEMP` cases failed; `cmd`,
 //!   Windows PowerShell, and `pwsh` started and printed through inherited
 //!   pipes, and `git --version` failed with "could not open '/dev/null' for
-//!   reading and writing: Permission denied". With derived, unregistered
-//!   SIDs (CI 39035318623) no program started. The per-run profile has not
-//!   run natively. Cargo is untested.
+//!   reading and writing: Permission denied". Git for Windows opens the null
+//!   device that way at every start, so Git cannot run here until a
+//!   container may open `NUL` for reading and writing; a test that records
+//!   each null-device open and requires Git to follow it has not run
+//!   natively. With derived, unregistered SIDs (CI 39035318623) no program
+//!   started. The per-run profile has not run natively. Cargo is untested.
 //! - **Reads are not limited to the grants.** Windows grants
 //!   `ALL APPLICATION PACKAGES` read and execute on most of `%SystemRoot%`
 //!   and `Program Files`, and on any object whose DACL names it; those
@@ -197,10 +227,20 @@
 //!   `WSAEACCES` (10013) without a capability and succeeded with
 //!   `internetClient`, while a loopback connection timed out with and
 //!   without capabilities; a timeout is not proof of a deliberate denial.
-//!   Firewall-service state and enterprise policy are untested.
+//!   The loopback test accepts only a refusal code, or a timeout while
+//!   the TCP table shows the command's SYN unanswered and the listener
+//!   nothing; it has not run natively. Firewall-service state and
+//!   enterprise policy are untested.
 //! - **Residue.** A renamed root leaves its ACEs behind.
 //! - **Grant propagation is eager.** The first grant on a root walks the
-//!   whole tree.
+//!   whole tree twice: the runner's check, then the propagation.
+//! - **The grant walk refuses common trees.** A root holding rustup's proxy
+//!   executables (usually hard links in `.cargo\bin`), a pnpm store's linked
+//!   packages, a local `git clone`'s linked objects, a symbolic link or
+//!   junction (pnpm's `node_modules` included), a OneDrive placeholder, or
+//!   an object owned by `SYSTEM` or `TrustedInstaller` is refused until its
+//!   grant stands. Once a grant's exact ACE stands, nothing is walked again,
+//!   and links and reparse points made later meet no propagation.
 //! - **A FAT volume has no DACLs**: a grant root on one fails.
 //! - **The runner ignores Ctrl+C** so it survives to clean up, and the
 //!   command inherits that setting.
@@ -643,7 +683,6 @@ pub(super) fn check_not_reparse_point(path: &Path) -> Result<(), String> {
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt;
-        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
         let meta = std::fs::symlink_metadata(path)
             .map_err(|error| format!("{} cannot be inspected: {error}", path.display()))?;
         if meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
@@ -785,6 +824,30 @@ pub fn check_profile_outside_grants(
     Ok(())
 }
 
+/// Refuses a workspace or read root equal to or containing the run-record
+/// directory ([`RUN_RECORD_DIRECTORY`]): a container that could write a
+/// record there could name another run's profile for a later run to
+/// delete.
+#[cfg_attr(not(any(windows, test)), allow(dead_code))]
+fn check_records_outside_grants(
+    record_directory: &Path,
+    workspace: &Path,
+    read_roots: &[PathBuf],
+) -> Result<(), String> {
+    for (what, root) in std::iter::once(("workspace", workspace))
+        .chain(read_roots.iter().map(|root| ("read root", root.as_path())))
+    {
+        if under(record_directory, root) {
+            return Err(format!(
+                "the {what} {} contains the AppContainer run records {}; choose a narrower directory",
+                root.display(),
+                record_directory.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// What a `CreateAppContainerProfile` status means for ownership.
 #[cfg_attr(not(any(windows, test)), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -808,6 +871,146 @@ fn classify_profile_creation(status: i32) -> ProfileCreation {
         status if status >= 0 => ProfileCreation::Created,
         _ => ProfileCreation::Failed,
     }
+}
+
+/// What a `DeleteAppContainerProfile` status means for a reclaimed run.
+#[cfg_attr(not(any(windows, test)), allow(dead_code))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProfileDeletion {
+    /// Deleted by this call.
+    Deleted,
+    /// No such profile: an earlier cleanup deleted it before its record.
+    Absent,
+    /// Any other failure: the profile may remain.
+    Failed,
+}
+
+/// `HRESULT_FROM_WIN32` of `ERROR_FILE_NOT_FOUND`, `ERROR_PATH_NOT_FOUND`,
+/// and `ERROR_NOT_FOUND`.
+#[cfg_attr(not(any(windows, test)), allow(dead_code))]
+const HRESULTS_ABSENT: [i32; 3] = [
+    0x8007_0002_u32 as i32,
+    0x8007_0003_u32 as i32,
+    0x8007_0490_u32 as i32,
+];
+
+#[cfg_attr(not(any(windows, test)), allow(dead_code))]
+fn classify_profile_deletion(status: i32) -> ProfileDeletion {
+    match status {
+        status if HRESULTS_ABSENT.contains(&status) => ProfileDeletion::Absent,
+        status if status >= 0 => ProfileDeletion::Deleted,
+        _ => ProfileDeletion::Failed,
+    }
+}
+
+/// The most objects one grant walk inspects under a root whose grant is
+/// about to propagate ([`GrantObjectRefusal`]); a larger tree refuses the
+/// run.
+#[cfg_attr(not(windows), allow(dead_code))]
+const MAX_GRANT_OBJECTS: usize = 1 << 20;
+
+/// Why a grant that would propagate through a root is refused at one
+/// object under it, the root included. The walk runs only when the exact
+/// standing ACE is missing, under the per-path lock the grant then takes,
+/// so a refusal leaves the DACL untouched.
+#[cfg_attr(not(any(windows, test)), allow(dead_code))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GrantObjectRefusal {
+    /// Any reparse point: a junction, a symbolic link, or another tag.
+    /// Its target is not walked.
+    ReparsePoint,
+    /// A file with more than one name: the inherited ACE lands on the one
+    /// descriptor all of its names share, wherever the others are.
+    HardLink { links: u32 },
+    /// An object owned by neither the token's user nor its default owner.
+    ForeignOwner,
+}
+
+/// `FILE_ATTRIBUTE_DIRECTORY` and `FILE_ATTRIBUTE_REPARSE_POINT`.
+#[cfg_attr(not(any(windows, test)), allow(dead_code))]
+const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
+#[cfg_attr(not(any(windows, test)), allow(dead_code))]
+const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+
+/// What one object's attributes, link count, and owner, read through a
+/// handle that does not follow a reparse point, mean for a propagating
+/// grant. A reparse point is refused first, whatever else it reports; a
+/// directory's link count is not a hard link.
+#[cfg_attr(not(any(windows, test)), allow(dead_code))]
+fn grant_object_refusal(
+    attributes: u32,
+    links: u32,
+    owner_accepted: bool,
+) -> Option<GrantObjectRefusal> {
+    if attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        Some(GrantObjectRefusal::ReparsePoint)
+    } else if attributes & FILE_ATTRIBUTE_DIRECTORY == 0 && links > 1 {
+        Some(GrantObjectRefusal::HardLink { links })
+    } else if !owner_accepted {
+        Some(GrantObjectRefusal::ForeignOwner)
+    } else {
+        None
+    }
+}
+
+/// The directory, under the runner's own temporary directory, that holds
+/// one record per run whose profile may still exist ([`run_record_name`]).
+/// A container reaches nothing there: that directory grants no package or
+/// capability SID.
+pub const RUN_RECORD_DIRECTORY: &str = "bake-appcontainer-runs";
+
+/// The file name of run `moniker`'s record: `<moniker>.run`.
+pub fn run_record_name(moniker: &str) -> String {
+    format!("{moniker}.run")
+}
+
+/// The run moniker a record file named `file_name` belongs to, when that
+/// run is in the namespace a run with `tag` may reclaim: the same tag's
+/// `bake.run.<tag>.<32 hex>`, or without a tag only the untagged
+/// `bake.run.<32 hex>`. Anything else, another tag's records included, is
+/// `None` and never touched.
+#[cfg_attr(not(any(windows, test)), allow(dead_code))]
+fn reclaimable_moniker<'a>(file_name: &'a str, tag: Option<&ProfileTag>) -> Option<&'a str> {
+    let moniker = file_name.strip_suffix(".run")?;
+    let random = match tag {
+        Some(tag) => moniker.strip_prefix(&tag.moniker_prefix())?,
+        None => moniker.strip_prefix(RUN_MONIKER_PREFIX)?,
+    };
+    (random.len() == 32
+        && random
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)))
+    .then_some(moniker)
+}
+
+/// A run record's text: the runner's pid and its creation time (a
+/// `FILETIME` as one integer), which together name one process even after
+/// its pid is reused.
+#[cfg_attr(not(any(windows, test)), allow(dead_code))]
+fn format_run_record(pid: u32, created: u64) -> String {
+    format!("pid {pid} created {created}\n")
+}
+
+/// The pid and creation time of a record [`format_run_record`] wrote, or
+/// `None` for any other text, a partly written record included.
+#[cfg_attr(not(any(windows, test)), allow(dead_code))]
+fn parse_run_record(text: &str) -> Option<(u32, u64)> {
+    let line = text.strip_suffix('\n')?;
+    let mut words = line.split(' ');
+    let (Some("pid"), Some(pid), Some("created"), Some(created), None) = (
+        words.next(),
+        words.next(),
+        words.next(),
+        words.next(),
+        words.next(),
+    ) else {
+        return None;
+    };
+    let digits = |text: &str| !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_digit());
+    if !digits(pid) || !digits(created) {
+        return None;
+    }
+    Some((pid.parse().ok()?, created.parse().ok()?))
 }
 
 /// The capability name whose SID carries a workspace's read grant.

@@ -10,18 +10,23 @@
 
 use std::ffi::{OsStr, OsString, c_void};
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
+use std::os::windows::fs::OpenOptionsExt;
 use std::os::windows::io::OwnedHandle;
 use std::os::windows::io::{AsHandle, AsRawHandle};
 use std::path::{Path, PathBuf};
 use std::ptr::{null, null_mut};
 
-use windows_sys::Win32::Foundation::{ERROR_SUCCESS, HANDLE, LocalFree};
+use windows_sys::Win32::Foundation::{
+    ERROR_INVALID_PARAMETER, ERROR_SHARING_VIOLATION, ERROR_SUCCESS, FILETIME, GENERIC_READ,
+    GENERIC_WRITE, GetLastError, HANDLE, LocalFree, WAIT_OBJECT_0,
+};
 use windows_sys::Win32::Security::Authorization::{
-    ConvertSidToStringSidW, EXPLICIT_ACCESS_W, GetNamedSecurityInfoW, NO_MULTIPLE_TRUSTEE,
-    SE_FILE_OBJECT, SET_ACCESS, TRUSTEE_IS_SID, TRUSTEE_IS_UNKNOWN, TRUSTEE_W,
+    ConvertSidToStringSidW, EXPLICIT_ACCESS_W, GetNamedSecurityInfoW, GetSecurityInfo,
+    NO_MULTIPLE_TRUSTEE, SE_FILE_OBJECT, SET_ACCESS, TRUSTEE_IS_SID, TRUSTEE_IS_UNKNOWN, TRUSTEE_W,
 };
 use windows_sys::Win32::Security::Isolation::{
-    CreateAppContainerProfile, DeleteAppContainerProfile, GetAppContainerFolderPath,
+    CreateAppContainerProfile, DeleteAppContainerProfile,
+    DeriveAppContainerSidFromAppContainerName, GetAppContainerFolderPath,
 };
 use windows_sys::Win32::Security::{
     ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, DeriveCapabilitySidsFromName, FreeSid, GetAce,
@@ -29,29 +34,39 @@ use windows_sys::Win32::Security::{
     SID_AND_ATTRIBUTES, SUB_CONTAINERS_AND_OBJECTS_INHERIT, TOKEN_OWNER, TOKEN_USER, TokenOwner,
     TokenUser,
 };
+use windows_sys::Win32::Storage::FileSystem::{
+    BY_HANDLE_FILE_INFORMATION, DELETE, FILE_DISPOSITION_INFO, FILE_FLAG_BACKUP_SEMANTICS,
+    FILE_FLAG_OPEN_REPARSE_POINT, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ,
+    FILE_SHARE_WRITE, FileDispositionInfo, GetFileInformationByHandle, READ_CONTROL,
+    SetFileInformationByHandle,
+};
 use windows_sys::Win32::System::Com::CoTaskMemFree;
 use windows_sys::Win32::System::Console::SetConsoleCtrlHandler;
 use windows_sys::Win32::System::Threading::{
     CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessW, EXTENDED_STARTUPINFO_PRESENT,
-    PROC_THREAD_ATTRIBUTE_HANDLE_LIST, PROC_THREAD_ATTRIBUTE_JOB_LIST,
-    PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, PROCESS_INFORMATION, ResumeThread,
+    GetCurrentProcess, GetProcessTimes, OpenProcess, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+    PROC_THREAD_ATTRIBUTE_JOB_LIST, PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES,
+    PROCESS_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, ResumeThread,
     STARTF_USESHOWWINDOW, STARTF_USESTDHANDLES, STARTUPINFOEXW, TerminateProcess,
+    WaitForSingleObject,
 };
 
 use bake_process::windows_job::Job;
 
 use super::super::windows_acl::build_command_line;
 use super::super::windows_acl::sys::{
-    Attributes, Local, Result, Sid, current_token, environment_block, grant_exact, last_error,
-    merge_and_apply, owned_handle, read_dacl, same_sid, standard_handles, terminate_and_drain,
-    token_information, wait_for_exit, wide, win32_error,
+    Attributes, Local, Result, Sid, current_token, environment_block, grant_exact_checked,
+    last_error, merge_and_apply, owned_handle, read_dacl, same_sid, standard_handles,
+    terminate_and_drain, token_information, wait_for_exit, wide, win32_error,
 };
 use super::{
-    Cli, MAX_PROFILE_OBJECTS, PROFILE_WRITE_MASK, ProfileCreation, READ_EXECUTE,
-    RUNNER_FAILURE_EXIT, RUNNER_SIGNATURE, RunnerMode, WORKSPACE_WRITE_MASK,
-    check_not_reparse_point, check_profile_outside_grants, classify_profile_creation,
-    profile_root_for, read_capability_name, run_moniker, workspace_read_capability_name,
-    write_capability_name,
+    Cli, FILE_ATTRIBUTE_DIRECTORY, GrantObjectRefusal, MAX_GRANT_OBJECTS, MAX_PROFILE_OBJECTS,
+    PROFILE_WRITE_MASK, ProfileCreation, ProfileDeletion, ProfileTag, READ_EXECUTE,
+    RUN_RECORD_DIRECTORY, RUNNER_FAILURE_EXIT, RUNNER_SIGNATURE, RunnerMode, WORKSPACE_WRITE_MASK,
+    check_not_reparse_point, check_profile_outside_grants, check_records_outside_grants,
+    classify_profile_creation, classify_profile_deletion, format_run_record, grant_object_refusal,
+    parse_run_record, profile_root_for, read_capability_name, reclaimable_moniker, run_moniker,
+    run_record_name, workspace_read_capability_name, write_capability_name,
 };
 
 /// `SE_GROUP_ENABLED`: a capability the access check consults.
@@ -192,6 +207,98 @@ fn check_owner(path: &Path, accepted: &[Sid]) -> Result<()> {
     Ok(())
 }
 
+/// One object's attributes, link count, and whether its owner is one of
+/// `accepted`, all read through one handle opened without following a
+/// reparse point and with no access beyond attributes and its descriptor.
+fn inspect_object(path: &Path, accepted: &[Sid]) -> Result<(u32, u32, bool)> {
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .access_mode(FILE_READ_ATTRIBUTES | READ_CONTROL)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)
+        .map_err(|error| format!("cannot inspect {}: {error}", path.display()))?;
+    let handle = file.as_raw_handle();
+    // SAFETY: a zeroed BY_HANDLE_FILE_INFORMATION is valid output space.
+    let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+    // SAFETY: a live handle opened with FILE_READ_ATTRIBUTES.
+    if unsafe { GetFileInformationByHandle(handle, &mut info) } == 0 {
+        return Err(last_error("GetFileInformationByHandle", path.display()));
+    }
+    let mut owner: PSID = null_mut();
+    let mut descriptor: PSECURITY_DESCRIPTOR = null_mut();
+    // SAFETY: a live handle opened with READ_CONTROL and valid out
+    // pointers; the owner points into the descriptor, which `Local` frees.
+    let status = unsafe {
+        GetSecurityInfo(
+            handle,
+            SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION,
+            &mut owner,
+            null_mut(),
+            null_mut(),
+            null_mut(),
+            &mut descriptor,
+        )
+    };
+    if status != ERROR_SUCCESS {
+        return Err(win32_error("GetSecurityInfo", status, path.display()));
+    }
+    let _descriptor = Local(descriptor);
+    let owner_accepted = !owner.is_null() && accepted.iter().any(|sid| same_sid(owner, sid));
+    Ok((info.dwFileAttributes, info.nNumberOfLinks, owner_accepted))
+}
+
+/// The walk before a grant propagates through `root`: every object under
+/// it, the root included and at most [`MAX_GRANT_OBJECTS`], must pass
+/// [`grant_object_refusal`]. A reparse point is refused, never followed,
+/// and an object that cannot be inspected or listed refuses the grant too.
+fn check_grant_tree(root: &Path, accepted: &[Sid]) -> Result<()> {
+    let mut pending = vec![root.to_path_buf()];
+    let mut seen = 0usize;
+    while let Some(path) = pending.pop() {
+        seen += 1;
+        if seen > MAX_GRANT_OBJECTS {
+            return Err(format!(
+                "{} holds more than {MAX_GRANT_OBJECTS} objects; refusing to propagate a grant through it",
+                root.display()
+            ));
+        }
+        let (attributes, links, owner_accepted) = inspect_object(&path, accepted)?;
+        if let Some(refusal) = grant_object_refusal(attributes, links, owner_accepted) {
+            let what = match refusal {
+                GrantObjectRefusal::ReparsePoint => "is a reparse point".to_owned(),
+                GrantObjectRefusal::HardLink { links } => {
+                    format!("is a hard link with {links} names")
+                }
+                GrantObjectRefusal::ForeignOwner => "is owned by another principal".to_owned(),
+            };
+            return Err(format!(
+                "{} {what}; refusing to propagate a grant through {}",
+                path.display(),
+                root.display()
+            ));
+        }
+        if attributes & FILE_ATTRIBUTE_DIRECTORY != 0 {
+            let listing = std::fs::read_dir(&path)
+                .map_err(|error| format!("cannot list {}: {error}", path.display()))?;
+            for entry in listing {
+                let entry =
+                    entry.map_err(|error| format!("cannot list {}: {error}", path.display()))?;
+                pending.push(entry.path());
+            }
+        }
+    }
+    Ok(())
+}
+
+/// [`grant_exact_checked`] with the [`check_grant_tree`] walk: an exact
+/// standing ACE is kept without a walk, and a missing one is added only
+/// when the walk passes.
+fn grant_checked(root: &Path, sid: &Sid, mask: u32, accepted: &[Sid]) -> Result<()> {
+    grant_exact_checked(root, sid, mask, || check_grant_tree(root, accepted))
+}
+
 fn utf8(path: &Path) -> Result<&str> {
     path.to_str()
         .ok_or_else(|| format!("{} is not valid Unicode", path.display()))
@@ -285,18 +392,7 @@ impl OwnedProfile {
     /// Resolves and checks the profile root from `GetAppContainerFolderPath`
     /// and records it for deletion's check.
     fn resolve_root(&mut self) -> Result<PathBuf> {
-        let text = sid_text(self.sid.as_psid());
-        let units = wide(OsStr::new(&text))?;
-        let mut path: *mut u16 = null_mut();
-        // SAFETY: a NUL-terminated SID string and a valid out pointer; the
-        // returned string is freed by `take_co_task_string`.
-        let status = unsafe { GetAppContainerFolderPath(units.as_ptr(), &mut path) };
-        let folder = (!path.is_null()).then(|| PathBuf::from(take_co_task_string(path)));
-        let Some(folder) = folder.filter(|_| status >= 0) else {
-            return Err(format!(
-                "GetAppContainerFolderPath failed for {text}: HRESULT {status:#010x}"
-            ));
-        };
+        let folder = folder_path(&self.sid)?;
         let root = profile_root_for(&folder, &self.moniker).ok_or_else(|| {
             format!(
                 "the profile folder {} is not under Packages\\{}; refusing to use it",
@@ -340,6 +436,21 @@ impl OwnedProfile {
     }
 }
 
+/// The `LOCALAPPDATA` folder `GetAppContainerFolderPath` reports for the
+/// profile of package `sid`.
+fn folder_path(sid: &Sid) -> Result<PathBuf> {
+    let text = sid_text(sid.as_psid());
+    let units = wide(OsStr::new(&text))?;
+    let mut path: *mut u16 = null_mut();
+    // SAFETY: a NUL-terminated SID string and a valid out pointer; the
+    // returned string is freed by `take_co_task_string`.
+    let status = unsafe { GetAppContainerFolderPath(units.as_ptr(), &mut path) };
+    let folder = (!path.is_null()).then(|| PathBuf::from(take_co_task_string(path)));
+    folder.filter(|_| status >= 0).ok_or_else(|| {
+        format!("GetAppContainerFolderPath failed for {text}: HRESULT {status:#010x}")
+    })
+}
+
 fn delete_profile(moniker: &str) -> Result<()> {
     let name = wide(OsStr::new(moniker))?;
     // SAFETY: a NUL-terminated name of a profile this run created.
@@ -350,6 +461,254 @@ fn delete_profile(moniker: &str) -> Result<()> {
         ));
     }
     Ok(())
+}
+
+/// [`RUN_RECORD_DIRECTORY`] under this runner's temporary directory.
+fn record_directory() -> PathBuf {
+    std::env::temp_dir().join(RUN_RECORD_DIRECTORY)
+}
+
+/// This run's record in [`RUN_RECORD_DIRECTORY`]: created exclusively
+/// before the profile, holding this runner's pid and creation time, and
+/// kept open without sharing for the runner's life, so a later run sees a
+/// sharing violation while this runner lives. It is deleted through its own
+/// handle after the profile is gone; a runner that exits first, killed or
+/// with an unconfirmed tree, leaves it for a later run to reclaim
+/// ([`reclaim_exited_runs`]).
+struct RunRecord {
+    file: std::fs::File,
+    path: PathBuf,
+}
+
+impl RunRecord {
+    fn create(moniker: &str) -> Result<Self> {
+        let directory = record_directory();
+        std::fs::create_dir_all(&directory).map_err(|error| {
+            format!(
+                "cannot create the run record directory {}: {error}",
+                directory.display()
+            )
+        })?;
+        let path = directory.join(run_record_name(moniker));
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .access_mode(GENERIC_READ | GENERIC_WRITE | DELETE)
+            .share_mode(0)
+            .open(&path)
+            .map_err(|error| format!("cannot create the run record {}: {error}", path.display()))?;
+        let written = process_created(current_process())
+            .ok_or_else(|| last_error("GetProcessTimes", "this runner"))
+            .and_then(|created| {
+                let text = format_run_record(std::process::id(), created);
+                std::io::Write::write_all(&mut &file, text.as_bytes()).map_err(|error| {
+                    format!("cannot write the run record {}: {error}", path.display())
+                })
+            });
+        let record = Self { file, path };
+        match written {
+            Ok(()) => Ok(record),
+            Err(detail) => Err(match record.remove() {
+                Ok(()) => detail,
+                Err(remove) => format!("{detail}; then {remove}"),
+            }),
+        }
+    }
+
+    /// Deletes the record through its own handle, then closes it.
+    fn remove(self) -> Result<()> {
+        delete_on_close(&self.file, &self.path)
+    }
+}
+
+/// Marks the file open as `file` for deletion when its last handle closes;
+/// `file` must have been opened with `DELETE`.
+fn delete_on_close(file: &std::fs::File, path: &Path) -> Result<()> {
+    let info = FILE_DISPOSITION_INFO { DeleteFile: true };
+    // SAFETY: a live handle opened with DELETE and a valid info block of
+    // the size passed.
+    let ok = unsafe {
+        SetFileInformationByHandle(
+            file.as_raw_handle(),
+            FileDispositionInfo,
+            std::ptr::from_ref(&info).cast(),
+            size_of::<FILE_DISPOSITION_INFO>() as u32,
+        )
+    };
+    if ok == 0 {
+        return Err(last_error("SetFileInformationByHandle", path.display()));
+    }
+    Ok(())
+}
+
+/// A pseudo-handle to this process, which needs no closing.
+fn current_process() -> HANDLE {
+    // SAFETY: plain call returning a pseudo-handle.
+    unsafe { GetCurrentProcess() }
+}
+
+/// The creation time of the process `handle` names, as one integer.
+fn process_created(handle: HANDLE) -> Option<u64> {
+    let zero = FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
+    let (mut created, mut exited, mut kernel, mut user) = (zero, zero, zero, zero);
+    // SAFETY: a process handle with query access and valid out pointers.
+    let ok = unsafe { GetProcessTimes(handle, &mut created, &mut exited, &mut kernel, &mut user) };
+    (ok != 0).then(|| (u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime))
+}
+
+/// Whether the runner a record names has exited: no process has its pid,
+/// the process with that pid was created at another time, or that process
+/// is signalled, which it is only after its handle table, its Job handle
+/// and record handle included, is closed. Anything that cannot be decided
+/// is not an exit.
+fn runner_exited(pid: u32, created: u64) -> bool {
+    // SAFETY: plain call; null means it failed.
+    let raw = unsafe {
+        OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
+            0,
+            pid,
+        )
+    };
+    if raw.is_null() {
+        // SAFETY: plain call.
+        return unsafe { GetLastError() } == ERROR_INVALID_PARAMETER;
+    }
+    let process = owned_handle(raw);
+    let handle = process.as_raw_handle();
+    match process_created(handle) {
+        Some(time) if time != created => true,
+        // SAFETY: a live handle opened with SYNCHRONIZE.
+        Some(_) => (unsafe { WaitForSingleObject(handle, 0) }) == WAIT_OBJECT_0,
+        None => false,
+    }
+}
+
+/// The most record entries one run reads, and the most runs it reclaims.
+const MAX_RECORDS_SCANNED: usize = 1024;
+const MAX_RECLAIMS: usize = 8;
+
+/// Reclaims the profiles of runs in this run's namespace
+/// ([`reclaimable_moniker`]) whose runner has exited, killed ones included:
+/// each record not held open by a live runner and naming a runner that
+/// [`runner_exited`] is opened exclusively, its profile deleted, its root
+/// checked gone, and only then the record deleted. A record that is held,
+/// unparsable, or names a runner that may live is left alone, and so is a
+/// profile without a record. Returns each failure, whose record stays for a
+/// later run; residue grants a later run nothing, because every run holds a
+/// fresh package SID.
+fn reclaim_exited_runs(tag: Option<&ProfileTag>) -> Vec<String> {
+    let directory = record_directory();
+    let listing = match std::fs::read_dir(&directory) {
+        Ok(listing) => listing,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+        Err(error) => {
+            return vec![format!(
+                "cannot list the run records in {}: {error}",
+                directory.display()
+            )];
+        }
+    };
+    let (mut failures, mut reclaimed) = (Vec::new(), 0usize);
+    for entry in listing.take(MAX_RECORDS_SCANNED) {
+        if reclaimed == MAX_RECLAIMS {
+            break;
+        }
+        let Ok(entry) = entry else { continue };
+        let name = entry.file_name();
+        let Some(moniker) = name
+            .to_str()
+            .and_then(|name| reclaimable_moniker(name, tag))
+        else {
+            continue;
+        };
+        match reclaim_run(&entry.path(), moniker) {
+            Ok(true) => reclaimed += 1,
+            Ok(false) => {}
+            Err(error) => failures.push(error),
+        }
+    }
+    failures
+}
+
+/// Reclaims run `moniker` from its record at `path`; `false` when the
+/// record is left alone.
+fn reclaim_run(path: &Path, moniker: &str) -> Result<bool> {
+    let opened = std::fs::OpenOptions::new()
+        .read(true)
+        .access_mode(GENERIC_READ | DELETE)
+        .share_mode(0)
+        .open(path);
+    let file = match opened {
+        Ok(file) => file,
+        Err(error)
+            if error.kind() == std::io::ErrorKind::NotFound
+                || error.raw_os_error() == Some(ERROR_SHARING_VIOLATION as i32) =>
+        {
+            return Ok(false);
+        }
+        Err(error) => {
+            return Err(format!(
+                "cannot open the run record {}: {error}",
+                path.display()
+            ));
+        }
+    };
+    let mut text = String::new();
+    if std::io::Read::read_to_string(&mut std::io::Read::take(&file, 64), &mut text).is_err() {
+        return Ok(false);
+    }
+    let Some((pid, created)) = parse_run_record(&text) else {
+        return Ok(false);
+    };
+    if !runner_exited(pid, created) {
+        return Ok(false);
+    }
+    reclaim_profile(moniker)?;
+    delete_on_close(&file, path)?;
+    Ok(true)
+}
+
+/// Deletes the profile of an exited run and checks that its root, when
+/// Windows still names it, is gone. An absent profile is already reclaimed.
+fn reclaim_profile(moniker: &str) -> Result<()> {
+    let name = wide(OsStr::new(moniker))?;
+    let mut sid: PSID = null_mut();
+    // SAFETY: a NUL-terminated name and a valid out pointer; the SID is
+    // freed with `FreeSid` below.
+    let derived = unsafe { DeriveAppContainerSidFromAppContainerName(name.as_ptr(), &mut sid) };
+    let root = if derived >= 0 && !sid.is_null() {
+        let copy = Sid::copy_of(sid, "package SID");
+        // SAFETY: allocated by the call, freed once.
+        unsafe { FreeSid(sid) };
+        copy.ok()
+            .and_then(|sid| folder_path(&sid).ok())
+            .and_then(|folder| profile_root_for(&folder, moniker))
+    } else {
+        None
+    };
+    // SAFETY: a NUL-terminated profile name in this run's namespace.
+    let status = unsafe { DeleteAppContainerProfile(name.as_ptr()) };
+    if classify_profile_deletion(status) == ProfileDeletion::Failed {
+        return Err(format!(
+            "cannot reclaim the AppContainer profile {moniker} of an exited runner: HRESULT {status:#010x}"
+        ));
+    }
+    match root.map(|root| (root.try_exists(), root)) {
+        None | Some((Ok(false), _)) => Ok(()),
+        Some((Ok(true), root)) => Err(format!(
+            "the reclaimed profile storage {} remains after DeleteAppContainerProfile",
+            root.display()
+        )),
+        Some((Err(error), root)) => Err(format!(
+            "cannot inspect the reclaimed profile storage {}: {error}",
+            root.display()
+        )),
+    }
 }
 
 /// `ACCESS_ALLOWED_ACE_TYPE` and `ACCESS_ALLOWED_CALLBACK_ACE_TYPE`: the
@@ -474,26 +833,40 @@ fn restrict_profile_tree(root: &Path, package: &Sid) -> Result<usize> {
 
 pub(super) fn run(cli: &Cli) -> i32 {
     let mut profile = None;
+    let mut record = None;
     let mut settled = true;
-    let outcome = run_inner(cli, &mut profile, &mut settled);
+    let outcome = run_inner(cli, &mut profile, &mut record, &mut settled);
+    // The record outlives a profile that remains, so a later run in this
+    // namespace reclaims that profile once this runner has exited.
+    let mut keep_record = false;
     match profile {
         Some(profile) if settled => {
-            for failure in profile.delete() {
+            let failures = profile.delete();
+            keep_record = !failures.is_empty();
+            for failure in failures {
                 eprintln!("{RUNNER_SIGNATURE}: cleanup: {failure}");
             }
         }
         // A process that may still run must not lose its storage. The
         // profile, its restricted DACLs, and the grants stay; the Job's last handle
         // closes with this process, which (kill-on-close) ends any member.
-        Some(profile) => eprintln!(
-            "{RUNNER_SIGNATURE}: cleanup: AppContainer profile {} ({}) is left in place: the confined tree's exit was not confirmed",
-            profile.moniker,
-            profile.root.as_deref().map_or_else(
-                || "root unresolved".to_owned(),
-                |root| root.display().to_string()
-            )
-        ),
+        Some(profile) => {
+            keep_record = true;
+            eprintln!(
+                "{RUNNER_SIGNATURE}: cleanup: AppContainer profile {} ({}) is left in place: the confined tree's exit was not confirmed",
+                profile.moniker,
+                profile.root.as_deref().map_or_else(
+                    || "root unresolved".to_owned(),
+                    |root| root.display().to_string()
+                )
+            );
+        }
         None => {}
+    }
+    if let Some(record) = record.filter(|_| !keep_record)
+        && let Err(failure) = record.remove()
+    {
+        eprintln!("{RUNNER_SIGNATURE}: cleanup: {failure}");
     }
     match outcome {
         Ok(code) => code as i32,
@@ -501,7 +874,12 @@ pub(super) fn run(cli: &Cli) -> i32 {
     }
 }
 
-fn run_inner(cli: &Cli, profile: &mut Option<OwnedProfile>, settled: &mut bool) -> Result<u32> {
+fn run_inner(
+    cli: &Cli,
+    profile: &mut Option<OwnedProfile>,
+    record: &mut Option<RunRecord>,
+    settled: &mut bool,
+) -> Result<u32> {
     // SAFETY: plain call with no handler routine.
     if unsafe { SetConsoleCtrlHandler(None, 1) } == 0 {
         return Err(last_error("SetConsoleCtrlHandler", "ignore Ctrl+C"));
@@ -514,16 +892,25 @@ fn run_inner(cli: &Cli, profile: &mut Option<OwnedProfile>, settled: &mut bool) 
     for root in cli.grants.read_roots() {
         check_owner(root, &owners)?;
     }
+    check_records_outside_grants(&record_directory(), &cli.workspace, cli.grants.read_roots())?;
+    // Best effort: residue a killed runner left grants this run nothing.
+    for failure in reclaim_exited_runs(cli.tag.as_ref()) {
+        eprintln!("{RUNNER_SIGNATURE}: cleanup: {failure}");
+    }
     let moniker = run_moniker(cli.tag.as_ref(), &random_hex()?);
+    record.replace(RunRecord::create(&moniker)?);
     let owned = profile.insert(OwnedProfile::create(&moniker)?);
     let root = owned.resolve_root()?;
     check_profile_outside_grants(&root, &cli.workspace, cli.grants.read_roots())?;
+    // Each grant that would propagate first walks its root
+    // (`check_grant_tree`): a hard link, a reparse point, or a foreign
+    // owner under it refuses the run before that DACL changes.
     let read = capability_sid(&workspace_read_capability_name(workspace))?;
-    grant_exact(&cli.workspace, &read, READ_EXECUTE)?;
+    grant_checked(&cli.workspace, &read, READ_EXECUTE, &owners)?;
     let mut capabilities: Vec<Sid> = vec![read];
     for root in cli.grants.read_roots() {
         let sid = capability_sid(&read_capability_name(utf8(root)?))?;
-        grant_exact(root, &sid, READ_EXECUTE)?;
+        grant_checked(root, &sid, READ_EXECUTE, &owners)?;
         capabilities.push(sid);
     }
     let read_only = cli.mode == RunnerMode::ReadOnly;
@@ -531,7 +918,7 @@ fn run_inner(cli: &Cli, profile: &mut Option<OwnedProfile>, settled: &mut bool) 
         restrict_profile_tree(&root, &owned.sid)?;
     } else {
         let write = capability_sid(&write_capability_name(workspace))?;
-        grant_exact(&cli.workspace, &write, WORKSPACE_WRITE_MASK)?;
+        grant_checked(&cli.workspace, &write, WORKSPACE_WRITE_MASK, &owners)?;
         capabilities.push(write);
     }
     for grant in cli.grants.network() {

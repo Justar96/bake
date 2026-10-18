@@ -24,16 +24,20 @@ libc.workspace = true
 bake-process.workspace = true
 # The Windows runners' restricted token, each run's AppContainer profile
 # (create, folder lookup freed with `CoTaskMemFree`, delete), capability
-# SIDs, DACL grants and denials, and process creation.
-windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Security_Isolation", "Win32_System_Com", "Win32_System_Console", "Win32_System_Threading"] }
+# SIDs, DACL grants and denials, and process creation; `Win32_Storage_FileSystem`
+# is the AppContainer grant walk's link counts and its run records.
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Security_Isolation", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_System_Console", "Win32_System_Threading"] }
 
 [target.'cfg(windows)'.dev-dependencies]
 # The enforcement tests' raw deletion, open, token, and SDDL probes and
 # their process and Job guards; `Win32_Security_Isolation` is the mechanism
 # probe's AppContainer profile and the runner cases' profile deletion and
 # package SID, and `Win32_System_Console` the candidates' output
-# redirection.
-windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Isolation", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_JobObjects", "Win32_System_Pipes", "Win32_System_Threading"] }
+# redirection. The AppContainer object cases add the registry, sections,
+# the session id, and the TCP table (`Win32_System_Registry`,
+# `Win32_System_Memory`, `Win32_System_RemoteDesktop`,
+# `Win32_NetworkManagement_IpHelper`).
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_Security", "Win32_Security_Isolation", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_JobObjects", "Win32_System_Memory", "Win32_System_Pipes", "Win32_System_Registry", "Win32_System_RemoteDesktop", "Win32_System_Threading"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["process", "time", "sync", "io-util", "rt", "rt-multi-thread", "macros"] }

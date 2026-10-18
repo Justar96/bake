@@ -354,6 +354,18 @@ fn grant_write(path: &Path, sid: &Sid) -> Result<()> {
 /// propagation is skipped. Only the DACL is written: owner, group, and
 /// label stay as they are.
 pub(in crate::backends) fn grant_exact(path: &Path, sid: &Sid, mask: u32) -> Result<()> {
+    grant_exact_checked(path, sid, mask, || Ok(()))
+}
+
+/// [`grant_exact`], running `before_propagation` under the same lock only
+/// when the exact ACE is missing and the grant is about to propagate. Its
+/// error refuses the grant with the DACL untouched.
+pub(in crate::backends) fn grant_exact_checked(
+    path: &Path,
+    sid: &Sid,
+    mask: u32,
+    before_propagation: impl FnOnce() -> Result<()>,
+) -> Result<()> {
     with_path_lock(path, || {
         let (_descriptor, dacl) = read_dacl(path)?;
         let exact = allow_aces(dacl)?
@@ -366,6 +378,7 @@ pub(in crate::backends) fn grant_exact(path: &Path, sid: &Sid, mask: u32) -> Res
         if exact {
             return Ok(());
         }
+        before_propagation()?;
         merge_and_apply(
             path,
             &explicit_access(sid, GRANT_ACCESS, mask),
