@@ -2,9 +2,11 @@
 //! `schedules` on. The other print-mode tests show the tools are absent by
 //! default.
 
+#[cfg(unix)]
 use super::*;
 
 /// The tool results a request carries, as their text.
+#[cfg(unix)]
 fn outputs(request: &Request) -> Vec<String> {
     request.body["input"]
         .as_array()
@@ -19,6 +21,7 @@ fn outputs(request: &Request) -> Vec<String> {
 }
 
 /// The tool names a request declares.
+#[cfg(unix)]
 fn declared(request: &Request) -> Vec<String> {
     request.body["tools"]
         .as_array()

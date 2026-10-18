@@ -3,7 +3,9 @@
 //! before the job's handle closes, so an intentionally started background
 //! process keeps running, as Pi leaves it; before that detach, the death of
 //! the process that owns the job ends the tree; an abort terminates the job
-//! and returns once it is empty.
+//! and returns once it is empty. A job a descendant creates is nested in
+//! the call's, so its processes are ended and awaited with the rest, and no
+//! descendant breaks away from the call's job.
 //!
 //! Each case starts its background process with PowerShell's
 //! `Start-Process`, which writes its pid to a file in the case's own
@@ -29,15 +31,22 @@ use std::time::{Duration, Instant};
 use bake_ai::AbortController;
 use bake_coding_agent::exec::{ExecOptions, ExecResult, exec_command};
 use bake_coding_agent::owned_work::WorkGate;
-use windows_sys::Win32::Foundation::{WAIT_OBJECT_0, WAIT_TIMEOUT};
+use windows_sys::Win32::Foundation::{ERROR_ACCESS_DENIED, WAIT_OBJECT_0, WAIT_TIMEOUT};
+use windows_sys::Win32::System::JobObjects::{
+    AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_BREAKAWAY_OK,
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+    SetInformationJobObject,
+};
 use windows_sys::Win32::System::Threading::{
-    OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
-    TerminateProcess, WaitForSingleObject,
+    CREATE_BREAKAWAY_FROM_JOB, GetCurrentProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    PROCESS_SYNCHRONIZE, PROCESS_TERMINATE, TerminateProcess, WaitForSingleObject,
 };
 
 /// The bound of every wait in this file.
 const BOUND: Duration = Duration::from_secs(30);
 const HELPER: &str = "BAKE_PROCESS_WINDOWS_HELPER";
+/// Set, to the case's directory, in `nested_case`'s environment.
+const NESTED: &str = "BAKE_PROCESS_WINDOWS_NESTED";
 
 static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
@@ -117,6 +126,11 @@ impl Background {
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
         };
+        Self::open_pid(pid)
+    }
+
+    /// Opens process `pid`. An error leaves nothing to clean up.
+    fn open_pid(pid: u32) -> Result<Self, String> {
         // SAFETY: plain call; a null handle means the open failed.
         let handle = unsafe {
             OpenProcess(
@@ -482,4 +496,233 @@ async fn helper_case() {
         ExecOptions::default(),
     )
     .await;
+}
+
+/// How a child `nested_case` tried to start began: running, held here by
+/// handle, or refused with an OS error code.
+enum Start {
+    Spawned(Background),
+    Failed(i32),
+}
+
+/// Waits, at most [`BOUND`], for `nested_case`'s report in `dir`.
+async fn nested_report(dir: &Path) -> Result<String, String> {
+    let file = dir.join("report");
+    let deadline = Instant::now() + BOUND;
+    loop {
+        if let Ok(report) = std::fs::read_to_string(&file) {
+            return Ok(report);
+        }
+        if Instant::now() >= deadline {
+            return Err("nested_case never reported".into());
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+/// The start `report` gives for `name`: `spawned <pid>`, whose process is
+/// opened here at once, or `failed <os error>`.
+fn start(report: &str, name: &str) -> Result<Start, String> {
+    let outcome = report
+        .lines()
+        .find_map(|line| line.strip_prefix(name)?.strip_prefix(' '))
+        .ok_or_else(|| format!("{name}: not in the report {report:?}"))?;
+    match outcome.split_once(' ') {
+        Some(("spawned", pid)) => pid
+            .parse()
+            .map_err(|_| format!("{name}: a malformed pid {pid:?}"))
+            .and_then(Background::open_pid)
+            .map(Start::Spawned),
+        Some(("failed", code)) => code
+            .parse()
+            .map(Start::Failed)
+            .map_err(|_| format!("{name}: a malformed error {code:?}")),
+        _ => Err(format!("{name}: a malformed outcome {outcome:?}")),
+    }
+}
+
+// A descendant's own job is no way out of the call's tree. The command
+// starts `nested_case`, a member of the call's job. It asks for a child
+// with `CREATE_BREAKAWAY_FROM_JOB`, which the call's job, without
+// `JOB_OBJECT_LIMIT_BREAKAWAY_OK`, refuses. It then joins a job of its own
+// that allows breakaway, which Windows nests in the call's job, and starts
+// a child there and one that breaks away from it; the second stops at the
+// call's job, which does not allow breakaway (Microsoft's "Nested Jobs").
+// An abort ends both children and returns only once they have ended: a
+// nested job's new processes are posted to the call's job's port and
+// counted in its accounting.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_abort_ends_a_nested_job_and_nothing_breaks_away() {
+    let _serial = SERIAL.lock().await;
+    let dir = TempDir::new();
+    let abort = AbortController::new();
+    let owner = WorkGate::default();
+    let command = format!(
+        "$env:{NESTED} = {}; & {} --exact nested_case --ignored --nocapture",
+        quoted(&dir.0),
+        quoted(&std::env::current_exe().expect("exe"))
+    );
+    let mut call = exec(
+        vec!["-NoProfile".into(), "-Command".into(), command.into()],
+        dir.0.clone(),
+        ExecOptions {
+            signal: Some(abort.signal()),
+            owner: Some(owner.clone()),
+            ..ExecOptions::default()
+        },
+    );
+    let report = nested_report(&dir.0).await;
+    let [direct, nested, breakaway] = ["direct", "nested", "breakaway"].map(|name| {
+        report
+            .as_deref()
+            .map_err(String::clone)
+            .and_then(|report| start(report, name))
+    });
+    abort.abort();
+    let mut observed = Vec::new();
+    match call.join(BOUND).await {
+        Ok(result) => observed.push(check(
+            result.aborted && result.killed,
+            &format!("not an aborted kill: {result:?}"),
+        )),
+        Err(error) => observed.push(Err(error)),
+    }
+    let denied = ERROR_ACCESS_DENIED as i32;
+    observed.push(match &direct {
+        Ok(Start::Failed(code)) => check(
+            *code == denied,
+            &format!("the breakaway failed otherwise: os error {code}"),
+        ),
+        Ok(Start::Spawned(_)) => Err("a child broke away from the call's job".into()),
+        Err(error) => Err(error.clone()),
+    });
+    // The call returned only once its job was empty: already ended.
+    observed.push(match &nested {
+        Ok(Start::Spawned(held)) => check(
+            held.ended_within(Duration::ZERO).await,
+            "the call returned while a nested job's process ran",
+        ),
+        Ok(Start::Failed(code)) => Err(format!(
+            "the nested job's child did not start: os error {code}"
+        )),
+        Err(error) => Err(error.clone()),
+    });
+    observed.push(match &breakaway {
+        Ok(Start::Spawned(held)) => check(
+            held.ended_within(Duration::ZERO).await,
+            "a child that broke away from the nested job outlived the call's job",
+        ),
+        // Refused outright, it is not out of the tree either.
+        Ok(Start::Failed(code)) => check(
+            *code == denied,
+            &format!("the nested breakaway failed otherwise: os error {code}"),
+        ),
+        Err(error) => Err(error.clone()),
+    });
+    let stopped = call.stop().await;
+    let first_close = close(&owner).await;
+    let mut cleanup = vec![stopped, first_close.clone()];
+    for start in [direct, nested, breakaway] {
+        if let Ok(Start::Spawned(held)) = start {
+            cleanup.push(held.stop().await);
+        }
+    }
+    redrain(&owner, &first_close, &mut cleanup).await;
+    verdict(observed, cleanup);
+}
+
+/// A new job that allows breakaway, with this process in it: nested in the
+/// job this process is already in.
+fn nested_job() -> std::io::Result<OwnedHandle> {
+    // SAFETY: null attributes (not inheritable) and no name.
+    let raw = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+    if raw.is_null() {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: a fresh handle owned here.
+    let job = unsafe { OwnedHandle::from_raw_handle(raw) };
+    // SAFETY: a zeroed struct is a valid starting value.
+    let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_BREAKAWAY_OK;
+    let size = u32::try_from(size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>())
+        .map_err(|_| std::io::Error::other("size"))?;
+    // SAFETY: `limits` has the size passed; the job handle is live.
+    let set = unsafe {
+        SetInformationJobObject(
+            job.as_raw_handle(),
+            JobObjectExtendedLimitInformation,
+            std::ptr::addr_of!(limits).cast(),
+            size,
+        )
+    };
+    if set == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: a live job handle and this process's pseudo handle.
+    if unsafe { AssignProcessToJobObject(job.as_raw_handle(), GetCurrentProcess()) } == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(job)
+}
+
+// Started, in the call's job, by the command of
+// `an_abort_ends_a_nested_job_and_nothing_breaks_away`. Reports each
+// start, `<name> spawned <pid>` or `<name> failed <os error>`, in one
+// `report` written all at once, then waits to be ended with the call's
+// job. Should the case never end it, a watchdog ends its children, then
+// fails.
+#[test]
+#[ignore = "started by the command of an_abort_ends_a_nested_job_and_nothing_breaks_away"]
+fn nested_case() {
+    use std::os::windows::process::CommandExt;
+    use std::process::{Command, Stdio};
+
+    let dir = PathBuf::from(std::env::var_os(NESTED).expect("started by its case's command"));
+    let spawn = |flags: u32| {
+        Command::new("ping")
+            .args(["-n", "600", "127.0.0.1"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(flags)
+            .spawn()
+            .map_err(|error| error.raw_os_error().unwrap_or(-1))
+    };
+    let direct = spawn(CREATE_BREAKAWAY_FROM_JOB);
+    let job = nested_job();
+    let (nested, breakaway) = match &job {
+        Ok(_) => (spawn(0), spawn(CREATE_BREAKAWAY_FROM_JOB)),
+        Err(error) => {
+            eprintln!("the nested job: {error}");
+            let code = error.raw_os_error().unwrap_or(-1);
+            (Err(code), Err(code))
+        }
+    };
+    let mut lines = Vec::new();
+    let mut children = Vec::new();
+    for (name, started) in [
+        ("direct", direct),
+        ("nested", nested),
+        ("breakaway", breakaway),
+    ] {
+        match started {
+            Ok(child) => {
+                lines.push(format!("{name} spawned {}", child.id()));
+                children.push(child);
+            }
+            Err(code) => lines.push(format!("{name} failed {code}")),
+        }
+    }
+    let partial = dir.join("report.partial");
+    let published = std::fs::write(&partial, lines.join("\n"))
+        .and_then(|()| std::fs::rename(&partial, dir.join("report")));
+    if published.is_ok() {
+        // The abort ends this process, a member of the call's job, first.
+        std::thread::sleep(Duration::from_secs(600));
+    }
+    for mut child in children {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    panic!("never ended by its case: {published:?}");
 }

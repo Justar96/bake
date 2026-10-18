@@ -2,10 +2,12 @@
 //! `subagents` on and two models so each request's route can be seen. The
 //! other print-mode tests show the tools are absent by default.
 
+#[cfg(unix)]
 use super::*;
 
 /// Turns subagents on, with the workspace's models: the parent's and a
 /// second one for children.
+#[cfg(unix)]
 fn two_models(workspace: &Workspace, port: u16) {
     std::fs::write(
         workspace.home().join("settings.json"),
@@ -29,6 +31,7 @@ fn two_models(workspace: &Workspace, port: u16) {
 }
 
 /// Whether a request is a child's: its task carries the return guidance.
+#[cfg(unix)]
 fn is_child(request: &Request) -> bool {
     transcript(request)
         .iter()

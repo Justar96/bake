@@ -56,8 +56,8 @@ loom = { version = "=0.7.2", default-features = false }
 bake-sandbox = { workspace = true, features = ["testing"] }
 
 [target.'cfg(windows)'.dev-dependencies]
-# `tests/process_windows.rs`' process probes.
-windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading"] }
+# `tests/process_windows.rs`' process probes and nested job.
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
 
 # MCP servers a real session owns: the test binary re-executes itself as
 # the stdio server, so its standard output must carry only protocol
