@@ -2,8 +2,9 @@
 //! and `bake-ai`'s faux model: D24 admission before spawn, tools declared,
 //! called, and logged, Esc ending one call, shutdown during `initialize`,
 //! failed discovery, tool-list refreshes with in-flight calls keeping their
-//! generation, a crashed server, and a resumed session that declares no stale
-//! tool. Each case names the Pi v1.3.0 or Bake TypeScript case it follows,
+//! generation, a crashed server, a resumed session that declares no stale
+//! tool, and the replay class of every tool `bake-rs` composes, which no
+//! request carries. Each case names the Pi v1.3.0 or Bake TypeScript case it follows,
 //! where one exists.
 //!
 //! The binary is its own fixture server (`fixture.rs`), so it has its own
@@ -23,6 +24,7 @@ mod fixture;
 #[path = "mcp_session/probe.rs"]
 mod probe;
 
+use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -30,14 +32,21 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
+use bake_agent::{
+    AgentContext, AgentLoopConfig, AgentMessage, AgentTool, StreamFn, ToolReplay, run_agent_loop,
+};
 use bake_ai::providers::faux::{
     FauxProvider, FauxProviderOptions, FauxResponseStep, faux_assistant_blocks,
-    faux_assistant_message, faux_tool_call,
+    faux_assistant_message, faux_model, faux_tool_call,
 };
 use bake_ai::transcript::get_current_tools;
+use bake_ai::types::{
+    Message, SystemContent, SystemMessage, TranscriptContext, UserContent, UserMessage,
+};
 use bake_ai::{ApiRegistry, AssistantMessage, StopReason, UserContentBlock};
 use bake_coding_agent::agent_session::{AgentSession, AgentSessionOptions};
 use bake_coding_agent::auth_storage::AuthStorage;
+use bake_coding_agent::cli::{CliEnvironment, no_interrupt, parse_args, start_interactive};
 use bake_coding_agent::mcp::{
     McpOptions, McpServerEntry, McpServerState, McpServers, McpTimings, McpToolFilter,
     load_mcp_config,
@@ -46,6 +55,7 @@ use bake_coding_agent::model_registry::ModelRegistry;
 use bake_coding_agent::model_registry::config::ModelConfig;
 use bake_coding_agent::owned_work::WorkGate;
 use bake_coding_agent::permissions::{ApprovalPolicy, StandingPermissions};
+use bake_coding_agent::plugins::wasm::WasmSetup;
 use bake_coding_agent::session::{NewSessionOptions, SessionManager};
 use bake_coding_agent::settings::Settings;
 use bake_coding_agent::system_prompt::SystemPromptOptions;
@@ -135,6 +145,14 @@ fn main() {
         ("the_probe_observes_real_processes", |case| {
             Box::pin(the_probe_observes_real_processes(case))
         }),
+        (
+            "every_composed_tool_has_a_replay_class_no_request_carries",
+            |case| {
+                Box::pin(every_composed_tool_has_a_replay_class_no_request_carries(
+                    case,
+                ))
+            },
+        ),
     ];
     let mut failed = Vec::new();
     let mut ran = 0;
@@ -1458,4 +1476,283 @@ async fn the_probe_observes_real_processes(_case: Arc<Case>) {
     let _ = child.wait();
     checked.unwrap_or_else(|error| panic!("{error}"));
     assert!(probe::Process::observe(u32::MAX).is_err());
+}
+
+/// The replay class of every tool `bake-rs` composes with every opt-in on
+/// (scope 08, D37): reads rerun, effects do not, and no MCP server's own
+/// read-only claim is trusted.
+const REPLAY_CLASSES: [(&str, ToolReplay); 19] = [
+    ("read", ToolReplay::Safe),
+    ("bash", ToolReplay::Never),
+    ("edit", ToolReplay::Never),
+    ("write", ToolReplay::Never),
+    ("grep", ToolReplay::Safe),
+    ("find", ToolReplay::Safe),
+    ("ls", ToolReplay::Safe),
+    ("job_output", ToolReplay::Never),
+    ("job_list", ToolReplay::Safe),
+    ("job_kill", ToolReplay::Never),
+    ("subagent", ToolReplay::Never),
+    ("list_subagent_models", ToolReplay::Safe),
+    ("send_message", ToolReplay::Never),
+    ("interrupt_agent", ToolReplay::Never),
+    ("list_agents", ToolReplay::Safe),
+    ("task_document", ToolReplay::Never),
+    ("schedule_create", ToolReplay::Never),
+    ("schedule_list", ToolReplay::Safe),
+    ("schedule_delete", ToolReplay::Never),
+];
+
+/// Writes `text` at `path`, writable by its owner only, as the home's
+/// files must be.
+fn write_owned(path: &Path, text: &str) {
+    std::fs::write(path, text).expect("write");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o644)).expect("chmod");
+    }
+}
+
+/// The first request a run over `tools` sends for a fixed prompt: the
+/// transcript every provider builds its body from, then the body of each
+/// wire protocol.
+async fn first_request(tools: Vec<Arc<AgentTool>>) -> Vec<String> {
+    let captured: Arc<Mutex<Option<TranscriptContext>>> = Arc::default();
+    let sink = Arc::clone(&captured);
+    let stream_fn: StreamFn = Arc::new(move |_, context, _| {
+        *sink.lock().unwrap_or_else(PoisonError::into_inner) = Some(context.clone());
+        Err("captured".into())
+    });
+    let model = faux_model("faux-1");
+    let convert = bake_agent::hook::convert_to_llm(|messages| {
+        let converted: Vec<Message> = messages
+            .iter()
+            .filter_map(|message| message.as_llm().cloned())
+            .collect();
+        Box::pin(async move { converted })
+    });
+    // Fixed timestamps; the tools land on the prompt's own system message.
+    let prompts: Vec<AgentMessage> = vec![
+        Message::System(SystemMessage {
+            content: SystemContent::Text("Be brief.".into()),
+            timestamp: 1,
+            ..SystemMessage::default()
+        })
+        .into(),
+        Message::User(UserMessage {
+            content: UserContent::Text("go".into()),
+            timestamp: 2,
+        })
+        .into(),
+    ];
+    let _ = run_agent_loop(
+        prompts,
+        AgentContext {
+            messages: Vec::new(),
+            tools,
+        },
+        AgentLoopConfig::new(model.clone(), convert),
+        Arc::new(|_| Box::pin(async {})),
+        None,
+        Some(stream_fn),
+    )
+    .await;
+    let context = captured
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .take()
+        .expect("a request");
+    use bake_ai::api::{anthropic_messages, openai_completions, openai_responses};
+    vec![
+        serde_json::to_string(&context).expect("transcript"),
+        openai_completions::build_params(
+            &model,
+            &context,
+            &openai_completions::OpenAICompletionsOptions::default(),
+            &openai_completions::get_compat(&model),
+            bake_ai::types::CacheRetention::Short,
+        )
+        .expect("completions body")
+        .to_string(),
+        openai_responses::build_params(
+            &model,
+            &context,
+            &openai_responses::OpenAIResponsesOptions::default(),
+            &openai_responses::get_compat(&model),
+        )
+        .expect("responses body")
+        .to_string(),
+        anthropic_messages::build_params(
+            &model,
+            &context,
+            false,
+            &anthropic_messages::AnthropicOptions::default(),
+        )
+        .expect("messages body")
+        .to_string(),
+    ]
+}
+
+// Scope 08: every tool `bake-rs` composes, built through the CLI with the
+// task-document, schedule, and subagent opt-ins and an MCP server, has a
+// replay class, the one recovery reads (`run_journal`). Plugins add no
+// tools, only vetoes (`plugins` module). Neither the class nor `read_only`
+// reaches the provider: the session's request declares exactly each tool's
+// declaration, and flipping or clearing both on every tool leaves the
+// transcript and every wire body byte-identical.
+async fn every_composed_tool_has_a_replay_class_no_request_carries(case: Arc<Case>) {
+    let home = case.dir.join("home");
+    let user = case.dir.join("user");
+    for dir in [&home, &user] {
+        std::fs::create_dir_all(dir).expect("directory");
+    }
+    #[cfg(unix)]
+    for dir in [
+        case.dir.clone(),
+        home.clone(),
+        user.clone(),
+        case.workspace(),
+    ] {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    }
+    write_owned(
+        &home.join("settings.json"),
+        &json!({ "taskDocuments": true, "schedules": true, "subagents": true }).to_string(),
+    );
+    write_owned(
+        &home.join("mcp.json"),
+        &json!({ "mcpServers": { "fixture": server_json(&case, "fixture", "") } }).to_string(),
+    );
+    let faux = Arc::new(FauxProvider::new(FauxProviderOptions::default()));
+    let requests: Arc<Mutex<Vec<TranscriptContext>>> = Arc::default();
+    let seen = Arc::clone(&requests);
+    faux.set_responses(vec![FauxResponseStep::from_fn(move |context, _, _, _| {
+        seen.lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(context.clone());
+        Ok(faux_assistant_message("done"))
+    })]);
+    let stderr: Arc<Mutex<Vec<u8>>> = Arc::default();
+    let environment = CliEnvironment {
+        cwd: case.workspace(),
+        home: Some(home),
+        user_home: Some(user),
+        docs_command: "bake-rs docs".into(),
+        stdin_is_terminal: true,
+        stdin: Box::new(std::io::empty()),
+        stdout: Arc::new(Mutex::new(Vec::<u8>::new())),
+        stderr: stderr.clone(),
+        // Two models, so `list_subagent_models` is composed too.
+        extra_providers: vec![(
+            "faux".into(),
+            json!({
+                "baseUrl": "http://127.0.0.1:9/unused",
+                "api": faux.model().api,
+                "models": [{ "id": "faux-1" }, { "id": "faux-2" }],
+            }),
+            Some("test-key".into()),
+        )],
+        imported_default_model: None,
+        imported_default_preset: None,
+        sandbox_provider: Arc::new(UnavailableProvider::new(None)),
+        approver: None,
+        plugins: WasmSetup::default(),
+        warnings: Vec::new(),
+        interrupt: no_interrupt(),
+    };
+    let args = [
+        "--model",
+        "faux/faux-1",
+        "--permission",
+        "danger-full-access",
+        "--no-session",
+        "--tools",
+        "*",
+    ]
+    .map(str::to_owned);
+    let Ok(started) = start_interactive(environment, parse_args(&args)).await else {
+        panic!(
+            "setup failed: {}",
+            String::from_utf8_lossy(&stderr.lock().unwrap_or_else(PoisonError::into_inner))
+        );
+    };
+    let session = Arc::new(started.session);
+    case.keep(&session);
+    session.apis().register(faux.clone());
+    let servers = session.mcp_servers().expect("the home's server");
+    wait_for(servers, "the server", |states| connected(&states[0], 1)).await;
+    session.prompt("go", Vec::new()).await.expect("prompt");
+
+    let tools = session.agent().tools();
+    let unclassified: Vec<&str> = tools
+        .iter()
+        .filter(|tool| tool.replay.is_none())
+        .map(|tool| tool.name.as_str())
+        .collect();
+    assert!(unclassified.is_empty(), "no replay class: {unclassified:?}");
+    let classes: BTreeMap<String, Option<ToolReplay>> = tools
+        .iter()
+        .map(|tool| (tool.name.clone(), tool.replay))
+        .collect();
+    let expected: BTreeMap<String, Option<ToolReplay>> = REPLAY_CLASSES
+        .iter()
+        .map(|(name, replay)| ((*name).to_owned(), Some(*replay)))
+        .chain(
+            FIXTURE_TOOLS
+                .iter()
+                .map(|name| ((*name).to_owned(), Some(ToolReplay::Never))),
+        )
+        .collect();
+    assert_eq!(classes, expected);
+    assert_eq!(classes.len(), tools.len(), "a tool name repeats");
+
+    // The session's own request declares each tool as its declaration.
+    let requests = requests
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone();
+    assert_eq!(requests.len(), 1);
+    let declared: BTreeMap<String, Value> = get_current_tools(requests[0].messages())
+        .into_iter()
+        .map(|tool| (tool.name.clone(), json!(tool)))
+        .collect();
+    let declarations: BTreeMap<String, Value> = tools
+        .iter()
+        .map(|tool| (tool.name.clone(), json!(tool.declaration())))
+        .collect();
+    assert_eq!(declared, declarations);
+
+    // Flipped and cleared classes and read-only flags send the same bytes.
+    let altered = |change: fn(&mut AgentTool)| -> Vec<Arc<AgentTool>> {
+        tools
+            .iter()
+            .map(|tool| {
+                let mut tool = (**tool).clone();
+                change(&mut tool);
+                Arc::new(tool)
+            })
+            .collect()
+    };
+    let original = first_request(tools.clone()).await;
+    assert!(
+        original
+            .iter()
+            .all(|body| body.contains("mcp__fixture__echo") && body.contains("schedule_list")),
+        "every body declares the tools"
+    );
+    let flipped = altered(|tool| {
+        tool.replay = match tool.replay {
+            Some(ToolReplay::Safe) => Some(ToolReplay::Never),
+            _ => Some(ToolReplay::Safe),
+        };
+        tool.read_only = !tool.read_only;
+    });
+    assert_eq!(first_request(flipped).await, original);
+    let cleared = altered(|tool| {
+        tool.replay = None;
+        tool.read_only = false;
+    });
+    assert_eq!(first_request(cleared).await, original);
 }

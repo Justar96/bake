@@ -24,7 +24,7 @@ use std::sync::Mutex;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
-use bake_agent::{AgentTool, AgentToolResult, BoxFuture, ToolExecutionMode};
+use bake_agent::{AgentTool, AgentToolResult, BoxFuture, ToolExecutionMode, ToolReplay};
 use bake_ai::{AbortSignal, TextContent, UserContentBlock};
 use serde_json::{Map, Value, json};
 use tokio::sync::Notify;
@@ -277,6 +277,7 @@ fn tool(
     label: &'static str,
     description: &'static str,
     parameters: Value,
+    replay: ToolReplay,
     execute: impl Fn(Value, Option<AbortSignal>) -> BoxFuture<'static, Result<AgentToolResult, String>>
     + Send
     + Sync
@@ -291,6 +292,7 @@ fn tool(
     );
     // One change at a time, in call order.
     tool.execution_mode = Some(ToolExecutionMode::Sequential);
+    tool.replay = Some(replay);
     Arc::new(tool)
 }
 
@@ -327,6 +329,8 @@ pub(super) fn tools(core: &Arc<Core>, schedules: &Arc<Schedules>) -> Vec<Arc<Age
                 },
                 "required": ["prompt"]
             }),
+            // A rerun would create a second reminder.
+            ToolReplay::Never,
             move |arguments, signal| {
                 let (core, schedules) = (Arc::clone(&core), Arc::clone(&schedules));
                 Box::pin(async move {
@@ -380,6 +384,7 @@ pub(super) fn tools(core: &Arc<Core>, schedules: &Arc<Schedules>) -> Vec<Arc<Age
             "List reminders",
             LIST_DESCRIPTION,
             json!({ "type": "object", "properties": {} }),
+            ToolReplay::Safe,
             move |_arguments, signal| {
                 let (core, schedules) = (Arc::clone(&core), Arc::clone(&schedules));
                 Box::pin(async move {
@@ -416,6 +421,7 @@ pub(super) fn tools(core: &Arc<Core>, schedules: &Arc<Schedules>) -> Vec<Arc<Age
                 "properties": { "id": { "type": "string", "description": "Exact session-local schedule id." } },
                 "required": ["id"]
             }),
+            ToolReplay::Never,
             move |arguments, signal| {
                 let (core, schedules) = (Arc::clone(&core), Arc::clone(&schedules));
                 Box::pin(async move {

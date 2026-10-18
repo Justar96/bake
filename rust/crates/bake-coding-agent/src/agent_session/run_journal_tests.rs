@@ -1,5 +1,8 @@
-//! Recovery uses real session files and process exits at durable boundaries.
-//! Each re-executed fixture owns its environment, paths, writer and runtime.
+//! Recovery uses real session files and processes the test kills with
+//! `SIGKILL` at durable boundaries. Each re-executed fixture owns its
+//! environment, paths, writer and runtime.
+
+use std::path::Path;
 
 use super::*;
 use bake_agent::RunLimits;
@@ -12,6 +15,12 @@ mod parked;
 
 #[path = "run_journal_job_tests.rs"]
 mod jobs;
+
+#[path = "run_journal_rerun_tests.rs"]
+mod rerun;
+
+#[path = "run_journal_kill_tests.rs"]
+mod kill;
 
 fn append_fact(session: &mut SessionManager, run_id: &str, mut event: Value) -> String {
     if event["kind"] == "started" && event.get("session_id").is_none() {
@@ -715,6 +724,70 @@ async fn required_journal_write_failures_stop_provider_tool_and_success_publicat
     }
 }
 
+/// Reports the fixture's kill point to the parent, then holds the process
+/// there until the parent's `SIGKILL`.
+fn halt(directory: &Path) -> ! {
+    std::fs::write(directory.join("ready"), b"").unwrap();
+    loop {
+        std::thread::park();
+    }
+}
+
+/// Where a [`fixture_tool`] holds its process for the parent's kill.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Hold {
+    Never,
+    BeforeEffect,
+    AfterEffect,
+}
+
+/// A tool of class `replay` whose effect appends its name to
+/// `directory/<name>` and syncs it, so a parent counts effects across
+/// processes. With `steer`, it first steers that session's running turn.
+fn fixture_tool(
+    name: &'static str,
+    replay: bake_agent::ToolReplay,
+    directory: &Path,
+    hold: Hold,
+    steer: Option<Arc<OnceLock<std::sync::Weak<AgentSession>>>>,
+) -> Arc<AgentTool> {
+    let directory = directory.to_owned();
+    let mut tool = AgentTool::new(
+        name,
+        name,
+        "Write the fixture effect",
+        json!({"type":"object"}),
+        move |_, _, _, _| {
+            let directory = directory.clone();
+            let steer = steer.clone();
+            Box::pin(async move {
+                if let Some(session) = steer.as_ref().and_then(|slot| slot.get()?.upgrade()) {
+                    session.steer("also this", Vec::new()).await.unwrap();
+                }
+                if hold == Hold::BeforeEffect {
+                    halt(&directory);
+                }
+                let mut file = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(directory.join(name))
+                    .unwrap();
+                std::io::Write::write_all(&mut file, format!("{name}\n").as_bytes()).unwrap();
+                file.sync_all().unwrap();
+                if hold == Hold::AfterEffect {
+                    halt(&directory);
+                }
+                Ok(AgentToolResult::text(format!("{name} done")))
+            })
+        },
+    );
+    tool.replay = Some(replay);
+    Arc::new(tool)
+}
+
+/// Runs one prompt to the kill point its mode names and halts there; see
+/// [`kill_at`]. `first-prompt` and `plain-assistant` are ordinary prompts,
+/// every other mode a recoverable run.
 #[test]
 fn recoverable_run_crash_fixture() {
     let Ok(mode) = std::env::var(CHILD_MODE) else {
@@ -727,6 +800,7 @@ fn recoverable_run_crash_fixture() {
         .build()
         .unwrap();
     runtime.block_on(async move {
+        let mode = mode.as_str();
         let h = harness(200_000);
         let manager = SessionManager::create(
             &directory.to_string_lossy(),
@@ -740,110 +814,207 @@ fn recoverable_run_crash_fixture() {
             path.to_string_lossy().as_bytes(),
         )
         .unwrap();
-        let tool_dir = directory.clone();
-        let tool_mode = mode.clone();
-        let tool = AgentTool::new(
-            "effect",
-            "effect",
-            "Write the fixture effect",
-            json!({"type":"object"}),
-            move |_, _, _, _| {
-                let directory = tool_dir.clone();
-                let mode = tool_mode.clone();
-                Box::pin(async move {
-                    let path = directory.join("effect");
-                    let mut file = std::fs::OpenOptions::new()
-                        .create(true)
-                        .append(true)
-                        .open(path)
-                        .unwrap();
-                    std::io::Write::write_all(&mut file, b"effect\n").unwrap();
-                    file.sync_all().unwrap();
-                    if mode == "dispatch" {
-                        std::process::exit(73);
-                    }
-                    Ok(AgentToolResult::text("effect recorded"))
-                })
-            },
+        let hold = |tool: &str| match (mode, tool) {
+            ("pre-effect", "effect") | ("pre-read", "probe") => Hold::BeforeEffect,
+            ("dispatch", "effect") | ("read", "probe") => Hold::AfterEffect,
+            _ => Hold::Never,
+        };
+        let slot = Arc::new(OnceLock::new());
+        let tools = vec![
+            fixture_tool(
+                "effect",
+                bake_agent::ToolReplay::Never,
+                &directory,
+                hold("effect"),
+                (mode == "steer").then(|| Arc::clone(&slot)),
+            ),
+            fixture_tool(
+                "probe",
+                bake_agent::ToolReplay::Safe,
+                &directory,
+                hold("probe"),
+                None,
+            ),
+        ];
+        let tool_use = |name: &str| -> FauxResponseStep {
+            faux_assistant_blocks(
+                vec![faux_tool_call(name, json!({}), Some("call"))],
+                StopReason::ToolUse,
+            )
+            .into()
+        };
+        let halting = {
+            let directory = directory.clone();
+            FauxResponseStep::from_fn(move |_, _, _, _| halt(&directory))
+        };
+        h.faux.set_responses(match mode {
+            "admission" | "timed" | "first-prompt" => vec![halting],
+            "assistant" | "plain-assistant" | "pre-effect" | "dispatch" | "result" => {
+                vec![tool_use("effect")]
+            }
+            "pre-read" | "read" => vec![tool_use("probe")],
+            "retry" => vec![failure("overloaded_error"), halting],
+            "follow-up" | "job-notice" => vec![faux_assistant_message("complete").into(), halting],
+            "steer" => vec![tool_use("effect"), halting],
+            "compaction" => vec![
+                tool_use("effect"),
+                faux_assistant_message("## Goal\nCompacted").into(),
+                halting,
+            ],
+            _ => vec![faux_assistant_message("complete").into()],
+        });
+        let settings = match mode {
+            "retry" => retry_settings(3, 60_000),
+            // A context over 10 tokens crosses the threshold.
+            "compaction" => settings(json!({
+                "compaction": { "reserveTokens": 199_990, "keepRecentTokens": 1 },
+            })),
+            _ => Settings::default(),
+        };
+        let session = Arc::new(
+            AgentSession::create(AgentSessionOptions {
+                tools,
+                active_tool_names: vec!["effect".into(), "probe".into()],
+                ..options(&h, manager, settings)
+            })
+            .await
+            .unwrap(),
         );
-        if mode == "admission" || mode == "timed" {
-            h.faux
-                .set_responses(vec![FauxResponseStep::from_fn(|_, _, _, _| {
-                    std::process::exit(73)
-                })]);
-        } else if mode == "dispatch" || mode == "result" {
-            h.faux.set_responses(vec![
-                faux_assistant_blocks(
-                    vec![faux_tool_call("effect", json!({}), Some("call"))],
-                    StopReason::ToolUse,
+        let _ = slot.set(Arc::downgrade(&session));
+        // A job that settles once the first answer ends, so its notice
+        // opens the run's next request.
+        let settle = Arc::new(tokio::sync::Notify::new());
+        if mode == "job-notice" {
+            let settled = Arc::clone(&settle);
+            session
+                .jobs()
+                .start(
+                    crate::jobs::JobSpec {
+                        kind: "bash",
+                        label: "fixture job".into(),
+                        output: crate::jobs::OutputMode::Stream,
+                    },
+                    move |_| async move {
+                        settled.notified().await;
+                        crate::jobs::JobOutcome::completed("fixture job done")
+                    },
                 )
-                .into(),
-            ]);
-        } else {
-            h.faux
-                .set_responses(vec![faux_assistant_message("complete").into()]);
+                .unwrap();
         }
-        let session = AgentSession::create(AgentSessionOptions {
-            tools: vec![Arc::new(tool)],
-            active_tool_names: vec!["effect".into()],
-            ..options(&h, manager, Settings::default())
-        })
-        .await
-        .unwrap();
-        let observe_mode = mode.clone();
+        let observe_mode = mode.to_owned();
         let _subscription = session.subscribe(move |event| {
             if let SessionEvent::RecoverableRunStarted { run_id } = event {
                 std::fs::write(directory.join("run-id"), run_id).unwrap();
                 if observe_mode == "start" {
-                    std::process::exit(73);
+                    halt(&directory);
                 }
             }
-            if let SessionEvent::Agent(AgentEvent::MessageEnd { message }) = event
-                && ((observe_mode == "result" && message.as_tool_result().is_some())
-                    || (observe_mode == "final" && message.as_assistant().is_some()))
-            {
-                std::process::exit(73);
+            if let SessionEvent::Agent(AgentEvent::MessageEnd { message }) = event {
+                let calls = message
+                    .as_assistant()
+                    .is_some_and(|assistant| assistant.stop_reason == StopReason::ToolUse);
+                let here = match observe_mode.as_str() {
+                    "assistant" | "plain-assistant" => calls,
+                    "result" => message.as_tool_result().is_some(),
+                    "final" => message.as_assistant().is_some() && !calls,
+                    "job-notice" => {
+                        if message.as_assistant().is_some() {
+                            settle.notify_one();
+                        }
+                        false
+                    }
+                    _ => false,
+                };
+                if here {
+                    halt(&directory);
+                }
             }
         });
-        let _ = session
-            .prompt_recoverable(
-                "perform effect",
-                Vec::new(),
-                RunLimits {
-                    max_model_calls: Some(2),
-                    deadline: (mode == "timed")
-                        .then(|| tokio::time::Instant::now() + Duration::from_secs(60)),
-                },
-            )
-            .await;
-        panic!("fixture did not reach crash boundary");
+        if mode == "follow-up" {
+            session.follow_up("then this", Vec::new()).await.unwrap();
+        }
+        if mode == "first-prompt" || mode == "plain-assistant" {
+            let _ = session.prompt("perform effect", Vec::new()).await;
+        } else {
+            let _ = session
+                .prompt_recoverable(
+                    "perform effect",
+                    Vec::new(),
+                    RunLimits {
+                        max_model_calls: Some(4),
+                        deadline: (mode == "timed")
+                            .then(|| tokio::time::Instant::now() + Duration::from_secs(60)),
+                    },
+                )
+                .await;
+        }
+        panic!("fixture did not reach its kill point");
     });
+}
+
+/// What a killed fixture left: its directory, session file, and run.
+struct Killed {
+    dir: TempDir,
+    path: PathBuf,
+    run_id: Option<String>,
+}
+
+/// Runs [`recoverable_run_crash_fixture`] in `mode` as a child process and
+/// kills it at its kill point; see [`kill_fixture`].
+async fn kill_at(mode: &str) -> Killed {
+    let dir = TempDir::new(&format!("run-journal-kill-{mode}"));
+    kill_fixture(
+        "agent_session::recovery_tests::run_journal_tests::recoverable_run_crash_fixture",
+        &[
+            (CHILD_MODE, mode.as_ref()),
+            (CHILD_DIR, dir.path().as_os_str()),
+        ],
+        dir.path(),
+    )
+    .await;
+    let path = PathBuf::from(std::fs::read_to_string(dir.join("session-path")).unwrap());
+    let run_id = std::fs::read_to_string(dir.join("run-id")).ok();
+    Killed { dir, path, run_id }
+}
+
+/// Runs the fixture test `name` as a child process with `env`, waits until
+/// it reports its kill point in `directory` ([`halt`]), and kills it with
+/// `SIGKILL`.
+async fn kill_fixture(name: &str, env: &[(&str, &std::ffi::OsStr)], directory: &Path) {
+    let mut child = tokio::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", name, "--nocapture"])
+        .envs(env.iter().copied())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    // Polled with a watchdog; a dropped child is killed.
+    let watchdog = tokio::time::Instant::now() + Duration::from_secs(60);
+    while !directory.join("ready").exists() {
+        if let Some(status) = child.try_wait().unwrap() {
+            panic!("{env:?}: the fixture exited ({status}) before its kill point");
+        }
+        assert!(
+            tokio::time::Instant::now() < watchdog,
+            "{env:?}: the fixture did not reach its kill point"
+        );
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    child.kill().await.unwrap();
+    let status = child.wait().await.unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        assert_eq!(status.signal(), Some(libc::SIGKILL), "{env:?}: {status}");
+    }
+    #[cfg(not(unix))]
+    assert!(!status.success(), "{env:?}: {status}");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn process_crashes_preserve_recovery_boundaries_without_replaying_effects() {
     for mode in ["start", "admission", "timed", "dispatch", "result", "final"] {
-        let dir = TempDir::new(&format!("run-journal-crash-{mode}"));
-        let mut child = tokio::process::Command::new(std::env::current_exe().unwrap())
-            .arg("--exact")
-            .arg("agent_session::recovery_tests::run_journal_tests::recoverable_run_crash_fixture")
-            .arg("--nocapture")
-            .env(CHILD_MODE, mode)
-            .env(CHILD_DIR, dir.path())
-            .kill_on_drop(true)
-            .spawn()
-            .unwrap();
-        let status = match tokio::time::timeout(Duration::from_secs(10), child.wait()).await {
-            Ok(status) => status.unwrap(),
-            Err(_) => {
-                let _ = child.kill().await;
-                let _ = child.wait().await;
-                panic!("{mode} fixture did not exit at its boundary");
-            }
-        };
-        assert_eq!(status.code(), Some(73), "{mode}");
-        let run_id = std::fs::read_to_string(dir.join("run-id")).unwrap();
-        let path = PathBuf::from(std::fs::read_to_string(dir.join("session-path")).unwrap());
+        let Killed { dir, path, run_id } = kill_at(mode).await;
+        let run_id = run_id.unwrap();
         let manager = SessionManager::open(&path, None, None).unwrap();
         let h = harness(200_000);
         h.faux

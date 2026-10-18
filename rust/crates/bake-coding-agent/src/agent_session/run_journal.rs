@@ -1,13 +1,29 @@
 //! Explicitly selected recovery intervals in Pi custom entries.
 //!
 //! Journal writes are required execution work. Tool dispatch is recorded
-//! before the tool's current permission check, so an interrupted dispatch
-//! is conservative evidence of uncertainty, never permission to replay.
+//! after the plugin vetoes and before the tool's current permission check
+//! and first effect, with the tool's replay class when it is `Safe`, so an
+//! interrupted dispatch is conservative evidence of uncertainty.
+//!
+//! Resuming a selected run applies Pi Durable's replay rule (v1.3.0
+//! `packages/durable/src/harness/tool.ts`, the `execute` phase): an
+//! uncertain call runs again only when the class recorded with its
+//! dispatch and the class of the tool registered now are both `Safe`. Bake
+//! extends the rule to a call of the same assistant that was never
+//! dispatched, and stops short of Pi in three ways. A call that is not
+//! `Safe` is never settled with an interruption error, as Pi's is: the run
+//! needs reconciliation. Nothing reruns unless every unresolved call is on
+//! the run's last assistant, every one is eligible, and the run could
+//! otherwise continue. And a rerun goes through the current plugin vetoes,
+//! permission wrappers, and result hooks, so the current policy, never the
+//! one before the crash, decides it; Pi reruns with its recorded arguments.
+//! The rerun results are committed before the recovery notice, which is
+//! committed before the resumed request.
 
 mod projection;
 
 use super::*;
-use bake_agent::{AdmissionObserver, ModelCallAdmission, RunLimits};
+use bake_agent::{AdmissionObserver, ModelCallAdmission, RunLimits, ToolReplay};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -41,7 +57,8 @@ pub struct RunRecovery {
 pub enum RunRecoveryDisposition {
     /// A terminal record or a durable final assistant settled execution.
     Completed { outcome: RunOutcome },
-    /// Untimed execution can continue with its original remaining allowance.
+    /// Untimed execution can continue with its original remaining allowance,
+    /// first running again any unresolved calls whose tools are `Safe`.
     Resumable,
     /// An effect or incomplete tool exchange needs explicit reconciliation.
     NeedsReconciliation { reason: String },
@@ -78,6 +95,14 @@ enum Event {
         assistant_entry_id: String,
         tool_call_id: String,
         tool_name: String,
+        /// Pi Durable's intent `replay`, written only when `Safe`; absent
+        /// is Pi's `unsafe`, as in records written before it existed.
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "replay_class"
+        )]
+        replay: Option<ToolReplay>,
     },
     Resumed {
         model_calls: u64,
@@ -92,6 +117,59 @@ fn present_option<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
     deserializer: D,
 ) -> Result<Option<T>, D::Error> {
     Option::deserialize(deserializer)
+}
+
+fn replay_class<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<ToolReplay>, D::Error> {
+    match String::deserialize(deserializer)?.as_str() {
+        "safe" => Ok(Some(ToolReplay::Safe)),
+        "never" => Ok(Some(ToolReplay::Never)),
+        other => Err(serde::de::Error::unknown_variant(other, &["safe", "never"])),
+    }
+}
+
+/// The tool-call hooks the agent runs, kept so that a rerun goes through
+/// the same ones.
+#[derive(Clone)]
+pub(super) struct ToolHooks {
+    pub before: Option<bake_agent::BeforeToolCall>,
+    pub after: Option<bake_agent::AfterToolCall>,
+}
+
+/// The model-visible notice a resumed run commits before its next request.
+fn notice(run_id: &str) -> GroupEntry {
+    GroupEntry::CustomMessage {
+        custom_type: NOTICE_TYPE.into(),
+        content: UserContent::Text("Execution resumed from its durable checkpoint. Completed tool results are already recorded. Continue the task using the current tools and permission policy; do not repeat completed effects.".into()),
+        display: true,
+        details: Some(serde_json::json!({"runId":run_id})),
+    }
+}
+
+/// The replay class of the tool named `name` among `tools`.
+pub(super) fn replay_of(tools: &[Arc<AgentTool>], name: &str) -> Option<ToolReplay> {
+    tools
+        .iter()
+        .find(|tool| tool.name == name)
+        .and_then(|tool| tool.replay)
+}
+
+/// An unresolved call on a resumed run's last assistant, run again under
+/// the current policy before the run's next request.
+#[derive(Debug, Clone)]
+pub(super) struct Rerun {
+    pub assistant_entry_id: String,
+    pub call: bake_ai::ToolCall,
+    /// The class recorded with the call's latest dispatch, or `None` when
+    /// the call was never dispatched.
+    dispatched: Option<Option<ToolReplay>>,
+}
+
+impl Rerun {
+    fn key(&self) -> (String, String) {
+        (self.assistant_entry_id.clone(), self.call.id.clone())
+    }
 }
 
 pub(super) struct Journal {
@@ -109,6 +187,8 @@ pub(super) enum Start {
     New(RunLimits),
     Resume {
         expected_leaf: Option<String>,
+        /// The unresolved `Safe` calls to run before the notice.
+        reruns: Vec<Rerun>,
     },
     Reconcile {
         expected_leaf: Option<String>,
@@ -236,33 +316,65 @@ impl Journal {
                 })
                 .await?;
             }
-            Start::Resume { expected_leaf } => {
+            Start::Resume {
+                expected_leaf,
+                reruns,
+            } => {
                 let expected_leaf = expected_leaf.clone();
+                let expected: Vec<_> = reruns.iter().map(Rerun::key).collect();
                 let run_id = self.run_id.clone();
                 self.commit(move |core| {
                     let projection = write_session(&core.session, &core.gap, |session| {
                         if session.leaf_id() != expected_leaf.as_deref() {
-                            return Ok::<_, String>(Err("Session branch changed before recovery admission".into()));
+                            return Ok::<_, String>(Err(
+                                "Session branch changed before recovery admission".into(),
+                            ));
                         }
-                        let selected = projection::project(session, &run_id)?;
-                        if selected.recovery.disposition != RunRecoveryDisposition::Resumable {
+                        let mut selected = projection::project(session, &run_id)?;
+                        // The current tools were checked at admission and are
+                        // checked again before each rerun; this checks the
+                        // durable evidence and that the calls are the same.
+                        let found = selected.resolve(|_| Some(ToolReplay::Safe));
+                        if selected.recovery.disposition != RunRecoveryDisposition::Resumable
+                            || found.iter().map(Rerun::key).ne(expected.iter().cloned())
+                        {
                             return Ok(Err(selected.refusal()));
                         }
-                        let resumed = Record { version: 1, run_id: run_id.clone(), event: Event::Resumed { model_calls: selected.recovery.model_calls } };
-                        session.append_durable_group(vec![
-                            GroupEntry::Custom { custom_type: CUSTOM_TYPE.into(), data: Some(serde_json::to_value(resumed).map_err(|error| error.to_string())?) },
-                            GroupEntry::CustomMessage {
-                                custom_type: NOTICE_TYPE.into(),
-                                content: UserContent::Text("Execution resumed from its durable checkpoint. Completed tool results are already recorded. Continue the task using the current tools and permission policy; do not repeat completed effects.".into()),
-                                display: true,
-                                details: Some(serde_json::json!({"runId":run_id})),
+                        let resumed = Record {
+                            version: 1,
+                            run_id: run_id.clone(),
+                            event: Event::Resumed {
+                                model_calls: selected.recovery.model_calls,
                             },
-                        ]).map_err(|error| error.to_string())?;
+                        };
+                        let mut group = vec![GroupEntry::Custom {
+                            custom_type: CUSTOM_TYPE.into(),
+                            data: Some(
+                                serde_json::to_value(resumed).map_err(|error| error.to_string())?,
+                            ),
+                        }];
+                        // A rerun's results belong right after their calls,
+                        // so its notice follows them.
+                        if expected.is_empty() {
+                            group.push(notice(&run_id));
+                        }
+                        session
+                            .append_durable_group(group)
+                            .map_err(|error| error.to_string())?;
                         Ok(Ok(session.build_session_projection()))
-                    }).map_err(|error| error.message())??;
+                    })
+                    .map_err(|error| error.message())??;
                     core.refresh_context(&projection);
                     Ok(())
-                }).await?;
+                })
+                .await?;
+                if let Some(rerun) = reruns.first() {
+                    *self
+                        .latest_assistant
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner) =
+                        Some(rerun.assistant_entry_id.clone());
+                }
             }
             Start::Reconcile {
                 expected_leaf,
@@ -333,7 +445,11 @@ impl Journal {
         .await
     }
 
-    async fn dispatch(&self, tool_call: &bake_ai::ToolCall) -> Result<(), String> {
+    async fn dispatch(
+        &self,
+        tool_call: &bake_ai::ToolCall,
+        replay: Option<ToolReplay>,
+    ) -> Result<(), String> {
         let assistant_entry_id = self
             .latest_assistant
             .lock()
@@ -344,6 +460,31 @@ impl Journal {
             assistant_entry_id,
             tool_call_id: tool_call.id.clone(),
             tool_name: tool_call.name.clone(),
+            replay: replay.filter(|replay| *replay == ToolReplay::Safe),
+        })
+        .await
+    }
+
+    /// The unresolved `Safe` calls this resumption runs before its notice.
+    pub fn reruns(&self) -> &[Rerun] {
+        match &self.start {
+            Start::Resume { reruns, .. } => reruns,
+            _ => &[],
+        }
+    }
+
+    /// Commits the recovery notice after the rerun results, before the
+    /// resumed request.
+    pub async fn resume_notice(&self) -> Result<(), String> {
+        let entry = notice(&self.run_id);
+        self.commit(move |core| {
+            let projection = write_session(&core.session, &core.gap, |session| {
+                session.append_durable_group(vec![entry])?;
+                Ok::<_, SessionError>(session.build_session_projection())
+            })
+            .map_err(|error| error.message())?;
+            core.refresh_context(&projection);
+            Ok(())
         })
         .await
     }
@@ -427,6 +568,7 @@ pub(super) fn tool_hook(
         let previous = previous.clone();
         Box::pin(async move {
             let call = context.tool_call.clone();
+            let replay = replay_of(&context.context.tools, &call.name);
             let decision = if let Some(previous) = previous {
                 previous(context, signal).await?
             } else {
@@ -436,7 +578,7 @@ pub(super) fn tool_hook(
                 return Ok(decision);
             }
             if let Some(journal) = journal {
-                journal.dispatch(&call).await?;
+                journal.dispatch(&call, replay).await?;
             }
             Ok(decision)
         })
@@ -513,21 +655,29 @@ impl AgentSession {
         })
     }
 
-    /// Inspects only the named run on the selected branch; never calls a provider.
+    /// Inspects only the named run on the selected branch; never calls a
+    /// provider. Unresolved calls the current tools may rerun count as
+    /// resumable.
     pub fn inspect_run(&self, run_id: &str) -> Result<RunRecovery, String> {
-        projection::project(&lock(&self.session), run_id).map(|selected| selected.recovery)
+        let mut selected = projection::project(&lock(&self.session), run_id)?;
+        selected.resolve(|name| self.replay_class(name));
+        Ok(selected.recovery)
     }
 
-    /// Continues a selected untimed run without refunding spent calls or
-    /// replaying uncertain effects. Current tools and approvals apply.
+    /// Continues a selected untimed run without refunding spent calls.
+    /// Current tools and approvals apply. An uncertain effect is never
+    /// replayed: unresolved calls on the run's last assistant run again,
+    /// before the next request, only when their tools are `Safe` now and
+    /// were when dispatched; otherwise the run needs reconciliation.
     pub async fn resume_run(&self, run_id: &str) -> Result<RecoverableRunResult, String> {
-        let (selected, expected_leaf) = {
+        let (mut selected, expected_leaf) = {
             let session = lock(&self.session);
             (
                 projection::project(&session, run_id)?,
                 session.leaf_id().map(str::to_owned),
             )
         };
+        let reruns = selected.resolve(|name| self.replay_class(name));
         let start = match &selected.recovery.disposition {
             RunRecoveryDisposition::Completed { outcome } if selected.terminal => {
                 return Ok(RecoverableRunResult {
@@ -540,7 +690,10 @@ impl AgentSession {
                 expected_leaf,
                 outcome: outcome.clone(),
             },
-            RunRecoveryDisposition::Resumable => Start::Resume { expected_leaf },
+            RunRecoveryDisposition::Resumable => Start::Resume {
+                expected_leaf,
+                reruns,
+            },
             _ => return Err(selected.refusal()),
         };
         let limits = RunLimits {
@@ -574,5 +727,14 @@ impl AgentSession {
                 .unwrap_or_else(PoisonError::into_inner)
                 .clone(),
         })
+    }
+
+    /// The replay class of the tool a resumed run would call by `name`,
+    /// resolved as its execution activates tools.
+    fn replay_class(&self, name: &str) -> Option<ToolReplay> {
+        if self.active_tool_names.iter().any(|active| active == name) {
+            return replay_of(&self.tools, name);
+        }
+        self.mcp.get().and_then(|mcp| replay_of(&mcp.tools(), name))
     }
 }

@@ -16,7 +16,7 @@
 use std::cmp::Ordering;
 use std::path::{Path, PathBuf};
 
-use bake_agent::{AgentTool, AgentToolResult};
+use bake_agent::{AgentTool, AgentToolResult, ToolReplay};
 use bake_ai::AbortSignal;
 use serde_json::{Map, Value, json};
 
@@ -71,6 +71,7 @@ pub(crate) fn owned_ls_tool_definition(
         move |_id, args, signal, _update| boxed(execute(cwd.clone(), args, signal, owner.clone())),
     );
     tool.read_only = true;
+    tool.replay = Some(ToolReplay::Safe);
     ToolDefinition {
         tool,
         prompt_snippet: Some(LS_PROMPT_SNIPPET.into()),

@@ -926,3 +926,45 @@ async fn a_dropped_start_leaves_no_child() {
     assert!(host.list().is_empty());
     work.close().await;
 }
+
+// Scope 08: a subagent's tools carry the replay class recovery reads,
+// the child's `send_message` included, which a parent never composes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn every_subagent_tool_has_a_replay_class() {
+    use bake_agent::ToolReplay;
+    let h = harness("subagent-replay");
+    let work = WorkGate::default();
+    let host = SubagentHost::new(HostOptions {
+        parent_id: "parent".into(),
+        parent_file: None,
+        jobs: JobRegistry::new(work.clone(), crate::jobs::JobLimits::default()),
+        work: work.clone(),
+        selection: SessionSelection::default(),
+        registry: h.runtime.clone(),
+        settings: Settings::default(),
+        builder: Arc::new(|_| Box::pin(std::future::pending())),
+        recovered: Recovered::default(),
+    });
+    let classes = |tools: Vec<ToolDefinition>| -> Vec<(String, Option<ToolReplay>)> {
+        tools
+            .into_iter()
+            .map(|definition| (definition.tool.name, definition.tool.replay))
+            .collect()
+    };
+    let class = |name: &str, replay| (name.to_owned(), Some(replay));
+    assert_eq!(
+        classes(parent_tools(&host, true)),
+        [
+            class("subagent", ToolReplay::Never),
+            class("list_subagent_models", ToolReplay::Safe),
+            class("send_message", ToolReplay::Never),
+            class("interrupt_agent", ToolReplay::Never),
+            class("list_agents", ToolReplay::Safe),
+        ]
+    );
+    assert_eq!(
+        classes(child_tools(&host.link("child"))),
+        [class("send_message", ToolReplay::Never)]
+    );
+    work.close().await;
+}

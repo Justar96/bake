@@ -24,7 +24,7 @@ use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use bake_agent::{AgentTool, AgentToolResult};
+use bake_agent::{AgentTool, AgentToolResult, ToolReplay};
 use bake_ai::{
     AbortSignal, ConstrainedSampling, ImageContent, InputModality, Model, StrictPreference,
     TextContent, UserContentBlock,
@@ -152,6 +152,7 @@ pub(crate) fn owned_read_tool_definition(
     );
     tool.output_schema = Some(output_schema());
     tool.read_only = true;
+    tool.replay = Some(ToolReplay::Safe);
     tool.constrained_sampling = Some(ConstrainedSampling::JsonSchema {
         strict: StrictPreference::Prefer,
     });

@@ -22,7 +22,7 @@
 
 use std::time::Duration;
 
-use bake_agent::{AgentTool, AgentToolResult};
+use bake_agent::{AgentTool, AgentToolResult, ToolReplay};
 use bake_ai::{AbortSignal, TextContent, UserContentBlock};
 use serde_json::{Value, json};
 
@@ -70,7 +70,10 @@ fn definitions(jobs: &JobRegistry, subagents: bool) -> Vec<ToolDefinition> {
     ]
 }
 
-fn definition(tool: AgentTool) -> ToolDefinition {
+/// A job tool with its replay class: `job_list` only reads, while
+/// `job_output` advances the job's read cursor and `job_kill` stops the job.
+fn definition(mut tool: AgentTool, replay: ToolReplay) -> ToolDefinition {
+    tool.replay = Some(replay);
     ToolDefinition {
         tool,
         prompt_snippet: None,
@@ -175,7 +178,7 @@ fn job_output_tool(jobs: JobRegistry, subagents: bool) -> ToolDefinition {
             Box::pin(async move { job_output(&jobs, &args, signal, subagents).await })
         },
     );
-    definition(tool)
+    definition(tool, ToolReplay::Never)
 }
 
 async fn job_output(
@@ -258,7 +261,7 @@ fn job_list_tool(jobs: JobRegistry) -> ToolDefinition {
             })
         },
     );
-    definition(tool)
+    definition(tool, ToolReplay::Safe)
 }
 
 fn job_kill_tool(jobs: JobRegistry, subagents: bool) -> ToolDefinition {
@@ -280,7 +283,7 @@ fn job_kill_tool(jobs: JobRegistry, subagents: bool) -> ToolDefinition {
             Box::pin(async move { result })
         },
     );
-    definition(tool)
+    definition(tool, ToolReplay::Never)
 }
 
 fn job_kill(jobs: &JobRegistry, args: &Value, subagents: bool) -> Result<AgentToolResult, String> {

@@ -23,7 +23,7 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use bake_agent::{AgentTool, AgentToolResult};
+use bake_agent::{AgentTool, AgentToolResult, ToolReplay};
 use bake_ai::AbortSignal;
 use serde_json::{Map, Value, json};
 
@@ -96,6 +96,7 @@ pub(crate) fn owned_grep_tool_definition(
         move |_id, args, signal, _update| boxed(execute(cwd.clone(), owner.clone(), args, signal)),
     );
     tool.read_only = true;
+    tool.replay = Some(ToolReplay::Safe);
     ToolDefinition {
         tool,
         prompt_snippet: Some(GREP_PROMPT_SNIPPET.into()),

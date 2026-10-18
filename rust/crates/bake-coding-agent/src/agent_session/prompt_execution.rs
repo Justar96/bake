@@ -2,6 +2,7 @@
 //! Callers only wait for the immutable execution they admitted.
 
 use super::*;
+use bake_agent::ToolReplay;
 
 #[derive(Default)]
 pub(super) struct Executions {
@@ -99,6 +100,7 @@ pub(super) struct PromptExecution {
     runtime: tokio::runtime::Handle,
     jobs: JobRegistry,
     pending_notices: Arc<Mutex<Vec<CustomMessage>>>,
+    tool_hooks: run_journal::ToolHooks,
 }
 
 impl PromptExecution {
@@ -122,6 +124,7 @@ impl PromptExecution {
             runtime: session.runtime.clone(),
             jobs: session.jobs.clone(),
             pending_notices: Arc::clone(&session.pending_notices),
+            tool_hooks: session.tool_hooks.clone(),
         }
     }
 
@@ -161,7 +164,10 @@ impl PromptExecution {
                         self.prompt_inner(&text, images, control).await
                     }
                     Input::Notices => self.deliver_notices(&execution).await,
-                    Input::Continue => self.continue_inner(control).await,
+                    Input::Continue => {
+                        self.continue_inner(control, execution.journal.as_deref())
+                            .await
+                    }
                 }?;
                 if outcome == RunOutcome::FinishedTurn
                     && let Some(journal) = &execution.journal
@@ -545,7 +551,11 @@ impl PromptExecution {
         }
     }
 
-    async fn continue_inner(&self, control: &RunControl) -> Result<RunOutcome, String> {
+    async fn continue_inner(
+        &self,
+        control: &RunControl,
+        journal: Option<&run_journal::Journal>,
+    ) -> Result<RunOutcome, String> {
         if let Some(outcome) = control.stopped() {
             return Ok(outcome);
         }
@@ -576,6 +586,16 @@ impl PromptExecution {
             .into_iter()
             .map(Into::into)
             .collect();
+        // A resumed run's rerun results are committed before its notice.
+        if let Some(journal) = journal
+            && !journal.reruns().is_empty()
+        {
+            self.rerun_safe_calls(journal, control).await?;
+            if let Some(outcome) = control.stopped() {
+                return Ok(outcome);
+            }
+            journal.resume_notice().await?;
+        }
         if let Some(installed) = self.hooks.get() {
             messages.extend(installed.take_pending());
         }
@@ -591,6 +611,117 @@ impl PromptExecution {
         );
         self.run_agent_input((!messages.is_empty()).then_some(messages), control)
             .await
+    }
+
+    /// Runs a resumed run's unresolved `Safe` calls again, one at a time,
+    /// as the agent loop runs a call: through the current plugin vetoes and
+    /// journal dispatch, permission wrappers, and result hooks. Each result
+    /// is committed and acknowledged as the loop's would be. A tool that is
+    /// no longer active and `Safe` fails the run instead.
+    async fn rerun_safe_calls(
+        &self,
+        journal: &run_journal::Journal,
+        control: &RunControl,
+    ) -> Result<(), String> {
+        let tools = self.agent.tools();
+        let mut context = bake_agent::AgentContext {
+            messages: self.agent.messages(),
+            tools: tools.clone(),
+        };
+        let assistant = context
+            .messages
+            .iter()
+            .rev()
+            .find_map(LiveMessage::as_assistant)
+            .cloned()
+            .ok_or_else(|| format!("Run {} has no assistant to resume", journal.run_id))?;
+        for rerun in journal.reruns() {
+            if let Some(reason) = self.closed_reason() {
+                return Err(reason);
+            }
+            if self.core.aborted() {
+                // The caller stops before the notice and the next request.
+                control.cancel();
+                return Ok(());
+            }
+            let call = &rerun.call;
+            let issued = assistant.content.iter().any(
+                |block| matches!(block, bake_ai::AssistantContentBlock::ToolCall(issued) if issued == call),
+            );
+            if !issued || run_journal::replay_of(&tools, &call.name) != Some(ToolReplay::Safe) {
+                return Err(format!(
+                    "Run {} needs reconciliation: {} is no longer safe to run again",
+                    journal.run_id, call.name
+                ));
+            }
+            self.core
+                .emit(&SessionEvent::Agent(&AgentEvent::ToolExecutionStart {
+                    tool_call_id: call.id.clone(),
+                    tool_name: call.name.clone(),
+                    args: serde_json::Value::Object(call.arguments.clone()),
+                }));
+            let abort = bake_ai::AbortController::new();
+            let outcome = {
+                let running = bake_agent::run_tool_call(
+                    call,
+                    bake_agent::RunToolCallOptions {
+                        tools: &tools,
+                        assistant_message: &assistant,
+                        context: &context,
+                        before_tool_call: self.tool_hooks.before.clone(),
+                        after_tool_call: self.tool_hooks.after.clone(),
+                        signal: Some(abort.signal()),
+                        on_update: None,
+                    },
+                );
+                tokio::pin!(running);
+                tokio::select! {
+                    outcome = &mut running => outcome,
+                    _ = control.wait_stopped() => {
+                        abort.abort();
+                        running.await
+                    }
+                }
+            };
+            self.core
+                .emit(&SessionEvent::Agent(&AgentEvent::ToolExecutionEnd {
+                    tool_call_id: call.id.clone(),
+                    tool_name: call.name.clone(),
+                    result: outcome.result.clone(),
+                    is_error: outcome.is_error,
+                    duration_ms: outcome.duration_ms,
+                }));
+            // Pi's `createToolResultMessage`.
+            let message: LiveMessage = bake_ai::ToolResultMessage {
+                tool_call_id: call.id.clone(),
+                tool_name: call.name.clone(),
+                content: outcome.result.content,
+                details: outcome.result.details,
+                usage: outcome.result.usage,
+                nested_calls: None,
+                is_error: outcome.is_error,
+                timestamp: bake_ai::now_ms(),
+                duration_ms: outcome.duration_ms,
+            }
+            .into();
+            self.core
+                .emit(&SessionEvent::Agent(&AgentEvent::MessageStart {
+                    message: message.clone(),
+                }));
+            let Ok(entry_id) = persist_message(&self.core, &self.persist_error, &message).await
+            else {
+                return Err(lock_gap(&self.core.gap)
+                    .clone()
+                    .unwrap_or_else(|| "The session is shut down.".into()));
+            };
+            journal.message(&message, entry_id).await?;
+            self.core
+                .emit(&SessionEvent::Agent(&AgentEvent::MessageEnd {
+                    message: message.clone(),
+                }));
+            context.messages.push(message);
+        }
+        Ok(())
     }
 
     /// The system message patching the sections the transcript replays,

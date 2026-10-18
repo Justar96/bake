@@ -21,7 +21,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use bake_agent::{AgentTool, AgentToolResult};
+use bake_agent::{AgentTool, AgentToolResult, ToolReplay};
 use bake_ai::{ImageContent, TextContent, UserContentBlock};
 use bake_mcp::{CallToolResult, McpClient, Tool};
 use serde_json::{Map, Value, json};
@@ -198,7 +198,7 @@ fn agent_tool(caller: Arc<Caller>, planned: PlannedTool) -> AgentTool {
         parameters,
     } = planned;
     let label = format!("{}/{tool}", caller.server);
-    AgentTool::new(
+    let mut agent_tool = AgentTool::new(
         name,
         label,
         description,
@@ -230,7 +230,11 @@ fn agent_tool(caller: Arc<Caller>, planned: PlannedTool) -> AgentTool {
                 Ok(convert_result(&caller.server, &tool, result, &caller.work).await)
             })
         },
-    )
+    );
+    // A server's `readOnlyHint` is its own claim, not a promise Bake can
+    // check, so no MCP call is rerun.
+    agent_tool.replay = Some(ToolReplay::Never);
+    agent_tool
 }
 
 /// Pi's `convertMcpResult`.

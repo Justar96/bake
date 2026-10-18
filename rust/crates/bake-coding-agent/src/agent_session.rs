@@ -17,6 +17,15 @@
 //! no later message is written, so the file never skips a message; Pi's
 //! throwing listener likewise ends the run.
 //!
+//! Every write is synced before the run goes on, so a killed process
+//! reopens to three checkpoints. A model request follows the sync of
+//! everything it sends: a new session's file is created at its first user
+//! message, as Pi v1.3.0's `SessionManager` does (`_hasConversation`, Pi
+//! #10000), and a retried attempt's omission and a compaction are written
+//! before the request after them. A tool's first effect follows the sync of
+//! the assistant message that called it and, in a recoverable run, of its
+//! dispatch record. The next step's request follows the tool results.
+//!
 //! The session's [`WorkGate`] owns the work that runs outside the task
 //! awaiting it: the full prompt driver, session writes and other blocking work, model requests,
 //! model, thinking-level, and settings changes, idle compaction, and
@@ -780,6 +789,8 @@ pub struct AgentSession {
     plugins: Option<Arc<VetoDispatcher>>,
     /// The external hooks [`Self::set_hooks`] installed, once it has.
     hooks: hooks::SharedHooks,
+    /// The agent's tool-call hooks, for a resumed run's reruns.
+    tool_hooks: run_journal::ToolHooks,
     /// The reminder timer's handle, when `schedules` is on.
     #[cfg(test)]
     schedules: Option<Arc<schedules::Schedules>>,
@@ -1662,6 +1673,10 @@ impl AgentSession {
                 normalize,
             )
         });
+        let tool_hooks = run_journal::ToolHooks {
+            before: agent_options.before_tool_call.clone(),
+            after: agent_options.after_tool_call.clone(),
+        };
         let agent = Agent::new(agent_options).map_err(|error| error.to_string())?;
         let agent = Arc::new(agent);
         let _ = core.agent.set(Arc::downgrade(&agent));
@@ -1733,6 +1748,7 @@ impl AgentSession {
             mcp: Arc::default(),
             plugins,
             hooks: shared_hooks,
+            tool_hooks,
             #[cfg(test)]
             schedules,
         };

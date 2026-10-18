@@ -348,6 +348,7 @@ pub fn create_bash_tool(cwd: impl Into<PathBuf>, options: BashToolOptions) -> Ag
         },
     );
     tool.output_schema = Some(bash_tool_output_schema());
+    tool.replay = Some(bake_agent::ToolReplay::Never);
     tool.constrained_sampling = Some(ConstrainedSampling::JsonSchema {
         strict: StrictPreference::Prefer,
     });

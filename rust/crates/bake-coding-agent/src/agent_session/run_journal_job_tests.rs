@@ -518,7 +518,7 @@ fn job_wait_crash_child() {
                     std::fs::write(output.join("run-id"), run_id).unwrap();
                 }
             });
-            session.core.hooks().after_run_job_wait = Some(Box::new(|| std::process::exit(78)));
+            session.core.hooks().after_run_job_wait = Some(Box::new(move || halt(&directory)));
             session
                 .prompt_recoverable(
                     "work",
@@ -537,25 +537,12 @@ fn job_wait_crash_child() {
 #[tokio::test]
 async fn crash_after_job_wait_start_refuses_a_refunded_deadline_and_never_replays_the_job() {
     let dir = TempDir::new("journal-wait-crash");
-    let mut child = tokio::process::Command::new(std::env::current_exe().unwrap())
-        .args([
-            "--exact",
-            "agent_session::recovery_tests::run_journal_tests::jobs::job_wait_crash_child",
-            "--nocapture",
-        ])
-        .env(JOB_CHILD_DIR, dir.path())
-        .kill_on_drop(true)
-        .spawn()
-        .unwrap();
-    let status = match tokio::time::timeout(Duration::from_secs(20), child.wait()).await {
-        Ok(status) => status.unwrap(),
-        Err(_) => {
-            let _ = child.kill().await;
-            let _ = child.wait().await;
-            panic!("job-wait child did not exit at its boundary");
-        }
-    };
-    assert_eq!(status.code(), Some(78));
+    kill_fixture(
+        "agent_session::recovery_tests::run_journal_tests::jobs::job_wait_crash_child",
+        &[(JOB_CHILD_DIR, dir.path().as_os_str())],
+        dir.path(),
+    )
+    .await;
     let path = std::fs::read_to_string(dir.join("session-path")).unwrap();
     let run_id = std::fs::read_to_string(dir.join("run-id")).unwrap();
     let h = harness(200_000);

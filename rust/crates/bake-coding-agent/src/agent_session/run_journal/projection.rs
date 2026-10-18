@@ -14,9 +14,32 @@ pub(super) struct Selected {
     pub job_wait: Duration,
     pub terminal: bool,
     pub final_message: Option<bake_ai::AssistantMessage>,
+    /// When the run needs reconciliation only for its unresolved calls,
+    /// all on its last assistant, and could otherwise continue: those
+    /// calls, in the assistant's order.
+    reruns: Vec<Rerun>,
 }
 
 impl Selected {
+    /// Pi Durable's replay rule: the run continues after rerunning its
+    /// unresolved calls only when every one names a tool whose class
+    /// (`replay_of`) is `Safe` now and, if it was dispatched, was recorded
+    /// `Safe` then. Nothing reruns unless all of them may.
+    pub fn resolve(&mut self, replay_of: impl Fn(&str) -> Option<ToolReplay>) -> Vec<Rerun> {
+        let eligible = !self.reruns.is_empty()
+            && self.reruns.iter().all(|rerun| {
+                replay_of(&rerun.call.name) == Some(ToolReplay::Safe)
+                    && rerun
+                        .dispatched
+                        .is_none_or(|recorded| recorded == Some(ToolReplay::Safe))
+            });
+        if !eligible {
+            return Vec::new();
+        }
+        self.recovery.disposition = RunRecoveryDisposition::Resumable;
+        std::mem::take(&mut self.reruns)
+    }
+
     pub fn refusal(&self) -> String {
         match &self.recovery.disposition {
             RunRecoveryDisposition::NeedsReconciliation { reason } => format!(
@@ -43,6 +66,15 @@ fn read(entry: &SessionEntry) -> Result<Option<Record>, String> {
         return Err(format!("Unsupported run journal entry {}", entry.id()));
     }
     Ok(Some(record))
+}
+
+/// A dispatch's latest record.
+struct Dispatched {
+    replay: Option<ToolReplay>,
+    /// Its branch position.
+    at: usize,
+    /// The resumptions recorded before it.
+    resumes: u64,
 }
 
 pub(super) fn project(session: &SessionManager, run_id: &str) -> Result<Selected, String> {
@@ -90,7 +122,8 @@ pub(super) fn project(session: &SessionManager, run_id: &str) -> Result<Selected
     let mut calls = 0_u64;
     let mut last_foreground = start;
     let mut acknowledged = HashSet::new();
-    let mut dispatches = HashSet::new();
+    let mut resumes = 0_u64;
+    let mut dispatches: HashMap<(String, String), Dispatched> = HashMap::new();
     let mut terminal = None;
     let by_id: HashMap<_, _> = entries
         .iter()
@@ -132,6 +165,7 @@ pub(super) fn project(session: &SessionManager, run_id: &str) -> Result<Selected
                 assistant_entry_id,
                 tool_call_id,
                 tool_name,
+                replay,
             } => {
                 let Some((at, entry)) = by_id.get(assistant_entry_id.as_str()) else {
                     return Err("Run dispatch refers outside the selected branch".into());
@@ -142,19 +176,35 @@ pub(super) fn project(session: &SessionManager, run_id: &str) -> Result<Selected
                     .and_then(LiveMessage::as_assistant)
                     .ok_or("Run dispatch does not reference an assistant")?;
                 let matching = assistant.content.iter().filter(|block| matches!(block, AssistantContentBlock::ToolCall(call) if &call.id == tool_call_id && &call.name == tool_name)).count();
+                let key = (assistant_entry_id.clone(), tool_call_id.clone());
+                // Only a later resumption reruns a call, and only a `Safe` one.
+                let repeat = dispatches.get(&key).is_some_and(|earlier| {
+                    earlier.replay != Some(ToolReplay::Safe)
+                        || *replay != Some(ToolReplay::Safe)
+                        || earlier.resumes == resumes
+                });
                 if *at <= start
                     || *at >= *index
                     || !acknowledged.contains(assistant_entry_id)
                     || matching != 1
-                    || !dispatches.insert((assistant_entry_id.clone(), tool_call_id.clone()))
+                    || repeat
                 {
                     return Err("Run dispatch has an invalid or duplicate tool identity".into());
                 }
+                dispatches.insert(
+                    key,
+                    Dispatched {
+                        replay: *replay,
+                        at: *index,
+                        resumes,
+                    },
+                );
             }
             Event::Resumed { model_calls } => {
                 if *model_calls != calls || timed || job_wait_started {
                     return Err("Run resume changed its original allowance".into());
                 }
+                resumes += 1;
             }
             Event::JobWaitStarted => {
                 if job_wait.is_zero() || job_wait_started || last_foreground == start {
@@ -176,6 +226,8 @@ pub(super) fn project(session: &SessionManager, run_id: &str) -> Result<Selected
     let mut saw_user = false;
     let mut unowned = false;
     let mut superseded = false;
+    // The last assistant while only its own results follow it.
+    let mut tail: Option<(String, bake_ai::AssistantMessage)> = None;
     let end = records.last().map_or(entries.len(), |(index, event)| {
         if matches!(event, Event::Terminal { .. }) {
             *index
@@ -188,6 +240,7 @@ pub(super) fn project(session: &SessionManager, run_id: &str) -> Result<Selected
             superseded = true;
         }
         if entry.entry_type() == "custom_message" {
+            tail = None;
             if job_notice(entry) {
                 saw_user = true;
                 final_assistant = None;
@@ -211,6 +264,9 @@ pub(super) fn project(session: &SessionManager, run_id: &str) -> Result<Selected
         let Some(message) = entry.message().map(|message| message.to_agent()) else {
             continue;
         };
+        if message.as_tool_result().is_none() {
+            tail = None;
+        }
         if message.as_system().is_some() {
             continue;
         }
@@ -239,6 +295,9 @@ pub(super) fn project(session: &SessionManager, run_id: &str) -> Result<Selected
                     }
                 }
             }
+            if has_calls && assistant.stop_reason == StopReason::ToolUse {
+                tail = Some((entry.id().to_owned(), assistant.clone()));
+            }
             if assistant.stop_reason == StopReason::Stop
                 && !has_calls
                 && index > last_foreground
@@ -260,17 +319,48 @@ pub(super) fn project(session: &SessionManager, run_id: &str) -> Result<Selected
                     "Tool result has no unique matching assistant call in this interval".into(),
                 );
             }
+            if dispatches
+                .get(&key)
+                .is_some_and(|dispatched| dispatched.at > index)
+            {
+                return Err("Run dispatch follows its tool result".into());
+            }
             // A result synced immediately before its journal acknowledgement
             // is sufficient evidence for the recorded dispatch.
-            unowned |= !ack && !dispatches.contains(&key);
+            unowned |= !ack && !dispatches.contains_key(&key);
         } else {
             unowned |= !ack;
         }
     }
-    let uncertain = dispatches.iter().find(|key| !results.contains(*key));
-    let incomplete = pending.keys().any(|key| !results.contains(key));
+    let uncertain = dispatches.keys().any(|key| !results.contains(key));
+    let unresolved: HashSet<_> = pending
+        .keys()
+        .filter(|key| !results.contains(*key))
+        .collect();
+    let incomplete = !unresolved.is_empty();
+    let candidates: Vec<Rerun> = match &tail {
+        Some((id, assistant)) if unresolved.iter().all(|(owner, _)| owner == id) => assistant
+            .content
+            .iter()
+            .filter_map(|block| match block {
+                AssistantContentBlock::ToolCall(call)
+                    if unresolved.contains(&(id.clone(), call.id.clone())) =>
+                {
+                    Some(Rerun {
+                        assistant_entry_id: id.clone(),
+                        call: call.clone(),
+                        dispatched: dispatches
+                            .get(&(id.clone(), call.id.clone()))
+                            .map(|dispatched| dispatched.replay),
+                    })
+                }
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
     if matches!(terminal, Some(RunOutcome::FinishedTurn))
-        && (uncertain.is_some()
+        && (uncertain
             || incomplete
             || unowned
             || superseded
@@ -300,27 +390,27 @@ pub(super) fn project(session: &SessionManager, run_id: &str) -> Result<Selected
         return Err("Run model-call outcome contradicts its original allowance".into());
     }
     let unobserved_jobs = !job_wait.is_zero() && !job_notices::unobserved(session).is_empty();
-    let disposition = if off_branch_facts {
-        RunRecoveryDisposition::Refused { reason: "the run has journal facts outside the selected branch; switching branches cannot refund calls or hide uncertain effects".into() }
+    let blocked = if off_branch_facts {
+        Some(RunRecoveryDisposition::Refused { reason: "the run has journal facts outside the selected branch; switching branches cannot refund calls or hide uncertain effects".into() })
     } else if let Some(outcome) = &terminal {
-        RunRecoveryDisposition::Completed {
+        Some(RunRecoveryDisposition::Completed {
             outcome: outcome.clone(),
-        }
+        })
     } else if foreign_session {
-        RunRecoveryDisposition::Refused {
+        Some(RunRecoveryDisposition::Refused {
             reason: "the run belongs to another session; copied or forked runs cannot continue"
                 .into(),
-        }
+        })
     } else if superseded || unowned {
-        RunRecoveryDisposition::Refused {
+        Some(RunRecoveryDisposition::Refused {
             reason: "later or uncheckpointed conversation entries cannot be attributed to this run"
                 .into(),
-        }
-    } else if uncertain.is_some() {
-        RunRecoveryDisposition::NeedsReconciliation { reason: "a recorded tool dispatch has no durable result; its external effect may already have occurred".into() }
-    } else if incomplete {
-        RunRecoveryDisposition::NeedsReconciliation { reason: "the durable assistant has an incomplete tool exchange; recovery will not replay its calls".into() }
-    } else if cancelled_assistant {
+        })
+    } else {
+        None
+    };
+    // What the run allows once its tool exchange is complete.
+    let rest = if cancelled_assistant {
         RunRecoveryDisposition::Refused {
             reason: "the durable assistant was cancelled; recovery will not restart cancelled work"
                 .into(),
@@ -346,6 +436,28 @@ pub(super) fn project(session: &SessionManager, run_id: &str) -> Result<Selected
     } else {
         RunRecoveryDisposition::Resumable
     };
+    let (disposition, reruns) = if let Some(blocked) = blocked {
+        (blocked, Vec::new())
+    } else if uncertain || incomplete {
+        let reason = if uncertain {
+            "a recorded tool dispatch has no durable result; its external effect may already have occurred"
+        } else {
+            "the durable assistant has an incomplete tool exchange; recovery will not replay its calls"
+        };
+        let reruns = if rest == RunRecoveryDisposition::Resumable {
+            candidates
+        } else {
+            Vec::new()
+        };
+        (
+            RunRecoveryDisposition::NeedsReconciliation {
+                reason: reason.into(),
+            },
+            reruns,
+        )
+    } else {
+        (rest, Vec::new())
+    };
     Ok(Selected {
         recovery: RunRecovery {
             run_id: run_id.into(),
@@ -356,6 +468,7 @@ pub(super) fn project(session: &SessionManager, run_id: &str) -> Result<Selected
         job_wait,
         terminal: terminal.is_some(),
         final_message,
+        reruns,
     })
 }
 

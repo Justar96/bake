@@ -11,7 +11,7 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use bake_agent::{AgentTool, AgentToolResult};
+use bake_agent::{AgentTool, AgentToolResult, ToolReplay};
 use bake_ai::{AbortSignal, ConstrainedSampling, StrictPreference};
 use serde_json::{Value, json};
 
@@ -69,6 +69,7 @@ pub(crate) fn owned_write_tool_definition(
             ))
         },
     );
+    tool.replay = Some(ToolReplay::Never);
     tool.constrained_sampling = Some(ConstrainedSampling::JsonSchema {
         strict: StrictPreference::Prefer,
     });
