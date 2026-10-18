@@ -896,6 +896,7 @@ fn read_input(
             .all(|msg| out.0.send(Source::Msg(msg)).is_ok())
     };
     let mut armed = 0;
+    let mut decoder = input::Decoder::new();
     while !stop.load(Ordering::SeqCst) {
         let drawn = shown.load(Ordering::SeqCst);
         if drawn != armed {
@@ -904,7 +905,7 @@ fn read_input(
                 if stop.load(Ordering::SeqCst) {
                     return;
                 }
-                let (sweep, dry) = match sweep(events, clock) {
+                let (sweep, dry) = match sweep(events, &mut decoder, clock) {
                     Ok(swept) => swept,
                     Err(err) => return fail(err),
                 };
@@ -929,7 +930,7 @@ fn read_input(
         if shown.load(Ordering::SeqCst) != armed {
             continue;
         }
-        match sweep(events, clock) {
+        match sweep(events, &mut decoder, clock) {
             Ok((swept, _)) => {
                 if !send(stamp(swept)) {
                     return;
@@ -943,11 +944,15 @@ fn read_input(
 /// Reads every waiting event, up to [`SWEEP`] events read, whether or not
 /// they decode to anything; `true` with them when the input then ran dry,
 /// `false` when the sweep stopped at its size.
-fn sweep(events: &mut impl Events, clock: Instant) -> io::Result<(Vec<Msg>, bool)> {
+fn sweep(
+    events: &mut impl Events,
+    decoder: &mut input::Decoder,
+    clock: Instant,
+) -> io::Result<(Vec<Msg>, bool)> {
     let mut swept = Vec::new();
     let mut read = 0;
     while events.poll(SWEEP_POLL)? {
-        swept.extend(input::decode(events.read()?, clock.elapsed()));
+        swept.extend(decoder.decode(events.read()?, clock.elapsed()));
         read += 1;
         if read >= SWEEP {
             return Ok((swept, false));
@@ -2027,7 +2032,7 @@ mod tests {
             stop_after: usize::MAX,
             stop,
         };
-        let (swept, dry) = sweep(&mut events, Instant::now()).unwrap();
+        let (swept, dry) = sweep(&mut events, &mut input::Decoder::new(), Instant::now()).unwrap();
         assert!(swept.is_empty());
         assert!(!dry);
         assert_eq!(events.reads, SWEEP);
