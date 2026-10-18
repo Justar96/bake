@@ -1,32 +1,36 @@
 /**
- * Paired live evaluation of the agent loop: runs the built headless CLI of two
- * or more checkouts on the same scenarios, interleaved, and records what each
- * sample cost. See evals/README.md for the procedure and the regression rule.
+ * Paired live evaluation of the agent loop: runs two or more agents on the
+ * same scenarios, interleaved, and records what each sample cost. See
+ * evals/README.md for the procedure and the regression rule.
  *
- * EVAL_ARMS    name=checkout pairs, comma-separated; each checkout must be built.
- *              name=pi, or name=pi:<bin>, runs the installed pi coding agent
- *              instead, with its own prompt, tools, and DeepSeek route.
- *              name=native, name=native:<checkout>, or name=native:<bin> runs
- *              the native bake-rs print mode, built from a checkout's rust/
- *              workspace (this evaluator's by default) or given as a binary
+ * EVAL_ARMS    name=checkout pairs, comma-separated. A checkout runs the native
+ *              bake-rs print mode, built from its rust/ workspace; name=<bin>
+ *              runs a prebuilt bake-rs, and name=native, or native:<path>,
+ *              names the same arm (this evaluator's checkout by default).
+ *              name=ts:<checkout> runs a built checkout's frozen TypeScript
+ *              headless CLI. name=pi, or name=pi:<bin>, runs the installed pi
+ *              coding agent, with its own prompt, tools, and DeepSeek route.
  * EVAL_MODELS  model ids or set names (default: standard and extended sets); a
  *              cliproxyapi id from ~/.bake/settings.yaml, or a DeepSeek id
  *              (deepseek/<id>, or a bare deepseek-* id the gateway lacks);
  *              a trailing @<effort> replaces the default effort
  * EVAL_CASES   scenario names or set names, `standard` or `extended` (default: the standard suite)
  * EVAL_ROSTER  `headless` (default) runs the headless bundle's tool configs; `tui`
- *              applies the terminal standard preset's to every Bake arm
+ *              applies the terminal standard preset's to every TypeScript arm
  * EVAL_TRIALS  trials per scenario (default 3)
  * EVAL_OUTPUT  raw output directory (default .preflight/evals/agent-loop/<time>)
- * EVAL_EXTRA_<ARM>  optional JSON array of extra overlay rows for one arm
+ * EVAL_EXTRA_<ARM>  optional JSON array of extra overlay rows for one TypeScript arm
  * EVAL_NATIVE_SESSION_<ARM> memory (default), persistent, or recoverable
  * EVAL_CONFIG_HOME optional directory holding settings.yaml and .credentials.yaml; defaults to ~/.bake
  * EVAL_GATEWAY optional JSON file of { baseUrl, apiKey } that replaces the
  *              cliproxyapi upstream and key for every arm, such as pi's
  *              ~/.pi/agent/cliproxyapi.json; DeepSeek routes are unaffected
- * EVAL_SETTINGS_<ARM>  optional JSON object for one arm's settings.yaml (Bake)
+ * EVAL_SETTINGS_<ARM>  optional JSON object for one arm's settings.yaml (TypeScript)
  *              or settings.json (native, excluding evaluator-owned controls);
  *              the strings $PROVIDER and $MODEL become the route under test
+ * EVAL_NATIVE_PERMISSION  the preset every native arm runs under:
+ *              `danger-full-access` (default, as the TypeScript arms) or `workspace-write`,
+ *              the default preset, whose bash needs a usable sandbox backend
  */
 import { spawn } from 'node:child_process'
 import { mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync, copyFileSync, rmSync, existsSync, realpathSync } from 'node:fs'
@@ -36,7 +40,7 @@ import { createHash } from 'node:crypto'
 import YAML from 'yaml'
 import { reconcile } from './accounting.ts'
 import { compositionCheck, ROSTERS, systemPromptOf, type Roster } from './composition.ts'
-import { bakeCommand, bakeOverlay, mergeSettings, nativeCommand, nativeSettings, nativeStaleWriter, parseArms, strayContextFiles, type Arm } from './arms.ts'
+import { bakeCommand, bakeOverlay, mergeSettings, NATIVE_PERMISSIONS, nativeCommand, nativeSettings, nativeStaleWriter, parseArms, strayContextFiles, type Arm, type NativePermission } from './arms.ts'
 import {
   backgroundCompactions, backgroundStarts, compactions, contextMasking, editCheckSplits, excessRequests, jsonModeCompactions, nativeReadBatches, nativeSummaryUsage, normalizeBake, normalizePi, orientationCalls, ranCheck,
   requestsOverFloor, routingDecisions, runawayAbort, shellEdits, skillLoads, verifiedBeforeFinal,
@@ -54,10 +58,14 @@ const roster = (process.env.EVAL_ROSTER ?? 'headless') as Roster
 if (!ROSTERS.includes(roster)) throw new Error(`EVAL_ROSTER must be one of ${ROSTERS.join(', ')}`)
 const ARMS = parseArms(process.env.EVAL_ARMS ?? '', roster, process.env)
 const armNames = Object.keys(ARMS)
-if (armNames.length < 2) throw new Error('EVAL_ARMS needs at least two name=checkout pairs, for example base=../bake-v0.2.0,candidate=.')
-/** Named model sets; EVAL_MODELS may list set names, model ids, or both. */
+if (armNames.length < 2) throw new Error('EVAL_ARMS needs at least two name=checkout pairs, for example base=.agents/worktrees/eval-base,candidate=.')
+/**
+ * Named model sets; EVAL_MODELS may list set names, model ids, or both. The
+ * gateway names Gemini models by tier, and the effort after `@` is the one
+ * each is measured at.
+ */
 const MODEL_SETS: Record<string, string[]> = {
-  standard: ['gemini-3.8-flash-medium', 'gpt-6.1-sol', 'claude-sonnet-5-5'],
+  standard: ['gemini-3.8-flash-high@high', 'gemini-4-argon-high@medium', 'gpt-6.1-sol', 'claude-sonnet-5-5'],
   extended: ['claude-opus-5-5', 'deepseek/deepseek-flash', 'deepseek/deepseek-v4-pro'],
 }
 const models = [...new Set((process.env.EVAL_MODELS ?? 'standard,extended').split(',').filter(Boolean)
@@ -69,6 +77,8 @@ if (cases.some(scenario => ['background_compaction', 'context_masking', 'indepen
   throw new Error('background_compaction, context_masking, and independent_reads require native arms')
 }
 const trials = Number(process.env.EVAL_TRIALS ?? 3)
+const nativePermission = (process.env.EVAL_NATIVE_PERMISSION ?? 'danger-full-access') as NativePermission
+if (!NATIVE_PERMISSIONS.includes(nativePermission)) throw new Error(`EVAL_NATIVE_PERMISSION must be one of ${NATIVE_PERMISSIONS.join(', ')}`)
 const configHome = resolve(process.env.EVAL_CONFIG_HOME ?? join(process.env.HOME!, '.bake'))
 const settings = YAML.parse(readFileSync(join(configHome, 'settings.yaml'), 'utf8'))
 const original = settings['llm-pi-ai'].providers.cliproxyapi
@@ -102,13 +112,15 @@ interface Route {
   pi(arm: Arm): PiRoute
   /** The same model for a native arm. */
   native: NativeRoute
+  /** The efforts the route's model entry lists, when it lists any. */
+  efforts?: string[]
 }
 interface PiRoute { api: string; upstreamBase: string; keyName: string; model: Record<string, unknown> }
 /**
  * A native arm's route: the provider `bake-rs` selects, its wire and upstream,
  * and the private Bake home files that point it at the proxy. A `cliproxyapi`
  * model goes through the 0.3 `settings.yaml` and `.credentials.yaml` that
- * `bake-rs` imports read-only (D25), as a Bake arm's route does; any other
+ * `bake-rs` imports read-only (D25), as a TypeScript arm's route does; any other
  * model goes through Pi's `models.json` with its key in `keyName`.
  */
 interface NativeRoute {
@@ -142,19 +154,36 @@ function piDeepseek(arm: Arm, id: string): PiRoute {
   return { api: entry.api, upstreamBase: String(entry.baseUrl).replace(/\/$/, ''), keyName: 'DEEPSEEK_API_KEY', model: piModel(id, entry) }
 }
 
-/** Resolve an EVAL_MODELS entry to its route; a gateway listing wins for a bare id. */
+/**
+ * Resolve an EVAL_MODELS entry to its route; a gateway listing wins for a bare
+ * id. An `@<effort>` the model entry does not list fails before any sample.
+ */
 function resolveRoute(spec: string): Route {
   const [entry, effortOverride] = spec.split('@') as [string, string | undefined]
   const route = routeOf(entry)
-  return effortOverride === undefined ? route : withEffort(route, effortOverride)
+  if (effortOverride === undefined) return route
+  if (route.efforts !== undefined && !route.efforts.includes(effortOverride)) {
+    throw new Error(`EVAL_MODELS entry "${spec}": ${route.model} lists efforts ${route.efforts.join(', ')}, not ${effortOverride}`)
+  }
+  return withEffort(route, effortOverride)
 }
-/** Replace a route's effort in both arms' configuration. */
+/**
+ * Replace a route's effort in every arm's configuration: a TypeScript arm's
+ * settings, a native arm's imported settings and `--thinking`, and pi's
+ * `--thinking`.
+ */
 function withEffort(route: Route, effort: string): Route {
+  const defaultModel = (settings: Record<string, any>) =>
+    ({ ...settings, 'agent-default-model': { ...settings['agent-default-model'] as object, reasoningEffort: effort } })
   return {
     ...route, effort,
-    settings: (proxyBase, llmDeepseek) => {
-      const settings = route.settings(proxyBase, llmDeepseek)
-      return { ...settings, 'agent-default-model': { ...settings['agent-default-model'] as object, reasoningEffort: effort } }
+    settings: (proxyBase, llmDeepseek) => defaultModel(route.settings(proxyBase, llmDeepseek)),
+    native: {
+      ...route.native,
+      home: proxyBase => {
+        const home = route.native.home(proxyBase)
+        return home.settings === undefined ? home : { ...home, settings: defaultModel(home.settings) }
+      },
     },
   }
 }
@@ -171,6 +200,7 @@ function routeOf(entry: string): Route {
     if (shipped === undefined) throw new Error(`EVAL_MODELS entry "${entry}": deepseek-official ships no model ${rest}`)
     return {
       model: rest, provider: 'deepseek-official', api: 'anthropic-messages', upstreamBase: DEEPSEEK_ANTHROPIC_BASE_URL, effort: 'high',
+      efforts: ['low', 'high', 'max'],
       settings: (proxyBase, llmDeepseek) => ({
         ...llmDeepseek
           ? { 'llm-deepseek': { baseURL: proxyBase, maxTokens: 8192, retryPolicy: { mode: 'normal', maxRetries: 0 } } }
@@ -209,6 +239,7 @@ function routeOf(entry: string): Route {
   }
   return {
     model: rest, provider: 'cliproxyapi', api, upstreamBase: gatewayBase(api, gateway.baseURL ?? original.baseURL), effort: 'medium',
+    ...gateway.reasoningEfforts === undefined ? {} : { efforts: Object.keys(gateway.reasoningEfforts) },
     settings,
     native: { provider: 'cliproxyapi', api, upstreamBase: gatewayBase(api, gateway.baseURL ?? original.baseURL), home: proxyBase => ({ settings: settings(proxyBase) }) },
     pi: () => ({ api, upstreamBase: gatewayBase(api, gateway.baseURL ?? original.baseURL), keyName: original.apiKeyEnv ?? 'CLIPROXYAPI_API_KEY', model: piModel(rest, gateway) }),
@@ -219,7 +250,7 @@ const routes = models.map(resolveRoute)
 const piUnsupported = (scenario: string) => scenario.startsWith('delegation')
 /**
  * A credential a pi arm passes to pi: the environment first, then the reference
- * of that name in ~/.bake/.credentials.yaml, which a Bake arm reads itself.
+ * of that name in ~/.bake/.credentials.yaml, which a TypeScript arm reads itself.
  */
 const credentialRefs = existsSync(credentialFile) ? parseCredentialsDocument(readFileSync(credentialFile, 'utf8'), credentialFile).refs : new Map<string, string>()
 function credential(name: string): string {
@@ -413,7 +444,7 @@ async function run(route: Route, scenario: string, trial: number, variant: strin
       const stray = strayContextFiles(workspace, userHome, usesAgentInstructions(scenario), usesSkills(scenario))
       if (stray.length > 0) throw new Error(`${label}: bake-rs would load context files outside the fixture: ${stray.join(', ')}; move them or set TMPDIR to a directory without them`)
       if (scenario === 'stale_edit') nativeInjection = nativeStaleWriter(workspace, join(workspace, file), injectionPath)
-      command = nativeCommand(arm.bin!, nativeRoute.provider, model, route.effort, prompts[scenario]!,
+      command = nativeCommand(arm.bin!, nativeRoute.provider, model, route.effort, prompts[scenario]!, nativePermission,
         arm.nativeSession === undefined || arm.nativeSession === 'memory' ? undefined : {
           mode: arm.nativeSession, path: join(root, 'session.jsonl'), maxModelCalls: maxRequestsFor(scenario), timeoutMs: capMsFor(scenario),
         })
@@ -602,16 +633,17 @@ writeFileSync(join(out, 'design.json'), JSON.stringify({
   startedAt: new Date().toISOString(),
   node: Bun.spawnSync(['node', '--version']).stdout.toString().trim(), models: routes.map(route => route.model), cases, trials, roster,
   routes: Object.fromEntries(routes.map(route => [route.model, { provider: route.provider, api: route.api, effort: route.effort }])),
-  effort: 'medium where the model offers it; DeepSeek runs at high, its default, having no medium', maxOutputTokens: 8192, capMs: wallClockCaps().default, capMsByScenario: wallClockCaps(), maxRequests: requestCaps(), requestFloors: REQUEST_FLOORS, contextWindows: CONTEXT_WINDOWS, maxLogicalTokens,
+  effort: 'each route\'s effort is in routes: medium by default, DeepSeek high (it has no medium), and an EVAL_MODELS @<effort> replaces either', maxOutputTokens: 8192, capMs: wallClockCaps().default, capMsByScenario: wallClockCaps(), maxRequests: requestCaps(), requestFloors: REQUEST_FLOORS, contextWindows: CONTEXT_WINDOWS, maxLogicalTokens,
   // What pi and bake-rs get for each forced window: Bake's threshold plus pi's default reserve, and Bake's retained tail.
   piContextWindows: PI_CONTEXT_WINDOWS,
   piCompaction: PI_COMPACTION,
+  nativePermission: armNames.some(name => ARMS[name]!.kind === 'native') ? nativePermission : null,
   retryPolicy: { mode: 'normal', maxRetries: 0 },
   gateway: override === undefined ? null : new URL(override.baseUrl).origin,
   composition: 'Built headless CLI with each revision\'s own headless system-prompt config (harness opener off, working-directory suffix) and its standard-preset persona prefix; host tools retained.'
     + (roster === 'tui' ? ' Roster tui: the standard preset\'s tool-fs, tool-fs-search, and tool-result-pruner configs and the terminal spill-policy inline cap; ask_user_question stays out, having no one to answer it headless.' : ' Roster headless: the headless bundle\'s own tool configs.')
     + ' Session title and ambient AGENTS disabled equally; instructions_file keeps agent-instructions for its own AGENTS.md.'
-    + (armNames.some(name => ARMS[name]!.kind === 'native') ? ' A native arm runs bake-rs -p --mode json with the built binary\'s own system prompt and default tools unless recorded defaultTools overrides them, the recorded session mode (memory uses --no-session), the danger-full-access preset, and agent-level retry off; a cliproxyapi model comes through the 0.3 settings.yaml and .credentials.yaml it imports read-only, and a DeepSeek model through models.json over Chat Completions. It skips scenarios that need a Bake-only tool, and its stale writer acts on its event stream. Its recorded EVAL_SETTINGS object configures settings.json except evaluator-controlled route, retry, permission, and scenario policy. Forced windows and compaction settings are recorded in piContextWindows and piCompaction.' : '')
+    + (armNames.some(name => ARMS[name]!.kind === 'native') ? ' A native arm runs bake-rs -p --mode json with the built binary\'s own system prompt and default tools unless recorded defaultTools overrides them, the recorded session mode (memory uses --no-session), the ' + nativePermission + ' preset, and agent-level retry off; a cliproxyapi model comes through the 0.3 settings.yaml and .credentials.yaml it imports read-only, and a DeepSeek model through models.json over Chat Completions. It skips scenarios that need a Bake-only tool, and its stale writer acts on its event stream. Its recorded EVAL_SETTINGS object configures settings.json except evaluator-controlled route, retry, permission, and scenario policy. Forced windows and compaction settings are recorded in piContextWindows and piCompaction.' : '')
     + (armNames.some(name => ARMS[name]!.kind === 'pi') ? ' A pi arm runs pi --mode json with its own system prompt and default tools, no session, extensions, prompt templates, or context files, no skills but a skill scenario\'s own, agent-level retry off, and pi\'s own wire for each model; it skips scenarios that need a Bake-only tool. Where a scenario forces a context window, pi gets its window for it (piContextWindows), Bake\'s threshold plus pi\'s default reserve, and compaction settings that keep Bake\'s retained tail (piCompaction).' : ''),
   cache: 'Fresh process/home/workspace/session per sample; provider cache is observed, not assumed cold. Pair order alternates by trial and scenario.',
   endpoint: 'Agent exits; external Node test passes without test modification; injected external comment is preserved.',

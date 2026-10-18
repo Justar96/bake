@@ -8,9 +8,9 @@ import { isEdit } from './metrics.ts'
 import { usesAgentInstructions } from './scenarios.ts'
 
 /**
- * A built Bake checkout, an installed pi CLI, or a native `bake-rs` binary. A
- * pi root is its package directory; a native root is the checkout whose Rust
- * workspace built the binary, or a prebuilt binary's directory.
+ * A native `bake-rs` binary, a built TypeScript Bake checkout, or an installed
+ * pi CLI. A native root is the checkout whose Rust workspace built the binary,
+ * or a prebuilt binary's directory; a pi root is its package directory.
  * Bake overlays apply only to the TypeScript arm. Native settings use
  * settings.json; pi does not accept per-arm settings.
  */
@@ -82,16 +82,16 @@ export function builtExecutable(stdout: string): string | undefined {
 }
 
 /**
- * Resolve `native`, `native:<checkout>`, or `native:<binary>`. A checkout,
- * this evaluator's own by default, is built with Cargo's locked release
+ * Resolve a native arm's checkout or binary; an empty path is this
+ * evaluator's own checkout. A checkout is built with Cargo's locked release
  * profile from its `rust/` directory, so its pinned toolchain applies, and
  * the arm runs the executable Cargo reports; its commit and tracked-file
  * state are read right after the build. A file is a prebuilt binary run as
  * given: no commit is credited to it, only its digest. Cargo's progress goes
  * to stderr.
  */
-function nativeArm(spec: string): Arm {
-  const target = resolve(spec.slice('native'.length).replace(/^:/, '') || EVALUATOR_ROOT)
+function nativeArm(path: string): Arm {
+  const target = resolve(path || EVALUATOR_ROOT)
   if (!existsSync(target)) throw new Error(`EVAL_ARMS: native arm ${target} does not exist`)
   const prebuilt = statSync(target).isFile()
   let bin: string
@@ -100,7 +100,10 @@ function nativeArm(spec: string): Arm {
     bin = realpathSync(target)
     revision = { prebuilt: true, commit: null, dirty: null }
   } else {
-    if (!existsSync(join(target, 'rust/Cargo.toml'))) throw new Error(`EVAL_ARMS: ${target} has no rust/Cargo.toml; pass a checkout or a bake-rs binary`)
+    if (!existsSync(join(target, 'rust/Cargo.toml'))) {
+      const typescript = existsSync(join(target, 'apps/cli/lib/bin.js')) ? `; name=ts:${path} runs its TypeScript agent` : ''
+      throw new Error(`EVAL_ARMS: ${target} has no rust/Cargo.toml; pass a checkout or a bake-rs binary${typescript}`)
+    }
     const build = spawnSync('cargo', ['build', '--locked', '--release', '-p', 'bake-cli', '--message-format=json-render-diagnostics'], {
       cwd: join(target, 'rust'), stdio: ['ignore', 'pipe', 2], encoding: 'utf8', maxBuffer: 256 * 1024 * 1024,
     })
@@ -124,23 +127,39 @@ function nativeArm(spec: string): Arm {
 }
 
 /**
- * Resolve arms and read their compositions before any sample launches. `env`
- * supplies per-arm EVAL_SETTINGS/EVAL_EXTRA values; pi lookup uses the current
- * PATH, and a native checkout is built here.
+ * Resolve arms and read their compositions before any sample launches. A bare
+ * checkout or binary, `native`, or `native:<path>` is the native `bake-rs`;
+ * `ts:<checkout>` is the frozen TypeScript agent of a built checkout; `pi` or
+ * `pi:<bin>` is pi. `env` supplies per-arm values: EVAL_SETTINGS for a native
+ * or TypeScript arm, EVAL_NATIVE_SESSION for a native arm, and EVAL_EXTRA for
+ * a TypeScript arm; one an arm would ignore stops the run. pi lookup uses the
+ * current PATH, and a native checkout is built here.
  */
 export function parseArms(spec: string, roster: Roster, env: NodeJS.ProcessEnv): Record<string, Arm> {
   return Object.fromEntries(spec.split(',').filter(Boolean).map((entry): [string, Arm] => {
     const [name, root] = entry.split('=')
     if (!name || !root) throw new Error(`EVAL_ARMS entry "${entry}" is not name=checkout`)
-    if (root === 'pi' || root.startsWith('pi:')) return [name, piArm(root)]
-    const settings = env[`EVAL_SETTINGS_${name.toUpperCase()}`] ?? '{}'
+    const settingsKey = `EVAL_SETTINGS_${name.toUpperCase()}`
+    const extraKey = `EVAL_EXTRA_${name.toUpperCase()}`
+    const sessionKey = `EVAL_NATIVE_SESSION_${name.toUpperCase()}`
+    const pi = root === 'pi' || root.startsWith('pi:')
+    const typescript = root.startsWith('ts:')
+    // An override the arm would ignore must not pass for a measured setting.
+    const ignored = [...pi ? [settingsKey] : [], ...typescript ? [] : [extraKey], ...pi || typescript ? [sessionKey] : []]
+      .filter(key => env[key] !== undefined)
+    if (ignored.length > 0) throw new Error(`EVAL_ARMS: arm ${name} would not apply ${ignored.join(' and ')}`)
+    if (pi) return [name, piArm(root)]
+    const settings = env[settingsKey] ?? '{}'
     parseSettings(settings)
-    if (root === 'native' || root.startsWith('native:')) return [name, { ...nativeArm(root), settings,
-      nativeSession: nativeSessionMode(env[`EVAL_NATIVE_SESSION_${name.toUpperCase()}`]) }]
-    if (!existsSync(join(root, 'apps/cli/lib/bin.js'))) throw new Error(`arm ${name}: ${root} has no built apps/cli/lib/bin.js; run bun run build there`)
+    if (!typescript) {
+      const path = root === 'native' ? '' : root.startsWith('native:') ? root.slice('native:'.length) : root
+      return [name, { ...nativeArm(path), settings, nativeSession: nativeSessionMode(env[sessionKey]) }]
+    }
+    const checkout = root.slice('ts:'.length)
+    if (!existsSync(join(checkout, 'apps/cli/lib/bin.js'))) throw new Error(`arm ${name}: ${checkout} has no built apps/cli/lib/bin.js; run bun run build there`)
     return [name, {
-      kind: 'bake', root: resolve(root), extra: JSON.parse(env[`EVAL_EXTRA_${name.toUpperCase()}`] ?? '[]'), settings, llmDeepseek: shipsLlmDeepseek(root),
-      composition: [systemPromptOverlay(root), ...rosterOverlay(root, roster)],
+      kind: 'bake', root: resolve(checkout), extra: JSON.parse(env[extraKey] ?? '[]'), settings, llmDeepseek: shipsLlmDeepseek(checkout),
+      composition: [systemPromptOverlay(checkout), ...rosterOverlay(checkout, roster)],
     }]
   }))
 }
@@ -207,18 +226,25 @@ export function bakeCommand(root: string, patch: string, prompt: string): string
   return ['node', join(root, 'apps/cli/lib/bin.js'), 'headless', '--patch', patch, '--json', prompt]
 }
 
+/** The permission presets a native arm can run under (`EVAL_NATIVE_PERMISSION`). */
+export const NATIVE_PERMISSIONS = ['danger-full-access', 'workspace-write'] as const
+export type NativePermission = typeof NATIVE_PERMISSIONS[number]
+
 /**
  * The `bake-rs` print-mode launch for one native sample: Pi's JSON event
- * stream, no session file by default, the Bake arms' `danger-full-access` preset, and the
- * route's model and effort. Persistent experiments supply a private file and
- * fixed run limits. The prompt follows `--`, so it is never an option.
+ * stream, no session file by default, the permission preset (the TypeScript
+ * arms' `danger-full-access` unless the run asks for the default
+ * `workspace-write`), and the route's model and effort. Persistent
+ * experiments supply a private file and fixed run limits. The prompt follows
+ * `--`, so it is never an option.
  */
 export function nativeCommand(bin: string, provider: string, model: string, effort: string, prompt: string,
+  permission: NativePermission = 'danger-full-access',
   session?: { mode: Exclude<NativeSessionMode, 'memory'>; path: string; maxModelCalls: number; timeoutMs: number }): string[] {
   const args = session === undefined ? ['--no-session'] : ['--session', session.path,
     '--max-model-calls', String(session.maxModelCalls), '--run-timeout-ms', String(session.timeoutMs),
     ...session.mode === 'recoverable' ? ['--recoverable'] : []]
-  return [bin, '-p', '--mode', 'json', ...args, '--permission', 'danger-full-access',
+  return [bin, '-p', '--mode', 'json', ...args, '--permission', permission,
     '--model', `${provider}/${model}`, '--thinking', effort, '--', prompt]
 }
 

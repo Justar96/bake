@@ -51,7 +51,6 @@ libc.workspace = true
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Console", "Win32_System_IO", "Win32_System_Threading"] }
 
-
 # The shipped binary consumes mcp.json; its test re-executes as a stdio server.
 [[test]]
 name = "mcp"

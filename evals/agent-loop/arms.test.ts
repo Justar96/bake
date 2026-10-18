@@ -24,7 +24,7 @@ describe('native arms', () => {
     expect(nativeSessionMode(undefined)).toBe('memory')
     for (const invalid of ['', 'true', '--recoverable']) expect(() => nativeSessionMode(invalid)).toThrow()
     for (const mode of ['persistent', 'recoverable'] as const) {
-      const command = nativeCommand('bake-rs', 'p', 'm', 'medium', '-prompt', { mode, path: '/private/session.jsonl', maxModelCalls: 14, timeoutMs: 180_000 })
+      const command = nativeCommand('bake-rs', 'p', 'm', 'medium', '-prompt', 'danger-full-access', { mode, path: '/private/session.jsonl', maxModelCalls: 14, timeoutMs: 180_000 })
       expect(command).toEqual(['bake-rs', '-p', '--mode', 'json', '--session', '/private/session.jsonl',
         '--max-model-calls', '14', '--run-timeout-ms', '180000', ...mode === 'recoverable' ? ['--recoverable'] : [],
         '--permission', 'danger-full-access', '--model', 'p/m', '--thinking', 'medium', '--', '-prompt'])
@@ -57,6 +57,12 @@ describe('native arms', () => {
     expect(nativeCommand('/bin/bake-rs', 'cliproxyapi', 'gpt-x', 'medium', '-starts with a dash'))
       .toEqual(['/bin/bake-rs', '-p', '--mode', 'json', '--no-session', '--permission', 'danger-full-access',
         '--model', 'cliproxyapi/gpt-x', '--thinking', 'medium', '--', '-starts with a dash'])
+  })
+
+  test('run under the default preset when the evaluation asks for it', () => {
+    expect(nativeCommand('/bin/bake-rs', 'cliproxyapi', 'gpt-x', 'medium', 'go', 'workspace-write'))
+      .toEqual(['/bin/bake-rs', '-p', '--mode', 'json', '--no-session', '--permission', 'workspace-write',
+        '--model', 'cliproxyapi/gpt-x', '--thinking', 'medium', '--', 'go'])
   })
 
   test('the executable is the bake-rs binary Cargo reports, wherever its target directory is', () => {
@@ -116,6 +122,25 @@ describe('native arms', () => {
     expect(() => parseArms(`cand=native:${join(root, 'missing')}`, 'headless', {})).toThrow(/does not exist/)
     mkdirSync(join(root, 'plain'))
     expect(() => parseArms(`cand=native:${join(root, 'plain')}`, 'headless', {})).toThrow(/no rust\/Cargo.toml/)
+  })
+
+  test.skipIf(!posix)('a bare path is the native agent, and ts: names the TypeScript agent', () => {
+    const text = '#!/bin/sh\necho "bake-rs 9.9.9-bare"\n'
+    const bin = script(join(root, 'bare/bake-rs'), text)
+    expect(parseArms(`cand=${bin}`, 'headless', {}).cand).toMatchObject({ kind: 'native', bin: realpathSync(bin), version: 'bake-rs 9.9.9-bare' })
+    // A built TypeScript checkout without a Rust workspace points at ts:.
+    const typescript = join(root, 'typescript')
+    mkdirSync(join(typescript, 'apps/cli/lib'), { recursive: true })
+    writeFileSync(join(typescript, 'apps/cli/lib/bin.js'), '')
+    expect(() => parseArms(`base=${typescript}`, 'headless', {})).toThrow(`name=ts:${typescript} runs its TypeScript agent`)
+    expect(() => parseArms(`base=ts:${join(root, 'plain')}`, 'headless', {})).toThrow(/no built apps\/cli\/lib\/bin.js/)
+  })
+
+  test.skipIf(!posix)('per-arm settings and overlays are refused only by an arm that would ignore them', () => {
+    const bin = script(join(root, 'ignored/bake-rs'), '#!/bin/sh\necho "bake-rs 9.9.9-ignored"\n')
+    expect(parseArms(`cand=${bin}`, 'headless', { EVAL_SETTINGS_CAND: '{"a":1}' }).cand?.settings).toBe('{"a":1}')
+    expect(() => parseArms(`cand=native:${bin}`, 'headless', { EVAL_EXTRA_CAND: '[]' })).toThrow(/would not apply EVAL_EXTRA_CAND/)
+    expect(() => parseArms(`cand=pi:${bin}`, 'headless', { EVAL_SETTINGS_CAND: '{}' })).toThrow(/would not apply EVAL_SETTINGS_CAND/)
   })
 })
 
