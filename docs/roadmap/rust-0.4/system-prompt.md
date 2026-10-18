@@ -152,7 +152,7 @@ This is a non-interactive run: no one can answer questions. Make reasonable assu
 <permissions>
 File sandbox: workspace-write. Sandboxed tools can modify files under "/home/user/project", and possibly in some temporary directories.
 
-Approval prompts: disabled. Actions that need approval are rejected automatically, so do not request sandbox escalation with `sandbox_permissions`.
+Approval prompts: disabled. Actions that need approval are rejected automatically.
 </permissions>
 
 <environment>

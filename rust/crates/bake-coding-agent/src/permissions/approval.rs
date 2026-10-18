@@ -78,8 +78,11 @@ impl FromStr for ApprovalPolicy {
     }
 }
 
-/// The model-facing statement for `never` (`NEVER_SENTENCE`).
-pub const NEVER_SENTENCE: &str = "Approval prompts: disabled. Actions that need approval are rejected automatically, so do not request sandbox escalation with `sandbox_permissions`.";
+/// The model-facing statement for `never` (`NEVER_SENTENCE`), without the
+/// TypeScript clause forbidding `sandbox_permissions`: under `never` the
+/// tools do not advertise it ([`super::reachable_escalation_targets`]).
+pub const NEVER_SENTENCE: &str =
+    "Approval prompts: disabled. Actions that need approval are rejected automatically.";
 /// The model-facing statement for `ask` (`ASK_SENTENCE`).
 pub const ASK_SENTENCE: &str = "Approval prompts: enabled. Actions that need approval request it before running, and fail if no one can answer.";
 
