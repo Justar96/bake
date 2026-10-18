@@ -9,9 +9,9 @@
 use crate::mode::SandboxMode;
 
 /// Every mode a call could escalate to (`ESCALATION_TARGETS`); `read-only` is
-/// the floor and nothing escalates to it. Tools advertise the whole set
-/// whenever they confine, since a session's effective mode may sit below the
-/// composition default.
+/// the floor and nothing escalates to it. Tools advertise only the modes a
+/// session can reach, those strictly wider than its standing mode
+/// ([`SandboxMode::wider_modes`]), and none when nothing can approve them.
 pub const ESCALATION_TARGETS: [SandboxMode; 2] =
     [SandboxMode::WorkspaceWrite, SandboxMode::DangerFullAccess];
 

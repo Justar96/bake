@@ -56,7 +56,7 @@ pub mod state;
 use std::path::Path;
 use std::sync::Arc;
 
-use bake_sandbox::{ESCALATION_TARGETS, SandboxMode, SandboxPolicy, SandboxProvider};
+use bake_sandbox::{SandboxMode, SandboxPolicy, SandboxProvider};
 use serde_json::{Value, json};
 
 pub use approval::{
@@ -75,14 +75,19 @@ use crate::session::SessionManager;
 use crate::tools::bash::BashToolOptions;
 use crate::tools::definition::ToolDefinition;
 
-/// What the wrapped tools share: the engine that resolves each call and the
-/// provider that confines bash.
+/// What the wrapped tools share: the engine that resolves each call, the
+/// provider that confines bash, and the escalations the tools offer.
 #[derive(Clone)]
 pub struct ToolPermissions {
     /// Resolves each call's policy.
     pub engine: Arc<PermissionEngine>,
     /// Confines bash under that policy.
     pub provider: Arc<dyn SandboxProvider>,
+    /// The modes a call can escalate to, narrowest first; see
+    /// [`reachable_escalation_targets`]. The tools advertise the
+    /// escalation parameters and add the denial hint only for these, so
+    /// when the set is empty the model sees neither.
+    pub escalation_targets: &'static [SandboxMode],
 }
 
 impl std::fmt::Debug for ToolPermissions {
@@ -90,38 +95,76 @@ impl std::fmt::Debug for ToolPermissions {
         f.debug_struct("ToolPermissions")
             .field("engine", &self.engine)
             .field("provider", &self.provider.name())
+            .field("escalation_targets", &self.escalation_targets)
             .finish()
     }
 }
 
 impl ToolPermissions {
     /// The shipped composition for `standing`: the standard engine whose
-    /// approvals go through the session's policy to `answerer`.
+    /// approvals go through the session's policy to `answerer`, offering
+    /// the escalations `standing` can reach. The offer is fixed here, so a
+    /// tool built from these permissions keeps its schema for its session.
     pub fn new(
         standing: Arc<StandingPermissions>,
         answerer: Arc<dyn Approver>,
         provider: Arc<dyn SandboxProvider>,
     ) -> Self {
+        let escalation_targets =
+            reachable_escalation_targets(standing.sandbox(), standing.approval());
         let approver = Arc::new(PolicyApprover::new(Arc::clone(&standing), answerer));
         Self {
             engine: Arc::new(PermissionEngine::standard(standing, approver)),
             provider,
+            escalation_targets,
         }
+    }
+
+    /// These permissions offering no escalation: for a composition with no
+    /// one to answer an approval prompt, such as `-p`, where every request
+    /// would fail.
+    pub fn without_escalation(mut self) -> Self {
+        self.escalation_targets = &[];
+        self
+    }
+
+    /// Whether a call denied under `mode` can still be retried wider, so its
+    /// denial carries the escalation hint.
+    pub fn offers_escalation_beyond(&self, mode: SandboxMode) -> bool {
+        self.escalation_targets
+            .iter()
+            .any(|&target| mode.is_widened_by(target))
+    }
+}
+
+/// The modes a session can escalate a call to: those strictly wider than
+/// its standing `sandbox` mode, and none under the `never` approval policy,
+/// which rejects every request. Bake's TypeScript advertised every
+/// [`ESCALATION_TARGETS`](bake_sandbox::ESCALATION_TARGETS) mode whenever a tool confined; the Rust agent
+/// offers only what an approval could grant.
+pub fn reachable_escalation_targets(
+    sandbox: SandboxMode,
+    approval: ApprovalPolicy,
+) -> &'static [SandboxMode] {
+    match approval {
+        ApprovalPolicy::Ask => sandbox.wider_modes(),
+        ApprovalPolicy::Never => &[],
     }
 }
 
 /// `parameters` with the two escalation parameters appended to its
-/// properties: `sandbox_permissions` (enum [`ESCALATION_TARGETS`]) and
-/// `justification`, neither required.
+/// properties: `sandbox_permissions` (enum `targets`) and `justification`,
+/// neither required. Without targets `parameters` is returned unchanged.
 pub fn with_escalation_parameters(
     mut parameters: Value,
+    targets: &[SandboxMode],
     sandbox_permissions: &str,
     justification: &str,
 ) -> Value {
-    let targets: Vec<&str> = ESCALATION_TARGETS
-        .iter()
-        .map(|mode| mode.as_str())
-        .collect();
+    if targets.is_empty() {
+        return parameters;
+    }
+    let targets: Vec<&str> = targets.iter().map(|mode| mode.as_str()).collect();
     if let Some(properties) = parameters
         .get_mut("properties")
         .and_then(Value::as_object_mut)
@@ -217,12 +260,17 @@ impl SessionPermission {
     /// `never` policy whatever the preset's.
     pub fn prompt_text(&self, workspace_root: &Path, can_ask: bool) -> String {
         let policy = SandboxPolicy::new(self.sandbox, workspace_root);
-        let approval = if can_ask {
+        context::permissions_section_text(&policy, self.stated_approval(can_ask))
+    }
+
+    /// The approval policy the model is told: the session's, or `never`
+    /// when no one can answer.
+    pub fn stated_approval(&self, can_ask: bool) -> ApprovalPolicy {
+        if can_ask {
             self.approval
         } else {
             ApprovalPolicy::Never
-        };
-        context::permissions_section_text(&policy, approval)
+        }
     }
 }
 

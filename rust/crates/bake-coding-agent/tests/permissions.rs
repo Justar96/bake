@@ -115,13 +115,17 @@ fn permissions(
     answerer: Arc<dyn Approver>,
     provider: Arc<dyn SandboxProvider>,
 ) -> ToolPermissions {
-    let standing = StandingPermissions::new(
-        mode,
-        ApprovalPolicy::Ask,
-        "x",
-        root,
-        Some("sess-perm".into()),
-    );
+    permissions_under(root, mode, ApprovalPolicy::Ask, answerer, provider)
+}
+
+fn permissions_under(
+    root: &Path,
+    mode: SandboxMode,
+    approval: ApprovalPolicy,
+    answerer: Arc<dyn Approver>,
+    provider: Arc<dyn SandboxProvider>,
+) -> ToolPermissions {
+    let standing = StandingPermissions::new(mode, approval, "x", root, Some("sess-perm".into()));
     ToolPermissions::new(Arc::new(standing), answerer, provider)
 }
 
@@ -204,43 +208,88 @@ fn headless(root: &Path, mode: SandboxMode) -> ToolPermissions {
 // ---------------------------------------------------------------------------
 // write and edit
 
+/// The permissions of each composition whose tools offer no escalation:
+/// full access, the `never` policy, and no answerer.
+fn offering_nothing(root: &Path) -> [(&'static str, ToolPermissions); 3] {
+    let provider = || Arc::new(UnavailableProvider::new(None)) as Arc<dyn SandboxProvider>;
+    [
+        ("danger-full-access", headless(root, DFA)),
+        (
+            "never",
+            permissions_under(
+                root,
+                WW,
+                ApprovalPolicy::Never,
+                Arc::new(NoApprover),
+                provider(),
+            ),
+        ),
+        ("no answerer", headless(root, WW).without_escalation()),
+    ]
+}
+
 // tool-fs.spec: "advertises the closed target vocabulary on write and edit
-// under a confining backend"; Pi's descriptions and parameters otherwise.
+// under a confining backend", narrowed to the modes an approval could
+// grant; Pi's descriptions and parameters otherwise.
 #[test]
 fn file_tools_add_the_escalation_parameters() {
     let root = std::env::temp_dir();
-    let tools = sandboxed(&root, &headless(&root, WW));
-    for name in ["write", "edit"] {
-        let wrapped = tool(&tools, name);
-        let pi = create_all_tool_definitions(&root, &ToolsOptions::default())
+    let pi_tool = |name: &str| {
+        create_all_tool_definitions(&root, &ToolsOptions::default())
             .into_iter()
             .find(|definition| definition.name() == name)
             .expect("pi tool")
-            .tool;
-        assert_eq!(wrapped.description, pi.description);
-        let mut expected = pi.parameters.clone();
-        let properties = expected["properties"].as_object_mut().expect("properties");
-        properties.insert(
-            "sandbox_permissions".into(),
-            json!({
-                "type": "string",
-                "enum": ["workspace-write", "danger-full-access"],
-                "description": "One retry after a sandbox denial; asks the user.",
-            }),
-        );
-        properties.insert(
-            "justification".into(),
-            json!({
-                "type": "string",
-                "description": "One sentence for the user; required with sandbox_permissions.",
-            }),
-        );
-        assert_eq!(
-            serde_json::to_string(&wrapped.parameters).expect("json"),
-            serde_json::to_string(&expected).expect("json")
-        );
-        assert_eq!(wrapped.constrained_sampling, pi.constrained_sampling);
+            .tool
+    };
+    let offered: [(SandboxMode, &[&str]); 2] = [
+        (RO, &["workspace-write", "danger-full-access"]),
+        (WW, &["danger-full-access"]),
+    ];
+    for (mode, targets) in offered {
+        let tools = sandboxed(&root, &headless(&root, mode));
+        for name in ["write", "edit"] {
+            let wrapped = tool(&tools, name);
+            let pi = pi_tool(name);
+            assert_eq!(wrapped.description, pi.description);
+            let mut expected = pi.parameters.clone();
+            let properties = expected["properties"].as_object_mut().expect("properties");
+            properties.insert(
+                "sandbox_permissions".into(),
+                json!({
+                    "type": "string",
+                    "enum": targets,
+                    "description": "One retry after a sandbox denial; asks the user.",
+                }),
+            );
+            properties.insert(
+                "justification".into(),
+                json!({
+                    "type": "string",
+                    "description": "One sentence for the user; required with sandbox_permissions.",
+                }),
+            );
+            assert_eq!(
+                serde_json::to_string(&wrapped.parameters).expect("json"),
+                serde_json::to_string(&expected).expect("json"),
+                "{mode} {name}"
+            );
+            assert_eq!(wrapped.constrained_sampling, pi.constrained_sampling);
+        }
     }
+    // Where no escalation is reachable, write and edit are Pi's schemas.
+    for (case, permissions) in offering_nothing(&root) {
+        let tools = sandboxed(&root, &permissions);
+        for name in ["write", "edit"] {
+            let pi = pi_tool(name);
+            assert_eq!(
+                serde_json::to_string(&tool(&tools, name).parameters).expect("json"),
+                serde_json::to_string(&pi.parameters).expect("json"),
+                "{case} {name}"
+            );
+            assert_eq!(tool(&tools, name).description, pi.description);
+        }
+    }
+    let tools = sandboxed(&root, &headless(&root, WW));
     // read, grep, find, and ls are Pi's.
     for name in ["read", "grep", "find", "ls"] {
         let pi = create_all_tool_definitions(&root, &ToolsOptions::default())
@@ -357,6 +406,40 @@ async fn workspace_write_allows_the_temporary_directory() {
     .expect("temp write");
     assert_eq!(std::fs::read_to_string(&target).expect("read"), "temp");
     let _ = std::fs::remove_file(&target);
+}
+
+// Bake's own: where no wider mode is reachable, a denied mutation carries
+// the denial marker alone, with no hint naming a parameter the tool lacks.
+#[tokio::test]
+async fn a_denial_hints_only_at_an_offered_escalation() {
+    let Some(dirs) = Dirs::new("no-hint") else {
+        return;
+    };
+    let escape = dirs.out().join("escape.txt");
+    for (case, permissions) in offering_nothing(&dirs.ws()) {
+        if case == "danger-full-access" {
+            continue;
+        }
+        let tools = sandboxed(&dirs.ws(), &permissions);
+        for (name, args) in [
+            (
+                "write",
+                json!({ "path": escape.to_string_lossy(), "content": "x" }),
+            ),
+            (
+                "edit",
+                json!({ "path": escape.to_string_lossy(), "edits": [{ "oldText": "a", "newText": "b" }] }),
+            ),
+        ] {
+            let refused = call(tool(&tools, name), args, None).await;
+            assert_eq!(
+                refused.err().as_deref(),
+                Some("[sandbox: file access denied under workspace-write mode]"),
+                "{case} {name}"
+            );
+        }
+    }
+    assert!(!escape.exists());
 }
 
 // fs-sandbox.spec (read-only): "denies write, leaving no file on disk" and
@@ -592,7 +675,7 @@ async fn a_link_swapped_before_the_check_is_judged_fresh() {
     let link = dirs.ws().join("link");
     std::os::unix::fs::symlink(dirs.ws().join("real"), &link).expect("link");
     let policy = SandboxPolicy::new(WW, dirs.ws());
-    let check = bake_coding_agent::permissions::fs::containment_guard(policy);
+    let check = bake_coding_agent::permissions::fs::containment_guard(policy, true);
     let swap_to = dirs.out();
     let guard: bake_coding_agent::tools::definition::MutationGuard = Arc::new(move |path| {
         std::fs::remove_file(&link).map_err(|error| error.to_string())?;
@@ -745,17 +828,39 @@ impl Drop for Cleanup {
 }
 
 // tool-bash.spec: "advertises the sandbox fields and validates their
-// pairing" (the description and parameters of a confining composition).
+// pairing" (the description and parameters of a confining composition),
+// with only the modes an approval could grant.
 #[test]
 fn bash_adds_the_sandbox_paragraph_and_parameters() {
     let root = std::env::temp_dir();
+    let pi = bake_coding_agent::tools::bash::create_bash_tool(&root, BashToolOptions::default());
+    let denial_sentences = " A file sandbox may block commands; trying is safe. `[sandbox: file access denied under <mode> mode]` is a policy denial: do not work around it.";
+    // Without a reachable mode: the denial sentences and Pi's parameters.
+    for (case, permissions) in offering_nothing(&root) {
+        let tools = sandboxed(&root, &permissions);
+        let bash = tool(&tools, "bash");
+        assert_eq!(
+            bash.description,
+            format!("{}{denial_sentences}", pi.description),
+            "{case}"
+        );
+        assert_eq!(
+            serde_json::to_string(&bash.parameters).expect("json"),
+            serde_json::to_string(&pi.parameters).expect("json"),
+            "{case}"
+        );
+    }
+    let tools = sandboxed(&root, &headless(&root, RO));
+    assert_eq!(
+        tool(&tools, "bash").parameters["properties"]["sandbox_permissions"]["enum"],
+        json!(["workspace-write", "danger-full-access"])
+    );
     let tools = sandboxed(&root, &headless(&root, WW));
     let bash = tool(&tools, "bash");
-    let pi = bake_coding_agent::tools::bash::create_bash_tool(&root, BashToolOptions::default());
     assert_eq!(
         bash.description,
         format!(
-            "{} A file sandbox may block commands; trying is safe. `[sandbox: file access denied under <mode> mode]` is a policy denial: do not work around it. If a wider mode would help, retry the same command once this turn with the narrowest `sandbox_permissions` and a `justification`; that asks the user, so do not ask in chat. Request wider access up front only after this session was denied the same access. A rejection is final for that command.",
+            "{}{denial_sentences} If a wider mode would help, retry the same command once this turn with the narrowest `sandbox_permissions` and a `justification`; that asks the user, so do not ask in chat. Request wider access up front only after this session was denied the same access. A rejection is final for that command.",
             pi.description
         )
     );
@@ -769,7 +874,7 @@ fn bash_adds_the_sandbox_paragraph_and_parameters() {
                 "timeout": { "type": "number", "description": "Timeout in seconds (optional, no default timeout)" },
                 "sandbox_permissions": {
                     "type": "string",
-                    "enum": ["workspace-write", "danger-full-access"],
+                    "enum": ["danger-full-access"],
                     "description": "For retrying a denied command.",
                 },
                 "justification": { "type": "string", "description": "One sentence for the user." },
@@ -857,6 +962,26 @@ async fn a_denied_bash_write_shows_the_markers() {
     assert_eq!(
         text(&other),
         "Permission denied\n\nCommand exited with code 1"
+    );
+
+    // renderResult: "hints only when escalation is advertised". Under
+    // `never`, the denial stands alone.
+    let tools = sandboxed(
+        &root,
+        &permissions_under(
+            &root,
+            WW,
+            ApprovalPolicy::Never,
+            Arc::new(NoApprover),
+            Arc::clone(&provider) as Arc<dyn SandboxProvider>,
+        ),
+    );
+    let result = call(tool(&tools, "bash"), json!({ "command": command }), None)
+        .await
+        .expect("a failed command is a result");
+    assert_eq!(
+        text(&result),
+        "touch: x: Read-only file system\n[sandbox: file access denied under workspace-write mode]\n\nCommand exited with code 1"
     );
 }
 

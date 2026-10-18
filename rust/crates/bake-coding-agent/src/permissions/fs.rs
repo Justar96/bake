@@ -7,7 +7,9 @@
 //! `danger-full-access` passes) and `packages/fs/tool-fs/src/{sandbox,write,edit}.ts`
 //! (`FsSandboxController`: the escalation parameters, the per-call policy,
 //! and `mapError`, which turns `FS_SANDBOX_DENIED` into the denial marker
-//! and the escalation hint).
+//! and the escalation hint). The parameters and the hint appear only when
+//! the session can reach a wider mode
+//! ([`ToolPermissions::escalation_targets`]); TypeScript always added them.
 //!
 //! The check runs inside the file's mutation queue, after Pi's first abort
 //! check and before any effect (for `edit`, before the file is checked or
@@ -63,15 +65,16 @@ pub const FS_SANDBOX_PERMISSIONS_DESCRIPTION: &str =
 pub const FS_JUSTIFICATION_DESCRIPTION: &str =
     "One sentence for the user; required with sandbox_permissions.";
 
-/// The text of a refused mutation (`mapError`): the denial marker, then the
-/// escalation hint, which always applies because a confining composition
-/// always offers escalation.
-pub fn fs_denial_text(policy: &SandboxPolicy) -> String {
-    format!(
-        "{}\n{}",
-        sandbox_denial_marker(policy.mode),
-        escalation_hint_marker("operation")
-    )
+/// The text of a refused mutation (`mapError`): the denial marker, then,
+/// when `escalation_hint` says a wider mode is reachable, the escalation
+/// hint.
+pub fn fs_denial_text(policy: &SandboxPolicy, escalation_hint: bool) -> String {
+    let marker = sandbox_denial_marker(policy.mode);
+    if escalation_hint {
+        format!("{marker}\n{}", escalation_hint_marker("operation"))
+    } else {
+        marker
+    }
 }
 
 /// The most links [`write_target`] follows, as Linux's `MAXSYMLINKS`.
@@ -175,10 +178,11 @@ pub fn file_writable_roots(policy: &SandboxPolicy) -> Vec<PathBuf> {
 /// [`file_writable_roots`]; the call then writes through a
 /// [`BeneathTarget`] that reaches that file from the root without following
 /// links. An unresolvable target is refused, `read-only` refuses every
-/// call, and `danger-full-access` writes Pi's way, to the path itself.
-pub fn containment_guard(policy: SandboxPolicy) -> MutationGuard {
+/// call, and `danger-full-access` writes Pi's way, to the path itself. A
+/// denial carries the escalation hint when `escalation_hint` is set.
+pub fn containment_guard(policy: SandboxPolicy, escalation_hint: bool) -> MutationGuard {
     Arc::new(move |path: &Path| {
-        let denial = || fs_denial_text(&policy);
+        let denial = || fs_denial_text(&policy, escalation_hint);
         match policy.mode {
             SandboxMode::DangerFullAccess => {
                 Ok(Box::new(PathTarget(path.to_path_buf())) as Box<dyn MutationTarget>)
@@ -202,9 +206,10 @@ pub fn containment_guard(policy: SandboxPolicy) -> MutationGuard {
     })
 }
 
-fn fs_parameters(parameters: Value) -> Value {
+fn fs_parameters(parameters: Value, permissions: &ToolPermissions) -> Value {
     with_escalation_parameters(
         parameters,
+        permissions.escalation_targets,
         FS_SANDBOX_PERMISSIONS_DESCRIPTION,
         FS_JUSTIFICATION_DESCRIPTION,
     )
@@ -229,7 +234,7 @@ pub fn create_sandboxed_write_tool_definition(
     let cwd = cwd.to_path_buf();
     let permissions = permissions.clone();
     let tool = &mut definition.tool;
-    tool.parameters = fs_parameters(std::mem::take(&mut tool.parameters));
+    tool.parameters = fs_parameters(std::mem::take(&mut tool.parameters), &permissions);
     tool.execute = Arc::new(
         move |id: String, args: Value, signal: Option<AbortSignal>, _update| {
             let cwd = cwd.clone();
@@ -239,11 +244,12 @@ pub fn create_sandboxed_write_tool_definition(
                     .engine
                     .resolve(&call("write", &id, &args), signal.as_ref())
                     .await?;
+                let hint = permissions.offers_escalation_beyond(policy.mode);
                 crate::tools::write::execute_guarded(
                     cwd,
                     args,
                     signal,
-                    Some(containment_guard(policy)),
+                    Some(containment_guard(policy, hint)),
                 )
                 .await
             }) as BoxFuture<'static, _>
@@ -262,7 +268,7 @@ pub fn create_sandboxed_edit_tool_definition(
     let cwd = cwd.to_path_buf();
     let permissions = permissions.clone();
     let tool = &mut definition.tool;
-    tool.parameters = fs_parameters(std::mem::take(&mut tool.parameters));
+    tool.parameters = fs_parameters(std::mem::take(&mut tool.parameters), &permissions);
     tool.execute = Arc::new(
         move |id: String, args: Value, signal: Option<AbortSignal>, _update| {
             let cwd = cwd.clone();
@@ -273,11 +279,12 @@ pub fn create_sandboxed_edit_tool_definition(
                     .engine
                     .resolve(&call("edit", &id, &args), signal.as_ref())
                     .await?;
+                let hint = permissions.offers_escalation_beyond(policy.mode);
                 crate::tools::edit::execute_guarded(
                     cwd,
                     args,
                     signal,
-                    Some(containment_guard(policy)),
+                    Some(containment_guard(policy, hint)),
                 )
                 .await
             }) as BoxFuture<'static, _>
