@@ -105,14 +105,15 @@ async fn a_user_message_comes_back_and_the_next_prompt_branches_from_its_parent(
     let assistants = entry_ids(&session, "assistant");
 
     let navigated = session
-        .navigate_tree(&users[1], None)
+        .navigate_tree(&users[1], TreeNavigationOptions::default(), None)
         .await
         .expect("navigate");
     assert_eq!(
         navigated,
         TreeNavigation {
             moved: true,
-            editor_text: Some("second".into())
+            editor_text: Some("second".into()),
+            summary_entry: None,
         }
     );
     assert_eq!(session.leaf_id().as_deref(), Some(assistants[0].as_str()));
@@ -170,14 +171,17 @@ async fn an_assistant_becomes_the_leaf_and_a_root_user_message_empties_the_path(
     let assistants = entry_ids(&session, "assistant");
 
     let navigated = session
-        .navigate_tree(&assistants[0], None)
+        .navigate_tree(&assistants[0], TreeNavigationOptions::default(), None)
         .await
         .expect("a1");
     assert_eq!(navigated.editor_text, None);
     assert_eq!(session.leaf_id().as_deref(), Some(assistants[0].as_str()));
     assert_eq!(live_texts(&session), ["user: first", "assistant: one"]);
 
-    let navigated = session.navigate_tree(&users[0], None).await.expect("u1");
+    let navigated = session
+        .navigate_tree(&users[0], TreeNavigationOptions::default(), None)
+        .await
+        .expect("u1");
     assert_eq!(navigated.editor_text.as_deref(), Some("first"));
     assert!(live_texts(&session).is_empty());
     let parent = lock(&session.session)
@@ -187,7 +191,7 @@ async fn an_assistant_becomes_the_leaf_and_a_root_user_message_empties_the_path(
 
     // Repeated navigation back to the original leaf restores its context.
     session
-        .navigate_tree(&assistants[1], None)
+        .navigate_tree(&assistants[1], TreeNavigationOptions::default(), None)
         .await
         .expect("a2");
     assert_eq!(
@@ -212,10 +216,13 @@ async fn the_leaf_is_a_no_op_and_a_missing_target_changes_nothing() {
     two_turns(&h, &session).await;
     let leaf = session.leaf_id().expect("leaf");
     let count = lock(&session.session).entry_count();
-    let navigated = session.navigate_tree(&leaf, None).await.expect("no-op");
+    let navigated = session
+        .navigate_tree(&leaf, TreeNavigationOptions::default(), None)
+        .await
+        .expect("no-op");
     assert!(!navigated.moved);
     let error = session
-        .navigate_tree("missing", None)
+        .navigate_tree("missing", TreeNavigationOptions::default(), None)
         .await
         .expect_err("missing");
     assert_eq!(error, "Entry missing not found");
@@ -223,7 +230,12 @@ async fn the_leaf_is_a_no_op_and_a_missing_target_changes_nothing() {
     assert_eq!(lock(&session.session).entry_count(), count);
     assert_eq!(live_texts(&session).len(), 4);
     session.shutdown().await;
-    assert!(session.navigate_tree("missing", None).await.is_err());
+    assert!(
+        session
+            .navigate_tree("missing", TreeNavigationOptions::default(), None)
+            .await
+            .is_err()
+    );
 }
 
 // Pi "tree navigation during an active response" and #9178: a running
@@ -263,7 +275,7 @@ async fn busy_sessions_refuse_navigation_and_navigation_refuses_prompts() {
     let leaf = session.leaf_id();
     assert_eq!(
         session
-            .navigate_tree(&target, None)
+            .navigate_tree(&target, TreeNavigationOptions::default(), None)
             .await
             .expect_err("streaming"),
         NAVIGATION_WHILE_STREAMING
@@ -279,7 +291,7 @@ async fn busy_sessions_refuse_navigation_and_navigation_refuses_prompts() {
         .send_modify(|activity| activity.manual_compaction = true);
     assert_eq!(
         session
-            .navigate_tree(&target, None)
+            .navigate_tree(&target, TreeNavigationOptions::default(), None)
             .await
             .expect_err("compacting"),
         NAVIGATION_WHILE_BUSY
@@ -305,7 +317,7 @@ async fn busy_sessions_refuse_navigation_and_navigation_refuses_prompts() {
     );
     assert_eq!(
         session
-            .navigate_tree(&target, None)
+            .navigate_tree(&target, TreeNavigationOptions::default(), None)
             .await
             .expect_err("navigating"),
         NAVIGATION_WHILE_BUSY
@@ -316,7 +328,7 @@ async fn busy_sessions_refuse_navigation_and_navigation_refuses_prompts() {
         .send_modify(|activity| activity.navigation = false);
     assert!(session.queued_messages().is_empty());
     session
-        .navigate_tree(&target, None)
+        .navigate_tree(&target, TreeNavigationOptions::default(), None)
         .await
         .expect("idle again");
     assert!(!session.is_compacting());
@@ -342,7 +354,7 @@ async fn navigation_keeps_the_live_model_and_thinking_level() {
         .await
         .expect("level");
     session
-        .navigate_tree(&target, None)
+        .navigate_tree(&target, TreeNavigationOptions::default(), None)
         .await
         .expect("navigate");
     assert_eq!(session.model().expect("model").id, "faux-2");
@@ -670,7 +682,11 @@ async fn a_held_navigation_excludes_input_and_a_cancel_before_its_commit_moves_n
         let held = {
             let (session, target, signal) =
                 (Arc::clone(&session), users[1].clone(), abort.signal());
-            tokio::spawn(async move { session.navigate_tree(&target, Some(signal)).await })
+            tokio::spawn(async move {
+                session
+                    .navigate_tree(&target, TreeNavigationOptions::default(), Some(signal))
+                    .await
+            })
         };
         tokio::task::spawn_blocking(move || reached.recv().expect("held"))
             .await
@@ -708,7 +724,11 @@ async fn a_held_navigation_excludes_input_and_a_cancel_before_its_commit_moves_n
     abort.abort();
     assert_eq!(
         session
-            .navigate_tree(&users[0], Some(abort.signal()))
+            .navigate_tree(
+                &users[0],
+                TreeNavigationOptions::default(),
+                Some(abort.signal())
+            )
             .await
             .expect_err("cancelled"),
         NAVIGATION_CANCELLED

@@ -25,13 +25,17 @@
 //! with a session id, which a fresh listing resolves to its file. No sheet
 //! sends a model request.
 //!
-//! `/tree` and `/fork` follow Pi v1.2.0 `interactive-mode.ts`
-//! (`showTreeSelector` without its branch-summary prompt,
-//! `showUserMessageSelector`), `agent-session.ts` (`navigateTree`,
-//! `getUserMessagesForForking`), and `agent-session-runtime.ts` (`fork`),
-//! with the same busy rule as `/new`. `/tree` moves the running session's
-//! leaf in place; `/fork` is staged like `/resume`. Both put a chosen user
-//! message back into the draft and never send it.
+//! `/tree` follows Pi v1.3.0 (`71023aec1546d6d677a65669c5665c0927ce0dd0`)
+//! `interactive-mode.ts` (`showTreeSelector` with its branch-summary
+//! prompt) and `agent-session.ts` (`navigateTree`, `abortBranchSummary`);
+//! `/fork` follows Pi v1.2.0 `interactive-mode.ts`
+//! (`showUserMessageSelector`), `agent-session.ts`
+//! (`getUserMessagesForForking`), and `agent-session-runtime.ts` (`fork`).
+//! Both have the same busy rule as `/new`. `/tree` moves the running
+//! session's leaf in place, after an optional summary of the branch it
+//! leaves; `/fork` is staged like `/resume`. Both put a chosen user message
+//! back into the draft and never send it. Unlike Pi, which aborts a running
+//! response before navigating, `/tree` is idle only, as `/new` is.
 //!
 //! `/clone` follows Pi v1.3.0 (`71023aec1546d6d677a65669c5665c0927ce0dd0`)
 //! `interactive-mode.ts` (`handleCloneCommand`) and
@@ -77,8 +81,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use bake_agent::QueueMode;
-use bake_ai::{AbortSignal, Model, ModelThinkingLevel};
-use bake_coding_agent::agent_session::{AgentSession, DefaultSave, ForkPosition};
+use bake_ai::{AbortController, AbortSignal, Model, ModelThinkingLevel};
+use bake_coding_agent::agent_session::{
+    AgentSession, BRANCH_SUMMARY_CANCELLED, DefaultSave, ForkPosition, NAVIGATION_CANCELLED,
+    TreeNavigation, TreeNavigationOptions,
+};
 use bake_coding_agent::cli::{Replacement, SessionFactory, SessionTarget};
 use bake_coding_agent::cliproxyapi::account::{
     AccountView, CliProxyAccount, RefreshOutcome, disabled_warning, refresh_account,
@@ -91,10 +98,12 @@ use bake_coding_agent::session::SessionManager;
 use bake_coding_agent::session::search::{NameFilter, QueryError, SessionSearchIndex, SortMode};
 use bake_coding_agent::settings::Settings;
 use bake_tui_view::dialog::{
-    DialogAnswer, DialogKind, DialogRequest, FieldDialog, InfoDialog, InfoLine, ListDialog,
-    ListItem, SearchError, SearchOrder, SearchResult, SessionFilter, SessionSearch,
+    BranchSummaryChoice, DialogAnswer, DialogKind, DialogRequest, FieldDialog, InfoDialog,
+    InfoLine, ListDialog, ListItem, SearchError, SearchOrder, SearchResult, SessionFilter,
+    SessionSearch, branch_summary_instructions, branch_summary_prompt,
 };
 use bake_tui_view::runtime::RuntimeUpdate;
+use bake_tui_view::state::Outcome as TurnOutcome;
 use bake_tui_view::transcript::Row;
 use tokio::sync::mpsc;
 
@@ -158,6 +167,10 @@ pub struct Context {
     /// Builds the sessions `/new` and `/resume` replace this one with;
     /// `None` when the command line gave none.
     pub factory: Option<SessionFactory>,
+    /// The cancel of the work this command runs as the session's, shown by
+    /// the bar as a turn, such as `/tree`'s branch summary; Esc there
+    /// fires it. `None` while none runs.
+    pub work: Arc<std::sync::Mutex<Option<AbortController>>>,
     /// The asker once made, which then holds `answers`.
     shared: Option<Asker>,
     #[cfg(test)]
@@ -206,6 +219,7 @@ impl Context {
             ids,
             shown,
             factory: None,
+            work: Arc::default(),
             shared: None,
             #[cfg(test)]
             commit_gate: None,
@@ -302,11 +316,17 @@ impl Asker {
     /// Opens `kind` and waits for its answer; answers for other dialogs
     /// are dropped. A closed channel or an aborted signal reads as
     /// [`DialogAnswer::Cancel`].
-    async fn ask(self, kind: DialogKind) -> DialogAnswer {
+    ///
+    /// With `back`, Esc on the dialog only answers it, so the command can
+    /// go back a step: it is marked shown ([`Context::shown`]), which lets
+    /// Esc abort the command, only once it is answered.
+    async fn ask(self, kind: DialogKind, back: bool) -> DialogAnswer {
+        use std::sync::atomic::Ordering;
         let Some(id) = next_dialog_id(&self.ids) else {
             return DialogAnswer::Cancel;
         };
-        self.shown.store(id, std::sync::atomic::Ordering::SeqCst);
+        self.shown
+            .store(if back { 0 } else { id }, Ordering::SeqCst);
         (self.send)(RuntimeUpdate::Dialog(Some(DialogRequest { id, kind })));
         let mut answers = self.answers.lock().await;
         loop {
@@ -316,7 +336,12 @@ impl Asker {
             tokio::select! {
                 () = self.signal.cancelled() => return DialogAnswer::Cancel,
                 answer = answers.recv() => match answer {
-                    Some((answered, answer)) if answered == id => return answer,
+                    Some((answered, answer)) if answered == id => {
+                        if back && answer != DialogAnswer::Cancel {
+                            self.shown.store(id, Ordering::SeqCst);
+                        }
+                        return answer;
+                    }
                     Some(_) => {}
                     None => return DialogAnswer::Cancel,
                 },
@@ -339,7 +364,13 @@ impl Context {
     }
 
     async fn ask(&mut self, kind: DialogKind) -> DialogAnswer {
-        self.asker().ask(kind).await
+        self.asker().ask(kind, false).await
+    }
+
+    /// [`Self::ask`] for a dialog Esc steps back from, rather than
+    /// cancelling the command; once answered, Esc cancels as usual.
+    async fn ask_back(&mut self, kind: DialogKind) -> DialogAnswer {
+        self.asker().ask(kind, true).await
     }
 
     fn account(&self) -> Result<CliProxyAccount, String> {
@@ -1114,76 +1145,197 @@ async fn resume(context: &mut Context) -> Outcome {
     })
 }
 
-/// `/tree`, Pi's `showTreeSelector` without its summary prompt: the
-/// session's tree as one sheet ([`super::tree::tree_rows`]), the leaf
-/// marked current. Choosing the leaf changes nothing; choosing another
-/// entry moves the leaf there within the same file
-/// ([`AgentSession::navigate_tree`]): a user message's parent, with the
-/// message back in the draft to edit and send, or the entry itself. The
-/// branch left stays in the file unsummarized. No model request is sent.
+/// `/tree`, Pi's `showTreeSelector`: the session's tree as one sheet
+/// ([`super::tree::tree_rows`]), the leaf marked current. Choosing the leaf
+/// changes nothing. Choosing another entry asks Pi's "Summarize branch?"
+/// ([`branch_summary_prompt`]) unless `branchSummary.skipPrompt` is set:
+/// no summary, a summary, or one with custom instructions
+/// ([`branch_summary_instructions`]); Esc there goes back to the sheet, and
+/// Esc in the instructions back to the choices. The leaf then moves within
+/// the same file ([`AgentSession::navigate_tree`]): a user message's
+/// parent, with the message back in the draft to edit and send, or the
+/// entry itself. Without a summary no model request is sent and the
+/// branch left stays in the file unsummarized; with one, the summary runs
+/// as the session's work ([`navigate`]), and a cancelled summary reopens
+/// the sheet at the chosen entry, as Pi's does.
 async fn tree(context: &mut Context) -> Outcome {
-    let session = Arc::clone(&context.session);
-    let (tree, leaf) = tokio::task::spawn_blocking(move || session.session_tree())
-        .await
-        .map_err(|error| error.to_string())?;
-    if tree.nodes.is_empty() {
-        return Err("No entries in session; your draft is kept.".into());
+    let mut chosen: Option<String> = None;
+    loop {
+        let session = Arc::clone(&context.session);
+        let (tree, leaf) = tokio::task::spawn_blocking(move || session.session_tree())
+            .await
+            .map_err(|error| error.to_string())?;
+        if tree.nodes.is_empty() {
+            return Err("No entries in session; your draft is kept.".into());
+        }
+        let rows = super::tree::tree_rows(&tree, leaf.as_deref());
+        if rows.items.is_empty() {
+            return Err("No messages to navigate to yet; your draft is kept.".into());
+        }
+        let shown = rows.items.len();
+        // Pi's `showTreeSelector(entryId)`: back at the entry chosen before.
+        let selected = chosen
+            .as_deref()
+            .and_then(|id| rows.items.iter().position(|item| item.value == id))
+            .or(rows.selected);
+        let answer = context
+            .ask(DialogKind::List(ListDialog {
+                title: format!("Session tree · {shown} entr{}", if shown == 1 { "y" } else { "ies" }),
+                items: rows.items,
+                current: rows.current,
+                selected,
+                filterable: true,
+                saves_default: false,
+                note: Some(
+                    "Continue from an earlier point in this session; • marks the current path. A user message goes back into the draft."
+                        .into(),
+                ),
+                search: None,
+            }))
+            .await;
+        let DialogAnswer::Chose { value: id, .. } = answer else {
+            return Err(CANCELLED.into());
+        };
+        if context.session.leaf_id().as_deref() == Some(id.as_str()) {
+            return Ok(Done::Note("Already at this point".into()));
+        }
+        let options = if context.session.settings().branch_summary_skip_prompt {
+            TreeNavigationOptions::default()
+        } else {
+            match summary_choice(context).await {
+                Some(options) => options,
+                None => {
+                    chosen = Some(id);
+                    continue;
+                }
+            }
+        };
+        // Holds the choice before the session's commit boundary, for tests.
+        #[cfg(test)]
+        if let Some(gate) = &context.commit_gate {
+            let _ = gate.reached.send(());
+            match &gate.release {
+                Release::Notified(release) => release.notified().await,
+                Release::Aborted => context.signal.cancelled().await,
+            }
+        }
+        let navigated = match navigate(context, &id, options).await {
+            Ok(navigated) => navigated,
+            Err(error) if error == BRANCH_SUMMARY_CANCELLED && !context.signal.aborted() => {
+                (context.send)(RuntimeUpdate::Commit(vec![Row::branch_summary_cancelled()]));
+                chosen = Some(id);
+                continue;
+            }
+            Err(error) if error == NAVIGATION_CANCELLED || error == BRANCH_SUMMARY_CANCELLED => {
+                return Err(CANCELLED.to_owned());
+            }
+            Err(error) => return Err(format!("{error} Your draft is kept.")),
+        };
+        if !navigated.moved {
+            return Ok(Done::Note("Already at this point".into()));
+        }
+        return Ok(Done::Navigated {
+            note: "Navigated to selected point".into(),
+            draft: navigated.editor_text.filter(|text| !text.trim().is_empty()),
+        });
     }
-    let rows = super::tree::tree_rows(&tree, leaf.as_deref());
-    if rows.items.is_empty() {
-        return Err("No messages to navigate to yet; your draft is kept.".into());
-    }
-    let shown = rows.items.len();
-    let answer = context
-        .ask(DialogKind::List(ListDialog {
-            title: format!("Session tree · {shown} entr{}", if shown == 1 { "y" } else { "ies" }),
-            items: rows.items,
-            current: rows.current,
-            selected: rows.selected,
-            filterable: true,
-            saves_default: false,
-            note: Some(
-                "Continue from an earlier point in this session; • marks the current path. A user message goes back into the draft."
-                    .into(),
-            ),
-            search: None,
-        }))
-        .await;
-    let DialogAnswer::Chose { value: id, .. } = answer else {
-        return Err(CANCELLED.into());
-    };
-    if context.session.leaf_id().as_deref() == Some(id.as_str()) {
-        return Ok(Done::Note("Already at this point".into()));
-    }
-    // Holds the choice before the session's commit boundary, for tests.
-    #[cfg(test)]
-    if let Some(gate) = &context.commit_gate {
-        let _ = gate.reached.send(());
-        match &gate.release {
-            Release::Notified(release) => release.notified().await,
-            Release::Aborted => context.signal.cancelled().await,
+}
+
+/// Pi's branch-summary prompt of `showTreeSelector`: the navigation's
+/// options, or `None` when Esc goes back to the tree. Esc in the custom
+/// instructions goes back to the choices. Esc on these dialogs does not
+/// cancel the command ([`Context::ask_back`]).
+async fn summary_choice(context: &mut Context) -> Option<TreeNavigationOptions> {
+    loop {
+        let answer = context
+            .ask_back(DialogKind::List(branch_summary_prompt()))
+            .await;
+        let DialogAnswer::Chose { value, .. } = answer else {
+            return None;
+        };
+        match BranchSummaryChoice::from_value(&value)? {
+            BranchSummaryChoice::None => return Some(TreeNavigationOptions::default()),
+            BranchSummaryChoice::Summarize => {
+                return Some(TreeNavigationOptions {
+                    summarize: true,
+                    ..TreeNavigationOptions::default()
+                });
+            }
+            BranchSummaryChoice::Custom => {
+                let answer = context
+                    .ask_back(DialogKind::Field(branch_summary_instructions()))
+                    .await;
+                if let DialogAnswer::Entered(text) = answer {
+                    return Some(TreeNavigationOptions {
+                        summarize: true,
+                        custom_instructions: Some(text.expose().to_owned()),
+                        ..TreeNavigationOptions::default()
+                    });
+                }
+                if context.signal.aborted() {
+                    return None;
+                }
+            }
         }
     }
-    // The session checks the signal again under its lock, right before the
-    // leaf moves, so an Esc taken before then moves nothing.
-    let navigated = context
-        .session
-        .navigate_tree(&id, Some(context.signal.clone()))
-        .await
-        .map_err(|error| {
-            if error == bake_coding_agent::agent_session::NAVIGATION_CANCELLED {
-                CANCELLED.to_owned()
-            } else {
-                format!("{error} Your draft is kept.")
-            }
-        })?;
-    if !navigated.moved {
-        return Ok(Done::Note("Already at this point".into()));
+}
+
+/// Moves the leaf to `id` with `options` ([`AgentSession::navigate_tree`]).
+/// The session checks the command's signal again under its lock, right
+/// before the leaf moves, so an Esc taken before then moves nothing.
+///
+/// A summary runs as the session's work, as Pi's
+/// `BranchSummaryStatusIndicator` shows it: the dialog closes, the bar
+/// shows a turn summarizing the branch, and Esc there cancels the summary
+/// through [`Context::work`], as Pi's `abortBranchSummary` does; so does
+/// the command's own cancel.
+async fn navigate(
+    context: &Context,
+    id: &str,
+    options: TreeNavigationOptions,
+) -> Result<TreeNavigation, String> {
+    if !options.summarize {
+        return context
+            .session
+            .navigate_tree(id, options, Some(context.signal.clone()))
+            .await;
     }
-    Ok(Done::Navigated {
-        note: "Navigated to selected point".into(),
-        draft: navigated.editor_text.filter(|text| !text.trim().is_empty()),
-    })
+    (context.send)(RuntimeUpdate::Dialog(None));
+    context.shown.store(0, std::sync::atomic::Ordering::SeqCst);
+    let work = AbortController::new();
+    *lock_work(&context.work) = Some(work.clone());
+    (context.send)(RuntimeUpdate::TurnStarted {
+        seed: format!("{}-tree-{id}", context.session.session_id()),
+    });
+    (context.send)(RuntimeUpdate::summarizing_branch());
+    let navigation = context
+        .session
+        .navigate_tree(id, options, Some(work.signal()));
+    tokio::pin!(navigation);
+    let result = tokio::select! {
+        biased;
+        result = &mut navigation => result,
+        () = context.signal.cancelled() => {
+            work.abort();
+            navigation.await
+        }
+    };
+    *lock_work(&context.work) = None;
+    (context.send)(RuntimeUpdate::TurnEnded(match &result {
+        Ok(_) => TurnOutcome::Completed,
+        Err(error) if error == BRANCH_SUMMARY_CANCELLED || error == NAVIGATION_CANCELLED => {
+            TurnOutcome::Interrupted
+        }
+        Err(_) => TurnOutcome::Failed,
+    }));
+    result
+}
+
+fn lock_work(
+    work: &std::sync::Mutex<Option<AbortController>>,
+) -> std::sync::MutexGuard<'_, Option<AbortController>> {
+    work.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// `/compact [instructions]`, Pi's `handleCompactCommand` with an idle-only
@@ -1381,7 +1533,7 @@ async fn login(context: &mut Context) -> Outcome {
                     initial,
                     error: prompt.error.clone(),
                 });
-                let asked = asker.clone().ask(kind);
+                let asked = asker.clone().ask(kind, false);
                 async move {
                     match asked.await {
                         DialogAnswer::Entered(text) => Ok(text.expose().to_owned()),

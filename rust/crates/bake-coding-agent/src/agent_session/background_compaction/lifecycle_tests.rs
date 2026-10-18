@@ -406,7 +406,14 @@ async fn manual_compaction_and_navigation_wait_for_speculative_provider_cleanup(
             let session = Arc::clone(&session);
             tokio::spawn(async move {
                 if navigate {
-                    session.navigate_tree(&target, None).await.map(|_| ())
+                    session
+                        .navigate_tree(
+                            &target,
+                            crate::agent_session::TreeNavigationOptions::default(),
+                            None,
+                        )
+                        .await
+                        .map(|_| ())
                 } else {
                     session
                         .compact_when_idle(None, AbortController::new().signal())

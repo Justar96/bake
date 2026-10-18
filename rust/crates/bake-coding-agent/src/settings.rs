@@ -5,7 +5,8 @@
 //! the settings a session uses: the default provider, model, and thinking
 //! level, per-model thinking levels, the queue modes, the session
 //! directory, `blockImages`, `images.autoResize`, `defaultTools`, `compaction`
-//! (with per-model overrides), `branchSummary.reserveTokens`, and `retry`,
+//! (with per-model overrides), `branchSummary.reserveTokens` and
+//! `branchSummary.skipPrompt`, and `retry`,
 //! and Bake's own `permission` section ([`crate::permissions`]) and
 //! `maxToolArgumentWhitespace` (Bake's route option in
 //! `packages/llm/llm-pi-ai/src/config.ts`). Pi reads `~/.pi/agent/settings.json` and
@@ -109,6 +110,9 @@ pub struct Settings {
     pub context_masking: bool,
     /// `branchSummary.reserveTokens`.
     pub branch_summary_reserve_tokens: u64,
+    /// `branchSummary.skipPrompt`: `/tree` navigates without asking whether
+    /// to summarize the branch it leaves. Defaults to false.
+    pub branch_summary_skip_prompt: bool,
     /// `retry`.
     pub retry: RetrySettings,
     /// `permission` as stored (`presets` and `defaultPreset`), read by
@@ -224,6 +228,7 @@ impl Default for Settings {
             background_compaction: false,
             context_masking: false,
             branch_summary_reserve_tokens: DEFAULT_BRANCH_SUMMARY_RESERVE_TOKENS,
+            branch_summary_skip_prompt: false,
             retry: RetrySettings::default(),
             permission: None,
             max_tool_argument_whitespace: None,
@@ -456,6 +461,11 @@ impl Settings {
                 .and_then(|summary| summary.get("reserveTokens"))
                 .and_then(Value::as_u64)
                 .unwrap_or(DEFAULT_BRANCH_SUMMARY_RESERVE_TOKENS),
+            branch_summary_skip_prompt: object
+                .get("branchSummary")
+                .and_then(|summary| summary.get("skipPrompt"))
+                .and_then(Value::as_bool)
+                == Some(true),
             retry: RetrySettings::from_value(object.get("retry")),
             permission: object.get("permission").cloned(),
             max_tool_argument_whitespace: object
@@ -1100,9 +1110,10 @@ mod tests {
                 }
             );
             assert_eq!(manager.branch_summary_reserve_tokens, 16384);
+            assert!(!manager.branch_summary_skip_prompt);
             let manager = settings(json!({
                 "retry": { "enabled": false, "maxRetries": 5, "baseDelayMs": 1, "maxAgentDelayMs": 5 },
-                "branchSummary": { "reserveTokens": 100 },
+                "branchSummary": { "reserveTokens": 100, "skipPrompt": true },
             }));
             assert_eq!(
                 manager.retry,
@@ -1114,6 +1125,7 @@ mod tests {
                 }
             );
             assert_eq!(manager.branch_summary_reserve_tokens, 100);
+            assert!(manager.branch_summary_skip_prompt);
         }
     }
 

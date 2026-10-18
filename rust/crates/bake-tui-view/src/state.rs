@@ -2591,6 +2591,125 @@ mod tests {
         assert_eq!(state.draft.text(), "draft!");
     }
 
+    // Pi `showTreeSelector`'s branch-summary prompt: "Summarize branch?"
+    // lists no summary, a summary, and a summary with a custom prompt, the
+    // first selected and none marked current; ↓ and Enter answer with the
+    // choice's value, and Esc goes back. The custom-instructions field
+    // answers with what was typed, which never reaches the draft.
+    #[test]
+    fn the_branch_summary_prompt_answers_with_each_choice() {
+        use crate::dialog::{
+            BranchSummaryChoice, DialogKind, DialogRequest, branch_summary_instructions,
+            branch_summary_prompt,
+        };
+        let prompt = branch_summary_prompt();
+        assert_eq!(prompt.title, "Summarize branch?");
+        let labels: Vec<&str> = prompt
+            .items
+            .iter()
+            .map(|item| item.label.as_str())
+            .collect();
+        assert_eq!(
+            labels,
+            ["No summary", "Summarize", "Summarize with custom prompt"]
+        );
+        assert_eq!((prompt.selected, prompt.current), (Some(0), None));
+        assert!(!prompt.filterable && !prompt.saves_default);
+
+        let mut state = live();
+        type_str(&mut state, "draft");
+        for (id, downs, choice) in [
+            (1, 0, BranchSummaryChoice::None),
+            (2, 1, BranchSummaryChoice::Summarize),
+            (3, 2, BranchSummaryChoice::Custom),
+        ] {
+            runtime(
+                &mut state,
+                RuntimeUpdate::Dialog(Some(DialogRequest {
+                    id,
+                    kind: DialogKind::List(branch_summary_prompt()),
+                })),
+            );
+            hand_off(&mut state);
+            for _ in 0..downs {
+                press(&mut state, Key::Down);
+            }
+            let effects = press(&mut state, Key::Enter);
+            let [
+                Effect::Dialog {
+                    id: answered,
+                    answer,
+                },
+            ] = &effects[..]
+            else {
+                panic!("{effects:?}");
+            };
+            assert_eq!(*answered, id);
+            let DialogAnswer::Chose {
+                value,
+                save_default,
+            } = answer
+            else {
+                panic!("{answer:?}");
+            };
+            assert_eq!(BranchSummaryChoice::from_value(value), Some(choice));
+            assert!(!save_default);
+        }
+        assert_eq!(BranchSummaryChoice::from_value("other"), None);
+
+        runtime(
+            &mut state,
+            RuntimeUpdate::Dialog(Some(DialogRequest {
+                id: 4,
+                kind: DialogKind::Field(branch_summary_instructions()),
+            })),
+        );
+        hand_off(&mut state);
+        type_str(&mut state, "keep the numbers");
+        assert_eq!(
+            press(&mut state, Key::Enter),
+            [Effect::Dialog {
+                id: 4,
+                answer: DialogAnswer::Entered("keep the numbers".to_owned().into()),
+            }]
+        );
+        runtime(
+            &mut state,
+            RuntimeUpdate::Dialog(Some(DialogRequest {
+                id: 5,
+                kind: DialogKind::List(branch_summary_prompt()),
+            })),
+        );
+        hand_off(&mut state);
+        assert_eq!(
+            press(&mut state, Key::Esc),
+            [Effect::Dialog {
+                id: 5,
+                answer: DialogAnswer::Cancel,
+            }]
+        );
+        runtime(&mut state, RuntimeUpdate::Dialog(None));
+        hand_off(&mut state);
+        assert_eq!(state.draft.text(), "draft");
+    }
+
+    // Pi's `BranchSummaryStatusIndicator`: while `/tree` summarizes, the
+    // runtime's turn shows the phase and Esc reaches the runtime as a
+    // cancel; the summary replays as Pi's collapsed branch row.
+    #[test]
+    fn a_branch_summary_runs_as_cancellable_work() {
+        let mut state = live();
+        runtime(&mut state, RuntimeUpdate::TurnStarted { seed: "s".into() });
+        runtime(&mut state, RuntimeUpdate::summarizing_branch());
+        assert_eq!(state.phase.as_deref(), Some("summarizing branch"));
+        assert_eq!(state.mode(), Mode::Running);
+        assert_eq!(press(&mut state, Key::Esc), [Effect::Cancel]);
+        assert_eq!(
+            Row::branch_summary(),
+            Row::Info("[branch] Branch summary".into())
+        );
+    }
+
     // Pi `AgentSessionRuntime` replacement and its interactive mode's
     // `renderInitialMessages`: the transcript starts over with the new
     // session's rows, its epoch moves so a normal-screen writer publishes

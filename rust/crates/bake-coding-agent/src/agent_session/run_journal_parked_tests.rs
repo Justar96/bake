@@ -58,7 +58,10 @@ async fn parked_recoverable_waiters_keep_their_answer_after_branch_navigation() 
         tokio::time::timeout(Duration::from_secs(10), session.core.wait_for_idle())
             .await
             .expect("owned execution settled while its caller stayed parked");
-        session.navigate_tree(&earlier, None).await.unwrap();
+        session
+            .navigate_tree(&earlier, TreeNavigationOptions::default(), None)
+            .await
+            .unwrap();
         let result = caller.await.unwrap();
         session.shutdown().await;
         assert_eq!(result.outcome, RunOutcome::FinishedTurn, "resume={resume}");

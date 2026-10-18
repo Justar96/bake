@@ -421,6 +421,9 @@ struct CommandRun {
     task: JoinHandle<commands::Outcome>,
     /// The dialog this command shows ([`commands::Context::shown`]).
     shown: Arc<std::sync::atomic::AtomicU64>,
+    /// The cancel of the work it runs as the session's
+    /// ([`commands::Context::work`]).
+    work: Arc<std::sync::Mutex<Option<AbortController>>>,
     answers: mpsc::UnboundedSender<(u64, DialogAnswer)>,
     abort: AbortController,
     id: Option<u64>,
@@ -765,6 +768,8 @@ impl Driver {
                 if let Some(command) = self.command.as_ref().filter(|command| command.transition) {
                     let reason = if command.name == commands::COMPACT {
                         "The session is being compacted; your draft is kept."
+                    } else if command.name == "tree" {
+                        bake_tui_view::runtime::TREE_BEING_NAVIGATED
                     } else {
                         "The session is being replaced; your draft is kept."
                     };
@@ -799,6 +804,18 @@ impl Driver {
                     .filter(|command| command.name == commands::COMPACT)
                 {
                     command.abort.abort();
+                    return;
+                }
+                // `/tree`'s branch summary runs as the session's work: Esc
+                // cancels it, as Pi's `abortBranchSummary` does.
+                if let Some(work) = self.command.as_ref().and_then(|command| {
+                    command
+                        .work
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .clone()
+                }) {
+                    work.abort();
                     return;
                 }
                 let Some(run) = running.as_mut().filter(|run| !run.cancelled) else {
@@ -959,6 +976,7 @@ impl Driver {
             Arc::clone(&shown),
         );
         let context = context.with_factory(self.factory.clone());
+        let work = Arc::clone(&context.work);
         #[cfg(test)]
         let context = context.with_commit_gate(self.commit_gate.clone());
         // The bar shows `/compact` as the running work, so Esc reaches it
@@ -977,6 +995,7 @@ impl Driver {
         self.command = Some(CommandRun {
             task,
             shown,
+            work,
             answers,
             abort,
             id,

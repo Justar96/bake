@@ -100,6 +100,20 @@ pub struct Nested {
     pub note: Option<String>,
 }
 
+impl Row {
+    /// A branch summary in a replayed transcript, Pi's collapsed
+    /// `BranchSummaryMessageComponent`.
+    pub fn branch_summary() -> Self {
+        Self::Info(copy::BRANCH_SUMMARY_ROW.to_owned())
+    }
+
+    /// The note of a cancelled `/tree` branch summary, Pi's status after
+    /// `abortBranchSummary`.
+    pub fn branch_summary_cancelled() -> Self {
+        Self::Info(copy::BRANCH_SUMMARY_CANCELLED_ROW.to_owned())
+    }
+}
+
 /// The fixed sample session the preview opens with; nothing in it ran.
 pub fn sample_session() -> Vec<Row> {
     let call =

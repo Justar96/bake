@@ -888,6 +888,8 @@ pub fn replay(messages: &[AgentMessage]) -> Vec<Row> {
             }
         } else if message.role() == "compactionSummary" {
             rows.push(Row::Info("Earlier conversation was compacted".into()));
+        } else if message.role() == "branchSummary" {
+            rows.push(Row::branch_summary());
         } else if let Some(row) = notice_row(message, &labels) {
             rows.push(row);
         }

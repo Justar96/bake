@@ -1,7 +1,10 @@
 //! Dialogs a live runtime opens over the composer: a list to choose from,
-//! for `/model`, `/thinking`, `/settings`, `/resume`, `/tree`, and `/fork`; a one-line field,
-//! for the CLIProxyAPI sign-in's address and key and `/name`; and a
-//! read-only information sheet, for `/session`.
+//! for `/model`, `/thinking`, `/settings`, `/resume`, `/tree`, `/tree`'s
+//! branch-summary prompt ([`branch_summary_prompt`]), and `/fork`; a
+//! one-line field, for the CLIProxyAPI sign-in's address and key, `/name`,
+//! and a branch summary's custom instructions
+//! ([`branch_summary_instructions`]); and a read-only information sheet,
+//! for `/session`.
 //!
 //! The list follows Pi v1.2.0's selectors
 //! (`packages/coding-agent/src/modes/interactive/components/model-selector.ts`,
@@ -230,6 +233,79 @@ pub struct FieldDialog {
     /// Why the last answer was not taken, shown under the field. A runtime
     /// never puts a secret here.
     pub error: Option<String>,
+}
+
+/// A choice of Pi's branch-summary prompt ([`branch_summary_prompt`]),
+/// answered by its [`Self::value`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BranchSummaryChoice {
+    /// Navigate without a summary.
+    None,
+    /// Summarize the branch left with Pi's prompt.
+    Summarize,
+    /// Summarize with instructions from [`branch_summary_instructions`].
+    Custom,
+}
+
+impl BranchSummaryChoice {
+    /// The choices in Pi's order.
+    pub const ALL: [Self; 3] = [Self::None, Self::Summarize, Self::Custom];
+
+    /// The value a list answer names.
+    pub fn value(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Summarize => "summarize",
+            Self::Custom => "custom",
+        }
+    }
+
+    /// The choice a list answer names.
+    pub fn from_value(value: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|choice| choice.value() == value)
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::None => crate::copy::BRANCH_SUMMARY_NONE,
+            Self::Summarize => crate::copy::BRANCH_SUMMARY_SUMMARIZE,
+            Self::Custom => crate::copy::BRANCH_SUMMARY_CUSTOM,
+        }
+    }
+}
+
+/// Pi's "Summarize branch?" selector, asked after a `/tree` target is
+/// chosen: no summary, a summary, or a summary with custom instructions,
+/// the first selected.
+pub fn branch_summary_prompt() -> ListDialog {
+    ListDialog {
+        title: crate::copy::BRANCH_SUMMARY_TITLE.to_owned(),
+        items: BranchSummaryChoice::ALL
+            .into_iter()
+            .map(|choice| ListItem {
+                value: choice.value().to_owned(),
+                label: choice.label().to_owned(),
+                ..ListItem::default()
+            })
+            .collect(),
+        current: None,
+        selected: Some(0),
+        filterable: false,
+        saves_default: false,
+        note: None,
+        search: None,
+    }
+}
+
+/// Pi's "Custom summarization instructions" editor, as a one-line field.
+pub fn branch_summary_instructions() -> FieldDialog {
+    FieldDialog {
+        title: crate::copy::BRANCH_SUMMARY_INSTRUCTIONS.to_owned(),
+        prompt: crate::copy::BRANCH_SUMMARY_INSTRUCTIONS_PROMPT.to_owned(),
+        secret: false,
+        initial: String::new(),
+        error: None,
+    }
 }
 
 /// What a dialog asks.

@@ -2174,6 +2174,10 @@ for (const inline of [false, true]) {
     await type(session, 'user: echo beta', typed => session.screen.includes(`> ${'user: echo beta'.slice(0, typed)}`))
     await session.wait('one match', () => session.screen.includes('1/1'))
     session.send('\r')
+    // Pi's branch-summary prompt; Enter takes its first choice, no summary.
+    await sheetReady(session, 'Summarize branch?')
+    assert(session.screen.includes('No summary') && session.screen.includes('Summarize with custom prompt'), session.screen)
+    session.send('\r')
     // The chosen message is back in the draft, unsent, and the transcript replays the path before it.
     await session.wait('navigated', () => session.screen.includes('❯ ECHO beta') && !session.screen.includes('Echo: beta.')
       && session.screen.includes('Echo: alpha.') && !session.screen.includes('Session tree'))
@@ -2239,6 +2243,75 @@ for (const inline of [false, true]) {
     assert.equal(parentOf('ECHO beta'), parentOf('ECHO gamma'), 'beta and gamma are not siblings in the source log')
     const header = fork[0] as { type?: string; parentSession?: string }
     assert(header.type === 'session' && typeof header.parentSession === 'string' && header.parentSession.endsWith('.jsonl'), 'the fork does not name its source')
+    assert.deepEqual(await readdir(world.project), [], 'the session wrote into the project')
+  })
+}
+
+for (const inline of [false, true]) {
+  await liveScenario(`${inline ? 'inline ' : ''}tree branch summaries run as cancellable work, reopen the tree on Esc, and reach the next request`, async (world) => {
+    const port = world.model.port
+    await writeFile(join(world.home, 'models.json'), JSON.stringify({
+      providers: { loop: { baseUrl: `http://127.0.0.1:${port}/v1`, api: 'openai-responses', apiKey: 'test-key',
+        models: [{ id: 'loop-model', name: 'Loop', contextWindow: 1000 }] } },
+    }))
+    await writeFile(join(world.home, 'settings.json'), JSON.stringify({ compaction: { enabled: false }, retry: { enabled: false } }))
+    const session = world.launch([], inline)
+    await session.ready()
+    session.send('ECHO alpha\r')
+    await turnSettled(session, 'Echo: alpha.')
+    session.send('ECHO beta\r')
+    await turnSettled(session, 'Echo: beta.')
+    await composerReady(session)
+    const requests = world.model.requests.length
+    const summaries = async (): Promise<Record<string, unknown>[]> => (await sessionEntries(world.home)).flat().filter(entry => entry.type === 'branch_summary')
+
+    // A custom prompt holds the summary request; Esc aborts it, writes nothing, and reopens the tree at the choice.
+    session.send('/tree\r')
+    await sheetReady(session, 'Session tree')
+    await type(session, 'user: echo beta', typed => session.screen.includes(`> ${'user: echo beta'.slice(0, typed)}`))
+    await session.wait('one match', () => session.screen.includes('1/1'))
+    session.send('\r')
+    await sheetReady(session, 'Summarize branch?')
+    // Only a fresh Enter answers a sheet, never one read in a burst with the arrows.
+    session.send('\x1b[B\x1b[B')
+    await session.wait('custom prompt selected', () => session.screen.includes('▸ Summarize with custom prompt'))
+    session.send('\r')
+    await sheetReady(session, 'Custom summarization instructions')
+    await type(session, 'HOLD-SUMMARY', typed => session.screen.includes('HOLD-SUMMARY'.slice(0, typed)))
+    session.send('\r')
+    // The closed sheet hands the keyboard back before Esc reaches the summary.
+    await session.wait('summarizing', () => world.model.holding === 1 && session.screen.includes('summarizing branch')
+      && !session.screen.includes('Custom summarization instructions') && !session.screen.includes('Preparing'))
+    session.send('\x1b')
+    await sheetReady(session, 'Session tree')
+    assert.equal(world.model.aborted, 1, 'the summary request was not aborted')
+    assert.equal(world.model.requests.length, requests + 1, 'a cancelled summary sent more than its request')
+    assert(String(JSON.stringify(world.model.requests[requests]?.input)).includes('Additional focus: HOLD-SUMMARY'), 'the custom prompt is missing')
+    assert.deepEqual(await summaries(), [], 'a cancelled summary was written')
+
+    // The tree reopened at the chosen message: Enter takes it again, and Summarize writes the summary.
+    session.send('\r')
+    await sheetReady(session, 'Summarize branch?')
+    session.send('\x1b[B')
+    await session.wait('summarize selected', () => /▸ Summarize(?! with)/u.test(session.screen))
+    session.send('\r')
+    await session.wait('navigated with a summary', () => session.screen.includes('[branch] Branch summary')
+      && session.screen.includes('❯ ECHO beta') && !session.screen.includes('Summarize branch?'))
+    await composerReady(session)
+    assert.equal(world.model.requests.length, requests + 2, 'expected one more summary request')
+    session.send('\x15')
+    await session.wait('draft cleared', () => !session.screen.includes('❯ ECHO beta'))
+    const before = world.model.requests.length
+    session.send('ECHO gamma\r')
+    await turnSettled(session, 'Echo: gamma.')
+    const sent = JSON.stringify(world.model.requests[before]?.input)
+    assert(sent.includes('summary of a branch') && sent.includes('the greek letters so far') && sent.includes('ECHO alpha') && !sent.includes('ECHO beta'),
+      `the request after the summary: ${sent}`)
+    await session.quit()
+    if (inline) session.assertShellHistory()
+    const written = await summaries()
+    assert.equal(written.length, 1, 'expected one branch summary')
+    assert(String(written[0]?.summary).includes('Summary: the greek letters so far.'), 'the summary text is missing')
     assert.deepEqual(await readdir(world.project), [], 'the session wrote into the project')
   })
 }

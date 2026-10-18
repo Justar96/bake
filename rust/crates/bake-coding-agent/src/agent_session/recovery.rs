@@ -62,6 +62,16 @@ pub enum CompactionReason {
     Overflow,
 }
 
+/// What a summarization retry belongs to, Pi's retry callbacks' `source`
+/// (`_summarizationRetryCallbacks`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SummarizationSource {
+    /// A compaction, with its reason.
+    Compaction(CompactionReason),
+    /// A branch summary of [`super::AgentSession::navigate_tree`].
+    BranchSummary,
+}
+
 impl CompactionReason {
     /// Pi's spelling.
     pub fn as_str(self) -> &'static str {
@@ -319,6 +329,8 @@ pub(super) struct RunState {
     pub compaction_abort: Option<AbortController>,
     /// `_autoCompactionAbortController`.
     pub auto_compaction_abort: Option<AbortController>,
+    /// `_branchSummaryAbortController`.
+    pub branch_summary_abort: Option<AbortController>,
 }
 
 /// Selects one of [`RunState`]'s abort controllers.
@@ -731,8 +743,11 @@ impl Core {
         }
     }
 
-    /// Pi's `_summarizationRetryCallbacks` for compaction.
-    fn summarization_observer(self: &Arc<Self>, reason: CompactionReason) -> RetryObserver {
+    /// Pi's `_summarizationRetryCallbacks`.
+    pub(super) fn summarization_observer(
+        self: &Arc<Self>,
+        source: SummarizationSource,
+    ) -> RetryObserver {
         let listeners = Arc::clone(&self.listeners);
         Arc::new(move |event| match event {
             RetryEvent::Scheduled {
@@ -747,7 +762,7 @@ impl Core {
                 error_message,
             }),
             RetryEvent::AttemptStart => {
-                listeners.emit(&SessionEvent::SummarizationRetryAttemptStart { reason });
+                listeners.emit(&SessionEvent::SummarizationRetryAttemptStart { source });
             }
             RetryEvent::Finished { .. } => {
                 listeners.emit(&SessionEvent::SummarizationRetryFinished);
@@ -782,7 +797,7 @@ impl Core {
             signal: Some(controller.signal()),
             thinking_level: self.agent().map(|agent| agent.thinking_level()),
             retry: Some(super::read_settings(&self.settings).retry.policy()),
-            on_retry: Some(self.summarization_observer(reason)),
+            on_retry: Some(self.summarization_observer(SummarizationSource::Compaction(reason))),
             ..SummarizationOptions::default()
         };
         let mut result = compact(
@@ -1332,13 +1347,14 @@ impl Core {
         Ok(true)
     }
 
-    /// Pi's `abortRetry` and `abortCompaction`.
+    /// Pi's `abortRetry`, `abortCompaction`, and `abortBranchSummary`.
     pub fn abort_retry_and_compaction(&self) {
         let state = self.state();
         for controller in [
             &state.retry_abort,
             &state.compaction_abort,
             &state.auto_compaction_abort,
+            &state.branch_summary_abort,
         ]
         .into_iter()
         .flatten()

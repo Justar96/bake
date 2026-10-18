@@ -10,7 +10,7 @@ use bake_ai::{AssistantContentBlock, AssistantMessageEvent};
 use serde::Serialize;
 use serde_json::{Map, Value};
 
-use crate::agent_session::SessionEvent;
+use crate::agent_session::{SessionEvent, SummarizationSource};
 
 fn to_value(value: &impl Serialize) -> Value {
     serde_json::to_value(value).unwrap_or(Value::Null)
@@ -255,10 +255,17 @@ pub fn session_event_json(event: &SessionEvent<'_>) -> Value {
             out.insert("errorMessage".into(), error_message.clone().into());
             Value::Object(out)
         }
-        SessionEvent::SummarizationRetryAttemptStart { reason } => {
+        SessionEvent::SummarizationRetryAttemptStart { source } => {
             let mut out = object("summarization_retry_attempt_start");
-            out.insert("source".into(), "compaction".into());
-            out.insert("reason".into(), reason.as_str().into());
+            match source {
+                SummarizationSource::Compaction(reason) => {
+                    out.insert("source".into(), "compaction".into());
+                    out.insert("reason".into(), reason.as_str().into());
+                }
+                SummarizationSource::BranchSummary => {
+                    out.insert("source".into(), "branchSummary".into());
+                }
+            }
             Value::Object(out)
         }
         SessionEvent::SummarizationRetryFinished => {
@@ -455,9 +462,15 @@ mod tests {
         );
         assert_eq!(
             line(SessionEvent::SummarizationRetryAttemptStart {
-                reason: CompactionReason::Manual
+                source: SummarizationSource::Compaction(CompactionReason::Manual)
             }),
             r#"{"type":"summarization_retry_attempt_start","source":"compaction","reason":"manual"}"#
+        );
+        assert_eq!(
+            line(SessionEvent::SummarizationRetryAttemptStart {
+                source: SummarizationSource::BranchSummary
+            }),
+            r#"{"type":"summarization_retry_attempt_start","source":"branchSummary"}"#
         );
         assert_eq!(
             line(SessionEvent::SummarizationRetryFinished),

@@ -63,6 +63,28 @@ pub const DIALOG_INFO_KEYS: &str = "Enter or Esc close";
 pub const DIALOG_WAITING: &str = "Working… · Esc cancels";
 pub const DIALOG_PREPARING: &str = "Preparing… · Esc cancels";
 pub const DRAFT_KEPT: &str = "draft kept · Esc returns";
+/// Pi's branch-summary prompt after a `/tree` target is chosen
+/// (`interactive-mode.ts` `showTreeSelector`): its title, its three
+/// choices, and the custom-instructions editor's title, with the line
+/// under it.
+pub const BRANCH_SUMMARY_TITLE: &str = "Summarize branch?";
+pub const BRANCH_SUMMARY_NONE: &str = "No summary";
+pub const BRANCH_SUMMARY_SUMMARIZE: &str = "Summarize";
+pub const BRANCH_SUMMARY_CUSTOM: &str = "Summarize with custom prompt";
+pub const BRANCH_SUMMARY_INSTRUCTIONS: &str = "Custom summarization instructions";
+pub const BRANCH_SUMMARY_INSTRUCTIONS_PROMPT: &str =
+    "What the summary should focus on; Esc goes back to the choices";
+/// The bar's phase while a branch is summarized, Pi's
+/// `BranchSummaryStatusIndicator`; Esc cancels it.
+pub const SUMMARIZING_BRANCH: &str = "summarizing branch";
+/// The transcript row of a cancelled branch summary, Pi's status after
+/// `abortBranchSummary`, before the tree reopens.
+pub const BRANCH_SUMMARY_CANCELLED_ROW: &str = "Branch summarization cancelled";
+/// The refusal of a prompt sent while `/tree` navigates.
+pub const TREE_BEING_NAVIGATED: &str = "The session tree is being navigated; your draft is kept.";
+/// A branch summary in the transcript, Pi's collapsed
+/// `BranchSummaryMessageComponent` without its expand key.
+pub const BRANCH_SUMMARY_ROW: &str = "[branch] Branch summary";
 /// Phases a sample turn steps through, one every [`PHASE_SECONDS`].
 pub const SAMPLE_PHASES: &[&str] = &["thinking", "writing", "running bash", "running subagent +2"];
 /// The header's word while history is compacted, and the phases it steps through.

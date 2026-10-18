@@ -1086,6 +1086,18 @@ fn a_driver_panic_after_new_shuts_down_the_session_in_use() {
     assert_eq!(texts(&second, "user"), ["second"]);
 }
 
+/// Answers `/tree`'s "Summarize branch?" with "No summary", returning
+/// the prompt.
+fn no_summary(h: &Harness) -> DialogRequest {
+    let prompt = h.next_dialog();
+    let DialogKind::List(list) = &prompt.kind else {
+        panic!("{prompt:?}");
+    };
+    assert_eq!(list.title, "Summarize branch?");
+    h.choose_answer(prompt.id, choose(&prompt, "No summary"));
+    prompt
+}
+
 fn restored(updates: &[RuntimeUpdate]) -> Option<String> {
     updates.iter().find_map(|update| match update {
         RuntimeUpdate::Restored(text) => Some(text.clone()),
@@ -1115,6 +1127,7 @@ fn tree_moves_the_leaf_and_the_next_prompt_branches_in_the_same_file() {
     assert_eq!(list.items[current].label, "• assistant: Echo: beta.");
     assert!(list.filterable);
     h.choose_answer(dialog.id, choose(&dialog, "• user: beta"));
+    no_summary(&h);
     let mut updates = h.ended(3);
     updates.extend(h.until(|u| matches!(u, RuntimeUpdate::Status(_))));
     let rows = replaced(&updates).expect("replaced");
@@ -1431,8 +1444,9 @@ fn an_esc_before_the_tree_commit_moves_nothing() {
     h.submit_id(3, Submission::FollowUp("/tree".into()));
     let dialog = h.next_dialog();
     h.choose_answer(dialog.id, choose(&dialog, "• user: beta"));
+    let prompt = no_summary(&h);
     reached.recv_timeout(PATIENCE).expect("chosen and held");
-    h.choose_answer(dialog.id, DialogAnswer::Cancel);
+    h.choose_answer(prompt.id, DialogAnswer::Cancel);
     let updates = h.ended(3);
     assert_eq!(refused(&updates).as_deref(), Some(commands::CANCELLED));
     assert!(replaced(&updates).is_none());
@@ -1446,3 +1460,6 @@ fn an_esc_before_the_tree_commit_moves_nothing() {
 
 #[path = "compact_live.rs"]
 mod compact_live;
+
+#[path = "tree_live.rs"]
+mod tree_live;

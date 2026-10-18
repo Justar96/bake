@@ -170,3 +170,14 @@ pub enum RuntimeUpdate {
     /// changes; an empty list hides the row under the composer.
     Jobs(Vec<BackgroundJob>),
 }
+
+/// The refusal of a prompt sent while `/tree` navigates, its draft kept.
+pub const TREE_BEING_NAVIGATED: &str = crate::copy::TREE_BEING_NAVIGATED;
+
+impl RuntimeUpdate {
+    /// The bar's phase while `/tree` summarizes the branch it leaves, Pi's
+    /// `BranchSummaryStatusIndicator`.
+    pub fn summarizing_branch() -> Self {
+        Self::Phase(crate::copy::SUMMARIZING_BRANCH.to_owned())
+    }
+}

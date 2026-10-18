@@ -86,12 +86,14 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 
 pub use background_compaction::BackgroundCompactionStatus;
 pub use navigation::{
-    ForkPoint, ForkPosition, ForkedSession, NAVIGATION_CANCELLED, NAVIGATION_WHILE_BUSY,
-    NAVIGATION_WHILE_STREAMING, TreeNavigation,
+    BRANCH_SUMMARY_CANCELLED, ForkPoint, ForkPosition, ForkedSession, NAVIGATION_CANCELLED,
+    NAVIGATION_WHILE_BUSY, NAVIGATION_WHILE_STREAMING, NO_SUMMARY_MODEL, TreeNavigation,
+    TreeNavigationOptions,
 };
 use recovery::{Activity, Core, RunState};
 pub use recovery::{
     COMPACTION_CANCELLED, COMPACTION_WHILE_BUSY, COMPACTION_WHILE_STREAMING, CompactionReason,
+    SummarizationSource,
 };
 pub use run_journal::{RecoverableRunResult, RunRecovery, RunRecoveryDisposition};
 
@@ -478,10 +480,10 @@ pub enum SessionEvent<'a> {
         /// The error retried.
         error_message: String,
     },
-    /// Pi's `summarization_retry_attempt_start` of a compaction.
+    /// Pi's `summarization_retry_attempt_start`.
     SummarizationRetryAttemptStart {
-        /// The compaction's reason.
-        reason: CompactionReason,
+        /// The compaction, with its reason, or the branch summary retried.
+        source: SummarizationSource,
     },
     /// Pi's `summarization_retry_finished`.
     SummarizationRetryFinished,
@@ -2888,6 +2890,8 @@ impl AgentSession {
 mod control_tests;
 #[cfg(test)]
 mod job_tests;
+#[cfg(test)]
+mod navigation_summary_tests;
 #[cfg(test)]
 mod navigation_tests;
 #[cfg(test)]
