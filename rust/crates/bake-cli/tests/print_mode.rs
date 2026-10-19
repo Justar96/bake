@@ -569,7 +569,8 @@ fn print_mode_answers_saves_and_continues() {
             "job_list",
             "job_kill",
             "web_search",
-            "web_fetch"
+            "web_fetch",
+            "codemode"
         ]
     );
     assert_eq!(first_input[1], "user: Say hi");
@@ -1394,7 +1395,8 @@ fn print_mode_runs_the_bash_tool() {
             "job_list",
             "job_kill",
             "web_search",
-            "web_fetch"
+            "web_fetch",
+            "codemode"
         ]
     );
     let input = requests[1].body["input"].as_array().expect("input");

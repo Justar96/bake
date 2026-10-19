@@ -12,13 +12,13 @@ bake-rs reads its settings from `settings.json` in the Bake home, a JSON object 
 | `modelThinkingLevels` | Thinking levels for particular models, keyed `provider/id`, used when a new session is given no thinking level |
 | `steeringMode`, `followUpMode` | How prompts sent while a turn runs are delivered: `one-at-a-time` (the default) or `all` at the next step |
 | `cliproxyapi` | The CLIProxyAPI account's route, or `null` once signed out; written by `/login` (`bake-rs docs models`) |
-| `defaultTools` | The tool names a session starts with, in place of `read`, `bash`, `edit`, `write`, the job tools, and the web tools `web_search` and `web_fetch`; `+name` and `-name` add to or remove from `read`, `bash`, `edit`, and `write` |
+| `defaultTools` | The tool names a session starts with, in place of `read`, `bash`, `edit`, `write`, the job tools, the web tools `web_search` and `web_fetch`, and `codemode`; `+name` and `-name` add to or remove from `read`, `bash`, `edit`, and `write` |
 | `webSearch.model` | The CLIProxyAPI route model `web_search` runs on: the id of one of the route's Anthropic Messages models, with or without `cliproxyapi/` |
 | `maxConcurrentReadTools` | Optional integer from 1 to 64; bounds concurrent native read tools and runs batches containing other tools sequentially. Absent preserves existing unlimited parallel batches |
 | `taskDocuments` | When `true`, enables the versioned `task_document` tool for plans, todos, and user-requested goals; default `false` |
 | `subagents` | When `true`, gives a top-level session the subagent tools: `subagent`, `send_message`, `interrupt_agent`, `list_agents`, and `list_subagent_models` when more than one model is available; default `false` |
 | `schedules` | When `true`, gives a top-level session the reminder tools `schedule_create`, `schedule_list`, and `schedule_delete`; default `false` |
-| `codemode` | `mode`: how the other tools are presented while the `codemode` tool is active, `on` (default) or `only`; `inlineBudget`: the estimated tokens its description's tool declarations may take, 3000 when unset (`bake-rs docs codemode`) |
+| `codemode` | `mode`: how the other tools are presented while the `codemode` tool is active, which it is by default, `on` (default) or `only`; `inlineBudget`: the estimated tokens its description's tool declarations may take, 3000 when unset (`bake-rs docs codemode`) |
 | `maxToolArgumentWhitespace` | The most whitespace a streamed tool call's arguments may end with, outside string values, before bake-rs abandons the response as a retryable error; a positive integer, 2000 when unset |
 | `sessionDir` | One directory to keep every project's sessions in, in place of `sessions/` in the Bake home; continuing and listing still pick the working directory's sessions |
 | `blockImages` | When `true`, images are not sent to the model |

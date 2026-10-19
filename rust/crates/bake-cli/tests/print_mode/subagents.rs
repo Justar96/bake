@@ -85,6 +85,8 @@ fn a_foreground_subagent_runs_on_its_route_and_answers_the_call() {
         .filter_map(|tool| tool["name"].as_str())
         .collect();
     assert!(child_tools.contains(&"send_message"), "{child_tools:?}");
+    // A child starts with its parent's default tools, `codemode` included.
+    assert!(child_tools.contains(&"codemode"), "{child_tools:?}");
     assert!(
         !child_tools.contains(&"subagent"),
         "a child cannot delegate"

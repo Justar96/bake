@@ -14,8 +14,12 @@
 //! built only with [`ToolsOptions::jobs`] ([`create_bake_tool_definitions`]),
 //! and makes them default tools ([`BAKE_DEFAULT_TOOL_NAMES`]): the owner
 //! decided on 2026-10-18 that background jobs are on by default, as in
-//! Bake 0.3's `standard` preset. Pi's names, sets, and selection rules are
-//! unchanged.
+//! Bake 0.3's `standard` preset. The web tools
+//! ([`crate::tools::web_tools`]) are defaults for the same reason, and
+//! [`crate::tools::codemode`] is one because the owner decided on
+//! 2026-10-20 that code mode is on by default, where Pi leaves it
+//! registered but inactive (D42). Pi's names, sets, and selection rules
+//! are unchanged.
 
 use std::path::Path;
 
@@ -48,10 +52,10 @@ pub const ALL_TOOL_NAMES: [&str; 8] = [
 /// `defaultTools` does not change them.
 pub const DEFAULT_TOOL_NAMES: [&str; 4] = ["read", "bash", "edit", "write"];
 
-/// Bake's default tools: Pi's, then the job tools and the web tools. A
-/// `defaultTools` setting replaces them, as it replaces Pi's; its
-/// modifiers apply to Pi's list.
-pub const BAKE_DEFAULT_TOOL_NAMES: [&str; 9] = [
+/// Bake's default tools: Pi's, then the job tools, the web tools, and
+/// `codemode`. A `defaultTools` setting replaces them, as it replaces
+/// Pi's; its modifiers apply to Pi's list.
+pub const BAKE_DEFAULT_TOOL_NAMES: [&str; 10] = [
     "read",
     "bash",
     "edit",
@@ -61,6 +65,7 @@ pub const BAKE_DEFAULT_TOOL_NAMES: [&str; 9] = [
     "job_kill",
     "web_search",
     "web_fetch",
+    "codemode",
 ];
 
 /// Pi's `ToolsOptions` for the ported tools.
@@ -463,5 +468,62 @@ mod tests {
             restrictions(None, Some(&["mcp__a__*"]), None).1,
             ["mcp__a__*"]
         );
+    }
+
+    // Bake's defaults, `codemode` among them by the owner's decision of
+    // 2026-10-20: a session starts with every one of them, and a
+    // `defaultTools` setting or a `--tools` allowlist that leaves
+    // `codemode` out, a `-codemode` entry, `--exclude-tools codemode`, or
+    // `--no-tools` starts without it.
+    #[test]
+    fn bakes_defaults_start_with_codemode_until_a_selection_drops_it() {
+        let names =
+            |entries: &[&str]| -> Vec<String> { entries.iter().map(|e| (*e).to_owned()).collect() };
+        let available = names(&BAKE_DEFAULT_TOOL_NAMES);
+        let defaults = available.clone();
+        let select = |options: ToolSelectionOptions, default_tools: &[String]| {
+            select_tools(&options, Some(default_tools), &available).expect("selection")
+        };
+
+        let started = select(ToolSelectionOptions::default(), &defaults);
+        assert_eq!(started.active, BAKE_DEFAULT_TOOL_NAMES);
+        assert_eq!(started.registered, available);
+
+        // The setting replaces the defaults; the tool stays registered.
+        let setting = select(ToolSelectionOptions::default(), &names(&["read", "bash"]));
+        assert_eq!(setting.active, ["read", "bash"]);
+        assert_eq!(setting.registered, available);
+
+        let allowlist = select(
+            ToolSelectionOptions {
+                tools: Some(names(&["read"])),
+                ..Default::default()
+            },
+            &defaults,
+        );
+        assert_eq!(allowlist.active, ["read"]);
+        assert_eq!(allowlist.registered, ["read"]);
+
+        for options in [
+            ToolSelectionOptions {
+                tools: Some(names(&["-codemode"])),
+                ..Default::default()
+            },
+            ToolSelectionOptions {
+                exclude_tools: Some(names(&["codemode"])),
+                ..Default::default()
+            },
+            ToolSelectionOptions {
+                no_tools: Some(NoTools::All),
+                ..Default::default()
+            },
+        ] {
+            let dropped = select(options, &defaults);
+            assert!(
+                !dropped.active.iter().any(|name| name == "codemode"),
+                "{:?}",
+                dropped.active
+            );
+        }
     }
 }

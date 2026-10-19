@@ -48,7 +48,7 @@ Model flags are in `bake-rs docs models`, session flags in `bake-rs docs session
 
 ## Tools
 
-A session starts with `read`, `bash`, `edit`, `write`, the background-job tools `job_output`, `job_list`, and `job_kill`, and the web tools `web_search` and `web_fetch` (or the `defaultTools` setting). `grep`, `find`, and `ls` are also available; `grep` and `find` need `rg` and `fd` (or `fdfind`) on `PATH`.
+A session starts with `read`, `bash`, `edit`, `write`, the background-job tools `job_output`, `job_list`, and `job_kill`, the web tools `web_search` and `web_fetch`, and `codemode` (or the `defaultTools` setting). `grep`, `find`, and `ls` are also available; `grep` and `find` need `rg` and `fd` (or `fdfind`) on `PATH`.
 
 - `-t`, `--tools <list>` gives a comma-separated list. Names and `*` patterns allow only those tools; `+name` and `-name` add to or remove from the default set.
 - `-xt`, `--exclude-tools <list>` removes tools by name or `*` pattern.
@@ -57,7 +57,7 @@ A session starts with `read`, `bash`, `edit`, `write`, the background-job tools 
 
 For example, `bake-rs -t +grep,+find -p "..."` adds `grep` and `find` to the defaults.
 
-`codemode`, which runs a model-written JavaScript script that calls the other tools, is available but not in the default set: `-t +codemode` turns it on (`bake-rs docs codemode`).
+`codemode`, which runs a model-written JavaScript script that calls the other tools, is in the default set: `-xt codemode`, a `-t` list or `-name` entry without it, or a `defaultTools` list without it turns it off (`bake-rs docs codemode`).
 
 ## Web tools
 

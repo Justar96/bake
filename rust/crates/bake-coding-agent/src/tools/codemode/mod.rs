@@ -22,13 +22,17 @@
 //! - A failed, blocked, or invalid call rejects with an `Error` carrying the
 //!   tool's error text.
 //!
-//! The session registers the tool inactive; `--tools codemode` or the
-//! `defaultTools` setting activates it. While it is active,
-//! [`prepare_codemode_loadout`] presents the other tools per the
-//! `codemode.mode` setting ([`CodemodeMode`]).
+//! The CLI starts the tool active, a Bake default
+//! ([`crate::tools::index::BAKE_DEFAULT_TOOL_NAMES`]) where Pi registers
+//! it inactive; a `--tools` list without it, `--no-tools`,
+//! `--exclude-tools codemode`, or a `defaultTools` setting that omits it
+//! turns it off. While it is active, [`prepare_codemode_loadout`]
+//! presents the other tools per the `codemode.mode` setting
+//! ([`CodemodeMode`]).
 //!
 //! Differences from Pi:
 //!
+//! - Code mode is a default tool, by the owner's decision of 2026-10-20.
 //! - No `models` namespace and no grammar-constrained input (D42): the
 //!   description is Pi's with `models` off, and the tool has no constrained
 //!   sampling.

@@ -2,7 +2,7 @@
 
 The `codemode` tool lets the model write a JavaScript script that calls bake-rs's other tools. Only the script's output reaches the model, so a script can run calls in parallel and filter large results before the model sees them.
 
-The tool is off by default. Turn it on for a run with `--tools`, for example `bake-rs -t +codemode` or `bake-rs -t read,bash,codemode`, or for every session with a `defaultTools` setting that names it (`bake-rs docs settings`). While it is off, requests are exactly what they are without it.
+The tool is on by default, a subagent's session included. Turn it off for a run with `bake-rs -xt codemode`, with a `--tools` list that leaves it out such as `bake-rs -t read,bash` or a `-name` entry that removes it, or for every session with a `defaultTools` setting that leaves it out (`bake-rs docs settings`). While it is off, requests are exactly what they are without it.
 
 ## Scripts
 

@@ -1475,8 +1475,9 @@ impl AgentSession {
             return Err("The schedule tool names are reserved when schedules is enabled.".into());
         }
         let mut tools: Vec<Arc<AgentTool>> = tools.into_iter().map(run_in_order).collect();
-        // The session's own `codemode` tool, registered inactive, unless the
-        // caller gives one; its guideline joins the rules when it is active.
+        // The session's own `codemode` tool, registered unless the caller
+        // gives one; it is active when `active_tool_names` names it, as the
+        // CLI's defaults do, and its guideline then joins the rules.
         let own_codemode = !tools
             .iter()
             .any(|tool| tool.name == crate::tools::codemode::CODEMODE_TOOL_NAME);

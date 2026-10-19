@@ -1,8 +1,9 @@
-//! `codemode` through the built binary: `--tools read,bash,codemode`
-//! selects it, the model's script calls `read` and `bash` in parallel, the
-//! result the model receives is the script's output, and the session file
-//! keeps one tool result with the nested calls in its details. With
-//! `codemode.mode` `only`, the callable tools leave the request.
+//! `codemode` through the built binary: it is a default tool, the model's
+//! script calls `read` and `bash` in parallel, the result the model
+//! receives is the script's output, and the session file keeps one tool
+//! result with the nested calls in its details. With `codemode.mode`
+//! `only`, the callable tools leave the request, and a selection without
+//! `codemode` sends the request a session sent before it became a default.
 
 use super::*;
 
@@ -128,4 +129,52 @@ fn codemode_only_leaves_the_callable_tools_out_of_the_request() {
     let codemode = description(&requests[0], "codemode");
     assert!(codemode.contains("### `read`"), "{codemode}");
     assert!(codemode.contains("### `bash`"), "{codemode}");
+}
+
+/// Code mode is on by default (the owner's decision of 2026-10-20), so a
+/// run that turns it off must send exactly the request it sent before:
+/// `--tools read,bash` and a `defaultTools` setting of those two tools,
+/// which leaves `codemode` registered but inactive, give byte-identical
+/// first requests that name code mode nowhere.
+#[test]
+fn a_selection_without_codemode_sends_the_request_of_a_session_without_it() {
+    let server = Server::start(Reply::sse());
+    // No workspace path may carry the tool's name, which the body must not.
+    let workspace = workspace("scripts-off", server.port);
+    let selected = workspace.run(
+        &[
+            "-p",
+            "--no-session",
+            "--tools",
+            "read,bash",
+            "Count the lines",
+        ],
+        None,
+    );
+    assert_eq!(text(&selected.stderr), "");
+    assert_eq!(selected.status.code(), Some(0));
+    std::fs::write(
+        workspace.home().join("settings.json"),
+        json!({ "defaultTools": ["read", "bash"] }).to_string(),
+    )
+    .expect("settings.json");
+    let configured = workspace.run(&["-p", "--no-session", "Count the lines"], None);
+    assert_eq!(text(&configured.stderr), "");
+    assert_eq!(configured.status.code(), Some(0));
+
+    let requests = server.requests();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(declared(&requests[0]), ["read", "bash"]);
+    // Every byte but the cache key, which carries the session's own id.
+    let body = |request: &Request| {
+        let mut body = request.body.clone();
+        body["prompt_cache_key"] = json!("<session-id>");
+        serde_json::to_string(&body).expect("body")
+    };
+    let from_flag = body(&requests[0]);
+    assert_eq!(from_flag, body(&requests[1]));
+    assert!(
+        !from_flag.to_lowercase().contains("codemode"),
+        "{from_flag}"
+    );
 }
