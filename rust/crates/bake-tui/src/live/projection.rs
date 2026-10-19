@@ -468,14 +468,13 @@ impl Projector {
                     *state = CallState::Failed;
                     *summary = Some(INTERRUPTED.into());
                 }
+                // No result was logged, so the replay knows no calls: the
+                // block drops the ones its partial results showed, to read
+                // as the session log replays it.
                 Row::Codemode(script) if script.state == CallState::Running => {
                     script.state = CallState::Failed;
                     script.summary = Some(INTERRUPTED.into());
-                    for call in &mut script.calls {
-                        if call.status == NestedStatus::Running {
-                            call.status = NestedStatus::Cancelled;
-                        }
-                    }
+                    script.calls.clear();
                 }
                 _ => {}
             }
@@ -2234,28 +2233,6 @@ more",
 
     #[test]
     fn an_unfinished_codemode_call_is_interrupted_live_and_replayed() {
-        let mut projector = Projector::default();
-        projector.begin(None);
-        run(
-            &mut projector,
-            start("c", CODEMODE_TOOL_NAME, json!({ "code": SCRIPT })),
-        );
-        run(
-            &mut projector,
-            codemode_update(json!([
-                { "id": "c/?", "name": "bash", "args": "{}", "status": "running" },
-            ])),
-        );
-        let Some(RuntimeUpdate::Commit(committed)) = projector.finish().pop() else {
-            panic!("the turn commits");
-        };
-        let script = codemode(&committed[0]);
-        assert_eq!(
-            (script.state, script.summary.as_deref()),
-            (CallState::Failed, Some(INTERRUPTED))
-        );
-        assert_eq!(script.calls[0].status, NestedStatus::Cancelled);
-        // A call with no result in the log never finished.
         let assistant = faux_assistant_blocks(
             vec![faux_tool_call(
                 CODEMODE_TOOL_NAME,
@@ -2264,12 +2241,42 @@ more",
             )],
             StopReason::ToolUse,
         );
-        let rows = replay(&[Message::Assistant(assistant).into()]);
-        let script = codemode(&rows[0]);
-        assert_eq!(
-            (script.state, script.summary.as_deref(), script.output.len()),
-            (CallState::Failed, Some(INTERRUPTED), 0)
+        let mut projector = Projector::default();
+        projector.begin(None);
+        run(
+            &mut projector,
+            AgentEvent::MessageEnd {
+                message: Message::Assistant(assistant.clone()).into(),
+            },
         );
+        run(
+            &mut projector,
+            start("c", CODEMODE_TOOL_NAME, json!({ "code": SCRIPT })),
+        );
+        let rows = live_rows(run(
+            &mut projector,
+            codemode_update(json!([
+                { "id": "c/?", "name": "bash", "args": "{}", "status": "running" },
+            ])),
+        ));
+        assert_eq!(codemode(&rows[0]).calls.len(), 1);
+        // The turn ends with no result: a teardown, not an Esc, which logs
+        // one.
+        let Some(RuntimeUpdate::Commit(committed)) = projector.finish().pop() else {
+            panic!("the turn commits");
+        };
+        let script = codemode(&committed[0]);
+        assert_eq!(
+            (
+                script.state,
+                script.summary.as_deref(),
+                script.calls.len(),
+                script.output.len()
+            ),
+            (CallState::Failed, Some(INTERRUPTED), 0, 0)
+        );
+        // The log holds the call and no result, and replays the same block.
+        assert_eq!(replay(&[Message::Assistant(assistant).into()]), committed);
     }
 
     #[test]
