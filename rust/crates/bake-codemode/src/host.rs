@@ -15,7 +15,7 @@
 //! after it runs, as Pi's host stops the VM on `done`.
 
 use std::borrow::Cow;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -30,8 +30,8 @@ use crate::guest::{
 use crate::js::utf16_len;
 use crate::prelude::{MAX_OUTPUT_CHARS, MAX_OUTPUT_ITEMS};
 use crate::types::{
-    Completion, During, Event, Failure, HostCall, MAX_PENDING_CALLS, Outcome, OutputItem,
-    ScriptError, StoreWrites,
+    Completion, During, Event, Failure, HostCall, MAX_PENDING_ARGUMENT_BYTES, MAX_PENDING_CALLS,
+    Outcome, OutputItem, ScriptError, StoreWrites,
 };
 
 /// WASI `errno` values.
@@ -384,6 +384,10 @@ pub(crate) struct HostState {
     pub(crate) issued: u32,
     /// Calls whose answers the VM has applied; `issued - settled` calls wait.
     pub(crate) settled: u32,
+    /// The JSON argument bytes of each call that waits, by id.
+    waiting_argument_bytes: HashMap<u32, usize>,
+    /// Their sum, at most [`MAX_PENDING_ARGUMENT_BYTES`].
+    waiting_argument_total: usize,
     output_chars: usize,
     output_items: usize,
     /// Set while the driver asks the prelude whether the script stalled.
@@ -437,12 +441,22 @@ impl HostState {
             deterministic: setup.deterministic.is_some(),
             issued: 0,
             settled: 0,
+            waiting_argument_bytes: HashMap::new(),
+            waiting_argument_total: 0,
             output_chars: 0,
             output_items: 0,
             checking_stall: false,
             current_seq: 0,
             done: None,
             failure: None,
+        }
+    }
+
+    /// Call `id`'s answer was applied: it no longer waits.
+    pub(crate) fn settle(&mut self, id: u32) {
+        self.settled = self.settled.saturating_add(1);
+        if let Some(bytes) = self.waiting_argument_bytes.remove(&id) {
+            self.waiting_argument_total = self.waiting_argument_total.saturating_sub(bytes);
         }
     }
 
@@ -837,19 +851,33 @@ fn host_call(
             let id = id as u32;
             // A script that issues calls without awaiting them never lets
             // the VM apply an answer, so its calls, answers, and promises
-            // would pile up until the heap limit; Bake 0.3's codemode
-            // runtime failed such a run the same way (`maxPendingCalls`).
+            // would pile up until the heap limit, and the host's queues with
+            // them. The prelude calls the bridge inside a Promise executor,
+            // so an error thrown into the script here would only reject the
+            // call, and a loop that does not await would go on; the run
+            // fails instead, as Bake 0.3's runtime did (`maxPendingCalls`).
             let waiting = caller.data().issued.saturating_sub(caller.data().settled);
             if waiting as usize >= MAX_PENDING_CALLS {
                 return Err(GuestError::Protocol(format!(
-                    "The script has {MAX_PENDING_CALLS} calls waiting for results, the most a run allows; await calls before making more"
+                    "The script has {MAX_PENDING_CALLS} calls waiting for results, the most a run allows; await calls before making more, or batch them"
                 )));
             }
             let name = required(
                 string_arg(caller, &exports, bridge.scratch, arg(2), None)?,
                 "call name",
             )?;
-            let args = string_arg(caller, &exports, bridge.scratch, arg(3), None)?
+            let remaining =
+                MAX_PENDING_ARGUMENT_BYTES.saturating_sub(caller.data().waiting_argument_total);
+            let json = match string_arg(caller, &exports, bridge.scratch, arg(3), Some(remaining)) {
+                Err(GuestError::TooLarge) => {
+                    return Err(GuestError::Protocol(format!(
+                        "The arguments of the script's calls waiting for results would exceed {MAX_PENDING_ARGUMENT_BYTES} bytes, the most a run allows; await calls before making more, or batch them"
+                    )));
+                }
+                other => other?,
+            };
+            let argument_bytes = json.as_ref().map_or(0, String::len);
+            let args = json
                 .map(|json| parse_bridge_json(&json, "call arguments"))
                 .transpose()?;
             {
@@ -861,6 +889,8 @@ fn host_call(
             }
             let state = caller.data_mut();
             state.issued = state.issued.saturating_add(1);
+            state.waiting_argument_total += argument_bytes;
+            state.waiting_argument_bytes.insert(id, argument_bytes);
             state.emit(Event::Call(if kind == "call" {
                 HostCall::Tool { id, name, args }
             } else {

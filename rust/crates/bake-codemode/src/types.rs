@@ -19,10 +19,15 @@ pub const DEFAULT_HEAP_BYTES: u32 = 256 << 20;
 /// [`Failure::OutOfMemory`].
 pub const DEFAULT_LINEAR_MEMORY_BYTES: usize = 320 << 20;
 /// The most calls a script may have waiting for results; the next one fails
-/// the run as [`Failure::Protocol`]. Bake 0.3's `maxPendingCalls`. Pi has no
-/// limit, but a script that calls in a loop without awaiting would otherwise
-/// fill the heap with calls the VM can never settle.
-pub const MAX_PENDING_CALLS: usize = 128;
+/// the run as [`Failure::Protocol`]. Pi has no limit, but a script that calls
+/// in a loop without awaiting would otherwise fill the heap, and the host's
+/// queues, with calls the VM can never settle. High enough that a
+/// `Promise.all` over a realistic list never reaches it.
+pub const MAX_PENDING_CALLS: usize = 1024;
+/// The most bytes the JSON arguments of the calls waiting for results may
+/// take together; a call that would pass it fails the run as
+/// [`Failure::Protocol`] before the host copies its arguments.
+pub const MAX_PENDING_ARGUMENT_BYTES: usize = 64 << 20;
 /// QuickJS's guard on its own stack, `quickjs-wasi`'s `MAX_STACK_SIZE`: deep
 /// recursion is a catchable `RangeError`.
 pub const MAX_STACK_BYTES: u32 = 512 * 1024;
@@ -341,7 +346,8 @@ pub enum Failure {
     },
     /// The VM failed outside the script's control: a malformed bridge
     /// message, a guest pointer outside its memory, a trap, or a call past
-    /// [`MAX_PENDING_CALLS`] (Pi's `sandbox` kind).
+    /// [`MAX_PENDING_CALLS`] or [`MAX_PENDING_ARGUMENT_BYTES`] (Pi's `sandbox`
+    /// kind).
     Protocol {
         /// What failed.
         message: String,

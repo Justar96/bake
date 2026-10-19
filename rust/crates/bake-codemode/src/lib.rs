@@ -76,7 +76,7 @@ pub use tool_search::{
 pub use types::{
     AnswerError, CallError, CallResult, Completion, DEFAULT_HEAP_BYTES,
     DEFAULT_LINEAR_MEMORY_BYTES, Deterministic, During, EngineError, Event, ExecuteRequest,
-    ExitHook, Failure, GlobalDeclaration, HostCall, Limits, MAX_PENDING_CALLS, MAX_STACK_BYTES,
-    Outcome, OutputItem, ScriptError, StartError, StoreValues, StoreWrites, ToolDeclaration,
-    discovery_globals,
+    ExitHook, Failure, GlobalDeclaration, HostCall, Limits, MAX_PENDING_ARGUMENT_BYTES,
+    MAX_PENDING_CALLS, MAX_STACK_BYTES, Outcome, OutputItem, ScriptError, StartError, StoreValues,
+    StoreWrites, ToolDeclaration, discovery_globals,
 };

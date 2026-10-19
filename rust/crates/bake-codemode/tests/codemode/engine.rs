@@ -7,8 +7,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use bake_codemode::{
-    Event, ExecuteRequest, ExitHook, Failure, Limits, MAX_OUTPUT_CHARS, MAX_PENDING_CALLS,
-    OutputItem, ToolDeclaration,
+    Event, ExecuteRequest, ExitHook, Failure, Limits, MAX_OUTPUT_CHARS, MAX_PENDING_ARGUMENT_BYTES,
+    MAX_PENDING_CALLS, OutputItem, ToolDeclaration,
 };
 use serde_json::json;
 
@@ -400,7 +400,13 @@ async fn an_oversized_string_is_a_catchable_error() {
 
 fn pending_limit_message() -> String {
     format!(
-        "The script has {MAX_PENDING_CALLS} calls waiting for results, the most a run allows; await calls before making more"
+        "The script has {MAX_PENDING_CALLS} calls waiting for results, the most a run allows; await calls before making more, or batch them"
+    )
+}
+
+fn pending_bytes_message() -> String {
+    format!(
+        "The arguments of the script's calls waiting for results would exceed {MAX_PENDING_ARGUMENT_BYTES} bytes, the most a run allows; await calls before making more, or batch them"
     )
 }
 
@@ -457,6 +463,44 @@ async fn the_pending_call_limit_counts_only_calls_that_wait() {
             message: pending_limit_message()
         }
     );
+}
+
+/// A fan-out of a thousand calls fits the limit.
+#[tokio::test]
+async fn a_promise_all_of_a_thousand_calls_succeeds() {
+    let execution = execute(
+        "return (await Promise.all(Array.from({ length: 1000 }, (_, i) => tools.echo(i)))).length",
+        Setup::tools(vec![echo()]),
+    )
+    .await;
+    assert_eq!(execution.value(), Some(&json!(1000)));
+    assert_eq!(MAX_PENDING_CALLS, 1024);
+}
+
+/// Waiting calls' arguments are bounded too: one call over the budget, or
+/// several that pass it together, end the run before the host copies them.
+#[tokio::test]
+async fn waiting_calls_arguments_stop_at_the_byte_budget() {
+    for code in [
+        "await tools.echo('x'.repeat(70 * 2 ** 20))",
+        "const big = 'x'.repeat(14 * 2 ** 20); await Promise.all([1, 2, 3, 4, 5].map(() => tools.echo(big)))",
+    ] {
+        let execution = execute(code, Setup::tools(vec![echo()])).await;
+        assert_eq!(
+            execution.failure(),
+            &Failure::Protocol {
+                message: pending_bytes_message()
+            },
+            "{code}"
+        );
+    }
+    // Answered calls give their bytes back.
+    let execution = execute(
+        "const big = 'x'.repeat(14 * 2 ** 20); for (let i = 0; i < 6; i++) await tools.echo(big); return 6",
+        Setup::tools(vec![echo()]),
+    )
+    .await;
+    assert_eq!(execution.value(), Some(&json!(6)));
 }
 
 /// A script that keeps allocating at the heap limit, catching each
