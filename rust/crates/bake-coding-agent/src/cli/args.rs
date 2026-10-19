@@ -5,8 +5,9 @@
 //! when no extension registers it, and a short one is an error.
 //!
 //! `--skill <path>` and `--no-skills` (`-ns`) select skills
-//! ([`crate::skills`]), and `--no-mcp` (Pi v1.3.0) starts no MCP server
-//! ([`crate::mcp::home`]).
+//! ([`crate::skills`]), `--no-mcp` (Pi v1.3.0) starts no MCP server
+//! ([`crate::mcp::home`]), and `--export` writes a session file as HTML
+//! ([`crate::cli::export`]).
 //!
 //! Bake adds `--permission <preset>`, `--sandbox <mode>`, and
 //! `--approval <policy>`, which select the session's permission (D24) the
@@ -127,6 +128,9 @@ pub struct Args {
     /// `--list-models [search]`: `Some(None)` when given without a search
     /// pattern, `Some(Some(pattern))` with one.
     pub list_models: Option<Option<String>>,
+    /// `--export <session-file>`: the session file to write as HTML. The
+    /// first positional message is its output path.
+    pub export: Option<String>,
     /// Bake's `--permission`: the preset to select.
     pub permission: Option<String>,
     /// Bake's `--sandbox`: the sandbox mode to set.
@@ -300,6 +304,10 @@ pub fn parse_args(args: &[String]) -> Args {
             "--no-prompt-templates" | "-np" => result.no_prompt_templates = true,
             "--no-context-files" | "-nc" => result.no_context_files = true,
             "--no-mcp" => result.no_mcp = true,
+            "--export" if next.is_some() => {
+                result.export = next.map(str::to_owned);
+                i += 1;
+            }
             "--list-models" => {
                 if let Some(search) = next
                     && !search.starts_with('-')
@@ -653,6 +661,23 @@ mod tests {
         assert_eq!(
             unknown_flags_message(&args.unknown_flags).as_deref(),
             Some("Unknown options: --flag, --other")
+        );
+    }
+
+    // Pi `args.ts`: `--export` takes the next argument, and the first
+    // positional message is the output path.
+    #[test]
+    fn export_takes_a_session_file_and_an_optional_output() {
+        let args = parse(&["--export", "a.jsonl"]);
+        assert_eq!(args.export.as_deref(), Some("a.jsonl"));
+        assert!(args.messages.is_empty());
+        let args = parse(&["--export", "a.jsonl", "out.html"]);
+        assert_eq!(args.export.as_deref(), Some("a.jsonl"));
+        assert_eq!(args.messages, ["out.html"]);
+        // Pi: a missing value falls through to the unknown flags.
+        assert_eq!(
+            parse(&["--export"]).unknown_flags,
+            [("export".into(), None)]
         );
     }
 

@@ -98,6 +98,8 @@ Options:
       --no-mcp              Start no MCP server from the Bake home's mcp.json
       --list-models [search]
                             List available models (with optional fuzzy search)
+      --export <file> [out.html]
+                            Write a session file as one HTML page and exit
       --permission <preset> Permission preset: workspace-write or
                             danger-full-access, or one from settings.json;
                             new sessions default to the saved preset, else
@@ -109,13 +111,15 @@ Options:
 
 Messages are prompts, sent in order; piped standard input and @file arguments
 are prepended to the first. The agent starts with the read, bash, edit, and
-write tools; grep, find, and ls are available through --tools, and grep and
-find need rg and fd on PATH. A session keeps its permission: write and edit
-change files only where its sandbox mode allows, and bash runs only under a
-sandbox that enforces it: bubblewrap or Landlock on Linux and Seatbelt on
-macOS. Without one (Windows, for now), confined bash calls are refused.
-Escalations need approval: under --approval ask an interactive session asks,
-Y then Enter allowing that one call; print mode cannot ask, so it refuses.
+write tools, the background-job tools job_output, job_list, and job_kill, and
+the web tools web_search and web_fetch; grep, find, and ls are available
+through --tools, and grep and find need rg and fd on PATH. A session keeps its
+permission: write and edit change files only where its sandbox mode allows,
+and bash runs only under a sandbox that enforces it: bubblewrap or Landlock
+on Linux and Seatbelt on macOS. Without one (Windows, for now), confined bash
+calls are refused. Escalations need approval: under --approval ask an
+interactive session asks, Y then Enter allowing that one call; print mode
+cannot ask, so it refuses.
 
 bake-rs is interactive when both standard streams are terminals and neither
 -p nor --mode is given; otherwise it prints. Interactive messages run in
@@ -403,6 +407,10 @@ fn agent(args: &[String]) -> ExitCode {
     let (parsed, mode) = match action {
         Action::Help => return print(HELP),
         Action::Version => return print(&format!("bake-rs {VERSION}\n")),
+        Action::Export(input, output) => {
+            let stdout: SharedWriter = Arc::new(Mutex::new(io::stdout()));
+            return exit_code(cli::run_export(&input, output.as_deref(), &stdout, &stderr));
+        }
         Action::Exit(code) => return exit_code(code),
         Action::Print(parsed, mode) => (parsed, Some(mode)),
         Action::Interactive(parsed) => (parsed, None),

@@ -62,6 +62,7 @@
 //! prompt.
 
 pub mod args;
+pub mod export;
 pub mod file_processor;
 pub mod list_models;
 
@@ -256,6 +257,9 @@ pub enum Action {
     Help,
     /// Print the version.
     Version,
+    /// Write a session file as HTML and exit (`--export`): the session
+    /// file, then the output path the first message named, if any.
+    Export(String, Option<String>),
     /// Run print mode.
     Print(Box<Args>, Mode),
     /// Run interactive mode: both standard streams are terminals and
@@ -294,7 +298,7 @@ pub fn plan(
     stdout_is_terminal: bool,
     stderr: &SharedWriter,
 ) -> Action {
-    let parsed = parse_args(args);
+    let mut parsed = parse_args(args);
     report(stderr, &parsed.diagnostics);
     if parsed
         .diagnostics
@@ -305,6 +309,11 @@ pub fn plan(
     }
     if parsed.version {
         return Action::Version;
+    }
+    // Pi's `main` exports before it reads any other flag, `--help`
+    // included, so `--export` with anything else still exports.
+    if let Some(input) = parsed.export.take() {
+        return Action::Export(input, parsed.messages.first().cloned());
     }
     if parsed.help {
         return Action::Help;
@@ -779,6 +788,25 @@ async fn run_list_models(environment: CliEnvironment, search_pattern: Option<&st
     }
     list_models(&registry, search_pattern, &docs_command, &stdout);
     0
+}
+
+/// Pi's `--export` branch: the page is written, its path is printed, and
+/// the program exits 0; a failure is one `Error: ` line and status 1. It
+/// reads no settings, credentials, or network, and needs no Bake home.
+/// Blocking.
+pub fn run_export(
+    input: &str,
+    output: Option<&str>,
+    stdout: &SharedWriter,
+    stderr: &SharedWriter,
+) -> i32 {
+    match export::export_from_file(input, output) {
+        Ok(path) => {
+            write_out(stdout, &format!("Exported to: {}\n", path.display()));
+            0
+        }
+        Err(message) => error(stderr, &message),
+    }
 }
 
 /// Sets the session up from the command line as Pi's `main` does before

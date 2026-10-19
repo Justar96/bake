@@ -217,3 +217,84 @@ fn flags_named_in_the_docs_are_accepted() {
     }
     assert!(checked > 15, "only {checked} flags found");
 }
+
+/// A directory under the system temp directory, removed on drop.
+struct TempDir(std::path::PathBuf);
+
+impl TempDir {
+    fn new(name: &str) -> Self {
+        let dir = std::env::temp_dir().join(format!(
+            "bake-cli-{name}-{}-{:?}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        Self(dir)
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// Pi's `--export` branch of `main.ts`: the page is written beside the
+/// working directory under Pi's default name, its path is printed, and a
+/// missing file is one `Error: ` line with status 1. It needs no Bake home,
+/// so the run is given none.
+#[test]
+fn export_writes_one_page_and_exits() {
+    let root = TempDir::new("export");
+    let session = root.0.join("2026-01-01T00-00-00-000Z_s1.jsonl");
+    std::fs::write(
+        &session,
+        concat!(
+            r#"{"type":"session","version":3,"id":"s1","timestamp":"2026-01-01T00:00:00.000Z","cwd":"/tmp"}"#,
+            "\n",
+            r#"{"type":"message","id":"a1","parentId":null,"timestamp":"2026-01-01T00:00:01.000Z","message":{"role":"user","content":"hi","timestamp":1}}"#,
+            "\n",
+        ),
+    )
+    .expect("write session");
+    let export = |args: &[&std::ffi::OsStr]| {
+        Command::new(env!("CARGO_BIN_EXE_bake-rs"))
+            .arg("--export")
+            .args(args)
+            .current_dir(&root.0)
+            .env_remove("BAKE_HOME")
+            .env_remove("DSH_HOME")
+            .stdin(Stdio::null())
+            .output()
+            .expect("bake-rs runs")
+    };
+    let out = export(&[session.as_os_str()]);
+    assert!(out.status.success(), "{}", text(&out.stderr));
+    let name = "bake-rs-session-2026-01-01T00-00-00-000Z_s1.html";
+    // Pi's default name is relative, so the page lands in the working
+    // directory and the printed path is the name itself.
+    assert_eq!(text(&out.stdout), format!("Exported to: {name}\n"));
+    let default = root.0.join(name);
+    assert!(
+        std::fs::read_to_string(&default)
+            .expect("page")
+            .starts_with("<!DOCTYPE html>")
+    );
+
+    let named = root.0.join("out.html");
+    let out = export(&[session.as_os_str(), named.as_os_str()]);
+    assert!(out.status.success(), "{}", text(&out.stderr));
+    assert!(std::fs::read_to_string(&named).expect("page").contains("<"));
+
+    let missing = root.0.join("nope.jsonl");
+    let out = export(&[missing.as_os_str()]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(out.stdout.is_empty());
+    assert_eq!(
+        text(&out.stderr),
+        format!("Error: File not found: {}\n", missing.display())
+    );
+}

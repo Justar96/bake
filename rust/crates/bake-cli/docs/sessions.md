@@ -19,6 +19,10 @@ Sessions live in `sessions/` in the Bake home, in one directory per working dire
 
 A resumed session keeps its model, thinking level, and permission unless a flag changes them.
 
+## Exporting a session
+
+`bake-rs --export <session-file> [output.html]` writes a session file as one self-contained web page and exits: every entry of the file, including branches you left, viewable in a browser without a network connection. Unlike `/share`, which runs inside a session, the page holds no system prompt and no tool definitions, because no session is set up to supply them. Without an output path the page is written to `bake-rs-session-<session file name>.html` in the working directory. The command reads no settings, credentials, or network, and needs no Bake home; a missing or empty session file is an error with status 1, and so is a session another run is writing. The session file itself is never changed.
+
 ## Recovering a selected run
 
 `--recoverable` journals one print-mode prompt and reports its run id and session file before execution. For example, `bake-rs -p --recoverable --max-model-calls 20 "Fix the failing test"` gives the run one allowance shared by its model requests, retries, and summaries. Recovery is opt-in and requires a saved session.
