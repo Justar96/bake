@@ -389,7 +389,7 @@ async fn embedded_resource(resource: &Value, work: &WorkGate) -> Vec<UserContent
 }
 
 /// Node's lenient base64 decoder, as `tools::image` reads tool images.
-fn decode_base64(data: &str) -> Vec<u8> {
+pub(crate) fn decode_base64(data: &str) -> Vec<u8> {
     use base64::Engine;
     let cleaned: String = data
         .chars()

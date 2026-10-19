@@ -11,6 +11,7 @@
 //! | [`image`] | `src/utils/{mime,exif-orientation,image-convert,image-resize-core,image-resize,image-process,tool-result-images}.ts` |
 //! | [`bash`] | `src/core/tools/bash.ts`, `src/utils/{shell,child-process}.ts`; owns each command's process tree |
 //! | [`truncate`], [`output_accumulator`], [`file_mutation_queue`] | `src/core/tools/{truncate,output-accumulator,file-mutation-queue}.ts` |
+//! | [`codemode`] | Pi v1.3.0 `src/extensions/codemode/{tool,execute,index}.ts`, over [`bake_codemode`] |
 //!
 //! Every tool is a [`bake_agent::AgentTool`] whose names, descriptions,
 //! schemas, results, and errors are Pi's. Blocking file work runs on
@@ -20,6 +21,7 @@
 //! tool joins through [`index::ToolsOptions::bash`].
 
 pub mod bash;
+pub mod codemode;
 pub mod definition;
 pub mod edit;
 pub mod edit_diff;

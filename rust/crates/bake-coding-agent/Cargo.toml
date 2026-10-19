@@ -9,6 +9,8 @@ description = "Pi's coding-agent services for Bake's Rust agent: sessions, the f
 
 [dependencies]
 bake-agent.workspace = true
+# The `codemode` tool's engine (`tools::codemode`).
+bake-codemode.workspace = true
 bake-ai.workspace = true
 bake-sandbox.workspace = true
 bake-process.workspace = true

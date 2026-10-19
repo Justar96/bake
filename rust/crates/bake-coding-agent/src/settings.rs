@@ -6,7 +6,8 @@
 //! level, per-model thinking levels, the queue modes, the session
 //! directory, `blockImages`, `images.autoResize`, `defaultTools`, `compaction`
 //! (with per-model overrides), `branchSummary.reserveTokens` and
-//! `branchSummary.skipPrompt`, and `retry`,
+//! `branchSummary.skipPrompt`, `retry`, and Pi v1.3.0's `codemode.mode` and
+//! `codemode.inlineBudget` ([`crate::tools::codemode`]),
 //! and Bake's own `permission` section ([`crate::permissions`]),
 //! `webSearch.model` ([`crate::web::search`]), and
 //! `maxToolArgumentWhitespace` (Bake's route option in
@@ -57,6 +58,7 @@ use crate::json_store::{JsonFileStore, StoreError, remove_member, set_member};
 use crate::model_registry::resolver::parse_thinking_level;
 use crate::session::json::{js_number_to_string, js_truthy};
 use crate::session::paths::normalize_path;
+use crate::tools::codemode::CodemodeMode;
 
 /// The largest `settings.json` read, in bytes.
 pub const MAX_SETTINGS_FILE_BYTES: u64 = 16 * 1024 * 1024;
@@ -133,6 +135,15 @@ pub struct Settings {
     /// `cliproxyapi`: Bake's own member, the CLIProxyAPI route a Rust
     /// login wrote, or `null` after a logout (see [`CliProxySetting`]).
     pub cliproxyapi: CliProxySetting,
+    /// `codemode.mode`, Pi v1.3.0's: how the active `codemode` tool presents
+    /// the tools scripts can call. `only` is read as `only`, anything else
+    /// as the default, `on`.
+    pub codemode_mode: CodemodeMode,
+    /// `codemode.inlineBudget`, Pi v1.3.0's: the estimated tokens the tool
+    /// declarations in the `codemode` description may take. `None` when
+    /// unset or not a finite number of at least 0, which uses
+    /// [`crate::tools::codemode::DEFAULT_CODEMODE_INLINE_BUDGET`].
+    pub codemode_inline_budget: Option<f64>,
     /// Load errors, as Pi's settings diagnostics word them.
     pub warnings: Vec<String>,
 }
@@ -243,6 +254,8 @@ impl Default for Settings {
             max_tool_argument_whitespace: None,
             web_search_model: None,
             cliproxyapi: CliProxySetting::Absent,
+            codemode_mode: CodemodeMode::On,
+            codemode_inline_budget: None,
             warnings: Vec::new(),
         }
     }
@@ -519,6 +532,20 @@ impl Settings {
                 .and_then(Value::as_object)
                 .and_then(|search| string(search, "model")),
             cliproxyapi: CliProxySetting::from_value(object.get(CLIPROXYAPI_MEMBER)),
+            // Pi's `readMode` and `readInlineBudget`.
+            codemode_mode: match object
+                .get("codemode")
+                .and_then(|codemode| codemode.get("mode"))
+                .and_then(Value::as_str)
+            {
+                Some("only") => CodemodeMode::Only,
+                _ => CodemodeMode::On,
+            },
+            codemode_inline_budget: object
+                .get("codemode")
+                .and_then(|codemode| codemode.get("inlineBudget"))
+                .and_then(Value::as_f64)
+                .filter(|budget| budget.is_finite() && *budget >= 0.0),
             warnings: Vec::new(),
         }
     }
@@ -929,6 +956,34 @@ mod tests {
     }
 
     // Bake's own: the `web_search` model on the CLIProxyAPI route.
+    // Pi v1.3.0 `extensions/codemode/index.ts` `readMode` and
+    // `readInlineBudget`, and `test/config-schemas.test.ts`'s budgets.
+    #[test]
+    fn reads_the_codemode_settings() {
+        let read = |text: &str| {
+            let settings = Settings::parse(text, Path::new("s.json"));
+            (settings.codemode_mode, settings.codemode_inline_budget)
+        };
+        assert_eq!(read("{}"), (CodemodeMode::On, None));
+        assert_eq!(
+            read(r#"{"codemode":{"mode":"only","inlineBudget":0}}"#),
+            (CodemodeMode::Only, Some(0.0))
+        );
+        assert_eq!(
+            read(r#"{"codemode":{"mode":"on","inlineBudget":1500}}"#),
+            (CodemodeMode::On, Some(1500.0))
+        );
+        assert_eq!(
+            read(r#"{"codemode":{"mode":"ONLY","inlineBudget":-1}}"#),
+            (CodemodeMode::On, None)
+        );
+        assert_eq!(
+            read(r#"{"codemode":{"inlineBudget":"3000"}}"#),
+            (CodemodeMode::On, None)
+        );
+        assert_eq!(read(r#"{"codemode":true}"#), (CodemodeMode::On, None));
+    }
+
     #[test]
     fn reads_the_web_search_model() {
         let read = |text: &str| Settings::parse(text, Path::new("s.json")).web_search_model;
