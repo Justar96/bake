@@ -26,18 +26,32 @@
 //! - **A prompt is never `handled`**: that disposition reports an
 //!   extension command or input handler consuming the prompt, so this
 //!   mode answers `started` or `queued`.
-//! - **Commands are handled in the order they arrive**, one at a time,
-//!   where Pi starts each line's handler concurrently. Only `prompt` runs
-//!   on its own task, as it does in Pi, so `abort`, `steer`, `follow_up`,
-//!   and `clear_queue` are handled while a turn runs.
+//!
+//! Each command is handled as it arrives, on its own task, as Pi's
+//! `handleInputLine` starts each line's handler without awaiting the one
+//! before it. A long command such as `compact` therefore delays no other:
+//! `abort` reaches the running compaction, prompt, or branch summary, and
+//! the inspection commands answer meanwhile. Which concurrent commands are
+//! safe is the session's own question, not this mode's: it refuses a
+//! prompt during a compaction and a compaction during a run with Pi's
+//! messages, and serializes its settings changes
+//! ([`AgentSession::prompt`], [`AgentSession::compact`],
+//! [`AgentSession::set_model`]). Only the commands that replace the
+//! session (`new_session`, `switch_session`, `fork`, `clone`) are
+//! serialized here, one at a time, since each shuts the running session
+//! down and installs the next; a command that arrived for the replaced
+//! session runs on it and answers with its refusal, as it does against
+//! Pi's disposed session. Responses carry their command's `id`, and each
+//! record is written whole under the writer's lock, so concurrent tasks
+//! never interleave bytes within a line.
 //!
 //! Shutdown follows Pi: standard input reaching its end shuts the session
 //! down and exits 0, and `SIGTERM` and `SIGHUP` exit 143 and 129
 //! ([`crate::cli::CliEnvironment::interrupt`]). Either way the session's
 //! shutdown stops its MCP servers and background shells and awaits their
 //! process trees, the approval broker closes so no queued request is left
-//! waiting, the prompt task is awaited, and the writer is flushed before
-//! the status is returned.
+//! waiting, every command task is awaited, and the writer is flushed
+//! before the status is returned.
 
 pub mod approvals;
 pub mod jsonl;
@@ -45,12 +59,13 @@ pub mod types;
 
 use std::io::Read;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use bake_agent::AgentEvent;
 use bake_ai::{Model, ModelThinkingLevel};
 use serde_json::{Map, Value, json};
-use tokio::sync::oneshot;
+use tokio::sync::Notify;
 
 use crate::agent_session::{
     AgentSession, ForkPosition, SessionEvent, SessionStats, SessionSubscription,
@@ -102,22 +117,28 @@ pub async fn run_rpc_mode(session: AgentSession, options: RpcModeOptions) -> i32
     let bridge = approvals
         .as_ref()
         .and_then(|broker| ApprovalBridge::connect(broker, &stdout));
-    let mut rpc = Rpc {
-        session: Arc::new(session),
+    let handler = Arc::new(Handler {
+        session: Mutex::new(Arc::new(session)),
         factory,
         out: stdout,
         stderr,
-        approvals,
         bridge,
-        subscription: None,
-        run_started: Arc::new(Mutex::new(None)),
-        prompts: Vec::new(),
+        subscription: Mutex::new(None),
+        run_started: Arc::new(Notify::new()),
+        replacing: tokio::sync::Mutex::new(()),
+        closing: AtomicBool::new(false),
+    });
+    handler.subscribe();
+    let mut rpc = Rpc {
+        handler,
+        approvals,
+        tasks: tokio::task::JoinSet::new(),
     };
-    rpc.subscribe();
     let status = loop {
+        rpc.reap();
         tokio::select! {
             line = lines.recv() => match line {
-                Some(line) => rpc.handle_line(&line).await,
+                Some(line) => rpc.handle_line(&line),
                 // Pi's `process.stdin.on("end")`: an orderly shutdown.
                 None => break 0,
             },
@@ -145,24 +166,110 @@ fn input_lines(input: Box<dyn Read + Send>) -> tokio::sync::mpsc::UnboundedRecei
     receiver
 }
 
-/// The RPC loop's state: the session in use, how to replace it, and the
-/// records it has sent.
+/// The RPC loop: the state its command tasks share, the approval queue it
+/// closes, and the tasks themselves.
 struct Rpc {
-    session: Arc<AgentSession>,
-    factory: Option<SessionFactory>,
-    out: SharedWriter,
-    stderr: SharedWriter,
+    handler: Arc<Handler>,
     approvals: Option<ApprovalBroker>,
-    bridge: Option<Arc<ApprovalBridge>>,
-    subscription: Option<SessionSubscription>,
-    /// Set while a prompt waits to learn whether its run started.
-    run_started: Arc<Mutex<Option<oneshot::Sender<()>>>>,
-    /// The prompt tasks, which answer their own commands. Each is owned
-    /// until it ends, so shutdown awaits every response it can still write.
-    prompts: Vec<tokio::task::JoinHandle<()>>,
+    /// The command tasks, which answer their own commands. Each is owned
+    /// until it ends, so shutdown awaits every response one can still
+    /// write, and none is detached.
+    tasks: tokio::task::JoinSet<()>,
 }
 
 impl Rpc {
+    /// Pi's `handleInputLine`: the command is handled on its own task, so
+    /// the next line is read while it runs.
+    fn handle_line(&mut self, line: &str) {
+        match read_record(line) {
+            Record::Command(id, command) => {
+                let handler = Arc::clone(&self.handler);
+                self.tasks.spawn(async move {
+                    if let Some(response) = handler.handle(id, command).await {
+                        handler.send(&response);
+                    }
+                });
+            }
+            // An answer settles a waiting approval; it writes nothing and
+            // never blocks, so it needs no task of its own.
+            Record::ExtensionUiResponse(response) => self.handler.answer(&response),
+            Record::Invalid(response) => self.handler.send(&response),
+        }
+    }
+
+    /// Drops the handles of the command tasks that have ended, so a long
+    /// stream of commands does not keep one handle each.
+    fn reap(&mut self) {
+        while self.tasks.try_join_next().is_some() {}
+    }
+
+    /// Pi's `shutdown`: the approval queue closes first, so a request the
+    /// client never answered is cancelled while the session can still
+    /// record that decision, and its call is refused before any effect;
+    /// then the session's own shutdown stops its MCP servers, background
+    /// shells, and plugin helpers and awaits their process trees, the
+    /// command tasks are awaited, and the writer is flushed.
+    async fn shutdown(mut self) {
+        if let Some(broker) = &self.approvals {
+            broker.close();
+        }
+        // A replacement in flight finishes before the session is read, so
+        // the session shut down here is the one in use; a replacement still
+        // waiting its turn is refused, so none installs a session after
+        // this. The hold is released before the tasks are awaited: one of
+        // them may be that waiting replacement.
+        self.handler.closing.store(true, Ordering::SeqCst);
+        let session = {
+            let _replacing = self.handler.replacing.lock().await;
+            self.handler.session()
+        };
+        // The run stops here, before the session tears down, so the
+        // refusal of a request nobody answered is written while the
+        // session still admits writes ([`crate::permissions::history`]).
+        session.abort().await;
+        session.shutdown().await;
+        // Every command task ends before the flush, so nothing writes
+        // after it.
+        while self.tasks.join_next().await.is_some() {}
+        self.handler.unsubscribe();
+        let mut out = self
+            .handler
+            .out
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let _ = std::io::Write::flush(&mut *out);
+    }
+}
+
+/// What every command task shares: the session in use, how to replace it,
+/// and where its records go.
+struct Handler {
+    /// The session in use. A command reads it once, when it starts, and
+    /// runs against that session even if a replacement installs another.
+    session: Mutex<Arc<AgentSession>>,
+    factory: Option<SessionFactory>,
+    out: SharedWriter,
+    stderr: SharedWriter,
+    bridge: Option<Arc<ApprovalBridge>>,
+    subscription: Mutex<Option<SessionSubscription>>,
+    /// Notified when a run starts, so a prompt learns that it was
+    /// admitted. Every waiting prompt is notified: a prompt the session
+    /// refused has stopped waiting by then.
+    run_started: Arc<Notify>,
+    /// Held by the command that replaces the session, so two replacements
+    /// never overlap and shutdown can wait for one.
+    replacing: tokio::sync::Mutex<()>,
+    /// Set once shutdown has read the session to shut down: a replacement
+    /// that has not started by then is refused rather than left running.
+    closing: AtomicBool,
+}
+
+impl Handler {
+    /// The session a command runs against.
+    fn session(&self) -> Arc<AgentSession> {
+        Arc::clone(&self.session.lock().unwrap_or_else(PoisonError::into_inner))
+    }
+
     /// Writes one protocol record.
     fn send(&self, record: &Value) {
         write_out(&self.out, &serialize_json_line(record));
@@ -175,35 +282,34 @@ impl Rpc {
 
     /// Subscribes to the session's events, replacing any earlier
     /// subscription, as Pi's `rebindSession` does.
-    fn subscribe(&mut self) {
-        if let Some(subscription) = self.subscription.take() {
-            subscription.unsubscribe();
-        }
+    fn subscribe(&self) {
         let out = Arc::clone(&self.out);
         let started = Arc::clone(&self.run_started);
-        self.subscription = Some(self.session.subscribe(move |event| {
+        let subscription = self.session().subscribe(move |event| {
             write_out(&out, &serialize_json_line(&session_event_json(event)));
-            if matches!(event, SessionEvent::Agent(AgentEvent::AgentStart))
-                && let Some(sender) = started
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .take()
-            {
-                let _ = sender.send(());
+            if matches!(event, SessionEvent::Agent(AgentEvent::AgentStart)) {
+                started.notify_waiters();
             }
-        }));
+        });
+        if let Some(previous) = self
+            .subscription
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .replace(subscription)
+        {
+            previous.unsubscribe();
+        }
     }
 
-    /// Pi's `handleInputLine`.
-    async fn handle_line(&mut self, line: &str) {
-        match read_record(line) {
-            Record::Command(id, command) => {
-                if let Some(response) = self.handle(id, command).await {
-                    self.send(&response);
-                }
-            }
-            Record::ExtensionUiResponse(response) => self.answer(&response),
-            Record::Invalid(response) => self.send(&response),
+    /// Stops writing the session's events.
+    fn unsubscribe(&self) {
+        if let Some(subscription) = self
+            .subscription
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
+        {
+            subscription.unsubscribe();
         }
     }
 
@@ -217,8 +323,9 @@ impl Rpc {
 
     /// Pi's `handleCommand`: the response to send, or `None` when the
     /// command answers itself.
-    async fn handle(&mut self, id: Option<String>, command: RpcCommand) -> Option<Value> {
+    async fn handle(&self, id: Option<String>, command: RpcCommand) -> Option<Value> {
         let kind = command.kind();
+        let session = self.session();
         let ok = |data: Option<Value>| Some(success_response(id.clone(), kind, data));
         let failed = |message: String| Some(error_response(id.clone(), kind, &message));
         match command {
@@ -229,42 +336,42 @@ impl Rpc {
             } => {
                 // Pi's `prompt`: a streaming behavior applies only while a
                 // turn runs; otherwise the prompt starts one.
-                match streaming_behavior.filter(|_| self.session.is_streaming()) {
+                match streaming_behavior.filter(|_| session.is_streaming()) {
                     Some(StreamingBehavior::Steer) => {
-                        match self.session.steer(&message, images).await {
+                        match session.steer(&message, images).await {
                             Ok(()) => ok(Some(json!({ "disposition": "queued" }))),
                             Err(message) => failed(message),
                         }
                     }
                     Some(StreamingBehavior::FollowUp) => {
-                        match self.session.follow_up(&message, images).await {
+                        match session.follow_up(&message, images).await {
                             Ok(()) => ok(Some(json!({ "disposition": "queued" }))),
                             Err(message) => failed(message),
                         }
                     }
                     None => {
-                        self.start_prompt(id, message, images).await;
+                        self.start_prompt(&session, id, message, images).await;
                         None
                     }
                 }
             }
-            RpcCommand::Steer { message, images } => match self.session.steer(&message, images).await
+            RpcCommand::Steer { message, images } => match session.steer(&message, images).await
             {
                 Ok(()) => ok(Some(json!({ "disposition": "queued" }))),
                 Err(message) => failed(message),
             },
             RpcCommand::FollowUp { message, images } => {
-                match self.session.follow_up(&message, images).await {
+                match session.follow_up(&message, images).await {
                     Ok(()) => ok(Some(json!({ "disposition": "queued" }))),
                     Err(message) => failed(message),
                 }
             }
             RpcCommand::Abort => {
-                self.session.abort().await;
+                session.abort().await;
                 ok(None)
             }
             RpcCommand::ClearQueue => {
-                let cleared = self.session.clear_queue();
+                let cleared = session.clear_queue();
                 ok(Some(json!({
                     "steering": cleared.steering,
                     "followUp": cleared.follow_up,
@@ -284,27 +391,23 @@ impl Rpc {
                     Err(message) => failed(message),
                 }
             }
-            RpcCommand::GetState => ok(Some(self.state())),
+            RpcCommand::GetState => ok(Some(self.state(&session))),
             RpcCommand::SetModel { provider, model_id } => {
-                let model = self
-                    .session
-                    .model_runtime()
-                    .snapshot()
-                    .model(&provider, &model_id);
+                let model = session.model_runtime().snapshot().model(&provider, &model_id);
                 match model {
                     None => failed(format!("Model not found: {provider}/{model_id}")),
-                    Some(model) => match self.session.set_model(model.clone(), false).await {
+                    Some(model) => match session.set_model(model.clone(), false).await {
                         Ok(_) => ok(Some(to_value(&model))),
                         Err(message) => failed(message),
                     },
                 }
             }
-            RpcCommand::CycleModel => match self.next_model() {
+            RpcCommand::CycleModel => match self.next_model(&session) {
                 None => ok(Some(Value::Null)),
-                Some(model) => match self.session.set_model(model.clone(), false).await {
+                Some(model) => match session.set_model(model.clone(), false).await {
                     Ok(_) => ok(Some(json!({
                         "model": to_value(&model),
-                        "thinkingLevel": self.session.thinking_level().as_str(),
+                        "thinkingLevel": session.thinking_level().as_str(),
                         // Bake's session keeps no `--models` scope to cycle.
                         "isScoped": false,
                     }))),
@@ -312,44 +415,44 @@ impl Rpc {
                 },
             },
             RpcCommand::GetAvailableModels => ok(Some(json!({
-                "models": to_value(&self.session.model_runtime().snapshot().available()),
+                "models": to_value(&session.model_runtime().snapshot().available()),
             }))),
             RpcCommand::SetThinkingLevel { level } => {
-                match self.session.set_thinking_level(level, false).await {
+                match session.set_thinking_level(level, false).await {
                     Ok(_) => ok(None),
                     Err(message) => failed(message),
                 }
             }
-            RpcCommand::CycleThinkingLevel => match self.next_thinking_level() {
+            RpcCommand::CycleThinkingLevel => match self.next_thinking_level(&session) {
                 None => ok(Some(Value::Null)),
-                Some(level) => match self.session.set_thinking_level(level, false).await {
+                Some(level) => match session.set_thinking_level(level, false).await {
                     Ok(_) => ok(Some(json!({ "level": level.as_str() }))),
                     Err(message) => failed(message),
                 },
             },
             RpcCommand::GetAvailableThinkingLevels => ok(Some(json!({
-                "levels": levels(&self.session.available_thinking_levels()),
+                "levels": levels(&session.available_thinking_levels()),
             }))),
             RpcCommand::SetSteeringMode { mode } => {
-                match self.session.set_steering_mode(mode.into()).await {
+                match session.set_steering_mode(mode.into()).await {
                     Ok(_) => ok(None),
                     Err(message) => failed(message),
                 }
             }
             RpcCommand::SetFollowUpMode { mode } => {
-                match self.session.set_follow_up_mode(mode.into()).await {
+                match session.set_follow_up_mode(mode.into()).await {
                     Ok(_) => ok(None),
                     Err(message) => failed(message),
                 }
             }
             RpcCommand::Compact {
                 custom_instructions,
-            } => match self.session.compact(custom_instructions.as_deref()).await {
+            } => match session.compact(custom_instructions.as_deref()).await {
                 Ok(result) => ok(Some(to_value(&result))),
                 Err(message) => failed(message),
             },
             RpcCommand::SetAutoCompaction { enabled } => {
-                match self.session.set_auto_compaction_enabled(enabled).await {
+                match session.set_auto_compaction_enabled(enabled).await {
                     Ok(_) => ok(None),
                     Err(message) => failed(message),
                 }
@@ -359,14 +462,17 @@ impl Rpc {
                     .to_owned(),
             ),
             RpcCommand::AbortRetry => {
-                self.session.abort_retry();
+                session.abort_retry();
                 ok(None)
             }
             RpcCommand::Bash { .. } | RpcCommand::AbortBash => failed(format!(
                 "{kind} is not supported in bake-rs: it runs no shell command outside the model's bash tool."
             )),
-            RpcCommand::GetSessionStats => ok(Some(stats(&self.session.session_stats()))),
-            RpcCommand::ExportHtml { output_path } => match self.export_html(output_path).await {
+            RpcCommand::GetSessionStats => ok(Some(stats(&session.session_stats()))),
+            RpcCommand::ExportHtml { output_path } => match self
+                .export_html(Arc::clone(&session), output_path)
+                .await
+            {
                 Ok(path) => ok(Some(json!({ "path": path }))),
                 Err(message) => failed(message),
             },
@@ -383,7 +489,7 @@ impl Rpc {
                 }
             }
             RpcCommand::Clone => {
-                let Some(leaf) = self.session.leaf_id() else {
+                let Some(leaf) = session.leaf_id() else {
                     return failed("Cannot clone session: no current entry selected".to_owned());
                 };
                 match self.fork(&leaf, ForkPosition::At).await {
@@ -392,15 +498,14 @@ impl Rpc {
                 }
             }
             RpcCommand::GetForkMessages => ok(Some(json!({
-                "messages": self
-                    .session
+                "messages": session
                     .user_messages_for_forking()
                     .into_iter()
                     .map(|point| json!({ "entryId": point.entry_id, "text": point.text }))
                     .collect::<Vec<Value>>(),
             }))),
             RpcCommand::GetEntries { since } => {
-                let (entries, leaf) = self.session.session_entries();
+                let (entries, leaf) = session.session_entries();
                 let start = match &since {
                     None => 0,
                     Some(since) => {
@@ -417,7 +522,7 @@ impl Rpc {
                 ok(Some(json!({ "entries": entries, "leafId": leaf })))
             }
             RpcCommand::GetTree => {
-                let (tree, leaf) = self.session.session_tree();
+                let (tree, leaf) = session.session_tree();
                 // The nested record is written without building a nested
                 // value, which a long branch would make too deep to
                 // serialize or drop safely.
@@ -425,113 +530,89 @@ impl Rpc {
                 None
             }
             RpcCommand::GetLastAssistantText => {
-                ok(Some(json!({ "text": self.last_assistant_text() })))
+                ok(Some(json!({ "text": self.last_assistant_text(&session) })))
             }
             RpcCommand::SetSessionName { name } => {
                 if crate::cli::normalize_session_name(&name).is_none() {
                     return failed("Session name cannot be empty".to_owned());
                 }
-                match self.session.set_session_name(&name).await {
+                match session.set_session_name(&name).await {
                     Ok(_) => ok(None),
                     Err(message) => failed(message),
                 }
             }
             RpcCommand::GetMessages => ok(Some(json!({
-                "messages": to_value(&self.session.messages()),
+                "messages": to_value(&session.messages()),
             }))),
-            RpcCommand::GetCommands => ok(Some(json!({ "commands": self.commands() }))),
+            RpcCommand::GetCommands => ok(Some(json!({ "commands": self.commands(&session) }))),
         }
     }
 
-    /// Pi's `prompt` case: the run starts on its own task, and the
-    /// response reports whether it started, as Pi's `preflightResult`
-    /// does. A refusal before the run starts is the command's failure; a
-    /// failure after it started is in the event stream, as in Pi.
+    /// Pi's `prompt` case: the response reports whether the run started,
+    /// as Pi's `preflightResult` does, and is written as soon as that is
+    /// known, while the run goes on. A refusal before the run starts is
+    /// the command's failure; a failure after it started is in the event
+    /// stream, as in Pi. The run is awaited on the command's own task, so
+    /// shutdown waits for it and nothing is detached.
     async fn start_prompt(
-        &mut self,
+        &self,
+        session: &AgentSession,
         id: Option<String>,
         message: String,
         images: Vec<bake_ai::ImageContent>,
     ) {
-        // One prompt runs at a time: the session refuses a second one,
-        // whose task ends at once. Finished tasks are reaped here.
-        self.reap_prompts().await;
-        let (sender, started) = oneshot::channel();
-        *self
-            .run_started
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = Some(sender);
-        let session = Arc::clone(&self.session);
-        let out = Arc::clone(&self.out);
-        let slot = Arc::clone(&self.run_started);
-        self.prompts.push(tokio::spawn(async move {
-            let run = session.prompt(&message, images);
-            let outcome = tokio::select! {
-                // The run's first event wins a tie: the prompt did start.
-                biased;
-                _ = started => None,
-                result = run => result.err(),
-            };
-            slot.lock().unwrap_or_else(PoisonError::into_inner).take();
-            let response = match outcome {
-                None => success_response(id, "prompt", Some(json!({ "disposition": "started" }))),
-                Some(message) => error_response(id, "prompt", &message),
-            };
-            write_out(&out, &serialize_json_line(&response));
-        }));
-    }
-
-    /// Awaits the prompt tasks that have ended, keeping the rest.
-    async fn reap_prompts(&mut self) {
-        for task in std::mem::take(&mut self.prompts) {
-            if task.is_finished() {
-                let _ = task.await;
-            } else {
-                self.prompts.push(task);
-            }
-        }
-    }
-
-    /// Awaits every prompt task, so nothing writes after this returns.
-    async fn await_prompts(&mut self) {
-        for task in std::mem::take(&mut self.prompts) {
-            let _ = task.await;
+        // Registered before the run starts, so its `agent_start` cannot
+        // arrive unheard.
+        let started = self.run_started.notified();
+        tokio::pin!(started);
+        started.as_mut().enable();
+        let run = session.prompt(&message, images);
+        tokio::pin!(run);
+        let (response, running) = tokio::select! {
+            // The run's first event wins a tie: the prompt did start.
+            biased;
+            () = &mut started => (
+                success_response(id, "prompt", Some(json!({ "disposition": "started" }))),
+                true,
+            ),
+            result = &mut run => (match result {
+                Ok(()) => success_response(id, "prompt", Some(json!({ "disposition": "started" }))),
+                Err(message) => error_response(id, "prompt", &message),
+            }, false),
+        };
+        self.send(&response);
+        if running {
+            let _ = run.await;
         }
     }
 
     /// Pi's `RpcSessionState`.
-    fn state(&self) -> Value {
+    fn state(&self, session: &AgentSession) -> Value {
         let mut state = Map::new();
-        if let Some(model) = self.session.model() {
+        if let Some(model) = session.model() {
             state.insert("model".into(), to_value(&model));
         }
         state.insert(
             "thinkingLevel".into(),
-            self.session.thinking_level().as_str().into(),
+            session.thinking_level().as_str().into(),
         );
-        state.insert("isStreaming".into(), self.session.is_streaming().into());
-        state.insert("isCompacting".into(), self.session.is_compacting().into());
-        state.insert(
-            "steeringMode".into(),
-            to_value(&self.session.steering_mode()),
-        );
-        state.insert(
-            "followUpMode".into(),
-            to_value(&self.session.follow_up_mode()),
-        );
-        if let Some(file) = self.session.session_file() {
+        state.insert("isStreaming".into(), session.is_streaming().into());
+        state.insert("isCompacting".into(), session.is_compacting().into());
+        state.insert("steeringMode".into(), to_value(&session.steering_mode()));
+        state.insert("followUpMode".into(), to_value(&session.follow_up_mode()));
+        if let Some(file) = session.session_file() {
             state.insert("sessionFile".into(), path_json(&file));
         }
-        state.insert("sessionId".into(), self.session.session_id().into());
-        if let Some(name) = self.session.session_name() {
+        state.insert("sessionId".into(), session.session_id().into());
+        if let Some(name) = session.session_name() {
             state.insert("sessionName".into(), name.into());
         }
         state.insert(
             "autoCompactionEnabled".into(),
-            self.session.auto_compaction_enabled().into(),
+            session.auto_compaction_enabled().into(),
         );
-        state.insert("messageCount".into(), self.session.messages().len().into());
-        let queued = self.session.queued_messages();
+        state.insert("messageCount".into(), session.messages().len().into());
+        let queued = session.queued_messages();
         state.insert(
             "pendingMessageCount".into(),
             (queued.steering.len() + queued.follow_up.len()).into(),
@@ -541,12 +622,12 @@ impl Rpc {
 
     /// Pi's `_cycleAvailableModel` over the available models: the one
     /// after the selected model, wrapping, or `None` with fewer than two.
-    fn next_model(&self) -> Option<Model> {
-        let models = self.session.model_runtime().snapshot().available();
+    fn next_model(&self, session: &AgentSession) -> Option<Model> {
+        let models = session.model_runtime().snapshot().available();
         if models.len() < 2 {
             return None;
         }
-        let current = self.session.model();
+        let current = session.model();
         let index = current
             .as_ref()
             .and_then(|model| {
@@ -560,12 +641,12 @@ impl Rpc {
 
     /// Pi's `cycleThinkingLevel`: the next level the selected model
     /// supports, or `None` when it does not reason.
-    fn next_thinking_level(&self) -> Option<ModelThinkingLevel> {
-        if !self.session.model().is_some_and(|model| model.reasoning) {
+    fn next_thinking_level(&self, session: &AgentSession) -> Option<ModelThinkingLevel> {
+        if !session.model().is_some_and(|model| model.reasoning) {
             return None;
         }
-        let levels = self.session.available_thinking_levels();
-        let current = self.session.thinking_level();
+        let levels = session.available_thinking_levels();
+        let current = session.thinking_level();
         let index = levels
             .iter()
             .position(|level| *level == current)
@@ -575,9 +656,8 @@ impl Rpc {
 
     /// Pi's `getLastAssistantText`: the last assistant message's text,
     /// trimmed, skipping an aborted message with no content.
-    fn last_assistant_text(&self) -> Value {
-        let text = self
-            .session
+    fn last_assistant_text(&self, session: &AgentSession) -> Value {
+        let text = session
             .messages()
             .iter()
             .rev()
@@ -606,9 +686,9 @@ impl Rpc {
 
     /// Pi's `get_commands` without extension commands: the prompt
     /// templates and skills a prompt can invoke.
-    fn commands(&self) -> Vec<Value> {
+    fn commands(&self, session: &AgentSession) -> Vec<Value> {
         let mut commands = Vec::new();
-        for template in self.session.prompt_templates() {
+        for template in session.prompt_templates() {
             commands.push(json!({
                 "name": template.name,
                 "description": template.description,
@@ -616,7 +696,7 @@ impl Rpc {
                 "sourceInfo": source_info(&template.file_path, &template.source, None),
             }));
         }
-        for skill in self.session.skills() {
+        for skill in session.skills() {
             commands.push(json!({
                 "name": format!("skill:{}", skill.name),
                 "description": skill.description,
@@ -630,14 +710,16 @@ impl Rpc {
     /// Pi's `exportToHtml`: the page, written where the command asks or,
     /// without a path, beside the working directory as
     /// `bake-session-<session file>.html`, as Pi names its default.
-    async fn export_html(&self, output_path: Option<String>) -> Result<String, String> {
-        let session = Arc::clone(&self.session);
-        let cwd = self.session.cwd();
+    async fn export_html(
+        &self,
+        session: Arc<AgentSession>,
+        output_path: Option<String>,
+    ) -> Result<String, String> {
+        let cwd = session.cwd();
         let path = match output_path {
             Some(path) => crate::session::paths::normalize_path(&path),
             None => {
-                let file = self
-                    .session
+                let file = session
                     .session_file()
                     .ok_or_else(|| crate::agent_session::share::EXPORT_IN_MEMORY.to_owned())?;
                 let stem = file.file_stem().unwrap_or_default().to_string_lossy();
@@ -656,7 +738,7 @@ impl Rpc {
 
     /// Pi's `switch_session`: the session file at `path`, which must hold
     /// a session started in this working directory.
-    async fn switch_session(&mut self, path: &str) -> Result<(), String> {
+    async fn switch_session(&self, path: &str) -> Result<(), String> {
         let path = crate::session::paths::normalize_path(path);
         let read = path.clone();
         let id = tokio::task::spawn_blocking(move || {
@@ -670,22 +752,24 @@ impl Rpc {
 
     /// Pi's runtime `fork`: the new session holds this session's history up
     /// to `entry_id`; `Before` returns the message's text, for an editor.
-    async fn fork(
-        &mut self,
-        entry_id: &str,
-        position: ForkPosition,
-    ) -> Result<Option<String>, String> {
+    async fn fork(&self, entry_id: &str, position: ForkPosition) -> Result<Option<String>, String> {
         let factory = self.factory()?;
-        let (replacement, text) = factory.fork(&self.session, entry_id, position).await?;
-        self.commit(replacement).await;
+        let replacing = self.replacing.lock().await;
+        let session = self.replaceable()?;
+        let (replacement, text) = factory.fork(&session, entry_id, position).await?;
+        self.commit(session, replacement).await;
+        drop(replacing);
         Ok(text)
     }
 
     /// Replaces the session with the one `target` names.
-    async fn replace(&mut self, target: SessionTarget) -> Result<(), String> {
+    async fn replace(&self, target: SessionTarget) -> Result<(), String> {
         let factory = self.factory()?;
-        let replacement = factory.replace(&self.session, target).await?;
-        self.commit(replacement).await;
+        let replacing = self.replacing.lock().await;
+        let session = self.replaceable()?;
+        let replacement = factory.replace(&session, target).await?;
+        self.commit(session, replacement).await;
+        drop(replacing);
         Ok(())
     }
 
@@ -695,14 +779,26 @@ impl Rpc {
             .ok_or_else(|| "This session cannot be replaced.".to_owned())
     }
 
-    /// Takes `replacement` into use, as the terminal frontend does: the
-    /// running session is shut down first, so its MCP servers are gone
-    /// before the replacement's start, and the events of the new session
-    /// reach the same output. The approval broker stays connected, so the
-    /// new session's tools ask the same client.
-    async fn commit(&mut self, mut replacement: Replacement) {
-        self.session.shutdown().await;
-        self.await_prompts().await;
+    /// The session to replace, once this replacement holds its turn, or
+    /// the session's own refusal when shutdown has already read the
+    /// session it stops: a replacement must not install one after that.
+    fn replaceable(&self) -> Result<Arc<AgentSession>, String> {
+        if self.closing.load(Ordering::SeqCst) {
+            return Err("The session is shut down.".to_owned());
+        }
+        Ok(self.session())
+    }
+
+    /// Takes `replacement` into use, as the terminal frontend does:
+    /// `previous`, the session it replaces, is shut down first, so its MCP
+    /// servers are gone before the replacement's start, and the events of
+    /// the new session reach the same output. The approval broker stays
+    /// connected, so the new session's tools ask the same client. A command
+    /// still running on `previous` is not waited for: it runs to its end
+    /// against the shut-down session and answers with its refusal, as it
+    /// does against Pi's disposed session.
+    async fn commit(&self, previous: Arc<AgentSession>, mut replacement: Replacement) {
+        previous.shutdown().await;
         let started = replacement.start_servers();
         let mut warnings = replacement.warnings;
         if let Err(message) = started {
@@ -711,31 +807,9 @@ impl Rpc {
         for warning in warnings {
             write_out(&self.stderr, &format!("Warning: {warning}\n"));
         }
-        self.session = Arc::new(replacement.session);
+        *self.session.lock().unwrap_or_else(PoisonError::into_inner) =
+            Arc::new(replacement.session);
         self.subscribe();
-    }
-
-    /// Pi's `shutdown`: the approval queue closes first, so a request the
-    /// client never answered is cancelled while the session can still
-    /// record that decision, and its call is refused before any effect;
-    /// then the session's own shutdown stops its MCP servers, background
-    /// shells, and plugin helpers and awaits their process trees, the
-    /// prompt task is awaited, and the writer is flushed.
-    async fn shutdown(mut self) {
-        if let Some(broker) = &self.approvals {
-            broker.close();
-        }
-        // The run stops here, before the session tears down, so the
-        // refusal of a request nobody answered is written while the
-        // session still admits writes ([`crate::permissions::history`]).
-        self.session.abort().await;
-        self.session.shutdown().await;
-        self.await_prompts().await;
-        if let Some(subscription) = self.subscription.take() {
-            subscription.unsubscribe();
-        }
-        let mut out = self.out.lock().unwrap_or_else(PoisonError::into_inner);
-        let _ = std::io::Write::flush(&mut *out);
     }
 }
 

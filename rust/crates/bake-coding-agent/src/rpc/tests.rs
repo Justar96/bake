@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use bake_ai::Model;
-use bake_ai::providers::faux::{FauxResponseStep, faux_assistant_message};
+use bake_ai::providers::faux::{FauxFuture, FauxResponseStep, faux_assistant_message};
 use serde_json::{Value, json};
 use tokio::sync::Notify;
 
@@ -580,4 +580,207 @@ async fn refuses_the_commands_bake_does_not_support() {
     }
     input.close();
     assert_eq!(mode.await.expect("the loop ends"), 0);
+}
+
+// ----------------------------------------------------------------------------
+// Pi `rpc-mode.ts` `handleInputLine`, which starts each line's handler
+// without awaiting the one before it: a long command delays no other.
+// ----------------------------------------------------------------------------
+
+/// A summary request that reports it started and then waits, so the
+/// compaction it serves is held until its own request is cancelled or
+/// `release` is notified. Pi holds a compaction the same way in
+/// `test/suite/regressions/7150-rpc-prompt-during-compaction.test.ts`,
+/// there through its `session_before_compact` handler.
+fn held_summary(
+    started: tokio::sync::mpsc::UnboundedSender<()>,
+    release: Arc<Notify>,
+) -> FauxResponseStep {
+    FauxResponseStep::Factory(Arc::new(move |_, options, _, _| {
+        let signal = options.base.signal.clone();
+        let started = started.clone();
+        let release = Arc::clone(&release);
+        let wait: FauxFuture = Box::pin(async move {
+            let released = release.notified();
+            tokio::pin!(released);
+            // Registered before the request reports that it started, so a
+            // release that follows at once is not missed.
+            released.as_mut().enable();
+            let _ = started.send(());
+            match signal {
+                Some(signal) => {
+                    tokio::select! {
+                        () = signal.cancelled() => {}
+                        () = released => {}
+                    }
+                }
+                None => released.await,
+            }
+            Ok(faux_assistant_message("## Goal\nHeld summary"))
+        });
+        wait
+    }))
+}
+
+/// A session with history a manual compaction can summarize, keeping one
+/// recent token as Pi's 7150 harness does with
+/// `compaction.keepRecentTokens`. Its prompts run before the loop starts,
+/// so the loop's records are the test's own.
+async fn compactable_session(
+    dir: &TempDir,
+    h: &crate::agent_session::tests::Harness,
+) -> AgentSession {
+    let cwd = dir.path().to_string_lossy().into_owned();
+    let mut created = options(h, new_file_session(dir), &cwd);
+    created.settings = crate::settings::Settings::from_object(
+        json!({ "compaction": { "keepRecentTokens": 1 } })
+            .as_object()
+            .expect("a settings object"),
+    );
+    h.faux.set_responses(vec![
+        faux_assistant_message("one").into(),
+        faux_assistant_message("two").into(),
+        faux_assistant_message("three").into(),
+    ]);
+    let session = AgentSession::create(created).await.expect("session");
+    for text in ["one", "two", "three"] {
+        session.prompt(text, Vec::new()).await.expect("prompt");
+    }
+    session
+}
+
+/// Holds a compaction the `compact` command started: its summary request
+/// has been sent and waits. Returns the release the request waits on.
+async fn hold_a_compaction(
+    h: &crate::agent_session::tests::Harness,
+    input: &Input,
+    out: &Output,
+) -> Arc<Notify> {
+    let (started, mut requested) = tokio::sync::mpsc::unbounded_channel();
+    let release = Arc::new(Notify::new());
+    h.faux.set_responses(vec![
+        held_summary(started, Arc::clone(&release)),
+        // A compaction that keeps one token summarizes the last turn's
+        // prefix too, so a released hold needs a second summary.
+        faux_assistant_message("## Original Request\nthree").into(),
+    ]);
+    input.send(json!({ "id": "c", "type": "compact" }));
+    requested.recv().await.expect("the summary request started");
+    assert!(
+        out.responses("c").is_empty(),
+        "the compaction is still running: {:?}",
+        out.records()
+    );
+    release
+}
+
+// Pi `agent-session.ts` `abort`, which calls `abortCompaction()` and then
+// waits for idle. It is reached while a compaction runs because Pi handles
+// each command line as it arrives, and the aborted compaction answers with
+// the message Pi's `compact` throws once its signal has aborted,
+// `Compaction cancelled`. Serialized handling would never reach the abort:
+// the held summary request is released by nothing else.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn abort_reaches_a_held_compaction() {
+    let dir = TempDir::new("rpc-abort-compaction");
+    let h = harness();
+    let session = compactable_session(&dir, &h).await;
+    let (input, pipe) = Input::new();
+    let out = Output(Arc::new(Mutex::new(Vec::new())));
+    let mode = start(session, pipe, &out, None);
+    let _release = hold_a_compaction(&h, &input, &out).await;
+    input.send(json!({ "id": "a", "type": "abort" }));
+    let aborted = out.wait_for_response("a").await;
+    assert_eq!(aborted["success"], json!(true), "{aborted}");
+    let compacted = out.wait_for_response("c").await;
+    assert_eq!(compacted["success"], json!(false), "{compacted}");
+    assert_eq!(compacted["error"], json!("Compaction cancelled"));
+    // Pi's `compaction_end` for an aborted compaction: no error message.
+    let ends = out.of_kind("compaction_end");
+    assert_eq!(ends.len(), 1, "{ends:?}");
+    assert_eq!(ends[0]["aborted"], json!(true), "{ends:?}");
+    assert_eq!(ends[0].get("errorMessage"), None, "{ends:?}");
+    input.close();
+    assert_eq!(mode.await.expect("the loop ends"), 0);
+}
+
+// Pi `test/rpc.test.ts`, "should get state", answered while a compaction
+// runs: Pi's `get_state` reads the session and needs nothing of the
+// running command. `isCompacting` reports the compaction meanwhile, as
+// Pi's `RpcSessionState` does.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn get_state_answers_while_a_compaction_runs() {
+    let dir = TempDir::new("rpc-state-compacting");
+    let h = harness();
+    let session = compactable_session(&dir, &h).await;
+    let (input, pipe) = Input::new();
+    let out = Output(Arc::new(Mutex::new(Vec::new())));
+    let mode = start(session, pipe, &out, None);
+    let release = hold_a_compaction(&h, &input, &out).await;
+    input.send(json!({ "id": "s", "type": "get_state" }));
+    let state = out.wait_for_response("s").await;
+    assert_eq!(state["success"], json!(true), "{state}");
+    assert_eq!(state["data"]["isCompacting"], json!(true), "{state}");
+    assert!(
+        out.responses("c").is_empty(),
+        "the compaction answered first: {:?}",
+        out.records()
+    );
+    release.notify_one();
+    let compacted = out.wait_for_response("c").await;
+    assert_eq!(compacted["success"], json!(true), "{compacted}");
+    input.close();
+    assert_eq!(mode.await.expect("the loop ends"), 0);
+}
+
+// Pi `test/suite/regressions/7150-rpc-prompt-during-compaction.test.ts`:
+// an RPC prompt during a manual compaction is refused, with the session's
+// own message, and starts no run. The refusal is the session's, so a
+// mutation Pi admits concurrently is never interleaved unsafely.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn rejects_an_rpc_prompt_while_manual_compaction_is_in_progress() {
+    let dir = TempDir::new("rpc-prompt-compacting");
+    let h = harness();
+    let session = compactable_session(&dir, &h).await;
+    let (input, pipe) = Input::new();
+    let out = Output(Arc::new(Mutex::new(Vec::new())));
+    let mode = start(session, pipe, &out, None);
+    let release = hold_a_compaction(&h, &input, &out).await;
+    input.send(json!({ "id": "p", "type": "prompt", "message": "PROBE-7150" }));
+    let refused = out.wait_for_response("p").await;
+    assert_eq!(refused["success"], json!(false), "{refused}");
+    assert_eq!(
+        refused["error"],
+        json!(
+            "Cannot submit a prompt while compaction is in progress. Wait for compaction to finish and retry."
+        )
+    );
+    assert!(out.of_kind("agent_start").is_empty(), "{:?}", out.records());
+    release.notify_one();
+    let compacted = out.wait_for_response("c").await;
+    assert_eq!(compacted["success"], json!(true), "{compacted}");
+    input.close();
+    assert_eq!(mode.await.expect("the loop ends"), 0);
+}
+
+// Pi `rpc-mode.ts` `shutdown`, reached from `process.stdin.on("end")`
+// while a command still runs: the session is shut down, which stops the
+// compaction, and the exit is 0. Bake's shutdown also awaits the command
+// task, so the compaction's own response is written before the loop
+// returns and nothing is left running.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn end_of_input_during_a_held_compaction_shuts_down() {
+    let dir = TempDir::new("rpc-eof-compacting");
+    let h = harness();
+    let session = compactable_session(&dir, &h).await;
+    let (input, pipe) = Input::new();
+    let out = Output(Arc::new(Mutex::new(Vec::new())));
+    let mode = start(session, pipe, &out, None);
+    let _release = hold_a_compaction(&h, &input, &out).await;
+    input.close();
+    assert_eq!(mode.await.expect("the loop ends"), 0);
+    let compacted = out.responses("c");
+    assert_eq!(compacted.len(), 1, "{:?}", out.records());
+    assert_eq!(compacted[0]["success"], json!(false), "{:?}", compacted[0]);
+    assert_eq!(compacted[0]["error"], json!("Compaction cancelled"));
 }

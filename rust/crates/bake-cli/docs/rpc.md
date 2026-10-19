@@ -28,7 +28,7 @@ Every command takes an optional string `id`, and its response repeats it:
 {"id":"req-1","type":"response","command":"get_state","success":true,"data":{"sessionId":"...","thinkingLevel":"off","isStreaming":false,"messageCount":0}}
 ```
 
-Commands are handled in the order they arrive, one at a time; only `prompt` runs on its own task, so `abort`, `steer`, `follow_up`, `clear_queue`, and the inspection commands are answered while a turn runs. Read standard output continuously: at most one chunk waits behind the writer, so a client that stops reading slows the session down.
+Each command is handled as it arrives, so a long command delays no other: `abort` reaches a running `compact`, prompt, or branch summary, and `get_state`, `get_messages`, and the other inspection commands answer meanwhile. Responses therefore arrive in the order the commands finish, not the order they were sent; correlate them by `id`. What may run together is the session's own rule: a `prompt` during a compaction is refused with the reason to wait for it, a `compact` while a turn runs stops that turn first, and settings changes are applied one at a time. Each record is written whole, so concurrent commands never interleave bytes within a line. Read standard output continuously: at most one chunk waits behind the writer, so a client that stops reading slows the session down.
 
 ## Prompting
 
@@ -121,4 +121,4 @@ A line that is not JSON answers as a `parse` failure without an id, and a record
 
 ## Shutdown
 
-Close the child's standard input to shut down: the pending approval question is cancelled, the running turn is stopped, the session is shut down with its MCP servers, background shells, and plugin helpers, their process trees are awaited, and `bake-rs` exits 0. `SIGTERM` exits 143, `SIGHUP` 129, and `SIGINT` 130, each after the same shutdown. Handle the child's unexpected exit too: a request in flight when the child exits gets no response.
+Close the child's standard input to shut down: the pending approval question is cancelled, the running turn is stopped, the session is shut down with its MCP servers, background shells, and plugin helpers, their process trees are awaited, and `bake-rs` exits 0. `SIGTERM` exits 143, `SIGHUP` 129, and `SIGINT` 130, each after the same shutdown. A long command in flight does not delay the shutdown: the stop request is taken up at once, the command is stopped with the session, and it answers with its own failure, such as `Compaction cancelled`, before the process exits. Handle the child's unexpected exit too: a request in flight when the child exits gets no response.
