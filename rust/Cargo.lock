@@ -153,7 +153,10 @@ dependencies = [
 name = "bake-codemode"
 version = "0.4.0-dev"
 dependencies = [
+ "getrandom 0.2.17",
  "serde_json",
+ "tokio",
+ "wasmtime",
 ]
 
 [[package]]

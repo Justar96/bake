@@ -1,0 +1,22 @@
+quickjs.wasm: QuickJS-NG 0.17.0 compiled to a WASI preview 1 reactor by
+quickjs-wasi, copied unchanged from its npm package.
+
+Package:   quickjs-wasi@3.6.2 (npm), file quickjs.wasm
+Integrity: sha512-FCqGtGOrMgzUiIrMNMA2YnsOxCNwo31dzqXvclXUC6xeT35NJLKXQJsvbeCTjvoFAwZgEAPg8U6+KAPDGXn8Mg==
+           (the npm tarball's)
+Size:      637405 bytes
+SHA-256:   d4c9375f2b1ca4dc95f72c8aa2982a7a9951ac8011490d79c6582df732b4bbd9
+Source:    https://github.com/vercel-labs/quickjs-wasi (wrapper and C glue)
+           https://github.com/quickjs-ng/quickjs (the engine)
+Used by:   Pi v1.3.0's packages/codemode, which pins quickjs-wasi 3.6.2.
+
+Licenses:  LICENSE-quickjs-wasi, the package's own LICENSE file, verbatim.
+           LICENSE-QuickJS-NG, the engine's MIT license. The package does not
+           carry QuickJS-NG's license file; this text names QuickJS-NG's
+           copyright holders and must be checked against the LICENSE file
+           of quickjs-ng at the engine version (0.17.0).
+
+The binary is not rebuilt from source; a unit test (`src/engine.rs`) checks
+the embedded bytes against the SHA-256 above. To update, replace
+the file, this record, and `QUICKJS_WASM_SHA256`, then re-check the driver's
+ABI (the exports `src/guest.rs` names and their signatures).

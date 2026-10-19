@@ -5,7 +5,18 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "Pi's codemode for Bake's Rust agent: the script source format, TypeScript declarations rendered from JSON Schema, script identifiers, and tool-search ranking; no agent types"
+description = "The native engine of Pi's codemode for Bake's Rust agent: the pinned QuickJS-NG WebAssembly binary run by Wasmtime in process, with Bake's own WASI shim and C API driver, Pi's script environment (prelude), source format, declarations, deterministic mode, and tool-search ranking; no agent types"
 
 [dependencies]
+# The engine: Cranelift compiles the vendored `engine/quickjs.wasm` as a core
+# module; epoch interruption and a store limiter bound each script.
+wasmtime.workspace = true
 serde_json.workspace = true
+# The WASI shim's `random_get` outside deterministic mode.
+getrandom.workspace = true
+# `Run`: the script thread's event channel, the deadline timer in
+# `Run::next`, and the blocking join when a `Run` is dropped on a runtime.
+tokio = { workspace = true, features = ["rt", "sync", "time"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "time", "macros"] }
