@@ -45,6 +45,10 @@ pub const OUTPUT_PREVIEW_LINES: usize = 5;
 /// Characters of a call's arguments a row shows; Pi's
 /// `COLLAPSED_ARGS_CHARS`.
 pub const COLLAPSED_ARGS_CHARS: usize = 80;
+/// Rows of a failed or cancelled call's error the block draws before it
+/// counts the rest. Bake's own: Pi shows errors only expanded, so eight
+/// failed calls stay a few rows each on a narrow terminal.
+pub const ERROR_PREVIEW_ROWS: usize = 2;
 
 /// How a call the script made stands; Pi's `CodemodeNestedCall` status.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -378,7 +382,8 @@ fn args_preview(args: &str) -> String {
 
 /// The latest [`CALL_PREVIEW_COUNT`] calls, one row each: its mark, its
 /// name, its arguments, and its duration, and a failed or cancelled call's
-/// error under its name. Earlier calls are counted above them.
+/// first [`ERROR_PREVIEW_ROWS`] rows of error under its name. Earlier calls
+/// are counted above them.
 fn calls(
     calls: &[NestedCall],
     width: usize,
@@ -444,26 +449,16 @@ fn calls(
         };
         let mut under = gutter();
         under.push(transcript::pad(name_at - BODY));
-        for item in transcript::preview(&clean_lines(error)) {
-            match item {
-                transcript::Preview::Line(text) => rows.extend(transcript::hang(
-                    &text,
-                    width,
-                    name_at,
-                    under.clone(),
-                    under.clone(),
-                    style,
-                )),
-                transcript::Preview::More(count) => {
-                    let mut spans = under.clone();
-                    spans.push(Span::styled(
-                        format!("{} {count} {}", look.marks().more, copy::MORE_LINES),
-                        transcript::dim(),
-                    ));
-                    rows.push(Line::from(spans));
-                }
-            }
-        }
+        let lead = || under.clone();
+        rows.extend(keep(
+            trimmed(&clean_lines(error)),
+            ERROR_PREVIEW_ROWS,
+            width,
+            name_at,
+            look,
+            &lead,
+            |_, text| transcript::hang(text, width, name_at, lead(), lead(), style),
+        ));
     }
     rows
 }
@@ -718,6 +713,41 @@ mod tests {
             },
         );
         assert_eq!(classic[2], "  | / bash  {}");
+    }
+
+    #[test]
+    fn a_failed_calls_error_keeps_its_first_rows_on_a_narrow_terminal() {
+        let mut failed = script(CallState::Failed);
+        failed.calls = (0..CALL_PREVIEW_COUNT)
+            .map(|_| NestedCall {
+                error: Some(format!("{}\n\nat run", "x".repeat(500))),
+                ..call("bash", "{}", NestedStatus::Error, None)
+            })
+            .collect();
+        let lines = render(failed, 40, PLAIN);
+        // Errors start under the name, 34 cells wide: the 500 characters
+        // wrap into 15 rows, and the blank and the stack line add two.
+        assert_eq!(
+            lines[2..6],
+            [
+                "  │ ✗ bash  {}".to_owned(),
+                format!("  │   {}", "x".repeat(34)),
+                format!("  │   {}", "x".repeat(34)),
+                "  │   ⋯ 15 more lines".to_owned(),
+            ]
+        );
+        // Each call takes its row, two of error, and the count.
+        assert_eq!(lines.len(), 2 + CALL_PREVIEW_COUNT * 4);
+        // A count that would stand for one row is that row.
+        let mut short = script(CallState::Failed);
+        short.calls = vec![NestedCall {
+            error: Some("one\ntwo\nthree".into()),
+            ..call("bash", "{}", NestedStatus::Error, None)
+        }];
+        assert_eq!(
+            render(short, 40, PLAIN)[3..],
+            ["  │   one", "  │   two", "  │   three"]
+        );
     }
 
     #[test]
