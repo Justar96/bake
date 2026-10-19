@@ -210,7 +210,10 @@ impl ProcessTree {
             if self.members() == Ok(0) {
                 return;
             }
-            #[cfg(windows)]
+            // Only a killed tree is waited for, so each poll kills again: a
+            // child its shell was forking as the group was signalled can
+            // join the group afterwards unsignalled (seen on macOS), and on
+            // Windows a process created as the job was terminated.
             self.kill();
             tokio::time::sleep(pause).await;
             pause = (pause * 2).min(Duration::from_millis(20));
