@@ -10,6 +10,12 @@
 //! calls failed with the response's error, as Pi's `message_end` handler
 //! does.
 //!
+//! A `codemode` call reads as one block: its script, then the calls the
+//! script made from its result's `details.calls`, which partial results
+//! publish while it runs, so the live block and a replayed one come from
+//! the same record. The nested calls' own events never reach the
+//! transcript.
+//!
 //! Background work reads as cards that pair up: the call that starts a
 //! background job or subagent, the calls that reach it later, and the
 //! notice it posts when it ends each carry its id, such as `bash-1`, and
@@ -19,6 +25,7 @@
 //! takes one event and returns the view updates it causes.
 
 use std::collections::HashMap;
+use std::time::Duration;
 
 use bake_agent::{AgentEvent, AgentMessage, AgentToolResult};
 use bake_ai::{AssistantContentBlock, AssistantMessage, StopReason, UserContent, UserContentBlock};
@@ -32,7 +39,9 @@ use bake_coding_agent::session::messages::CustomMessage;
 use bake_coding_agent::subagents::SUBAGENT_DETAIL;
 use bake_coding_agent::subagents::messages as subagents;
 use bake_coding_agent::tools::bash::BACKGROUND_JOB_DETAIL;
+use bake_coding_agent::tools::codemode::CODEMODE_TOOL_NAME;
 use bake_coding_agent::tools::job_tools::STILL_RUNNING;
+use bake_tui_view::codemode::{self, Codemode, NestedCall, NestedStatus};
 use bake_tui_view::copy;
 use bake_tui_view::jobs::{self, JobState};
 use bake_tui_view::runtime::{Pending, RuntimeUpdate, Target};
@@ -85,6 +94,12 @@ struct Outcome {
     id: Option<String>,
     summary: Option<String>,
     output: Vec<String>,
+    /// A `codemode` call's record of the calls its script made.
+    calls: Vec<NestedCall>,
+    /// The file a `codemode` result's whole output went to, when cut.
+    full_output_path: Option<String>,
+    /// How long a `codemode` script ran, from its result's header.
+    wall_time: Option<Duration>,
 }
 
 impl Outcome {
@@ -94,6 +109,16 @@ impl Outcome {
             id: None,
             summary: None,
             output,
+            calls: Vec::new(),
+            full_output_path: None,
+            wall_time: None,
+        }
+    }
+
+    fn failed(output: Vec<String>) -> Self {
+        Self {
+            state: CallState::Failed,
+            ..Self::running(output)
         }
     }
 }
@@ -309,11 +334,11 @@ impl Projector {
             }
             AgentEvent::ToolExecutionUpdate {
                 tool_call_id,
+                tool_name,
                 partial_result,
                 ..
             } => {
-                let lines = result_lines(&partial_result.content, partial_result.details.as_ref());
-                self.update_call(tool_call_id, Outcome::running(lines));
+                self.update_call(tool_call_id, partial(tool_name, partial_result));
                 vec![self.live()]
             }
             AgentEvent::ToolExecutionEnd {
@@ -384,22 +409,36 @@ impl Projector {
         if !running {
             self.settled.insert(id.to_owned(), outcome.clone());
         }
-        if let Row::Call {
-            state,
-            id,
-            summary,
-            output,
-            ..
-        } = &mut self.rows[index]
-        {
-            *state = outcome.state;
-            *output = outcome.output;
-            if outcome.id.is_some() {
-                *id = outcome.id;
+        match &mut self.rows[index] {
+            Row::Call {
+                state,
+                id,
+                summary,
+                output,
+                ..
+            } => {
+                *state = outcome.state;
+                *output = outcome.output;
+                if outcome.id.is_some() {
+                    *id = outcome.id;
+                }
+                if !running {
+                    *summary = outcome.summary;
+                }
             }
-            if !running {
-                *summary = outcome.summary;
+            // Each partial result holds every call so far, so the latest
+            // one replaces the record.
+            Row::Codemode(script) => {
+                script.state = outcome.state;
+                script.calls = outcome.calls;
+                script.output = outcome.output;
+                script.full_output_path = outcome.full_output_path;
+                script.wall_time = outcome.wall_time;
+                if !running {
+                    script.summary = outcome.summary;
+                }
             }
+            _ => {}
         }
     }
 
@@ -424,11 +463,21 @@ impl Projector {
         self.running.clear();
         let mut rows = std::mem::take(&mut self.rows);
         for row in &mut rows {
-            if let Row::Call { state, summary, .. } = row
-                && *state == CallState::Running
-            {
-                *state = CallState::Failed;
-                *summary = Some(INTERRUPTED.into());
+            match row {
+                Row::Call { state, summary, .. } if *state == CallState::Running => {
+                    *state = CallState::Failed;
+                    *summary = Some(INTERRUPTED.into());
+                }
+                Row::Codemode(script) if script.state == CallState::Running => {
+                    script.state = CallState::Failed;
+                    script.summary = Some(INTERRUPTED.into());
+                    for call in &mut script.calls {
+                        if call.status == NestedStatus::Running {
+                            call.status = NestedStatus::Cancelled;
+                        }
+                    }
+                }
+                _ => {}
             }
         }
         self.calls.clear();
@@ -535,12 +584,7 @@ fn assistant_rows(
                 let args = Value::Object(call.arguments.clone());
                 let outcome = match (settled.get(&call.id), failure) {
                     (Some(outcome), _) => outcome.clone(),
-                    (None, Some(failure)) => Outcome {
-                        state: CallState::Failed,
-                        id: None,
-                        summary: None,
-                        output: vec![failure.to_owned()],
-                    },
+                    (None, Some(failure)) => Outcome::failed(vec![failure.to_owned()]),
                     (None, None) => Outcome::running(Vec::new()),
                 };
                 calls.insert(call.id.clone(), rows.len());
@@ -555,6 +599,21 @@ fn assistant_rows(
 /// A tool call's card: its title, its main argument, the job or agent it
 /// reached, and its outcome. A running `job_output` that waits says so.
 fn call_row(tool: &str, args: &Value, labels: &Labels, outcome: Outcome) -> Row {
+    if tool == CODEMODE_TOOL_NAME {
+        return Row::Codemode(Codemode {
+            code: args
+                .get("code")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+            state: outcome.state,
+            summary: outcome.summary,
+            calls: outcome.calls,
+            output: outcome.output,
+            full_output_path: outcome.full_output_path,
+            wall_time: outcome.wall_time,
+        });
+    }
     let waits = tool == "job_output" && args.get("wait").and_then(Value::as_bool) == Some(true);
     let summary = outcome.summary.or_else(|| {
         (outcome.state == CallState::Running && waits).then(|| copy::WAITING.to_owned())
@@ -667,6 +726,52 @@ fn learn(labels: &mut Labels, details: Option<&Value>) {
     }
 }
 
+/// A running call's outcome from a partial result: its output so far, or
+/// for a `codemode` call the calls its script has made.
+fn partial(tool: &str, result: &AgentToolResult) -> Outcome {
+    if tool == CODEMODE_TOOL_NAME {
+        return Outcome {
+            calls: nested_calls(result.details.as_ref()),
+            ..Outcome::running(Vec::new())
+        };
+    }
+    Outcome::running(result_lines(&result.content, result.details.as_ref()))
+}
+
+/// The calls a `codemode` result's `details.calls` records, Pi's
+/// `CodemodeNestedCall`s. A record this frontend cannot read is left out.
+fn nested_calls(details: Option<&Value>) -> Vec<NestedCall> {
+    let Some(calls) = details
+        .and_then(|details| details.get("calls"))
+        .and_then(Value::as_array)
+    else {
+        return Vec::new();
+    };
+    calls
+        .iter()
+        .filter_map(|call| {
+            let text = |key: &str| call.get(key).and_then(Value::as_str).map(str::to_owned);
+            let status = match call.get("status")?.as_str()? {
+                "running" => NestedStatus::Running,
+                "ok" => NestedStatus::Ok,
+                "error" => NestedStatus::Error,
+                "cancelled" => NestedStatus::Cancelled,
+                _ => return None,
+            };
+            Some(NestedCall {
+                name: text("name")?,
+                args: text("args").unwrap_or_default(),
+                status,
+                duration: call
+                    .get("durationMs")
+                    .and_then(Value::as_f64)
+                    .and_then(|ms| Duration::try_from_secs_f64(ms / 1000.0).ok()),
+                error: text("error"),
+            })
+        })
+        .collect()
+}
+
 /// A settled call's outcome from its result.
 fn settled(tool: &str, failed: bool, result: &AgentToolResult) -> Outcome {
     outcome(tool, failed, &result.content, result.details.as_ref())
@@ -689,9 +794,7 @@ fn outcome(
         } else {
             CallState::Done
         },
-        id: None,
-        summary: None,
-        output: result_lines(content, details),
+        ..Outcome::running(result_lines(content, details))
     };
     let record = |key: &str| details.and_then(|details| details.get(key));
     let started = |key: &str, id: &str| {
@@ -708,6 +811,26 @@ fn outcome(
         }
     };
     match tool {
+        // Pi's renderer leaves out the header a script's result opens
+        // with; the time it states is the block's.
+        CODEMODE_TOOL_NAME => {
+            let header = match content.first() {
+                Some(UserContentBlock::Text(text)) => codemode::wall_time(&text.text),
+                _ => None,
+            };
+            let rest = if header.is_some() {
+                &content[1..]
+            } else {
+                content
+            };
+            outcome.output = result_lines(rest, None);
+            outcome.calls = nested_calls(details);
+            outcome.full_output_path = details
+                .and_then(|details| details.get("fullOutputPath"))
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            outcome.wall_time = header;
+        }
         "bash" => {
             outcome.id = started(BACKGROUND_JOB_DETAIL, "id");
             if outcome.id.is_some() {
@@ -897,15 +1020,19 @@ pub fn replay(messages: &[AgentMessage]) -> Vec<Row> {
             );
             for row in &mut assistant_rows {
                 // A call with no result in the log never finished.
-                if let Row::Call {
-                    state: CallState::Failed,
-                    output,
-                    summary,
-                    ..
-                } = row
-                    && output.len() == 1
-                    && output[0] == INTERRUPTED
-                {
+                let (output, summary) = match row {
+                    Row::Call {
+                        state: CallState::Failed,
+                        output,
+                        summary,
+                        ..
+                    } => (output, summary),
+                    Row::Codemode(script) if script.state == CallState::Failed => {
+                        (&mut script.output, &mut script.summary)
+                    }
+                    _ => continue,
+                };
+                if output.len() == 1 && output[0] == INTERRUPTED {
                     output.clear();
                     *summary = Some(INTERRUPTED.into());
                 }
@@ -1941,6 +2068,227 @@ more",
             })
             .as_deref(),
             Some("reminders schedule-1, schedule-2")
+        );
+    }
+
+    const SCRIPT: &str = "const a = await tools.read({ path: \"a\" });\nreturn a;";
+    const HEADER: &str = "Script completed\nWall time 0.1 seconds\nOutput:\n";
+
+    fn codemode_update(calls: Value) -> AgentEvent {
+        AgentEvent::ToolExecutionUpdate {
+            tool_call_id: "c".into(),
+            tool_name: CODEMODE_TOOL_NAME.into(),
+            args: json!({ "code": SCRIPT }),
+            partial_result: AgentToolResult {
+                details: Some(json!({ "calls": calls })),
+                ..AgentToolResult::default()
+            },
+            parent_tool_call_id: None,
+        }
+    }
+
+    fn codemode_result() -> AgentToolResult {
+        AgentToolResult {
+            content: vec![
+                UserContentBlock::Text(TextContent::new(HEADER)),
+                UserContentBlock::Text(TextContent::new("alpha")),
+            ],
+            details: Some(json!({
+                "calls": [
+                    { "id": "c/1", "name": "read", "args": "{\"path\":\"a\"}", "status": "ok", "durationMs": 5.2 },
+                    { "id": "c/2", "name": "bash", "args": "{\"command\":\"false\"}", "status": "error", "durationMs": 12, "error": "exit 1" },
+                ],
+                "fullOutputPath": "/tmp/out.txt",
+            })),
+            ..AgentToolResult::default()
+        }
+    }
+
+    fn codemode(row: &Row) -> &Codemode {
+        match row {
+            Row::Codemode(script) => script,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_codemode_call_shows_its_calls_live_and_reads_the_same_replayed() {
+        let assistant = faux_assistant_blocks(
+            vec![faux_tool_call(
+                CODEMODE_TOOL_NAME,
+                json!({ "code": SCRIPT }),
+                Some("c"),
+            )],
+            StopReason::ToolUse,
+        );
+        let mut projector = Projector::default();
+        projector.begin(None);
+        run(
+            &mut projector,
+            AgentEvent::MessageEnd {
+                message: Message::Assistant(assistant.clone()).into(),
+            },
+        );
+        let rows = live_rows(run(
+            &mut projector,
+            start("c", CODEMODE_TOOL_NAME, json!({ "code": SCRIPT })),
+        ));
+        let script = codemode(&rows[0]);
+        assert_eq!(
+            (script.code.as_str(), script.state, script.calls.len()),
+            (SCRIPT, CallState::Running, 0)
+        );
+        // A nested call's own events stay out of the transcript.
+        let nested = AgentEvent::ToolExecutionStart {
+            tool_call_id: "c/1".into(),
+            tool_name: "read".into(),
+            args: json!({ "path": "a" }),
+            parent_tool_call_id: Some("c".into()),
+        };
+        assert_eq!(run(&mut projector, nested), []);
+        // Partial results start empty and carry every call so far.
+        let rows = live_rows(run(&mut projector, codemode_update(json!([]))));
+        assert!(codemode(&rows[0]).calls.is_empty());
+        let rows = live_rows(run(
+            &mut projector,
+            codemode_update(json!([
+                { "id": "c/1", "name": "read", "args": "{\"path\":\"a\"}", "status": "ok", "durationMs": 5.2 },
+                { "id": "c/?", "name": "bash", "args": "{\"command\":\"false\"}", "status": "running" },
+                { "id": "c/?", "name": "future", "args": "{}", "status": "paused" },
+            ])),
+        ));
+        let script = codemode(&rows[0]);
+        assert_eq!(script.state, CallState::Running);
+        assert_eq!(
+            script.calls,
+            [
+                NestedCall {
+                    name: "read".into(),
+                    args: r#"{"path":"a"}"#.into(),
+                    status: NestedStatus::Ok,
+                    duration: Some(Duration::from_micros(5_200)),
+                    error: None,
+                },
+                // A status this frontend does not know is left out.
+                NestedCall {
+                    name: "bash".into(),
+                    args: r#"{"command":"false"}"#.into(),
+                    status: NestedStatus::Running,
+                    duration: None,
+                    error: None,
+                },
+            ]
+        );
+        // The result settles it: its calls, its output without the
+        // header, the time the header states, and the full output's file.
+        run(
+            &mut projector,
+            AgentEvent::ToolExecutionEnd {
+                tool_call_id: "c".into(),
+                tool_name: CODEMODE_TOOL_NAME.into(),
+                result: codemode_result(),
+                is_error: false,
+                duration_ms: Some(130),
+                parent_tool_call_id: None,
+            },
+        );
+        let Some(RuntimeUpdate::Commit(committed)) = projector.finish().pop() else {
+            panic!("the turn commits");
+        };
+        let settled = Codemode {
+            code: SCRIPT.into(),
+            state: CallState::Done,
+            summary: None,
+            calls: vec![
+                script.calls[0].clone(),
+                NestedCall {
+                    name: "bash".into(),
+                    args: r#"{"command":"false"}"#.into(),
+                    status: NestedStatus::Error,
+                    duration: Some(Duration::from_millis(12)),
+                    error: Some("exit 1".into()),
+                },
+            ],
+            output: vec!["alpha".into()],
+            full_output_path: Some("/tmp/out.txt".into()),
+            wall_time: Some(Duration::from_millis(100)),
+        };
+        assert_eq!(committed, [Row::Codemode(settled.clone())]);
+        // The session log replays the same block.
+        let logged = Message::ToolResult(ToolResultMessage {
+            tool_call_id: "c".into(),
+            tool_name: CODEMODE_TOOL_NAME.into(),
+            content: codemode_result().content,
+            details: codemode_result().details,
+            usage: None,
+            nested_calls: None,
+            is_error: false,
+            timestamp: 0,
+            duration_ms: Some(130),
+        });
+        assert_eq!(
+            replay(&[Message::Assistant(assistant).into(), logged.into()]),
+            [Row::Codemode(settled)]
+        );
+    }
+
+    #[test]
+    fn an_unfinished_codemode_call_is_interrupted_live_and_replayed() {
+        let mut projector = Projector::default();
+        projector.begin(None);
+        run(
+            &mut projector,
+            start("c", CODEMODE_TOOL_NAME, json!({ "code": SCRIPT })),
+        );
+        run(
+            &mut projector,
+            codemode_update(json!([
+                { "id": "c/?", "name": "bash", "args": "{}", "status": "running" },
+            ])),
+        );
+        let Some(RuntimeUpdate::Commit(committed)) = projector.finish().pop() else {
+            panic!("the turn commits");
+        };
+        let script = codemode(&committed[0]);
+        assert_eq!(
+            (script.state, script.summary.as_deref()),
+            (CallState::Failed, Some(INTERRUPTED))
+        );
+        assert_eq!(script.calls[0].status, NestedStatus::Cancelled);
+        // A call with no result in the log never finished.
+        let assistant = faux_assistant_blocks(
+            vec![faux_tool_call(
+                CODEMODE_TOOL_NAME,
+                json!({ "code": SCRIPT }),
+                Some("c"),
+            )],
+            StopReason::ToolUse,
+        );
+        let rows = replay(&[Message::Assistant(assistant).into()]);
+        let script = codemode(&rows[0]);
+        assert_eq!(
+            (script.state, script.summary.as_deref(), script.output.len()),
+            (CallState::Failed, Some(INTERRUPTED), 0)
+        );
+    }
+
+    #[test]
+    fn a_codemode_result_without_a_header_keeps_all_its_text() {
+        let rejected = outcome(
+            CODEMODE_TOOL_NAME,
+            true,
+            &[UserContentBlock::Text(TextContent::new(
+                "The @options line must be followed by JavaScript source",
+            ))],
+            None,
+        );
+        assert_eq!(
+            (rejected.state, rejected.output, rejected.wall_time),
+            (
+                CallState::Failed,
+                vec!["The @options line must be followed by JavaScript source".to_owned()],
+                None
+            )
         );
     }
 }
