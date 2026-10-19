@@ -147,6 +147,19 @@ recordInSession of src/modes/interactive/bug-report.ts, in
 src/agent_session/share.rs; with the cases of test/bug-report.test.ts,
 test/export-jsonl-share.test.ts, and test/export-html-xss.test.ts that those
 files name.
+
+From release v1.3.0, revision 71023aec1546d6d677a65669c5665c0927ce0dd0, RPC
+mode: the command loop, commands, responses, and shutdown of
+src/modes/rpc/rpc-mode.ts, the protocol records of
+src/modes/rpc/rpc-types.ts, and the strict JSONL framing of
+src/modes/rpc/jsonl.ts, adapted in src/rpc/; docs/rpc.md,
+docs/rpc-commands.md, and docs/rpc-extension-ui.md as the protocol's
+description; and the cases of test/rpc-jsonl.test.ts,
+test/rpc-prompt-response-semantics.test.ts, test/rpc.test.ts,
+test/rpc-client-clear-queue.test.ts, test/rpc-client-clone.test.ts, and
+test/rpc-client-process-exit.test.ts that src/rpc/ and
+crates/bake-cli/tests/rpc.rs name. Approvals (D24) are Bake's own, carried
+over Pi's extension_ui_request.
 --------------------------------------------------------------------------------
 MIT License
 

@@ -25,6 +25,7 @@
 //! | [`config_value`] | Pi `src/core/resolve-config-value.ts` |
 //! | [`settings`] | Pi `src/core/settings-manager.ts` (default model, thinking level, tools, images, compaction with per-model overrides, branch-summary reserve, and retry; the global-scope setters from v1.2.0) |
 //! | [`print_mode`], [`json_event`] | Pi `src/modes/print-mode.ts`, `src/modes/json-event.ts` |
+//! | [`rpc`] | Pi v1.3.0 `src/modes/rpc/{rpc-mode,rpc-types,jsonl}.ts`; approvals over Pi's `extension_ui_request` (D24) |
 //! | [`cli`] | Pi `src/main.ts`, `src/cli/args.ts`, `src/cli/initial-message.ts`, `src/cli/file-processor.ts`, `src/cli/list-models.ts`, `packages/tui/src/fuzzy.ts` |
 //! | [`mcp`] | Pi v1.3.0 `src/extensions/mcp/{index,runtime,tools,config}.ts`, `src/core/mcp-servers.ts`; Bake's tool names (`packages/mcp/mcp-client`) and D24 admission |
 //! | [`hooks`] | Bake 0.3: `packages/hooks/{hook-protocol,hooks-claude-code,hooks-codex}`, run at Pi v1.3.0's extension events (`src/core/extensions/types.ts`, `runner.ts`) |
@@ -57,6 +58,7 @@ pub mod permissions;
 pub mod plugins;
 pub mod print_mode;
 pub mod prompt_templates;
+pub mod rpc;
 pub mod schedules;
 pub mod session;
 pub mod session_export;

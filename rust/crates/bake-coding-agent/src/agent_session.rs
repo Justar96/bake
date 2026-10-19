@@ -2111,6 +2111,12 @@ impl AgentSession {
         &self.prompt_templates
     }
 
+    /// The loaded skills (`Skill`) a `/skill:<name>` prompt expands
+    /// ([`crate::skills`]), which the system prompt also lists.
+    pub fn skills(&self) -> &[crate::skills::Skill] {
+        &self.prompt_options.skills
+    }
+
     /// Sets the prompt templates expanded by [`Self::prompt`].
     pub fn set_prompt_templates(&mut self, prompt_templates: Vec<PromptTemplate>) {
         self.prompt_templates = prompt_templates;
@@ -3102,7 +3108,7 @@ mod service_tests;
 #[cfg(test)]
 mod share_tests;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 /// The failure a test injects into a session write.
 #[cfg(test)]

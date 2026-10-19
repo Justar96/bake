@@ -473,6 +473,16 @@ impl AgentSession {
         (session.tree(), session.leaf_id().map(str::to_owned))
     }
 
+    /// The session file's entries, in file order, and its leaf, Pi's
+    /// `getEntries` and `getLeafId`. Reads only.
+    pub fn session_entries(&self) -> (Vec<SessionEntry>, Option<String>) {
+        let session = lock(&self.session);
+        (
+            session.entries().into_iter().cloned().collect(),
+            session.leaf_id().map(str::to_owned),
+        )
+    }
+
     /// The leaf entry's id, Pi's `getLeafId`.
     pub fn leaf_id(&self) -> Option<String> {
         lock(&self.session).leaf_id().map(str::to_owned)
