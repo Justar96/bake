@@ -259,8 +259,24 @@ class WindowsConsole implements Backend {
   }
 
   async survivors(owned: ReadonlyMap<string, string>): Promise<string[]> {
+    // Once the program has exited the host closes and lists no members; its
+    // settled job then says whether anything outlived the program: a job it
+    // had to terminate held survivors, which it ended.
+    const settled = async (): Promise<string[]> => {
+      await this.console.ended
+      assert(this.console.settled, 'the job did not settle')
+      return this.console.settled.terminated ? [...owned.keys()] : []
+    }
+    if (this.console.closed) return settled()
     // Every pin is held open, so a pid names the same process until unpinned.
-    const members = await this.console.members()
+    let members
+    try {
+      members = await this.console.members()
+    } catch (error) {
+      // The program exited and the host closed while this was asked.
+      if (this.console.closed) return settled()
+      throw error
+    }
     return members.filter(member => member.alive && owned.has(String(member.pid))).map(member => String(member.pid))
   }
 

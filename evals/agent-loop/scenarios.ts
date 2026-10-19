@@ -533,7 +533,8 @@ export function validate(scenario: string, built: Fixture, outcome: Outcome, env
     return { validated: outcome.final.trim() === EXPLORE_ANSWER && treeDigest(workspace) === built.digest, source, testsUnchanged: null, testExit: null, fixturesUnchanged: null }
   }
   const testsUnchanged = existsSync(join(workspace, 'test.cjs')) && readFileSync(join(workspace, 'test.cjs'), 'utf8') === testsFor(scenario, file)
-  const validation = spawnSync('node', ['test.cjs'], { cwd: workspace, env, stdio: ['ignore', 'pipe', 'pipe'], timeout: 5000 })
+  // A cold Windows runner took over 5 s to start the first Node process.
+  const validation = spawnSync('node', ['test.cjs'], { cwd: workspace, env, stdio: ['ignore', 'pipe', 'pipe'], timeout: 30_000 })
   const testExit = validation.status
   const read = (path: string) => existsSync(join(workspace, path)) ? readFileSync(join(workspace, path), 'utf8') : ''
   const unchanged = fixturesUnchanged(built)
