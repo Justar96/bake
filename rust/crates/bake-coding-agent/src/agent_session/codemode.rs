@@ -2,6 +2,14 @@
 //! its store on the session's branch, the namespaces of MCP tools, the
 //! tools' prompt guidelines, and the loadout the active tool applies to
 //! each request.
+//!
+//! The tools a request hides are derived from the `codemode.mode` setting
+//! and not written to the session file, as in Pi. The log still
+//! reconstructs them: `only` is in effect exactly when the recorded
+//! `codemode` declaration contains `Nested tools:`, and then every other
+//! declared tool is hidden, since every session tool but `codemode` is
+//! callable from scripts. Otherwise none is hidden; with `only` and no
+//! other tool, the declaration lists none and nothing is hidden either.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};

@@ -402,17 +402,15 @@ async fn presents_callable_tools_per_codemode_mode() {
             .append_responses(vec![fx.recording(faux_assistant_message("ok"))]);
         prompt(&session).await;
         let requests = fx.requests.lock().unwrap().clone();
-        let transcript: Vec<String> = {
+        let recorded: Vec<bake_ai::Tool> = {
             let messages: Vec<bake_ai::Message> = session
                 .messages()
                 .iter()
                 .filter_map(|message| message.as_system().cloned().map(bake_ai::Message::System))
                 .collect();
             get_current_tools(&messages)
-                .into_iter()
-                .map(|tool| tool.name)
-                .collect()
         };
+        let transcript: Vec<String> = recorded.iter().map(|tool| tool.name.clone()).collect();
         session.shutdown().await;
         let tools = declared(&requests[0]);
         let description = |name: &str| {
@@ -423,6 +421,28 @@ async fn presents_callable_tools_per_codemode_mode() {
         };
         let system = get_current_system_prompt(requests[0].messages());
         assert_eq!(transcript, ["read", "echo", "codemode"]);
+        // The hidden set is not logged; the log reconstructs it. `only` is in
+        // effect exactly when the recorded codemode declaration lists
+        // `Nested tools:`, and then every other declared tool is hidden.
+        let lists_nested_tools = recorded
+            .iter()
+            .find(|tool| tool.name == "codemode")
+            .expect("codemode")
+            .description
+            .contains("Nested tools:");
+        assert_eq!(lists_nested_tools, mode == CodemodeMode::Only);
+        let reconstructed: Vec<&str> = transcript
+            .iter()
+            .map(String::as_str)
+            .filter(|name| !lists_nested_tools || *name == "codemode")
+            .collect();
+        assert_eq!(
+            reconstructed,
+            tools
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .collect::<Vec<_>>()
+        );
         match mode {
             CodemodeMode::On => {
                 let names: Vec<&str> = tools.iter().map(|tool| tool.name.as_str()).collect();
