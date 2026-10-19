@@ -69,6 +69,12 @@ fn matches_family(id: &str, families: &[&str]) -> bool {
     run > 0 && matches!(id.as_bytes().get(run), Some(b'/' | b':')) && at(run + 1)
 }
 
+/// Whether `id` names one of the [`CHAT_COMPLETIONS_FAMILIES`], by the same
+/// match [`cli_proxy_api`] assigns their protocol with.
+pub(super) fn is_chat_completions_family(id: &str) -> bool {
+    matches_family(id, &CHAT_COMPLETIONS_FAMILIES)
+}
+
 /// `cliProxyApi`: the wire protocol one listed model is served over.
 ///
 /// Claude, by id wherever it is hosted or by an `anthropic` owner, goes over
@@ -81,7 +87,7 @@ pub fn cli_proxy_api(id: &str, owned_by: Option<&str>) -> CliProxyApi {
     {
         return CliProxyApi::AnthropicMessages;
     }
-    if matches_family(id, &CHAT_COMPLETIONS_FAMILIES) {
+    if is_chat_completions_family(id) {
         return CliProxyApi::OpenAiCompletions;
     }
     CliProxyApi::OpenAiResponses

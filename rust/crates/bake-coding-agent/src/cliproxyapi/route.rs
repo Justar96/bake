@@ -25,6 +25,7 @@
 //! | model `name` | model `name`; the id when the name is absent or empty, which 0.3 accepted and Pi refuses |
 //! | model `reasoningEfforts` | model `reasoning` and `thinkingLevelMap`: each offered level maps to its wire value, every level not offered to `null` (unsupported), and a valueless `off` is left out; `false` or absent is `reasoning: false` |
 //! | model `compat.forceAdaptiveThinking` | model `compat.forceAdaptiveThinking`, which Pi's Anthropic adapter reads the same way |
+//! | a Chat-Completions-family id (`catalog::is_chat_completions_family`) | model `compat.supportsDeveloperRole: false`, unless the model's or the route's `compat` already states that key: Pi marks these vendors as having no `developer` role by provider id or the vendor's own host (`bake_ai::api::openai_completions::detect_compat`), and behind the proxy both are the proxy's, so a reasoning model would be sent the `developer` role the gateway refuses |
 //! | model `contextWindow`, `maxTokens`, `input` | the same fields, with Bake's route fallbacks (`defaultContextWindow` 262,144, `defaultMaxTokens` 32,768, `defaultInput` `[text]`) written out, because Pi's own defaults (128,000, 16,384) differ |
 //!
 //! Bake-only fields with no Pi counterpart are not carried: a model's
@@ -35,7 +36,7 @@
 use bake_ai::ModelThinkingLevel;
 use serde_json::{Map, Value, json};
 
-use super::catalog::{CliProxyModel, Modality};
+use super::catalog::{CliProxyModel, Modality, is_chat_completions_family};
 use super::endpoints::{CliProxyEndpoints, cli_proxy_endpoints};
 use super::{CLIPROXYAPI_ID, CLIPROXYAPI_KEY};
 
@@ -43,6 +44,9 @@ use super::{CLIPROXYAPI_ID, CLIPROXYAPI_KEY};
 pub const DEFAULT_CONTEXT_WINDOW: u64 = 262_144;
 /// `DEFAULT_MAX_TOKENS` in `packages/llm/llm-pi-ai/src/config.ts`.
 pub const DEFAULT_MAX_TOKENS: u64 = 32_768;
+
+/// The pi-ai `compat` switch for the reasoning models' instruction role.
+const SUPPORTS_DEVELOPER_ROLE: &str = "supportsDeveloperRole";
 
 /// `CLIPROXYAPI_ROUTE_DEFAULTS`: route defaults for a proxy that balances
 /// several upstream credentials.
@@ -697,10 +701,30 @@ fn pi_model(
                 .unwrap_or(DEFAULT_MAX_TOKENS)
         ),
     );
-    if let Some(compat) = &model.compat {
-        out.insert("compat".into(), Value::Object(compat.clone()));
+    let mut compat = model.compat.clone();
+    if needs_the_system_role(model, route) {
+        compat
+            .get_or_insert_with(Map::new)
+            .insert(SUPPORTS_DEVELOPER_ROLE.into(), Value::Bool(false));
+    }
+    if let Some(compat) = compat {
+        out.insert("compat".into(), Value::Object(compat));
     }
     Ok(Value::Object(out))
+}
+
+/// Whether the route must tell Pi that `model` has no `developer` role: it
+/// belongs to a Chat-Completions-only family, whose upstream refuses that
+/// role, and neither its own nor the route's `compat` states the switch, a
+/// setting that always wins. Pi merges the route's `compat` into each
+/// model's under the model's own fields, so either one stating it decides.
+fn needs_the_system_role(model: &RouteModel, route: &CliProxyRoute) -> bool {
+    let states = |compat: Option<&Map<String, Value>>| {
+        compat.is_some_and(|compat| compat.contains_key(SUPPORTS_DEVELOPER_ROLE))
+    };
+    is_chat_completions_family(&model.id)
+        && !states(model.compat.as_ref())
+        && !states(route.compat.as_ref())
 }
 
 /// `resolveModelReasoning`: an offered level maps to its wire value, a

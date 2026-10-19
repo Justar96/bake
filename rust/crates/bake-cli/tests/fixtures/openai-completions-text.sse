@@ -1,0 +1,9 @@
+data: {"id":"chatcmpl-0001","object":"chat.completion.chunk","created":1760000000,"model":"kimi-k2.7-code","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello from"}}]}
+
+data: {"id":"chatcmpl-0001","object":"chat.completion.chunk","created":1760000000,"model":"kimi-k2.7-code","choices":[{"index":0,"delta":{"content":" the loop."}}]}
+
+data: {"id":"chatcmpl-0001","object":"chat.completion.chunk","created":1760000000,"model":"kimi-k2.7-code","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: {"id":"chatcmpl-0001","object":"chat.completion.chunk","created":1760000000,"model":"kimi-k2.7-code","choices":[],"usage":{"prompt_tokens":42,"completion_tokens":6,"total_tokens":48,"prompt_tokens_details":{"cached_tokens":0}}}
+
+data: [DONE]

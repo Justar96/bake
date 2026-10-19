@@ -1,7 +1,9 @@
 //! End-to-end print mode: the built `bake-rs` against a loopback HTTP
 //! server that answers `POST /v1/responses` with OpenAI Responses event
 //! streams (`fixtures/openai-responses-text.sse`, and a `read` tool call in
-//! `fixtures/openai-responses-read-call.sse`). Each test owns a temporary
+//! `fixtures/openai-responses-read-call.sse`), and `POST
+//! /v1/chat/completions` with the Chat Completions stream
+//! `fixtures/openai-completions-text.sse`. Each test owns a temporary
 //! Bake home, project directory, and server; nothing reaches the network.
 
 use std::io::{Read, Write};
@@ -33,6 +35,7 @@ fn docs_command() -> String {
 
 const SSE: &str = include_str!("fixtures/openai-responses-text.sse");
 const READ_CALL_SSE: &str = include_str!("fixtures/openai-responses-read-call.sse");
+const COMPLETIONS_SSE: &str = include_str!("fixtures/openai-completions-text.sse");
 
 /// How long one `bake-rs` run may take before the test fails.
 const RUN_TIMEOUT: Duration = Duration::from_secs(60);
@@ -68,6 +71,15 @@ impl Reply {
             status: 200,
             content_type: "text/event-stream",
             body: format!("{SSE}\n"),
+        }
+    }
+
+    /// The same answer over Chat Completions.
+    fn completions_sse() -> Self {
+        Self {
+            status: 200,
+            content_type: "text/event-stream",
+            body: COMPLETIONS_SSE.to_owned(),
         }
     }
 
@@ -1119,6 +1131,56 @@ fn the_imported_cliproxyapi_route_runs_a_turn() {
     assert_eq!(
         std::fs::read_to_string(workspace.home().join(".credentials.yaml")).expect("creds"),
         credentials
+    );
+}
+
+/// A reasoning Chat-Completions-family model on the CLIProxyAPI route is
+/// sent the system prompt as `system`: the proxy's gateway refuses the
+/// `developer` role those upstreams have none of, and Pi detects their
+/// vendors by provider id or host, which the proxy hides, so the route
+/// maps `compat.supportsDeveloperRole: false` onto the model.
+#[test]
+fn the_cliproxyapi_route_sends_a_kimi_model_the_system_role() {
+    let server = Server::start(Reply::completions_sse());
+    let workspace = Workspace::new("cliproxyapi-kimi", server.port);
+    std::fs::remove_file(workspace.home().join("models.json")).expect("remove models.json");
+    let settings = format!(
+        "llm-pi-ai:\n  providers:\n    cliproxyapi:\n      displayName: CLIProxyAPI\n      apiKeyEnv: CLIPROXYAPI_API_KEY\n      api: openai-responses\n      baseURL: http://127.0.0.1:{}/v1\n      models:\n        - id: kimi-k2.7-code\n          name: Kimi K2.7 Code\n          api: openai-completions\n          contextWindow: 200000\n          maxTokens: 32000\n          input: [text]\n          reasoningEfforts: {{low: low, medium: medium, high: high}}\nagent-default-model:\n  provider: cliproxyapi\n  model: kimi-k2.7-code\n  reasoningEffort: high\n",
+        server.port
+    );
+    std::fs::write(workspace.home().join("settings.yaml"), &settings).expect("settings.yaml");
+    std::fs::write(
+        workspace.home().join(".credentials.yaml"),
+        "version: 1\nrefs:\n  CLIPROXYAPI_API_KEY: proxy-test-key\n",
+    )
+    .expect(".credentials.yaml");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(
+            workspace.home().join(".credentials.yaml"),
+            std::fs::Permissions::from_mode(0o600),
+        )
+        .expect("chmod 600");
+    }
+
+    let output = workspace.run(&["-p", "Say hi"], None);
+    assert_eq!(text(&output.stderr), "");
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(text(&output.stdout), "Hello from the loop.\n");
+    let requests = server.requests();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].line, "POST /v1/chat/completions");
+    assert_eq!(requests[0].body["model"], "kimi-k2.7-code");
+    let messages = requests[0].body["messages"]
+        .as_array()
+        .expect("the request messages");
+    assert_eq!(messages[0]["role"], "system");
+    assert!(
+        messages
+            .iter()
+            .all(|message| message["role"] != "developer"),
+        "{messages:?}"
     );
 }
 

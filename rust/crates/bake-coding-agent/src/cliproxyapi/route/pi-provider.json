@@ -67,7 +67,10 @@
             "text"
           ],
           "contextWindow": 200000,
-          "maxTokens": 32768
+          "maxTokens": 32768,
+          "compat": {
+            "supportsDeveloperRole": false
+          }
         }
       ]
     }

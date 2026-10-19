@@ -223,7 +223,8 @@ fn mapped_pi_config() -> Value {
               "input": ["text"], "contextWindow": 200_000, "maxTokens": 32_768,
               "compat": { "forceAdaptiveThinking": true } },
             { "id": "glm-test", "name": "glm-test", "api": "openai-completions", "reasoning": false,
-              "input": ["text"], "contextWindow": 200_000, "maxTokens": 32_768 },
+              "input": ["text"], "contextWindow": 200_000, "maxTokens": 32_768,
+              "compat": { "supportsDeveloperRole": false } },
         ],
     })
 }
@@ -410,5 +411,103 @@ fn reads_an_empty_name_and_gives_pi_a_non_empty_one() {
         .map(|_| ())
         .map_err(|error| error.to_string()),
         Err("models[0].name must be a string".into())
+    );
+}
+
+/// Each model's mapped `compat` by id, for a route holding `models` and,
+/// when given, a route-level `compat`.
+fn mapped_compat(models: Value, route_compat: Option<Value>) -> Vec<(String, Value)> {
+    let mut route = json!({
+        "api": "openai-responses", "baseURL": "https://proxy.example/v1", "models": models,
+    });
+    if let Some(compat) = route_compat {
+        route["compat"] = compat;
+    }
+    let config = CliProxyRoute::from_settings(&route)
+        .expect("a readable route")
+        .to_pi_provider_config()
+        .config;
+    config["models"]
+        .as_array()
+        .expect("the mapped models")
+        .iter()
+        .map(|model| {
+            (
+                model["id"].as_str().unwrap_or_default().to_owned(),
+                model.get("compat").cloned().unwrap_or(Value::Null),
+            )
+        })
+        .collect()
+}
+
+// A Chat-Completions-family model is told it has no `developer` role: Pi
+// marks these vendors by provider id or the vendor's own host
+// (`bake_ai::api::openai_completions::detect_compat`), and behind the proxy
+// both are the proxy's. Other families keep Pi's own detection, and a
+// `supportsDeveloperRole` the model or the route states wins.
+#[test]
+fn tells_pi_the_chat_completions_families_have_no_developer_role() {
+    let no_role = json!({ "supportsDeveloperRole": false });
+    assert_eq!(
+        mapped_compat(
+            json!([
+                { "id": "kimi-k2.7-code", "api": "openai-completions" },
+                { "id": "moonshot/kimi-k2.7-code", "api": "openai-completions" },
+                { "id": "QWEN3-MAX" },
+                { "id": "gpt-6-sol" },
+                { "id": "claude-opus-5-5", "api": "anthropic-messages" },
+                { "id": "gemini-3-pro" },
+            ]),
+            None,
+        ),
+        [
+            ("kimi-k2.7-code".to_owned(), no_role.clone()),
+            ("moonshot/kimi-k2.7-code".to_owned(), no_role.clone()),
+            ("QWEN3-MAX".to_owned(), no_role.clone()),
+            ("gpt-6-sol".to_owned(), Value::Null),
+            ("claude-opus-5-5".to_owned(), Value::Null),
+            ("gemini-3-pro".to_owned(), Value::Null),
+        ]
+    );
+    // The model's own switch wins, and its other compat keys stay.
+    assert_eq!(
+        mapped_compat(
+            json!([
+                { "id": "kimi-say-yes", "compat": { "supportsDeveloperRole": true } },
+                { "id": "kimi-adaptive", "compat": { "forceAdaptiveThinking": true } },
+            ]),
+            None,
+        ),
+        [
+            (
+                "kimi-say-yes".to_owned(),
+                json!({ "supportsDeveloperRole": true })
+            ),
+            (
+                "kimi-adaptive".to_owned(),
+                json!({ "forceAdaptiveThinking": true, "supportsDeveloperRole": false })
+            ),
+        ]
+    );
+    // Pi merges the route's compat into each model's, so a switch the route
+    // states decides and the model is left without one.
+    for stated in [json!(true), json!(false)] {
+        assert_eq!(
+            mapped_compat(
+                json!([{ "id": "kimi-k2.7-code" }]),
+                Some(
+                    json!({ "sendSessionAffinityHeaders": true, "supportsDeveloperRole": stated })
+                ),
+            ),
+            [("kimi-k2.7-code".to_owned(), Value::Null)]
+        );
+    }
+    // The route's other compat keys leave the mapping to the model.
+    assert_eq!(
+        mapped_compat(
+            json!([{ "id": "kimi-k2.7-code" }]),
+            Some(json!({ "sendSessionAffinityHeaders": true })),
+        ),
+        [("kimi-k2.7-code".to_owned(), no_role)]
     );
 }
