@@ -25,8 +25,14 @@ fn tool(jobs: &JobRegistry, name: &str) -> AgentTool {
 
 async fn call(jobs: &JobRegistry, name: &str, args: Value) -> Result<String, String> {
     let tool = tool(jobs, name);
-    let result =
-        (tool.execute)("call".into(), args, None, AgentToolUpdateCallback::ignore()).await?;
+    let result = (tool.execute)(
+        "call".into(),
+        args,
+        None,
+        AgentToolUpdateCallback::ignore(),
+        bake_agent::ToolContext::detached(),
+    )
+    .await?;
     Ok(result
         .content
         .iter()

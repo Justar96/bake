@@ -448,7 +448,7 @@ async fn the_setting_gates_the_tools_and_reserves_their_names() {
         "x",
         "x",
         json!({"type": "object"}),
-        |_, _, _, _| Box::pin(async { Ok(bake_agent::AgentToolResult::default()) }),
+        |_, _, _, _, _ctx| Box::pin(async { Ok(bake_agent::AgentToolResult::default()) }),
     )));
     let refused = AgentSession::create(opts).await.expect_err("refused");
     assert_eq!(

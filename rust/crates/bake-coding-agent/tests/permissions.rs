@@ -176,6 +176,7 @@ async fn call(
         args,
         signal,
         AgentToolUpdateCallback::ignore(),
+        bake_agent::ToolContext::detached(),
     )
     .await
 }

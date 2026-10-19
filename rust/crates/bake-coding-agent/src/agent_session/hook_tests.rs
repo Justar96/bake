@@ -1067,7 +1067,7 @@ async fn a_replaced_result_keeps_no_observation_provenance_the_tool_claimed() {
         "Custom grep",
         "A custom grep",
         json!({ "type": "object", "properties": {} }),
-        |_, _, _, _| {
+        |_, _, _, _, _ctx| {
             Box::pin(async {
                 Ok(bake_agent::AgentToolResult {
                     details: Some(json!({

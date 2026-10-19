@@ -90,7 +90,7 @@ pub fn child_tools(link: &ParentLink) -> Vec<ToolDefinition> {
         "send_message",
         SEND_MESSAGE,
         send_message_parameters(),
-        move |_id, args, _signal, _update| {
+        move |_id, args, _signal, _update, _ctx| {
             let result = (|| {
                 let agent = string_arg(&args, "agent_id")?;
                 let message = args.get("message").and_then(Value::as_str).unwrap_or("");
@@ -145,7 +145,7 @@ fn subagent_tool(host: SubagentHost, model_choice: bool) -> ToolDefinition {
         "subagent",
         description,
         parameters,
-        move |_id, args, signal, _update| {
+        move |_id, args, signal, _update, _ctx| {
             let host = host.clone();
             Box::pin(async move { delegate(&host, model_choice, &args, signal).await })
         },
@@ -245,7 +245,7 @@ fn list_models_tool(host: SubagentHost) -> ToolDefinition {
         "list_subagent_models",
         "List the routes a subagent can run on: providers; with `provider`, its models; with `provider` and `model`, that model's efforts.",
         parameters,
-        move |_id, args, _signal, _update| {
+        move |_id, args, _signal, _update, _ctx| {
             let result = models::list(&args, &host.available_models(), host.settings())
                 .map(|listing| text(listing, None));
             Box::pin(async move { result })
@@ -273,7 +273,7 @@ fn parent_send_message_tool(host: SubagentHost) -> ToolDefinition {
         "send_message",
         SEND_MESSAGE,
         send_message_parameters(),
-        move |_id, args, _signal, _update| {
+        move |_id, args, _signal, _update, _ctx| {
             let host = host.clone();
             Box::pin(async move {
                 let agent = string_arg(&args, "agent_id")?.to_owned();
@@ -305,7 +305,7 @@ fn interrupt_tool(host: SubagentHost) -> ToolDefinition {
         "interrupt_agent",
         "Request a stop of a continuable subagent's current turn; it stays available.",
         parameters,
-        move |_id, args, _signal, _update| {
+        move |_id, args, _signal, _update, _ctx| {
             let result = string_arg(&args, "agent_id").and_then(|agent| {
                 host.interrupt(agent)?;
                 Ok(text(format!("interrupt requested for agent {agent}"), None))
@@ -323,7 +323,7 @@ fn list_agents_tool(host: SubagentHost) -> ToolDefinition {
         "list_agents",
         "List your continuable subagents: agent id, status (running, idle, or ready = saved, resumable, not a result), label, and model. For ids only; you are notified on finish.",
         json!({ "type": "object", "properties": {} }),
-        move |_id, _args, _signal, _update| {
+        move |_id, _args, _signal, _update, _ctx| {
             let rows = host.list();
             let listing = if rows.is_empty() {
                 "(no subagents)".to_owned()

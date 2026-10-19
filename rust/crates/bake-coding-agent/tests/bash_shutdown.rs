@@ -63,6 +63,7 @@ async fn kill_tracked_detached_children_ends_running_commands() {
         json!({ "command": command }),
         None,
         AgentToolUpdateCallback::ignore(),
+        bake_agent::ToolContext::detached(),
     ));
     let deadline = Instant::now() + Duration::from_secs(10);
     let pids: Vec<i32> = loop {

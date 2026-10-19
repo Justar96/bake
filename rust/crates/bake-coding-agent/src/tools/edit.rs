@@ -144,7 +144,7 @@ pub(crate) fn owned_edit_tool_definition(
         "edit",
         "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.",
         parameters(),
-        move |_id, args, signal, _update| {
+        move |_id, args, signal, _update, _ctx| {
             boxed(execute_owned(
                 cwd.clone(),
                 args,

@@ -108,6 +108,7 @@ async fn call(tool: &AgentTool, args: Value) -> Result<String, String> {
         args,
         None,
         AgentToolUpdateCallback::ignore(),
+        bake_agent::ToolContext::detached(),
     )
     .await
     .map(|result| format!("{:?}", result.content))

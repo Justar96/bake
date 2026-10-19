@@ -329,7 +329,7 @@ pub fn create_sandboxed_bash_tool_definition(
     tool.description = sandboxed_bash_tool_description(permissions.escalation_targets, background);
     tool.parameters = sandboxed_bash_tool_parameters(permissions.escalation_targets, background);
     tool.execute = Arc::new(
-        move |id: String, args: Value, signal: Option<AbortSignal>, on_update| {
+        move |id: String, args: Value, signal: Option<AbortSignal>, on_update, ctx| {
             let cwd = cwd.clone();
             let options = options.clone();
             let permissions = permissions.clone();
@@ -355,7 +355,7 @@ pub fn create_sandboxed_bash_tool_definition(
                         ..options
                     },
                 );
-                (tool.execute)(id, args, signal, on_update).await
+                (tool.execute)(id, args, signal, on_update, ctx).await
             }) as BoxFuture<'static, _>
         },
     );

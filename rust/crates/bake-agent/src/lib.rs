@@ -10,6 +10,7 @@
 //! | [`hook`] | constructors for the hook types of `types.ts` |
 //! | [`agent_loop`](mod@agent_loop) | `packages/agent/src/agent-loop.ts` |
 //! | [`agent`] | `packages/agent/src/agent.ts` |
+//! | [`nested`] | `packages/coding-agent/src/core/nested-tool-calls.ts` (v1.3.0) |
 //! | [`stream_fn`] | `packages/agent/src/stream-fn.ts` |
 //! | [`validation`] | `packages/ai/src/utils/validation.ts` |
 //!
@@ -21,6 +22,7 @@
 pub mod agent;
 pub mod agent_loop;
 pub mod hook;
+pub mod nested;
 pub mod run_control;
 pub mod stream_fn;
 pub mod types;
@@ -31,6 +33,7 @@ pub use agent_loop::{
     AgentLoopError, AgentLoopStream, RunToolCallOptions, agent_loop, agent_loop_continue,
     run_agent_loop, run_agent_loop_continue, run_tool_call,
 };
+pub use nested::{NESTED_CALLS_UNAVAILABLE, NestedToolExecutor};
 pub use run_control::{
     AdmissionObserver, BudgetLimit, ModelCallAdmission, ModelCallKind, RunControl, RunLimits,
     RunOutcome,

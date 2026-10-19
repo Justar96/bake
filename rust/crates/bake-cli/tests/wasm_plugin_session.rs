@@ -141,7 +141,7 @@ impl Fixture {
             name,
             "a marker",
             json!({ "type": "object" }),
-            move |_id, _args, _signal, _update| {
+            move |_id, _args, _signal, _update, _ctx| {
                 ran.lock().expect("ran").push(tool_name.clone());
                 Box::pin(async { Ok(AgentToolResult::text("ran")) })
             },

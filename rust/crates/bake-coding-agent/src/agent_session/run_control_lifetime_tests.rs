@@ -24,7 +24,7 @@ async fn dropping_the_prompt_waiter_keeps_summary_admission_on_the_same_control(
         "held",
         "Held tool",
         json!({"type":"object"}),
-        move |_, _, _, _| {
+        move |_, _, _, _, _ctx| {
             let (reached, held) = (Arc::clone(&reached), Arc::clone(&held));
             Box::pin(async move {
                 reached.notify_one();
@@ -351,7 +351,7 @@ async fn a_dropped_prompt_waiter_cannot_hide_its_required_write_failure() {
         "held",
         "Held tool",
         json!({"type":"object"}),
-        move |_, _, _, _| {
+        move |_, _, _, _, _ctx| {
             let (reached, held, file) = (Arc::clone(&reached), Arc::clone(&held), file.clone());
             Box::pin(async move {
                 reached.notify_one();

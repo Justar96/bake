@@ -203,7 +203,7 @@ fn agent_tool(caller: Arc<Caller>, planned: PlannedTool) -> AgentTool {
         label,
         description,
         parameters,
-        move |_id, params, signal, _update| {
+        move |_id, params, signal, _update, _ctx| {
             let caller = Arc::clone(&caller);
             let tool = tool.clone();
             Box::pin(async move {

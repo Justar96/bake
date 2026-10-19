@@ -322,7 +322,7 @@ async fn a_failed_change_write_stops_the_running_turn() {
             "noop",
             "Counts its calls",
             json!({ "type": "object" }),
-            move |_, _, _, _| {
+            move |_, _, _, _, _ctx| {
                 ran.fetch_add(1, Ordering::SeqCst);
                 Box::pin(async { Ok(AgentToolResult::default()) })
             },
@@ -465,7 +465,7 @@ fn noop_tool() -> Arc<AgentTool> {
         "noop",
         "Does nothing",
         json!({ "type": "object" }),
-        |_, _, _, _| Box::pin(async { Ok(AgentToolResult::default()) }),
+        |_, _, _, _, _ctx| Box::pin(async { Ok(AgentToolResult::default()) }),
     ))
 }
 
@@ -962,7 +962,7 @@ async fn a_failed_change_write_stops_the_run_before_the_change_goes_on() {
             "noop",
             "Counts its calls",
             json!({ "type": "object" }),
-            move |_, _, _, _| {
+            move |_, _, _, _, _ctx| {
                 ran.fetch_add(1, Ordering::SeqCst);
                 Box::pin(async { Ok(AgentToolResult::default()) })
             },

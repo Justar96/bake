@@ -68,7 +68,9 @@ pub(crate) fn owned_ls_tool_definition(
             DEFAULT_MAX_BYTES / 1024
         ),
         parameters(),
-        move |_id, args, signal, _update| boxed(execute(cwd.clone(), args, signal, owner.clone())),
+        move |_id, args, signal, _update, _ctx| {
+            boxed(execute(cwd.clone(), args, signal, owner.clone()))
+        },
     );
     tool.read_only = true;
     tool.replay = Some(ToolReplay::Safe);

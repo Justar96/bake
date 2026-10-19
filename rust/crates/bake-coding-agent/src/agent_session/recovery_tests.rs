@@ -690,7 +690,7 @@ async fn the_threshold_compacts_between_turns_and_after_runs() {
         "dummy",
         "Dummy tool",
         json!({ "type": "object" }),
-        |_, _, _, _| {
+        |_, _, _, _, _ctx| {
             Box::pin(async {
                 Ok(AgentToolResult {
                     content: vec![UserContentBlock::Text(TextContent::new("tool output"))],
@@ -994,7 +994,7 @@ async fn a_retry_runs_its_whole_tool_loop() {
         "Echo",
         "Echo text back",
         json!({ "type": "object", "properties": { "text": { "type": "string" } }, "required": ["text"] }),
-        move |_, _, _, _| {
+        move |_, _, _, _, _ctx| {
             count.fetch_add(1, Ordering::SeqCst);
             Box::pin(async {
                 Ok(AgentToolResult {

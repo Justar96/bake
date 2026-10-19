@@ -419,7 +419,7 @@ async fn print_resume_cannot_replace_the_selected_runs_spent_allowance() {
         "inspect",
         "Inspect the fixture",
         json!({"type":"object"}),
-        |_, _, _, _| Box::pin(async { Ok(AgentToolResult::text("fixture")) }),
+        |_, _, _, _, _ctx| Box::pin(async { Ok(AgentToolResult::text("fixture")) }),
     );
     let session = AgentSession::create(AgentSessionOptions {
         tools: vec![Arc::new(tool)],

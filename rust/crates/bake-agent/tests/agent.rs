@@ -46,7 +46,7 @@ fn tool(name: &str) -> Arc<AgentTool> {
         name,
         format!("{name} tool"),
         empty_schema(),
-        move |_, _, _, _| {
+        move |_, _, _, _, _ctx| {
             let text = text.clone();
             Box::pin(async move { Ok(AgentToolResult::text(text)) })
         },
@@ -537,7 +537,7 @@ async fn ignores_tool_updates_after_the_tool_settles() {
         "Delayed Tool",
         "Captures progress callbacks",
         empty_schema(),
-        move |_, _, _, update| {
+        move |_, _, _, update, _ctx| {
             update.update(AgentToolResult {
                 details: Some(json!({ "status": "running" })),
                 ..AgentToolResult::text("running")
@@ -596,7 +596,7 @@ async fn ignores_a_settled_parallel_tool_update_while_another_runs() {
         "Settled Tool",
         "Captures progress callbacks",
         empty_schema(),
-        move |_, _, _, update| {
+        move |_, _, _, update, _ctx| {
             *l.lock().unwrap() = Some(update);
             Box::pin(async {
                 Ok(AgentToolResult {
@@ -612,7 +612,7 @@ async fn ignores_a_settled_parallel_tool_update_while_another_runs() {
         "Slow Tool",
         "Keeps the agent run active",
         empty_schema(),
-        move |_, _, _, _| {
+        move |_, _, _, _, _ctx| {
             let (s, r) = (Arc::clone(&s), Arc::clone(&r));
             Box::pin(async move {
                 s.notify_one();
@@ -1241,7 +1241,7 @@ async fn abort_during_a_tool_settles_the_run() {
         "Wait",
         "Waits for abort",
         empty_schema(),
-        move |_, _, signal, _| {
+        move |_, _, signal, _, _ctx| {
             let s = Arc::clone(&s);
             Box::pin(async move {
                 s.notify_one();
@@ -1303,7 +1303,7 @@ async fn shutdown_cancels_the_run_and_silences_listeners() {
         "Stubborn",
         "Ignores abort",
         empty_schema(),
-        move |_, _, _, _| {
+        move |_, _, _, _, _ctx| {
             let s = Arc::clone(&s);
             Box::pin(async move {
                 s.notify_one();
@@ -1363,7 +1363,7 @@ async fn dropping_the_agent_cancels_a_detached_run() {
         "Hang",
         "Never ends",
         empty_schema(),
-        move |_, _, _, _| {
+        move |_, _, _, _, _ctx| {
             let (s, guard) = (Arc::clone(&s), OnDrop(Arc::clone(&d)));
             Box::pin(async move {
                 let _guard = guard;

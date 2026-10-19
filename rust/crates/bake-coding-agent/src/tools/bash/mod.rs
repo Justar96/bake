@@ -342,7 +342,7 @@ pub fn create_bash_tool(cwd: impl Into<PathBuf>, options: BashToolOptions) -> Ag
         "bash",
         bash_tool_description_for(background),
         bash_tool_parameters_for(background),
-        move |_id, params, signal, on_update| {
+        move |_id, params, signal, on_update, _ctx| {
             let shared = Arc::clone(&shared);
             Box::pin(async move { shared.execute(params, signal, on_update).await })
         },

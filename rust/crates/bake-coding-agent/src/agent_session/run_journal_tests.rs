@@ -259,7 +259,7 @@ async fn concurrent_run_journal_admissions_preserve_durable_ordinal_order() {
         "held",
         "Wait for test admission writes",
         json!({"type":"object"}),
-        move |_, _, _, _| {
+        move |_, _, _, _, _ctx| {
             let reached = Arc::clone(&reached);
             let held = Arc::clone(&held);
             Box::pin(async move {
@@ -653,7 +653,7 @@ async fn required_journal_write_failures_stop_provider_tool_and_success_publicat
             "effect",
             "Count effects",
             json!({"type":"object"}),
-            move |_, _, _, _| {
+            move |_, _, _, _, _ctx| {
                 counter.fetch_add(1, Ordering::SeqCst);
                 Box::pin(async { Ok(AgentToolResult::text("effect")) })
             },
@@ -757,7 +757,7 @@ fn fixture_tool(
         name,
         "Write the fixture effect",
         json!({"type":"object"}),
-        move |_, _, _, _| {
+        move |_, _, _, _, _ctx| {
             let directory = directory.clone();
             let steer = steer.clone();
             Box::pin(async move {

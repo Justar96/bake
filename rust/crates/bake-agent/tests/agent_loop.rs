@@ -244,7 +244,7 @@ async fn handles_tool_calls_and_results() {
         "Echo",
         "Echo tool",
         value_schema(),
-        move |_, params, _, _| {
+        move |_, params, _, _, _ctx| {
             let value = params["value"].as_str().unwrap_or_default().to_owned();
             record.lock().unwrap().push(value.clone());
             Box::pin(async move {
@@ -305,7 +305,7 @@ async fn records_execute_duration_excluding_hooks() {
         "Echo",
         "Echo tool",
         value_schema(),
-        |_, params, _, _| {
+        |_, params, _, _, _ctx| {
             Box::pin(async move {
                 tokio::time::sleep(Duration::from_millis(30)).await;
                 Ok(AgentToolResult::text(
@@ -406,7 +406,7 @@ async fn executes_mutated_before_tool_call_args_without_revalidation() {
         "Echo",
         "Echo tool",
         value_schema(),
-        move |_, params, _, _| {
+        move |_, params, _, _, _ctx| {
             record.lock().unwrap().push(params["value"].clone());
             Box::pin(async { Ok(AgentToolResult::text("ok")) })
         },
@@ -455,7 +455,7 @@ async fn prepares_tool_arguments_for_validation() {
         "Edit",
         "Edit tool",
         schema,
-        move |_, params, _, _| {
+        move |_, params, _, _, _ctx| {
             record.lock().unwrap().push(params["edits"].clone());
             Box::pin(async { Ok(AgentToolResult::text("edited")) })
         },
@@ -495,7 +495,7 @@ fn gated_tool(name: &str, release: Arc<Notify>, overlap: Arc<AtomicBool>) -> Age
         name,
         "Gated tool",
         value_schema(),
-        move |_, params, _, _| {
+        move |_, params, _, _, _ctx| {
             let value = params["value"].as_str().unwrap_or_default().to_owned();
             let release = Arc::clone(&release);
             let overlap = Arc::clone(&overlap);
@@ -681,7 +681,7 @@ async fn one_sequential_tool_among_several_forces_sequential_execution() {
         "Slow",
         "Slow tool",
         value_schema(),
-        move |_, params, _, _| {
+        move |_, params, _, _, _ctx| {
             let value = params["value"].as_str().unwrap_or_default().to_owned();
             o.lock().unwrap().push(format!("slow:{value}"));
             let r = Arc::clone(&r);
@@ -700,7 +700,7 @@ async fn one_sequential_tool_among_several_forces_sequential_execution() {
         "Fast",
         "Fast tool",
         value_schema(),
-        move |_, params, _, _| {
+        move |_, params, _, _, _ctx| {
             o.lock().unwrap().push(format!(
                 "fast:{}",
                 params["value"].as_str().unwrap_or_default()
@@ -755,7 +755,7 @@ fn terminating_echo() -> AgentTool {
         "Echo",
         "Echo tool",
         value_schema(),
-        |_, params, _, _| {
+        |_, params, _, _, _ctx| {
             let value = params["value"].as_str().unwrap_or_default().to_owned();
             Box::pin(async move {
                 Ok(AgentToolResult {
@@ -768,9 +768,13 @@ fn terminating_echo() -> AgentTool {
 }
 
 fn noop_tool() -> AgentTool {
-    AgentTool::new("noop", "Noop", "Noop tool", empty_schema(), |_, _, _, _| {
-        Box::pin(async { Ok(AgentToolResult::text("done")) })
-    })
+    AgentTool::new(
+        "noop",
+        "Noop",
+        "Noop tool",
+        empty_schema(),
+        |_, _, _, _, _ctx| Box::pin(async { Ok(AgentToolResult::text("done")) }),
+    )
 }
 
 /// Pi: "runs finishTurn after tool-result messages and before turn_end".
@@ -1546,7 +1550,7 @@ async fn continues_when_not_every_parallel_result_terminates() {
         "Echo",
         "Echo tool",
         value_schema(),
-        |_, params, _, _| {
+        |_, params, _, _, _ctx| {
             let value = params["value"].as_str().unwrap_or_default().to_owned();
             Box::pin(async move {
                 Ok(AgentToolResult {
@@ -1721,7 +1725,7 @@ fn echo_with_update() -> AgentTool {
         "Echo",
         "Echo tool",
         value_schema(),
-        |_, params, _, update| {
+        |_, params, _, update, _ctx| {
             update.update(AgentToolResult {
                 details: Some(json!({})),
                 ..AgentToolResult::text("partial")
@@ -1746,7 +1750,7 @@ fn failing_tool() -> AgentTool {
         "Failing",
         "Returns an error result",
         empty_schema(),
-        |_, _, _, _| {
+        |_, _, _, _, _ctx| {
             Box::pin(async {
                 Ok(AgentToolResult {
                     details: Some(json!({ "partial": true })),
@@ -1923,7 +1927,7 @@ async fn abort_during_a_tool_ends_the_run_aborted() {
         "Wait",
         "Waits for abort",
         empty_schema(),
-        move |_, _, signal, _| {
+        move |_, _, signal, _, _ctx| {
             let s = Arc::clone(&s);
             Box::pin(async move {
                 s.notify_one();
@@ -2073,10 +2077,14 @@ async fn streams_faux_deltas_as_message_updates() {
 /// results as Pi's thrown errors do; the run goes on.
 #[tokio::test]
 async fn tool_panics_and_errors_become_error_results() {
-    let panicking = AgentTool::new("boom", "Boom", "Panics", empty_schema(), |_, _, _, _| {
-        Box::pin(async { panic!("tool exploded") })
-    });
-    let erring = AgentTool::new("err", "Err", "Fails", empty_schema(), |_, _, _, _| {
+    let panicking = AgentTool::new(
+        "boom",
+        "Boom",
+        "Panics",
+        empty_schema(),
+        |_, _, _, _, _ctx| Box::pin(async { panic!("tool exploded") }),
+    );
+    let erring = AgentTool::new("err", "Err", "Fails", empty_schema(), |_, _, _, _, _ctx| {
         Box::pin(async { Err("tool failed".to_owned()) })
     });
     let stream = agent_loop(
@@ -2116,7 +2124,7 @@ async fn tool_updates_are_emitted_between_start_and_end() {
         "Progress",
         "Reports",
         empty_schema(),
-        |_, _, _, update| {
+        |_, _, _, update, _ctx| {
             Box::pin(async move {
                 for step in ["one", "two"] {
                     update.update(AgentToolResult::text(step));
@@ -2166,7 +2174,7 @@ async fn dropping_the_loop_stream_cancels_the_running_tool() {
         "Hang",
         "Never ends",
         empty_schema(),
-        move |_, _, _, _| {
+        move |_, _, _, _, _ctx| {
             let (s, guard) = (Arc::clone(&s), OnDrop(Arc::clone(&d)));
             Box::pin(async move {
                 let _guard = guard;
@@ -2233,7 +2241,7 @@ async fn an_update_sent_as_the_tool_completes_is_emitted() {
         "Last",
         "Updates then ends",
         empty_schema(),
-        |_, _, _, update| {
+        |_, _, _, update, _ctx| {
             Box::pin(async move {
                 update.update(AgentToolResult::text("final progress"));
                 Ok(AgentToolResult::text("done"))
@@ -2271,7 +2279,7 @@ async fn slow_update_listeners_neither_stall_the_tool_nor_lengthen_its_duration(
         "Progress",
         "Reports, then works",
         empty_schema(),
-        |_, _, _, update| {
+        |_, _, _, update, _ctx| {
             Box::pin(async move {
                 update.update(AgentToolResult::text("started"));
                 tokio::time::sleep(Duration::from_millis(30)).await;

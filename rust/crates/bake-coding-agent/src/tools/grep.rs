@@ -93,7 +93,9 @@ pub(crate) fn owned_grep_tool_definition(
             DEFAULT_MAX_BYTES / 1024
         ),
         parameters(),
-        move |_id, args, signal, _update| boxed(execute(cwd.clone(), owner.clone(), args, signal)),
+        move |_id, args, signal, _update, _ctx| {
+            boxed(execute(cwd.clone(), owner.clone(), args, signal))
+        },
     );
     tool.read_only = true;
     tool.replay = Some(ToolReplay::Safe);

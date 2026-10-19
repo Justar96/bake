@@ -173,7 +173,7 @@ fn job_output_tool(jobs: JobRegistry, subagents: bool) -> ToolDefinition {
         "job_output",
         description,
         parameters,
-        move |_id, args, signal, _update| {
+        move |_id, args, signal, _update, _ctx| {
             let jobs = jobs.clone();
             Box::pin(async move { job_output(&jobs, &args, signal, subagents).await })
         },
@@ -237,7 +237,7 @@ fn job_list_tool(jobs: JobRegistry) -> ToolDefinition {
         "job_list",
         "List your background jobs, running and finished.",
         json!({ "type": "object", "properties": {} }),
-        move |_id, _args, _signal, _update| {
+        move |_id, _args, _signal, _update, _ctx| {
             let listed = jobs.list();
             Box::pin(async move {
                 let text = if listed.is_empty() {
@@ -278,7 +278,7 @@ fn job_kill_tool(jobs: JobRegistry, subagents: bool) -> ToolDefinition {
         "job_kill",
         "Stop a background job (jobs outlive your turn).",
         parameters,
-        move |_id, args, _signal, _update| {
+        move |_id, args, _signal, _update, _ctx| {
             let result = job_kill(&jobs, &args, subagents);
             Box::pin(async move { result })
         },

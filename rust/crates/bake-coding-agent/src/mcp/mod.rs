@@ -551,9 +551,13 @@ mod tests {
     use super::*;
 
     fn tool(name: &str) -> Arc<AgentTool> {
-        Arc::new(AgentTool::new(name, name, name, json!({}), |_, _, _, _| {
-            Box::pin(async { Ok(AgentToolResult::text("x")) })
-        }))
+        Arc::new(AgentTool::new(
+            name,
+            name,
+            name,
+            json!({}),
+            |_, _, _, _, _ctx| Box::pin(async { Ok(AgentToolResult::text("x")) }),
+        ))
     }
 
     fn entries(names: &[&str]) -> Vec<McpServerEntry> {

@@ -186,7 +186,7 @@ pub fn echo_tool(executed: Arc<Mutex<Vec<String>>>) -> AgentTool {
         "Echo",
         "Echo tool",
         value_schema(),
-        move |_id, params, _signal, _update| {
+        move |_id, params, _signal, _update, _ctx| {
             let value = params["value"].as_str().unwrap_or_default().to_owned();
             executed.lock().unwrap().push(value.clone());
             Box::pin(async move {

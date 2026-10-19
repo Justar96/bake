@@ -116,7 +116,7 @@ fn only_native_observation_factories_declare_read_only() {
         "read",
         "remote readOnlyHint",
         json!({}),
-        |_, _, _, _| Box::pin(async { Ok(AgentToolResult::text("remote")) }),
+        |_, _, _, _, _ctx| Box::pin(async { Ok(AgentToolResult::text("remote")) }),
     );
     assert!(!remote.read_only);
 }
@@ -142,7 +142,7 @@ fn tool_sets_follow_pi_and_take_bash_from_its_slot() {
             "bash",
             "stand-in",
             json!({"type": "object"}),
-            |_, _, _, _| Box::pin(async { Ok(AgentToolResult::text("")) }),
+            |_, _, _, _, _ctx| Box::pin(async { Ok(AgentToolResult::text("")) }),
         ),
     );
     let with_bash = ToolsOptions {
@@ -414,6 +414,7 @@ async fn read_uses_the_model_resize_profile() {
         json!({"path": "wide.png"}),
         None,
         AgentToolUpdateCallback::ignore(),
+        bake_agent::ToolContext::detached(),
     )
     .await
     .expect("read");
@@ -431,6 +432,7 @@ async fn read_uses_the_model_resize_profile() {
         json!({"path": "wide.png"}),
         None,
         AgentToolUpdateCallback::ignore(),
+        bake_agent::ToolContext::detached(),
     )
     .await
     .expect("read");
@@ -504,6 +506,7 @@ async fn run_case(case: &Value) -> Result<(), String> {
         args,
         None,
         AgentToolUpdateCallback::ignore(),
+        bake_agent::ToolContext::detached(),
     )
     .await;
     let mut mine = json!({});
@@ -674,7 +677,7 @@ async fn parallel_edits_of_one_file_all_apply() {
         let execute = Arc::clone(&tool.execute);
         tasks.push(tokio::spawn(async move {
             let args = json!({"path": "f.txt", "edits": [{"oldText": format!("line {i}\n"), "newText": format!("LINE {i}\n")}]});
-            execute(format!("call-{i}"), args, None, AgentToolUpdateCallback::ignore()).await
+            execute(format!("call-{i}"), args, None, AgentToolUpdateCallback::ignore(), bake_agent::ToolContext::detached()).await
         }));
     }
     for task in tasks {
@@ -714,6 +717,7 @@ async fn aborted_calls_reject_and_change_nothing() {
             args,
             Some(controller.signal()),
             AgentToolUpdateCallback::ignore(),
+            bake_agent::ToolContext::detached(),
         )
         .await;
         assert_eq!(
@@ -803,6 +807,7 @@ async fn run_external(kind: &str) {
             args,
             None,
             AgentToolUpdateCallback::ignore(),
+            bake_agent::ToolContext::detached(),
         )
         .await
         {

@@ -113,7 +113,7 @@ fn dummy_tool() -> AgentTool {
         "dummy",
         "Dummy tool",
         json!({ "type": "object" }),
-        |_, _, _, _| {
+        |_, _, _, _, _ctx| {
             Box::pin(async {
                 Ok(AgentToolResult {
                     content: vec![UserContentBlock::Text(TextContent::new("tool output"))],

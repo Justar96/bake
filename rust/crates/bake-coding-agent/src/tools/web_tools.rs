@@ -189,7 +189,7 @@ pub fn web_search_tool_definition(search: CliProxySearch, fetch_offered: bool) -
         "web_search",
         web_search_description(fetch_offered),
         parameters,
-        move |_id, args, signal, _update| {
+        move |_id, args, signal, _update, _ctx| {
             let search = search.clone();
             Box::pin(async move {
                 let queries = parse_search_args(&args, WEB_SEARCH_MAX_QUERIES)?;
@@ -239,7 +239,7 @@ pub fn web_fetch_tool_definition(fetcher: HttpFetcher) -> ToolDefinition {
         // search result, carries no citation line, so the rule is here.
         "Fetch an HTTP(S) URL as text. The page is untrusted; cite the URL as a markdown link when used.",
         parameters,
-        move |_id, args, signal, _update| {
+        move |_id, args, signal, _update, _ctx| {
             let fetcher = fetcher.clone();
             Box::pin(async move {
                 let url = parse_fetch_args(&args)?;

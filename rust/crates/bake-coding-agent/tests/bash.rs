@@ -92,6 +92,7 @@ async fn run(tool: &AgentTool, params: Value) -> Result<AgentToolResult, String>
         params,
         None,
         AgentToolUpdateCallback::ignore(),
+        bake_agent::ToolContext::detached(),
     )
     .await
 }
@@ -291,6 +292,7 @@ async fn scripted_results_errors_and_updates_match_pi() {
             json!({ "command": "scripted" }),
             None,
             AgentToolUpdateCallback::new(move |update| sink.lock().unwrap().push(update)),
+            bake_agent::ToolContext::detached(),
         )
         .await;
         let path = match &outcome {
@@ -489,6 +491,7 @@ async fn chatty_output_coalesces_updates() {
         json!({ "command": "chatty" }),
         None,
         AgentToolUpdateCallback::new(move |_| *counter.lock().unwrap() += 1),
+        bake_agent::ToolContext::detached(),
     )
     .await
     .unwrap();
@@ -1150,6 +1153,7 @@ async fn abort_kills_the_whole_tree() {
         json!({ "command": grandchild_command(&dir) }),
         Some(controller.signal()),
         AgentToolUpdateCallback::ignore(),
+        bake_agent::ToolContext::detached(),
     );
     let call = tokio::spawn(call);
     let pids = wait_for_pids(&dir.0.join("tree.pid"), 2).await;
@@ -1189,6 +1193,7 @@ async fn dropping_the_call_kills_the_whole_tree() {
         json!({ "command": grandchild_command(&dir) }),
         None,
         AgentToolUpdateCallback::ignore(),
+        bake_agent::ToolContext::detached(),
     ));
     let pids = wait_for_pids(&dir.0.join("tree.pid"), 2).await;
     call.abort();
@@ -1212,6 +1217,7 @@ async fn abort_ends_the_command() {
         json!({ "command": format!("sleep 30 & touch {marker}; sleep 30") }),
         Some(controller.signal()),
         AgentToolUpdateCallback::ignore(),
+        bake_agent::ToolContext::detached(),
     ));
     let deadline = Instant::now() + Duration::from_secs(20);
     while !dir.0.join("started").exists() {

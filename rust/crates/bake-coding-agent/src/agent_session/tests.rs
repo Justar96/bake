@@ -589,7 +589,7 @@ async fn persists_message_end_events_in_order() {
         "dummy",
         "Dummy tool",
         json!({ "type": "object", "properties": { "q": { "type": "string" } } }),
-        |_, params, _, _| {
+        |_, params, _, _, _ctx| {
             let q = params["q"].as_str().unwrap_or_default().to_owned();
             Box::pin(async move {
                 Ok(AgentToolResult {
@@ -842,7 +842,7 @@ async fn tool_prompts_reach_the_system_prompt() {
         "dummy",
         "Dummy tool",
         json!({ "type": "object" }),
-        |_, _, _, _| Box::pin(async { Ok(AgentToolResult::default()) }),
+        |_, _, _, _, _ctx| Box::pin(async { Ok(AgentToolResult::default()) }),
     );
     let manager = SessionManager::in_memory(Some("/tmp"), NewSessionOptions::default(), Vec::new())
         .expect("session");
@@ -905,7 +905,7 @@ async fn a_failed_write_aborts_the_run() {
         "dummy",
         "Dummy tool",
         json!({ "type": "object" }),
-        move |_, _, _, _| {
+        move |_, _, _, _, _ctx| {
             counter.fetch_add(1, Ordering::SeqCst);
             let file = file.clone();
             let cancel = cancel.clone();
@@ -1088,9 +1088,13 @@ fn block_images_replaces_runs_of_images() {
 #[test]
 fn tools_that_change_files_or_run_commands_run_in_order() {
     let tool = |name: &str, mode: Option<ToolExecutionMode>| {
-        let mut tool = AgentTool::new(name, name, "", json!({ "type": "object" }), |_, _, _, _| {
-            Box::pin(async { Ok(AgentToolResult::default()) })
-        });
+        let mut tool = AgentTool::new(
+            name,
+            name,
+            "",
+            json!({ "type": "object" }),
+            |_, _, _, _, _ctx| Box::pin(async { Ok(AgentToolResult::default()) }),
+        );
         tool.execution_mode = mode;
         Arc::new(tool)
     };
@@ -1169,7 +1173,7 @@ async fn pi_queue_modes_and_pending_message_start() {
                     "Wait",
                     "Wait for release",
                     json!({"type": "object", "properties": {}}),
-                    move |_, _, signal, _| {
+                    move |_, _, signal, _, _ctx| {
                         let started = Arc::clone(&started);
                         let release = Arc::clone(&release);
                         Box::pin(async move {

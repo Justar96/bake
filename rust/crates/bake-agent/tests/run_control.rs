@@ -553,7 +553,7 @@ async fn dropped_agent_aborts_stubborn_tools_after_a_shared_admission_drains() {
         "stubborn",
         "stubborn",
         empty_schema(),
-        move |_, _, _, _| {
+        move |_, _, _, _, _ctx| {
             let (started, guard) = (Arc::clone(&started), ToolDrop(Arc::clone(&dropped)));
             Box::pin(async move {
                 let _guard = guard;
@@ -839,7 +839,7 @@ async fn deadline_signals_tool_and_awaits_its_cleanup() {
         "wait",
         "wait",
         empty_schema(),
-        move |_, _, signal, _| {
+        move |_, _, signal, _, _ctx| {
             let (e, r, c) = (Arc::clone(&e), Arc::clone(&r), Arc::clone(&c));
             Box::pin(async move {
                 e.notify_one();

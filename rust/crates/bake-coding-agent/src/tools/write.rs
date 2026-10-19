@@ -59,7 +59,7 @@ pub(crate) fn owned_write_tool_definition(
         "write",
         "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.",
         parameters(),
-        move |_id, args, signal, _update| {
+        move |_id, args, signal, _update, _ctx| {
             boxed(execute_owned(
                 cwd.clone(),
                 args,

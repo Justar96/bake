@@ -45,7 +45,7 @@ impl Batch {
                     "Read",
                     "Read fixture",
                     empty_schema(),
-                    move |_, _, _, _| {
+                    move |_, _, _, _, _ctx| {
                         let (release, active, peak, entered) = (
                             Arc::clone(&release),
                             Arc::clone(&active),

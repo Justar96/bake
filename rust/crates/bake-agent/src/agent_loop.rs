@@ -40,12 +40,13 @@ use bake_ai::{
 };
 use serde_json::{Value, json};
 
+use crate::nested::NestedToolExecutor;
 use crate::stream_fn::default_stream_fn;
 use crate::types::{
     AfterToolCall, AfterToolCallContext, AgentContext, AgentEvent, AgentEventSink, AgentLoopConfig,
     AgentMessage, AgentTool, AgentToolCallOutcome, AgentToolResult, AgentToolUpdateCallback,
     AgentTurnContext, AgentTurnDecision, BeforeToolCall, BeforeToolCallContext, BoxFuture,
-    PrepareRequestContext, StreamFn, ToolExecutionMode,
+    PrepareRequestContext, StreamFn, ToolContext, ToolExecutionMode,
 };
 use crate::validation::validate_tool_arguments;
 use crate::{ModelCallKind, RunControl, RunOutcome};
@@ -947,8 +948,15 @@ async fn execute_tool_calls_sequential(
             },
             Preparation::Prepared { tool, args } => {
                 let updates = tool_update_sink(tool_call, sink);
-                let executed =
-                    execute_prepared_tool_call(&tool, tool_call, &args, signal, &updates).await;
+                let executed = execute_prepared_tool_call(
+                    &tool,
+                    tool_call,
+                    &args,
+                    signal,
+                    &updates,
+                    unavailable_context(tool_call),
+                )
+                .await;
                 finalize_executed_tool_call(
                     context,
                     assistant_message,
@@ -1027,8 +1035,15 @@ async fn execute_tool_calls_parallel(
                         return finalized;
                     }
                     let updates = tool_update_sink(tool_call, sink);
-                    let executed =
-                        execute_prepared_tool_call(&tool, tool_call, &args, signal, &updates).await;
+                    let executed = execute_prepared_tool_call(
+                        &tool,
+                        tool_call,
+                        &args,
+                        signal,
+                        &updates,
+                        unavailable_context(tool_call),
+                    )
+                    .await;
                     let finalized = finalize_executed_tool_call(
                         context,
                         assistant_message,
@@ -1121,6 +1136,11 @@ fn immediate_error(message: impl Into<String>) -> Preparation {
         result: create_error_tool_result(message),
         is_error: true,
     }
+}
+
+/// The context of a call no nested-call executor serves.
+fn unavailable_context(tool_call: &ToolCall) -> ToolContext {
+    ToolContext::new(NestedToolExecutor::unavailable(tool_call.id.clone()))
 }
 
 fn should_terminate_tool_batch(finalized_calls: &[AgentToolCallOutcome]) -> bool {
@@ -1281,6 +1301,7 @@ async fn execute_prepared_tool_call(
     args: &Value,
     signal: Option<&AbortSignal>,
     on_update: &ToolUpdateSink<'_>,
+    ctx: ToolContext,
 ) -> ExecutedToolCallOutcome {
     let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel::<AgentToolResult>();
     let accepting = Arc::new(AtomicBool::new(true));
@@ -1303,6 +1324,7 @@ async fn execute_prepared_tool_call(
             args.clone(),
             signal.cloned(),
             callback,
+            ctx,
         )
     }));
     let outcome = match future {
@@ -1430,7 +1452,7 @@ async fn finalize_executed_tool_call(
     }
 }
 
-fn create_error_tool_result(message: impl Into<String>) -> AgentToolResult {
+pub(crate) fn create_error_tool_result(message: impl Into<String>) -> AgentToolResult {
     AgentToolResult {
         details: Some(json!({})),
         ..AgentToolResult::text(message)
@@ -1553,7 +1575,15 @@ pub async fn run_tool_call(
         }
         Box::pin(async {})
     };
-    let executed = execute_prepared_tool_call(&tool, tool_call, &args, signal, &updates).await;
+    let executed = execute_prepared_tool_call(
+        &tool,
+        tool_call,
+        &args,
+        signal,
+        &updates,
+        unavailable_context(tool_call),
+    )
+    .await;
     finalize_executed_tool_call(
         options.context,
         options.assistant_message,

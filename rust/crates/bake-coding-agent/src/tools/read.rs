@@ -144,7 +144,7 @@ pub(crate) fn owned_read_tool_definition(
         "read",
         description(),
         parameters(),
-        move |_id, args, signal, _update| {
+        move |_id, args, signal, _update, _ctx| {
             let cwd = cwd.clone();
             let options = Arc::clone(&options);
             boxed(execute(cwd, options, args, signal, owner.clone()))

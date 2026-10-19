@@ -46,7 +46,7 @@ pub(super) fn tool(core: Arc<Core>) -> Arc<AgentTool> {
                 }}
             }, "required":["operation"]
         }),
-        move |_id, arguments, signal, _update| {
+        move |_id, arguments, signal, _update, _ctx| {
             let core = Arc::clone(&core);
             Box::pin(async move { execute(core, arguments, signal).await })
         },

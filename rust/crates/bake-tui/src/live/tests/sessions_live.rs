@@ -480,7 +480,7 @@ fn a_running_turn_refuses_a_replacement_and_keeps_the_draft() {
         "Wait",
         "Waits",
         json!({"type": "object", "properties": {}}),
-        move |_, _, _, _| {
+        move |_, _, _, _, _ctx| {
             let held = Arc::clone(&held);
             Box::pin(async move {
                 held.notified().await;

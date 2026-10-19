@@ -59,7 +59,7 @@ async fn the_export_carries_the_saved_session_its_prompt_and_tools() {
         "noop",
         "Does nothing",
         json!({ "type": "object" }),
-        |_, _, _, _| Box::pin(async { Ok(bake_agent::AgentToolResult::default()) }),
+        |_, _, _, _, _ctx| Box::pin(async { Ok(bake_agent::AgentToolResult::default()) }),
     ));
     let session = h
         .session(file_session(&dir), Settings::default(), None, vec![tool])

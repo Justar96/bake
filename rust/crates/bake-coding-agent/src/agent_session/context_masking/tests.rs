@@ -264,7 +264,7 @@ async fn a_custom_marker_saved_while_masking_is_off_is_not_trusted_after_reopen(
         "Custom grep",
         "A custom override",
         json!({"type":"object","properties":{}}),
-        move |_, _, _, _| {
+        move |_, _, _, _, _ctx| {
             let text = returned.clone();
             Box::pin(async move {
                 Ok(bake_agent::AgentToolResult {
@@ -371,7 +371,7 @@ async fn a_native_read_is_attested_but_a_custom_override_cannot_attest_itself() 
                 "Custom read",
                 "A custom override",
                 json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}),
-                |_, _, _, _| {
+                |_, _, _, _, _ctx| {
                     Box::pin(async {
                         Ok(bake_agent::AgentToolResult {
                             details: Some(

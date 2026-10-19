@@ -64,7 +64,7 @@ fn calculate_tool() -> Arc<AgentTool> {
         "Calculator",
         "Evaluate mathematical expressions",
         schema,
-        |_, params, _, _| {
+        |_, params, _, _, _ctx| {
             let expression = params["expression"].as_str().unwrap_or_default().to_owned();
             Box::pin(async move {
                 let parts: Vec<&str> = expression.split_whitespace().collect();

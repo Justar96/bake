@@ -248,7 +248,7 @@ pub(crate) fn owned_sandboxed_write_tool_definition(
     let tool = &mut definition.tool;
     tool.parameters = fs_parameters(std::mem::take(&mut tool.parameters), &permissions);
     tool.execute = Arc::new(
-        move |id: String, args: Value, signal: Option<AbortSignal>, _update| {
+        move |id: String, args: Value, signal: Option<AbortSignal>, _update, _ctx| {
             let cwd = cwd.clone();
             let permissions = permissions.clone();
             let owner = owner.clone();
@@ -295,7 +295,7 @@ pub(crate) fn owned_sandboxed_edit_tool_definition(
     let tool = &mut definition.tool;
     tool.parameters = fs_parameters(std::mem::take(&mut tool.parameters), &permissions);
     tool.execute = Arc::new(
-        move |id: String, args: Value, signal: Option<AbortSignal>, _update| {
+        move |id: String, args: Value, signal: Option<AbortSignal>, _update, _ctx| {
             let cwd = cwd.clone();
             let permissions = permissions.clone();
             let owner = owner.clone();

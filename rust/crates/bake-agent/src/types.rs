@@ -24,6 +24,8 @@ use serde::Serialize;
 use serde::ser::Serializer;
 use serde_json::Value;
 
+use crate::nested::NestedToolExecutor;
+
 /// A boxed, sendable future.
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
@@ -299,7 +301,36 @@ impl fmt::Debug for AgentToolUpdateCallback {
     }
 }
 
-/// A tool's `execute`: `(tool_call_id, params, signal, on_update)`.
+/// What one tool execution may use beyond its arguments, the part of Pi's
+/// `ExtensionToolContext` a tool needs: the [`NestedToolExecutor`] that runs
+/// other tools on behalf of this call.
+///
+/// The agent loop builds one per call; it is cheap to clone and may move to
+/// another task or thread.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct ToolContext {
+    nested: NestedToolExecutor,
+}
+
+impl ToolContext {
+    /// A context outside any agent, for tests and direct calls: its executor
+    /// refuses every nested call.
+    pub fn detached() -> Self {
+        Self::new(NestedToolExecutor::unavailable(""))
+    }
+
+    pub(crate) fn new(nested: NestedToolExecutor) -> Self {
+        Self { nested }
+    }
+
+    /// Runs other tools on behalf of this call, Pi's `ctx.executeTool`.
+    pub fn nested(&self) -> &NestedToolExecutor {
+        &self.nested
+    }
+}
+
+/// A tool's `execute`: `(tool_call_id, params, signal, on_update, ctx)`.
 ///
 /// Return `Err(message)` on failure, or a result with `is_error`; do not
 /// only describe the failure in `content`. A panic counts as a failure with
@@ -310,6 +341,7 @@ pub type ToolExecute = Arc<
             Value,
             Option<AbortSignal>,
             AgentToolUpdateCallback,
+            ToolContext,
         ) -> BoxFuture<'static, Result<AgentToolResult, String>>
         + Send
         + Sync,
@@ -376,6 +408,7 @@ impl AgentTool {
                 Value,
                 Option<AbortSignal>,
                 AgentToolUpdateCallback,
+                ToolContext,
             ) -> BoxFuture<'static, Result<AgentToolResult, String>>
             + Send
             + Sync

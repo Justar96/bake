@@ -218,7 +218,7 @@ fn echo_tool() -> Arc<AgentTool> {
         "Echo",
         "Echoes",
         json!({"type": "object", "properties": {}}),
-        |_, _, _, _| Box::pin(async { Ok(AgentToolResult::text("echoed\nline two")) }),
+        |_, _, _, _, _ctx| Box::pin(async { Ok(AgentToolResult::text("echoed\nline two")) }),
     ))
 }
 
@@ -413,7 +413,7 @@ fn gate_tool(gate: &Arc<Notify>) -> Arc<AgentTool> {
         "Gate",
         "Waits",
         json!({"type": "object", "properties": {}}),
-        move |_, _, signal, _| {
+        move |_, _, signal, _, _ctx| {
             let gate = Arc::clone(&gate);
             Box::pin(async move {
                 match signal {

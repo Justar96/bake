@@ -288,7 +288,7 @@ fn tool(
         label,
         description,
         parameters,
-        move |_id, arguments, signal, _update| execute(arguments, signal),
+        move |_id, arguments, signal, _update, _ctx| execute(arguments, signal),
     );
     // One change at a time, in call order.
     tool.execution_mode = Some(ToolExecutionMode::Sequential);

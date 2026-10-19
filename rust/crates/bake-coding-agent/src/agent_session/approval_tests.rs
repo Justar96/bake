@@ -127,7 +127,7 @@ fn effect_tool(
                 "justification": { "type": "string" },
             },
         }),
-        move |id, args, signal, _| {
+        move |id, args, signal, _, _ctx| {
             let permissions = permissions.clone();
             let file = file.clone();
             let markers = markers.clone();

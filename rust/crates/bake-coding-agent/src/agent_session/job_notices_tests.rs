@@ -65,6 +65,7 @@ async fn a_completed_bash_job_observed_by_its_output_is_not_lost_after_reopen() 
             }),
             None,
             AgentToolUpdateCallback::ignore(),
+            bake_agent::ToolContext::detached(),
         )
         .await
         .expect("bash started");
@@ -87,6 +88,7 @@ async fn a_completed_bash_job_observed_by_its_output_is_not_lost_after_reopen() 
             }),
             None,
             AgentToolUpdateCallback::ignore(),
+            bake_agent::ToolContext::detached(),
         )
         .await
         .expect("job read");

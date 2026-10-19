@@ -19,7 +19,7 @@ fn counted(name: &str, replay: Option<ToolReplay>, count: &Arc<AtomicUsize>) -> 
         name,
         "Count executions",
         json!({"type":"object"}),
-        move |_, _, _, _| {
+        move |_, _, _, _, _ctx| {
             let ran = count.fetch_add(1, Ordering::SeqCst) + 1;
             let text = format!("{label} ran {ran}");
             Box::pin(async move { Ok(AgentToolResult::text(text)) })

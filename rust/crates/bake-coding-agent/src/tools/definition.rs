@@ -439,6 +439,7 @@ mod ownership_tests {
                 args,
                 None,
                 bake_agent::AgentToolUpdateCallback::ignore(),
+                bake_agent::ToolContext::detached(),
             )
             .await;
             assert_eq!(result.unwrap_err(), "the session is shut down", "{label}");
@@ -448,6 +449,7 @@ mod ownership_tests {
                     serde_json::json!({"path": "sub/new", "content": "new\n"}),
                     None,
                     bake_agent::AgentToolUpdateCallback::ignore(),
+                    bake_agent::ToolContext::detached(),
                 )
                 .await;
                 assert_eq!(created.unwrap_err(), "the session is shut down", "{label}");
@@ -502,6 +504,7 @@ mod ownership_tests {
                 serde_json::json!({"pattern": "needle"}),
                 None,
                 bake_agent::AgentToolUpdateCallback::ignore(),
+                bake_agent::ToolContext::detached(),
             )
             .await;
             assert_eq!(result.unwrap_err(), refused, "{name}");
@@ -535,6 +538,7 @@ mod ownership_tests {
                 args,
                 None,
                 bake_agent::AgentToolUpdateCallback::ignore(),
+                bake_agent::ToolContext::detached(),
             )
             .await;
             assert_eq!(result.unwrap_err(), "the session is shut down", "{name}");
