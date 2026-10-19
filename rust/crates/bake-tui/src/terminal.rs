@@ -1664,6 +1664,7 @@ mod tests {
             generation,
             tool: "write".into(),
             call_id: call_id.into(),
+            parent_call_id: None,
             reason: "escalate sandbox to workspace-write: create notes.txt".into(),
             arguments: "path: notes.txt\ncontent: hello".into(),
         }

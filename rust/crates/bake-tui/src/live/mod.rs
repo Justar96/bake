@@ -1318,6 +1318,7 @@ fn approval(prompt: ApprovalPrompt) -> Approval {
         generation: prompt.generation,
         tool: prompt.tool_name,
         call_id: prompt.call_id,
+        parent_call_id: prompt.parent_tool_call_id,
         reason: prompt.reason,
         arguments: arguments_text(&prompt.arguments),
     }

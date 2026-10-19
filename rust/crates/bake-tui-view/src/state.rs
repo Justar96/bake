@@ -2834,6 +2834,7 @@ mod tests {
                 generation: 9,
                 tool: "bash".into(),
                 call_id: "c".into(),
+                parent_call_id: None,
                 reason: "r".into(),
                 arguments: String::new(),
             }]),
@@ -3815,6 +3816,7 @@ mod tests {
             generation,
             tool: "bash".into(),
             call_id: format!("call-{generation}"),
+            parent_call_id: None,
             reason: "escalate sandbox to danger-full-access: needs the network".into(),
             arguments: "command: curl -fsS https://example.com".into(),
         }

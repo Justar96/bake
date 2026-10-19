@@ -381,3 +381,19 @@ async fn generations_never_wrap() {
     assert!(broker.answer(u64::MAX, ApprovalAnswer::Reject));
     assert_eq!(last.await.unwrap(), EscalationOutcome::Rejected);
 }
+
+// Bake's own: a prompt names the call whose script made the call, so a
+// frontend can say which `codemode` call asked.
+#[tokio::test]
+async fn a_prompt_keeps_the_calling_tool_call() {
+    let (broker, _) = connected();
+    let nested = ApprovalRequest {
+        parent_tool_call_id: Some("call-1".into()),
+        ..ask("bash", "call-1/2")
+    };
+    let answered = tokio::spawn(broker.request(nested, None));
+    let queue = broker.pending();
+    assert_eq!(queue[0].parent_tool_call_id.as_deref(), Some("call-1"));
+    assert!(broker.answer(queue[0].generation, ApprovalAnswer::Reject));
+    assert_eq!(answered.await.unwrap(), EscalationOutcome::Rejected);
+}

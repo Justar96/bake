@@ -817,6 +817,20 @@ fn approval_rows(app: &State, width: u16) -> u16 {
 /// reason, then the call's arguments under a heading, each in full. The
 /// text is sanitized, so model-written text cannot reach the terminal as
 /// an escape sequence; tabs become spaces.
+/// Characters of a call id an approval's head shows for the `codemode`
+/// call that made the call it asks about; the call's own id beside it
+/// already holds the whole id.
+const SHORT_ID_CHARS: usize = 12;
+
+/// `id` kept to [`SHORT_ID_CHARS`], the last of them an ellipsis when cut.
+fn short_id(id: &str) -> String {
+    if id.chars().count() <= SHORT_ID_CHARS {
+        return id.to_owned();
+    }
+    let kept: String = id.chars().take(SHORT_ID_CHARS - 1).collect();
+    format!("{kept}…")
+}
+
 fn approval_detail(app: &State, width: u16) -> Vec<String> {
     let Some(approval) = app.approval() else {
         return Vec::new();
@@ -860,6 +874,16 @@ fn render_approval(app: &mut State, area: Rect, buf: &mut Buffer) {
         ),
         Span::styled(format!("  {}", clean(&approval.call_id)), dim()),
     ];
+    if let Some(parent) = &approval.parent_call_id {
+        head.push(Span::styled(
+            format!(
+                "  {} {}",
+                copy::APPROVAL_FROM_CODEMODE,
+                short_id(&clean(parent))
+            ),
+            dim(),
+        ));
+    }
     if app.approvals.len() > 1 {
         head.push(Span::styled(format!("  1/{}", app.approvals.len()), dim()));
     }
@@ -4164,6 +4188,7 @@ mod tests {
                     generation: 4,
                     tool: "bash\x1b[31m".into(),
                     call_id: "call\x07-4".into(),
+                    parent_call_id: None,
                     reason: reason.into(),
                     arguments: arguments.into(),
                 },
@@ -4214,6 +4239,44 @@ mod tests {
         assert!(screen.contains("Approval pending"));
         assert!(screen.contains(copy::HINT_APPROVAL));
         assert!(!screen.contains("Enter steers") && !screen.contains(copy::HINT_INTERRUPT));
+    }
+
+    #[test]
+    fn an_approval_a_script_asked_for_names_its_codemode_call() {
+        let mut app = State::live(FrameStyle::default(), Tones::None, Vec::new());
+        let approval = |parent: &str| crate::runtime::Approval {
+            generation: 1,
+            tool: "bash".into(),
+            call_id: format!("{parent}/2"),
+            parent_call_id: Some(parent.into()),
+            reason: "escalate sandbox to danger-full-access: needs the network".into(),
+            arguments: "command: curl -fsS https://example.com".into(),
+        };
+        update(
+            &mut app,
+            Msg::Runtime(crate::runtime::RuntimeUpdate::Approvals(vec![approval(
+                "call_1",
+            )])),
+        );
+        let (rows, _) = draw(&mut app, 80, 24);
+        let screen = rows.join("\n");
+        assert!(
+            screen.contains("Approval required: bash  call_1/2  from codemode call_1"),
+            "{screen}"
+        );
+        // A long id is cut, since the call's own id holds all of it.
+        update(
+            &mut app,
+            Msg::Runtime(crate::runtime::RuntimeUpdate::Approvals(vec![approval(
+                "call_abcdefghijklmnop",
+            )])),
+        );
+        let (rows, _) = draw(&mut app, 100, 24);
+        let screen = rows.join("\n");
+        assert!(
+            screen.contains("call_abcdefghijklmnop/2  from codemode call_abcdef…"),
+            "{screen}"
+        );
     }
 
     #[test]

@@ -261,6 +261,9 @@ pub const INTERRUPTED: &str = "Interrupted";
 /// the cancel key; the line once `y` has chosen; the scroll keys; and the
 /// line shown until the request is armed and keys can answer it.
 pub const APPROVAL_TITLE: &str = "Approval required";
+/// Before the id of the `codemode` call whose script made the call an
+/// approval is for: `from codemode call_1`.
+pub const APPROVAL_FROM_CODEMODE: &str = "from codemode";
 pub const APPROVAL_ARGUMENTS: &str = "Arguments:";
 pub const APPROVAL_KEYS: &str = "Y then Enter allows once · N rejects · Esc cancels";
 pub const APPROVAL_CONFIRM: &str = "Allow this call once?";

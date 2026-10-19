@@ -95,6 +95,9 @@ pub struct Approval {
     pub tool: String,
     /// The exact tool call the request is for.
     pub call_id: String,
+    /// The `codemode` call whose script made this call, when a script made
+    /// it.
+    pub parent_call_id: Option<String>,
     /// Why the tool asks, such as `escalate sandbox to …: <justification>`.
     pub reason: String,
     /// The call's arguments as the runtime words them, one line each, so
